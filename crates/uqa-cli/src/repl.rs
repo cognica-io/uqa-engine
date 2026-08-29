@@ -13,8 +13,28 @@ fn explicit_block_command(transaction: &uqa_sql::ast::TransactionStmt) -> Option
         uqa_sql::ast::TransactionStmt::Savepoint(_) => Some("SAVEPOINT"),
         uqa_sql::ast::TransactionStmt::ReleaseSavepoint(_) => Some("RELEASE SAVEPOINT"),
         uqa_sql::ast::TransactionStmt::RollbackToSavepoint(_) => Some("ROLLBACK TO SAVEPOINT"),
+        uqa_sql::ast::TransactionStmt::CommitAndChain => Some("COMMIT AND CHAIN"),
+        uqa_sql::ast::TransactionStmt::RollbackAndChain => Some("ROLLBACK AND CHAIN"),
         _ => None,
     }
+}
+
+fn compile_simple_query_batch(
+    text: &str,
+) -> Result<Option<Vec<(String, uqa_sql::ast::Statement)>>, String> {
+    let compiled = uqa_sql::compile(text)
+        .map_err(|error| format!("{}: {error}", error.sqlstate().unwrap_or("XX000")))?;
+    if compiled.len() <= 1 {
+        return Ok(None);
+    }
+    let statements = split_statements(text)
+        .into_iter()
+        .filter(|statement| !statement_is_pure_comment(statement))
+        .collect::<Vec<_>>();
+    if statements.len() != compiled.len() {
+        return Err("XX000: simple-query statement segmentation mismatch".into());
+    }
+    Ok(Some(statements.into_iter().zip(compiled).collect()))
 }
 
 impl Session {
@@ -120,7 +140,7 @@ impl Session {
             let read = stdin.lock().read_line(&mut input);
             match read {
                 Ok(0) => {
-                    if !buffer.trim().is_empty() {
+                    if !buffer.trim().is_empty() && !statement_is_pure_comment(&buffer) {
                         let _ = writeln!(out, "ERROR: unterminated SQL statement at end of input");
                         return ExitCode::FAILURE;
                     }
@@ -181,7 +201,7 @@ impl Session {
             buffer.push('\n');
         }
         buffer.push_str(line);
-        if contains_statement_terminator(buffer) {
+        if contains_input_terminator(buffer) {
             if let Err(err) = self.execute_text_with_history(buffer, out, record_sql_history) {
                 let _ = writeln!(out, "ERROR: {err}");
                 buffer.clear();
@@ -377,6 +397,9 @@ impl Session {
         out: &mut impl Write,
         record_history: bool,
     ) -> Result<(), String> {
+        if let Some(command) = unescape_psql_semicolons(text) {
+            return self.execute_command_text_with_history(&command, out, record_history);
+        }
         for stmt in split_statements(text) {
             if statement_is_pure_comment(&stmt) {
                 continue;
@@ -402,21 +425,15 @@ impl Session {
         out: &mut impl Write,
         record_history: bool,
     ) -> Result<(), String> {
-        let compiled = uqa_sql::compile(text)
-            .map_err(|error| format!("{}: {error}", error.sqlstate().unwrap_or("XX000")))?;
-        if compiled.len() <= 1 {
+        if let Some(command) = unescape_psql_semicolons(text) {
+            return self.execute_command_text_with_history(&command, out, record_history);
+        }
+        let Some(statements) = compile_simple_query_batch(text)? else {
             return self.execute_text_with_history(text, out, record_history);
-        }
-        let statements = split_statements(text)
-            .into_iter()
-            .filter(|statement| !statement_is_pure_comment(statement))
-            .collect::<Vec<_>>();
-        if statements.len() != compiled.len() {
-            return Err("XX000: simple-query statement segmentation mismatch".into());
-        }
+        };
 
         let mut implicit_segment_open = false;
-        for (statement, compiled_statement) in statements.into_iter().zip(compiled) {
+        for (statement, compiled_statement) in statements {
             let transaction = match compiled_statement {
                 uqa_sql::ast::Statement::Transaction(transaction) => Some(transaction),
                 _ => None,
@@ -435,11 +452,26 @@ impl Session {
             }
             if implicit_segment_open
                 && transaction.as_ref().is_some_and(|transaction| {
-                    matches!(transaction, uqa_sql::ast::TransactionStmt::Begin)
+                    matches!(
+                        transaction,
+                        uqa_sql::ast::TransactionStmt::Begin
+                            | uqa_sql::ast::TransactionStmt::BeginWithCharacteristics(_)
+                    )
                 })
             {
                 if record_history {
                     self.record_statement(&statement)?;
+                }
+                if let Some(uqa_sql::ast::TransactionStmt::BeginWithCharacteristics(options)) =
+                    transaction
+                {
+                    self.engine
+                        .run_transaction_statement(
+                            uqa_sql::ast::TransactionStmt::SetCharacteristics(options),
+                        )
+                        .map_err(|error| {
+                            format!("{}: {error}", error.sqlstate().unwrap_or("XX000"))
+                        })?;
                 }
                 implicit_segment_open = false;
                 continue;
@@ -504,7 +536,16 @@ impl Session {
         let start = std::time::Instant::now();
         let outcome = self.engine.sql(sql, &[]);
         let elapsed = start.elapsed();
-        let result = match outcome {
+        let notices = self.engine.take_sql_notices();
+        let notice_result = {
+            let stderr = io::stderr();
+            let mut diagnostics = stderr.lock();
+            notices.iter().try_for_each(|(level, message)| {
+                writeln!(diagnostics, "{level}: {message}")
+                    .map_err(|error| format!("write SQL notice: {error}"))
+            })
+        };
+        let result = notice_result.and_then(|()| match outcome {
             Ok(result) => self.write_query_output(out, |writer| {
                 if self.copy_text {
                     print_result_copy_text_with_engine(&result, &self.engine, writer);
@@ -515,7 +556,7 @@ impl Session {
                 }
             }),
             Err(err) => Err(format!("{}: {err}", err.sqlstate().unwrap_or("XX000"))),
-        };
+        });
         let timing_result = if self.show_timing {
             let ms = elapsed.as_secs_f64() * 1000.0;
             self.write_query_output(out, |writer| {

@@ -86,6 +86,9 @@ impl Engine {
             }
             let query_schema = crate::sql::bind_catalog_query_routines(engine, &mut plan, params)?;
             let output_columns = create_view_output_columns(&query_schema, column_names)?;
+            for column in &output_columns {
+                crate::sql::validate_postgres_column_name(column)?;
+            }
             let materialized_column_types = query_schema.column_types().to_vec();
             let materialized_rows = if with_no_data {
                 Vec::new()

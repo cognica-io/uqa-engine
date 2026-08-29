@@ -1,6 +1,6 @@
 # UQA Engine
 
-UQA Engine is an embeddable database engine that lets one application use PostgreSQL-oriented SQL, full-text search, vector search, graph queries, and ranked retrieval through a shared Rust runtime.
+UQA Engine is an embeddable database engine that lets one application use a PostgreSQL 18-compatible SQL surface across the behavior covered by its differential suite, full-text search, vector search, graph queries, and ranked retrieval through a shared Rust runtime.
 
 It is designed for applications that need more than a relational table but do not want to assemble a separate database, search server, vector store, and graph engine for every query path.
 
@@ -16,7 +16,7 @@ It is designed for applications that need more than a relational table but do no
 
 ## What you can build
 
-- Run relational queries, joins, aggregates, CTEs, windows, JSON operations, and transactions with a PostgreSQL-oriented SQL surface.
+- Run relational queries, joins, aggregates, CTEs, windows, JSON operations, and transactions with PostgreSQL 18 compatibility across the verified SQL surface.
 - Search text with BM25 or Bayesian BM25, retrieve vectors with KNN, and combine both signals in hybrid queries.
 - Store named graphs, execute Cypher and regular path queries, and call graph traversal or centrality functions from SQL.
 - Start in memory for experiments, then choose the default SQLite backend or the pure-Rust redb backend without changing the query API.

@@ -74,8 +74,17 @@ impl Default for CteScope {
 }
 
 impl CteScope {
+    #[cfg(test)]
     pub(crate) fn new() -> Self {
         Self::default()
+    }
+
+    pub(crate) fn new_for_current_routine() -> Self {
+        let mut scope = Self::default();
+        if crate::engine_roles::active_routine_reads_command_overlay() == Some(false) {
+            scope.read_command_overlay = false;
+        }
+        scope
     }
 
     fn row_lock_state(&self) -> Option<&RowLockScopeState> {

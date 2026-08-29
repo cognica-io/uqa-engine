@@ -894,7 +894,13 @@ impl Engine {
     /// candidates, matching `PostgreSQL`'s routine lookup rules.
     pub(crate) fn lookup_sql_functions(&self, name: &str) -> Option<Vec<Arc<SQLUserFunction>>> {
         let keys = self.routine_lookup_keys(name).ok()?;
-        let registry = self.durable.sql_user_functions.read();
+        let live_registry;
+        let registry = if let Some(snapshot) = self.query_sql_function_snapshots.as_ref() {
+            snapshot.as_ref()
+        } else {
+            live_registry = self.durable.sql_user_functions.read();
+            &live_registry
+        };
         let mut visible = Vec::new();
         let mut seen = std::collections::BTreeSet::new();
         for key in keys {
@@ -920,7 +926,13 @@ impl Engine {
         name: &str,
     ) -> Option<Vec<Arc<SQLUserFunction>>> {
         let keys = self.routine_lookup_keys(name).ok()?;
-        let registry = self.durable.sql_user_functions.read();
+        let live_registry;
+        let registry = if let Some(snapshot) = self.query_sql_function_snapshots.as_ref() {
+            snapshot.as_ref()
+        } else {
+            live_registry = self.durable.sql_user_functions.read();
+            &live_registry
+        };
         let candidates = keys
             .into_iter()
             .filter_map(|key| registry.get(&key))
@@ -932,7 +944,13 @@ impl Engine {
     /// Every registered routine, sorted by qualified name then signature. Feeds
     /// `pg_catalog.pg_proc` / `information_schema.routines`.
     pub(crate) fn list_sql_functions(&self) -> Vec<Arc<SQLUserFunction>> {
-        let registry = self.durable.sql_user_functions.read();
+        let live_registry;
+        let registry = if let Some(snapshot) = self.query_sql_function_snapshots.as_ref() {
+            snapshot.as_ref()
+        } else {
+            live_registry = self.durable.sql_user_functions.read();
+            &live_registry
+        };
         let mut out: Vec<Arc<SQLUserFunction>> = Vec::new();
         for overloads in registry.values() {
             let mut sorted = overloads.clone();

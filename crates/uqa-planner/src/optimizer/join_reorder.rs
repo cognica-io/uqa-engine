@@ -109,7 +109,8 @@ fn reorder_command_joins(
         }
         CommandPlan::CreateView { query, .. }
         | CommandPlan::CreateMaterializedView { query, .. }
-        | CommandPlan::CreateTableAs { query, .. } => {
+        | CommandPlan::CreateTableAs { query, .. }
+        | CommandPlan::DeclareCursor { query, .. } => {
             reorder_query_joins(query, statistics)?;
         }
         CommandPlan::Explain { body, .. } | CommandPlan::Prepare { body, .. } => {
@@ -130,13 +131,18 @@ fn reorder_command_joins(
         | CommandPlan::AlterViewOptions(_)
         | CommandPlan::CreateSchema { .. }
         | CommandPlan::SetVariable { .. }
+        | CommandPlan::ResetVariable { .. }
+        | CommandPlan::ResetAllVariables
         | CommandPlan::SetConstraints { .. }
         | CommandPlan::ShowVariable { .. }
         | CommandPlan::Discard { .. }
         | CommandPlan::Load { .. }
         | CommandPlan::Analyze { .. }
+        | CommandPlan::Vacuum(_)
         | CommandPlan::Truncate { .. }
         | CommandPlan::Transaction(_)
+        | CommandPlan::FetchCursor(_)
+        | CommandPlan::CloseCursor { .. }
         | CommandPlan::CreateSequence(_)
         | CommandPlan::AlterSequence(_)
         | CommandPlan::Deallocate { .. }

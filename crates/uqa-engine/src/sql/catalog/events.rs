@@ -69,7 +69,7 @@ fn catalog_triggers(engine: &Engine) -> Result<Vec<(StoredTrigger, i64)>, SQLErr
         })
         .collect::<BTreeMap<_, _>>();
     for table in engine
-        .table_names()
+        .query_table_names()
         .map_err(|error| SQLError::Internal(format!("read trigger tables: {error}")))?
     {
         let sources = engine.partition_trigger_sources(&table)?;

@@ -6,7 +6,10 @@
 
 //! Session-level integration between the SQL transaction stack and the row-lock manager: typed-mutation locking, statement-scoped recheck contexts, and change publication for tuple-local rechecks.
 
-use super::{panic_description, BackendTransactionMode, Engine, SQLError, TransactionIntent};
+use super::{
+    panic_description, BackendTransactionMode, Engine, SQLError, TransactionIntent,
+    TransactionRowChange,
+};
 
 impl Engine {
     /// Run one typed row mutation with the same relation/tuple locking order as SQL DML: logical locks first, backend-writer promotion second. This prevents typed APIs from bypassing `SELECT ... FOR UPDATE` and avoids a writer/row-lock inversion while waiting for another transaction.
@@ -18,6 +21,23 @@ impl Engine {
         f: impl FnOnce(&Self) -> Result<R, SQLError>,
     ) -> Result<R, SQLError> {
         let _statement = self.runtime.statement_gate.lock();
+        if self.current_transaction_is_read_only()
+            && self
+                .table_persistence(table)
+                .map_err(|error| {
+                    SQLError::Internal(format!(
+                        "resolve read-only row mutation target `{table}`: {error}"
+                    ))
+                })?
+                .is_some_and(|persistence| {
+                    persistence != uqa_sql::ast::RelationPersistence::Temporary
+                })
+        {
+            return Err(SQLError::Routine {
+                sqlstate: "25006".into(),
+                message: "cannot execute row mutation in a read-only transaction".into(),
+            });
+        }
         if self.storage.backend.is_none() && self.transaction_depth() == 0 {
             return f(self);
         }
@@ -178,9 +198,9 @@ impl Engine {
         };
         Ok(self.session.transactions.lock().iter().any(|frame| {
             frame.row_changes.iter().any(|change| {
-                change.key == key
+                change.pending.key == key
                     || matches!(
-                        change.kind,
+                        change.pending.kind,
                         crate::row_locks::PendingRowChangeKind::Rewrite(successor)
                             if successor == key
                     )
@@ -291,10 +311,16 @@ impl Engine {
             table: self.row_locks.table_key(&canonical),
             doc_id,
         };
+        let source_generation = self.require_table(&canonical)?.storage_generation();
         let mut stack = self.session.transactions.lock();
-        let change = crate::row_locks::PendingRowChange { key, kind };
+        let pending = crate::row_locks::PendingRowChange { key, kind };
         if let Some(frame) = stack.last_mut() {
-            frame.row_changes.push(change);
+            frame.row_changes.push(TransactionRowChange {
+                pending,
+                source_generation,
+                successor_generation: None,
+                query_origin: self.query_transaction_origin,
+            });
             Ok(())
         } else {
             drop(stack);
@@ -303,7 +329,7 @@ impl Engine {
                 .begin_change_publication(&self.runtime.cancellation)?;
             let result = self
                 .row_locks
-                .publish_row_changes(self.session_id, [change]);
+                .publish_row_changes(self.session_id, [pending]);
             drop(publication);
             result
         }
@@ -472,8 +498,10 @@ impl Engine {
             table: self.row_locks.table_key(&new_table),
             doc_id: new_doc_id,
         };
+        let source_generation = self.require_table(&old_table)?.storage_generation();
+        let successor_generation = self.require_table(&new_table)?.storage_generation();
         let mut stack = self.session.transactions.lock();
-        let change = crate::row_locks::PendingRowChange {
+        let pending = crate::row_locks::PendingRowChange {
             key: old,
             kind: crate::row_locks::PendingRowChangeKind::Rewrite(new),
         };
@@ -483,7 +511,12 @@ impl Engine {
                     check.row = Some(new);
                 }
             }
-            frame.row_changes.push(change);
+            frame.row_changes.push(TransactionRowChange {
+                pending,
+                source_generation,
+                successor_generation: Some(successor_generation),
+                query_origin: self.query_transaction_origin,
+            });
             Ok(())
         } else {
             drop(stack);
@@ -492,7 +525,7 @@ impl Engine {
                 .begin_change_publication(&self.runtime.cancellation)?;
             let result = self
                 .row_locks
-                .publish_row_changes(self.session_id, [change]);
+                .publish_row_changes(self.session_id, [pending]);
             drop(publication);
             result
         }

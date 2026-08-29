@@ -13,7 +13,7 @@ pub(in crate::sql) use hierarchy::HierarchyScoredDocumentSource;
 
 use super::{
     doc_id_value, Arc, DocId, ExecResult, RecheckDoc, ResultRow, SQLError, ScoredEntry, Value,
-    DOC_ID_COLUMN, SCORE_COLUMN, TABLE_OID_COLUMN,
+    DOC_ID_COLUMN, SCORE_COLUMN, TABLE_OID_COLUMN, XMIN_COLUMN,
 };
 use crate::sql::from_rows::RelationMetadataProjection;
 use crate::sql::{META_DOC_ID_COLUMN, META_QUALIFIER, META_SCORE_COLUMN};
@@ -431,6 +431,7 @@ impl ScoredDocumentSource {
                         DOC_ID_COLUMN => Some(uqa_sql::ast::ColumnType::BigInteger),
                         SCORE_COLUMN => Some(uqa_sql::ast::ColumnType::DoublePrecision),
                         TABLE_OID_COLUMN => Some(uqa_sql::ast::ColumnType::Oid),
+                        XMIN_COLUMN => Some(uqa_sql::ast::ColumnType::Xid),
                         _ => None,
                     })
             })
@@ -439,12 +440,11 @@ impl ScoredDocumentSource {
             .iter()
             .enumerate()
             .filter_map(|(position, name)| {
-                HiddenColumn::ALL
-                    .iter()
-                    .any(|hidden| {
+                (name == XMIN_COLUMN
+                    || HiddenColumn::ALL.iter().any(|hidden| {
                         hidden_columns.contains(*hidden) && name.as_str() == hidden.name()
-                    })
-                    .then_some(position)
+                    }))
+                .then_some(position)
             })
             .collect::<Vec<_>>();
         let schema = uqa_execution::RowSchema::with_types(schema, column_types);

@@ -122,7 +122,16 @@ impl EngineTableRowSource {
                         ))
                     })?;
                 } else {
-                    let fields = self.columns.iter().map(String::as_str).collect::<Vec<_>>();
+                    let fields = self
+                        .columns
+                        .iter()
+                        .map(|column| {
+                            crate::sql::storage_projection_column_for_table(
+                                column,
+                                &self.column_definitions,
+                            )
+                        })
+                        .collect::<Vec<_>>();
                     if let Some(shared_rows) = store
                         .get_shared_fields(&persisted_ids, &fields)
                         .map_err(|error| {
@@ -177,7 +186,15 @@ impl EngineTableRowSource {
                         let values = self
                             .columns
                             .iter()
-                            .map(|column| document.get(column).cloned().unwrap_or(Value::Null))
+                            .map(|column| {
+                                document
+                                    .get(crate::sql::storage_projection_column_for_table(
+                                        column,
+                                        &self.column_definitions,
+                                    ))
+                                    .cloned()
+                                    .unwrap_or(Value::Null)
+                            })
                             .collect();
                         (doc_id, uqa_execution::PhysicalRow::from_values(values))
                     }
@@ -210,7 +227,15 @@ impl EngineTableRowSource {
                         let values = self
                             .columns
                             .iter()
-                            .map(|column| document.get(column).cloned().unwrap_or(Value::Null))
+                            .map(|column| {
+                                document
+                                    .get(crate::sql::storage_projection_column_for_table(
+                                        column,
+                                        &self.column_definitions,
+                                    ))
+                                    .cloned()
+                                    .unwrap_or(Value::Null)
+                            })
                             .collect();
                         (doc_id, uqa_execution::PhysicalRow::from_values(values))
                     }

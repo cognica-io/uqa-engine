@@ -219,6 +219,17 @@ impl Engine {
         let mut result = Ok(());
         for action in std::mem::take(&mut definition.config_actions) {
             let applied = match action {
+                RoutineConfigAction::Set { name, value: _ }
+                | RoutineConfigAction::FromCurrent { name }
+                    if name.eq_ignore_ascii_case("transaction_isolation")
+                        || name.eq_ignore_ascii_case("transaction_read_only")
+                        || name.eq_ignore_ascii_case("transaction_deferrable") =>
+                {
+                    Err(SQLError::Routine {
+                        sqlstate: "0A000".into(),
+                        message: format!("parameter \"{name}\" cannot be set locally in functions"),
+                    })
+                }
                 RoutineConfigAction::Set { name, value } => self
                     .set_variable(&name, &value)
                     .and_then(|()| self.show_variable(&name))

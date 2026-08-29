@@ -43,7 +43,7 @@ pub(super) fn build_info_schemata(engine: &Engine) -> Result<Vec<ResultRow>, SQL
 pub(super) fn build_info_tables(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = Vec::new();
     for name in engine
-        .table_names()
+        .query_table_names()
         .map_err(|err| SQLError::Internal(format!("read table catalog: {err}")))?
     {
         let (schema, table) = split_schema_name(&name)?;
@@ -251,7 +251,7 @@ fn information_schema_column_row(
 pub(super) fn build_info_columns(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     let mut out: Vec<ResultRow> = Vec::new();
     let mut tables = engine
-        .table_names()
+        .query_table_names()
         .map_err(|err| SQLError::Internal(format!("read table catalog: {err}")))?;
     tables.sort();
     for tname in tables {

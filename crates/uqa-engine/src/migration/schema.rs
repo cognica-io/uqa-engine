@@ -166,6 +166,8 @@ pub(super) fn column_to_rust(col: &PythonColumnDef) -> Result<ColumnDef, PythonM
     Ok(ColumnDef {
         name: col.name.clone(),
         ty,
+        object_id: None,
+        missing_value: None,
         primary_key: col.primary_key,
         not_null: col.not_null,
         not_null_explicit: col.not_null,

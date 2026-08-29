@@ -101,7 +101,7 @@ fn filter_table_rows(
     if filter.collect_columns(&mut columns) {
         let names: Vec<String> = columns.into_iter().collect();
         let refs: Vec<&str> = names.iter().map(String::as_str).collect();
-        let field_values = engine.get_document_fields_multi(table, &doc_ids, &refs)?;
+        let field_values = engine.get_query_document_fields_multi(table, &doc_ids, &refs)?;
         let mut documents = Vec::with_capacity(doc_ids.len());
         for &doc_id in &doc_ids {
             let values = field_values.get(&doc_id).ok_or_else(|| {
@@ -131,14 +131,14 @@ fn filter_table_rows(
     }
     let mut documents = Vec::with_capacity(doc_ids.len());
     for &doc_id in &doc_ids {
-        let document = engine.get_document(table, doc_id)?.ok_or_else(|| {
+        let document = engine.get_query_document(table, doc_id)?.ok_or_else(|| {
             SQLError::Internal(format!(
                 "WHERE scan: document {doc_id} listed by table `{table}` disappeared during the statement"
             ))
         })?;
         documents.push(document);
     }
-    let columns = engine.try_table_columns(table).map_err(|error| {
+    let columns = engine.try_query_table_columns(table).map_err(|error| {
         SQLError::Internal(format!("read table columns for `{table}`: {error}"))
     })?;
     let (schema, document_id) = table_filter_schema(engine, table, qualifier, columns)?;
@@ -163,7 +163,7 @@ fn table_filter_schema(
     columns: Vec<String>,
 ) -> Result<(uqa_execution::RowSchema, uqa_sql::ast::InternalColumnRef), SQLError> {
     let definitions = engine
-        .try_describe_table(table)
+        .try_describe_query_table(table)
         .map_err(|error| SQLError::Internal(format!("read table schema for `{table}`: {error}")))?
         .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
     let types = columns

@@ -6,7 +6,8 @@
 
 use super::{
     compile, is_transaction_control, lower_statement, optimize_engine_plan, query_has_row_locks,
-    query_may_mutate_engine, Arc, Engine, SQLError, SQLParam, SQLResult, UnifiedPlanExecutor,
+    query_may_mutate_engine, query_requires_statement_transaction, Arc, Engine, SQLError, SQLParam,
+    SQLResult, UnifiedPlanExecutor,
 };
 
 pub(crate) fn execute(
@@ -40,8 +41,20 @@ fn execute_with_context(
     }
     if engine.storage.backend.is_none() && engine.transaction_depth() == 0 {
         if let Some(plan) = engine.cached_optimized_sql_plan(sql) {
-            return UnifiedPlanExecutor::with_nested_statement(engine, params, nested_statement)
+            let can_execute_without_transaction = match plan.as_ref() {
+                uqa_planner::UnifiedPlan::Query(query) => {
+                    !query_requires_statement_transaction(engine, query)?
+                }
+                uqa_planner::UnifiedPlan::Command(_) => false,
+            };
+            if can_execute_without_transaction {
+                return UnifiedPlanExecutor::with_nested_statement(
+                    engine,
+                    params,
+                    nested_statement,
+                )
                 .execute(plan.as_ref());
+            }
         }
     }
     execute_uncached_or_snapshot_scoped(engine, sql, params, nested_statement)
@@ -96,12 +109,24 @@ fn execute_uncached_or_snapshot_scoped(
             if simple_query_batch
                 && implicit_segment_open
                 && transaction.as_ref().is_some_and(|transaction| {
-                    matches!(transaction, uqa_sql::ast::TransactionStmt::Begin)
+                    matches!(
+                        transaction,
+                        uqa_sql::ast::TransactionStmt::Begin
+                            | uqa_sql::ast::TransactionStmt::BeginWithCharacteristics(_)
+                    )
                 })
             {
                 // PostgreSQL promotes the simple-query message's implicit
                 // transaction to an explicit block. The preceding statements
                 // stay uncommitted; a later COMMIT or ROLLBACK controls them.
+                engine.promote_implicit_transaction_block()?;
+                if let Some(uqa_sql::ast::TransactionStmt::BeginWithCharacteristics(options)) =
+                    transaction
+                {
+                    engine.run_transaction_statement(
+                        uqa_sql::ast::TransactionStmt::SetCharacteristics(options),
+                    )?;
+                }
                 implicit_segment_open = false;
                 last = SQLResult::empty();
                 continue;
@@ -135,8 +160,8 @@ fn execute_uncached_or_snapshot_scoped(
                 (Arc::new(lower_statement(engine, statement.clone())), None)
             };
             if is_transaction_control(initial_plan.as_ref()) {
-                if simple_query_batch
-                    && engine.transaction_depth() == 0
+                // SQL COMMIT/ROLLBACK outside a block warn and succeed; the direct Rust transaction API keeps reporting misuse as an error.
+                if engine.transaction_depth() == 0
                     && transaction.as_ref().is_some_and(|transaction| {
                         matches!(
                             transaction,
@@ -193,7 +218,9 @@ fn execute_uncached_or_snapshot_scoped(
                         .map_err(|error| engine.abort_sql_transaction_after_error(error))?;
                 }
                 engine
-                    .refresh_explicit_statement_snapshot()
+                    .prepare_explicit_statement_snapshot(
+                        super::read_only::plan_sets_transaction_snapshot(initial_plan.as_ref()),
+                    )
                     .map_err(|error| engine.abort_sql_transaction_after_error(error))?;
                 // The statement was lowered immediately above, after any earlier
                 // BEGIN or catalog-changing statement in this batch completed.
@@ -247,17 +274,29 @@ fn execute_uncached_or_snapshot_scoped(
             // back. Memory commands use the same boundary so a fallible multi-row
             // mutation restores its pre-statement snapshot; read-only memory
             // queries avoid copying the whole database.
-            let is_read_query = match initial_plan.as_ref() {
-                uqa_planner::UnifiedPlan::Query(query) => !query_may_mutate_engine(engine, query)?,
-                uqa_planner::UnifiedPlan::Command(_) => false,
+            let (is_read_query, requires_statement_transaction) = match initial_plan.as_ref() {
+                uqa_planner::UnifiedPlan::Query(query) => {
+                    let mutates = query_may_mutate_engine(engine, query)?;
+                    (
+                        !mutates,
+                        mutates || query_requires_statement_transaction(engine, query)?,
+                    )
+                }
+                uqa_planner::UnifiedPlan::Command(_) => (false, true),
             };
-            let is_discard = matches!(
+            let runs_outside_transaction = matches!(
                 initial_plan.as_ref(),
                 uqa_planner::UnifiedPlan::Command(command)
-                    if matches!(command.as_ref(), uqa_planner::CommandPlan::Discard { .. })
+                    if matches!(
+                        command.as_ref(),
+                        uqa_planner::CommandPlan::Discard { .. }
+                            | uqa_planner::CommandPlan::Vacuum(_)
+                    )
             );
-            let needs_implicit_transaction = !is_discard
-                && (engine.storage.backend.is_some() || !is_read_query || has_row_locks);
+            let needs_implicit_transaction = !runs_outside_transaction
+                && (engine.storage.backend.is_some()
+                    || requires_statement_transaction
+                    || has_row_locks);
             if needs_implicit_transaction {
                 if has_row_locks {
                     engine.statement_row_lock_cache()?;
@@ -387,6 +426,8 @@ fn transaction_requires_explicit_block(transaction: &uqa_sql::ast::TransactionSt
         uqa_sql::ast::TransactionStmt::Savepoint(_)
             | uqa_sql::ast::TransactionStmt::ReleaseSavepoint(_)
             | uqa_sql::ast::TransactionStmt::RollbackToSavepoint(_)
+            | uqa_sql::ast::TransactionStmt::CommitAndChain
+            | uqa_sql::ast::TransactionStmt::RollbackAndChain
     )
 }
 
@@ -395,6 +436,8 @@ fn no_active_transaction_error(transaction: &uqa_sql::ast::TransactionStmt) -> S
         uqa_sql::ast::TransactionStmt::Savepoint(_) => "SAVEPOINT",
         uqa_sql::ast::TransactionStmt::ReleaseSavepoint(_) => "RELEASE SAVEPOINT",
         uqa_sql::ast::TransactionStmt::RollbackToSavepoint(_) => "ROLLBACK TO SAVEPOINT",
+        uqa_sql::ast::TransactionStmt::CommitAndChain => "COMMIT AND CHAIN",
+        uqa_sql::ast::TransactionStmt::RollbackAndChain => "ROLLBACK AND CHAIN",
         _ => unreachable!("only explicit-block transaction commands use this error"),
     };
     SQLError::Routine {

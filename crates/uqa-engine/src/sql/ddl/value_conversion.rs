@@ -65,7 +65,7 @@ pub(super) fn rewrite_column_values_to_type(
             })
             .collect(),
     );
-    for doc_id in engine.table_doc_ids(table)? {
+    for doc_id in engine.live_table_doc_ids(table)? {
         let Some(doc) = engine.get_document(table, doc_id)? else {
             continue;
         };

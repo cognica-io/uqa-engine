@@ -38,6 +38,7 @@ impl ContainerFile {
         self.generation = next_generation;
         self.state_tag = compacted.state_tag;
         self.append_offset = compacted.append_offset;
+        self.committed_file_len = compacted.append_offset;
         self.chunks = compacted.chunks;
         sync_parent_directory(&self.path)
     }

@@ -208,6 +208,8 @@ fn legacy_boolean_auto_increment_metadata_remains_readable() {
     let current = ColumnDef {
         name: "id".into(),
         ty: ColumnType::Integer,
+        object_id: None,
+        missing_value: None,
         primary_key: false,
         not_null: true,
         not_null_explicit: false,

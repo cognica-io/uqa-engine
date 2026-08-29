@@ -12,7 +12,7 @@ use std::sync::Arc;
 use super::{
     qualify_source_operator, table_lock_origin, ColumnPrune, CteScope, Engine,
     HierarchyScoredDocumentSource, SQLError, SQLParam, ScalarExpr, ScoredDocumentSource,
-    ScoredInput, SharedLockOrigin, SourcePlan, TABLE_OID_COLUMN,
+    ScoredInput, SharedLockOrigin, SourcePlan, TABLE_OID_COLUMN, XMIN_COLUMN,
 };
 use crate::sql::select::RecheckDoc;
 use crate::ScoredEntry;
@@ -47,7 +47,7 @@ pub(super) fn build_hierarchy_retrieval_operator<'a>(
     };
     let direct_vector =
         crate::operator_tree_bridge::direct_vector_retrieval(engine, predicate, params)?;
-    let table_names = engine.hierarchy_scan_tables(logical_table, *include_descendants)?;
+    let table_names = engine.query_hierarchy_scan_tables(logical_table, *include_descendants)?;
     let mut physical = Vec::with_capacity(table_names.len());
     for table_name in table_names {
         let lock_origin =
@@ -111,14 +111,22 @@ pub(super) fn build_hierarchy_retrieval_operator<'a>(
         None => {}
     }
 
-    let mut columns = engine.try_table_columns(logical_table).map_err(|error| {
-        SQLError::Internal(format!("read table columns for `{logical_table}`: {error}"))
-    })?;
+    let mut columns = engine
+        .try_query_table_columns(logical_table)
+        .map_err(|error| {
+            SQLError::Internal(format!("read table columns for `{logical_table}`: {error}"))
+        })?;
     if prune
         .and_then(|prune| prune.get(qualifier))
         .is_some_and(|wanted| wanted.contains(TABLE_OID_COLUMN))
     {
         columns.push(TABLE_OID_COLUMN.into());
+    }
+    if prune
+        .and_then(|prune| prune.get(qualifier))
+        .is_some_and(|wanted| wanted.contains(XMIN_COLUMN))
+    {
+        columns.push(XMIN_COLUMN.into());
     }
     let metadata = prune
         .and_then(|prune| prune.get(qualifier))
@@ -131,7 +139,7 @@ pub(super) fn build_hierarchy_retrieval_operator<'a>(
     let score_column = uqa_sql::ast::InternalRelationId::allocate().column(0);
     let mut sources = Vec::with_capacity(physical.len());
     for retrieval in physical {
-        let table = engine.require_table(&retrieval.table_name)?;
+        let table = engine.require_query_table(&retrieval.table_name)?;
         sources.push(
             ScoredDocumentSource::new_configured(
                 &retrieval.table_name,

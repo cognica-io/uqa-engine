@@ -8,6 +8,39 @@
 //! rollback, and savepoint operations.
 
 use uqa_engine::Engine;
+use uqa_sql::ast::ColumnType;
+use uqa_storage::document_store::Document;
+
+fn shown(engine: &Engine, name: &str) -> String {
+    let result = engine.sql(&format!("SHOW {name}"), &[]).unwrap();
+    let uqa_core::Value::Str(value) = &result.rows[0][name] else {
+        panic!("SHOW {name} did not return text");
+    };
+    value.clone()
+}
+
+fn integer_column(result: &uqa_sql::SQLResult, name: &str) -> Vec<i64> {
+    result
+        .rows
+        .iter()
+        .map(|row| match row.get(name) {
+            Some(uqa_core::Value::Int(value)) => *value,
+            other => panic!("expected integer column {name}, got {other:?}"),
+        })
+        .collect()
+}
+
+fn assert_integer_query<const N: usize>(
+    engine: &Engine,
+    sql: &str,
+    column: &str,
+    expected: [i64; N],
+) {
+    assert_eq!(
+        integer_column(&engine.sql(sql, &[]).unwrap(), column),
+        expected
+    );
+}
 
 #[test]
 fn begin_commit_round_trip() {
@@ -78,6 +111,13 @@ fn rollback_to_savepoint_keeps_frame_open() {
     assert_eq!(eng.transaction_depth(), 0);
 }
 
+#[path = "transaction_lifecycle/pg18_cursors.rs"]
+mod pg18_cursors;
+#[path = "transaction_lifecycle/pg18_isolation.rs"]
+mod pg18_isolation;
+#[path = "transaction_lifecycle/pg18_vacuum_xmin.rs"]
+mod pg18_vacuum_xmin;
+
 #[test]
 fn savepoint_order_invalidates_descendants_and_preserves_shadowed_names() {
     let eng = Engine::new();
@@ -121,6 +161,26 @@ fn close_drops_open_transactions() {
 fn commit_without_begin_errors() {
     let eng = Engine::new();
     assert!(eng.commit().is_err());
+}
+
+#[test]
+fn sql_commit_and_rollback_without_begin_warn_instead_of_erroring() {
+    let eng = Engine::new();
+    eng.sql("COMMIT", &[]).unwrap();
+    eng.sql("ROLLBACK", &[]).unwrap();
+    assert_eq!(
+        eng.take_sql_notices(),
+        vec![
+            (
+                "WARNING".into(),
+                "there is no transaction in progress".into()
+            ),
+            (
+                "WARNING".into(),
+                "there is no transaction in progress".into()
+            ),
+        ]
+    );
 }
 
 #[test]

@@ -221,7 +221,7 @@ fn operator_join_relation_schema(
         SQLError::TypeMismatch("operator join relation must be a table identifier".into())
     })?;
     let resolved = engine
-        .try_resolve_table_name(relation)
+        .try_resolve_query_table_name(relation)
         .map_err(|error| {
             SQLError::Internal(format!(
                 "resolve operator join relation `{relation}` schema: {error}"
@@ -233,7 +233,7 @@ fn operator_join_relation_schema(
             "decode operator join relation `{resolved}` schema: {error}"
         ))
     })?;
-    let table = engine.try_table(&resolved).map_err(|error| {
+    let table = engine.try_query_table(&resolved).map_err(|error| {
         SQLError::Internal(format!(
             "read operator join relation `{resolved}` schema: {error}"
         ))
@@ -663,7 +663,7 @@ impl SchemaScope {
                     self.visiting_views.remove(&key);
                     return result;
                 }
-                if let Some(table) = engine.try_table(name).map_err(|error| {
+                if let Some(table) = engine.try_query_table(name).map_err(|error| {
                     SQLError::Internal(format!("resolve table `{name}` schema: {error}"))
                 })? {
                     let definitions = table.columns.read();
@@ -1253,6 +1253,33 @@ pub(in crate::sql) fn validate_query_block_expression_types(
         .chain(statement.offset.iter())
     {
         uqa_execution::scalar_type_with_resolver(expression, schema, params, &resolver)?;
+    }
+    Ok(())
+}
+
+/// Validate projection names only after the caller has the authoritative source schema. Runtime Rust table functions declare their row shape when invoked, so their projections are checked against the built operator rather than a guessed one-column placeholder.
+pub(in crate::sql) fn validate_query_block_projection_references(
+    engine: &Engine,
+    statement: &QueryBlockPlan,
+    schema: &RowSchema,
+    params: &[SQLParam],
+    ctes: &CteScope,
+) -> Result<(), SQLError> {
+    let mut analysis = SchemaScope::for_analysis(ctes);
+    for projection in &statement.projections {
+        if !matches!(
+            projection.expr,
+            ScalarExpr::Star | ScalarExpr::QualifiedStar(_)
+        ) {
+            analysis.validate_expression_references(
+                engine,
+                &projection.expr,
+                schema,
+                None,
+                &statement.subqueries,
+                params,
+            )?;
+        }
     }
     Ok(())
 }

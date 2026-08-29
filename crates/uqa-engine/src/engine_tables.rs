@@ -73,6 +73,8 @@ impl Engine {
         catalog.save_table(&TableSchema {
             relation: RelationIdentity::from_legacy_name(name)
                 .map_err(StorageBackendError::Other)?,
+            object_id: table.object_id(),
+            storage_generation: table.storage_generation(),
             analyzer_json,
             fts_fields: table.fts_fields(),
             vector_fields,
@@ -172,6 +174,9 @@ impl Engine {
                 )
             };
         let table = TableState {
+            lifecycle_id: std::sync::atomic::AtomicU64::new(crate::next_table_lifecycle_id()),
+            object_id: crate::new_table_object_id()?,
+            storage_generation: RwLock::new(crate::new_table_storage_generation()?),
             document_store: RwLock::new(docs),
             inverted_index: RwLock::new(inv),
             vector_indexes: RwLock::new(BTreeMap::new()),

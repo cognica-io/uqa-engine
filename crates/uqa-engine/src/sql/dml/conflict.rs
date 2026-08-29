@@ -397,7 +397,7 @@ fn build_conflict_update(
     scope: &CteScope,
 ) -> Result<BuiltConflictUpdate, SQLError> {
     let existing_doc = engine
-        .get_document(table, existing_id)?
+        .get_document_for_mutation(table, existing_id)?
         .ok_or_else(|| missing_document_error("INSERT ON CONFLICT", table, existing_id))?;
     let target_row = dml_target_row(engine, table, target_qualifier, existing_id, &existing_doc)?;
     let definitions = engine
@@ -410,7 +410,14 @@ fn build_conflict_update(
         &mut excluded_document,
     )?;
     let excluded_columns = if definitions.is_empty() {
-        excluded_document.keys().cloned().collect::<Vec<_>>()
+        excluded_document
+            .keys()
+            .filter(|column| {
+                column.as_str() != crate::sql::XMIN_STORAGE_COLUMN
+                    && column.as_str() != crate::sql::XMIN_USER_STORAGE_COLUMN
+            })
+            .cloned()
+            .collect::<Vec<_>>()
     } else {
         definitions
             .iter()
@@ -809,6 +816,8 @@ pub(in crate::sql) fn returning_row_context(
         columns.push(DOC_ID_COLUMN.into());
         types.push(Some(uqa_sql::ast::ColumnType::BigInteger));
     }
+    columns.push(crate::sql::XMIN_COLUMN.into());
+    types.push(Some(uqa_sql::ast::ColumnType::Xid));
     let schema = returning_context_schema(&columns, &types, target_qualifier, aliases);
     let current_values = returning_image_values(Some(current), &columns, &definitions)?;
     let old_values = returning_image_values(images.old, &columns, &definitions)?;
@@ -1079,7 +1088,7 @@ fn analyze_dml_returning_plan(
     if returning.is_empty() {
         return Ok(None);
     }
-    let mut ctes = CteScope::new();
+    let mut ctes = CteScope::new_for_current_routine();
     for plan in cte_plans {
         ctes.insert_deferred(plan.clone());
     }
@@ -1204,6 +1213,8 @@ fn returning_expression_schema(
         columns.push(DOC_ID_COLUMN.into());
         types.push(Some(uqa_sql::ast::ColumnType::BigInteger));
     }
+    columns.push(crate::sql::XMIN_COLUMN.into());
+    types.push(Some(uqa_sql::ast::ColumnType::Xid));
     let target = returning_context_schema(&columns, &types, target_qualifier, aliases);
     supplemental.map_or(target.clone(), |source| {
         RowSchema::join(&target, source, std::iter::empty())

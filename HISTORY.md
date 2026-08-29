@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- Matched PostgreSQL 18 transaction and maintenance behavior for fixed repeatable-read and serializable snapshots across writer promotion, declaration-time and incremental SQL cursor execution, holdable-cursor commit rewind and deferred-constraint revalidation, read-only `ANALYZE` and `VACUUM`, targeted `VACUUM FULL`, and schemaless system `xmin` refreshes.
+
 ## [0.1.8] - 2026-08-29
 
 ### Added
@@ -168,7 +172,7 @@ Initial preproduction release of UQA Engine.
 
 ### Added
 
-- **Unified query runtime:** PostgreSQL-oriented SQL, full-text retrieval, vector search, graph queries, ranking, fusion, and machine-learning operators execute through one embeddable Rust engine.
+- **Unified query runtime:** PostgreSQL 18-compatible SQL, full-text retrieval, vector search, graph queries, ranking, fusion, and machine-learning operators execute through one embeddable Rust engine.
 - **Explicit query carriers:** `DocSet` owns document-support Boolean algebra, `Relation<K>` owns finite-support semiring combination, `PostingList` owns decorated posting storage, `RankedView` owns score order and top-K, and generalized postings preserve join-tuple identity.
 - **Typed score domains:** raw BM25 scores, evidence logits, prior logits, and posterior probabilities use distinct public types so invalid mathematical combinations are visible at API boundaries.
 - **Unified planning:** statements compile to `UnifiedPlan`, pass through the plan-native optimizer, and execute through `UnifiedPlanExecutor`; specialized retrieval paths remain explicit children of the shared plan.

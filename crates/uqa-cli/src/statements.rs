@@ -129,6 +129,142 @@ pub(super) fn statement_terminator_offsets(text: &str) -> Vec<usize> {
     boundaries.offsets
 }
 
+fn psql_escaped_semicolon_offsets(text: &str) -> Vec<usize> {
+    let bytes = text.as_bytes();
+    let mut offsets = Vec::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index..].starts_with(b"--") {
+            index = text[index..]
+                .find('\n')
+                .map_or(bytes.len(), |offset| index + offset + 1);
+            continue;
+        }
+        if bytes[index..].starts_with(b"/*") {
+            let mut depth = 1_usize;
+            index += 2;
+            while index < bytes.len() && depth != 0 {
+                if bytes[index..].starts_with(b"/*") {
+                    depth += 1;
+                    index += 2;
+                } else if bytes[index..].starts_with(b"*/") {
+                    depth -= 1;
+                    index += 2;
+                } else {
+                    index += text[index..].chars().next().map_or(1, char::len_utf8);
+                }
+            }
+            continue;
+        }
+        if bytes[index] == b'\'' {
+            let backslash_escapes = index >= 1
+                && matches!(bytes[index - 1], b'e' | b'E')
+                && (index == 1
+                    || !(bytes[index - 2].is_ascii_alphanumeric()
+                        || matches!(bytes[index - 2], b'_' | b'$')));
+            index += 1;
+            while index < bytes.len() {
+                if backslash_escapes && bytes[index] == b'\\' {
+                    let escaped = index + 1;
+                    index = escaped + text[escaped..].chars().next().map_or(0, char::len_utf8);
+                } else if bytes[index] == b'\'' {
+                    if bytes.get(index + 1) == Some(&b'\'') {
+                        index += 2;
+                    } else {
+                        index += 1;
+                        break;
+                    }
+                } else {
+                    index += text[index..].chars().next().map_or(1, char::len_utf8);
+                }
+            }
+            continue;
+        }
+        if bytes[index] == b'"' {
+            index += 1;
+            while index < bytes.len() {
+                if bytes[index] == b'"' {
+                    if bytes.get(index + 1) == Some(&b'"') {
+                        index += 2;
+                    } else {
+                        index += 1;
+                        break;
+                    }
+                } else {
+                    index += text[index..].chars().next().map_or(1, char::len_utf8);
+                }
+            }
+            continue;
+        }
+        if bytes[index] == b'$' {
+            if let Some(end) = dollar_quote_delimiter_end(text, index) {
+                let delimiter = &text[index..=end];
+                let body_start = end + 1;
+                index = text[body_start..]
+                    .find(delimiter)
+                    .map_or(bytes.len(), |offset| body_start + offset + delimiter.len());
+                continue;
+            }
+        }
+        if bytes[index..].starts_with(b"\\;") {
+            offsets.push(index);
+            index += 2;
+            continue;
+        }
+        index += text[index..].chars().next().map_or(1, char::len_utf8);
+    }
+    offsets
+}
+
+fn dollar_quote_delimiter_end(text: &str, start: usize) -> Option<usize> {
+    debug_assert_eq!(text.as_bytes().get(start), Some(&b'$'));
+    let tag = &text[start + 1..];
+    if tag.starts_with('$') {
+        return Some(start + 1);
+    }
+    let mut chars = tag.char_indices();
+    let (_, first) = chars.next()?;
+    if !(first == '_' || first.is_alphabetic()) {
+        return None;
+    }
+    for (offset, character) in chars {
+        if character == '$' {
+            return Some(start + 1 + offset);
+        }
+        if !(character == '_' || character.is_alphanumeric()) {
+            return None;
+        }
+    }
+    None
+}
+
+fn replace_psql_escaped_semicolons(text: &str, offsets: &[usize], replacement: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    let mut start = 0;
+    for &offset in offsets {
+        output.push_str(&text[start..offset]);
+        output.push_str(replacement);
+        start = offset + 2;
+    }
+    output.push_str(&text[start..]);
+    output
+}
+
+/// Remove psql's backslash from `\;` separators outside SQL literals and comments. psql uses these separators to keep several SQL statements in one simple-query message.
+pub(super) fn unescape_psql_semicolons(text: &str) -> Option<String> {
+    let offsets = psql_escaped_semicolon_offsets(text);
+    (!offsets.is_empty()).then(|| replace_psql_escaped_semicolons(text, &offsets, ";"))
+}
+
+/// Detect a real input terminator while masking psql `\;` separators, which delimit server-side statements but do not submit the client buffer.
+pub(super) fn contains_input_terminator(text: &str) -> bool {
+    let offsets = psql_escaped_semicolon_offsets(text);
+    if offsets.is_empty() {
+        return contains_statement_terminator(text);
+    }
+    contains_statement_terminator(&replace_psql_escaped_semicolons(text, &offsets, "  "))
+}
+
 pub(super) fn split_statements(text: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut start = 0;

@@ -243,13 +243,20 @@ impl Engine {
         let session_id = row_locks.allocate_session();
         let mut engine = Self {
             storage: super::StorageContext::persistent(catalog, backend, provider),
-            durable: super::DurableCatalogState::new(),
-            session: super::SessionContext::new(super::initial_random_state()),
+            durable: Arc::new(super::DurableCatalogState::new()),
+            session: Arc::new(super::SessionContext::new(super::initial_random_state())),
             extensions: super::RuntimeExtensions::new(),
             epochs: super::EpochCoordinator::new(),
             runtime: super::QueryRuntime::new(super::SQL_FUNCTION_DEPTH_LIMIT),
             row_locks,
             session_id,
+            owns_session_registration: true,
+            query_table_snapshots: None,
+            query_view_snapshots: None,
+            query_sql_function_snapshots: None,
+            query_catalog_snapshot: None,
+            query_transaction_overlay: None,
+            query_transaction_origin: None,
         };
         Self::prepare_catalog_for_initial_restore(restore_catalog.as_ref())?;
         restore_backend.migrate_inverted_index_storage()?;

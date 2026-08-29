@@ -1,0 +1,9 @@
+view	20
+function	2
+new_count	0
+truncate_count	0
+ddl_not_null	23502
+altered_row	50|7
+catalog_refresh	1
+old_regclass	<null>
+dropped_regclass	<null>

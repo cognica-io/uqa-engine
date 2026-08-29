@@ -131,6 +131,19 @@ fn named_windows_share_and_extend_definitions() {
 }
 
 #[test]
+fn pg18_builtin_aggregate_windows_bind_over_values_sources() {
+    let eng = Engine::new();
+    let result = eng
+        .sql(
+            "SELECT sum(x) OVER (ORDER BY x) AS running FROM (VALUES (1), (2), (3)) AS t(x)",
+            &[],
+        )
+        .unwrap();
+
+    assert_eq!(ints(&[result], "running"), vec![1, 3, 6]);
+}
+
+#[test]
 fn row_number_inside_projection_expression() {
     let eng = corpus();
     let r = eng

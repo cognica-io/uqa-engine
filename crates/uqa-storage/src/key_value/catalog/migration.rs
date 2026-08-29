@@ -81,6 +81,8 @@ pub(super) fn decode_migrated_table(
     }
     Ok(TableSchema {
         relation,
+        object_id: [0; 16],
+        storage_generation: [0; 16],
         analyzer_json: legacy.analyzer_json,
         fts_fields: legacy.fts_fields,
         vector_fields: legacy.vector_fields,

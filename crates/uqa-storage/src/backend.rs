@@ -234,6 +234,11 @@ pub trait PersistentStorageBackend: Send + Sync {
         ))
     }
 
+    /// Whether an independently pinned read session can remain open while another session writes the same database. Backends that return `false` use a detached fixed snapshot for `REPEATABLE READ` and `SERIALIZABLE` transactions.
+    fn supports_concurrent_pinned_read_and_write(&self) -> bool {
+        false
+    }
+
     fn document_store(&self, table: &str) -> Box<dyn DocumentStore>;
 
     fn inverted_index(&self, table: &str, analyzer: Analyzer) -> Box<dyn InvertedIndex>;
@@ -337,6 +342,11 @@ pub trait PersistentStorageBackend: Send + Sync {
     }
 
     fn clear_btree_indexes(&self, _table: &str) -> StorageBackendResult<()> {
+        Ok(())
+    }
+
+    /// Reclaim backend-owned storage outside a transaction. Backends whose logical stores eagerly remove obsolete values may keep the no-op default; durable backends with file-level compaction should override it.
+    fn vacuum(&self) -> StorageBackendResult<()> {
         Ok(())
     }
 
@@ -457,6 +467,10 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
         let catalog: Arc<dyn CatalogFacade> = Arc::new(Catalog::open(connection.clone())?);
         let backend: Arc<dyn PersistentStorageBackend> = Arc::new(Self::new(connection));
         Ok(PersistentStorageSession::new(catalog, backend))
+    }
+
+    fn supports_concurrent_pinned_read_and_write(&self) -> bool {
+        self.conn.supports_concurrent_pinned_read_and_write()
     }
 
     fn document_store(&self, table: &str) -> Box<dyn DocumentStore> {
@@ -616,6 +630,11 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
 
     fn clear_btree_indexes(&self, table: &str) -> StorageBackendResult<()> {
         SQLiteBTreeIndexStore::new(self.conn.clone()).clear_table(table)?;
+        Ok(())
+    }
+
+    fn vacuum(&self) -> StorageBackendResult<()> {
+        self.conn.vacuum()?;
         Ok(())
     }
 

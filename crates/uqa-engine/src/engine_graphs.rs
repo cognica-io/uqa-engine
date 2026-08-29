@@ -697,24 +697,32 @@ impl Engine {
         params: BTreeMap<String, Value>,
     ) -> Result<(Vec<String>, Vec<uqa_graph::cypher::ResultRow>), uqa_graph::cypher::CypherError>
     {
-        self.with_implicit_mapped_transaction(
-            move |engine| engine.run_cypher_inner(graph, query, params),
-            uqa_graph::cypher::CypherError::Storage,
-        )
+        let _statement = self.runtime.statement_gate.lock();
+        self.synchronize_catalog_registries()
+            .map_err(|error| uqa_graph::cypher::CypherError::Storage(error.to_string()))?;
+        let query = uqa_graph::cypher::parse_cypher(query)?;
+        let mutates = query.mutates_graph() || !self.durable.graphs.read().contains_key(graph);
+        if mutates {
+            self.with_implicit_mapped_transaction(
+                move |engine| engine.run_cypher_inner(graph, &query, params),
+                uqa_graph::cypher::CypherError::Storage,
+            )
+        } else {
+            self.run_cypher_inner(graph, &query, params)
+        }
     }
 
     fn run_cypher_inner(
         &self,
         graph: &str,
-        query: &str,
+        query: &uqa_graph::cypher::CypherQuery,
         params: BTreeMap<String, Value>,
     ) -> Result<(Vec<String>, Vec<uqa_graph::cypher::ResultRow>), uqa_graph::cypher::CypherError>
     {
-        use uqa_graph::cypher::{parse_cypher, CypherWriter};
+        use uqa_graph::cypher::CypherWriter;
         use uqa_graph::GraphStore as _;
         self.synchronize_catalog_registries()
             .map_err(|err| uqa_graph::cypher::CypherError::Storage(err.to_string()))?;
-        let q = parse_cypher(query)?;
         let mut graphs = self.durable.graphs.write();
         let existed = graphs.contains_key(graph);
         let mut candidate = graphs.get(graph).cloned().unwrap_or_default();
@@ -724,7 +732,7 @@ impl Engine {
         let labels = candidate
             .graph_labels(graph)
             .map_err(|error| uqa_graph::cypher::CypherError::Storage(error.to_string()))?;
-        let (requires_vertex, requires_edge) = cypher_label_requirements(&q);
+        let (requires_vertex, requires_edge) = cypher_label_requirements(query);
         for (required, kind) in [
             (requires_vertex, uqa_graph::LabelKind::Vertex),
             (requires_edge, uqa_graph::LabelKind::Edge),
@@ -739,22 +747,14 @@ impl Engine {
                 ));
             }
         }
-        let mutates = q.clauses.iter().any(|clause| {
-            matches!(
-                clause,
-                uqa_graph::cypher::CypherClause::Create(_)
-                    | uqa_graph::cypher::CypherClause::Merge(_)
-                    | uqa_graph::cypher::CypherClause::Set(_)
-                    | uqa_graph::cypher::CypherClause::Delete(_)
-            )
-        });
+        let mutates = query.mutates_graph();
         let result = {
             // Ensure the named partition exists inside the store as
             // well. The outer map only owns the store; create_graph
             // populates the store's own partition registry that
             // mutations key off of.
             let mut writer = CypherWriter::new(&mut candidate, graph).with_params(params);
-            writer.execute(&q)?
+            writer.execute(query)?
         };
         if mutates || !existed {
             self.persist_graph_candidate(graph, &candidate)

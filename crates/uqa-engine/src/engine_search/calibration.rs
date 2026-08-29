@@ -183,7 +183,7 @@ impl Engine {
             return Ok(false);
         };
         let Some(table_state) = self
-            .try_table(table)
+            .try_query_table(table)
             .map_err(|error| storage_sql_error("resolve search table", error))?
         else {
             return Err(SQLError::UnknownTable(table.to_string()));
@@ -212,7 +212,7 @@ impl Engine {
         estimator: &UnsupervisedBm25ScoreEstimator,
     ) -> Result<Vec<Vec<String>>, SQLError> {
         let Some(table_state) = self
-            .try_table(table)
+            .try_query_table(table)
             .map_err(|error| storage_sql_error("resolve calibration table", error))?
         else {
             return Err(SQLError::UnknownTable(table.to_string()));
@@ -275,7 +275,7 @@ impl Engine {
         table: &str,
         field: &str,
     ) -> Result<Option<BayesianBM25Params>, SQLError> {
-        let table_state = self.require_table(table)?;
+        let table_state = self.require_query_table(table)?;
         let estimator = UnsupervisedBm25ScoreEstimator::default();
         let queries = self.sample_calibration_queries(table, field, &estimator)?;
         let (params, doc_count) = {

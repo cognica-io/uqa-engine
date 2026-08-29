@@ -269,6 +269,10 @@ pub(super) fn with_table_pseudo_columns(schema: &RowSchema, qualifier: &str) -> 
             ColumnIdentity::qualified(qualifier, "tableoid"),
             Some(ColumnType::Oid),
         ),
+        (
+            ColumnIdentity::qualified(qualifier, "xmin"),
+            Some(ColumnType::Xid),
+        ),
     ];
     RowSchema::with_typed_virtual_identities(schema, &columns)
 }
@@ -289,6 +293,10 @@ pub(super) fn with_unqualified_table_pseudo_columns(schema: &RowSchema) -> RowSc
         (
             ColumnIdentity::unqualified("tableoid"),
             schema.qualified_type(&qualifier, "tableoid").cloned(),
+        ),
+        (
+            ColumnIdentity::unqualified("xmin"),
+            schema.qualified_type(&qualifier, "xmin").cloned(),
         ),
     ];
     let schema = RowSchema::with_typed_virtual_identities(schema, &columns);

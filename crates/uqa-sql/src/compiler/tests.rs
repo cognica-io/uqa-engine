@@ -14,6 +14,121 @@ fn bundled_parser_is_postgresql_18_4() {
 }
 
 #[test]
+fn transaction_control_preserves_postgresql_modes_and_chaining() {
+    use crate::ast::{TransactionCharacteristics, TransactionIsolationLevel, TransactionStmt};
+
+    assert!(matches!(
+        first("BEGIN ISOLATION LEVEL SERIALIZABLE, READ ONLY, DEFERRABLE"),
+        Statement::Transaction(TransactionStmt::BeginWithCharacteristics(
+            TransactionCharacteristics {
+                isolation: Some(TransactionIsolationLevel::Serializable),
+                read_only: Some(true),
+                deferrable: Some(true),
+            }
+        ))
+    ));
+    assert!(matches!(
+        first("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ WRITE, NOT DEFERRABLE"),
+        Statement::Transaction(TransactionStmt::SetCharacteristics(
+            TransactionCharacteristics {
+                isolation: Some(TransactionIsolationLevel::RepeatableRead),
+                read_only: Some(false),
+                deferrable: Some(false),
+            }
+        ))
+    ));
+    assert!(matches!(
+        first("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY"),
+        Statement::Transaction(TransactionStmt::SetSessionCharacteristics(
+            TransactionCharacteristics {
+                isolation: None,
+                read_only: Some(true),
+                deferrable: None,
+            }
+        ))
+    ));
+    assert!(matches!(
+        first("COMMIT AND CHAIN"),
+        Statement::Transaction(TransactionStmt::CommitAndChain)
+    ));
+    assert!(matches!(
+        first("ROLLBACK AND CHAIN"),
+        Statement::Transaction(TransactionStmt::RollbackAndChain)
+    ));
+    assert!(matches!(
+        first("SET TRANSACTION SNAPSHOT 'FFF-FFF-F'"),
+        Statement::Transaction(TransactionStmt::SetSnapshot(ref snapshot))
+            if snapshot == "FFF-FFF-F"
+    ));
+}
+
+#[test]
+fn reset_runtime_parameters_remains_distinct_from_empty_set() {
+    assert!(matches!(
+        first("RESET default_transaction_read_only"),
+        Statement::ResetVariable { ref name }
+            if name == "default_transaction_read_only"
+    ));
+    assert!(matches!(first("RESET ALL"), Statement::ResetAllVariables));
+}
+
+#[test]
+fn sql_cursor_statements_preserve_postgresql_options_and_fetch_direction() {
+    use crate::ast::{CursorDirection, DeclareCursorStmt, FetchCursorStmt};
+
+    let Statement::DeclareCursor(DeclareCursorStmt {
+        name,
+        binary,
+        scroll,
+        hold,
+        query,
+    }) = first("DECLARE \"CaseCursor\" BINARY SCROLL CURSOR WITH HOLD FOR SELECT 1 AS value")
+    else {
+        panic!("expected DECLARE CURSOR");
+    };
+    assert_eq!(name, "CaseCursor");
+    assert!(binary);
+    assert_eq!(scroll, Some(true));
+    assert!(hold);
+    assert_eq!(query.projections[0].alias.as_deref(), Some("value"));
+
+    assert!(matches!(
+        first("FETCH BACKWARD 5 FROM CaseCursor"),
+        Statement::FetchCursor(FetchCursorStmt {
+            ref name,
+            direction: CursorDirection::Backward,
+            count: 5,
+            move_only: false,
+        }) if name == "casecursor"
+    ));
+    assert!(matches!(
+        first("MOVE ABSOLUTE -1 IN CaseCursor"),
+        Statement::FetchCursor(FetchCursorStmt {
+            direction: CursorDirection::Absolute,
+            count: -1,
+            move_only: true,
+            ..
+        })
+    ));
+    assert!(matches!(
+        first("FETCH ALL FROM CaseCursor"),
+        Statement::FetchCursor(FetchCursorStmt {
+            direction: CursorDirection::Forward,
+            count: i64::MAX,
+            ..
+        })
+    ));
+    assert!(matches!(
+        first("CLOSE CaseCursor"),
+        Statement::CloseCursor { name: Some(ref name) } if name == "casecursor"
+    ));
+    assert!(matches!(
+        first("CLOSE ALL"),
+        Statement::CloseCursor { name: None }
+    ));
+}
+
+#[test]
 fn function_arguments_reject_positional_after_named_and_duplicate_names() {
     let error = compile("SELECT random(max => 2, 1)").unwrap_err();
     assert_eq!(error.sqlstate(), Some("42601"));

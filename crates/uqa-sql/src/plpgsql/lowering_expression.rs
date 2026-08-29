@@ -160,9 +160,13 @@ fn compile_single_select_expression(
     select: &pg_query::protobuf::SelectStmt,
     text: &str,
 ) -> Result<Expr> {
-    validate_select_expression_envelope(select, text)?;
     if select.target_list.len() != 1 {
         return Err(SQLError::Parse(format!("not a single expression: {text}")));
+    }
+    if validate_select_expression_envelope(select, text).is_err() {
+        return crate::compiler::compile_pg_select(select)
+            .map(Box::new)
+            .map(Expr::ScalarSubquery);
     }
     let Some(pg_query::NodeEnum::ResTarget(target)) = select.target_list[0].node.as_ref() else {
         return Err(SQLError::Internal(
@@ -253,5 +257,15 @@ mod tests {
                     if message.contains("non-expression SELECT state")
             ));
         }
+    }
+
+    #[test]
+    fn expression_with_from_lowers_to_a_scalar_subquery() {
+        let expression = compile_expression_text("max(a) FROM xacttest").unwrap();
+        let Expr::ScalarSubquery(query) = expression else {
+            panic!("PL/pgSQL query-shaped expression was not preserved as a scalar subquery");
+        };
+        assert_eq!(query.projections.len(), 1);
+        assert!(query.from.is_some());
     }
 }

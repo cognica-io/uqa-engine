@@ -10,8 +10,6 @@ use std::collections::BTreeSet;
 
 use super::{ddl_storage_error, ColumnType, Document, Engine, SQLError, SQLParam, SQLResult};
 
-const POSTGRES_SYSTEM_COLUMNS: [&str; 6] = ["tableoid", "xmin", "cmin", "xmax", "cmax", "ctid"];
-
 pub(in crate::sql) struct CreateTableAsExecution<'a> {
     pub name: &'a str,
     pub if_not_exists: bool,
@@ -64,7 +62,7 @@ fn run_create_table_as_inner(
     engine: &Engine,
     execution: &CreateTableAsExecution<'_>,
 ) -> Result<SQLResult, SQLError> {
-    let ctes = crate::sql::select::CteScope::new();
+    let ctes = crate::sql::select::CteScope::new_for_current_routine();
     let mut query_schema = execution
         .with_no_data
         .then(|| {
@@ -242,6 +240,7 @@ fn materialize_create_table_as_rows(
                 })?;
             document.insert(column.name.clone(), value);
         }
+        crate::sql::dml::stamp_tuple_xmin(engine, name, &mut document)?;
         let vectors = crate::sql::dml::document_vectors(engine, name, &document)?;
         engine.add_document_with_vector_values(name, doc_id, document, vectors)?;
     }
@@ -272,12 +271,7 @@ fn create_table_as_columns(
         .collect::<Vec<_>>();
     let mut seen = BTreeSet::new();
     for name in &names {
-        if POSTGRES_SYSTEM_COLUMNS.contains(&name.as_str()) {
-            return Err(SQLError::Routine {
-                sqlstate: "42701".into(),
-                message: format!("column name \"{name}\" conflicts with a system column name"),
-            });
-        }
+        super::validate_postgres_column_name(name)?;
         if !seen.insert(name) {
             return Err(SQLError::Routine {
                 sqlstate: "42701".into(),
@@ -294,6 +288,8 @@ fn create_table_as_columns(
                 .column_type(position)
                 .cloned()
                 .unwrap_or(ColumnType::Text),
+            object_id: None,
+            missing_value: None,
             primary_key: false,
             not_null: false,
             not_null_explicit: false,

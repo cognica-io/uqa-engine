@@ -127,7 +127,7 @@ graph TD
 | `uqa-graph` | Named graph stores, Cypher, RPQ automata, graph algebra, centrality, message passing, temporal traversal, and graph indexes |
 | `uqa-joins` | Relational and cross-paradigm join algorithms for text, vectors, graphs, and structured values |
 | `uqa-pg-query` | Imported PostgreSQL 18 `libpg_query` pin; library name stays `pg_query` |
-| `uqa-sql` | `uqa-pg-query` parsing, syntax ASTs, PostgreSQL-oriented statement compilation, scalar IR, and SQL function registry |
+| `uqa-sql` | `uqa-pg-query` parsing, syntax ASTs, PostgreSQL 18-compatible statement compilation across the verified surface, scalar IR, and SQL function registry |
 | `uqa-execution` | Volcano-style physical operators, columnar result batches, spill formats, sorting, aggregation, joins, and bounded materialization |
 | `uqa-planner` | Cardinality and cost models, DPccp join enumeration, unified-plan optimization, and physical text top-K selection |
 | `uqa-engine` | Composition root, SQL lifecycle, transactions, catalog restore, persistent state, graph/model integration, and public embedded API |
@@ -286,7 +286,7 @@ RPQ is treated as regular-language recognition over an automaton-product travers
 
 ## SQL surface and extensions
 
-The SQL compiler is PostgreSQL-oriented and currently covers schemas and `search_path`, DDL and DML, constraints and referential actions, MERGE, CTAS, recursive CTEs, subqueries, LATERAL joins, window frames, grouping sets, sequences, views, prepared statements, JSON/JSONB, arrays, temporal and numeric types, `BYTEA`, analyzer DDL, foreign server/table DDL, SQL and PL/pgSQL routines, and virtual `information_schema` and `pg_catalog` views.
+The SQL compiler targets PostgreSQL 18 compatibility and currently covers schemas and `search_path`, DDL and DML, constraints and referential actions, MERGE, CTAS, recursive CTEs, subqueries, LATERAL joins, window frames, grouping sets, sequences, views, prepared statements, JSON/JSONB, arrays, temporal and numeric types, `BYTEA`, analyzer DDL, foreign server/table DDL, SQL and PL/pgSQL routines, and virtual `information_schema` and `pg_catalog` views.
 
 Retrieval and graph functions include text and Bayesian match, KNN, exact and robust fusion, multi-field and staged retrieval, calibration, sparse thresholds, highlighting, facets, graph lifecycle and traversal, RPQ, centrality, Cypher, and deep model training and inference.
 

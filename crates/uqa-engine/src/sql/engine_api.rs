@@ -86,12 +86,31 @@ impl Engine {
     /// WHERE clause.
     pub fn table_doc_ids(&self, table: &str) -> Result<Vec<uqa_core::DocId>, SQLError> {
         let Some(t) = self
-            .try_table(table)
+            .try_query_table(table)
             .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
         else {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
-        let doc_ids = t
+        self.table_doc_ids_from_state(table, &t)
+    }
+
+    /// All current document ids for schema mutation and validation. Unlike the SELECT-facing path, DDL must inspect rows committed after a fixed transaction snapshot was acquired.
+    pub(crate) fn live_table_doc_ids(&self, table: &str) -> Result<Vec<uqa_core::DocId>, SQLError> {
+        let Some(t) = self.try_table(table).map_err(|error| {
+            SQLError::Internal(format!("resolve live table `{table}`: {error}"))
+        })?
+        else {
+            return Err(SQLError::UnknownTable(table.to_string()));
+        };
+        self.table_doc_ids_from_state(table, &t)
+    }
+
+    fn table_doc_ids_from_state(
+        &self,
+        table: &str,
+        state: &crate::TableState,
+    ) -> Result<Vec<uqa_core::DocId>, SQLError> {
+        let doc_ids = state
             .document_store
             .read()
             .doc_ids()
@@ -115,7 +134,7 @@ impl Engine {
     pub(crate) fn table_doc_count(&self, table: &str) -> Result<u64, SQLError> {
         use std::sync::atomic::Ordering;
         let Some(t) = self
-            .try_table(table)
+            .try_query_table(table)
             .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
         else {
             return Err(SQLError::UnknownTable(table.to_string()));

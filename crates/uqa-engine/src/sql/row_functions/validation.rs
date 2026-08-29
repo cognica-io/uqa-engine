@@ -162,7 +162,7 @@ pub(in crate::sql) fn validate_joined_expr_text_match_fields(
         let mut containing: Vec<&String> = Vec::new();
         for (_, name) in &tables {
             if engine
-                .table_has_column(name, column)
+                .try_query_table_has_column(name, column)
                 .map_err(|err| SQLError::Internal(format!("read table schema: {err}")))?
             {
                 containing.push(name);
@@ -238,7 +238,7 @@ pub(in crate::sql) fn validate_text_match_field(
     function_name: &str,
 ) -> Result<(), SQLError> {
     if !engine
-        .has_table(table)
+        .try_query_has_table(table)
         .map_err(|err| SQLError::Internal(format!("read table catalog: {err}")))?
     {
         return Err(SQLError::TypeMismatch(format!(
@@ -251,10 +251,10 @@ pub(in crate::sql) fn validate_text_match_field(
         .any(|fts| fts == field);
     if !indexed {
         if !engine
-            .table_has_column(table, field)
+            .try_query_table_has_column(table, field)
             .map_err(|err| SQLError::Internal(format!("read table schema: {err}")))?
             && !engine
-                .table_columns(table)
+                .try_query_table_columns(table)
                 .map_err(|err| SQLError::Internal(format!("read table schema: {err}")))?
                 .is_empty()
         {
@@ -276,7 +276,7 @@ pub(in crate::sql) fn validate_text_match_all_fields(
     function_name: &str,
 ) -> Result<(), SQLError> {
     if !engine
-        .has_table(table)
+        .try_query_has_table(table)
         .map_err(|err| SQLError::Internal(format!("read table catalog: {err}")))?
     {
         return Err(SQLError::TypeMismatch(format!(

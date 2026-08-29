@@ -171,7 +171,7 @@ pub(super) fn validate_foreign_key_rows(
     name: &str,
     foreign_key: &uqa_sql::ast::ForeignKey,
 ) -> Result<(), SQLError> {
-    for doc_id in engine.table_doc_ids(table)? {
+    for doc_id in engine.live_table_doc_ids(table)? {
         let Some(document) = engine.get_document(table, doc_id)? else {
             continue;
         };

@@ -10,6 +10,8 @@
     "stateful_constraints": "tests/parity/pg18/constraints_stateful.expected.json",
     "stateful_triggers": "tests/parity/pg18/triggers_stateful.expected.json",
     "stateful_rules": "tests/parity/pg18/rules_stateful.expected.json",
+    "stateful_transactions": "tests/parity/pg18/transaction_stateful.expected.json",
+    "transaction_catalog_visibility": "tests/parity/pg18/transaction_catalog_visibility_oracle.expected.txt",
     "tpch_fixture": "benchmarks/tpch/expected/pg18.json"
   },
   "parser_chain": {
@@ -75,6 +77,7 @@
       "routines.procedure-call-overload-resolution",
       "routines.table-setof-overload-resolution",
       "routines.stored-view-function-drop-restrict",
+      "transactions.snapshot-catalog-visibility",
       "functions.json-null-stripping",
       "functions.array-transforms",
       "functions.integer-base-conversion",
@@ -530,11 +533,19 @@
     },
     {
       "id": "plpgsql.datum-slots-and-bound-cursors",
-      "postgresql_reference": "PostgreSQL 18 PL/pgSQL statements and cursor documentation; PostgreSQL 18.4 with Apache AGE transcript in tests/parity/pg18/routine_security_cursor_oracle.md",
-      "uqa_test": "cargo test -p uqa-engine --test integration engine_functions::sql_plpgsql::",
-      "supported_version": "PostgreSQL 18 datum slots, qualified named types, table-backed %TYPE resolution, strict scalar coercion, bound cursor declarations and arguments, refcursor parameters and returns, transaction-scoped session portals that survive routine exit, and savepoint rollback that closes newer portals without rewinding older cursor positions",
+      "postgresql_reference": "PostgreSQL 18 PL/pgSQL statements and cursor documentation; PostgreSQL 18.4 with Apache AGE transcripts in tests/parity/pg18/routine_security_cursor_oracle.md and tests/parity/pg18/transaction_stateful.expected.json",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_functions::sql_plpgsql:: && cargo test -p uqa-engine --test integration pg18_sql_cursor; python3 tests/parity/pg18/run_routines_stateful.py --suite transactions",
+      "supported_version": "PostgreSQL 18 datum slots, qualified named types, table-backed %TYPE resolution, strict scalar coercion, bound cursor declarations and arguments, refcursor parameters and returns, transaction-scoped session portals that survive routine exit, top-level SQL DECLARE/FETCH/MOVE/CLOSE with execution-free declaration analysis, declaration-time relation, view-name, nested-view-plan, literal-regclass sequence, routine-definition, and inheritance binding, transaction-scoped AccessShare locking, notice forwarding, declaration-time snapshots, lazy and one-row incremental execution, directional, scrolling, and holdable behavior including commit-time rewind and complete materialization, deferred-constraint revalidation after holdable materialization, and savepoint rollback that closes newer portals without rewinding older cursor positions",
       "status": "partial",
-      "open_issue": "Dynamic OPEN FOR forms, MOVE, fetch directions other than NEXT, holdable cursors, and top-level SQL portal control remain."
+      "open_issue": "Dynamic PL/pgSQL OPEN FOR forms and PL/pgSQL MOVE and fetch directions other than NEXT remain."
+    },
+    {
+      "id": "transactions.snapshot-catalog-visibility",
+      "postgresql_reference": "PostgreSQL 18.4 sibling-session results in tests/parity/pg18/transaction_catalog_visibility_oracle.sql and transaction_catalog_visibility_oracle.expected.txt",
+      "uqa_test": "cargo test --locked -p uqa-engine --test integration pg18_fixed_snapshot",
+      "supported_version": "PostgreSQL 18.4 REPEATABLE READ row visibility with current committed view and routine definitions, post-snapshot relation binding, TRUNCATE storage identity, transaction-local DDL, and rollback",
+      "status": "verified",
+      "open_issue": null
     },
     {
       "id": "protocol.frontend-backend-3.2",

@@ -16,6 +16,15 @@ pub(crate) fn is_virtual_system_schema(name: &str) -> bool {
 
 impl Engine {
     pub fn list_catalog_indexes(&self) -> StorageBackendResult<Vec<CatalogIndexRow>> {
+        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
+            let mut out = snapshot
+                .catalog_indexes
+                .values()
+                .cloned()
+                .collect::<Vec<_>>();
+            out.sort_by(|a, b| a.name.cmp(&b.name));
+            return Ok(out);
+        }
         self.synchronize_catalog_registries()?;
         let mut out: Vec<CatalogIndexRow> = self
             .durable
@@ -161,6 +170,9 @@ impl Engine {
 
     /// Return every registered schema in sorted order.
     pub fn list_schemas(&self) -> StorageBackendResult<Vec<String>> {
+        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
+            return Ok(snapshot.schemas.iter().cloned().collect());
+        }
         self.synchronize_catalog_registries()?;
         Ok(self.durable.schemas.read().iter().cloned().collect())
     }
@@ -180,6 +192,15 @@ impl Engine {
     }
 
     pub fn list_sequences(&self) -> StorageBackendResult<Vec<String>> {
+        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
+            let mut out = snapshot
+                .sequences
+                .keys()
+                .map(RelationIdentity::qualified_name)
+                .collect::<Vec<_>>();
+            out.sort_unstable();
+            return Ok(out);
+        }
         self.refresh_sequences_from_catalog()?;
         let mut out: Vec<String> = self
             .durable

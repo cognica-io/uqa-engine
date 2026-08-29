@@ -189,6 +189,12 @@ impl RelationKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableSchema {
     pub relation: RelationIdentity,
+    /// Stable logical relation identity. `CREATE TABLE` allocates a new value, while renames, schema changes, `TRUNCATE`, and reopen preserve it. A zero value marks a legacy catalog row that the engine upgrades during open.
+    #[serde(default)]
+    pub object_id: [u8; 16],
+    /// Stable physical-storage identity. `CREATE TABLE` and `TRUNCATE` allocate a new value, while schema-only alterations and renames preserve it. A zero value marks a legacy catalog row that the engine upgrades during open.
+    #[serde(default)]
+    pub storage_generation: [u8; 16],
     pub analyzer_json: String,
     pub fts_fields: Vec<String>,
     pub vector_fields: Vec<VectorFieldSchema>,

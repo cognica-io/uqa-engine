@@ -771,6 +771,8 @@ mod tests {
         catalog
             .save_table(&TableSchema {
                 relation: uqa_storage::RelationIdentity::new("public", "docs"),
+                object_id: [1; 16],
+                storage_generation: [1; 16],
                 analyzer_json: "{}".into(),
                 fts_fields: vec!["title".into()],
                 vector_fields: Vec::new(),

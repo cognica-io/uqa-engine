@@ -48,7 +48,13 @@ impl EngineTableRowSource {
             return self.next_virtual_physical_rows_batch(max_rows);
         }
         let store = self.table.document_store.read();
-        let fields = self.columns.iter().map(String::as_str).collect::<Vec<_>>();
+        let fields = self
+            .columns
+            .iter()
+            .map(|column| {
+                crate::sql::storage_projection_column_for_table(column, &self.column_definitions)
+            })
+            .collect::<Vec<_>>();
         let mut rows = Vec::with_capacity(max_rows);
         loop {
             // A source must not return an empty batch before end-of-stream: TableScan treats it as EOF. Keep advancing storage pages when a pushed predicate rejects an entire page, and fill the requested output batch when selectivity permits it.
@@ -232,7 +238,15 @@ impl EngineTableRowSource {
             let values = self
                 .columns
                 .iter()
-                .map(|column| document.get(column).cloned().unwrap_or(Value::Null))
+                .map(|column| {
+                    document
+                        .get(crate::sql::storage_projection_column_for_table(
+                            column,
+                            &self.column_definitions,
+                        ))
+                        .cloned()
+                        .unwrap_or(Value::Null)
+                })
                 .collect::<Vec<_>>();
             let value_refs = values.iter().collect::<Vec<_>>();
             if let Some(predicate) = self.predicate.as_ref() {
@@ -289,7 +303,15 @@ impl EngineTableRowSource {
                 let values = self
                     .columns
                     .iter()
-                    .map(|column| document.get(column).cloned().unwrap_or(Value::Null))
+                    .map(|column| {
+                        document
+                            .get(crate::sql::storage_projection_column_for_table(
+                                column,
+                                &self.column_definitions,
+                            ))
+                            .cloned()
+                            .unwrap_or(Value::Null)
+                    })
                     .collect::<Vec<_>>();
                 let value_refs = values.iter().collect::<Vec<_>>();
                 if let Some(predicate) = self.predicate.as_ref() {

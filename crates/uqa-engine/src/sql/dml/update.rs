@@ -56,7 +56,7 @@ pub(in crate::sql) fn run_update_inner(
             .map(|assignment| assignment.column.as_str()),
         "UPDATE",
     )?;
-    let mut ctes = CteScope::new();
+    let mut ctes = CteScope::new_for_current_routine();
     crate::sql::select::materialize_plan_ctes(engine, &stmt.ctes, params, &mut ctes)?;
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
     let assigned_columns = stmt
@@ -220,7 +220,7 @@ pub(in crate::sql) fn run_update_inner(
         if recheck {
             engine.refresh_explicit_statement_snapshot()?;
         }
-        let Some(mut doc) = engine.get_document(&storage_table, doc_id)? else {
+        let Some(mut doc) = engine.get_document_for_mutation(&storage_table, doc_id)? else {
             continue;
         };
         let original_doc = doc.clone();
@@ -557,7 +557,7 @@ pub(in crate::sql) fn point_lookup_filter(
     };
     if let Some(field) = top_level_column(lhs) {
         if expr_is_row_independent(rhs) {
-            let ctes = CteScope::new();
+            let ctes = CteScope::new_for_current_routine();
             return Ok(Some((
                 field.to_string(),
                 eval_mutation_expr(engine, &ctes, rhs, None, params)?,
@@ -566,7 +566,7 @@ pub(in crate::sql) fn point_lookup_filter(
     }
     if let Some(field) = top_level_column(rhs) {
         if expr_is_row_independent(lhs) {
-            let ctes = CteScope::new();
+            let ctes = CteScope::new_for_current_routine();
             return Ok(Some((
                 field.to_string(),
                 eval_mutation_expr(engine, &ctes, lhs, None, params)?,
@@ -591,7 +591,7 @@ pub(in crate::sql) fn row_independent_update_values(
 ) -> Result<Option<RowIndependentUpdateValues>, SQLError> {
     let mut updates = BTreeMap::new();
     let mut vectors = BTreeMap::new();
-    let ctes = CteScope::new();
+    let ctes = CteScope::new_for_current_routine();
     for assignment in &stmt.assignments {
         if !expr_is_row_independent(&assignment.value) {
             return Ok(None);

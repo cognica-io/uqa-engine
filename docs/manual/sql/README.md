@@ -1,6 +1,6 @@
 # Supported SQL
 
-UQA Engine parses PostgreSQL-oriented SQL with `libpg_query`, compiles it into UQA Engine AST and plans, and executes it inside the embedded engine. Syntax acceptance does not imply complete PostgreSQL server behavior; this manual states the implemented contract.
+UQA Engine parses PostgreSQL 18 SQL syntax with `libpg_query`, compiles supported statements into UQA Engine AST and plans, and executes them inside the embedded engine. Syntax acceptance does not imply complete PostgreSQL server behavior; this manual states the implemented contract.
 
 ## Reference map
 

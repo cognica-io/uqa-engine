@@ -227,6 +227,10 @@ impl UnifiedPlan {
             Statement::SetVariable { name, value } => {
                 Self::Command(Box::new(CommandPlan::SetVariable { name, value }))
             }
+            Statement::ResetVariable { name } => {
+                Self::Command(Box::new(CommandPlan::ResetVariable { name }))
+            }
+            Statement::ResetAllVariables => Self::Command(Box::new(CommandPlan::ResetAllVariables)),
             Statement::SetConstraints {
                 constraints,
                 deferred,
@@ -253,6 +257,7 @@ impl UnifiedPlan {
                 body: Box::new(Self::lower_with(*body, aggregates)),
             })),
             Statement::Analyze { table } => Self::Command(Box::new(CommandPlan::Analyze { table })),
+            Statement::Vacuum(vacuum) => Self::Command(Box::new(CommandPlan::Vacuum(vacuum))),
             Statement::Truncate {
                 tables,
                 cascade,
@@ -264,6 +269,21 @@ impl UnifiedPlan {
             })),
             Statement::Transaction(value) => {
                 Self::Command(Box::new(CommandPlan::Transaction(value)))
+            }
+            Statement::DeclareCursor(cursor) => {
+                Self::Command(Box::new(CommandPlan::DeclareCursor {
+                    name: cursor.name,
+                    binary: cursor.binary,
+                    scroll: cursor.scroll,
+                    hold: cursor.hold,
+                    query: Box::new(QueryPlan::lower_with(*cursor.query, aggregates)),
+                }))
+            }
+            Statement::FetchCursor(cursor) => {
+                Self::Command(Box::new(CommandPlan::FetchCursor(cursor)))
+            }
+            Statement::CloseCursor { name } => {
+                Self::Command(Box::new(CommandPlan::CloseCursor { name }))
             }
             Statement::CreateSequence(value) => {
                 Self::Command(Box::new(CommandPlan::CreateSequence(value)))
@@ -415,14 +435,20 @@ impl CommandPlan {
             Self::RefreshMaterializedView { .. } => "RefreshMaterializedView",
             Self::CreateSchema { .. } => "CreateSchema",
             Self::SetVariable { .. } => "SetVariable",
+            Self::ResetVariable { .. } => "ResetVariable",
+            Self::ResetAllVariables => "ResetAllVariables",
             Self::SetConstraints { .. } => "SetConstraints",
             Self::ShowVariable { .. } => "ShowVariable",
             Self::Discard { .. } => "Discard",
             Self::Load { .. } => "Load",
             Self::Explain { .. } => "Explain",
             Self::Analyze { .. } => "Analyze",
+            Self::Vacuum(_) => "Vacuum",
             Self::Truncate { .. } => "Truncate",
             Self::Transaction(_) => "Transaction",
+            Self::DeclareCursor { .. } => "DeclareCursor",
+            Self::FetchCursor(_) => "FetchCursor",
+            Self::CloseCursor { .. } => "CloseCursor",
             Self::CreateSequence(_) => "CreateSequence",
             Self::AlterSequence(_) => "AlterSequence",
             Self::CreateTableAs { .. } => "CreateTableAs",

@@ -576,6 +576,8 @@ pub(in crate::compiler) fn compile_column_def(
     Ok(ColumnDef {
         name,
         ty,
+        object_id: None,
+        missing_value: None,
         primary_key,
         not_null,
         not_null_explicit,

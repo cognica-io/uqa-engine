@@ -78,6 +78,13 @@ impl Engine {
         restart_identity: bool,
     ) -> Result<(), SQLError> {
         let t = self.require_table(table_name)?;
+        *t.storage_generation.write() = crate::new_table_storage_generation().map_err(|error| {
+            SQLError::Internal(format!("rotate TRUNCATE storage generation: {error}"))
+        })?;
+        self.try_save_table_schema(table_name, &t)
+            .map_err(|error| {
+                SQLError::Internal(format!("persist TRUNCATE storage generation: {error}"))
+            })?;
         // Snapshot the doc id set before grabbing any write locks so
         // we do not deadlock against the read guard inside the loop.
         let ids: Vec<DocId> = t

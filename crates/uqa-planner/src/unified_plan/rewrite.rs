@@ -208,7 +208,8 @@ pub(super) fn rewrite_command_scalars(
         }
         CommandPlan::CreateView { query, .. }
         | CommandPlan::CreateMaterializedView { query, .. }
-        | CommandPlan::CreateTableAs { query, .. } => {
+        | CommandPlan::CreateTableAs { query, .. }
+        | CommandPlan::DeclareCursor { query, .. } => {
             rewrite_query_scalars(query, rewrite);
         }
         CommandPlan::Explain { body, .. } | CommandPlan::Prepare { body, .. } => {
@@ -228,13 +229,18 @@ pub(super) fn rewrite_command_scalars(
         | CommandPlan::RefreshMaterializedView { .. }
         | CommandPlan::CreateSchema { .. }
         | CommandPlan::SetVariable { .. }
+        | CommandPlan::ResetVariable { .. }
+        | CommandPlan::ResetAllVariables
         | CommandPlan::SetConstraints { .. }
         | CommandPlan::ShowVariable { .. }
         | CommandPlan::Discard { .. }
         | CommandPlan::Load { .. }
         | CommandPlan::Analyze { .. }
+        | CommandPlan::Vacuum(_)
         | CommandPlan::Truncate { .. }
         | CommandPlan::Transaction(_)
+        | CommandPlan::FetchCursor(_)
+        | CommandPlan::CloseCursor { .. }
         | CommandPlan::CreateSequence(_)
         | CommandPlan::AlterSequence(_)
         | CommandPlan::Deallocate { .. }

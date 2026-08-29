@@ -42,7 +42,9 @@ impl ScoredDocumentSource {
         let fields = self
             .projected_fields
             .iter()
-            .map(String::as_str)
+            .map(|field| {
+                crate::sql::storage_projection_column_for_table(field, &self.column_definitions)
+            })
             .collect::<Vec<_>>();
         let mut last = None;
         let mut aggregate_error = None;
@@ -449,7 +451,9 @@ impl ScoredDocumentSource {
         let fields = self
             .projected_fields
             .iter()
-            .map(String::as_str)
+            .map(|field| {
+                crate::sql::storage_projection_column_for_table(field, &self.column_definitions)
+            })
             .collect::<Vec<_>>();
         let store = self.table.document_store.read();
         for entry in entries {

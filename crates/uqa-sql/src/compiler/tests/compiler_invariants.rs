@@ -7,6 +7,7 @@
 //! Compiler-wide parser, administrative-command, and malformed-AST invariants.
 
 use super::*;
+use crate::ast::{VacuumOption, VacuumOptionValue, VacuumTarget};
 
 #[test]
 fn analyze_preserves_its_relation_and_rejects_dropped_semantics() {
@@ -22,7 +23,6 @@ fn analyze_preserves_its_relation_and_rejects_dropped_semantics() {
     for (sql, expected) in [
         ("ANALYZE docs (title)", "column lists"),
         ("ANALYZE (VERBOSE) docs", "options"),
-        ("VACUUM docs", "VACUUM"),
     ] {
         let error = compile(sql).expect_err(sql);
         assert!(
@@ -30,6 +30,32 @@ fn analyze_preserves_its_relation_and_rejects_dropped_semantics() {
             "unexpected error for {sql}: {error}"
         );
     }
+    let Statement::Vacuum(vacuum) = first("VACUUM (ANALYZE, PARALLEL 2) ONLY app.docs (title)")
+    else {
+        panic!("not VACUUM");
+    };
+    assert_eq!(
+        vacuum.options,
+        vec![
+            VacuumOption {
+                name: "analyze".into(),
+                value: None,
+            },
+            VacuumOption {
+                name: "parallel".into(),
+                value: Some(VacuumOptionValue::Integer(2)),
+            },
+        ]
+    );
+    assert_eq!(
+        vacuum.targets,
+        vec![VacuumTarget {
+            catalog: None,
+            table: "app.docs".into(),
+            include_descendants: false,
+            columns: vec!["title".into()],
+        }]
+    );
 }
 
 #[test]

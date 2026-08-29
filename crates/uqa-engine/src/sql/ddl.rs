@@ -43,6 +43,18 @@ pub(crate) use value_conversion::{convert_value_to_column_type, validate_vector_
 use drop::ddl_storage_error;
 use value_conversion::rewrite_column_values_to_type;
 
+const POSTGRES_SYSTEM_COLUMNS: [&str; 6] = ["tableoid", "xmin", "cmin", "xmax", "cmax", "ctid"];
+
+pub(crate) fn validate_postgres_column_name(name: &str) -> Result<(), SQLError> {
+    if POSTGRES_SYSTEM_COLUMNS.contains(&name) {
+        return Err(SQLError::Routine {
+            sqlstate: "42701".into(),
+            message: format!("column name \"{name}\" conflicts with a system column name"),
+        });
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 use value_conversion::coerce_json_value;
 

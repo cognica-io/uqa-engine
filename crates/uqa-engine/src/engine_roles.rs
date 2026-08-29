@@ -6,10 +6,13 @@
 
 //! PostgreSQL-shaped logical roles and routine execution contexts.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
-use uqa_sql::ast::{AlterRoleStmt, CreateFunction, CreateRoleStmt, DropRoleStmt, RoleAttribute};
+use uqa_sql::ast::{
+    AlterRoleStmt, CreateFunction, CreateRoleStmt, DropRoleStmt, FunctionVolatility, RoleAttribute,
+};
 use uqa_sql::SQLError;
 
 use crate::{
@@ -22,6 +25,37 @@ pub(crate) struct RoutineSessionStateGuard<'a> {
     session_vars: BTreeMap<String, String>,
     sql_statement_cache: Option<SQLStatementCache>,
     current_user: String,
+}
+
+thread_local! {
+    static ROUTINE_VOLATILITY_STACK: RefCell<Vec<FunctionVolatility>> = const { RefCell::new(Vec::new()) };
+}
+
+pub(crate) fn active_routine_reads_command_overlay() -> Option<bool> {
+    ROUTINE_VOLATILITY_STACK.with(|stack| {
+        stack
+            .borrow()
+            .last()
+            .map(|volatility| *volatility == FunctionVolatility::Volatile)
+    })
+}
+
+struct RoutineVolatilityGuard;
+
+impl RoutineVolatilityGuard {
+    fn enter(volatility: FunctionVolatility) -> Self {
+        ROUTINE_VOLATILITY_STACK.with(|stack| stack.borrow_mut().push(volatility));
+        Self
+    }
+}
+
+impl Drop for RoutineVolatilityGuard {
+    fn drop(&mut self) {
+        ROUTINE_VOLATILITY_STACK.with(|stack| {
+            let removed = stack.borrow_mut().pop();
+            debug_assert!(removed.is_some(), "routine volatility stack underflow");
+        });
+    }
 }
 
 impl RoutineSessionStateGuard<'_> {
@@ -111,6 +145,9 @@ impl Engine {
     }
 
     pub(crate) fn roles_for_catalog(&self) -> Vec<RoleDefinition> {
+        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
+            return snapshot.roles.values().cloned().collect();
+        }
         self.durable.roles.read().values().cloned().collect()
     }
 
@@ -350,6 +387,7 @@ impl Engine {
         execute: impl FnOnce() -> Result<T, SQLError>,
     ) -> Result<T, SQLError> {
         let _guard = self.routine_session_state_guard();
+        let _volatility = RoutineVolatilityGuard::enter(definition.volatility);
         if definition.security.security_definer {
             self.session
                 .state

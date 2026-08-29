@@ -1,6 +1,6 @@
 # SQL Data Types
 
-UQA Engine has PostgreSQL-oriented type names mapped to the value carriers implemented by `uqa-core` and the SQL engine. Casts and assignment checks use these engine types rather than PostgreSQL binary storage formats.
+UQA Engine has PostgreSQL 18-compatible type names mapped to the value carriers implemented by `uqa-core` and the SQL engine. Casts and assignment checks use these engine types rather than PostgreSQL binary storage formats.
 
 ## Type matrix
 

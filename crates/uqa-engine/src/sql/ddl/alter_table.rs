@@ -176,6 +176,7 @@ fn run_alter_table_action(
             mut column,
             if_not_exists,
         } => {
+            super::validate_postgres_column_name(&column.name)?;
             let col_name = column.name.clone();
             if engine
                 .try_table_has_column(&stmt.table, &col_name)
@@ -267,13 +268,24 @@ fn run_alter_table_action(
                 let default_expr = engine
                     .try_column_default_expr(&stmt.table, &col_name)
                     .map_err(|e| ddl_storage_error("ALTER TABLE ADD COLUMN default", e))?;
-                backfill_added_column(
+                let missing_value = backfill_added_column(
                     engine,
                     &stmt.table,
                     &col_name,
                     default_expr.as_ref(),
                     column_not_null,
                 )?;
+                let table = engine.require_table(&stmt.table)?;
+                let mut columns = table.columns.write();
+                let definition = columns
+                    .iter_mut()
+                    .find(|definition| definition.name == col_name)
+                    .ok_or_else(|| {
+                        SQLError::Internal(format!(
+                            "new column `{col_name}` disappeared during ALTER TABLE"
+                        ))
+                    })?;
+                definition.missing_value = missing_value;
             }
             engine
                 .try_persist_table_schema(&stmt.table)
@@ -368,6 +380,7 @@ fn run_alter_table_action(
             drop_column_cascade(engine, &stmt.table, &name, if_exists)?;
         }
         AlterTableAction::RenameColumn { from, to } => {
+            super::validate_postgres_column_name(&to)?;
             if !engine
                 .try_table_has_column(&stmt.table, &from)
                 .map_err(|err| ddl_storage_error("ALTER TABLE RENAME COLUMN", err))?
@@ -671,7 +684,7 @@ fn validate_and_rewrite_generated_rows(
     table: &str,
     rewrite_physical_rows: bool,
 ) -> Result<(), SQLError> {
-    let doc_ids = engine.table_doc_ids(table)?;
+    let doc_ids = engine.live_table_doc_ids(table)?;
     let mut rows = Vec::with_capacity(doc_ids.len());
     for doc_id in &doc_ids {
         let Some(mut document) = engine.get_document(table, *doc_id)? else {
@@ -766,7 +779,7 @@ fn validate_all_table_rows(engine: &Engine) -> Result<(), SQLError> {
         .table_names()
         .map_err(|error| ddl_storage_error("generated-column validation", error))?
     {
-        for doc_id in engine.table_doc_ids(&table)? {
+        for doc_id in engine.live_table_doc_ids(&table)? {
             let Some(document) = engine.get_document(&table, doc_id)? else {
                 continue;
             };
@@ -801,7 +814,7 @@ fn ensure_existing_values_not_null(
     column: &str,
 ) -> Result<(), SQLError> {
     let mut null_rows = 0usize;
-    for doc_id in engine.table_doc_ids(table)? {
+    for doc_id in engine.live_table_doc_ids(table)? {
         let Some(doc) = engine.get_document(table, doc_id)? else {
             continue;
         };
@@ -898,7 +911,7 @@ fn validate_added_key_constraint(
     }
 
     let mut seen = std::collections::BTreeSet::<Vec<Value>>::new();
-    for doc_id in engine.table_doc_ids(table)? {
+    for doc_id in engine.live_table_doc_ids(table)? {
         let Some(document) = engine.get_document(table, doc_id)? else {
             continue;
         };
@@ -952,40 +965,80 @@ fn validate_added_key_constraint(
     Ok(())
 }
 
-/// Apply the new column's DEFAULT (or NULL) value to every row that
-/// existed before the ADD COLUMN. `PostgreSQL` evaluates the default
-/// once per existing row at ALTER TABLE time so NOT NULL columns stay
-/// consistent on non-empty tables; this function preserves that semantic by
-/// sweeping the document store.
+/// Apply the new column's default to rows that existed before `ADD COLUMN`.
+/// `PostgreSQL` stores one missing value for a non-volatile default, including on an empty table, while volatile defaults are evaluated independently for every existing row and do not populate `attmissingval`.
 fn backfill_added_column(
     engine: &Engine,
     table: &str,
     column: &str,
     default_expr: Option<&uqa_sql::ast::Expr>,
     not_null: bool,
-) -> Result<(), SQLError> {
-    let doc_ids = engine.table_doc_ids(table)?;
-    if doc_ids.is_empty() {
-        return Ok(());
-    }
-    let default_value = if let Some(expr) = default_expr {
-        eval_lowered_expression(engine, expr, None, &[])?
-    } else if not_null {
-        return Err(SQLError::TypeMismatch(format!(
-            "ALTER TABLE ADD COLUMN `{column}` is NOT NULL but no DEFAULT supplied; \
-             {} existing row(s) would violate the constraint",
-            doc_ids.len()
-        )));
-    } else {
-        Value::Null
+) -> Result<Option<Value>, SQLError> {
+    let doc_ids = engine.live_table_doc_ids(table)?;
+    let Some(default_expr) = default_expr else {
+        if not_null && !doc_ids.is_empty() {
+            return Err(SQLError::Routine {
+                sqlstate: "23502".into(),
+                message: format!(
+                    "column \"{column}\" of relation \"{table}\" contains null values"
+                ),
+            });
+        }
+        return Ok(None);
     };
-    let default_value = coerce_to_column_type(engine, table, column, default_value)?;
-    let vector_value: Option<Vec<Vec<f32>>> = match engine
+    let column_type = engine
         .column_type(table, column)
-        .map_err(|err| ddl_storage_error("ALTER TABLE ADD COLUMN", err))?
-    {
+        .map_err(|err| ddl_storage_error("ALTER TABLE ADD COLUMN", err))?;
+    let lowered = uqa_planner::ExpressionPlan::lower(default_expr.clone());
+    let volatile = crate::sql::volatility::expr_contains_volatile_function(engine, &lowered.scalar);
+    if volatile {
+        for doc_id in doc_ids {
+            let value = eval_lowered_expression(engine, default_expr, None, &[])?;
+            let value = coerce_to_column_type(engine, table, column, value)?;
+            if not_null && value == Value::Null {
+                return Err(SQLError::Routine {
+                    sqlstate: "23502".into(),
+                    message: format!(
+                        "null value in column \"{column}\" of relation \"{table}\" violates not-null constraint"
+                    ),
+                });
+            }
+            let mut vectors: RowUpdateVectors = BTreeMap::new();
+            if let Some(ty) = column_type
+                .as_ref()
+                .filter(|ty| matches!(ty, ColumnType::Vector(_) | ColumnType::Tensor(_)))
+            {
+                vectors.insert(column.to_string(), index_vectors_for_type(&value, ty)?);
+            }
+            engine.update_document_fields_with_vector_values(
+                table,
+                doc_id,
+                BTreeMap::from([(column.to_string(), value)]),
+                vectors,
+            )?;
+        }
+        for definition in engine.require_table(table)?.columns.write().iter_mut() {
+            definition.missing_value = None;
+        }
+        return Ok(None);
+    }
+    let default_value = coerce_to_column_type(
+        engine,
+        table,
+        column,
+        eval_lowered_expression(engine, default_expr, None, &[])?,
+    )?;
+    if not_null && default_value == Value::Null && !doc_ids.is_empty() {
+        return Err(SQLError::Routine {
+            sqlstate: "23502".into(),
+            message: format!(
+                "null value in column \"{column}\" of relation \"{table}\" violates not-null constraint"
+            ),
+        });
+    }
+    let vector_value = match column_type.as_ref() {
         Some(ty) if matches!(ty, ColumnType::Vector(_) | ColumnType::Tensor(_)) => {
-            Some(index_vectors_for_type(&default_value, &ty)?)
+            Some(index_vectors_for_type(&default_value, ty)?)
         }
         Some(_) | None => None,
     };
@@ -998,7 +1051,7 @@ fn backfill_added_column(
         }
         engine.update_document_fields_with_vector_values(table, doc_id, updates, vectors)?;
     }
-    Ok(())
+    Ok((default_value != Value::Null).then_some(default_value))
 }
 
 // DDL

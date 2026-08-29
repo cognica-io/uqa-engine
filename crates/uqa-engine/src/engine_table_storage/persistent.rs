@@ -108,7 +108,7 @@ impl Engine {
     /// field from the document. Missing/NULL fields are represented by an
     /// empty vector list so replacement clears stale index entries instead of
     /// accidentally preserving them.
-    pub(super) fn document_vector_values(
+    pub(crate) fn document_vector_values(
         table: &TableState,
         document: &Document,
     ) -> Result<BTreeMap<FieldName, Vec<Vec<f32>>>, SQLError> {

@@ -12,7 +12,7 @@ use super::{
 impl Engine {
     pub(crate) fn fts_fields_for_table(&self, name: &str) -> Result<Vec<FieldName>, SQLError> {
         Ok(self
-            .try_table(name)
+            .try_query_table(name)
             .map_err(|err| SQLError::Internal(format!("resolve table `{name}`: {err}")))?
             .map_or_else(Vec::new, |table| table.fts_fields()))
     }
@@ -28,7 +28,7 @@ impl Engine {
         field: &str,
     ) -> Result<(), SQLError> {
         let Some(table_state) = self
-            .try_table(table)
+            .try_query_table(table)
             .map_err(|error| SQLError::Internal(format!("resolve text-search table: {error}")))?
         else {
             return Err(SQLError::UnknownTable(table.to_string()));
@@ -169,6 +169,7 @@ impl Engine {
         known_new: bool,
     ) -> Result<(), SQLError> {
         crate::sql::refresh_stored_generated_columns(self, table, &mut document)?;
+        crate::sql::dml::stamp_tuple_xmin(self, table, &mut document)?;
         self.add_prepared_document_impl(table, doc_id, document, known_new)
     }
 

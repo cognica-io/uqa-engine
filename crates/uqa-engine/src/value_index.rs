@@ -283,7 +283,7 @@ impl crate::Engine {
         field: &str,
         predicate: &Predicate,
     ) -> Result<Option<PostingList>, SQLError> {
-        let t = self.require_table(table)?;
+        let t = self.require_query_table(table)?;
         {
             let indexes = t.value_indexes.read();
             if let Some(index) = indexes.get(field) {
@@ -291,7 +291,7 @@ impl crate::Engine {
             }
         }
         if !self
-            .ensure_value_index(table, field)
+            .ensure_query_value_index(table, &t, field)
             .map_err(|error| SQLError::Internal(format!("build value index: {error}")))?
         {
             return Ok(None);
@@ -313,7 +313,7 @@ impl crate::Engine {
         field: &str,
         predicate: &Predicate,
     ) -> Result<Option<usize>, SQLError> {
-        let table_state = self.require_table(table)?;
+        let table_state = self.require_query_table(table)?;
         {
             let indexes = table_state.value_indexes.read();
             if let Some(index) = indexes.get(field) {
@@ -321,7 +321,7 @@ impl crate::Engine {
             }
         }
         if !self
-            .ensure_value_index(table, field)
+            .ensure_query_value_index(table, &table_state, field)
             .map_err(|error| SQLError::Internal(format!("build value index: {error}")))?
         {
             return Ok(None);
@@ -344,21 +344,52 @@ impl crate::Engine {
         field: &str,
         predicate: &Predicate,
     ) -> StorageBackendResult<bool> {
-        if !self.ensure_value_index(table, field)? {
-            return Ok(false);
-        }
         let Some(table_name) = self.try_resolve_table_name(table)? else {
             return Ok(false);
         };
-        let Some(table) = self.try_table(&table_name)? else {
+        let Some(table) = self.try_query_table(&table_name)? else {
             return Ok(false);
         };
+        if !self.ensure_query_value_index(&table_name, &table, field)? {
+            return Ok(false);
+        }
         let supported = table
             .value_indexes
             .read()
             .get(field)
             .is_some_and(|index| index.supports(predicate));
         Ok(supported)
+    }
+
+    fn ensure_query_value_index(
+        &self,
+        table_name: &str,
+        table: &std::sync::Arc<TableState>,
+        field: &str,
+    ) -> StorageBackendResult<bool> {
+        if table.value_indexes.read().contains_key(field) {
+            return Ok(true);
+        }
+        if let Some(live) = self.try_table(table_name)? {
+            if std::sync::Arc::ptr_eq(&live, table) {
+                return self.ensure_value_index(table_name, field);
+            }
+        }
+        if !self
+            .value_indexable_fields(table_name)?
+            .iter()
+            .any(|name| name == field)
+        {
+            return Ok(false);
+        }
+        let store = table.document_store.read();
+        let values =
+            Self::project_value_index_rows(store.as_ref(), table_name, field, store.doc_ids()?)?;
+        table.value_indexes.write().insert(
+            field.to_string(),
+            ColumnValueIndex::build(field, values.into_iter()),
+        );
+        Ok(true)
     }
 
     /// Hydrate one value index from durable postings when available. A missing

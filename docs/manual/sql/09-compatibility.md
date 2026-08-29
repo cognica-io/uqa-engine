@@ -1,6 +1,6 @@
 # PostgreSQL Compatibility and Limits
 
-UQA Engine deliberately uses PostgreSQL-oriented syntax and behavior while remaining an embedded engine with its own storage, planner, catalog, and extension model. PostgreSQL 18 is the behavioral oracle: every externally observable difference is a compatibility bug, including differences in features not yet implemented.
+UQA Engine targets PostgreSQL 18-compatible syntax and behavior while remaining an embedded engine with its own storage, planner, catalog, and extension model. PostgreSQL 18 is the behavioral oracle: every externally observable difference is a compatibility bug, including differences in features not yet implemented.
 
 ## Compatibility baseline
 
@@ -64,8 +64,8 @@ For implemented tables, views, materialized views, sequences, foreign tables, an
 - `ALTER COLUMN TYPE USING` is preserved structurally and evaluated once per old row inside the atomic ALTER transaction; the complete PostgreSQL assignment-cast matrix, dependency and collation rewrites, domain checks, and upstream ALTER regression cases remain open.
 - `CREATE SCHEMA AUTHORIZATION` and embedded schema elements are not implemented.
 - Sequence minimum, maximum, cycle, cache, ownership, and identity-owned sequence options are not implemented.
-- `VACUUM` is not implemented.
-- `ANALYZE` accepts all tables or one table, without options or a column list.
+- `VACUUM` runs only outside transaction blocks, preserves PostgreSQL 18 option and target structure, validates option names, Boolean and parallel values, buffer limits, relations, and columns, and runs targeted statistics collection when `ANALYZE` is requested. `VACUUM FULL` rewrites each named relation and its descendants unless `ONLY` is specified, rebuilds its document, full-text, vector, and B-tree state, and compacts the SQLite database; eager logical backends have no obsolete physical tuple versions for plain `VACUUM` to reclaim. Tuple-freezing metadata, verbose progress output, maintenance catalog counters, and exact PostgreSQL lock granularity remain open compatibility bugs.
+- Standalone `ANALYZE` accepts all tables or one table without options or a column list; `VACUUM (ANALYZE)` additionally supports per-relation column lists, multiple targets, and `ONLY` descendant control.
 - `EXPLAIN` options are limited to `ANALYZE`, `VERBOSE`, and `FORMAT TEXT` or `FORMAT JSON`.
 
 ## PostgreSQL 18 trigger and rule status
@@ -98,7 +98,7 @@ Known mutable settings are `search_path`, `client_encoding`, `datestyle`, `timez
 
 ## Open PostgreSQL 18 routine bugs
 
-SQL and PL/pgSQL routines cover a broad tested subset, including overloads, defaults, set returns, procedures, control flow, dynamic SQL, recursion limits, diagnostics, exception handling, qualified named types, table-backed `%TYPE`, strict assignment/return casts, bound cursors, `refcursor` parameters and returns, and session portals that survive routine exit until close or transaction end. Dynamic cursor queries, `MOVE`, non-`NEXT` fetch directions, holdable cursors, and top-level SQL portal control remain open. The routine security slice implements durable logical roles, owner and EXECUTE ACL changes, `SECURITY DEFINER` and `INVOKER`, routine-local configuration, leakproof and parallel metadata, and recognized PostgreSQL support-function identities; memberships, passwords, per-role settings, non-routine privileges, extension languages, and complete planner and server-security consequences remain open.
+SQL and PL/pgSQL routines cover a broad tested subset, including overloads, defaults, set returns, procedures, control flow, dynamic SQL, recursion limits, diagnostics, exception handling, qualified named types, table-backed `%TYPE`, strict assignment/return casts, bound cursors, `refcursor` parameters and returns, and session portals that survive routine exit until close or transaction end. Top-level SQL `DECLARE`, `FETCH`, `MOVE`, and `CLOSE` support scrolling, directional positioning, holdable portals, transaction-end cleanup, and savepoint lifecycle; dynamic PL/pgSQL cursor queries, PL/pgSQL `MOVE` and non-`NEXT` directions, and exact volatile-expression execution timing remain open. The routine security slice implements durable logical roles, owner and EXECUTE ACL changes, `SECURITY DEFINER` and `INVOKER`, routine-local configuration, leakproof and parallel metadata, and recognized PostgreSQL support-function identities; memberships, passwords, per-role settings, non-routine privileges, extension languages, and complete planner and server-security consequences remain open.
 
 The bounded original PostgreSQL 18 additions inventory is verified. This closes only `functions.identified-pg18-additions`; the complete PostgreSQL 18 function, operator, type, cast, extension, and catalog matrix remains an open compatibility bug under `functions.full-pg18-matrix`. The implemented-carrier polymorphic, variadic, and pseudo-type routine slice is independently verified under `routines.polymorphic-variadic-pseudotype-overloads`; missing enum carriers, extension languages and security, and extended dependency graphs remain separate items rather than broadening that claim.
 

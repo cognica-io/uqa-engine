@@ -30,7 +30,7 @@ impl Engine {
         documents: Option<std::sync::Arc<dyn uqa_storage::DocumentStore>>,
     ) -> Result<Option<ExecutionContext>, SQLError> {
         let Some(t) = self
-            .try_table(table)
+            .try_query_table(table)
             .map_err(|error| storage_sql_error("resolve snapshot table", error))?
         else {
             return Ok(None);

@@ -12,13 +12,15 @@ use super::{
     has_window, overlay_outer_schema, projection_columns, qualifier_filters_for_stmt,
     resolve_row_locks, run_select_without_from_output, run_single_foreign_select_output,
     run_single_table_select_output, validate_query_block_expression_types,
-    validate_query_set_contexts, validate_source_set_contexts_before_build,
-    with_query_table_pseudo_columns, BTreeSet, ColumnPrune, CteScope, Engine, QueryBlockPlan,
-    QueryOutput, QueryOutputMode, SQLError, SQLParam, ScalarExpr, ScopedEngineHook, SingleRelation,
-    SourcePlan,
+    validate_query_block_projection_references, validate_query_set_contexts,
+    validate_source_set_contexts_before_build, with_query_table_pseudo_columns, BTreeSet,
+    ColumnPrune, CteScope, Engine, QueryBlockPlan, QueryOutput, QueryOutputMode, SQLError,
+    SQLParam, ScalarExpr, ScopedEngineHook, SingleRelation, SourcePlan,
 };
 use crate::sql::from_rows::SourceProjection;
-use crate::sql::{META_DOC_ID_COLUMN, META_QUALIFIER, META_SCORE_COLUMN};
+use crate::sql::{
+    DOC_ID_COLUMN, META_DOC_ID_COLUMN, META_QUALIFIER, META_SCORE_COLUMN, SCORE_COLUMN,
+};
 
 pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
     engine: &Engine,
@@ -28,21 +30,29 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
     ctes: &mut CteScope,
     output_mode: QueryOutputMode,
 ) -> Result<QueryOutput, SQLError> {
-    let outer = ctes.row_lock_outer_row().map(|row| &row.schema);
+    let outer = ctes.row_lock_outer_row().map(|row| row.schema.clone());
     let source_schema = stmt.from.as_ref().map_or_else(
         || Ok(uqa_execution::RowSchema::default()),
-        |source| bind_source_plan_schema(engine, source, params, ctes, outer),
+        |source| bind_source_plan_schema(engine, source, params, ctes, outer.as_ref()),
     )?;
     let source_schema = with_query_table_pseudo_columns(&source_schema);
-    let expression_schema = overlay_outer_schema(&source_schema, outer);
+    let expression_schema = overlay_outer_schema(&source_schema, outer.as_ref());
     validate_query_block_expression_types(engine, stmt, &expression_schema, params, ctes)?;
     let type_resolver = ScopedEngineHook::new(engine, ctes);
     validate_query_set_contexts(engine, &type_resolver, stmt, &expression_schema, params)?;
 
     let Some(from) = stmt.from.as_ref() else {
+        validate_query_block_projection_references(engine, stmt, &expression_schema, params, ctes)?;
         return run_select_without_from_output(engine, block, stmt, params, ctes, output_mode);
     };
-    validate_source_set_contexts_before_build(engine, &type_resolver, from, params, ctes, outer)?;
+    validate_source_set_contexts_before_build(
+        engine,
+        &type_resolver,
+        from,
+        params,
+        ctes,
+        outer.as_ref(),
+    )?;
 
     // Set-op branches, CTEs, and derived-table bodies still need the same
     // search-aware single-table physical access path as top-level queries;
@@ -60,6 +70,13 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
             .foreign_table(name)
             .map_err(|err| SQLError::Internal(format!("resolve foreign table `{name}`: {err}")))?;
         if alias.is_none() && foreign_table.is_some() {
+            validate_query_block_projection_references(
+                engine,
+                stmt,
+                &expression_schema,
+                params,
+                ctes,
+            )?;
             return run_single_foreign_select_output(
                 engine,
                 SingleRelation {
@@ -74,17 +91,24 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
             );
         }
         let local_table = engine
-            .try_table(name)
+            .try_query_table(name)
             .map_err(|err| SQLError::Internal(format!("resolve table `{name}`: {err}")))?;
         let is_virtual = name.contains('.') || (local_table.is_none() && foreign_table.is_none());
         let command_overlay =
             ctes.reads_command_overlay() && engine.command_mutation_overlay_active();
         let has_hierarchy_descendants = local_table.is_some()
             && engine
-                .hierarchy_scan_tables(name, *include_descendants)?
+                .query_hierarchy_scan_tables(name, *include_descendants)?
                 .len()
                 > 1;
         if alias.is_none() && !is_virtual && !command_overlay && !has_hierarchy_descendants {
+            validate_query_block_projection_references(
+                engine,
+                stmt,
+                &expression_schema,
+                params,
+                ctes,
+            )?;
             return run_single_table_select_output(
                 engine,
                 SingleRelation {
@@ -126,6 +150,9 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
         )?
     };
     let source_schema = operator.row_schema().clone();
+    let projection_schema = with_query_table_pseudo_columns(&source_schema);
+    let projection_schema = overlay_outer_schema(&projection_schema, outer.as_ref());
+    validate_query_block_projection_references(engine, stmt, &projection_schema, params, ctes)?;
     let physical_filter =
         final_filter_after_qualifier_pushdown(engine, stmt, from, qualifier_filters.as_ref());
 
@@ -183,10 +210,18 @@ pub(in crate::sql) fn column_prune_for_stmt_with_filter(
         return None;
     }
 
-    let metadata_qualifier = single_local_table_metadata_qualifier(engine, from);
+    let metadata_binding = single_local_table_metadata_binding(engine, from);
     let scope = PruneScope {
         qualifiers: &qualifiers,
-        metadata_qualifier: metadata_qualifier.as_deref(),
+        metadata_qualifier: metadata_binding
+            .as_ref()
+            .map(|binding| binding.qualifier.as_str()),
+        legacy_doc_id: metadata_binding
+            .as_ref()
+            .is_some_and(|binding| binding.legacy_doc_id),
+        legacy_score: metadata_binding
+            .as_ref()
+            .is_some_and(|binding| binding.legacy_score),
     };
     let mut prune: ColumnPrune = qualifiers
         .iter()
@@ -227,6 +262,8 @@ pub(in crate::sql) fn column_prune_for_stmt_with_filter(
 struct PruneScope<'a> {
     qualifiers: &'a [String],
     metadata_qualifier: Option<&'a str>,
+    legacy_doc_id: bool,
+    legacy_score: bool,
 }
 
 fn collect_query_block_prune_columns(
@@ -251,11 +288,20 @@ fn collect_query_block_prune_columns(
     }
 }
 
-fn single_local_table_metadata_qualifier(engine: &Engine, source: &SourcePlan) -> Option<String> {
+struct LocalTableMetadataBinding {
+    qualifier: String,
+    legacy_doc_id: bool,
+    legacy_score: bool,
+}
+
+fn single_local_table_metadata_binding(
+    engine: &Engine,
+    source: &SourcePlan,
+) -> Option<LocalTableMetadataBinding> {
     if source_contains_join_alias(source) {
         return None;
     }
-    fn collect(engine: &Engine, source: &SourcePlan, qualifiers: &mut BTreeSet<String>) {
+    fn collect(engine: &Engine, source: &SourcePlan, relations: &mut BTreeSet<(String, String)>) {
         match source {
             SourcePlan::Table {
                 name,
@@ -263,13 +309,16 @@ fn single_local_table_metadata_qualifier(engine: &Engine, source: &SourcePlan) -
                 alias,
                 ..
             } => {
-                if engine.try_table(name).ok().flatten().is_some() {
-                    qualifiers.insert(alias.as_deref().unwrap_or(qualifier).to_string());
+                if engine.try_query_table(name).ok().flatten().is_some() {
+                    relations.insert((
+                        alias.as_deref().unwrap_or(qualifier).to_string(),
+                        name.clone(),
+                    ));
                 }
             }
             SourcePlan::Join { left, right, .. } => {
-                collect(engine, left, qualifiers);
-                collect(engine, right, qualifiers);
+                collect(engine, left, relations);
+                collect(engine, right, relations);
             }
             SourcePlan::Values { .. }
             | SourcePlan::Function { .. }
@@ -277,10 +326,18 @@ fn single_local_table_metadata_qualifier(engine: &Engine, source: &SourcePlan) -
             | SourcePlan::Subquery { .. } => {}
         }
     }
-    let mut qualifiers = BTreeSet::new();
-    collect(engine, source, &mut qualifiers);
-    let qualifier = qualifiers.pop_first()?;
-    qualifiers.is_empty().then_some(qualifier)
+    let mut relations = BTreeSet::new();
+    collect(engine, source, &mut relations);
+    let (qualifier, name) = relations.pop_first()?;
+    if !relations.is_empty() {
+        return None;
+    }
+    let columns = engine.try_query_table_columns(&name).ok()?;
+    Some(LocalTableMetadataBinding {
+        qualifier,
+        legacy_doc_id: !columns.iter().any(|column| column == DOC_ID_COLUMN),
+        legacy_score: !columns.iter().any(|column| column == SCORE_COLUMN),
+    })
 }
 
 fn source_contains_join_alias(source: &SourcePlan) -> bool {
@@ -347,7 +404,7 @@ fn add_all_source_columns_to_prune(engine: &Engine, source: &SourcePlan, prune: 
             ..
         } => {
             let qualifier = alias.as_deref().unwrap_or(qualifier);
-            match engine.try_table_columns(name) {
+            match engine.try_query_table_columns(name) {
                 Ok(table_columns) => {
                     if let Some(columns) = prune.get_mut(qualifier) {
                         columns.extend(table_columns);
@@ -556,6 +613,26 @@ fn collect_expr_prune_columns(
 ) {
     match expr {
         ScalarExpr::Column(column) => {
+            if let Some(qualifier) = scope.metadata_qualifier {
+                let metadata = match column.as_str() {
+                    DOC_ID_COLUMN if scope.legacy_doc_id => Some(true),
+                    SCORE_COLUMN if scope.legacy_score => Some(false),
+                    _ => None,
+                };
+                if let Some(doc_id) = metadata {
+                    let Some(source) = prune.get_mut(qualifier) else {
+                        *valid = false;
+                        return;
+                    };
+                    source.insert(column.clone());
+                    if doc_id {
+                        source.metadata_mut().request_doc_id();
+                    } else {
+                        source.metadata_mut().request_score();
+                    }
+                    return;
+                }
+            }
             for qualifier in scope.qualifiers {
                 if let Some(columns) = prune.get_mut(qualifier) {
                     columns.insert(column.clone());
@@ -565,6 +642,26 @@ fn collect_expr_prune_columns(
         ScalarExpr::QualifiedColumn {
             qualifier, column, ..
         } => {
+            if scope.metadata_qualifier == Some(qualifier.as_str()) {
+                let metadata = match column.as_str() {
+                    DOC_ID_COLUMN if scope.legacy_doc_id => Some(true),
+                    SCORE_COLUMN if scope.legacy_score => Some(false),
+                    _ => None,
+                };
+                if let Some(doc_id) = metadata {
+                    let Some(source) = prune.get_mut(qualifier) else {
+                        *valid = false;
+                        return;
+                    };
+                    source.insert(column.clone());
+                    if doc_id {
+                        source.metadata_mut().request_doc_id();
+                    } else {
+                        source.metadata_mut().request_score();
+                    }
+                    return;
+                }
+            }
             if qualifier == META_QUALIFIER && !prune.contains_key(META_QUALIFIER) {
                 let Some(source) = scope
                     .metadata_qualifier

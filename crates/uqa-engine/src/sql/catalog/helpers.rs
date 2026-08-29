@@ -113,6 +113,15 @@ pub(super) fn stable_oid(kind: &str, name: &str) -> i64 {
     10_000 + i64::try_from(hash % 2_000_000_000).unwrap_or(0)
 }
 
+pub(super) fn stable_object_oid(kind: &str, object_id: &[u8; 16]) -> i64 {
+    let mut hash = 14_695_981_039_346_656_037_u64;
+    for byte in kind.bytes().chain(*b":").chain(object_id.iter().copied()) {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(1_099_511_628_211);
+    }
+    10_000 + i64::try_from(hash % 2_000_000_000).unwrap_or(0)
+}
+
 pub(super) fn schema_oid(schema: &str) -> i64 {
     match schema {
         "pg_catalog" => 11,
@@ -155,8 +164,9 @@ pub(super) fn table_columns_for(
     table: &str,
 ) -> Result<Vec<SQLColumnDef>, SQLError> {
     Ok(engine
-        .describe_table(table)
+        .try_query_table(table)
         .map_err(|err| SQLError::Internal(format!("read table schema: {err}")))?
+        .map(|table| table.columns.read().clone())
         .unwrap_or_default())
 }
 
@@ -176,6 +186,8 @@ pub(super) fn view_columns_for(engine: &Engine, view: &str) -> Result<Vec<SQLCol
                 .column_type(position)
                 .cloned()
                 .unwrap_or(ColumnType::Text),
+            object_id: None,
+            missing_value: None,
             primary_key: false,
             not_null: false,
             not_null_explicit: false,
@@ -1051,7 +1063,7 @@ pub(super) fn constraint_catalog_rows(
 ) -> Result<Vec<ConstraintCatalogRow>, SQLError> {
     let mut out = Vec::new();
     for table_name in engine
-        .table_names()
+        .query_table_names()
         .map_err(|err| SQLError::Internal(format!("read table catalog: {err}")))?
     {
         let (schema, table) = split_schema_name(&table_name)?;

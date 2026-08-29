@@ -180,16 +180,35 @@ unsafe extern "C" fn file_lock(file: *mut ffi::sqlite3_file, lock: c_int) -> c_i
     if lock <= handle.lock_state {
         return ffi::SQLITE_OK;
     }
+    if handle.lock_state >= SQLITE_LOCK_RESERVED && lock >= SQLITE_LOCK_RESERVED {
+        handle.lock_state = lock;
+        return ffi::SQLITE_OK;
+    }
+    let previous_lock = handle.lock_state;
     let lock_ok = if lock >= SQLITE_LOCK_RESERVED {
         if handle.lock_state != SQLITE_LOCK_NONE && FileExt::unlock(&handle.lock_file).is_err() {
             return ffi::SQLITE_IOERR_UNLOCK;
         }
-        FileExt::try_lock_exclusive(&handle.lock_file).is_ok()
+        match FileExt::try_lock_exclusive(&handle.lock_file) {
+            Ok(()) => true,
+            Err(_) if previous_lock != SQLITE_LOCK_NONE => {
+                if FileExt::try_lock_shared(&handle.lock_file).is_err() {
+                    handle.lock_state = SQLITE_LOCK_NONE;
+                    return ffi::SQLITE_IOERR_LOCK;
+                }
+                false
+            }
+            Err(_) => false,
+        }
     } else {
         FileExt::try_lock_shared(&handle.lock_file).is_ok()
     };
     if !lock_ok {
         return ffi::SQLITE_BUSY;
+    }
+    if previous_lock == SQLITE_LOCK_NONE && handle.file.refresh_committed_state().is_err() {
+        let _ = FileExt::unlock(&handle.lock_file);
+        return ffi::SQLITE_IOERR_LOCK;
     }
     handle.lock_state = handle.lock_state.max(lock);
     ffi::SQLITE_OK
@@ -200,6 +219,10 @@ unsafe extern "C" fn file_unlock(file: *mut ffi::sqlite3_file, lock: c_int) -> c
         return ffi::SQLITE_IOERR_UNLOCK;
     };
     if lock <= SQLITE_LOCK_NONE {
+        // SQLite may truncate the main database after its final xSync (notably during VACUUM), so publish every remaining logical-file mutation while the exclusive lock is still held.
+        if handle.file.flush().is_err() {
+            return ffi::SQLITE_IOERR_UNLOCK;
+        }
         if FileExt::unlock(&handle.lock_file).is_err() {
             return ffi::SQLITE_IOERR_UNLOCK;
         }

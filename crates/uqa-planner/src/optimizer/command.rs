@@ -130,7 +130,8 @@ pub(super) fn optimize_command(
         }
         CommandPlan::CreateView { query, .. }
         | CommandPlan::CreateMaterializedView { query, .. }
-        | CommandPlan::CreateTableAs { query, .. } => {
+        | CommandPlan::CreateTableAs { query, .. }
+        | CommandPlan::DeclareCursor { query, .. } => {
             optimize_query(query, config, aggregates);
         }
         CommandPlan::Explain { body, .. } | CommandPlan::Prepare { body, .. } => {
@@ -149,13 +150,18 @@ pub(super) fn optimize_command(
         | CommandPlan::RefreshMaterializedView { .. }
         | CommandPlan::CreateSchema { .. }
         | CommandPlan::SetVariable { .. }
+        | CommandPlan::ResetVariable { .. }
+        | CommandPlan::ResetAllVariables
         | CommandPlan::SetConstraints { .. }
         | CommandPlan::ShowVariable { .. }
         | CommandPlan::Discard { .. }
         | CommandPlan::Load { .. }
         | CommandPlan::Analyze { .. }
+        | CommandPlan::Vacuum(_)
         | CommandPlan::Truncate { .. }
         | CommandPlan::Transaction(_)
+        | CommandPlan::FetchCursor(_)
+        | CommandPlan::CloseCursor { .. }
         | CommandPlan::CreateSequence(_)
         | CommandPlan::AlterSequence(_)
         | CommandPlan::Deallocate { .. }

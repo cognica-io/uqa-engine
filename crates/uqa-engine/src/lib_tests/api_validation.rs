@@ -141,6 +141,8 @@ fn direct_schema_mutations_reject_missing_relations_columns_and_duplicates() {
     let column = uqa_sql::ast::ColumnDef {
         name: "value".into(),
         ty: uqa_sql::ast::ColumnType::Integer,
+        object_id: None,
+        missing_value: None,
         primary_key: false,
         not_null: false,
         not_null_explicit: false,
@@ -280,6 +282,8 @@ fn tensor_backfill_reports_inner_dimension_mismatch_and_allows_null() {
     let tensor_column = uqa_sql::ast::ColumnDef {
         name: "embedding".into(),
         ty: uqa_sql::ast::ColumnType::Tensor(2),
+        object_id: None,
+        missing_value: None,
         primary_key: false,
         not_null: false,
         not_null_explicit: false,

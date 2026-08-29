@@ -25,6 +25,70 @@ fn in_memory_connection_round_trip() {
 }
 
 #[test]
+fn vacuum_reclaims_free_pages_and_requires_autocommit() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("vacuum.sqlite3");
+    let connection = ManagedConnection::open(&path).unwrap();
+    connection
+        .with(|sqlite| {
+            sqlite.execute_batch(
+                "CREATE TABLE payloads (id INTEGER PRIMARY KEY, payload BLOB); \
+                 WITH RECURSIVE ids(id) AS (VALUES (1) UNION ALL SELECT id + 1 FROM ids WHERE id < 256) \
+                 INSERT INTO payloads SELECT id, zeroblob(8192) FROM ids; \
+                 DELETE FROM payloads",
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    let before: i64 = connection
+        .with(|sqlite| Ok(sqlite.pragma_query_value(None, "page_count", |row| row.get(0))?))
+        .unwrap();
+
+    connection.vacuum().unwrap();
+
+    let after: i64 = connection
+        .with(|sqlite| Ok(sqlite.pragma_query_value(None, "page_count", |row| row.get(0))?))
+        .unwrap();
+    assert!(
+        after < before,
+        "VACUUM page count {after} did not shrink from {before}"
+    );
+
+    connection.begin_transaction().unwrap();
+    assert!(matches!(
+        connection.vacuum(),
+        Err(SQLiteError::TransactionAlreadyActive)
+    ));
+    connection.rollback_transaction().unwrap();
+}
+
+#[test]
+fn compressed_vacuum_flushes_its_final_truncate_before_connection_reuse() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("vacuum-compressed.uqac.sqlite3");
+    let connection =
+        ManagedConnection::open_compressed(&path, SQLiteCompressionOptions::default()).unwrap();
+    connection
+        .with(|sqlite| {
+            sqlite.execute_batch(
+                "CREATE TABLE payloads (id INTEGER PRIMARY KEY, payload BLOB); \
+                 WITH RECURSIVE ids(id) AS (VALUES (1) UNION ALL SELECT id + 1 FROM ids WHERE id < 256) \
+                 INSERT INTO payloads SELECT id, zeroblob(8192) FROM ids; \
+                 DELETE FROM payloads WHERE id > 2",
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+    connection.vacuum().unwrap();
+
+    let remaining: i64 = connection
+        .with(|sqlite| Ok(sqlite.query_row("SELECT count(*) FROM payloads", [], |row| row.get(0))?))
+        .unwrap();
+    assert_eq!(remaining, 2);
+}
+
+#[test]
 fn wal_mode_pragma_is_set() {
     let mc = ManagedConnection::open_in_memory().unwrap();
     let mode: String = mc
@@ -422,6 +486,46 @@ fn compressed_file_reopens_through_vfs() {
     assert_eq!(&compressed[..8], b"UQACDB2\0");
     assert!(compressed.len() < plain_len as usize);
     assert!(ManagedConnection::open(&path).is_err());
+}
+
+#[test]
+fn compressed_connections_refresh_committed_container_state_after_relocking() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir
+        .path()
+        .join("compressed-concurrent-sessions.uqac.sqlite3");
+    let options = SQLiteCompressionOptions::default();
+    let reader = ManagedConnection::open_compressed(&path, options).unwrap();
+    reader
+        .with(|connection| {
+            connection.execute_batch(
+                "CREATE TABLE t (id INTEGER PRIMARY KEY, value INTEGER);
+                 INSERT INTO t VALUES (1, 10);",
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    let initial: i64 = reader
+        .with(|connection| {
+            Ok(connection.query_row("SELECT value FROM t WHERE id = 1", [], |row| row.get(0))?)
+        })
+        .unwrap();
+    assert_eq!(initial, 10);
+
+    let writer = ManagedConnection::open_compressed(&path, options).unwrap();
+    writer
+        .with(|connection| {
+            connection.execute("UPDATE t SET value = 11 WHERE id = 1", [])?;
+            Ok(())
+        })
+        .unwrap();
+
+    let refreshed: i64 = reader
+        .with(|connection| {
+            Ok(connection.query_row("SELECT value FROM t WHERE id = 1", [], |row| row.get(0))?)
+        })
+        .unwrap();
+    assert_eq!(refreshed, 11);
 }
 
 #[test]

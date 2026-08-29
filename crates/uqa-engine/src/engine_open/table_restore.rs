@@ -231,9 +231,29 @@ impl Engine {
         if !schemas.iter().any(|name| name == "public") {
             catalog.save_schema("public")?;
         }
+        Self::migrate_table_identities(catalog)?;
         Self::repair_dangling_hierarchy_parents(catalog)?;
         Self::migrate_constraint_names_from_metadata(catalog)?;
         Self::migrate_legacy_sequences_from_metadata(catalog)
+    }
+
+    fn migrate_table_identities(catalog: &dyn CatalogFacade) -> StorageBackendResult<()> {
+        for mut schema in catalog.load_tables()? {
+            let mut changed = false;
+            if schema.object_id == [0; 16] {
+                schema.object_id = crate::new_table_object_id()?;
+                changed = true;
+            }
+            if schema.storage_generation == [0; 16] {
+                schema.storage_generation = crate::new_table_storage_generation()?;
+                changed = true;
+            }
+            if !changed {
+                continue;
+            }
+            catalog.save_table(&schema)?;
+        }
+        Ok(())
     }
 
     fn repair_dangling_hierarchy_parents(catalog: &dyn CatalogFacade) -> StorageBackendResult<()> {
@@ -369,6 +389,9 @@ impl Engine {
         };
         let next_id = persisted_next_id.unwrap_or(1).max(u128::from(max_id) + 1);
         Ok(Arc::new(TableState {
+            lifecycle_id: std::sync::atomic::AtomicU64::new(crate::next_table_lifecycle_id()),
+            object_id: schema.object_id,
+            storage_generation: RwLock::new(schema.storage_generation),
             document_store: RwLock::new(docs),
             inverted_index: RwLock::new(inv),
             vector_indexes: RwLock::new(vectors),

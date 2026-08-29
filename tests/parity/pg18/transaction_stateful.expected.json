@@ -1,0 +1,392 @@
+{
+  "schema_version": 1,
+  "fixture_sha256": "b7f259b91f6c7f92f97f2c51ac9a3f8f4885333b06dd13faa0d2fb757b0db161",
+  "oracle": {
+    "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
+    "server_version_num": "180004",
+    "version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "age_version": "1.8.0"
+  },
+  "cases": [
+    {
+      "name": "create_schema",
+      "kind": "ok"
+    },
+    {
+      "name": "create_cursor_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "cursor_declare_rejects_missing_relation",
+      "kind": "error",
+      "sqlstate": "42P01"
+    },
+    {
+      "name": "cursor_declare_rejects_missing_column",
+      "kind": "error",
+      "sqlstate": "42703"
+    },
+    {
+      "name": "catalog_cursor_keeps_declare_time_relations",
+      "kind": "ok"
+    },
+    {
+      "name": "catalog_cursor_declare_time_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "2"
+        ]
+      ]
+    },
+    {
+      "name": "cursor_keeps_relation_binding_after_rename",
+      "kind": "ok"
+    },
+    {
+      "name": "cursor_keeps_declare_time_hierarchy",
+      "kind": "ok"
+    },
+    {
+      "name": "cursor_relation_binding_results",
+      "kind": "rows",
+      "rows": [
+        [
+          "binding_hierarchy_rows",
+          "1"
+        ],
+        [
+          "binding_rename_rows",
+          "2"
+        ]
+      ]
+    },
+    {
+      "name": "cursor_keeps_declare_time_view_plan",
+      "kind": "ok"
+    },
+    {
+      "name": "cursor_view_plan_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "2"
+        ]
+      ]
+    },
+    {
+      "name": "cursor_keeps_declare_time_view_name_binding",
+      "kind": "ok"
+    },
+    {
+      "name": "cursor_view_name_binding_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "2"
+        ]
+      ]
+    },
+    {
+      "name": "cursor_keeps_declare_time_regclass_binding",
+      "kind": "ok"
+    },
+    {
+      "name": "cursor_regclass_binding_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "2"
+        ]
+      ]
+    },
+    {
+      "name": "cursor_keeps_declare_time_function_plan",
+      "kind": "ok"
+    },
+    {
+      "name": "cursor_function_plan_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "2"
+        ]
+      ]
+    },
+    {
+      "name": "fixed_snapshot_uses_recreated_relation_lifetime",
+      "kind": "ok"
+    },
+    {
+      "name": "fixed_snapshot_recreated_relation_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "fixed_snapshot_after_recreate",
+          "99"
+        ],
+        [
+          "fixed_snapshot_before_recreate",
+          "2"
+        ]
+      ]
+    },
+    {
+      "name": "fixed_snapshot_own_change_survives_rename",
+      "kind": "ok"
+    },
+    {
+      "name": "fixed_snapshot_own_change_after_rename_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "20"
+        ]
+      ]
+    },
+    {
+      "name": "relation_oid_survives_rename_and_truncate",
+      "kind": "ok"
+    },
+    {
+      "name": "relation_oid_after_rename_and_truncate_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "relation_oid_changes_after_recreate",
+      "kind": "ok"
+    },
+    {
+      "name": "relation_oid_after_recreate_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "declare_cursor_is_lazy",
+      "kind": "ok"
+    },
+    {
+      "name": "first_cursor_movement_executes_query",
+      "kind": "error",
+      "sqlstate": "22012"
+    },
+    {
+      "name": "holdable_materialization_failure_ends_transaction",
+      "kind": "error",
+      "sqlstate": "22012"
+    },
+    {
+      "name": "session_after_holdable_materialization_failure",
+      "kind": "rows",
+      "rows": [
+        [
+          "42"
+        ]
+      ]
+    },
+    {
+      "name": "cursor_execution_is_incremental",
+      "kind": "ok"
+    },
+    {
+      "name": "cursor_execution_is_incremental_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "incremental_after_one",
+          "2"
+        ],
+        [
+          "incremental_seed",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "declare_captures_cursor_snapshot",
+      "kind": "ok"
+    },
+    {
+      "name": "declare_captures_cursor_snapshot_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "declare_snapshot_freezes_own_changes",
+      "kind": "ok"
+    },
+    {
+      "name": "declare_snapshot_freezes_own_changes_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "3"
+        ]
+      ]
+    },
+    {
+      "name": "cursor_volatile_routine_observes_earlier_writes",
+      "kind": "ok"
+    },
+    {
+      "name": "cursor_volatile_routine_write_visibility_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "routine_1",
+          "1"
+        ],
+        [
+          "routine_2",
+          "2"
+        ]
+      ]
+    },
+    {
+      "name": "holdable_snapshot_freezes_own_changes",
+      "kind": "ok"
+    },
+    {
+      "name": "holdable_snapshot_freezes_own_changes_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "4"
+        ]
+      ]
+    },
+    {
+      "name": "holdable_cursor_materializes_at_commit",
+      "kind": "ok"
+    },
+    {
+      "name": "holdable_cursor_materializes_at_commit_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "4"
+        ]
+      ]
+    },
+    {
+      "name": "create_holdable_constraint_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "holdable_cursor_revalidates_deferred_constraints",
+      "kind": "error",
+      "sqlstate": "23503"
+    },
+    {
+      "name": "holdable_cursor_constraint_failure_rolls_back",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_vacuum_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "targeted_vacuum_full",
+      "kind": "ok"
+    },
+    {
+      "name": "targeted_vacuum_full_remains_writable",
+      "kind": "ok"
+    },
+    {
+      "name": "targeted_vacuum_full_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "other",
+          "9",
+          "nine"
+        ],
+        [
+          "target",
+          "1",
+          "one"
+        ],
+        [
+          "target",
+          "2",
+          "updated"
+        ]
+      ]
+    },
+    {
+      "name": "analyze_in_read_only_transaction",
+      "kind": "ok"
+    },
+    {
+      "name": "prepare_sets_transaction_snapshot",
+      "kind": "error",
+      "sqlstate": "25001"
+    },
+    {
+      "name": "analyze_after_write_in_read_only_transaction",
+      "kind": "ok"
+    },
+    {
+      "name": "analyze_after_write_rollback_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "2"
+        ]
+      ]
+    },
+    {
+      "name": "create_attribute_missing_value_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "attribute_missing_value_catalog_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "fast_default",
+          "f",
+          null
+        ],
+        [
+          "volatile_default",
+          "f",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "volatile_added_column_default_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "10"
+        ],
+        [
+          "2",
+          "11"
+        ]
+      ]
+    }
+  ]
+}

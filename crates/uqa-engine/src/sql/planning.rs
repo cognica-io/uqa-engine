@@ -123,7 +123,7 @@ impl uqa_planner::SourceStatistics for EngineSourceStatistics<'_> {
 
 fn hierarchy_row_count(engine: &Engine, table: &str) -> Result<u64, SQLError> {
     let mut total = 0_u64;
-    for member in engine.hierarchy_scan_tables(table, true)? {
+    for member in engine.query_hierarchy_scan_tables(table, true)? {
         total = total
             .checked_add(engine.table_doc_count(&member)?)
             .ok_or_else(|| {

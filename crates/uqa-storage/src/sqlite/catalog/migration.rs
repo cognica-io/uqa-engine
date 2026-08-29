@@ -733,6 +733,12 @@ impl Catalog {
                     let sequence_called_already_present = *version == 18
                         && Self::table_columns(conn, "_sequences")?
                             .is_some_and(|columns| columns.contains_key("called"));
+                    let table_storage_generation_already_present = *version == 24
+                        && Self::table_columns(conn, "_tables")?
+                            .is_some_and(|columns| columns.contains_key("storage_generation"));
+                    let table_object_id_already_present = *version == 25
+                        && Self::table_columns(conn, "_tables")?
+                            .is_some_and(|columns| columns.contains_key("object_id"));
                     let tx = conn.transaction()?;
                     if *version == 17 && !relation_namespace_already_present {
                         Self::migrate_relation_namespace_v17(&tx)?;
@@ -742,7 +748,11 @@ impl Catalog {
                         Self::migrate_clustered_postings_v22(&tx)?;
                     } else if *version == 23 {
                         Self::migrate_sequence_persistence_v23(&tx, sql)?;
-                    } else if !schema_change_already_present && !sequence_called_already_present {
+                    } else if !schema_change_already_present
+                        && !sequence_called_already_present
+                        && !table_storage_generation_already_present
+                        && !table_object_id_already_present
+                    {
                         tx.execute_batch(sql)?;
                     }
                     tx.execute(

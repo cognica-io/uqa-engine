@@ -283,3 +283,19 @@ pub enum CypherClause {
 pub struct CypherQuery {
     pub clauses: Vec<CypherClause>,
 }
+
+impl CypherQuery {
+    /// Whether execution can change graph data.
+    #[must_use]
+    pub fn mutates_graph(&self) -> bool {
+        self.clauses.iter().any(|clause| {
+            matches!(
+                clause,
+                CypherClause::Create(_)
+                    | CypherClause::Merge(_)
+                    | CypherClause::Set(_)
+                    | CypherClause::Delete(_)
+            )
+        })
+    }
+}
