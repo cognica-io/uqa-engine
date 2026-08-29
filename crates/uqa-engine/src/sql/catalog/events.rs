@@ -19,8 +19,8 @@ use crate::engine_events::{StoredRule, StoredTrigger};
 use crate::{Engine, RelationIdentity};
 
 use super::helpers::{
-    bool_value, catalog_usize, int_value, relation_oid, row, schema_expr_text, split_schema_name,
-    stable_oid, str_value,
+    bool_value, catalog_usize, int_value, relation_oid, row, schema_expr_text, schema_oid,
+    split_schema_name, stable_oid, str_value,
 };
 use super::pg_catalog::table_relation_oid;
 use super::pg_proc::user_routine_catalog_oid;
@@ -133,6 +133,68 @@ pub(super) fn catalog_triggers(engine: &Engine) -> Result<Vec<(StoredTrigger, i6
         }
     }
     Ok(catalog.into_values().collect())
+}
+
+pub(super) fn build_trigger_constraints(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+    let mut rows = Vec::new();
+    for (trigger, _) in catalog_triggers(engine)? {
+        if !trigger.definition.constraint {
+            continue;
+        }
+        let definition = &trigger.definition;
+        let constraint_name = trigger
+            .constraint_name
+            .as_deref()
+            .unwrap_or(&definition.name);
+        let relation = RelationIdentity::from_legacy_name(&definition.table).map_err(|error| {
+            SQLError::Internal(format!(
+                "decode constraint-trigger relation `{}`: {error}",
+                definition.table
+            ))
+        })?;
+        rows.push(row([
+            (
+                "oid",
+                int_value(trigger_constraint_catalog_oid(engine, &trigger)?),
+            ),
+            ("conname", str_value(constraint_name)),
+            ("connamespace", int_value(schema_oid(&relation.schema))),
+            ("contype", str_value("t")),
+            (
+                "condeferrable",
+                bool_value(definition.deferrability.is_deferrable()),
+            ),
+            (
+                "condeferred",
+                bool_value(definition.deferrability.is_initially_deferred()),
+            ),
+            ("conenforced", bool_value(true)),
+            ("convalidated", bool_value(true)),
+            (
+                "conrelid",
+                int_value(table_relation_oid(engine, &definition.table)?),
+            ),
+            ("contypid", int_value(0)),
+            ("conindid", int_value(0)),
+            ("conparentid", int_value(0)),
+            ("confrelid", int_value(0)),
+            ("confupdtype", str_value(" ")),
+            ("confdeltype", str_value(" ")),
+            ("confmatchtype", str_value(" ")),
+            ("conislocal", bool_value(true)),
+            ("coninhcount", int_value(0)),
+            ("connoinherit", bool_value(true)),
+            ("conperiod", bool_value(false)),
+            ("conkey", Value::Null),
+            ("confkey", Value::Null),
+            ("conpfeqop", Value::Null),
+            ("conppeqop", Value::Null),
+            ("conffeqop", Value::Null),
+            ("conexclop", Value::Null),
+            ("conbin", Value::Null),
+        ]));
+    }
+    Ok(rows)
 }
 
 fn pg_trigger_row(
