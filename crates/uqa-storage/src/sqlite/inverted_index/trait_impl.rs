@@ -28,6 +28,13 @@ impl InvertedIndex for SQLiteInvertedIndex {
         Ok(self.add_document_inner(doc_id, fields)?)
     }
 
+    fn try_add_documents(
+        &mut self,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+    ) -> StorageBackendResult<()> {
+        Ok(self.add_documents_inner(documents)?)
+    }
+
     fn remove_document(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
         Ok(self.remove_document_inner(doc_id)?)
     }

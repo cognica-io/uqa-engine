@@ -45,6 +45,79 @@ type KeyValueStagedPosting = (FieldName, String, Vec<u32>);
 type KeyValueAnalyzedFields = (BTreeMap<FieldName, u64>, Vec<KeyValueStagedPosting>);
 type ClusterKey = (FieldName, String, u64);
 type PostingChange = Option<(u64, Vec<u32>)>;
+type KeyValueStagedDocuments = BTreeMap<DocId, KeyValueAnalyzedFields>;
+type KeyValueClusterChanges = BTreeMap<ClusterKey, BTreeMap<DocId, PostingChange>>;
+type KeyValueFieldChanges = BTreeMap<FieldName, (u64, u64)>;
+type KeyValueMergedClusters = Vec<(ClusterKey, Vec<ClusterPosting>)>;
+
+fn merge_cluster_changes(
+    entries: Vec<ClusterPosting>,
+    changes: BTreeMap<DocId, PostingChange>,
+) -> Vec<ClusterPosting> {
+    fn push_replacement(
+        entries: &mut Vec<ClusterPosting>,
+        doc_id: DocId,
+        replacement: PostingChange,
+    ) {
+        if let Some((doc_length, positions)) = replacement {
+            entries.push(ClusterPosting {
+                doc_id,
+                term_freq: positions.len() as u64,
+                doc_length,
+                positions,
+            });
+        }
+    }
+
+    let mut merged = Vec::with_capacity(entries.len().saturating_add(changes.len()));
+    let mut changes = changes.into_iter().peekable();
+    for entry in entries {
+        while changes
+            .peek()
+            .is_some_and(|(doc_id, _)| *doc_id < entry.doc_id)
+        {
+            let (doc_id, replacement) = changes.next().expect("peeked posting change exists");
+            push_replacement(&mut merged, doc_id, replacement);
+        }
+        if changes
+            .peek()
+            .is_some_and(|(doc_id, _)| *doc_id == entry.doc_id)
+        {
+            let (doc_id, replacement) = changes.next().expect("peeked posting change exists");
+            push_replacement(&mut merged, doc_id, replacement);
+        } else {
+            merged.push(entry);
+        }
+    }
+    for (doc_id, replacement) in changes {
+        push_replacement(&mut merged, doc_id, replacement);
+    }
+    merged
+}
+
+fn accumulate_field_changes(
+    field_changes: &mut KeyValueFieldChanges,
+    old_lengths: &BTreeMap<FieldName, u64>,
+    new_lengths: &BTreeMap<FieldName, u64>,
+) -> StorageBackendResult<()> {
+    let mut affected_fields = BTreeSet::new();
+    affected_fields.extend(old_lengths.keys().cloned());
+    affected_fields.extend(new_lengths.keys().cloned());
+    for field in affected_fields {
+        let (old_total, new_total) = field_changes.entry(field.clone()).or_default();
+        if let Some(length) = old_lengths.get(&field) {
+            *old_total = old_total
+                .checked_add(*length)
+                .ok_or_else(|| other_error("old field length overflow"))?;
+        }
+        if let Some(length) = new_lengths.get(&field) {
+            *new_total = new_total
+                .checked_add(*length)
+                .ok_or_else(|| other_error("new field length overflow"))?;
+        }
+    }
+    Ok(())
+}
 
 impl KeyValueInvertedIndex {
     pub fn new(
@@ -272,6 +345,122 @@ impl KeyValueInvertedIndex {
         Ok(())
     }
 
+    fn collect_batch_changes(
+        &self,
+        staged_documents: &KeyValueStagedDocuments,
+    ) -> StorageBackendResult<(KeyValueClusterChanges, KeyValueFieldChanges)> {
+        let mut cluster_changes = KeyValueClusterChanges::new();
+        let mut field_changes = KeyValueFieldChanges::new();
+        for (doc_id, (new_lengths, new_postings)) in staged_documents {
+            let old_lengths = self.old_doc_lengths(*doc_id)?;
+            let old_terms = self.old_terms(*doc_id)?;
+            let posting_cluster = cluster_id(*doc_id);
+            for (field, terms) in old_terms {
+                for term in terms {
+                    cluster_changes
+                        .entry((field.clone(), term, posting_cluster))
+                        .or_default()
+                        .insert(*doc_id, None);
+                }
+            }
+            for (field, term, positions) in new_postings {
+                cluster_changes
+                    .entry((field.clone(), term.clone(), posting_cluster))
+                    .or_default()
+                    .insert(*doc_id, Some((new_lengths[field], positions.clone())));
+            }
+            accumulate_field_changes(&mut field_changes, &old_lengths, new_lengths)?;
+        }
+        Ok((cluster_changes, field_changes))
+    }
+
+    fn plan_batch_totals(
+        &self,
+        field_changes: KeyValueFieldChanges,
+    ) -> StorageBackendResult<Vec<(FieldName, u64)>> {
+        let mut totals = Vec::with_capacity(field_changes.len());
+        for (field, (old_total, new_total)) in field_changes {
+            let base = self
+                .store
+                .get(&field_stats_key(&self.table, &field)?)?
+                .map(|value| decode_u64_value(&value))
+                .transpose()?
+                .unwrap_or(0);
+            let total = base
+                .checked_sub(old_total)
+                .ok_or_else(|| other_error("stored field length is smaller than batch length"))?
+                .checked_add(new_total)
+                .ok_or_else(|| other_error("total field length overflow"))?;
+            totals.push((field, total));
+        }
+        Ok(totals)
+    }
+
+    fn merge_batch_clusters(
+        &self,
+        cluster_changes: KeyValueClusterChanges,
+    ) -> StorageBackendResult<KeyValueMergedClusters> {
+        let mut merged = Vec::with_capacity(cluster_changes.len());
+        for ((field, term, posting_cluster), changes) in cluster_changes {
+            let entries = self.load_cluster(&field, &term, posting_cluster)?;
+            merged.push((
+                (field, term, posting_cluster),
+                merge_cluster_changes(entries, changes),
+            ));
+        }
+        Ok(merged)
+    }
+
+    fn write_batch_documents(
+        &self,
+        batch: &mut dyn KeyValueBatch,
+        staged_documents: KeyValueStagedDocuments,
+    ) -> StorageBackendResult<()> {
+        for (doc_id, (lengths, postings)) in staged_documents {
+            batch.delete_prefix(&posting_document_doc_prefix(&self.table, doc_id)?)?;
+            batch.delete_prefix(&doc_length_doc_prefix(&self.table, doc_id)?)?;
+            let mut terms_by_field = BTreeMap::<FieldName, Vec<String>>::new();
+            for (field, term, _) in postings {
+                terms_by_field.entry(field).or_default().push(term);
+            }
+            for (field, length) in lengths {
+                batch.put(
+                    &doc_length_key(&self.table, doc_id, &field)?,
+                    &u64_value(length),
+                )?;
+                batch.put(
+                    &posting_document_key(&self.table, doc_id, &field)?,
+                    &encode_terms(terms_by_field.get(&field).map_or(&[], Vec::as_slice))?,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    fn add_documents(
+        &self,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+    ) -> StorageBackendResult<()> {
+        let mut staged_documents = BTreeMap::new();
+        for (doc_id, fields) in documents {
+            staged_documents.insert(doc_id, self.analyze_fields(fields)?);
+        }
+        if staged_documents.is_empty() {
+            return Ok(());
+        }
+
+        let (cluster_changes, field_changes) = self.collect_batch_changes(&staged_documents)?;
+        let totals = self.plan_batch_totals(field_changes)?;
+        let merged_clusters = self.merge_batch_clusters(cluster_changes)?;
+        let mut batch = self.store.batch();
+        Self::apply_cluster_changes(batch.as_mut(), &self.table, merged_clusters)?;
+        for (field, total) in totals {
+            Self::set_total_length(batch.as_mut(), &self.table, &field, total)?;
+        }
+        self.write_batch_documents(batch.as_mut(), staged_documents)?;
+        batch.commit()
+    }
+
     fn cursor_for_term(
         &self,
         field: &str,
@@ -482,6 +671,13 @@ impl InvertedIndex for KeyValueInvertedIndex {
             )?;
         }
         batch.commit()
+    }
+
+    fn try_add_documents(
+        &mut self,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+    ) -> StorageBackendResult<()> {
+        self.add_documents(documents)
     }
 
     fn remove_document(&mut self, doc_id: DocId) -> StorageBackendResult<()> {

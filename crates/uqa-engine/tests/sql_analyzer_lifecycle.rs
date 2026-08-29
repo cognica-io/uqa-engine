@@ -197,6 +197,70 @@ fn runtime_analyzer_failure_does_not_publish_a_partial_update() {
 }
 
 #[test]
+fn runtime_analyzer_failure_rolls_back_a_persistent_copy_batch() {
+    let directory = TempDir::new().unwrap();
+    let database = directory.path().join("batch-analyzer-failure.db");
+    let synonyms = directory.path().join("batch-synonyms.txt");
+    std::fs::write(&synonyms, "old, legacy\n").unwrap();
+    let config = serde_json::json!({
+        "tokenizer": {"type": "whitespace"},
+        "token_filters": [{
+            "type": "synonym",
+            "synonyms_path": synonyms,
+        }],
+    })
+    .to_string();
+
+    {
+        let engine = Engine::open(&database).unwrap();
+        engine
+            .register_named_analyzer("batch_file_synonyms", &config)
+            .unwrap();
+        engine
+            .sql(
+                "CREATE TABLE batch_docs (id INTEGER PRIMARY KEY, body TEXT)",
+                &[],
+            )
+            .unwrap();
+        engine
+            .sql(
+                "CREATE INDEX batch_docs_body_gin ON batch_docs USING gin (body)",
+                &[],
+            )
+            .unwrap();
+        engine
+            .set_table_field_analyzer("batch_docs", "body", "batch_file_synonyms", "index")
+            .unwrap();
+        std::fs::remove_file(&synonyms).unwrap();
+
+        let error = engine
+            .copy_from(
+                "COPY batch_docs (id, body) FROM STDIN",
+                b"1\tfirst\n2\tsecond\n".as_slice(),
+            )
+            .expect_err("missing analyzer input must abort the COPY batch");
+        assert!(error.to_string().contains("synonym file"), "{error}");
+        std::fs::write(&synonyms, "old, legacy\n").unwrap();
+        assert_eq!(
+            engine
+                .sql("SELECT count(*) AS n FROM batch_docs", &[])
+                .unwrap()
+                .rows[0]["n"],
+            uqa_core::Value::Int(0)
+        );
+    }
+
+    let reopened = Engine::open(&database).unwrap();
+    assert_eq!(
+        reopened
+            .sql("SELECT count(*) AS n FROM batch_docs", &[])
+            .unwrap()
+            .rows[0]["n"],
+        uqa_core::Value::Int(0)
+    );
+}
+
+#[test]
 fn invalid_legacy_catalog_analyzer_makes_reopen_fail_explicitly() {
     let directory = TempDir::new().unwrap();
     let path = directory.path().join("invalid-analyzer.db");

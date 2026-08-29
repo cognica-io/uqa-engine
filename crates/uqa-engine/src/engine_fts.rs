@@ -176,8 +176,68 @@ impl Engine {
         &self,
         table: &str,
         doc_id: DocId,
+        document: Document,
+        known_new: bool,
+    ) -> Result<(), SQLError> {
+        self.add_prepared_document_impl_with_fts(table, doc_id, document, known_new, true)
+    }
+
+    pub(crate) fn add_prepared_document_without_fts_impl(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        document: Document,
+        known_new: bool,
+    ) -> Result<(), SQLError> {
+        self.add_prepared_document_impl_with_fts(table, doc_id, document, known_new, false)
+    }
+
+    pub(crate) fn prepared_document_text_fields(
+        &self,
+        table: &str,
+        document: &Document,
+    ) -> Result<BTreeMap<FieldName, String>, SQLError> {
+        let Some(t) = self
+            .try_table(table)
+            .map_err(|err| SQLError::Internal(format!("resolve table `{table}`: {err}")))?
+        else {
+            return Err(SQLError::UnknownTable(table.to_string()));
+        };
+        let mut text_fields = BTreeMap::new();
+        for name in &t.fts_fields() {
+            if let Some(Value::Str(value)) = document.get(name) {
+                text_fields.insert(name.clone(), value.clone());
+            }
+        }
+        Ok(text_fields)
+    }
+
+    pub(crate) fn add_prepared_fts_documents(
+        &self,
+        table: &str,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+    ) -> Result<(), SQLError> {
+        let Some(t) = self
+            .try_table(table)
+            .map_err(|err| SQLError::Internal(format!("resolve table `{table}`: {err}")))?
+        else {
+            return Err(SQLError::UnknownTable(table.to_string()));
+        };
+        let result = t
+            .inverted_index
+            .write()
+            .try_add_documents(documents)
+            .map_err(|error| SQLError::Internal(format!("index documents: {error}")));
+        result
+    }
+
+    fn add_prepared_document_impl_with_fts(
+        &self,
+        table: &str,
+        doc_id: DocId,
         mut document: Document,
         known_new: bool,
+        index_fts: bool,
     ) -> Result<(), SQLError> {
         let Some(table_name) = self
             .try_resolve_table_name(table)
@@ -200,21 +260,14 @@ impl Engine {
                 .map_err(|error| SQLError::Internal(format!("read existing document: {error}")))?
                 .is_some()
         };
-        // Index the FTS fields whose values are strings.
-        let mut text_fields: BTreeMap<FieldName, String> = BTreeMap::new();
-        for name in &t.fts_fields() {
-            if let Some(Value::Str(s)) = document.get(name) {
-                text_fields.insert(name.clone(), s.clone());
-            }
+        if index_fts {
+            let text_fields = self.prepared_document_text_fields(table, &document)?;
+            // Replacement is one atomic inverted-index operation even when the new document has no indexed text. Skipping an empty field map would leave stale postings from the previous version; remove-then-add would expose a destructive failure window when analysis fails.
+            t.inverted_index
+                .write()
+                .add_document(doc_id, text_fields)
+                .map_err(|error| SQLError::Internal(format!("index document: {error}")))?;
         }
-        // Replacement is one atomic inverted-index operation even when the
-        // new document has no indexed text. Skipping an empty field map would
-        // leave stale postings from the previous version; remove-then-add
-        // would expose a destructive failure window when analysis fails.
-        t.inverted_index
-            .write()
-            .add_document(doc_id, text_fields)
-            .map_err(|error| SQLError::Internal(format!("index document: {error}")))?;
         // Value-index maintenance: unindex the previous field values
         // (put may replace an existing document), index the new ones.
         // `old_indexed` is `None` exactly when no index is built, so

@@ -437,3 +437,67 @@ fn partition_copy_routing_and_identity_survive_reopen() {
         .unwrap();
     assert_eq!(row.rows[0]["id"], Value::Int(3));
 }
+
+#[test]
+fn persistent_copy_batches_clustered_postings_and_survives_reopen() {
+    use std::fmt::Write as _;
+
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("copy-postings.db");
+    {
+        let engine = Engine::open(&database).unwrap();
+        exec(
+            &engine,
+            "CREATE TABLE posting_copy (id BIGINT PRIMARY KEY, body TEXT)",
+        );
+        exec(
+            &engine,
+            "CREATE INDEX posting_copy_body_gin ON posting_copy USING gin (body)",
+        );
+        let mut input = String::new();
+        for id in 1..=2_405 {
+            let suffix = if id == 2_405 {
+                "uniquezulu"
+            } else {
+                "ordinary"
+            };
+            writeln!(input, "{id}\tshared {suffix}").unwrap();
+        }
+        assert_eq!(
+            engine
+                .copy_from("COPY posting_copy (id, body) FROM STDIN", input.as_bytes(),)
+                .unwrap(),
+            2_405
+        );
+        assert_eq!(
+            engine
+                .sql(
+                    "SELECT count(*) AS n FROM posting_copy WHERE text_match(body, 'shared')",
+                    &[],
+                )
+                .unwrap()
+                .rows[0]["n"],
+            Value::Int(2_405)
+        );
+    }
+
+    let reopened = Engine::open(&database).unwrap();
+    let unique = reopened
+        .sql(
+            "SELECT id FROM posting_copy WHERE text_match(body, 'uniquezulu')",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(unique.rows.len(), 1);
+    assert_eq!(unique.rows[0]["id"], Value::Int(2_405));
+    assert_eq!(
+        reopened
+            .sql(
+                "SELECT count(*) AS n FROM posting_copy WHERE text_match(body, 'shared')",
+                &[],
+            )
+            .unwrap()
+            .rows[0]["n"],
+        Value::Int(2_405)
+    );
+}

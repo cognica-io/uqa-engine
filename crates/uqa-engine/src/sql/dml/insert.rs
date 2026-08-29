@@ -74,6 +74,36 @@ struct PreparedInsertRowContext<'a> {
     scope: &'a CteScope,
 }
 
+const PREPARED_FTS_BATCH_DOCUMENTS: usize = 4_096;
+type PreparedFtsDocuments = Vec<(DocId, BTreeMap<String, String>)>;
+type PreparedFtsTables = BTreeMap<String, PreparedFtsDocuments>;
+
+#[derive(Default)]
+struct PreparedFtsBatch {
+    tables: PreparedFtsTables,
+    document_count: usize,
+}
+
+impl PreparedFtsBatch {
+    fn push(&mut self, table: String, doc_id: DocId, fields: BTreeMap<String, String>) {
+        self.tables.entry(table).or_default().push((doc_id, fields));
+        self.document_count += 1;
+    }
+
+    fn is_full(&self) -> bool {
+        self.document_count >= PREPARED_FTS_BATCH_DOCUMENTS
+    }
+}
+
+fn flush_prepared_fts_batch(engine: &Engine, batch: &mut PreparedFtsBatch) -> Result<(), SQLError> {
+    let tables = std::mem::take(&mut batch.tables);
+    batch.document_count = 0;
+    for (table, documents) in tables {
+        engine.add_prepared_fts_documents(&table, documents)?;
+    }
+    Ok(())
+}
+
 impl InsertSelectConsumer {
     fn new(
         engine: &Engine,
@@ -560,6 +590,7 @@ pub(in crate::sql) fn run_insert_inner(
             let apply_reader = prepared_rows
                 .read_rows()
                 .map_err(crate::sql::select::physical_exec_error)?;
+            let mut fts_batch = PreparedFtsBatch::default();
             for prepared_row in apply_reader {
                 cancel.check()?;
                 let prepared_row = prepared_row.map_err(crate::sql::select::physical_exec_error)?;
@@ -594,8 +625,10 @@ pub(in crate::sql) fn run_insert_inner(
                     document,
                     &mut prepared,
                     false,
+                    &mut fts_batch,
                 )?;
             }
+            flush_prepared_fts_batch(engine, &mut fts_batch)?;
             crate::sql::triggers::fire_after_row_trigger_events(engine, &after_row_events)?;
             referential_actions.fire_after_statement_triggers(engine)?;
             if let Some(columns) = conflict_update_columns.as_deref() {
@@ -848,6 +881,7 @@ pub(in crate::sql) fn run_insert_inner(
         )?;
     }
     drop(conflict_locks);
+    let mut fts_batch = PreparedFtsBatch::default();
     for ((target_table, document), prepared) in target_tables
         .into_iter()
         .zip(documents)
@@ -866,8 +900,16 @@ pub(in crate::sql) fn run_insert_inner(
         let document = Arc::try_unwrap(document).map_err(|_| {
             SQLError::Internal("INSERT command overlay retained a staged document".into())
         })?;
-        apply_validated_prepared_insert(engine, &target_table, document, prepared, known_new)?;
+        apply_validated_prepared_insert(
+            engine,
+            &target_table,
+            document,
+            prepared,
+            known_new,
+            &mut fts_batch,
+        )?;
     }
+    flush_prepared_fts_batch(engine, &mut fts_batch)?;
     crate::sql::triggers::fire_after_row_trigger_events(engine, &after_row_events)?;
     referential_actions.fire_after_statement_triggers(engine)?;
     if let Some(columns) = conflict_update_columns.as_deref() {
@@ -1149,19 +1191,26 @@ fn apply_validated_prepared_insert(
     document: Document,
     prepared: &mut PreparedInsertConflict,
     known_new: bool,
+    fts_batch: &mut PreparedFtsBatch,
 ) -> Result<bool, SQLError> {
     match prepared {
         PreparedInsertConflict::Skip => Ok(false),
         PreparedInsertConflict::Updated(prepared) => {
+            flush_prepared_fts_batch(engine, fts_batch)?;
             apply_validated_prepared_document_rewrite(engine, prepared)?;
             Ok(true)
         }
         PreparedInsertConflict::Insert { doc_id, .. } => {
+            let text_fields = engine.prepared_document_text_fields(table, &document)?;
             let vectors = document_vectors(engine, table, &document)?;
-            engine.add_prepared_document_with_vector_values(
+            engine.add_prepared_document_with_vector_values_deferred_fts(
                 table, *doc_id, document, vectors, known_new,
             )?;
             engine.defer_inserted_foreign_key_checks(table, *doc_id)?;
+            fts_batch.push(table.to_string(), *doc_id, text_fields);
+            if fts_batch.is_full() {
+                flush_prepared_fts_batch(engine, fts_batch)?;
+            }
             Ok(true)
         }
         PreparedInsertConflict::Unresolved => Err(SQLError::Internal(

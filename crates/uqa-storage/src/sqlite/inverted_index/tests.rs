@@ -342,6 +342,77 @@ fn rebuild_analysis_failure_preserves_existing_index() {
 }
 
 #[test]
+fn batch_analysis_failure_preserves_existing_index() {
+    let mut idx = idx();
+    idx.add_document(1, fields([("title", "rust")])).unwrap();
+    idx.set_field_analyzer(
+        "body",
+        Analyzer::new(
+            Tokenizer::NGram {
+                min_gram: 0,
+                max_gram: 1,
+            },
+            Vec::new(),
+            Vec::new(),
+        ),
+        AnalyzerPhase::Index,
+    )
+    .unwrap();
+
+    let error = idx
+        .try_add_documents(vec![
+            (2, fields([("title", "sqlite")])),
+            (3, fields([("body", "failure")])),
+        ])
+        .unwrap_err();
+    assert!(error.to_string().contains("gram"));
+    assert_eq!(idx.doc_count().unwrap(), 1);
+    assert_eq!(idx.doc_freq("title", "rust").unwrap(), 1);
+    assert_eq!(idx.doc_freq("title", "sqlite").unwrap(), 0);
+}
+
+#[test]
+fn batch_coalesces_replacements_removals_and_clusters() {
+    let mut idx = idx();
+    idx.add_document(1, fields([("title", "old token"), ("body", "obsolete")]))
+        .unwrap();
+    idx.add_document(2, fields([("title", "keep rust")]))
+        .unwrap();
+    let distant_doc = crate::POSTING_CLUSTER_DOCS + 5;
+
+    idx.try_add_documents(vec![
+        (1, fields([("title", "new")])),
+        (2, BTreeMap::new()),
+        (3, fields([("title", "discarded")])),
+        (3, fields([("title", "new rust")])),
+        (distant_doc, fields([("title", "rust")])),
+    ])
+    .unwrap();
+
+    assert_eq!(
+        idx.get_posting_list("title", "new")
+            .unwrap()
+            .doc_ids()
+            .collect::<Vec<_>>(),
+        vec![1, 3]
+    );
+    assert_eq!(
+        idx.get_posting_list("title", "rust")
+            .unwrap()
+            .doc_ids()
+            .collect::<Vec<_>>(),
+        vec![3, distant_doc]
+    );
+    for removed in ["old", "token", "keep", "discard"] {
+        assert_eq!(idx.doc_freq("title", removed).unwrap(), 0);
+    }
+    assert_eq!(idx.doc_length_count(Some("title")).unwrap(), 3);
+    assert_eq!(idx.total_field_length("title").unwrap(), 4);
+    assert_eq!(idx.doc_length_count(Some("body")).unwrap(), 0);
+    assert_eq!(idx.total_field_length("body").unwrap(), 0);
+}
+
+#[test]
 fn rebuild_duplicate_document_uses_only_final_lengths() {
     let mut idx = idx();
     idx.try_rebuild_documents(vec![

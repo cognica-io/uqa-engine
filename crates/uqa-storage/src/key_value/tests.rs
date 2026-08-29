@@ -795,6 +795,92 @@ fn key_value_rebuild_analysis_failure_preserves_old_index() {
 }
 
 #[test]
+fn key_value_batch_analysis_failure_preserves_old_index() {
+    let store = store();
+    let mut index = KeyValueInvertedIndex::new(store, "articles", standard_analyzer("english"));
+    index
+        .add_document(1, BTreeMap::from([("title".into(), "rust".into())]))
+        .unwrap();
+    let invalid = Analyzer::new(
+        Tokenizer::NGram {
+            min_gram: 0,
+            max_gram: 1,
+        },
+        Vec::new(),
+        Vec::new(),
+    );
+    index
+        .set_field_analyzer("body", invalid, AnalyzerPhase::Index)
+        .unwrap();
+
+    let error = index
+        .try_add_documents(vec![
+            (2, BTreeMap::from([("title".into(), "sqlite".into())])),
+            (3, BTreeMap::from([("body".into(), "failure".into())])),
+        ])
+        .unwrap_err();
+    assert!(error.to_string().contains("gram"));
+    assert_eq!(index.doc_count().unwrap(), 1);
+    assert_eq!(index.doc_freq("title", "rust").unwrap(), 1);
+    assert_eq!(index.doc_freq("title", "sqlite").unwrap(), 0);
+}
+
+#[test]
+fn key_value_batch_coalesces_replacements_removals_and_clusters() {
+    let mut index = KeyValueInvertedIndex::new(store(), "articles", standard_analyzer("english"));
+    index
+        .add_document(
+            1,
+            BTreeMap::from([
+                ("title".into(), "old token".into()),
+                ("body".into(), "obsolete".into()),
+            ]),
+        )
+        .unwrap();
+    index
+        .add_document(2, BTreeMap::from([("title".into(), "keep rust".into())]))
+        .unwrap();
+    let distant_doc = crate::POSTING_CLUSTER_DOCS + 5;
+
+    index
+        .try_add_documents(vec![
+            (1, BTreeMap::from([("title".into(), "new".into())])),
+            (2, BTreeMap::new()),
+            (3, BTreeMap::from([("title".into(), "discarded".into())])),
+            (3, BTreeMap::from([("title".into(), "new rust".into())])),
+            (
+                distant_doc,
+                BTreeMap::from([("title".into(), "rust".into())]),
+            ),
+        ])
+        .unwrap();
+
+    assert_eq!(
+        index
+            .get_posting_list("title", "new")
+            .unwrap()
+            .doc_ids()
+            .collect::<Vec<_>>(),
+        vec![1, 3]
+    );
+    assert_eq!(
+        index
+            .get_posting_list("title", "rust")
+            .unwrap()
+            .doc_ids()
+            .collect::<Vec<_>>(),
+        vec![3, distant_doc]
+    );
+    for removed in ["old", "token", "keep", "discard"] {
+        assert_eq!(index.doc_freq("title", removed).unwrap(), 0);
+    }
+    assert_eq!(index.doc_length_count(Some("title")).unwrap(), 3);
+    assert_eq!(index.total_field_length("title").unwrap(), 4);
+    assert_eq!(index.doc_length_count(Some("body")).unwrap(), 0);
+    assert_eq!(index.total_field_length("body").unwrap(), 0);
+}
+
+#[test]
 fn key_value_field_stats_and_vocabulary_are_field_scoped() {
     let mut index = KeyValueInvertedIndex::new(store(), "articles", standard_analyzer("english"));
     index

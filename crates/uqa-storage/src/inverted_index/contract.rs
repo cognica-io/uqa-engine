@@ -57,6 +57,17 @@ pub trait InvertedIndex: Send + Sync {
         self.add_document(doc_id, fields)
     }
 
+    /// Add or replace several documents in input order. The default preserves the point-mutation contract for custom backends; transactional persistent backends can override this to make the call atomic and coalesce writes that share physical posting clusters.
+    fn try_add_documents(
+        &mut self,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+    ) -> StorageBackendResult<()> {
+        for (doc_id, fields) in documents {
+            self.try_add_document(doc_id, fields)?;
+        }
+        Ok(())
+    }
+
     fn remove_document(&mut self, doc_id: DocId) -> StorageBackendResult<()>;
 
     fn try_remove_document(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
