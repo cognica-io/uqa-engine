@@ -955,6 +955,13 @@ pub(in crate::sql) fn prepare_referential_document_rewrite(
     };
     prepared.trigger_updated_columns = Some(updated_columns);
     finalize_referential_partition_rewrite(engine, &mut prepared, params)?;
+    referential_actions.record_pending_document(
+        PhysicalDocumentIdentity {
+            table: prepared.table.clone(),
+            doc_id: prepared.doc_id,
+        },
+        Some(prepared.new_document.clone()),
+    );
     Ok(Some(prepared))
 }
 
@@ -1247,39 +1254,62 @@ fn foreign_keys_equivalent(left: &ForeignKey, right: &ForeignKey) -> bool {
 }
 
 /// Lock one referencing child row for a referential action and refetch it after the wait. Returns `None` when the child vanished or its foreign-key columns no longer reference the parent key that triggered the action, so the action skips it exactly like `PostgreSQL` after an `EvalPlanQual` recheck of the referencing row.
-pub(in crate::sql) fn lock_referencing_child(
-    engine: &Engine,
-    ref_table: &str,
-    child: &PhysicalDocumentIdentity,
-    lock_columns: &[String],
-    fk: &ForeignKey,
-    comparison: &ForeignKeyComparison,
-    expected: &[Value],
-) -> Result<Option<(PhysicalDocumentIdentity, Document)>, SQLError> {
-    let target = lock_physical_mutation_target(
-        engine,
-        &child.table,
-        ref_table,
-        child.doc_id,
-        update_lock_strength(engine, &child.table, lock_columns),
-    )?;
-    let PhysicalMutationLockTarget::Present { identity, recheck } = target else {
-        return Ok(None);
-    };
-    if recheck {
-        engine.refresh_explicit_statement_snapshot()?;
+pub(in crate::sql) struct ReferencingChildLock<'a> {
+    pub(in crate::sql) ref_table: &'a str,
+    pub(in crate::sql) child: &'a PhysicalDocumentIdentity,
+    pub(in crate::sql) lock_columns: &'a [String],
+    pub(in crate::sql) foreign_key: &'a ForeignKey,
+    pub(in crate::sql) comparison: &'a ForeignKeyComparison,
+    pub(in crate::sql) expected: &'a [Value],
+}
+
+impl Engine {
+    pub(in crate::sql) fn lock_referencing_child(
+        &self,
+        request: ReferencingChildLock<'_>,
+        referential_actions: &ReferentialActionContext,
+    ) -> Result<Option<(PhysicalDocumentIdentity, Document)>, SQLError> {
+        let ReferencingChildLock {
+            ref_table,
+            child,
+            lock_columns,
+            foreign_key,
+            comparison,
+            expected,
+        } = request;
+        let target = lock_physical_mutation_target(
+            self,
+            &child.table,
+            ref_table,
+            child.doc_id,
+            update_lock_strength(self, &child.table, lock_columns),
+        )?;
+        let PhysicalMutationLockTarget::Present { identity, recheck } = target else {
+            return Ok(None);
+        };
+        if recheck {
+            self.refresh_explicit_statement_snapshot()?;
+        }
+        let child_doc = match referential_actions.pending_document(&identity) {
+            Some(Some(document)) => document.clone(),
+            Some(None) => return Ok(None),
+            None => {
+                let Some(document) =
+                    self.get_document_for_mutation(&identity.table, identity.doc_id)?
+                else {
+                    return Ok(None);
+                };
+                document
+            }
+        };
+        let actual = foreign_key
+            .local_columns
+            .iter()
+            .map(|column| child_doc.get(column).cloned().unwrap_or(Value::Null))
+            .collect();
+        let actual = comparison.normalize(actual)?;
+        Ok((actual == expected).then_some((identity, child_doc)))
     }
-    let Some(child_doc) = engine.get_document_for_mutation(&identity.table, identity.doc_id)?
-    else {
-        return Ok(None);
-    };
-    let actual = fk
-        .local_columns
-        .iter()
-        .map(|column| child_doc.get(column).cloned().unwrap_or(Value::Null))
-        .collect();
-    let actual = comparison.normalize(actual)?;
-    Ok((actual == expected).then_some((identity, child_doc)))
 }
 
 pub(in crate::sql) fn referencing_rows(
@@ -1288,16 +1318,28 @@ pub(in crate::sql) fn referencing_rows(
     fk: &ForeignKey,
     comparison: &ForeignKeyComparison,
     expected: &[Value],
+    referential_actions: &ReferentialActionContext,
 ) -> Result<Vec<(PhysicalDocumentIdentity, Document)>, SQLError> {
     let mut out = Vec::new();
     for physical_table in engine.hierarchy_scan_tables(table, true)? {
         for doc_id in engine.table_doc_ids(&physical_table)? {
-            let Some(doc) = engine.get_document(&physical_table, doc_id)? else {
-                return Err(missing_document_error(
-                    "foreign-key reference scan",
-                    &physical_table,
-                    doc_id,
-                ));
+            let identity = PhysicalDocumentIdentity {
+                table: physical_table.clone(),
+                doc_id,
+            };
+            let doc = match referential_actions.pending_document(&identity) {
+                Some(Some(document)) => document.clone(),
+                Some(None) => continue,
+                None => {
+                    let Some(document) = engine.get_document(&physical_table, doc_id)? else {
+                        return Err(missing_document_error(
+                            "foreign-key reference scan",
+                            &physical_table,
+                            doc_id,
+                        ));
+                    };
+                    document
+                }
             };
             let values = fk
                 .local_columns
@@ -1305,13 +1347,7 @@ pub(in crate::sql) fn referencing_rows(
                 .map(|column| doc.get(column).cloned().unwrap_or(Value::Null))
                 .collect();
             if comparison.normalize(values)? == expected {
-                out.push((
-                    PhysicalDocumentIdentity {
-                        table: physical_table.clone(),
-                        doc_id,
-                    },
-                    doc,
-                ));
+                out.push((identity, doc));
             }
         }
     }

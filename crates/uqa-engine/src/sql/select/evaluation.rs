@@ -81,6 +81,9 @@ impl CteScope {
 
     pub(crate) fn new_for_current_routine() -> Self {
         let mut scope = Self::default();
+        scope
+            .rows
+            .extend(crate::sql::triggers::current_transition_relations());
         if crate::engine_roles::active_routine_reads_command_overlay() == Some(false) {
             scope.read_command_overlay = false;
         }

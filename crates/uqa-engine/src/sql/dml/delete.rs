@@ -15,9 +15,9 @@ use super::{
     stage_prepared_document_rewrite, validate_dml_expression_qualifiers,
     validate_returning_alias_relations, BTreeSet, CteScope, DeletePlan, DmlCommandMutationOverlay,
     DmlReturningShape, DocId, Document, Engine, ForeignKey, ForeignKeyAction, MutationLockTarget,
-    PhysicalMutationLockTarget, PreparedDeleteAction, PreparedDocumentDelete,
-    ReturningProjectionRow, ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult,
-    Value,
+    PhysicalDocumentIdentity, PhysicalMutationLockTarget, PreparedDeleteAction,
+    PreparedDocumentDelete, ReferencingChildLock, ReturningProjectionRow, ReturningRowImage,
+    ReturningRowImages, SQLError, SQLParam, SQLResult, Value,
 };
 
 pub(in crate::sql) fn run_delete(
@@ -340,15 +340,35 @@ pub(in crate::sql) fn run_delete_inner(
             apply_validated_prepared_document_delete(engine, prepared)?;
         }
     }
-    crate::sql::triggers::fire_after_row_trigger_events(engine, &after_row_events)?;
-    referential_actions.fire_after_statement_triggers(engine)?;
+    let transition_tables = delete_original_query
+        .then(|| {
+            crate::sql::triggers::build_transition_tables(
+                engine,
+                &stmt.table,
+                uqa_sql::ast::TriggerEvent::Delete,
+                &[],
+                &after_row_events,
+            )
+        })
+        .transpose()?
+        .flatten();
+    let referential_transition =
+        referential_actions.transition_tables(engine, &after_row_events)?;
+    let mut transition_refs = transition_tables.iter().collect::<Vec<_>>();
+    transition_refs.extend(referential_transition.iter());
+    crate::sql::triggers::fire_after_row_trigger_events_with_transitions(
+        engine,
+        &after_row_events,
+        &transition_refs,
+    )?;
+    referential_actions.fire_after_statement_triggers(engine, &referential_transition)?;
     if delete_original_query {
-        crate::sql::triggers::fire_statement_triggers(
+        crate::sql::triggers::fire_after_statement_triggers(
             engine,
             &stmt.table,
-            uqa_sql::ast::TriggerTiming::After,
             uqa_sql::ast::TriggerEvent::Delete,
             &[],
+            transition_tables.as_ref(),
         )?;
     }
     if !stmt.returning.is_empty() {
@@ -462,8 +482,19 @@ pub(in crate::sql) fn prepare_document_delete(
     if recheck {
         engine.refresh_explicit_statement_snapshot()?;
     }
-    let Some(target) = engine.get_document(table, doc_id)? else {
-        return Ok(None);
+    let identity = PhysicalDocumentIdentity {
+        table: table.to_string(),
+        doc_id,
+    };
+    let target = match referential_actions.pending_document(&identity) {
+        Some(Some(document)) => document.clone(),
+        Some(None) => return Ok(None),
+        None => {
+            let Some(document) = engine.get_document(table, doc_id)? else {
+                return Ok(None);
+            };
+            document
+        }
     };
     if fire_row_triggers
         && crate::sql::triggers::fire_before_row_triggers(
@@ -494,12 +525,14 @@ pub(in crate::sql) fn prepare_document_delete(
         referential_actions,
     );
     referential_actions.delete_stack.pop();
-    Ok(Some(PreparedDocumentDelete {
+    let prepared = PreparedDocumentDelete {
         table: table.to_string(),
         doc_id,
         document: target,
         actions: actions?,
-    }))
+    };
+    referential_actions.record_pending_document(identity, None);
+    Ok(Some(prepared))
 }
 
 pub(in crate::sql) fn stage_prepared_document_delete(
@@ -675,7 +708,14 @@ fn prepare_referenced_key_delete_actions(
             }
             ForeignKeyAction::NoAction | ForeignKeyAction::Restrict => {}
         }
-        let referencing = referencing_rows(engine, &ref_table, &fk, &comparison, &expected)?;
+        let referencing = referencing_rows(
+            engine,
+            &ref_table,
+            &fk,
+            &comparison,
+            &expected,
+            referential_actions,
+        )?;
         for (child, _child_doc) in referencing {
             if root_deletes.contains(&(child.table.clone(), child.doc_id)) {
                 continue;
@@ -715,14 +755,16 @@ fn prepare_referenced_key_delete_actions(
                 }
                 ForeignKeyAction::SetNull | ForeignKeyAction::SetDefault => {
                     let columns = delete_set_columns(&fk);
-                    let Some((child, child_doc)) = super::lock_referencing_child(
-                        engine,
-                        &ref_table,
-                        &child,
-                        &columns,
-                        &fk,
-                        &comparison,
-                        &expected,
+                    let Some((child, child_doc)) = engine.lock_referencing_child(
+                        ReferencingChildLock {
+                            ref_table: &ref_table,
+                            child: &child,
+                            lock_columns: &columns,
+                            foreign_key: &fk,
+                            comparison: &comparison,
+                            expected: &expected,
+                        },
+                        referential_actions,
                     )?
                     else {
                         continue;

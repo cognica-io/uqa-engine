@@ -630,24 +630,60 @@ pub(in crate::sql) fn run_insert_inner(
                 )?;
             }
             flush_prepared_fts_batch(engine, &mut fts_batch)?;
-            crate::sql::triggers::fire_after_row_trigger_events(engine, &after_row_events)?;
-            referential_actions.fire_after_statement_triggers(engine)?;
+            let insert_transition = insert_original_query
+                .then(|| {
+                    crate::sql::triggers::build_transition_tables(
+                        engine,
+                        &stmt.table,
+                        uqa_sql::ast::TriggerEvent::Insert,
+                        &[],
+                        &after_row_events,
+                    )
+                })
+                .transpose()?
+                .flatten();
+            let update_transition = conflict_update_columns
+                .as_deref()
+                .map(|columns| {
+                    crate::sql::triggers::build_transition_tables(
+                        engine,
+                        &stmt.table,
+                        uqa_sql::ast::TriggerEvent::Update,
+                        columns,
+                        &after_row_events,
+                    )
+                })
+                .transpose()?
+                .flatten();
+            let referential_transition =
+                referential_actions.transition_tables(engine, &after_row_events)?;
+            let mut transition_tables = [insert_transition.as_ref(), update_transition.as_ref()]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>();
+            transition_tables.extend(referential_transition.iter());
+            crate::sql::triggers::fire_after_row_trigger_events_with_transitions(
+                engine,
+                &after_row_events,
+                &transition_tables,
+            )?;
+            referential_actions.fire_after_statement_triggers(engine, &referential_transition)?;
             if let Some(columns) = conflict_update_columns.as_deref() {
-                crate::sql::triggers::fire_statement_triggers(
+                crate::sql::triggers::fire_after_statement_triggers(
                     engine,
                     &stmt.table,
-                    uqa_sql::ast::TriggerTiming::After,
                     uqa_sql::ast::TriggerEvent::Update,
                     columns,
+                    update_transition.as_ref(),
                 )?;
             }
             if insert_original_query {
-                crate::sql::triggers::fire_statement_triggers(
+                crate::sql::triggers::fire_after_statement_triggers(
                     engine,
                     &stmt.table,
-                    uqa_sql::ast::TriggerTiming::After,
                     uqa_sql::ast::TriggerEvent::Insert,
                     &[],
+                    insert_transition.as_ref(),
                 )?;
             }
             if !stmt.returning.is_empty() {
@@ -911,24 +947,60 @@ pub(in crate::sql) fn run_insert_inner(
         )?;
     }
     flush_prepared_fts_batch(engine, &mut fts_batch)?;
-    crate::sql::triggers::fire_after_row_trigger_events(engine, &after_row_events)?;
-    referential_actions.fire_after_statement_triggers(engine)?;
+    let insert_transition = insert_original_query
+        .then(|| {
+            crate::sql::triggers::build_transition_tables(
+                engine,
+                &stmt.table,
+                uqa_sql::ast::TriggerEvent::Insert,
+                &[],
+                &after_row_events,
+            )
+        })
+        .transpose()?
+        .flatten();
+    let update_transition = conflict_update_columns
+        .as_deref()
+        .map(|columns| {
+            crate::sql::triggers::build_transition_tables(
+                engine,
+                &stmt.table,
+                uqa_sql::ast::TriggerEvent::Update,
+                columns,
+                &after_row_events,
+            )
+        })
+        .transpose()?
+        .flatten();
+    let referential_transition =
+        referential_actions.transition_tables(engine, &after_row_events)?;
+    let mut transition_tables = [insert_transition.as_ref(), update_transition.as_ref()]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    transition_tables.extend(referential_transition.iter());
+    crate::sql::triggers::fire_after_row_trigger_events_with_transitions(
+        engine,
+        &after_row_events,
+        &transition_tables,
+    )?;
+    referential_actions.fire_after_statement_triggers(engine, &referential_transition)?;
     if let Some(columns) = conflict_update_columns.as_deref() {
-        crate::sql::triggers::fire_statement_triggers(
+        crate::sql::triggers::fire_after_statement_triggers(
             engine,
             &stmt.table,
-            uqa_sql::ast::TriggerTiming::After,
             uqa_sql::ast::TriggerEvent::Update,
             columns,
+            update_transition.as_ref(),
         )?;
     }
     if insert_original_query {
-        crate::sql::triggers::fire_statement_triggers(
+        crate::sql::triggers::fire_after_statement_triggers(
             engine,
             &stmt.table,
-            uqa_sql::ast::TriggerTiming::After,
             uqa_sql::ast::TriggerEvent::Insert,
             &[],
+            insert_transition.as_ref(),
         )?;
     }
     let rule_returning = rule_batch

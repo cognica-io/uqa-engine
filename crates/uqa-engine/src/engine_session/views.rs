@@ -247,6 +247,7 @@ impl Engine {
 
     fn bind_view_plan_for_create(&self, plan: &mut QueryPlan) -> Result<bool, SQLError> {
         let temporary_schema = self.temporary_schema_name();
+        let transition_relations = crate::sql::active_trigger_transition_relation_names();
         let mut uses_temporary_relation = false;
         bind_query_plan_relations(plan, &std::collections::BTreeSet::new(), &mut |reference| {
             // Catalog relations win for their supported spellings just
@@ -258,6 +259,17 @@ impl Engine {
             }
             if let Some(canonical) = crate::sql::resolve_age_label_relation_name(self, reference)? {
                 return Ok(canonical);
+            }
+            if RelationIdentity::parse_reference(reference)
+                .ok()
+                .is_some_and(|(schema, relation)| {
+                    schema.is_none() && transition_relations.contains(&relation)
+                })
+            {
+                return Err(SQLError::Routine {
+                    sqlstate: "0A000".into(),
+                    message: "transition tables cannot be referenced in a view definition".into(),
+                });
             }
             match self.try_resolve_relation_kind(reference).map_err(|error| {
                 SQLError::Internal(format!("resolve CREATE VIEW source `{reference}`: {error}"))

@@ -9,7 +9,8 @@
 use uqa_core::Value;
 use uqa_sql::ast::{
     ColumnType, CreateRule, CreateTrigger, Expr, FromClause, FunctionReturns, OnConflictAction,
-    RuleEvent, SelectStmt, Statement, TriggerEvent, TriggerTiming,
+    RuleEvent, SelectStmt, Statement, TableHierarchy, TriggerEvent, TriggerTiming,
+    TriggerTransitionRelation,
 };
 use uqa_sql::plpgsql::{bind_expr, ResolvedVariable, VariableResolver};
 use uqa_sql::SQLError;
@@ -740,6 +741,87 @@ fn validate_rule_action_reference_scopes(action: &Statement) -> Result<(), SQLEr
     }
 }
 
+fn validate_trigger_transition_relation(
+    definition: &CreateTrigger,
+    hierarchy: &TableHierarchy,
+    transition: &TriggerTransitionRelation,
+) -> Result<(), SQLError> {
+    if !transition.is_table {
+        return Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: "ROW variable naming in the REFERENCING clause is not supported".into(),
+        });
+    }
+    if definition.row && !hierarchy.parents.is_empty() {
+        return Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: if hierarchy.partition_bound.is_some() {
+                "ROW triggers with transition tables are not supported on partitions".into()
+            } else {
+                "ROW triggers with transition tables are not supported on inheritance children"
+                    .into()
+            },
+        });
+    }
+    if definition.timing != TriggerTiming::After {
+        return Err(SQLError::Routine {
+            sqlstate: "42P17".into(),
+            message: "transition table name can only be specified for an AFTER trigger".into(),
+        });
+    }
+    if definition.events.contains(&TriggerEvent::Truncate) {
+        return Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: "TRUNCATE triggers with transition tables are not supported".into(),
+        });
+    }
+    let mutation_events = definition
+        .events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event,
+                TriggerEvent::Insert | TriggerEvent::Update | TriggerEvent::Delete
+            )
+        })
+        .count();
+    if mutation_events != 1 {
+        return Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: "transition tables cannot be specified for triggers with more than one event"
+                .into(),
+        });
+    }
+    if !definition.update_columns.is_empty() {
+        return Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: "transition tables cannot be specified for triggers with column lists".into(),
+        });
+    }
+    let valid_event = definition.events.iter().any(|event| {
+        if transition.is_new {
+            matches!(event, TriggerEvent::Insert | TriggerEvent::Update)
+        } else {
+            matches!(event, TriggerEvent::Delete | TriggerEvent::Update)
+        }
+    });
+    if !valid_event {
+        return Err(SQLError::Routine {
+            sqlstate: "42P17".into(),
+            message: format!(
+                "{} TABLE can only be specified for {} trigger",
+                if transition.is_new { "NEW" } else { "OLD" },
+                if transition.is_new {
+                    "an INSERT or UPDATE"
+                } else {
+                    "a DELETE or UPDATE"
+                }
+            ),
+        });
+    }
+    Ok(())
+}
+
 impl Engine {
     pub(crate) fn resolve_rule_relation(&self, name: &str) -> Result<RelationIdentity, SQLError> {
         let candidates = self.relation_lookup_candidates(name).map_err(|error| {
@@ -1104,6 +1186,7 @@ impl Engine {
             .try_describe_table(&definition.table)
             .map_err(|error| SQLError::Internal(format!("read trigger columns: {error}")))?
             .ok_or_else(|| SQLError::UnknownTable(definition.table.clone()))?;
+        self.validate_trigger_transition_relations(definition, &relation)?;
         if definition.events.contains(&TriggerEvent::Truncate) && definition.row {
             return Err(SQLError::Routine {
                 sqlstate: "0A000".into(),
@@ -1138,6 +1221,54 @@ impl Engine {
             definition.when = Some(condition);
         }
         Ok(relation)
+    }
+
+    fn validate_trigger_transition_relations(
+        &self,
+        definition: &CreateTrigger,
+        relation: &RelationIdentity,
+    ) -> Result<(), SQLError> {
+        if definition.transition_relations.is_empty() {
+            return Ok(());
+        }
+        let hierarchy = self.loaded_table_hierarchy(relation).ok_or_else(|| {
+            SQLError::Internal(format!(
+                "trigger table `{}` disappeared during validation",
+                definition.table
+            ))
+        })?;
+        if definition.row && hierarchy.partition_spec.is_some() {
+            return Err(SQLError::Routine {
+                sqlstate: "0A000".into(),
+                message: format!("\"{}\" is a partitioned table", relation.name),
+            });
+        }
+        let mut old_table = None;
+        let mut new_table = None;
+        for transition in &definition.transition_relations {
+            validate_trigger_transition_relation(definition, &hierarchy, transition)?;
+            let duplicate = if transition.is_new {
+                new_table.replace(transition.name.as_str())
+            } else {
+                old_table.replace(transition.name.as_str())
+            };
+            if duplicate.is_some() {
+                return Err(SQLError::Routine {
+                    sqlstate: "42P17".into(),
+                    message: format!(
+                        "{} TABLE cannot be specified multiple times",
+                        if transition.is_new { "NEW" } else { "OLD" }
+                    ),
+                });
+            }
+        }
+        if old_table.is_some() && old_table == new_table {
+            return Err(SQLError::Routine {
+                sqlstate: "42P17".into(),
+                message: "OLD TABLE name and NEW TABLE name cannot be the same".into(),
+            });
+        }
+        Ok(())
     }
 
     fn validate_trigger_condition(

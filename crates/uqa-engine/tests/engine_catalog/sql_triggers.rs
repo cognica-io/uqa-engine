@@ -14,6 +14,8 @@ use uqa_engine::Engine;
 mod constraint;
 #[path = "sql_triggers/review_regressions.rs"]
 mod review_regressions;
+#[path = "sql_triggers/transition.rs"]
+mod transition;
 
 fn exec(engine: &Engine, sql: &str) -> uqa_engine::SQLResult {
     engine

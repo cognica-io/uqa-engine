@@ -785,8 +785,59 @@ pub(in crate::sql) fn run_merge_inner(
             }
         }
     }
-    crate::sql::triggers::fire_after_row_trigger_events(engine, &after_row_events)?;
-    referential_actions.fire_after_statement_triggers(engine)?;
+    let delete_transition = has_delete_action
+        .then(|| {
+            crate::sql::triggers::build_transition_tables(
+                engine,
+                &target_table,
+                uqa_sql::ast::TriggerEvent::Delete,
+                &[],
+                &after_row_events,
+            )
+        })
+        .transpose()?
+        .flatten();
+    let update_transition = has_update_action
+        .then(|| {
+            crate::sql::triggers::build_transition_tables(
+                engine,
+                &target_table,
+                uqa_sql::ast::TriggerEvent::Update,
+                &update_statement_columns,
+                &after_row_events,
+            )
+        })
+        .transpose()?
+        .flatten();
+    let insert_transition = has_insert_action
+        .then(|| {
+            crate::sql::triggers::build_transition_tables(
+                engine,
+                &target_table,
+                uqa_sql::ast::TriggerEvent::Insert,
+                &[],
+                &after_row_events,
+            )
+        })
+        .transpose()?
+        .flatten();
+    let referential_transition =
+        referential_actions.transition_tables(engine, &after_row_events)?;
+    let mut transition_tables = [
+        delete_transition.as_ref(),
+        update_transition.as_ref(),
+        insert_transition.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    transition_tables.extend(referential_transition.iter());
+    crate::sql::triggers::fire_after_row_trigger_events_with_transitions(
+        engine,
+        &after_row_events,
+        &transition_tables,
+    )?;
+    referential_actions.fire_after_statement_triggers(engine, &referential_transition)?;
     for (enabled, event, columns) in [
         (
             has_delete_action,
@@ -805,12 +856,18 @@ pub(in crate::sql) fn run_merge_inner(
         ),
     ] {
         if enabled {
-            crate::sql::triggers::fire_statement_triggers(
+            let transition_tables = match event {
+                uqa_sql::ast::TriggerEvent::Delete => delete_transition.as_ref(),
+                uqa_sql::ast::TriggerEvent::Update => update_transition.as_ref(),
+                uqa_sql::ast::TriggerEvent::Insert => insert_transition.as_ref(),
+                uqa_sql::ast::TriggerEvent::Truncate => None,
+            };
+            crate::sql::triggers::fire_after_statement_triggers(
                 engine,
                 &target_table,
-                uqa_sql::ast::TriggerTiming::After,
                 event,
                 columns,
+                transition_tables,
             )?;
         }
     }
