@@ -115,6 +115,8 @@ Each crate exposes exactly one integration-test executable. Additional integrati
 
 The 1,500-line Rust file check is a hard safety ceiling, not a design target. Split modules by ownership before they approach the ceiling when parsing, binding, planning, execution, persistence, or tests have separable responsibilities.
 
+[`0005-rust-workspace-refactoring.md`](0005-rust-workspace-refactoring.md) governs the active ownership refactoring, transition ratchet, capability boundaries, and final 1,000-line limit. Until that plan reaches its final gate, passing the 1,500-line emergency ceiling is not evidence that a module is adequately decomposed.
+
 When work starts on a confirmed gap governed by a living plan, record it there as incomplete before implementation and promote it only after its stated verification evidence passes; branch names and pull-request descriptions are not substitutes for repository planning state.
 
 During iteration, format first and run the smallest focused checks that cover the changed ownership boundary:
