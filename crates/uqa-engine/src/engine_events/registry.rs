@@ -179,6 +179,16 @@ impl Engine {
         let mut triggers = self.durable.triggers.write();
         let mut next = triggers.clone();
         let table_triggers = next.entry(relation).or_default();
+        if definition.or_replace
+            && table_triggers
+                .get(&definition.name)
+                .is_some_and(|trigger| trigger.definition.constraint)
+        {
+            return Err(SQLError::Routine {
+                sqlstate: "0A000".into(),
+                message: "CREATE OR REPLACE CONSTRAINT TRIGGER is not supported".into(),
+            });
+        }
         if table_triggers.contains_key(&definition.name) && !definition.or_replace {
             return Err(duplicate_object(
                 "trigger",
@@ -186,11 +196,18 @@ impl Engine {
                 &definition.table,
             ));
         }
+        let object_id = match table_triggers.get(&definition.name) {
+            Some(trigger) => trigger.object_id,
+            None => Some(new_trigger_object_id()?),
+        };
+        let constraint_name = definition.constraint.then(|| definition.name.clone());
         table_triggers.insert(
             definition.name.clone(),
             StoredTrigger {
                 definition,
                 enabled: EventEnableMode::Origin,
+                object_id,
+                constraint_name,
             },
         );
         self.persist_trigger_catalog_snapshot(&next)?;
@@ -275,7 +292,7 @@ impl Engine {
         let removed = next
             .get_mut(&relation)
             .and_then(|entries| entries.remove(&statement.name));
-        if removed.is_none() {
+        let Some(removed) = removed else {
             if statement.if_exists {
                 self.push_sql_notice(
                     "NOTICE",
@@ -287,13 +304,16 @@ impl Engine {
                 return Ok(());
             }
             return Err(undefined_object("trigger", &statement.name, &table));
-        }
+        };
         if next.get(&relation).is_some_and(BTreeMap::is_empty) {
             next.remove(&relation);
         }
         self.persist_trigger_catalog_snapshot(&next)?;
         *triggers = next;
         drop(triggers);
+        if removed.definition.constraint {
+            self.forget_constraint_trigger_events(&Self::constraint_trigger_identity(&removed)?);
+        }
         self.note_catalog_registry_changed();
         Ok(())
     }
@@ -309,10 +329,94 @@ impl Engine {
         let mut trigger = entries
             .remove(from)
             .ok_or_else(|| undefined_object("trigger", from, table))?;
+        let constraint_identity = trigger
+            .definition
+            .constraint
+            .then(|| Self::constraint_trigger_identity(&trigger))
+            .transpose()?;
         trigger.definition.name = to.to_string();
         entries.insert(to.to_string(), trigger);
         self.persist_trigger_catalog_snapshot(&next)?;
         *triggers = next;
+        drop(triggers);
+        if let Some(identity) = constraint_identity.as_ref() {
+            self.rename_pending_constraint_trigger(identity, to);
+        }
+        self.note_catalog_registry_changed();
+        Ok(())
+    }
+
+    pub(crate) fn constraint_trigger_by_constraint_name(
+        &self,
+        table: &str,
+        name: &str,
+    ) -> Result<Option<StoredTrigger>, SQLError> {
+        let relation = self.resolve_trigger_table(table)?;
+        Ok(self
+            .durable
+            .triggers
+            .read()
+            .get(&relation)
+            .into_iter()
+            .flat_map(BTreeMap::values)
+            .find(|trigger| {
+                trigger.definition.constraint
+                    && trigger
+                        .constraint_name
+                        .as_deref()
+                        .unwrap_or(&trigger.definition.name)
+                        == name
+            })
+            .cloned())
+    }
+
+    pub(crate) fn rename_trigger_constraint(
+        &self,
+        table: &str,
+        from: &str,
+        to: &str,
+    ) -> Result<(), SQLError> {
+        let relation = self.resolve_trigger_table(table)?;
+        if crate::sql::runtime_constraints(self)?
+            .iter()
+            .any(|constraint| {
+                constraint.identity.relation == relation && constraint.identity.name == to
+            })
+        {
+            return Err(SQLError::Routine {
+                sqlstate: "42710".into(),
+                message: format!(
+                    "constraint \"{to}\" for relation \"{}\" already exists",
+                    relation.name
+                ),
+            });
+        }
+        let mut triggers = self.durable.triggers.write();
+        let mut next = triggers.clone();
+        let entries = next.entry(relation.clone()).or_default();
+        let trigger = entries
+            .values_mut()
+            .find(|trigger| {
+                trigger.definition.constraint
+                    && trigger
+                        .constraint_name
+                        .as_deref()
+                        .unwrap_or(&trigger.definition.name)
+                        == from
+            })
+            .ok_or_else(|| SQLError::Routine {
+                sqlstate: "42704".into(),
+                message: format!(
+                    "constraint \"{from}\" of relation \"{}\" does not exist",
+                    relation.name
+                ),
+            })?;
+        let old_identity = Self::constraint_trigger_identity(trigger)?;
+        trigger.constraint_name = Some(to.to_string());
+        self.persist_trigger_catalog_snapshot(&next)?;
+        *triggers = next;
+        drop(triggers);
+        self.rename_constraint_trigger_identity(&old_identity, to);
         self.note_catalog_registry_changed();
         Ok(())
     }
@@ -342,4 +446,17 @@ impl Engine {
         self.note_catalog_registry_changed();
         Ok(())
     }
+}
+
+fn new_trigger_object_id() -> Result<[u8; 16], SQLError> {
+    let mut object_id = [0_u8; 16];
+    getrandom::fill(&mut object_id).map_err(|error| {
+        SQLError::Internal(format!(
+            "allocate constraint-trigger object identity: {error}"
+        ))
+    })?;
+    if object_id == [0; 16] {
+        object_id[15] = 1;
+    }
+    Ok(object_id)
 }

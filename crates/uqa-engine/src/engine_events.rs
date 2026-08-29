@@ -22,6 +22,10 @@ pub(crate) struct StoredTrigger {
     pub(crate) definition: CreateTrigger,
     #[serde(default)]
     pub(crate) enabled: EventEnableMode,
+    #[serde(default)]
+    pub(crate) object_id: Option<[u8; 16]>,
+    #[serde(default)]
+    pub(crate) constraint_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

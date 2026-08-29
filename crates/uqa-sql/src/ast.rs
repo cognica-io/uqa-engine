@@ -828,6 +828,10 @@ pub enum AlterTableAction {
         from: String,
         to: String,
     },
+    RenameConstraint {
+        from: String,
+        to: String,
+    },
     RenameRule {
         from: String,
         to: String,

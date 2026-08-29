@@ -10,6 +10,8 @@ use tempfile::TempDir;
 use uqa_core::Value;
 use uqa_engine::Engine;
 
+#[path = "sql_triggers/constraint.rs"]
+mod constraint;
 #[path = "sql_triggers/review_regressions.rs"]
 mod review_regressions;
 

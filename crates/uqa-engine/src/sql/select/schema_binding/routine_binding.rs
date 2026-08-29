@@ -375,7 +375,11 @@ impl SchemaScope {
                 let local = crate::sql::builtin_function_dispatch_name(name);
                 let input = if crate::operator_tree_bridge::is_operator_join_table_function(&local)
                 {
-                    operator_join_relation_schema(engine, relation.as_deref())?
+                    operator_join_relation_schema(
+                        engine,
+                        relation.as_deref(),
+                        self.catalog_tables_only,
+                    )?
                 } else {
                     outer.cloned().unwrap_or_default()
                 };
@@ -391,7 +395,11 @@ impl SchemaScope {
                     let local = crate::sql::builtin_function_dispatch_name(&function.name);
                     let input =
                         if crate::operator_tree_bridge::is_operator_join_table_function(&local) {
-                            operator_join_relation_schema(engine, function.relation.as_deref())?
+                            operator_join_relation_schema(
+                                engine,
+                                function.relation.as_deref(),
+                                self.catalog_tables_only,
+                            )?
                         } else {
                             outer.cloned().unwrap_or_default()
                         };

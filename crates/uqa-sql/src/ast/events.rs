@@ -24,12 +24,37 @@ pub enum TriggerEvent {
     Truncate,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TriggerDeferrability {
+    #[default]
+    NotDeferrable,
+    InitiallyImmediate,
+    InitiallyDeferred,
+}
+
+impl TriggerDeferrability {
+    pub const fn is_deferrable(self) -> bool {
+        !matches!(self, Self::NotDeferrable)
+    }
+
+    pub const fn is_initially_deferred(self) -> bool {
+        matches!(self, Self::InitiallyDeferred)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateTrigger {
     pub name: String,
     pub table: String,
     pub function: String,
     pub arguments: Vec<String>,
+    #[serde(default)]
+    pub constraint: bool,
+    #[serde(default)]
+    pub referenced_table: Option<String>,
+    #[serde(default)]
+    pub deferrability: TriggerDeferrability,
     pub row: bool,
     pub timing: TriggerTiming,
     pub events: Vec<TriggerEvent>,

@@ -19,6 +19,12 @@ fn trigger_statements_preserve_postgresql_event_and_lifecycle_shape() {
     assert_eq!(trigger.table, "app.items");
     assert_eq!(trigger.function, "app.normalize");
     assert_eq!(trigger.arguments, ["first", "second"]);
+    assert!(!trigger.constraint);
+    assert_eq!(trigger.referenced_table, None);
+    assert_eq!(
+        trigger.deferrability,
+        crate::ast::TriggerDeferrability::NotDeferrable
+    );
     assert!(trigger.row);
     assert!(trigger.or_replace);
     assert_eq!(trigger.timing, crate::ast::TriggerTiming::Before);
@@ -53,6 +59,17 @@ fn trigger_statements_preserve_postgresql_event_and_lifecycle_shape() {
             if from == "normalize_before" && to == "normalized_before"
     ));
 
+    let Statement::AlterTable(rename_constraint) =
+        first("ALTER TABLE app.items RENAME CONSTRAINT guarded TO guarded_v2")
+    else {
+        panic!("expected ALTER TABLE RENAME CONSTRAINT");
+    };
+    assert!(matches!(
+        rename_constraint.actions.as_slice(),
+        [AlterTableAction::RenameConstraint { from, to }]
+            if from == "guarded" && to == "guarded_v2"
+    ));
+
     let Statement::AlterTable(enable) =
         first("ALTER TABLE app.items ENABLE ALWAYS TRIGGER normalized_before")
     else {
@@ -69,9 +86,32 @@ fn trigger_statements_preserve_postgresql_event_and_lifecycle_shape() {
 }
 
 #[test]
+fn constraint_trigger_shape_is_preserved_for_execution_validation() {
+    let Statement::CreateTrigger(trigger) = first(
+        "CREATE CONSTRAINT TRIGGER constrained AFTER INSERT OR UPDATE ON app.items FROM app.parents DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION app.probe()",
+    ) else {
+        panic!("expected CREATE CONSTRAINT TRIGGER");
+    };
+    assert!(trigger.constraint);
+    assert_eq!(trigger.referenced_table.as_deref(), Some("app.parents"));
+    assert_eq!(
+        trigger.deferrability,
+        crate::ast::TriggerDeferrability::InitiallyDeferred
+    );
+    assert!(trigger.row);
+    assert_eq!(trigger.timing, crate::ast::TriggerTiming::After);
+    assert_eq!(
+        trigger.events,
+        [
+            crate::ast::TriggerEvent::Insert,
+            crate::ast::TriggerEvent::Update,
+        ]
+    );
+}
+
+#[test]
 fn unsupported_advanced_trigger_shapes_fail_during_compilation() {
     for sql in [
-        "CREATE CONSTRAINT TRIGGER constrained AFTER INSERT ON items DEFERRABLE FOR EACH ROW EXECUTE FUNCTION probe()",
         "CREATE TRIGGER transitioning AFTER UPDATE ON items REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION probe()",
         "CREATE TRIGGER view_instead INSTEAD OF INSERT ON item_view FOR EACH ROW EXECUTE FUNCTION probe()",
     ] {

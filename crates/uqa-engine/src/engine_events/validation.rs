@@ -1069,8 +1069,31 @@ impl Engine {
         &self,
         definition: &mut CreateTrigger,
     ) -> Result<RelationIdentity, SQLError> {
+        if definition.constraint && definition.or_replace {
+            return Err(SQLError::Routine {
+                sqlstate: "0A000".into(),
+                message: "CREATE OR REPLACE CONSTRAINT TRIGGER is not supported".into(),
+            });
+        }
+        if definition.constraint && (!definition.row || definition.timing != TriggerTiming::After) {
+            return Err(SQLError::Routine {
+                sqlstate: "0A000".into(),
+                message: "constraint triggers must be AFTER ROW triggers".into(),
+            });
+        }
+        if !definition.constraint
+            && (definition.deferrability.is_deferrable() || definition.referenced_table.is_some())
+        {
+            return Err(SQLError::Internal(
+                "ordinary trigger retained constraint-only metadata".into(),
+            ));
+        }
         let relation = self.resolve_trigger_table(&definition.table)?;
         definition.table = relation.qualified_name();
+        if let Some(referenced_table) = definition.referenced_table.as_mut() {
+            let referenced = self.resolve_trigger_table(referenced_table)?;
+            *referenced_table = referenced.qualified_name();
+        }
         definition.function.clone_from(
             &self
                 .resolve_trigger_function(&definition.function)?

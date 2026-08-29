@@ -22,6 +22,24 @@ pub(super) fn drop_constraint(
         .try_resolve_table_name(table)
         .map_err(|error| ddl_storage_error("DROP CONSTRAINT relation lookup", error))?
         .unwrap_or_else(|| table.to_string());
+    if let Some(trigger) = engine.constraint_trigger_by_constraint_name(&table, name)? {
+        let relation = crate::RelationIdentity::from_legacy_name(&table).map_err(|error| {
+            SQLError::Internal(format!(
+                "decode constraint-trigger relation `{table}`: {error}"
+            ))
+        })?;
+        return Err(constraint_error(
+            "2BP01",
+            format!(
+                "cannot drop constraint {name} on table {} because trigger {} on table {} requires it\nHINT: You can drop trigger {} on table {} instead.",
+                relation.name,
+                trigger.definition.name,
+                relation.name,
+                trigger.definition.name,
+                relation.name
+            ),
+        ));
+    }
     drop_constraint_group(engine, &table, name, if_exists, cascade, true)
 }
 

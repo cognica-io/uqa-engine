@@ -21,12 +21,45 @@ impl Engine {
     ) -> StorageBackendResult<()> {
         let mut triggers = self.durable.triggers.write();
         let mut rules = self.durable.rules.write();
-        if !triggers.contains_key(relation) && !rules.contains_key(relation) {
+        let qualified = relation.qualified_name();
+        let referenced_by_trigger = triggers.values().any(|entries| {
+            entries.values().any(|trigger| {
+                trigger.definition.referenced_table.as_deref() == Some(qualified.as_str())
+            })
+        });
+        if !triggers.contains_key(relation)
+            && !rules.contains_key(relation)
+            && !referenced_by_trigger
+        {
             return Ok(());
         }
         let mut next_triggers = triggers.clone();
         let mut next_rules = rules.clone();
+        let mut removed_constraint_identities = Vec::new();
+        for (trigger_relation, entries) in triggers.iter() {
+            for trigger in entries.values() {
+                if trigger.definition.constraint
+                    && (trigger_relation == relation
+                        || trigger.definition.referenced_table.as_deref()
+                            == Some(qualified.as_str()))
+                {
+                    removed_constraint_identities.push(
+                        Self::constraint_trigger_identity(trigger).map_err(|error| {
+                            StorageBackendError::Other(format!(
+                                "resolve dropped constraint-trigger identity: {error}"
+                            ))
+                        })?,
+                    );
+                }
+            }
+        }
         next_triggers.remove(relation);
+        for entries in next_triggers.values_mut() {
+            entries.retain(|_, trigger| {
+                trigger.definition.referenced_table.as_deref() != Some(qualified.as_str())
+            });
+        }
+        next_triggers.retain(|_, entries| !entries.is_empty());
         next_rules.remove(relation);
         self.persist_trigger_catalog_snapshot(&next_triggers)
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
@@ -36,6 +69,9 @@ impl Engine {
         *rules = next_rules;
         drop(rules);
         drop(triggers);
+        for identity in &removed_constraint_identities {
+            self.forget_constraint_trigger_events(identity);
+        }
         self.note_catalog_registry_changed();
         Ok(())
     }
@@ -47,16 +83,30 @@ impl Engine {
     ) -> StorageBackendResult<()> {
         let mut triggers = self.durable.triggers.write();
         let mut rules = self.durable.rules.write();
-        if !triggers.contains_key(from) && !rules.contains_key(from) {
+        let from_name = from.qualified_name();
+        let to_name = to.qualified_name();
+        let referenced_by_trigger = triggers.values().any(|entries| {
+            entries.values().any(|trigger| {
+                trigger.definition.referenced_table.as_deref() == Some(from_name.as_str())
+            })
+        });
+        if !triggers.contains_key(from) && !rules.contains_key(from) && !referenced_by_trigger {
             return Ok(());
         }
         let mut next_triggers = triggers.clone();
         let mut next_rules = rules.clone();
         if let Some(mut entries) = next_triggers.remove(from) {
             for trigger in entries.values_mut() {
-                trigger.definition.table = to.qualified_name();
+                trigger.definition.table.clone_from(&to_name);
             }
             next_triggers.insert(to.clone(), entries);
+        }
+        for entries in next_triggers.values_mut() {
+            for trigger in entries.values_mut() {
+                if trigger.definition.referenced_table.as_deref() == Some(from_name.as_str()) {
+                    trigger.definition.referenced_table = Some(to_name.clone());
+                }
+            }
         }
         if let Some(mut entries) = next_rules.remove(from) {
             for rule in entries.values_mut() {

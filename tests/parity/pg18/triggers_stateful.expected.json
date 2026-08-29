@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "b3a966639f95720b0dab917ff4941052a9d114a6feb469caf475d7914204081f",
+  "fixture_sha256": "077c4a01e1fed074914789da4fdabb32c6d727589d6d633bd199c41cccf9f327",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -254,6 +254,205 @@
       "rows": [
         [
           "1"
+        ]
+      ]
+    },
+    {
+      "name": "create_constraint_trigger_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "create_deferred_constraint_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "constraint_trigger_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t",
+          "t",
+          "t",
+          "29",
+          "t",
+          "t",
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "constraint_trigger_definition",
+      "kind": "rows",
+      "rows": [
+        [
+          "CREATE CONSTRAINT TRIGGER constraint_guard AFTER INSERT OR DELETE OR UPDATE ON constraint_trigger_items FROM constraint_trigger_reference DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION constraint_trigger_probe()"
+        ]
+      ]
+    },
+    {
+      "name": "deferred_constraint_trigger_commit",
+      "kind": "ok"
+    },
+    {
+      "name": "deferred_constraint_trigger_commit_log",
+      "kind": "rows",
+      "rows": [
+        [
+          "constraint_guard:INSERT:NULL:10"
+        ]
+      ]
+    },
+    {
+      "name": "deferred_constraint_trigger_savepoint_rollback",
+      "kind": "ok"
+    },
+    {
+      "name": "deferred_constraint_trigger_savepoint_log_unchanged",
+      "kind": "rows",
+      "rows": [
+        [
+          "constraint_guard:INSERT:NULL:10"
+        ]
+      ]
+    },
+    {
+      "name": "constraint_trigger_retroactive_immediate",
+      "kind": "ok"
+    },
+    {
+      "name": "constraint_trigger_immediate_mode_log",
+      "kind": "rows",
+      "rows": [
+        [
+          "constraint_guard:INSERT:NULL:10"
+        ],
+        [
+          "constraint_guard:INSERT:NULL:20"
+        ],
+        [
+          "constraint_guard:UPDATE:20:21"
+        ],
+        [
+          "constraint_guard:DELETE:21:NULL"
+        ]
+      ]
+    },
+    {
+      "name": "constraint_trigger_pending_trigger_rename",
+      "kind": "ok"
+    },
+    {
+      "name": "constraint_trigger_rename_uses_new_tg_name",
+      "kind": "rows",
+      "rows": [
+        [
+          "renamed_constraint_trigger:INSERT:NULL:30"
+        ]
+      ]
+    },
+    {
+      "name": "rename_constraint_trigger_constraint",
+      "kind": "ok"
+    },
+    {
+      "name": "independent_trigger_and_constraint_names",
+      "kind": "rows",
+      "rows": [
+        [
+          "renamed_constraint_trigger",
+          "renamed_constraint",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "constraint_trigger_constraint_drop_rejected",
+      "kind": "error",
+      "sqlstate": "2BP01"
+    },
+    {
+      "name": "create_partition_constraint_trigger_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "partition_constraint_trigger_clone_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "partition_constraint_items",
+          "f",
+          "t",
+          "t"
+        ],
+        [
+          "partition_constraint_items_low",
+          "t",
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "partition_constraint_trigger_executes_on_leaf",
+      "kind": "ok"
+    },
+    {
+      "name": "partition_constraint_trigger_leaf_context",
+      "kind": "rows",
+      "rows": [
+        [
+          "partition_constraint_guard:INSERT:NULL:100"
+        ]
+      ]
+    },
+    {
+      "name": "create_failing_constraint_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "failing_constraint_trigger_aborts_commit",
+      "kind": "error",
+      "sqlstate": "P0001"
+    },
+    {
+      "name": "failing_constraint_trigger_rolls_back_row",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "drop_constraint_trigger_reference",
+      "kind": "ok"
+    },
+    {
+      "name": "referenced_constraint_trigger_removed",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_pending_referenced_constraint_trigger_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "drop_reference_cancels_pending_constraint_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "dropped_reference_cancels_event_and_trigger",
+      "kind": "rows",
+      "rows": [
+        [
+          "0",
+          "0"
         ]
       ]
     }

@@ -238,45 +238,108 @@ impl Engine {
             return Ok(());
         }
 
-        let pending_checks = {
+        let (pending_checks, pending_trigger_constraints) = {
             let stack = self.session.transactions.lock();
             let frame = stack.last().ok_or_else(|| {
                 SQLError::Internal("SET CONSTRAINTS lost its transaction frame".into())
             })?;
-            frame.deferred_foreign_key_checks.clone()
+            (
+                frame.deferred_foreign_key_checks.clone(),
+                frame
+                    .deferred_constraint_trigger_events
+                    .iter()
+                    .map(|event| event.constraint.clone())
+                    .collect::<Vec<_>>(),
+            )
         };
         if !deferred && requested.is_empty() {
             targets.extend(pending_checks.iter().map(|check| check.constraint.clone()));
-        }
-        if !deferred && !pending_checks.is_empty() {
-            crate::sql::dml::validate_deferred_foreign_key_checks(
-                self,
-                &pending_checks,
-                Some(&targets),
-            )?;
+            targets.extend(pending_trigger_constraints);
         }
 
-        let mut stack = self.session.transactions.lock();
-        let frame = stack.last_mut().ok_or_else(|| {
-            SQLError::Internal("SET CONSTRAINTS lost its transaction frame".into())
-        })?;
-        if !deferred {
-            frame.deferred_foreign_key_checks.retain(|check| {
-                !targets
-                    .iter()
-                    .any(|target| constraint_identities_match(target, &check.constraint))
-            });
+        {
+            let mut stack = self.session.transactions.lock();
+            let frame = stack.last_mut().ok_or_else(|| {
+                SQLError::Internal("SET CONSTRAINTS lost its transaction frame".into())
+            })?;
+            if requested.is_empty() {
+                frame.constraint_modes.named.clear();
+                frame.constraint_modes.all = Some(deferred);
+            } else {
+                for target in &targets {
+                    frame
+                        .constraint_modes
+                        .named
+                        .retain(|identity, _| !constraint_identities_match(identity, target));
+                    frame
+                        .constraint_modes
+                        .named
+                        .insert(target.clone(), deferred);
+                }
+            }
         }
-        if requested.is_empty() {
-            frame.constraint_modes.named.clear();
-            frame.constraint_modes.all = Some(deferred);
-        } else {
-            for target in targets {
-                frame
-                    .constraint_modes
-                    .named
-                    .retain(|identity, _| !constraint_identities_match(identity, &target));
-                frame.constraint_modes.named.insert(target, deferred);
+        if deferred {
+            return Ok(());
+        }
+
+        self.fire_immediate_constraint_work(&targets)
+    }
+
+    fn fire_immediate_constraint_work(
+        &self,
+        targets: &BTreeSet<ConstraintIdentity>,
+    ) -> Result<(), SQLError> {
+        loop {
+            let (checks, events) = {
+                let mut stack = self.session.transactions.lock();
+                let frame = stack.last_mut().ok_or_else(|| {
+                    SQLError::Internal("SET CONSTRAINTS lost its transaction frame".into())
+                })?;
+                let checks = frame
+                    .deferred_foreign_key_checks
+                    .iter()
+                    .filter(|check| {
+                        targets
+                            .iter()
+                            .any(|target| constraint_identities_match(target, &check.constraint))
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let mut events = Vec::new();
+                frame.deferred_constraint_trigger_events.retain(|event| {
+                    if targets
+                        .iter()
+                        .any(|target| constraint_identities_match(target, &event.constraint))
+                    {
+                        events.push(event.clone());
+                        false
+                    } else {
+                        true
+                    }
+                });
+                (checks, events)
+            };
+            if checks.is_empty() && events.is_empty() {
+                break;
+            }
+            if !checks.is_empty() {
+                crate::sql::dml::validate_deferred_foreign_key_checks(
+                    self,
+                    &checks,
+                    Some(targets),
+                )?;
+                let mut stack = self.session.transactions.lock();
+                let frame = stack.last_mut().ok_or_else(|| {
+                    SQLError::Internal("SET CONSTRAINTS lost its transaction frame".into())
+                })?;
+                frame.deferred_foreign_key_checks.retain(|check| {
+                    !targets
+                        .iter()
+                        .any(|target| constraint_identities_match(target, &check.constraint))
+                });
+            }
+            for event in &events {
+                crate::sql::fire_deferred_constraint_trigger_event(self, event)?;
             }
         }
         Ok(())
@@ -301,6 +364,59 @@ impl Engine {
                     foreign_key.initially_deferred,
                 )
             }))
+    }
+
+    pub(crate) fn constraint_trigger_identity(
+        trigger: &crate::engine_events::StoredTrigger,
+    ) -> Result<ConstraintIdentity, SQLError> {
+        if !trigger.definition.constraint {
+            return Err(SQLError::Internal(format!(
+                "ordinary trigger `{}` requested a constraint identity",
+                trigger.definition.name
+            )));
+        }
+        let relation =
+            RelationIdentity::from_legacy_name(&trigger.definition.table).map_err(|error| {
+                SQLError::Internal(format!(
+                    "decode constraint-trigger relation `{}`: {error}",
+                    trigger.definition.table
+                ))
+            })?;
+        Ok(ConstraintIdentity {
+            relation,
+            name: trigger
+                .constraint_name
+                .clone()
+                .unwrap_or_else(|| trigger.definition.name.clone()),
+            object_id: trigger.object_id,
+        })
+    }
+
+    pub(crate) fn constraint_trigger_is_deferred(
+        &self,
+        trigger: &crate::engine_events::StoredTrigger,
+    ) -> Result<bool, SQLError> {
+        if !trigger.definition.constraint || !trigger.definition.deferrability.is_deferrable() {
+            return Ok(false);
+        }
+        let identity = Self::constraint_trigger_identity(trigger)?;
+        let initially_deferred = trigger.definition.deferrability.is_initially_deferred();
+        let stack = self.session.transactions.lock();
+        Ok(stack.last().map_or(initially_deferred, |frame| {
+            constraint_is_deferred(&frame.constraint_modes, &identity, initially_deferred)
+        }))
+    }
+
+    pub(crate) fn defer_constraint_trigger_event(
+        &self,
+        event: crate::sql::DeferredConstraintTriggerEvent,
+    ) -> Result<(), SQLError> {
+        let mut stack = self.session.transactions.lock();
+        let frame = stack.last_mut().ok_or_else(|| {
+            SQLError::Internal("deferred constraint trigger outside a transaction".into())
+        })?;
+        frame.deferred_constraint_trigger_events.push(event);
+        Ok(())
     }
 
     pub(crate) fn foreign_key_constraint_identity(
@@ -361,6 +477,25 @@ impl Engine {
                 }
             }
         }
+        let from_name = from.qualified_name();
+        let to_name = to.qualified_name();
+        for event in &mut frame.deferred_constraint_trigger_events {
+            if event.constraint.relation == *from {
+                event.constraint.relation = to.clone();
+            }
+            if event.firing_relation == *from {
+                event.firing_relation = to.clone();
+            }
+            if event.table == from_name {
+                event.table.clone_from(&to_name);
+            }
+            if event.trigger.definition.table == from_name {
+                event.trigger.definition.table.clone_from(&to_name);
+            }
+            if event.trigger.definition.referenced_table.as_deref() == Some(from_name.as_str()) {
+                event.trigger.definition.referenced_table = Some(to_name.clone());
+            }
+        }
     }
 
     pub(crate) fn prune_constraint_modes(&self) -> Result<(), SQLError> {
@@ -412,6 +547,31 @@ impl Engine {
                 }
                 true
             });
+            frame
+                .deferred_constraint_trigger_events
+                .retain_mut(|event| {
+                    let Some(current) =
+                        find_live_constraint_identity(&live, &live_relations, &event.constraint)
+                    else {
+                        return false;
+                    };
+                    let previous_relation = event.constraint.relation.clone();
+                    event.constraint = current.clone();
+                    if previous_relation != current.relation {
+                        let previous_name = previous_relation.qualified_name();
+                        let current_name = current.relation.qualified_name();
+                        if event.firing_relation == previous_relation {
+                            event.firing_relation = current.relation.clone();
+                        }
+                        if event.table == previous_name {
+                            event.table.clone_from(&current_name);
+                        }
+                        if event.trigger.definition.table == previous_name {
+                            event.trigger.definition.table.clone_from(&current_name);
+                        }
+                    }
+                    true
+                });
         }
         Ok(())
     }
@@ -425,6 +585,64 @@ impl Engine {
         }
     }
 
+    pub(crate) fn forget_constraint_trigger_events(&self, identity: &ConstraintIdentity) {
+        if let Some(frame) = self.session.transactions.lock().last_mut() {
+            frame
+                .constraint_modes
+                .named
+                .retain(|candidate, _| !constraint_identities_match(candidate, identity));
+            frame
+                .deferred_constraint_trigger_events
+                .retain(|event| !constraint_identities_match(&event.constraint, identity));
+        }
+    }
+
+    pub(crate) fn rename_pending_constraint_trigger(
+        &self,
+        identity: &ConstraintIdentity,
+        trigger_name: &str,
+    ) {
+        if let Some(frame) = self.session.transactions.lock().last_mut() {
+            for event in &mut frame.deferred_constraint_trigger_events {
+                if constraint_identities_match(&event.constraint, identity) {
+                    event.trigger.definition.name = trigger_name.to_string();
+                }
+            }
+        }
+    }
+
+    pub(crate) fn rename_constraint_trigger_identity(
+        &self,
+        identity: &ConstraintIdentity,
+        constraint_name: &str,
+    ) {
+        if let Some(frame) = self.session.transactions.lock().last_mut() {
+            let moved = frame
+                .constraint_modes
+                .named
+                .iter()
+                .find(|(candidate, _)| constraint_identities_match(candidate, identity))
+                .map(|(candidate, deferred)| (candidate.clone(), *deferred));
+            if let Some((old, deferred)) = moved {
+                frame.constraint_modes.named.remove(&old);
+                frame.constraint_modes.named.insert(
+                    ConstraintIdentity {
+                        relation: old.relation,
+                        name: constraint_name.to_string(),
+                        object_id: old.object_id,
+                    },
+                    deferred,
+                );
+            }
+            for event in &mut frame.deferred_constraint_trigger_events {
+                if constraint_identities_match(&event.constraint, identity) {
+                    event.constraint.name = constraint_name.to_string();
+                    event.trigger.constraint_name = Some(constraint_name.to_string());
+                }
+            }
+        }
+    }
+
     pub(crate) fn relation_has_pending_trigger_events(&self, relation: &RelationIdentity) -> bool {
         self.session
             .transactions
@@ -435,6 +653,13 @@ impl Engine {
                     .deferred_foreign_key_checks
                     .iter()
                     .any(|check| check.firing_relation == *relation)
+                    || frame
+                        .deferred_constraint_trigger_events
+                        .iter()
+                        .any(|event| {
+                            event.constraint.relation == *relation
+                                || event.firing_relation == *relation
+                        })
             })
     }
 
@@ -470,23 +695,35 @@ impl Engine {
                     && check.firing_relation != *relation
                     && check.row.is_none_or(|row| row.table != table)
             });
+            frame.deferred_constraint_trigger_events.retain(|event| {
+                event.constraint.relation != *relation && event.firing_relation != *relation
+            });
         }
     }
 
     pub(super) fn validate_deferred_constraints_before_outer_commit(&self) -> Result<(), SQLError> {
-        let pending_checks = {
-            let stack = self.session.transactions.lock();
-            let frame = stack
-                .last()
-                .ok_or_else(|| SQLError::Internal("COMMIT without an open transaction".into()))?;
-            frame.deferred_foreign_key_checks.clone()
-        };
-        if pending_checks.is_empty() {
-            return Ok(());
-        }
-        if let Err(validation_error) =
-            crate::sql::dml::validate_deferred_foreign_key_checks(self, &pending_checks, None)
-        {
+        let result = (|| loop {
+            let (pending_checks, pending_events) = {
+                let mut stack = self.session.transactions.lock();
+                let frame = stack.last_mut().ok_or_else(|| {
+                    SQLError::Internal("COMMIT without an open transaction".into())
+                })?;
+                (
+                    std::mem::take(&mut frame.deferred_foreign_key_checks),
+                    std::mem::take(&mut frame.deferred_constraint_trigger_events),
+                )
+            };
+            if pending_checks.is_empty() && pending_events.is_empty() {
+                return Ok(());
+            }
+            if !pending_checks.is_empty() {
+                crate::sql::dml::validate_deferred_foreign_key_checks(self, &pending_checks, None)?;
+            }
+            for event in &pending_events {
+                crate::sql::fire_deferred_constraint_trigger_event(self, event)?;
+            }
+        })();
+        if let Err(validation_error) = result {
             let mut stack = self.session.transactions.lock();
             return Err(match self.rollback_transaction_frame(&mut stack) {
                 Ok(()) => validation_error,

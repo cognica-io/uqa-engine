@@ -19,8 +19,8 @@ use crate::engine_events::{StoredRule, StoredTrigger};
 use crate::{Engine, RelationIdentity};
 
 use super::helpers::{
-    bool_value, catalog_usize, int_value, relation_oid, row, schema_expr_text, split_schema_name,
-    stable_oid, str_value,
+    bool_value, catalog_usize, int_value, relation_oid, row, schema_expr_text, schema_oid,
+    split_schema_name, stable_oid, str_value,
 };
 use super::pg_catalog::table_relation_oid;
 use super::pg_proc::user_routine_catalog_oid;
@@ -32,11 +32,53 @@ const TRIGGER_TYPE_DELETE: i64 = 8;
 const TRIGGER_TYPE_UPDATE: i64 = 16;
 const TRIGGER_TYPE_TRUNCATE: i64 = 32;
 
-pub(super) fn trigger_catalog_oid(trigger: &StoredTrigger) -> i64 {
-    stable_oid(
-        "trigger",
-        &format!("{}.{}", trigger.definition.table, trigger.definition.name),
-    )
+pub(super) fn trigger_catalog_oid(
+    engine: &Engine,
+    trigger: &StoredTrigger,
+) -> Result<i64, SQLError> {
+    let identity = if let Some(object_id) = trigger.object_id {
+        format!(
+            "{}:{}",
+            hex_object_id(object_id),
+            table_relation_oid(engine, &trigger.definition.table)?
+        )
+    } else {
+        format!("{}.{}", trigger.definition.table, trigger.definition.name)
+    };
+    Ok(stable_oid("trigger", &identity))
+}
+
+pub(super) fn trigger_constraint_catalog_oid(
+    engine: &Engine,
+    trigger: &StoredTrigger,
+) -> Result<i64, SQLError> {
+    if !trigger.definition.constraint {
+        return Ok(0);
+    }
+    let constraint_name = trigger
+        .constraint_name
+        .as_deref()
+        .unwrap_or(&trigger.definition.name);
+    let identity = if let Some(object_id) = trigger.object_id {
+        format!(
+            "{}:{}",
+            hex_object_id(object_id),
+            table_relation_oid(engine, &trigger.definition.table)?
+        )
+    } else {
+        format!("{}.{}", trigger.definition.table, constraint_name)
+    };
+    Ok(stable_oid("constraint", &identity))
+}
+
+fn hex_object_id(object_id: [u8; 16]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(32);
+    for byte in object_id {
+        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    encoded
 }
 
 pub(super) fn rule_catalog_oid(rule: &StoredRule) -> i64 {
@@ -53,7 +95,7 @@ pub(super) fn build_pg_trigger(engine: &Engine) -> Result<Vec<ResultRow>, SQLErr
         .collect()
 }
 
-fn catalog_triggers(engine: &Engine) -> Result<Vec<(StoredTrigger, i64)>, SQLError> {
+pub(super) fn catalog_triggers(engine: &Engine) -> Result<Vec<(StoredTrigger, i64)>, SQLError> {
     let originals = engine.list_triggers();
     let mut catalog = originals
         .iter()
@@ -86,11 +128,73 @@ fn catalog_triggers(engine: &Engine) -> Result<Vec<(StoredTrigger, i64)>, SQLErr
                 parent_clone.definition.table = parent.qualified_name();
                 catalog
                     .entry((table.clone(), clone.definition.name.clone()))
-                    .or_insert((clone, trigger_catalog_oid(&parent_clone)));
+                    .or_insert((clone, trigger_catalog_oid(engine, &parent_clone)?));
             }
         }
     }
     Ok(catalog.into_values().collect())
+}
+
+pub(super) fn build_trigger_constraints(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+    let mut rows = Vec::new();
+    for (trigger, _) in catalog_triggers(engine)? {
+        if !trigger.definition.constraint {
+            continue;
+        }
+        let definition = &trigger.definition;
+        let constraint_name = trigger
+            .constraint_name
+            .as_deref()
+            .unwrap_or(&definition.name);
+        let relation = RelationIdentity::from_legacy_name(&definition.table).map_err(|error| {
+            SQLError::Internal(format!(
+                "decode constraint-trigger relation `{}`: {error}",
+                definition.table
+            ))
+        })?;
+        rows.push(row([
+            (
+                "oid",
+                int_value(trigger_constraint_catalog_oid(engine, &trigger)?),
+            ),
+            ("conname", str_value(constraint_name)),
+            ("connamespace", int_value(schema_oid(&relation.schema))),
+            ("contype", str_value("t")),
+            (
+                "condeferrable",
+                bool_value(definition.deferrability.is_deferrable()),
+            ),
+            (
+                "condeferred",
+                bool_value(definition.deferrability.is_initially_deferred()),
+            ),
+            ("conenforced", bool_value(true)),
+            ("convalidated", bool_value(true)),
+            (
+                "conrelid",
+                int_value(table_relation_oid(engine, &definition.table)?),
+            ),
+            ("contypid", int_value(0)),
+            ("conindid", int_value(0)),
+            ("conparentid", int_value(0)),
+            ("confrelid", int_value(0)),
+            ("confupdtype", str_value(" ")),
+            ("confdeltype", str_value(" ")),
+            ("confmatchtype", str_value(" ")),
+            ("conislocal", bool_value(true)),
+            ("coninhcount", int_value(0)),
+            ("connoinherit", bool_value(true)),
+            ("conperiod", bool_value(false)),
+            ("conkey", Value::Null),
+            ("confkey", Value::Null),
+            ("conpfeqop", Value::Null),
+            ("conppeqop", Value::Null),
+            ("conffeqop", Value::Null),
+            ("conexclop", Value::Null),
+            ("conbin", Value::Null),
+        ]));
+    }
+    Ok(rows)
 }
 
 fn pg_trigger_row(
@@ -125,8 +229,15 @@ fn pg_trigger_row(
         arguments.extend_from_slice(argument.as_bytes());
         arguments.push(0);
     }
+    let constraint_oid = trigger_constraint_catalog_oid(engine, &trigger)?;
+    let referenced_relation_oid = definition
+        .referenced_table
+        .as_deref()
+        .map(|table| table_relation_oid(engine, table))
+        .transpose()?
+        .unwrap_or(0);
     Ok(row([
-        ("oid", int_value(trigger_catalog_oid(&trigger))),
+        ("oid", int_value(trigger_catalog_oid(engine, &trigger)?)),
         (
             "tgrelid",
             int_value(table_relation_oid(engine, &definition.table)?),
@@ -137,11 +248,17 @@ fn pg_trigger_row(
         ("tgtype", int_value(trigger_type(definition))),
         ("tgenabled", str_value(trigger.enabled.catalog_code())),
         ("tgisinternal", bool_value(false)),
-        ("tgconstrrelid", int_value(0)),
+        ("tgconstrrelid", int_value(referenced_relation_oid)),
         ("tgconstrindid", int_value(0)),
-        ("tgconstraint", int_value(0)),
-        ("tgdeferrable", bool_value(false)),
-        ("tginitdeferred", bool_value(false)),
+        ("tgconstraint", int_value(constraint_oid)),
+        (
+            "tgdeferrable",
+            bool_value(definition.deferrability.is_deferrable()),
+        ),
+        (
+            "tginitdeferred",
+            bool_value(definition.deferrability.is_initially_deferred()),
+        ),
         (
             "tgnargs",
             int_value(catalog_usize(
@@ -268,11 +385,14 @@ pub(in crate::sql) fn pg_get_triggerdef_value(
     let Some((oid, pretty)) = definition_arguments else {
         return Ok(Value::Null);
     };
-    let Some(trigger) = catalog_triggers(engine)?
-        .into_iter()
-        .map(|(trigger, _)| trigger)
-        .find(|trigger| trigger_catalog_oid(trigger) == oid)
-    else {
+    let mut found = None;
+    for (trigger, _) in catalog_triggers(engine)? {
+        if trigger_catalog_oid(engine, &trigger)? == oid {
+            found = Some(trigger);
+            break;
+        }
+    }
+    let Some(trigger) = found else {
         return Ok(Value::Null);
     };
     Ok(str_value(render_trigger_definition(
@@ -432,26 +552,31 @@ fn render_trigger_definition(
     definition: &CreateTrigger,
     pretty: bool,
 ) -> Result<String, SQLError> {
-    let events = definition
-        .events
-        .iter()
-        .map(|event| match event {
-            TriggerEvent::Insert => "INSERT".to_string(),
-            TriggerEvent::Delete => "DELETE".to_string(),
-            TriggerEvent::Truncate => "TRUNCATE".to_string(),
-            TriggerEvent::Update if definition.update_columns.is_empty() => "UPDATE".to_string(),
-            TriggerEvent::Update => format!(
-                "UPDATE OF {}",
-                definition
-                    .update_columns
-                    .iter()
-                    .map(|column| uqa_sql::expr::quote_ident(column))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        })
-        .collect::<Vec<_>>()
-        .join(" OR ");
+    let events = [
+        TriggerEvent::Insert,
+        TriggerEvent::Delete,
+        TriggerEvent::Update,
+        TriggerEvent::Truncate,
+    ]
+    .into_iter()
+    .filter(|event| definition.events.contains(event))
+    .map(|event| match event {
+        TriggerEvent::Insert => "INSERT".to_string(),
+        TriggerEvent::Delete => "DELETE".to_string(),
+        TriggerEvent::Truncate => "TRUNCATE".to_string(),
+        TriggerEvent::Update if definition.update_columns.is_empty() => "UPDATE".to_string(),
+        TriggerEvent::Update => format!(
+            "UPDATE OF {}",
+            definition
+                .update_columns
+                .iter()
+                .map(|column| uqa_sql::expr::quote_ident(column))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    })
+    .collect::<Vec<_>>()
+    .join(" OR ");
     let arguments = definition
         .arguments
         .iter()
@@ -459,7 +584,12 @@ fn render_trigger_definition(
         .collect::<Vec<_>>()
         .join(", ");
     let mut rendered = format!(
-        "CREATE TRIGGER {} {} {} ON {} FOR EACH {}",
+        "CREATE {}TRIGGER {} {} {} ON {}",
+        if definition.constraint {
+            "CONSTRAINT "
+        } else {
+            ""
+        },
         uqa_sql::expr::quote_ident(&definition.name),
         match definition.timing {
             TriggerTiming::Before => "BEFORE",
@@ -467,8 +597,27 @@ fn render_trigger_definition(
         },
         events,
         render_trigger_relation(engine, &definition.table, pretty)?,
-        if definition.row { "ROW" } else { "STATEMENT" }
     );
+    if let Some(referenced_table) = definition.referenced_table.as_deref() {
+        rendered.push_str(" FROM ");
+        // PostgreSQL deparses the constraint trigger's FROM relation with
+        // visibility-based qualification even in the non-pretty form.
+        rendered.push_str(&render_trigger_relation(engine, referenced_table, true)?);
+    }
+    if definition.constraint {
+        rendered.push_str(if definition.deferrability.is_deferrable() {
+            " DEFERRABLE"
+        } else {
+            " NOT DEFERRABLE"
+        });
+        rendered.push_str(if definition.deferrability.is_initially_deferred() {
+            " INITIALLY DEFERRED"
+        } else {
+            " INITIALLY IMMEDIATE"
+        });
+    }
+    rendered.push_str(" FOR EACH ");
+    rendered.push_str(if definition.row { "ROW" } else { "STATEMENT" });
     if let Some(condition) = &definition.when {
         rendered.push_str(" WHEN (");
         rendered.push_str(&render_trigger_condition(condition, pretty));

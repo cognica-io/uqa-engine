@@ -625,7 +625,7 @@ pub(super) fn build_pg_attrdef(engine: &Engine) -> Result<Vec<ResultRow>, SQLErr
 }
 
 pub(super) fn build_pg_constraint(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
-    constraint_catalog_rows(engine)?
+    let mut rows = constraint_catalog_rows(engine)?
         .into_iter()
         .map(|constraint| -> Result<ResultRow, SQLError> {
             let foreign_key = constraint.foreign_key.as_ref();
@@ -730,7 +730,9 @@ pub(super) fn build_pg_constraint(engine: &Engine) -> Result<Vec<ResultRow>, SQL
                 ("conbin", Value::Null),
             ]))
         })
-        .collect()
+        .collect::<Result<Vec<_>, SQLError>>()?;
+    rows.extend(super::events::build_trigger_constraints(engine)?);
+    Ok(rows)
 }
 
 const fn foreign_key_action_code(action: uqa_sql::ast::ForeignKeyAction) -> &'static str {

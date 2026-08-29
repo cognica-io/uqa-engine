@@ -92,13 +92,18 @@ fn trigger_record(
     document: Option<&Document>,
     mask_generated: bool,
 ) -> Result<Value> {
-    let Some(document) = document else {
-        return Ok(Value::Null);
-    };
     let definitions = engine
         .try_describe_table(table)
         .map_err(|error| SQLError::Internal(format!("read trigger row type: {error}")))?
         .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+    let Some(document) = document else {
+        return Ok(Value::Record(
+            definitions
+                .iter()
+                .map(|column| (column.name.clone(), Value::Null))
+                .collect(),
+        ));
+    };
     let mut materialized = document.clone();
     for column in &definitions {
         let unavailable = column.generated.as_ref().is_some_and(|generated| {
@@ -359,6 +364,25 @@ pub(super) fn fire_before_row_triggers(
 
 fn fire_after_row_trigger(engine: &Engine, event: &AfterRowTriggerEvent) -> Result<()> {
     for trigger in &event.triggers {
+        if trigger.definition.constraint && engine.constraint_trigger_is_deferred(trigger)? {
+            engine.defer_constraint_trigger_event(DeferredConstraintTriggerEvent {
+                constraint: Engine::constraint_trigger_identity(trigger)?,
+                firing_relation: RelationIdentity::from_legacy_name(&event.table).map_err(
+                    |error| {
+                        SQLError::Internal(format!(
+                            "decode deferred trigger relation `{}`: {error}",
+                            event.table
+                        ))
+                    },
+                )?,
+                table: event.table.clone(),
+                event: event.event,
+                old: event.old.clone(),
+                new: event.new.clone(),
+                trigger: trigger.clone(),
+            })?;
+            continue;
+        }
         let _ = invoke_trigger(
             engine,
             TriggerInvocation {
@@ -372,6 +396,36 @@ fn fire_after_row_trigger(engine: &Engine, event: &AfterRowTriggerEvent) -> Resu
             },
         )?;
     }
+    Ok(())
+}
+
+#[derive(Clone)]
+pub(crate) struct DeferredConstraintTriggerEvent {
+    pub(crate) constraint: crate::ConstraintIdentity,
+    pub(crate) firing_relation: RelationIdentity,
+    pub(crate) table: String,
+    event: TriggerEvent,
+    old: Value,
+    new: Value,
+    pub(crate) trigger: crate::engine_events::StoredTrigger,
+}
+
+pub(crate) fn fire_deferred_constraint_trigger_event(
+    engine: &Engine,
+    event: &DeferredConstraintTriggerEvent,
+) -> Result<()> {
+    let _ = invoke_trigger(
+        engine,
+        TriggerInvocation {
+            table: &event.table,
+            trigger: &event.trigger,
+            timing: TriggerTiming::After,
+            event: event.event,
+            row: true,
+            old: event.old.clone(),
+            new: event.new.clone(),
+        },
+    )?;
     Ok(())
 }
 

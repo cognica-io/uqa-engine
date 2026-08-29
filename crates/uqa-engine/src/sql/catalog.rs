@@ -84,7 +84,7 @@ pub(crate) struct RuntimeConstraint {
 }
 
 pub(crate) fn runtime_constraints(engine: &Engine) -> Result<Vec<RuntimeConstraint>, SQLError> {
-    helpers::constraint_catalog_rows(engine)?
+    let mut constraints = helpers::constraint_catalog_rows(engine)?
         .into_iter()
         .map(|constraint| {
             Ok(RuntimeConstraint {
@@ -96,7 +96,31 @@ pub(crate) fn runtime_constraints(engine: &Engine) -> Result<Vec<RuntimeConstrai
                 deferrable: constraint.state.deferrable(),
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>, SQLError>>()?;
+    for (trigger, _) in events::catalog_triggers(engine)? {
+        if !trigger.definition.constraint {
+            continue;
+        }
+        let relation =
+            RelationIdentity::from_legacy_name(&trigger.definition.table).map_err(|error| {
+                SQLError::Internal(format!(
+                    "decode constraint-trigger relation `{}`: {error}",
+                    trigger.definition.table
+                ))
+            })?;
+        constraints.push(RuntimeConstraint {
+            identity: ConstraintIdentity {
+                relation,
+                name: trigger
+                    .constraint_name
+                    .clone()
+                    .unwrap_or_else(|| trigger.definition.name.clone()),
+                object_id: trigger.object_id,
+            },
+            deferrable: trigger.definition.deferrability.is_deferrable(),
+        });
+    }
+    Ok(constraints)
 }
 
 pub(crate) use ag_catalog::resolve_age_label_relation_name;

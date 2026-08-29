@@ -606,6 +606,21 @@ impl Engine {
         Ok(self.durable.views.read().get(&relation).cloned())
     }
 
+    /// Resolve a view only against the live restored registry without starting another registry synchronization pass.
+    pub(crate) fn restored_catalog_view_definition(
+        &self,
+        name: &str,
+    ) -> Result<Option<StoredView>, SQLError> {
+        let views = self.durable.views.read();
+        Ok(self
+            .relation_lookup_candidates(name)
+            .map_err(|error| {
+                SQLError::Internal(format!("resolve restored view `{name}`: {error}"))
+            })?
+            .into_iter()
+            .find_map(|relation| views.get(&relation).cloned()))
+    }
+
     pub fn view(&self, name: &str) -> Result<Option<uqa_planner::QueryPlan>, SQLError> {
         Ok(self.view_definition(name)?.and_then(|definition| {
             (definition.kind == StoredViewKind::View).then_some(definition.query)

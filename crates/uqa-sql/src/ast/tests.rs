@@ -5,10 +5,11 @@
 //
 
 use super::{
-    AlterSequence, ColumnType, CreateFunction, FunctionBinding, FunctionBody, FunctionDispatch,
-    FunctionParallel, FunctionParam, FunctionParamMode, FunctionReturns, FunctionVolatility,
-    RangeFunctionOperation, RangeSubtype, RoutineInvocationBinding, RoutineSecurityAttributes,
-    RoutineVariadicMode, SequenceRestart, Statement,
+    AlterSequence, ColumnType, CreateFunction, CreateTrigger, FunctionBinding, FunctionBody,
+    FunctionDispatch, FunctionParallel, FunctionParam, FunctionParamMode, FunctionReturns,
+    FunctionVolatility, RangeFunctionOperation, RangeSubtype, RoutineInvocationBinding,
+    RoutineSecurityAttributes, RoutineVariadicMode, SequenceRestart, Statement,
+    TriggerDeferrability,
 };
 
 #[test]
@@ -339,4 +340,41 @@ fn create_table_as_reads_legacy_statements_without_optional_fields() {
     };
     assert!(column_names.is_empty());
     assert!(!with_no_data);
+}
+
+#[test]
+fn trigger_deferrability_defaults_for_legacy_catalogs_and_round_trips() {
+    let Statement::CreateTrigger(ordinary) = crate::compile(
+        "CREATE TRIGGER ordinary AFTER INSERT ON items FOR EACH ROW EXECUTE FUNCTION probe()",
+    )
+    .unwrap()
+    .remove(0) else {
+        panic!("expected CREATE TRIGGER");
+    };
+    let mut legacy = serde_json::to_value(&ordinary).unwrap();
+    {
+        let object = legacy.as_object_mut().unwrap();
+        object.remove("constraint");
+        object.remove("referenced_table");
+        object.remove("deferrability");
+    }
+    let restored: CreateTrigger = serde_json::from_value(legacy).unwrap();
+    assert!(!restored.constraint);
+    assert_eq!(restored.referenced_table, None);
+    assert_eq!(restored.deferrability, TriggerDeferrability::NotDeferrable);
+
+    let Statement::CreateTrigger(deferred) = crate::compile(
+        "CREATE CONSTRAINT TRIGGER deferred AFTER INSERT ON items DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION probe()",
+    )
+    .unwrap()
+    .remove(0)
+    else {
+        panic!("expected CREATE CONSTRAINT TRIGGER");
+    };
+    assert_eq!(
+        serde_json::from_value::<CreateTrigger>(serde_json::to_value(&deferred).unwrap())
+            .unwrap()
+            .deferrability,
+        TriggerDeferrability::InitiallyDeferred
+    );
 }
