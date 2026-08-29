@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-08-30
+
+### Added
+
+- Implemented PostgreSQL 18 constraint triggers with `AFTER ROW` execution, optional `FROM` dependencies, immediate and deferred modes, captured row images, retroactive `SET CONSTRAINTS` firing, savepoint and outer-commit lifecycle, queued-event cancellation, independent trigger and constraint renames and OIDs, trigger-owned `pg_constraint` rows, partition clone identities, catalog deparsing, and a 63-case PostgreSQL 18.4 stateful oracle.
+
+### Fixed
+
+- Prevented durable rewrite-rule catalog restoration from recursively entering transaction snapshots or registry refresh while statically validating stored view actions.
+- Assigned deterministic object identities to legacy stored trigger metadata so trigger catalog OIDs remain stable across rename and reopen after an upgrade.
+
 ## [0.1.9] - 2026-08-30
 
 ### Fixed

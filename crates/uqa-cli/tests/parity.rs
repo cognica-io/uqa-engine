@@ -48,7 +48,7 @@ fn banner_matches_expected_usql_shape() {
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     let out = stdout(&output);
     assert!(
-        out.contains("usql 0.1.9 -- UQA interactive SQL shell"),
+        out.contains("usql 0.1.10 -- UQA interactive SQL shell"),
         "{out}"
     );
     assert!(out.contains("Database: :memory:"), "{out}");
