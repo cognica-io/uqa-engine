@@ -80,6 +80,7 @@ pub(super) use planning::{execute_compiled_statement, optimize_engine_plan};
 pub(crate) use plpgsql_exec::{call_bound_user_scalar_function, call_user_scalar_function};
 use select::query_has_row_locks;
 pub(crate) use select::{execute_query_plan, RowLockRetryCache};
+pub(crate) use triggers::{fire_deferred_constraint_trigger_event, DeferredConstraintTriggerEvent};
 
 use aggregates::{
     aggregate_value, contains_aggregate, has_aggregate, projection_label_at, AggregateAccumulator,
@@ -164,7 +165,7 @@ pub(crate) fn analyze_catalog_query_schema(
     query: &uqa_planner::QueryPlan,
     params: &[SQLParam],
 ) -> Result<uqa_execution::RowSchema, SQLError> {
-    select::analyze_query_plan_schema(engine, query, params, &CteScope::default(), None)
+    select::analyze_catalog_query_plan_schema(engine, query, params)
 }
 
 /// Analyze the declared RETURNING row type of a rewrite-rule action without

@@ -161,6 +161,7 @@ fn run_alter_table_action(
         AlterTableAction::RenameColumn { .. }
             | AlterTableAction::RenameTable { .. }
             | AlterTableAction::RenameTrigger { .. }
+            | AlterTableAction::RenameConstraint { .. }
             | AlterTableAction::RenameRule { .. }
     ) {
         engine.ensure_no_pending_trigger_events(&stmt.table, "ALTER TABLE")?;
@@ -422,6 +423,9 @@ fn run_alter_table_action(
         }
         AlterTableAction::RenameTrigger { from, to } => {
             engine.rename_trigger(&stmt.table, &from, &to)?;
+        }
+        AlterTableAction::RenameConstraint { from, to } => {
+            engine.rename_trigger_constraint(&stmt.table, &from, &to)?;
         }
         AlterTableAction::RenameRule { from, to } => {
             engine.rename_rule(&stmt.table, &from, &to)?;

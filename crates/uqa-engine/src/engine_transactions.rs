@@ -34,6 +34,7 @@ struct StatementAbortSnapshot {
     keep_mark: Option<u32>,
     row_changes: Vec<TransactionRowChange>,
     deferred_foreign_key_checks: Vec<crate::DeferredForeignKeyCheck>,
+    deferred_constraint_trigger_events: Vec<crate::sql::DeferredConstraintTriggerEvent>,
     constraint_modes: ConstraintModeState,
     intent: TransactionIntent,
     characteristics: TransactionCharacteristicsState,
@@ -51,6 +52,9 @@ fn statement_abort_snapshot(frame: &TransactionFrame) -> StatementAbortSnapshot 
             keep_mark: Some(savepoint.lock_mark),
             row_changes: savepoint.row_changes.clone(),
             deferred_foreign_key_checks: savepoint.deferred_foreign_key_checks.clone(),
+            deferred_constraint_trigger_events: savepoint
+                .deferred_constraint_trigger_events
+                .clone(),
             constraint_modes: savepoint.constraint_modes.clone(),
             intent: savepoint.intent,
             characteristics: savepoint.characteristics,
@@ -70,6 +74,7 @@ fn statement_abort_snapshot(frame: &TransactionFrame) -> StatementAbortSnapshot 
             .map(|_| frame.begin_lock_mark.saturating_sub(1)),
         row_changes: Vec::new(),
         deferred_foreign_key_checks: Vec::new(),
+        deferred_constraint_trigger_events: Vec::new(),
         constraint_modes: ConstraintModeState::default(),
         intent: frame.intent,
         characteristics: frame.characteristics,
@@ -595,15 +600,17 @@ impl Engine {
                 (Some(savepoint), self.snapshot_transaction_data()?, baseline)
             }
         };
-        let (constraint_modes, deferred_foreign_key_checks) = stack.last().map_or_else(
-            || (ConstraintModeState::default(), Vec::new()),
-            |frame| {
-                (
-                    frame.constraint_modes.clone(),
-                    frame.deferred_foreign_key_checks.clone(),
-                )
-            },
-        );
+        let (constraint_modes, deferred_foreign_key_checks, deferred_constraint_trigger_events) =
+            stack.last().map_or_else(
+                || (ConstraintModeState::default(), Vec::new(), Vec::new()),
+                |frame| {
+                    (
+                        frame.constraint_modes.clone(),
+                        frame.deferred_foreign_key_checks.clone(),
+                        frame.deferred_constraint_trigger_events.clone(),
+                    )
+                },
+            );
         let (lock_mark, next_lock_mark) = stack.last_mut().map_or((0, 1), |frame| {
             let lock_mark = frame.next_lock_mark;
             frame.next_lock_mark = frame.next_lock_mark.saturating_add(1);
@@ -642,6 +649,7 @@ impl Engine {
             snapshot_change_baseline,
             row_changes: Vec::new(),
             deferred_foreign_key_checks,
+            deferred_constraint_trigger_events,
             constraint_modes,
             nontransactional_column_stats: NontransactionalColumnStats::new(),
         });
@@ -879,6 +887,8 @@ impl Engine {
             };
             frame.row_changes = rollback_state.row_changes;
             frame.deferred_foreign_key_checks = rollback_state.deferred_foreign_key_checks;
+            frame.deferred_constraint_trigger_events =
+                rollback_state.deferred_constraint_trigger_events;
             frame.constraint_modes = rollback_state.constraint_modes;
             frame.intent = rollback_state.intent;
             frame.characteristics = rollback_state.characteristics;
@@ -931,6 +941,7 @@ impl Engine {
         frame.next_lock_mark = frame.next_lock_mark.saturating_add(1);
         let row_changes = frame.row_changes.clone();
         let deferred_foreign_key_checks = frame.deferred_foreign_key_checks.clone();
+        let deferred_constraint_trigger_events = frame.deferred_constraint_trigger_events.clone();
         let constraint_modes = frame.constraint_modes.clone();
         frame.savepoints.push(TransactionSavepoint {
             name,
@@ -944,6 +955,7 @@ impl Engine {
             lock_mark: keep_mark,
             row_changes,
             deferred_foreign_key_checks,
+            deferred_constraint_trigger_events,
             constraint_modes,
         });
         frame.xid_levels.push(None);
@@ -1054,6 +1066,9 @@ impl Engine {
         frame
             .deferred_foreign_key_checks
             .clone_from(&savepoint.deferred_foreign_key_checks);
+        frame
+            .deferred_constraint_trigger_events
+            .clone_from(&savepoint.deferred_constraint_trigger_events);
         frame
             .constraint_modes
             .clone_from(&savepoint.constraint_modes);

@@ -8,6 +8,7 @@
 
 use std::collections::BTreeMap;
 
+use sha2::{Digest, Sha256};
 use uqa_sql::ast::RelationPersistence;
 use uqa_sql::SQLError;
 
@@ -151,6 +152,9 @@ impl Engine {
             .collect::<BTreeMap<_, _>>();
         let mut triggers = temporary_triggers;
         for mut trigger in stored.triggers {
+            if trigger.definition.constraint && trigger.constraint_name.is_none() {
+                trigger.constraint_name = Some(trigger.definition.name.clone());
+            }
             if let Some(condition) = &mut trigger.definition.when {
                 condition.upgrade_legacy_serialized_dispatches();
             }
@@ -159,6 +163,9 @@ impl Engine {
                 .map_err(|error| {
                     StorageBackendError::Other(format!("restore trigger catalog: {error}"))
                 })?;
+            if trigger.object_id.is_none() {
+                trigger.object_id = Some(legacy_trigger_object_id(&trigger.definition));
+            }
             let name = trigger.definition.name.clone();
             if triggers
                 .entry(relation)
@@ -174,4 +181,16 @@ impl Engine {
         *self.durable.triggers.write() = triggers;
         Ok(())
     }
+}
+
+fn legacy_trigger_object_id(definition: &uqa_sql::ast::CreateTrigger) -> [u8; 16] {
+    let mut digest = Sha256::new();
+    digest.update(b"uqa:legacy-trigger-object-id\0");
+    digest.update(definition.table.as_bytes());
+    digest.update([0]);
+    digest.update(definition.name.as_bytes());
+    let digest = digest.finalize();
+    let mut object_id = [0_u8; 16];
+    object_id.copy_from_slice(&digest[..16]);
+    object_id
 }

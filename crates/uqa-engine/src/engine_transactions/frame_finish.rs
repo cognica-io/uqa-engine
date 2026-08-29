@@ -105,6 +105,8 @@ impl Engine {
             parent.constraint_modes = committed.constraint_modes;
             parent.row_changes.extend(committed.row_changes);
             parent.deferred_foreign_key_checks = committed.deferred_foreign_key_checks;
+            parent.deferred_constraint_trigger_events =
+                committed.deferred_constraint_trigger_events;
             parent.first_snapshot_set |= committed.first_snapshot_set;
         }
         Ok(())

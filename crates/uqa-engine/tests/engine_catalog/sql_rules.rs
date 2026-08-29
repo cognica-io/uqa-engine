@@ -678,6 +678,59 @@ fn rule_returning_contract_is_validated_when_the_rule_is_created() {
 }
 
 #[test]
+fn persistent_rule_catalog_restoration_does_not_reenter_transaction_snapshots() {
+    let directory = TempDir::new().unwrap();
+    let database = directory.path().join("rule-catalog-restoration.db");
+    let engine = Engine::open(&database).unwrap();
+    exec(&engine, "CREATE TABLE view_action_base (id INTEGER)");
+    exec(
+        &engine,
+        "CREATE VIEW view_action_target AS SELECT id FROM view_action_base",
+    );
+    exec(&engine, "CREATE TABLE view_action_event (id INTEGER)");
+    exec(
+        &engine,
+        "CREATE RULE view_action_rule AS ON INSERT TO view_action_event
+         DO ALSO INSERT INTO view_action_target VALUES (NEW.id)",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE returning_validation_event (id INTEGER, note VARCHAR(3))",
+    );
+    exec(
+        &engine,
+        "CREATE TABLE returning_validation_action (id BIGINT, note VARCHAR(20))",
+    );
+
+    let error = engine
+        .sql(
+            "CREATE RULE returning_wrong_type AS ON INSERT TO returning_validation_event
+             DO INSTEAD INSERT INTO returning_validation_action VALUES (NEW.id, NEW.note)
+             RETURNING id, note::VARCHAR(3)",
+            &[],
+        )
+        .expect_err("an incompatible rule RETURNING type must be rejected");
+    assert_eq!(error.sqlstate(), Some("42P17"));
+    assert_eq!(
+        exec(
+            &engine,
+            "SELECT count(*) AS n FROM pg_rewrite WHERE rulename = 'view_action_rule'",
+        )
+        .rows[0]
+            .get("n"),
+        Some(&Value::Int(1))
+    );
+
+    exec(&engine, "BEGIN");
+    exec(&engine, "CREATE TABLE rolled_back_rule_marker (id INTEGER)");
+    exec(&engine, "ROLLBACK");
+    let missing = engine
+        .sql("SELECT * FROM rolled_back_rule_marker", &[])
+        .expect_err("explicit rollback must restore the persistent catalog");
+    assert_eq!(missing.sqlstate(), Some("42P01"));
+}
+
+#[test]
 fn insert_rule_returning_maps_provider_rows_to_the_event_relation() {
     let engine = Engine::new();
     exec(

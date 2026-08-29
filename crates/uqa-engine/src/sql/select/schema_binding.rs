@@ -45,6 +45,7 @@ struct SchemaScope {
     deferred_ctes: BTreeMap<String, uqa_planner::CtePlan>,
     visiting_views: BTreeSet<String>,
     validate_references: bool,
+    catalog_tables_only: bool,
 }
 
 struct QueryFunctionTypeResolver<'a> {
@@ -216,29 +217,38 @@ impl SchemaScope {
 fn operator_join_relation_schema(
     engine: &Engine,
     relation: Option<&str>,
+    catalog_tables_only: bool,
 ) -> Result<RowSchema, SQLError> {
     let relation = relation.ok_or_else(|| {
         SQLError::TypeMismatch("operator join relation must be a table identifier".into())
     })?;
-    let resolved = engine
-        .try_resolve_query_table_name(relation)
-        .map_err(|error| {
-            SQLError::Internal(format!(
-                "resolve operator join relation `{relation}` schema: {error}"
-            ))
-        })?
-        .ok_or_else(|| SQLError::UnknownTable(relation.to_string()))?;
+    let resolved = if catalog_tables_only {
+        engine.resolve_restored_catalog_table_name(relation)
+    } else {
+        engine.try_resolve_query_table_name(relation)
+    }
+    .map_err(|error| {
+        SQLError::Internal(format!(
+            "resolve operator join relation `{relation}` schema: {error}"
+        ))
+    })?
+    .ok_or_else(|| SQLError::UnknownTable(relation.to_string()))?;
     let identity = crate::RelationIdentity::from_legacy_name(&resolved).map_err(|error| {
         SQLError::Internal(format!(
             "decode operator join relation `{resolved}` schema: {error}"
         ))
     })?;
-    let table = engine.try_query_table(&resolved).map_err(|error| {
+    let table = if catalog_tables_only {
+        engine.restored_catalog_table(&resolved)
+    } else {
+        engine.try_query_table(&resolved)
+    }
+    .map_err(|error| {
         SQLError::Internal(format!(
             "read operator join relation `{resolved}` schema: {error}"
         ))
-    })?;
-    let table = table.ok_or_else(|| SQLError::UnknownTable(relation.to_string()))?;
+    })?
+    .ok_or_else(|| SQLError::UnknownTable(relation.to_string()))?;
     let definitions = table.columns.read();
     let columns = definitions
         .iter()
@@ -270,6 +280,7 @@ impl SchemaScope {
             deferred_ctes: ctes.deferred_ctes().clone(),
             visiting_views: BTreeSet::new(),
             validate_references: false,
+            catalog_tables_only: false,
         }
     }
 
@@ -277,6 +288,14 @@ impl SchemaScope {
         let mut scope = Self::from_execution_scope(ctes);
         scope.validate_references = true;
         scope
+    }
+
+    fn for_catalog_analysis() -> Self {
+        Self {
+            validate_references: true,
+            catalog_tables_only: true,
+            ..Self::default()
+        }
     }
 
     fn bind_query(
@@ -628,7 +647,12 @@ impl SchemaScope {
                     self.deferred_ctes.insert(name.clone(), plan);
                     return result;
                 }
-                if let Some(view) = engine.view_definition(name)? {
+                let view = if self.catalog_tables_only {
+                    engine.restored_catalog_view_definition(name)?
+                } else {
+                    engine.view_definition(name)?
+                };
+                if let Some(view) = view {
                     if view.kind == crate::StoredViewKind::Materialized {
                         let columns = view.output_columns.unwrap_or_default();
                         if columns.len() != view.materialized_column_types.len() {
@@ -663,9 +687,15 @@ impl SchemaScope {
                     self.visiting_views.remove(&key);
                     return result;
                 }
-                if let Some(table) = engine.try_query_table(name).map_err(|error| {
+                let table = if self.catalog_tables_only {
+                    engine.restored_catalog_table(name)
+                } else {
+                    engine.try_query_table(name)
+                }
+                .map_err(|error| {
                     SQLError::Internal(format!("resolve table `{name}` schema: {error}"))
-                })? {
+                })?;
+                if let Some(table) = table {
                     let definitions = table.columns.read();
                     let columns = definitions
                         .iter()
@@ -678,14 +708,23 @@ impl SchemaScope {
                     let schema = RowSchema::with_qualified_types(qualifier, columns, types);
                     return Ok(analysis::with_table_pseudo_columns(&schema, qualifier));
                 }
-                if engine
-                    .foreign_table(name)
-                    .map_err(SQLError::Unsupported)?
-                    .is_some()
-                {
-                    let typed_columns = engine
-                        .foreign_table_typed_columns(name)
-                        .map_err(SQLError::Unsupported)?;
+                let foreign_table = if self.catalog_tables_only {
+                    engine.restored_catalog_foreign_table(name)
+                } else {
+                    engine.foreign_table(name)
+                }
+                .map_err(SQLError::Unsupported)?;
+                if let Some(foreign_table) = foreign_table {
+                    let typed_columns = foreign_table
+                        .columns
+                        .iter()
+                        .map(|column| {
+                            (
+                                column.name.clone(),
+                                crate::engine_fdw::fdw_column_type_to_sql(&column.ty),
+                            )
+                        })
+                        .collect::<Vec<_>>();
                     let columns = typed_columns
                         .iter()
                         .map(|(column, _)| column.clone())
@@ -751,7 +790,11 @@ impl SchemaScope {
                 let lower = crate::sql::builtin_function_dispatch_name(name);
                 let input = if crate::operator_tree_bridge::is_operator_join_table_function(&lower)
                 {
-                    operator_join_relation_schema(engine, relation.as_deref())?
+                    operator_join_relation_schema(
+                        engine,
+                        relation.as_deref(),
+                        self.catalog_tables_only,
+                    )?
                 } else {
                     outer.cloned().unwrap_or_default()
                 };
@@ -997,7 +1040,11 @@ impl SchemaScope {
                 let lower = crate::sql::builtin_function_dispatch_name(name);
                 let input = if crate::operator_tree_bridge::is_operator_join_table_function(&lower)
                 {
-                    operator_join_relation_schema(engine, relation.as_deref())?
+                    operator_join_relation_schema(
+                        engine,
+                        relation.as_deref(),
+                        self.catalog_tables_only,
+                    )?
                 } else {
                     outer.cloned().unwrap_or_default()
                 };
@@ -1077,6 +1124,15 @@ pub(in crate::sql) fn analyze_query_plan_schema(
     outer: Option<&RowSchema>,
 ) -> Result<RowSchema, SQLError> {
     SchemaScope::for_analysis(ctes).bind_query(engine, plan, params, outer)
+}
+
+/// Analyze a catalog-owned query against the restored live catalog without consulting transaction row snapshots. Registry restoration can run while the transaction-frame mutex is held, so static catalog validation must not recursively acquire it.
+pub(in crate::sql) fn analyze_catalog_query_plan_schema(
+    engine: &Engine,
+    plan: &QueryPlan,
+    params: &[SQLParam],
+) -> Result<RowSchema, SQLError> {
+    SchemaScope::for_catalog_analysis().bind_query(engine, plan, params, None)
 }
 
 /// Derive the exact row type of one FROM source without executing it.

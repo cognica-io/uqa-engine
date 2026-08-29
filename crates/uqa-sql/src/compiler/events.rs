@@ -10,7 +10,8 @@ use pg_query::protobuf::{CmdType, DropBehavior};
 use pg_query::TriggerType;
 
 use crate::ast::{
-    CreateRule, CreateTrigger, DropRule, DropTrigger, RuleEvent, TriggerEvent, TriggerTiming,
+    CreateRule, CreateTrigger, DropRule, DropTrigger, RuleEvent, TriggerDeferrability,
+    TriggerEvent, TriggerTiming,
 };
 
 use super::dispatch::compile_stmt;
@@ -27,11 +28,6 @@ pub(super) fn compile_create_trigger(
         .relation
         .as_ref()
         .ok_or_else(|| SQLError::Internal("CREATE TRIGGER without relation".into()))?;
-    if stmt.isconstraint || stmt.deferrable || stmt.initdeferred || stmt.constrrel.is_some() {
-        return Err(SQLError::Unsupported(
-            "constraint triggers are not implemented".into(),
-        ));
-    }
     if !stmt.transition_rels.is_empty() {
         return Err(SQLError::Unsupported(
             "trigger transition relations are not implemented".into(),
@@ -81,6 +77,19 @@ pub(super) fn compile_create_trigger(
         table: range_var_name(relation),
         function: compile_qualified_name(&stmt.funcname, "CREATE TRIGGER")?,
         arguments,
+        constraint: stmt.isconstraint,
+        referenced_table: stmt.constrrel.as_ref().map(range_var_name),
+        deferrability: match (stmt.deferrable, stmt.initdeferred) {
+            (false, false) => TriggerDeferrability::NotDeferrable,
+            (true, false) => TriggerDeferrability::InitiallyImmediate,
+            (true, true) => TriggerDeferrability::InitiallyDeferred,
+            (false, true) => {
+                return Err(SQLError::Internal(
+                    "CREATE CONSTRAINT TRIGGER retained INITIALLY DEFERRED without DEFERRABLE"
+                        .into(),
+                ));
+            }
+        },
         row: stmt.row,
         timing,
         events,

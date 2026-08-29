@@ -20,6 +20,8 @@ use uqa_core::ArrayValue;
 use uqa_sql::ast::RangeSubtype;
 use uqa_sql::ast::RoleAttribute;
 
+use crate::RelationIdentity;
+
 pub(super) fn build_pg_tables(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     let mut out: Vec<ResultRow> = Vec::new();
     let mut names = engine
@@ -625,7 +627,7 @@ pub(super) fn build_pg_attrdef(engine: &Engine) -> Result<Vec<ResultRow>, SQLErr
 }
 
 pub(super) fn build_pg_constraint(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
-    constraint_catalog_rows(engine)?
+    let mut rows = constraint_catalog_rows(engine)?
         .into_iter()
         .map(|constraint| -> Result<ResultRow, SQLError> {
             let foreign_key = constraint.foreign_key.as_ref();
@@ -730,7 +732,67 @@ pub(super) fn build_pg_constraint(engine: &Engine) -> Result<Vec<ResultRow>, SQL
                 ("conbin", Value::Null),
             ]))
         })
-        .collect()
+        .collect::<Result<Vec<_>, SQLError>>()?;
+    for (trigger, _) in super::events::catalog_triggers(engine)? {
+        if !trigger.definition.constraint {
+            continue;
+        }
+        let definition = &trigger.definition;
+        let constraint_name = trigger
+            .constraint_name
+            .as_deref()
+            .unwrap_or(&definition.name);
+        let relation = RelationIdentity::from_legacy_name(&definition.table).map_err(|error| {
+            SQLError::Internal(format!(
+                "decode constraint-trigger relation `{}`: {error}",
+                definition.table
+            ))
+        })?;
+        rows.push(row([
+            (
+                "oid",
+                int_value(super::events::trigger_constraint_catalog_oid(
+                    engine, &trigger,
+                )?),
+            ),
+            ("conname", str_value(constraint_name)),
+            ("connamespace", int_value(schema_oid(&relation.schema))),
+            ("contype", str_value("t")),
+            (
+                "condeferrable",
+                bool_value(definition.deferrability.is_deferrable()),
+            ),
+            (
+                "condeferred",
+                bool_value(definition.deferrability.is_initially_deferred()),
+            ),
+            ("conenforced", bool_value(true)),
+            ("convalidated", bool_value(true)),
+            (
+                "conrelid",
+                int_value(table_relation_oid(engine, &definition.table)?),
+            ),
+            ("contypid", int_value(0)),
+            ("conindid", int_value(0)),
+            ("conparentid", int_value(0)),
+            ("confrelid", int_value(0)),
+            ("confupdtype", str_value(" ")),
+            ("confdeltype", str_value(" ")),
+            ("confmatchtype", str_value(" ")),
+            ("conislocal", bool_value(true)),
+            ("coninhcount", int_value(0)),
+            ("connoinherit", bool_value(true)),
+            ("conperiod", bool_value(false)),
+            ("conkey", Value::Null),
+            ("confkey", Value::Null),
+            ("conpfeqop", Value::Null),
+            ("conppeqop", Value::Null),
+            ("conffeqop", Value::Null),
+            ("conexclop", Value::Null),
+            ("conbin", Value::Null),
+        ]));
+    }
+    Ok(rows)
 }
 
 const fn foreign_key_action_code(action: uqa_sql::ast::ForeignKeyAction) -> &'static str {

@@ -661,6 +661,10 @@ pub(super) fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<St
             from: stmt.subname.clone(),
             to: stmt.newname.clone(),
         },
+        ObjectType::ObjectTabconstraint => AlterTableAction::RenameConstraint {
+            from: stmt.subname.clone(),
+            to: stmt.newname.clone(),
+        },
         ObjectType::ObjectRule => AlterTableAction::RenameRule {
             from: stmt.subname.clone(),
             to: stmt.newname.clone(),

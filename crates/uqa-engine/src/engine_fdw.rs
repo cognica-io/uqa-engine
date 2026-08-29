@@ -487,6 +487,19 @@ impl Engine {
         Ok(self.durable.foreign_tables.read().get(&relation).cloned())
     }
 
+    /// Resolve a foreign table only against the live restored registry without recursively synchronizing that registry.
+    pub(crate) fn restored_catalog_foreign_table(
+        &self,
+        name: &str,
+    ) -> Result<Option<uqa_fdw::ForeignTable>, String> {
+        let tables = self.durable.foreign_tables.read();
+        Ok(self
+            .relation_lookup_candidates(name)
+            .map_err(|error| format!("resolve restored foreign table: {error}"))?
+            .into_iter()
+            .find_map(|relation| tables.get(&relation).cloned()))
+    }
+
     pub fn list_foreign_servers(&self) -> Result<Vec<String>, String> {
         if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
             let mut out = snapshot.foreign_servers.keys().cloned().collect::<Vec<_>>();

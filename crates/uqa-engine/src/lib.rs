@@ -461,6 +461,7 @@ struct TransactionFrame {
     snapshot_change_baseline: row_locks::RowChangeBaseline,
     row_changes: Vec<TransactionRowChange>,
     deferred_foreign_key_checks: Vec<DeferredForeignKeyCheck>,
+    deferred_constraint_trigger_events: Vec<sql::DeferredConstraintTriggerEvent>,
     constraint_modes: ConstraintModeState,
     /// Statistics written by ANALYZE are nontransactional in `PostgreSQL`. Keep the latest values outside savepoint snapshots so any rollback can restore them after transactional storage state is rolled back.
     nontransactional_column_stats: NontransactionalColumnStats,
@@ -520,6 +521,7 @@ struct TransactionSavepoint {
     lock_mark: u32,
     row_changes: Vec<TransactionRowChange>,
     deferred_foreign_key_checks: Vec<DeferredForeignKeyCheck>,
+    deferred_constraint_trigger_events: Vec<sql::DeferredConstraintTriggerEvent>,
     constraint_modes: ConstraintModeState,
 }
 
