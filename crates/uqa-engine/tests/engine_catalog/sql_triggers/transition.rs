@@ -2,6 +2,7 @@
 // Unified Query Algebra
 //
 // Copyright (c) 2023-2026 Cognica, Inc.
+//
 
 //! `PostgreSQL` 18 trigger transition-relation coverage.
 
