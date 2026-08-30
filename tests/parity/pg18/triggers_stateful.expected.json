@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "58acd36b8c94b68561cd2ec33dadeb3c147adde2a5f3690265b58ed9e0ffadf6",
+  "fixture_sha256": "167f17562290c3a4b78589510e2c96ebda47dfb98108239438fb663dfcc9cd3e",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -1162,6 +1162,114 @@
           "0",
           "0",
           "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_multi_row_conflict_cascade_transition_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "multi_row_conflict_update_with_recursive_cascades",
+      "kind": "ok"
+    },
+    {
+      "name": "multi_row_conflict_cascade_transition_sets",
+      "kind": "rows",
+      "rows": [
+        [
+          "transition_conflict_chain_row",
+          "UPDATE",
+          "2",
+          "2",
+          "110",
+          "110",
+          "1100",
+          "1100"
+        ],
+        [
+          "transition_conflict_chain_row",
+          "UPDATE",
+          "2",
+          "2",
+          "110",
+          "110",
+          "1100",
+          "1100"
+        ],
+        [
+          "transition_conflict_chain_statement",
+          "UPDATE",
+          "2",
+          "2",
+          "110",
+          "110",
+          "1100",
+          "1100"
+        ],
+        [
+          "transition_conflict_chain_row",
+          "UPDATE",
+          "2",
+          "2",
+          "50",
+          "50",
+          "500",
+          "500"
+        ],
+        [
+          "transition_conflict_chain_row",
+          "UPDATE",
+          "2",
+          "2",
+          "50",
+          "50",
+          "500",
+          "500"
+        ],
+        [
+          "transition_conflict_chain_statement",
+          "UPDATE",
+          "2",
+          "2",
+          "50",
+          "50",
+          "500",
+          "500"
+        ]
+      ]
+    },
+    {
+      "name": "multi_row_conflict_cascade_final_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "2",
+          "101",
+          null,
+          "20",
+          "200"
+        ],
+        [
+          "3",
+          null,
+          "101",
+          "30",
+          "300"
+        ],
+        [
+          "101",
+          null,
+          null,
+          "10",
+          "100"
+        ],
+        [
+          "110",
+          null,
+          null,
+          "100",
+          "1000"
         ]
       ]
     },

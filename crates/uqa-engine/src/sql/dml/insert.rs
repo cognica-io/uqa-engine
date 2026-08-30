@@ -390,7 +390,7 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
         if let Some(row) = returning {
             returning_rows.push(row);
         }
-        after_row_events.extend(row_after_events);
+        crate::sql::triggers::AfterRowTriggerEvent::append(after_row_events, row_after_events);
         prepared_buffer
             .as_mut()
             .ok_or_else(|| {
@@ -785,7 +785,10 @@ pub(in crate::sql) fn run_insert_inner(
             if let Some(returning) = staged.returning {
                 returning_rows.push(returning);
             }
-            after_row_events.extend(staged.after_row_events);
+            crate::sql::triggers::AfterRowTriggerEvent::append(
+                &mut after_row_events,
+                staged.after_row_events,
+            );
             if staged.prepared_effect {
                 affected += 1;
                 has_prepared_effect = true;
@@ -849,7 +852,10 @@ pub(in crate::sql) fn run_insert_inner(
             if let Some(returning) = staged.returning {
                 returning_rows.push(returning);
             }
-            after_row_events.extend(staged.after_row_events);
+            crate::sql::triggers::AfterRowTriggerEvent::append(
+                &mut after_row_events,
+                staged.after_row_events,
+            );
             if staged.prepared_effect {
                 affected += 1;
                 has_prepared_effect = true;

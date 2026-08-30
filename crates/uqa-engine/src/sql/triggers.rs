@@ -1144,6 +1144,19 @@ impl AfterRowTriggerEvent {
         events.push(event);
         sequence
     }
+
+    pub(super) fn append(events: &mut Vec<Self>, appended: Vec<Self>) {
+        let sequence_offset = events.len();
+        debug_assert!(appended
+            .iter()
+            .enumerate()
+            .all(|(sequence, event)| event.sequence == sequence));
+        events.reserve(appended.len());
+        for mut event in appended {
+            event.cascade_parent = event.cascade_parent.map(|parent| sequence_offset + parent);
+            Self::push(events, event);
+        }
+    }
 }
 
 pub(super) fn fire_after_row_trigger_events_for_generation(
@@ -1169,13 +1182,7 @@ pub(super) fn fire_after_row_trigger_events_for_generation(
             .unwrap_or(event.sequence)
     });
     for event in matching {
-        let event_generation = transition_tables
-            .iter()
-            .find_map(|tables| tables.generation_for(event))
-            .unwrap_or(0);
-        if event_generation == generation {
-            fire_after_row_trigger(engine, event, transition_tables)?;
-        }
+        fire_after_row_trigger(engine, event, transition_tables)?;
     }
     Ok(())
 }

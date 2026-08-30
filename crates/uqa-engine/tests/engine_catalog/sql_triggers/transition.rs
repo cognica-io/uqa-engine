@@ -481,6 +481,44 @@ fn self_referential_cascade_splits_transition_sets_for_after_row_triggers() {
 }
 
 #[test]
+fn multi_row_conflict_cascades_rebase_transition_event_sequences() {
+    let engine = Engine::new();
+    install_transition_fixture(&engine);
+    exec(
+        &engine,
+        "CREATE TABLE transition_conflict_chain (a INTEGER PRIMARY KEY, b INTEGER UNIQUE, c INTEGER, replacement INTEGER, value INTEGER, generated_value INTEGER GENERATED ALWAYS AS (value * 10) STORED, FOREIGN KEY (b) REFERENCES transition_conflict_chain(a) ON UPDATE CASCADE, FOREIGN KEY (c) REFERENCES transition_conflict_chain(b) ON UPDATE CASCADE); CREATE TRIGGER transition_conflict_chain_row AFTER UPDATE ON transition_conflict_chain REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH ROW EXECUTE FUNCTION transition_probe(); CREATE TRIGGER transition_conflict_chain_statement AFTER UPDATE ON transition_conflict_chain REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION transition_probe(); INSERT INTO transition_conflict_chain(a, b, c, value) VALUES (1, NULL, NULL, 10), (2, 1, NULL, 20), (3, NULL, 1, 30), (10, NULL, NULL, 100); INSERT INTO transition_conflict_chain(a, b, c, replacement, value) VALUES (10, NULL, NULL, 110, 100), (1, NULL, NULL, 101, 10) ON CONFLICT (a) DO UPDATE SET a = excluded.replacement",
+    );
+    assert_eq!(
+        strings(
+            &engine,
+            "SELECT message FROM transition_log ORDER BY id",
+            "message"
+        ),
+        vec![
+            "transition_conflict_chain_row:UPDATE:2:2:110:110:1100:1100",
+            "transition_conflict_chain_row:UPDATE:2:2:110:110:1100:1100",
+            "transition_conflict_chain_statement:UPDATE:2:2:110:110:1100:1100",
+            "transition_conflict_chain_row:UPDATE:2:2:50:50:500:500",
+            "transition_conflict_chain_row:UPDATE:2:2:50:50:500:500",
+            "transition_conflict_chain_statement:UPDATE:2:2:50:50:500:500",
+        ]
+    );
+    assert_eq!(
+        strings(
+            &engine,
+            "SELECT a::text || ':' || coalesce(b::text, 'NULL') || ':' || coalesce(c::text, 'NULL') || ':' || value::text || ':' || generated_value::text AS row_image FROM transition_conflict_chain ORDER BY a",
+            "row_image"
+        ),
+        vec![
+            "2:101:NULL:20:200",
+            "3:NULL:101:30:300",
+            "101:NULL:NULL:10:100",
+            "110:NULL:NULL:100:1000",
+        ]
+    );
+}
+
+#[test]
 fn transition_relations_cannot_escape_into_persistent_relations() {
     let engine = Engine::new();
     exec(

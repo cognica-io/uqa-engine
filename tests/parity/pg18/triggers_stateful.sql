@@ -550,6 +550,22 @@ DELETE FROM transition_self_ref_deep WHERE a = 1;
 SELECT trigger_name, old_count, old_a_sum, old_b_sum FROM transition_self_ref_log ORDER BY id;
 -- @end
 
+-- @case create_multi_row_conflict_cascade_transition_fixture ok
+DELETE FROM transition_log; CREATE TABLE transition_conflict_chain (a integer PRIMARY KEY, b integer UNIQUE, c integer, replacement integer, value integer, generated_value integer GENERATED ALWAYS AS (value * 10) STORED, FOREIGN KEY (b) REFERENCES transition_conflict_chain(a) ON UPDATE CASCADE, FOREIGN KEY (c) REFERENCES transition_conflict_chain(b) ON UPDATE CASCADE); CREATE TRIGGER transition_conflict_chain_row AFTER UPDATE ON transition_conflict_chain REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH ROW EXECUTE FUNCTION transition_probe(); CREATE TRIGGER transition_conflict_chain_statement AFTER UPDATE ON transition_conflict_chain REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION transition_probe(); INSERT INTO transition_conflict_chain(a, b, c, value) VALUES (1, NULL, NULL, 10), (2, 1, NULL, 20), (3, NULL, 1, 30), (10, NULL, NULL, 100);
+-- @end
+
+-- @case multi_row_conflict_update_with_recursive_cascades ok
+INSERT INTO transition_conflict_chain(a, b, c, replacement, value) VALUES (10, NULL, NULL, 110, 100), (1, NULL, NULL, 101, 10) ON CONFLICT (a) DO UPDATE SET a = excluded.replacement;
+-- @end
+
+-- @case multi_row_conflict_cascade_transition_sets rows
+SELECT trigger_name, operation, old_count, new_count, old_sum, new_sum, old_generated_sum, new_generated_sum FROM transition_log ORDER BY id;
+-- @end
+
+-- @case multi_row_conflict_cascade_final_rows rows
+SELECT a, b, c, value, generated_value FROM transition_conflict_chain ORDER BY a;
+-- @end
+
 -- @case create_nested_transition_scope_fixture ok
 CREATE TABLE transition_scope_rows (value integer); INSERT INTO transition_scope_rows VALUES (1), (2), (3); CREATE TABLE transition_scope_outer (id integer); CREATE TABLE transition_scope_inner (id integer); CREATE TABLE transition_scope_log (id bigserial PRIMARY KEY, message text); CREATE FUNCTION transition_scope_helper() RETURNS bigint LANGUAGE plpgsql AS $probe$ DECLARE row_count bigint; BEGIN SELECT count(*) INTO row_count FROM transition_scope_rows; RETURN row_count; END $probe$; CREATE FUNCTION transition_scope_inner_probe() RETURNS trigger LANGUAGE plpgsql AS $probe$ DECLARE row_count bigint; BEGIN SELECT count(*) INTO row_count FROM transition_scope_rows; INSERT INTO transition_scope_log(message) VALUES ('inner:' || row_count::text); RETURN NEW; END $probe$; CREATE TRIGGER transition_scope_inner_trigger AFTER INSERT ON transition_scope_inner FOR EACH ROW EXECUTE FUNCTION transition_scope_inner_probe(); CREATE FUNCTION transition_scope_outer_probe() RETURNS trigger LANGUAGE plpgsql AS $probe$ DECLARE before_count bigint; helper_count bigint; after_count bigint; BEGIN SELECT count(*) INTO before_count FROM transition_scope_rows; helper_count := transition_scope_helper(); INSERT INTO transition_scope_inner VALUES (1); SELECT count(*) INTO after_count FROM transition_scope_rows; INSERT INTO transition_scope_log(message) VALUES ('outer:' || before_count::text || ':' || helper_count::text || ':' || after_count::text); RETURN NULL; END $probe$; CREATE TRIGGER transition_scope_outer_trigger AFTER INSERT ON transition_scope_outer REFERENCING NEW TABLE AS transition_scope_rows FOR EACH STATEMENT EXECUTE FUNCTION transition_scope_outer_probe();
 -- @end
