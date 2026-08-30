@@ -11,7 +11,7 @@ use pg_query::TriggerType;
 
 use crate::ast::{
     CreateRule, CreateTrigger, DropRule, DropTrigger, RuleEvent, TriggerDeferrability,
-    TriggerEvent, TriggerTiming,
+    TriggerEvent, TriggerTiming, TriggerTransitionRelation,
 };
 
 use super::dispatch::compile_stmt;
@@ -28,11 +28,22 @@ pub(super) fn compile_create_trigger(
         .relation
         .as_ref()
         .ok_or_else(|| SQLError::Internal("CREATE TRIGGER without relation".into()))?;
-    if !stmt.transition_rels.is_empty() {
-        return Err(SQLError::Unsupported(
-            "trigger transition relations are not implemented".into(),
-        ));
-    }
+    let transition_relations = stmt
+        .transition_rels
+        .iter()
+        .map(|node| {
+            let Some(NodeEnum::TriggerTransition(relation)) = node.node.as_ref() else {
+                return Err(SQLError::Internal(
+                    "CREATE TRIGGER REFERENCING entry is not a transition relation".into(),
+                ));
+            };
+            Ok(TriggerTransitionRelation {
+                name: relation.name.clone(),
+                is_new: relation.is_new,
+                is_table: relation.is_table,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
     let timing = match stmt.timing {
         value if value == TriggerType::Before as i32 => TriggerTiming::Before,
         0 => TriggerTiming::After,
@@ -94,6 +105,7 @@ pub(super) fn compile_create_trigger(
         timing,
         events,
         update_columns,
+        transition_relations,
         when,
         or_replace: stmt.replace,
     })

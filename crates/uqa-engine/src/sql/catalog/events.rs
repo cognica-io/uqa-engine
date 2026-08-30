@@ -274,8 +274,18 @@ fn pg_trigger_row(
                 str_value(schema_expr_text(condition))
             }),
         ),
-        ("tgoldtable", Value::Null),
-        ("tgnewtable", Value::Null),
+        (
+            "tgoldtable",
+            definition
+                .old_transition_table()
+                .map_or(Value::Null, str_value),
+        ),
+        (
+            "tgnewtable",
+            definition
+                .new_transition_table()
+                .map_or(Value::Null, str_value),
+        ),
     ]))
 }
 
@@ -615,6 +625,31 @@ fn render_trigger_definition(
         } else {
             " INITIALLY IMMEDIATE"
         });
+    }
+    if !definition.transition_relations.is_empty() {
+        rendered.push_str(" REFERENCING ");
+        rendered.push_str(
+            &definition
+                .transition_relations
+                .iter()
+                .filter(|relation| !relation.is_new)
+                .chain(
+                    definition
+                        .transition_relations
+                        .iter()
+                        .filter(|relation| relation.is_new),
+                )
+                .map(|relation| {
+                    format!(
+                        "{} {} AS {}",
+                        if relation.is_new { "NEW" } else { "OLD" },
+                        if relation.is_table { "TABLE" } else { "ROW" },
+                        uqa_sql::expr::quote_ident(&relation.name)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
     }
     rendered.push_str(" FOR EACH ");
     rendered.push_str(if definition.row { "ROW" } else { "STATEMENT" });

@@ -390,7 +390,7 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
         if let Some(row) = returning {
             returning_rows.push(row);
         }
-        after_row_events.extend(row_after_events);
+        crate::sql::triggers::AfterRowTriggerEvent::append(after_row_events, row_after_events);
         prepared_buffer
             .as_mut()
             .ok_or_else(|| {
@@ -464,6 +464,7 @@ pub(in crate::sql) fn run_insert_inner(
     stmt: &InsertPlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
+    let _transition_capture_scope = crate::sql::triggers::TransitionCaptureScope::enter();
     engine.lock_relation(
         &stmt.table,
         crate::row_locks::RelationLockMode::RowExclusive,
@@ -630,26 +631,14 @@ pub(in crate::sql) fn run_insert_inner(
                 )?;
             }
             flush_prepared_fts_batch(engine, &mut fts_batch)?;
-            crate::sql::triggers::fire_after_row_trigger_events(engine, &after_row_events)?;
-            referential_actions.fire_after_statement_triggers(engine)?;
-            if let Some(columns) = conflict_update_columns.as_deref() {
-                crate::sql::triggers::fire_statement_triggers(
-                    engine,
-                    &stmt.table,
-                    uqa_sql::ast::TriggerTiming::After,
-                    uqa_sql::ast::TriggerEvent::Update,
-                    columns,
-                )?;
-            }
-            if insert_original_query {
-                crate::sql::triggers::fire_statement_triggers(
-                    engine,
-                    &stmt.table,
-                    uqa_sql::ast::TriggerTiming::After,
-                    uqa_sql::ast::TriggerEvent::Insert,
-                    &[],
-                )?;
-            }
+            fire_insert_after_triggers(
+                engine,
+                &stmt.table,
+                insert_original_query,
+                conflict_update_columns.as_deref(),
+                &after_row_events,
+                &referential_actions,
+            )?;
             if !stmt.returning.is_empty() {
                 return dml_returning_result(
                     engine,
@@ -796,7 +785,10 @@ pub(in crate::sql) fn run_insert_inner(
             if let Some(returning) = staged.returning {
                 returning_rows.push(returning);
             }
-            after_row_events.extend(staged.after_row_events);
+            crate::sql::triggers::AfterRowTriggerEvent::append(
+                &mut after_row_events,
+                staged.after_row_events,
+            );
             if staged.prepared_effect {
                 affected += 1;
                 has_prepared_effect = true;
@@ -860,7 +852,10 @@ pub(in crate::sql) fn run_insert_inner(
             if let Some(returning) = staged.returning {
                 returning_rows.push(returning);
             }
-            after_row_events.extend(staged.after_row_events);
+            crate::sql::triggers::AfterRowTriggerEvent::append(
+                &mut after_row_events,
+                staged.after_row_events,
+            );
             if staged.prepared_effect {
                 affected += 1;
                 has_prepared_effect = true;
@@ -911,26 +906,14 @@ pub(in crate::sql) fn run_insert_inner(
         )?;
     }
     flush_prepared_fts_batch(engine, &mut fts_batch)?;
-    crate::sql::triggers::fire_after_row_trigger_events(engine, &after_row_events)?;
-    referential_actions.fire_after_statement_triggers(engine)?;
-    if let Some(columns) = conflict_update_columns.as_deref() {
-        crate::sql::triggers::fire_statement_triggers(
-            engine,
-            &stmt.table,
-            uqa_sql::ast::TriggerTiming::After,
-            uqa_sql::ast::TriggerEvent::Update,
-            columns,
-        )?;
-    }
-    if insert_original_query {
-        crate::sql::triggers::fire_statement_triggers(
-            engine,
-            &stmt.table,
-            uqa_sql::ast::TriggerTiming::After,
-            uqa_sql::ast::TriggerEvent::Insert,
-            &[],
-        )?;
-    }
+    fire_insert_after_triggers(
+        engine,
+        &stmt.table,
+        insert_original_query,
+        conflict_update_columns.as_deref(),
+        &after_row_events,
+        &referential_actions,
+    )?;
     let rule_returning = rule_batch
         .as_ref()
         .map(|rule_batch| {
@@ -961,6 +944,87 @@ pub(in crate::sql) fn run_insert_inner(
         return dml_returning_result(engine, shape, returning_rows, affected);
     }
     Ok(SQLResult::from_affected(affected))
+}
+
+fn fire_insert_after_triggers(
+    engine: &Engine,
+    table: &str,
+    insert_original_query: bool,
+    conflict_update_columns: Option<&[String]>,
+    after_row_events: &[crate::sql::triggers::AfterRowTriggerEvent],
+    referential_actions: &super::ReferentialActionContext,
+) -> Result<(), SQLError> {
+    let insert_transition = if insert_original_query {
+        crate::sql::triggers::build_transition_tables(
+            engine,
+            table,
+            uqa_sql::ast::TriggerEvent::Insert,
+            &[],
+            after_row_events,
+        )?
+    } else {
+        Vec::new()
+    };
+    let update_transition = if let Some(columns) = conflict_update_columns {
+        crate::sql::triggers::build_transition_tables(
+            engine,
+            table,
+            uqa_sql::ast::TriggerEvent::Update,
+            columns,
+            after_row_events,
+        )?
+    } else {
+        Vec::new()
+    };
+    let referential_transition = referential_actions.transition_tables(engine, after_row_events)?;
+    let mut transition_tables = insert_transition
+        .iter()
+        .chain(update_transition.iter())
+        .collect::<Vec<_>>();
+    transition_tables.extend(referential_transition.iter());
+    let mut root_events = Vec::new();
+    if conflict_update_columns.is_some() {
+        root_events.push(uqa_sql::ast::TriggerEvent::Update);
+    }
+    if insert_original_query {
+        root_events.push(uqa_sql::ast::TriggerEvent::Insert);
+    }
+    for generation in crate::sql::triggers::after_trigger_generations(&transition_tables) {
+        crate::sql::triggers::fire_after_row_trigger_events_for_generation(
+            engine,
+            after_row_events,
+            &transition_tables,
+            generation,
+        )?;
+        referential_actions.fire_after_statement_triggers(
+            engine,
+            &referential_transition,
+            table,
+            &root_events,
+            generation,
+        )?;
+        if let Some(columns) = conflict_update_columns {
+            crate::sql::triggers::fire_after_statement_trigger_generation_for_root(
+                engine,
+                table,
+                uqa_sql::ast::TriggerEvent::Update,
+                columns,
+                &update_transition,
+                generation,
+            )?;
+        }
+        if insert_original_query {
+            crate::sql::triggers::fire_after_statement_trigger_generation_for_root(
+                engine,
+                table,
+                uqa_sql::ast::TriggerEvent::Insert,
+                &[],
+                &insert_transition,
+                generation,
+            )?;
+        }
+    }
+    Ok(())
 }
 
 struct StagedValuesInsertRow {
@@ -1121,9 +1185,10 @@ fn stage_prepared_insert_row(
                     old_document: None,
                     new_document: Some(document),
                     updated_columns: &[],
+                    cascade_parent: None,
                 },
             )? {
-                after_row_events.push(event);
+                crate::sql::triggers::AfterRowTriggerEvent::push(&mut after_row_events, event);
             }
             (
                 ReturningRowImages {

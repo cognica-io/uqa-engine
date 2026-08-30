@@ -68,6 +68,7 @@ pub(in crate::sql) fn run_merge_inner(
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
     use uqa_sql::expr::truthy;
+    let _transition_capture_scope = crate::sql::triggers::TransitionCaptureScope::enter();
     let target_table = stmt.target.clone();
     engine.lock_relation(
         &target_table,
@@ -697,9 +698,10 @@ pub(in crate::sql) fn run_merge_inner(
                         old_document: None,
                         new_document: Some(&document),
                         updated_columns: &[],
+                        cascade_parent: None,
                     },
                 )? {
-                    after_row_events.push(event);
+                    crate::sql::triggers::AfterRowTriggerEvent::push(&mut after_row_events, event);
                 }
                 if !stmt.returning.is_empty() {
                     returning_rows.push(build_merge_returning_row(
@@ -785,32 +787,102 @@ pub(in crate::sql) fn run_merge_inner(
             }
         }
     }
-    crate::sql::triggers::fire_after_row_trigger_events(engine, &after_row_events)?;
-    referential_actions.fire_after_statement_triggers(engine)?;
-    for (enabled, event, columns) in [
-        (
-            has_delete_action,
+    let delete_transition = if has_delete_action {
+        crate::sql::triggers::build_transition_tables(
+            engine,
+            &target_table,
             uqa_sql::ast::TriggerEvent::Delete,
-            &[][..],
-        ),
-        (
-            has_update_action,
+            &[],
+            &after_row_events,
+        )?
+    } else {
+        Vec::new()
+    };
+    let update_transition = if has_update_action {
+        crate::sql::triggers::build_transition_tables(
+            engine,
+            &target_table,
             uqa_sql::ast::TriggerEvent::Update,
-            update_statement_columns.as_slice(),
-        ),
-        (
-            has_insert_action,
+            &update_statement_columns,
+            &after_row_events,
+        )?
+    } else {
+        Vec::new()
+    };
+    let insert_transition = if has_insert_action {
+        crate::sql::triggers::build_transition_tables(
+            engine,
+            &target_table,
             uqa_sql::ast::TriggerEvent::Insert,
-            &[][..],
-        ),
-    ] {
-        if enabled {
-            crate::sql::triggers::fire_statement_triggers(
+            &[],
+            &after_row_events,
+        )?
+    } else {
+        Vec::new()
+    };
+    let referential_transition =
+        referential_actions.transition_tables(engine, &after_row_events)?;
+    let mut transition_tables = delete_transition
+        .iter()
+        .chain(update_transition.iter())
+        .chain(insert_transition.iter())
+        .collect::<Vec<_>>();
+    transition_tables.extend(referential_transition.iter());
+    let root_events = [
+        (has_delete_action, uqa_sql::ast::TriggerEvent::Delete),
+        (has_update_action, uqa_sql::ast::TriggerEvent::Update),
+        (has_insert_action, uqa_sql::ast::TriggerEvent::Insert),
+    ]
+    .into_iter()
+    .filter_map(|(enabled, event)| enabled.then_some(event))
+    .collect::<Vec<_>>();
+    for generation in crate::sql::triggers::after_trigger_generations(&transition_tables) {
+        crate::sql::triggers::fire_after_row_trigger_events_for_generation(
+            engine,
+            &after_row_events,
+            &transition_tables,
+            generation,
+        )?;
+        referential_actions.fire_after_statement_triggers(
+            engine,
+            &referential_transition,
+            &target_table,
+            &root_events,
+            generation,
+        )?;
+        for (enabled, event, columns) in [
+            (
+                has_delete_action,
+                uqa_sql::ast::TriggerEvent::Delete,
+                &[][..],
+            ),
+            (
+                has_update_action,
+                uqa_sql::ast::TriggerEvent::Update,
+                update_statement_columns.as_slice(),
+            ),
+            (
+                has_insert_action,
+                uqa_sql::ast::TriggerEvent::Insert,
+                &[][..],
+            ),
+        ] {
+            if !enabled {
+                continue;
+            }
+            let event_transitions = match event {
+                uqa_sql::ast::TriggerEvent::Delete => &delete_transition,
+                uqa_sql::ast::TriggerEvent::Update => &update_transition,
+                uqa_sql::ast::TriggerEvent::Insert => &insert_transition,
+                uqa_sql::ast::TriggerEvent::Truncate => unreachable!(),
+            };
+            crate::sql::triggers::fire_after_statement_trigger_generation_for_root(
                 engine,
                 &target_table,
-                uqa_sql::ast::TriggerTiming::After,
                 event,
                 columns,
+                event_transitions,
+                generation,
             )?;
         }
     }

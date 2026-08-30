@@ -8,9 +8,9 @@
 
 use super::{
     apply_set_action_to_child, coerce_to_column_type, foreign_key_comparison_types,
-    foreign_key_lookup_values, lock_referencing_child, period_foreign_key_coverage,
-    prepare_referential_document_rewrite, referencing_rows, referrers_to_for_actions, DocId,
-    Document, Engine, ForeignKeyAction, PhysicalDocumentIdentity, PreparedDocumentRewrite,
+    foreign_key_lookup_values, period_foreign_key_coverage, prepare_referential_document_rewrite,
+    referencing_rows, referrers_to_for_actions, DocId, Document, Engine, ForeignKeyAction,
+    PhysicalDocumentIdentity, PreparedDocumentRewrite, ReferencingChildLock,
     ReferentialActionContext, ReferentialRewritePreparation, SQLError, SQLParam, Value,
 };
 
@@ -114,7 +114,14 @@ pub(super) fn prepare_referenced_key_update_actions(
                 &fk.local_columns,
             )?;
         }
-        let referencing = referencing_rows(engine, &ref_table, &fk, &comparison, &expected)?;
+        let referencing = referencing_rows(
+            engine,
+            &ref_table,
+            &fk,
+            &comparison,
+            &expected,
+            referential_actions,
+        )?;
         for (child, _child_doc) in referencing {
             match fk.on_update {
                 ForeignKeyAction::NoAction if defer_no_action => {
@@ -136,14 +143,16 @@ pub(super) fn prepare_referenced_key_update_actions(
                     });
                 }
                 ForeignKeyAction::Cascade => {
-                    let Some((child, child_doc)) = lock_referencing_child(
-                        engine,
-                        &ref_table,
-                        &child,
-                        &fk.local_columns,
-                        &fk,
-                        &comparison,
-                        &expected,
+                    let Some((child, child_doc)) = engine.lock_referencing_child(
+                        ReferencingChildLock {
+                            ref_table: &ref_table,
+                            child: &child,
+                            lock_columns: &fk.local_columns,
+                            foreign_key: &fk,
+                            comparison: &comparison,
+                            expected: &expected,
+                        },
+                        referential_actions,
                     )?
                     else {
                         continue;
@@ -171,14 +180,16 @@ pub(super) fn prepare_referenced_key_update_actions(
                     }
                 }
                 ForeignKeyAction::SetNull | ForeignKeyAction::SetDefault => {
-                    let Some((child, child_doc)) = lock_referencing_child(
-                        engine,
-                        &ref_table,
-                        &child,
-                        &fk.local_columns,
-                        &fk,
-                        &comparison,
-                        &expected,
+                    let Some((child, child_doc)) = engine.lock_referencing_child(
+                        ReferencingChildLock {
+                            ref_table: &ref_table,
+                            child: &child,
+                            lock_columns: &fk.local_columns,
+                            foreign_key: &fk,
+                            comparison: &comparison,
+                            expected: &expected,
+                        },
+                        referential_actions,
                     )?
                     else {
                         continue;

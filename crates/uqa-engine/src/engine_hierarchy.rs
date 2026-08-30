@@ -10,6 +10,16 @@ use super::{Engine, RelationIdentity, SQLError, StorageBackendError, StorageBack
 use std::collections::BTreeSet;
 
 impl Engine {
+    /// Read hierarchy metadata from an already-loaded relation without synchronizing catalogs or consulting a transaction snapshot. Trigger catalog restoration uses this path while the transaction state mutex is already held.
+    pub(crate) fn loaded_table_hierarchy(
+        &self,
+        relation: &RelationIdentity,
+    ) -> Option<uqa_sql::ast::TableHierarchy> {
+        let table = self.storage.tables.read().get(relation).cloned()?;
+        let hierarchy = table.hierarchy.read().clone();
+        Some(hierarchy)
+    }
+
     pub(crate) fn try_table_hierarchy(
         &self,
         table: &str,

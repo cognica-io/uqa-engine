@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "077c4a01e1fed074914789da4fdabb32c6d727589d6d633bd199c41cccf9f327",
+  "fixture_sha256": "167f17562290c3a4b78589510e2c96ebda47dfb98108239438fb663dfcc9cd3e",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -448,6 +448,862 @@
     },
     {
       "name": "dropped_reference_cancels_event_and_trigger",
+      "kind": "rows",
+      "rows": [
+        [
+          "0",
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_transition_relation_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "reject_transition_before_trigger",
+      "kind": "error",
+      "sqlstate": "42P17"
+    },
+    {
+      "name": "reject_transition_multiple_events",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "reject_transition_update_column_list",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "reject_transition_old_table_for_insert",
+      "kind": "error",
+      "sqlstate": "42P17"
+    },
+    {
+      "name": "reject_transition_new_table_for_delete",
+      "kind": "error",
+      "sqlstate": "42P17"
+    },
+    {
+      "name": "reject_transition_same_relation_name",
+      "kind": "error",
+      "sqlstate": "42P17"
+    },
+    {
+      "name": "reject_transition_duplicate_old_table",
+      "kind": "error",
+      "sqlstate": "42P17"
+    },
+    {
+      "name": "reject_transition_row_variable_name",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "reject_transition_truncate",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "create_transition_insert_statement",
+      "kind": "ok"
+    },
+    {
+      "name": "create_transition_insert_row",
+      "kind": "ok"
+    },
+    {
+      "name": "create_transition_update_statement",
+      "kind": "ok"
+    },
+    {
+      "name": "create_transition_delete_statement",
+      "kind": "ok"
+    },
+    {
+      "name": "transition_insert_multiple_rows",
+      "kind": "ok"
+    },
+    {
+      "name": "transition_update_multiple_rows",
+      "kind": "ok"
+    },
+    {
+      "name": "transition_update_zero_rows",
+      "kind": "ok"
+    },
+    {
+      "name": "transition_delete_multiple_rows",
+      "kind": "ok"
+    },
+    {
+      "name": "transition_relation_execution",
+      "kind": "rows",
+      "rows": [
+        [
+          "transition_insert_row",
+          "INSERT",
+          "0",
+          "3",
+          "0",
+          "63",
+          "0",
+          "630"
+        ],
+        [
+          "transition_insert_row",
+          "INSERT",
+          "0",
+          "3",
+          "0",
+          "63",
+          "0",
+          "630"
+        ],
+        [
+          "transition_insert_row",
+          "INSERT",
+          "0",
+          "3",
+          "0",
+          "63",
+          "0",
+          "630"
+        ],
+        [
+          "transition_insert_statement",
+          "INSERT",
+          "0",
+          "3",
+          "0",
+          "63",
+          "0",
+          "630"
+        ],
+        [
+          "transition_update_statement",
+          "UPDATE",
+          "2",
+          "2",
+          "32",
+          "66",
+          "320",
+          "660"
+        ],
+        [
+          "transition_update_statement",
+          "UPDATE",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0"
+        ],
+        [
+          "transition_delete_statement",
+          "DELETE",
+          "2",
+          "0",
+          "54",
+          "0",
+          "540",
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "transition_relation_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "transition_delete_statement",
+          "old_rows",
+          null,
+          "CREATE TRIGGER transition_delete_statement AFTER DELETE ON transition_items REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION transition_probe()"
+        ],
+        [
+          "transition_insert_row",
+          null,
+          "new_rows",
+          "CREATE TRIGGER transition_insert_row AFTER INSERT ON transition_items REFERENCING NEW TABLE AS new_rows FOR EACH ROW EXECUTE FUNCTION transition_probe()"
+        ],
+        [
+          "transition_insert_statement",
+          null,
+          "new_rows",
+          "CREATE TRIGGER transition_insert_statement AFTER INSERT ON transition_items REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION transition_probe()"
+        ],
+        [
+          "transition_update_statement",
+          "old_rows",
+          "new_rows",
+          "CREATE TRIGGER transition_update_statement AFTER UPDATE ON transition_items REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION transition_probe()"
+        ]
+      ]
+    },
+    {
+      "name": "create_transition_insert_select_source",
+      "kind": "ok"
+    },
+    {
+      "name": "transition_insert_select",
+      "kind": "ok"
+    },
+    {
+      "name": "transition_insert_select_execution",
+      "kind": "rows",
+      "rows": [
+        [
+          "transition_insert_row",
+          "INSERT",
+          "0",
+          "2",
+          "0",
+          "92"
+        ],
+        [
+          "transition_insert_row",
+          "INSERT",
+          "0",
+          "2",
+          "0",
+          "92"
+        ],
+        [
+          "transition_insert_statement",
+          "INSERT",
+          "0",
+          "2",
+          "0",
+          "92"
+        ]
+      ]
+    },
+    {
+      "name": "clear_transition_log_before_on_conflict",
+      "kind": "ok"
+    },
+    {
+      "name": "transition_on_conflict_update_and_insert",
+      "kind": "ok"
+    },
+    {
+      "name": "transition_on_conflict_execution",
+      "kind": "rows",
+      "rows": [
+        [
+          "transition_insert_row",
+          "INSERT",
+          "0",
+          "1",
+          "0",
+          "61"
+        ],
+        [
+          "transition_update_statement",
+          "UPDATE",
+          "1",
+          "1",
+          "43",
+          "202"
+        ],
+        [
+          "transition_insert_statement",
+          "INSERT",
+          "0",
+          "1",
+          "0",
+          "61"
+        ]
+      ]
+    },
+    {
+      "name": "create_transition_update_from_source",
+      "kind": "ok"
+    },
+    {
+      "name": "transition_update_from",
+      "kind": "ok"
+    },
+    {
+      "name": "transition_update_from_execution",
+      "kind": "rows",
+      "rows": [
+        [
+          "transition_update_statement",
+          "UPDATE",
+          "2",
+          "2",
+          "92",
+          "101"
+        ]
+      ]
+    },
+    {
+      "name": "create_transition_merge_source",
+      "kind": "ok"
+    },
+    {
+      "name": "transition_merge_mixed_actions",
+      "kind": "ok"
+    },
+    {
+      "name": "transition_merge_execution",
+      "kind": "rows",
+      "rows": [
+        [
+          "transition_insert_row",
+          "INSERT",
+          "0",
+          "1",
+          "0",
+          "71"
+        ],
+        [
+          "transition_delete_statement",
+          "DELETE",
+          "1",
+          "0",
+          "202",
+          "0"
+        ],
+        [
+          "transition_update_statement",
+          "UPDATE",
+          "1",
+          "1",
+          "45",
+          "401"
+        ],
+        [
+          "transition_insert_statement",
+          "INSERT",
+          "0",
+          "1",
+          "0",
+          "71"
+        ]
+      ]
+    },
+    {
+      "name": "create_partition_transition_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "reject_partitioned_row_transition",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "reject_partition_row_transition",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "transition_partition_update_across_leaves",
+      "kind": "ok"
+    },
+    {
+      "name": "transition_partition_execution",
+      "kind": "rows",
+      "rows": [
+        [
+          "transition_partition_update",
+          "UPDATE",
+          "2",
+          "2",
+          "32",
+          "66",
+          "320",
+          "660"
+        ]
+      ]
+    },
+    {
+      "name": "create_inheritance_transition_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "reject_inheritance_child_row_transition",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "transition_inheritance_update_parent_and_child",
+      "kind": "ok"
+    },
+    {
+      "name": "transition_inheritance_execution",
+      "kind": "rows",
+      "rows": [
+        [
+          "transition_inherited_update",
+          "UPDATE",
+          "2",
+          "2",
+          "30",
+          "32",
+          "300",
+          "320"
+        ]
+      ]
+    },
+    {
+      "name": "create_foreign_key_transition_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "transition_foreign_key_update_cascade",
+      "kind": "ok"
+    },
+    {
+      "name": "transition_foreign_key_update_cascade_execution",
+      "kind": "rows",
+      "rows": [
+        [
+          "transition_cascade_update",
+          "UPDATE",
+          "2",
+          "2",
+          "30",
+          "30"
+        ]
+      ]
+    },
+    {
+      "name": "clear_transition_log_before_delete_cascade",
+      "kind": "ok"
+    },
+    {
+      "name": "transition_foreign_key_delete_cascade",
+      "kind": "ok"
+    },
+    {
+      "name": "transition_foreign_key_delete_cascade_execution",
+      "kind": "rows",
+      "rows": [
+        [
+          "transition_cascade_delete",
+          "DELETE",
+          "2",
+          "0",
+          "30",
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_multi_foreign_key_transition_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "transition_multi_foreign_key_update_cascades",
+      "kind": "ok"
+    },
+    {
+      "name": "transition_multi_foreign_key_cascade_statement_boundaries",
+      "kind": "rows",
+      "rows": [
+        [
+          "transition_multi_cascade_row",
+          "UPDATE",
+          "4",
+          "4",
+          "600",
+          "600"
+        ],
+        [
+          "transition_multi_cascade_row",
+          "UPDATE",
+          "4",
+          "4",
+          "600",
+          "600"
+        ],
+        [
+          "transition_multi_cascade_row",
+          "UPDATE",
+          "4",
+          "4",
+          "600",
+          "600"
+        ],
+        [
+          "transition_multi_cascade_row",
+          "UPDATE",
+          "4",
+          "4",
+          "600",
+          "600"
+        ],
+        [
+          "transition_multi_cascade_update",
+          "UPDATE",
+          "4",
+          "4",
+          "600",
+          "600"
+        ]
+      ]
+    },
+    {
+      "name": "transition_multi_foreign_key_statement_trigger_cardinality",
+      "kind": "rows",
+      "rows": [
+        [
+          "transition_multi_before:BEFORE:UPDATE"
+        ],
+        [
+          "transition_multi_before_a:BEFORE:UPDATE"
+        ],
+        [
+          "transition_multi_aa_after_b:AFTER:UPDATE"
+        ],
+        [
+          "transition_multi_after:AFTER:UPDATE"
+        ],
+        [
+          "transition_multi_after_b:AFTER:UPDATE"
+        ]
+      ]
+    },
+    {
+      "name": "transition_multi_foreign_key_cascade_final_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "101",
+          "1010",
+          "100"
+        ],
+        [
+          "2",
+          "102",
+          "1020",
+          "200"
+        ]
+      ]
+    },
+    {
+      "name": "create_self_referential_cascade_transition_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "delete_self_referential_cascade_with_after_row_transition_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "self_referential_cascade_splits_transition_sets",
+      "kind": "rows",
+      "rows": [
+        [
+          "transition_self_ref_row",
+          "2",
+          "3",
+          "1"
+        ],
+        [
+          "transition_self_ref_row",
+          "2",
+          "3",
+          "1"
+        ],
+        [
+          "transition_self_ref_statement",
+          "2",
+          "3",
+          "1"
+        ],
+        [
+          "transition_self_ref_row",
+          "1",
+          "3",
+          "2"
+        ],
+        [
+          "transition_self_ref_statement",
+          "1",
+          "3",
+          "2"
+        ]
+      ]
+    },
+    {
+      "name": "delete_self_referential_cascade_without_after_row_transition_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "self_referential_cascade_coalesces_without_after_row_transition_trigger",
+      "kind": "rows",
+      "rows": [
+        [
+          "transition_self_ref_statement",
+          "4",
+          "10",
+          "6"
+        ]
+      ]
+    },
+    {
+      "name": "create_branching_self_referential_cascade_transition_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "delete_branching_self_referential_cascade_with_after_row_transition_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "branching_self_referential_cascade_transition_sets",
+      "kind": "rows",
+      "rows": [
+        [
+          "transition_self_ref_branch_row",
+          "3",
+          "6",
+          "2"
+        ],
+        [
+          "transition_self_ref_branch_row",
+          "3",
+          "6",
+          "2"
+        ],
+        [
+          "transition_self_ref_branch_row",
+          "3",
+          "6",
+          "2"
+        ],
+        [
+          "transition_self_ref_branch_statement",
+          "3",
+          "6",
+          "2"
+        ],
+        [
+          "transition_self_ref_branch_row",
+          "2",
+          "9",
+          "5"
+        ],
+        [
+          "transition_self_ref_branch_row",
+          "2",
+          "9",
+          "5"
+        ],
+        [
+          "transition_self_ref_branch_statement",
+          "2",
+          "9",
+          "5"
+        ],
+        [
+          "transition_self_ref_branch_statement",
+          "0",
+          "0",
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_deep_self_referential_cascade_transition_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "delete_deep_self_referential_cascade_with_after_row_transition_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "deep_self_referential_cascade_transition_sets",
+      "kind": "rows",
+      "rows": [
+        [
+          "transition_self_ref_deep_row",
+          "2",
+          "3",
+          "1"
+        ],
+        [
+          "transition_self_ref_deep_row",
+          "2",
+          "3",
+          "1"
+        ],
+        [
+          "transition_self_ref_deep_statement",
+          "2",
+          "3",
+          "1"
+        ],
+        [
+          "transition_self_ref_deep_row",
+          "2",
+          "7",
+          "5"
+        ],
+        [
+          "transition_self_ref_deep_row",
+          "2",
+          "7",
+          "5"
+        ],
+        [
+          "transition_self_ref_deep_statement",
+          "2",
+          "7",
+          "5"
+        ],
+        [
+          "transition_self_ref_deep_statement",
+          "0",
+          "0",
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_multi_row_conflict_cascade_transition_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "multi_row_conflict_update_with_recursive_cascades",
+      "kind": "ok"
+    },
+    {
+      "name": "multi_row_conflict_cascade_transition_sets",
+      "kind": "rows",
+      "rows": [
+        [
+          "transition_conflict_chain_row",
+          "UPDATE",
+          "2",
+          "2",
+          "110",
+          "110",
+          "1100",
+          "1100"
+        ],
+        [
+          "transition_conflict_chain_row",
+          "UPDATE",
+          "2",
+          "2",
+          "110",
+          "110",
+          "1100",
+          "1100"
+        ],
+        [
+          "transition_conflict_chain_statement",
+          "UPDATE",
+          "2",
+          "2",
+          "110",
+          "110",
+          "1100",
+          "1100"
+        ],
+        [
+          "transition_conflict_chain_row",
+          "UPDATE",
+          "2",
+          "2",
+          "50",
+          "50",
+          "500",
+          "500"
+        ],
+        [
+          "transition_conflict_chain_row",
+          "UPDATE",
+          "2",
+          "2",
+          "50",
+          "50",
+          "500",
+          "500"
+        ],
+        [
+          "transition_conflict_chain_statement",
+          "UPDATE",
+          "2",
+          "2",
+          "50",
+          "50",
+          "500",
+          "500"
+        ]
+      ]
+    },
+    {
+      "name": "multi_row_conflict_cascade_final_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "2",
+          "101",
+          null,
+          "20",
+          "200"
+        ],
+        [
+          "3",
+          null,
+          "101",
+          "30",
+          "300"
+        ],
+        [
+          "101",
+          null,
+          null,
+          "10",
+          "100"
+        ],
+        [
+          "110",
+          null,
+          null,
+          "100",
+          "1000"
+        ]
+      ]
+    },
+    {
+      "name": "create_nested_transition_scope_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "execute_nested_transition_scope",
+      "kind": "ok"
+    },
+    {
+      "name": "nested_transition_scope_isolation",
+      "kind": "rows",
+      "rows": [
+        [
+          "inner:3"
+        ],
+        [
+          "outer:2:3:2"
+        ]
+      ]
+    },
+    {
+      "name": "create_transition_persistence_guard_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "reject_persisting_transition_relation",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "transition_persistence_failure_is_atomic",
       "kind": "rows",
       "rows": [
         [

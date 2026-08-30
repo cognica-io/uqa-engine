@@ -63,6 +63,10 @@ mod rules;
 mod scalar;
 mod select;
 mod triggers;
+
+pub(crate) fn active_trigger_transition_relation_names() -> std::collections::BTreeSet<String> {
+    triggers::current_transition_relation_names()
+}
 mod vacuum;
 mod volatility;
 mod where_eval;

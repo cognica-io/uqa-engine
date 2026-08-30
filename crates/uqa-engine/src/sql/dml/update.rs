@@ -37,6 +37,7 @@ pub(in crate::sql) fn run_update_inner(
     stmt: &UpdatePlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
+    let _transition_capture_scope = crate::sql::triggers::TransitionCaptureScope::enter();
     engine.lock_relation(
         &stmt.table,
         crate::row_locks::RelationLockMode::RowExclusive,
@@ -93,17 +94,7 @@ pub(in crate::sql) fn run_update_inner(
     // evaluate WHERE against each joined row, and apply assignments to the
     // matching target rows.
     if let Some(source) = stmt.source.as_deref() {
-        let result = run_update_from(engine, stmt, source, params, &mut ctes)?;
-        if update_original_query {
-            crate::sql::triggers::fire_statement_triggers(
-                engine,
-                &stmt.table,
-                uqa_sql::ast::TriggerTiming::After,
-                uqa_sql::ast::TriggerEvent::Update,
-                &assigned_columns,
-            )?;
-        }
-        return Ok(result);
+        return run_update_from(engine, stmt, source, params, &mut ctes);
     }
     let target_tables = engine.hierarchy_scan_tables(&stmt.table, stmt.include_descendants)?;
     let target_hierarchy = engine
@@ -116,6 +107,12 @@ pub(in crate::sql) fn run_update_inner(
         && target_tables.len() == 1
         && !target_is_partitioned
         && !engine.has_row_triggers(&stmt.table, uqa_sql::ast::TriggerEvent::Update)?
+        && !crate::sql::triggers::transition_capture_required(
+            engine,
+            &stmt.table,
+            uqa_sql::ast::TriggerEvent::Update,
+            &assigned_columns,
+        )?
         && !engine.relation_has_rules(&stmt.table)?
     {
         if let Some(result) = try_run_point_update(engine, stmt, params)? {
@@ -356,18 +353,53 @@ pub(in crate::sql) fn run_update_inner(
             apply_validated_prepared_document_rewrite(engine, prepared)?;
         }
     }
-    for (_, events) in prepared_updates {
-        crate::sql::triggers::fire_after_row_trigger_events(engine, &events)?;
-    }
-    referential_actions.fire_after_statement_triggers(engine)?;
-    if update_original_query {
-        crate::sql::triggers::fire_statement_triggers(
+    let after_row_events = prepared_updates
+        .into_iter()
+        .flat_map(|(_, events)| events)
+        .collect::<Vec<_>>();
+    let transition_tables = if update_original_query {
+        crate::sql::triggers::build_transition_tables(
             engine,
             &stmt.table,
-            uqa_sql::ast::TriggerTiming::After,
             uqa_sql::ast::TriggerEvent::Update,
             &assigned_columns,
+            &after_row_events,
+        )?
+    } else {
+        Vec::new()
+    };
+    let referential_transition =
+        referential_actions.transition_tables(engine, &after_row_events)?;
+    let mut transition_refs = transition_tables.iter().collect::<Vec<_>>();
+    transition_refs.extend(referential_transition.iter());
+    let root_events = update_original_query
+        .then_some(uqa_sql::ast::TriggerEvent::Update)
+        .into_iter()
+        .collect::<Vec<_>>();
+    for generation in crate::sql::triggers::after_trigger_generations(&transition_refs) {
+        crate::sql::triggers::fire_after_row_trigger_events_for_generation(
+            engine,
+            &after_row_events,
+            &transition_refs,
+            generation,
         )?;
+        referential_actions.fire_after_statement_triggers(
+            engine,
+            &referential_transition,
+            &stmt.table,
+            &root_events,
+            generation,
+        )?;
+        if update_original_query {
+            crate::sql::triggers::fire_after_statement_trigger_generation_for_root(
+                engine,
+                &stmt.table,
+                uqa_sql::ast::TriggerEvent::Update,
+                &assigned_columns,
+                &transition_tables,
+                generation,
+            )?;
+        }
     }
     if !stmt.returning.is_empty() {
         let shape = DmlReturningShape {

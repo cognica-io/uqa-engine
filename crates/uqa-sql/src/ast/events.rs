@@ -24,6 +24,13 @@ pub enum TriggerEvent {
     Truncate,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriggerTransitionRelation {
+    pub name: String,
+    pub is_new: bool,
+    pub is_table: bool,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TriggerDeferrability {
@@ -59,8 +66,28 @@ pub struct CreateTrigger {
     pub timing: TriggerTiming,
     pub events: Vec<TriggerEvent>,
     pub update_columns: Vec<String>,
+    #[serde(default)]
+    pub transition_relations: Vec<TriggerTransitionRelation>,
     pub when: Option<Expr>,
     pub or_replace: bool,
+}
+
+impl CreateTrigger {
+    #[must_use]
+    pub fn old_transition_table(&self) -> Option<&str> {
+        self.transition_relations
+            .iter()
+            .find(|relation| relation.is_table && !relation.is_new)
+            .map(|relation| relation.name.as_str())
+    }
+
+    #[must_use]
+    pub fn new_transition_table(&self) -> Option<&str> {
+        self.transition_relations
+            .iter()
+            .find(|relation| relation.is_table && relation.is_new)
+            .map(|relation| relation.name.as_str())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

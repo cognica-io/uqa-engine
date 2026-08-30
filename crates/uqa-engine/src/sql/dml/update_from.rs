@@ -261,10 +261,54 @@ pub(in crate::sql) fn run_update_from(
             apply_validated_prepared_document_rewrite(engine, prepared)?;
         }
     }
-    for (_, _, events) in prepared_updates {
-        crate::sql::triggers::fire_after_row_trigger_events(engine, &events)?;
+    let after_row_events = prepared_updates
+        .into_iter()
+        .flat_map(|(_, _, events)| events)
+        .collect::<Vec<_>>();
+    let transition_tables = if update_original_query {
+        crate::sql::triggers::build_transition_tables(
+            engine,
+            &target,
+            uqa_sql::ast::TriggerEvent::Update,
+            &assigned_columns,
+            &after_row_events,
+        )?
+    } else {
+        Vec::new()
+    };
+    let referential_transition =
+        referential_actions.transition_tables(engine, &after_row_events)?;
+    let mut transition_refs = transition_tables.iter().collect::<Vec<_>>();
+    transition_refs.extend(referential_transition.iter());
+    let root_events = update_original_query
+        .then_some(uqa_sql::ast::TriggerEvent::Update)
+        .into_iter()
+        .collect::<Vec<_>>();
+    for generation in crate::sql::triggers::after_trigger_generations(&transition_refs) {
+        crate::sql::triggers::fire_after_row_trigger_events_for_generation(
+            engine,
+            &after_row_events,
+            &transition_refs,
+            generation,
+        )?;
+        referential_actions.fire_after_statement_triggers(
+            engine,
+            &referential_transition,
+            &target,
+            &root_events,
+            generation,
+        )?;
+        if update_original_query {
+            crate::sql::triggers::fire_after_statement_trigger_generation_for_root(
+                engine,
+                &target,
+                uqa_sql::ast::TriggerEvent::Update,
+                &assigned_columns,
+                &transition_tables,
+                generation,
+            )?;
+        }
     }
-    referential_actions.fire_after_statement_triggers(engine)?;
     if !stmt.returning.is_empty() {
         let shape = DmlReturningShape {
             table: &target,

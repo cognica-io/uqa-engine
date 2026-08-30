@@ -97,6 +97,7 @@ pub(super) fn execute_routine(
         });
     }
     let _guard = DepthGuard::enter(engine)?;
+    let _transition_scope = crate::sql::triggers::enter_empty_transition_relation_scope();
     let specialized = specialized_definition(&function.def, invocation)?;
     let definition = specialized.as_ref().unwrap_or(&function.def);
     engine.ensure_routine_execute_privilege(definition)?;

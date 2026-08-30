@@ -110,14 +110,32 @@ fn constraint_trigger_shape_is_preserved_for_execution_validation() {
 }
 
 #[test]
-fn unsupported_advanced_trigger_shapes_fail_during_compilation() {
-    for sql in [
-        "CREATE TRIGGER transitioning AFTER UPDATE ON items REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION probe()",
-        "CREATE TRIGGER view_instead INSTEAD OF INSERT ON item_view FOR EACH ROW EXECUTE FUNCTION probe()",
-    ] {
-        let error = compile(sql).expect_err("advanced trigger must not compile partially");
-        assert_eq!(error.sqlstate(), Some("0A000"), "{sql}: {error}");
-    }
+fn trigger_transition_relations_preserve_names_and_level() {
+    let Statement::CreateTrigger(statement) = first(
+        "CREATE TRIGGER transitioning AFTER UPDATE ON items REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION probe()",
+    ) else {
+        panic!("expected CREATE TRIGGER");
+    };
+    assert!(!statement.row);
+    assert_eq!(statement.transition_relations.len(), 2);
+    assert_eq!(statement.old_transition_table(), Some("old_rows"));
+    assert_eq!(statement.new_transition_table(), Some("new_rows"));
+
+    let Statement::CreateTrigger(row) = first(
+        "CREATE TRIGGER transitioning_row AFTER INSERT ON items REFERENCING NEW TABLE AS inserted_rows FOR EACH ROW EXECUTE FUNCTION probe()",
+    ) else {
+        panic!("expected row CREATE TRIGGER");
+    };
+    assert!(row.row);
+    assert_eq!(row.old_transition_table(), None);
+    assert_eq!(row.new_transition_table(), Some("inserted_rows"));
+}
+
+#[test]
+fn unsupported_instead_of_trigger_fails_during_compilation() {
+    let sql = "CREATE TRIGGER view_instead INSTEAD OF INSERT ON item_view FOR EACH ROW EXECUTE FUNCTION probe()";
+    let error = compile(sql).expect_err("INSTEAD OF trigger must not compile partially");
+    assert_eq!(error.sqlstate(), Some("0A000"), "{sql}: {error}");
 }
 
 #[test]
