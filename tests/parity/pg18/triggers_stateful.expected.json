@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "47abb7a101469b46c9578fe1557b4999e17d1841bea7234c21ebf968ec637933",
+  "fixture_sha256": "70268b8ab6cf7c5e391496080764bf10d4697514ed45c91872867a2b7956b57c",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -1753,6 +1753,418 @@
           "{origin,replica,local}",
           "origin",
           "origin"
+        ]
+      ]
+    },
+    {
+      "name": "create_insert_select_statement_snapshot_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_select_keeps_statement_snapshot",
+      "kind": "rows",
+      "rows": []
+    },
+    {
+      "name": "insert_select_statement_snapshot_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "update_keeps_statement_snapshot",
+      "kind": "rows",
+      "rows": []
+    },
+    {
+      "name": "update_statement_snapshot_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "2",
+          "update-seeded"
+        ]
+      ]
+    },
+    {
+      "name": "delete_keeps_statement_snapshot",
+      "kind": "rows",
+      "rows": [
+        [
+          "2",
+          "update-seeded"
+        ]
+      ]
+    },
+    {
+      "name": "delete_statement_snapshot_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "3",
+          "delete-seeded"
+        ]
+      ]
+    },
+    {
+      "name": "create_instead_of_view_trigger_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "reject_instead_of_trigger_on_table",
+      "kind": "error",
+      "sqlstate": "42809"
+    },
+    {
+      "name": "reject_instead_of_statement_trigger",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "reject_instead_of_when_condition",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "reject_instead_of_update_column_list",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "reject_instead_of_truncate_on_view",
+      "kind": "error",
+      "sqlstate": "42809"
+    },
+    {
+      "name": "reject_instead_of_transition_table",
+      "kind": "error",
+      "sqlstate": "42809"
+    },
+    {
+      "name": "reject_before_row_trigger_on_view",
+      "kind": "error",
+      "sqlstate": "42809"
+    },
+    {
+      "name": "create_instead_of_view_triggers",
+      "kind": "ok"
+    },
+    {
+      "name": "instead_of_view_trigger_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "a_instead_transform",
+          "93",
+          "O",
+          "t",
+          "t",
+          "CREATE TRIGGER a_instead_transform INSTEAD OF INSERT OR DELETE OR UPDATE ON instead_item_view FOR EACH ROW EXECUTE FUNCTION instead_view_transform()"
+        ],
+        [
+          "b_instead_apply",
+          "93",
+          "O",
+          "t",
+          "t",
+          "CREATE TRIGGER b_instead_apply INSTEAD OF INSERT OR DELETE OR UPDATE ON instead_item_view FOR EACH ROW EXECUTE FUNCTION instead_view_apply()"
+        ]
+      ]
+    },
+    {
+      "name": "instead_of_insert_chain_suppression_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          null,
+          "3",
+          "3",
+          "three:a:returned"
+        ]
+      ]
+    },
+    {
+      "name": "instead_of_update_returning_old_and_final_new",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "one",
+          "11",
+          "one:updated:a:returned",
+          "11",
+          "one:updated:a:returned"
+        ],
+        [
+          "2",
+          "two",
+          "12",
+          "two:updated:a:returned",
+          "12",
+          "two:updated:a:returned"
+        ]
+      ]
+    },
+    {
+      "name": "instead_of_delete_returns_original_old",
+      "kind": "rows",
+      "rows": [
+        [
+          "one:updated:a:stored",
+          null,
+          "11",
+          "one:updated:a:stored"
+        ]
+      ]
+    },
+    {
+      "name": "instead_of_trigger_chain_and_base_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "BEFORE:STATEMENT:INSERT"
+        ],
+        [
+          "2",
+          "a:INSERT:-:3"
+        ],
+        [
+          "3",
+          "b:INSERT:-:three:a"
+        ],
+        [
+          "4",
+          "a:INSERT:-:4"
+        ],
+        [
+          "5",
+          "AFTER:STATEMENT:INSERT"
+        ],
+        [
+          "6",
+          "BEFORE:STATEMENT:UPDATE"
+        ],
+        [
+          "7",
+          "a:UPDATE:1:11"
+        ],
+        [
+          "8",
+          "b:UPDATE:one:one:updated:a"
+        ],
+        [
+          "9",
+          "a:UPDATE:2:12"
+        ],
+        [
+          "10",
+          "b:UPDATE:two:two:updated:a"
+        ],
+        [
+          "11",
+          "AFTER:STATEMENT:UPDATE"
+        ],
+        [
+          "12",
+          "BEFORE:STATEMENT:DELETE"
+        ],
+        [
+          "13",
+          "a:DELETE:11:-"
+        ],
+        [
+          "14",
+          "b:DELETE:one:updated:a:stored:-"
+        ],
+        [
+          "15",
+          "AFTER:STATEMENT:DELETE"
+        ],
+        [
+          "9223372036854775807",
+          "base:3:three:a:stored"
+        ],
+        [
+          "9223372036854775807",
+          "base:12:two:updated:a:stored"
+        ]
+      ]
+    },
+    {
+      "name": "clear_instead_of_log_before_zero_row",
+      "kind": "ok"
+    },
+    {
+      "name": "instead_of_zero_row_update",
+      "kind": "ok"
+    },
+    {
+      "name": "instead_of_zero_row_statement_triggers",
+      "kind": "rows",
+      "rows": [
+        [
+          "BEFORE:STATEMENT:UPDATE"
+        ],
+        [
+          "AFTER:STATEMENT:UPDATE"
+        ]
+      ]
+    },
+    {
+      "name": "create_instead_of_source_context_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "instead_of_update_from_source_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          "3",
+          "changed",
+          "changed:a:returned"
+        ]
+      ]
+    },
+    {
+      "name": "instead_of_delete_using_source_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          "12",
+          "12",
+          "two:updated:a:stored"
+        ]
+      ]
+    },
+    {
+      "name": "instead_of_source_context_final_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "base",
+          "3",
+          "changed:a:stored"
+        ],
+        [
+          "source",
+          "3",
+          "changed"
+        ],
+        [
+          "source",
+          "12",
+          "remove"
+        ]
+      ]
+    },
+    {
+      "name": "instead_of_insert_select_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          "23",
+          "changed:selected:a:returned"
+        ]
+      ]
+    },
+    {
+      "name": "instead_of_insert_select_base_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "23",
+          "changed:selected:a:stored"
+        ]
+      ]
+    },
+    {
+      "name": "create_instead_of_insert_select_snapshot_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "instead_of_insert_select_keeps_statement_snapshot",
+      "kind": "rows",
+      "rows": []
+    },
+    {
+      "name": "instead_of_insert_select_snapshot_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "instead_of_update_keeps_statement_snapshot",
+      "kind": "rows",
+      "rows": []
+    },
+    {
+      "name": "instead_of_update_statement_snapshot_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "30",
+          "update-seeded"
+        ]
+      ]
+    },
+    {
+      "name": "instead_of_delete_keeps_statement_snapshot",
+      "kind": "rows",
+      "rows": [
+        [
+          "30",
+          "update-seeded"
+        ]
+      ]
+    },
+    {
+      "name": "instead_of_delete_statement_snapshot_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "31",
+          "delete-seeded"
+        ]
+      ]
+    },
+    {
+      "name": "reject_instead_of_view_trigger_disable",
+      "kind": "error",
+      "sqlstate": "42809"
+    },
+    {
+      "name": "rename_instead_of_view_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "renamed_instead_of_view_trigger_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "renamed_instead_transform",
+          "O"
+        ]
+      ]
+    },
+    {
+      "name": "drop_renamed_instead_of_view_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "dropped_instead_of_view_trigger_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
         ]
       ]
     }

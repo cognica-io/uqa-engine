@@ -168,6 +168,9 @@ impl Engine {
     ) -> Result<Vec<RelationIdentity>, SQLError> {
         let mut current = self.resolve_trigger_table(table)?;
         let mut sources = vec![current.clone()];
+        if !self.storage.tables.read().contains_key(&current) {
+            return Ok(sources);
+        }
         loop {
             let hierarchy = self
                 .try_table_hierarchy(&current.qualified_name())

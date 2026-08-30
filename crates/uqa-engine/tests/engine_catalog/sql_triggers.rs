@@ -12,6 +12,8 @@ use uqa_engine::Engine;
 
 #[path = "sql_triggers/constraint.rs"]
 mod constraint;
+#[path = "sql_triggers/instead_of.rs"]
+mod instead_of;
 #[path = "sql_triggers/review_regressions.rs"]
 mod review_regressions;
 #[path = "sql_triggers/transition.rs"]
@@ -111,6 +113,73 @@ fn before_row_and_after_statement_triggers_mutate_skip_and_expose_context() {
     assert_eq!(
         strings(&engine, "SELECT value FROM items WHERE id = 1", "value"),
         vec!["CHANGED"]
+    );
+}
+
+#[test]
+fn insert_select_keeps_the_statement_snapshot_across_before_statement_triggers() {
+    let engine = Engine::new();
+    for sql in [
+        "CREATE TABLE snapshot_target (id INTEGER PRIMARY KEY, value TEXT)",
+        "CREATE TABLE snapshot_source (id INTEGER PRIMARY KEY, value TEXT)",
+        "CREATE FUNCTION seed_snapshot_source() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO snapshot_source VALUES (1, 'seeded'); RETURN NULL; END $$",
+        "CREATE TRIGGER seed_source BEFORE INSERT ON snapshot_target FOR EACH STATEMENT EXECUTE FUNCTION seed_snapshot_source()",
+    ] {
+        exec(&engine, sql);
+    }
+    let inserted = exec(
+        &engine,
+        "INSERT INTO snapshot_target SELECT id, value FROM snapshot_source RETURNING id, value",
+    );
+    assert_eq!(inserted.affected_rows, 0);
+    assert!(inserted.rows.is_empty());
+    assert_eq!(
+        strings(
+            &engine,
+            "SELECT value FROM snapshot_source ORDER BY id",
+            "value",
+        ),
+        vec!["seeded"]
+    );
+    assert!(exec(&engine, "SELECT id FROM snapshot_target")
+        .rows
+        .is_empty());
+    for sql in [
+        "CREATE TABLE snapshot_mutation_target (id INTEGER PRIMARY KEY, value TEXT)",
+        "CREATE FUNCTION seed_snapshot_update() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO snapshot_mutation_target VALUES (2, 'update-seeded'); RETURN NULL; END $$",
+        "CREATE FUNCTION seed_snapshot_delete() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO snapshot_mutation_target VALUES (3, 'delete-seeded'); RETURN NULL; END $$",
+        "CREATE TRIGGER seed_update BEFORE UPDATE ON snapshot_mutation_target FOR EACH STATEMENT EXECUTE FUNCTION seed_snapshot_update()",
+        "CREATE TRIGGER seed_delete BEFORE DELETE ON snapshot_mutation_target FOR EACH STATEMENT EXECUTE FUNCTION seed_snapshot_delete()",
+    ] {
+        exec(&engine, sql);
+    }
+    let updated = exec(
+        &engine,
+        "UPDATE snapshot_mutation_target SET value = 'updated' RETURNING id, value",
+    );
+    assert_eq!(updated.affected_rows, 0);
+    assert!(updated.rows.is_empty());
+    assert_eq!(
+        strings(
+            &engine,
+            "SELECT value FROM snapshot_mutation_target WHERE id = 2",
+            "value",
+        ),
+        vec!["update-seeded"]
+    );
+    let deleted = exec(
+        &engine,
+        "DELETE FROM snapshot_mutation_target RETURNING id, value",
+    );
+    assert_eq!(deleted.affected_rows, 1);
+    assert_eq!(deleted.rows[0].get("id"), Some(&Value::Int(2)));
+    assert_eq!(
+        strings(
+            &engine,
+            "SELECT value FROM snapshot_mutation_target ORDER BY id",
+            "value",
+        ),
+        vec!["delete-seeded"]
     );
 }
 

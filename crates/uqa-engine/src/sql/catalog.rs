@@ -126,7 +126,9 @@ pub(crate) fn runtime_constraints(engine: &Engine) -> Result<Vec<RuntimeConstrai
 pub(crate) use ag_catalog::resolve_age_label_relation_name;
 use ag_catalog::{build_ag_graph, build_ag_label};
 use events::{build_pg_rewrite, build_pg_rules, build_pg_trigger};
-pub(in crate::sql) use events::{pg_get_ruledef_value, pg_get_triggerdef_value};
+pub(in crate::sql) use events::{
+    event_relation_oid, pg_get_ruledef_value, pg_get_triggerdef_value,
+};
 use information_schema::{
     build_info_catalog_name, build_info_columns, build_info_key_column_usage, build_info_routines,
     build_info_schemata, build_info_sequences, build_info_table_constraints, build_info_tables,

@@ -34,6 +34,24 @@ impl Engine {
                 .is_some_and(|view| view.persistence == RelationPersistence::Temporary)
     }
 
+    fn trigger_relation_persistence(
+        &self,
+        relation: &RelationIdentity,
+    ) -> Option<RelationPersistence> {
+        self.storage
+            .tables
+            .read()
+            .get(relation)
+            .map(|table| table.persistence)
+            .or_else(|| {
+                self.durable
+                    .views
+                    .read()
+                    .get(relation)
+                    .map(|view| view.persistence)
+            })
+    }
+
     pub(super) fn persist_rule_catalog_snapshot(
         &self,
         rules: &BTreeMap<RelationIdentity, BTreeMap<String, StoredRule>>,
@@ -107,17 +125,13 @@ impl Engine {
         let Some(catalog) = self.storage.catalog.as_ref() else {
             return Ok(());
         };
-        let is_persistent = |relation: &RelationIdentity| {
-            self.storage
-                .tables
-                .read()
-                .get(relation)
-                .is_some_and(|table| table.persistence != RelationPersistence::Temporary)
-        };
         let snapshot = StoredTriggerCatalog {
             triggers: triggers
                 .iter()
-                .filter(|(relation, _)| is_persistent(relation))
+                .filter(|(relation, _)| {
+                    self.trigger_relation_persistence(relation)
+                        .is_some_and(|persistence| persistence != RelationPersistence::Temporary)
+                })
                 .flat_map(|(_, entries)| entries.values().cloned())
                 .collect(),
         };
@@ -142,11 +156,7 @@ impl Engine {
             .read()
             .iter()
             .filter(|(relation, _)| {
-                self.storage
-                    .tables
-                    .read()
-                    .get(*relation)
-                    .is_some_and(|table| table.persistence == RelationPersistence::Temporary)
+                self.trigger_relation_persistence(relation) == Some(RelationPersistence::Temporary)
             })
             .map(|(relation, entries)| (relation.clone(), entries.clone()))
             .collect::<BTreeMap<_, _>>();

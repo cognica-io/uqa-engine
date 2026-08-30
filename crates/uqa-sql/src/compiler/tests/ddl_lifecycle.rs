@@ -132,10 +132,22 @@ fn trigger_transition_relations_preserve_names_and_level() {
 }
 
 #[test]
-fn unsupported_instead_of_trigger_fails_during_compilation() {
-    let sql = "CREATE TRIGGER view_instead INSTEAD OF INSERT ON item_view FOR EACH ROW EXECUTE FUNCTION probe()";
-    let error = compile(sql).expect_err("INSTEAD OF trigger must not compile partially");
-    assert_eq!(error.sqlstate(), Some("0A000"), "{sql}: {error}");
+fn instead_of_trigger_shape_is_preserved_for_execution_validation() {
+    let Statement::CreateTrigger(trigger) = first(
+        "CREATE TRIGGER view_instead INSTEAD OF INSERT OR UPDATE OR DELETE ON item_view FOR EACH ROW EXECUTE FUNCTION probe()",
+    ) else {
+        panic!("expected CREATE TRIGGER");
+    };
+    assert_eq!(trigger.timing, crate::ast::TriggerTiming::InsteadOf);
+    assert!(trigger.row);
+    assert_eq!(
+        trigger.events,
+        [
+            crate::ast::TriggerEvent::Insert,
+            crate::ast::TriggerEvent::Update,
+            crate::ast::TriggerEvent::Delete,
+        ]
+    );
 }
 
 #[test]

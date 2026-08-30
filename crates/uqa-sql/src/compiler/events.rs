@@ -47,11 +47,7 @@ pub(super) fn compile_create_trigger(
     let timing = match stmt.timing {
         value if value == TriggerType::Before as i32 => TriggerTiming::Before,
         0 => TriggerTiming::After,
-        value if value == TriggerType::Instead as i32 => {
-            return Err(SQLError::Unsupported(
-                "INSTEAD OF triggers require updatable view execution".into(),
-            ));
-        }
+        value if value == TriggerType::Instead as i32 => TriggerTiming::InsteadOf,
         value => {
             return Err(SQLError::Internal(format!(
                 "CREATE TRIGGER has unknown timing bit {value}"

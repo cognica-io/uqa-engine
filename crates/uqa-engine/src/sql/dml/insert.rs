@@ -464,6 +464,9 @@ pub(in crate::sql) fn run_insert_inner(
     stmt: &InsertPlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
+    if super::view_triggers::target_is_view(engine, &stmt.table)? {
+        return super::view_triggers::run_view_insert_inner(engine, stmt, params);
+    }
     let _transition_capture_scope = crate::sql::triggers::TransitionCaptureScope::enter();
     engine.lock_relation(
         &stmt.table,
@@ -489,9 +492,6 @@ pub(in crate::sql) fn run_insert_inner(
         uqa_sql::ast::RuleEvent::Insert,
         !stmt.returning.is_empty(),
     )?;
-    let mut scope = CteScope::new_for_current_routine();
-    crate::sql::select::materialize_plan_ctes(engine, &stmt.ctes, params, &mut scope)?;
-    scope.scalar_subqueries.clone_from(&stmt.subqueries);
     let conflict_update_columns = if let Some(ConflictPlan {
         action: ConflictActionPlan::Update { assignments, .. },
         ..
@@ -517,6 +517,34 @@ pub(in crate::sql) fn run_insert_inner(
     let insert_original_query = !insert_rules
         .iter()
         .any(|rule| rule.definition.instead && rule.definition.condition.is_none());
+    let has_before_insert_statement_trigger = insert_original_query
+        && !engine
+            .triggers_for(
+                &stmt.table,
+                uqa_sql::ast::TriggerTiming::Before,
+                uqa_sql::ast::TriggerEvent::Insert,
+                false,
+                &[],
+            )?
+            .is_empty();
+    let has_before_update_statement_trigger =
+        if let Some(columns) = conflict_update_columns.as_deref() {
+            !engine
+                .triggers_for(
+                    &stmt.table,
+                    uqa_sql::ast::TriggerTiming::Before,
+                    uqa_sql::ast::TriggerEvent::Update,
+                    false,
+                    columns,
+                )?
+                .is_empty()
+        } else {
+            false
+        };
+    let statement_snapshot = (has_before_insert_statement_trigger
+        || has_before_update_statement_trigger)
+        .then(|| engine.capture_statement_snapshot_engine())
+        .transpose()?;
     if insert_original_query {
         crate::sql::triggers::fire_statement_triggers(
             engine,
@@ -535,6 +563,10 @@ pub(in crate::sql) fn run_insert_inner(
             columns,
         )?;
     }
+    let read_engine = statement_snapshot.as_ref().unwrap_or(engine);
+    let mut scope = CteScope::new_for_current_routine();
+    crate::sql::select::materialize_plan_ctes(read_engine, &stmt.ctes, params, &mut scope)?;
+    scope.scalar_subqueries.clone_from(&stmt.subqueries);
     // Resolve the table's primary-key column name. Auto-increment
     // (SERIAL / BIGSERIAL) wins; otherwise the scalar PRIMARY KEY
     // column wins; otherwise use the conventional legacy `id` slot.
@@ -560,7 +592,7 @@ pub(in crate::sql) fn run_insert_inner(
             )?);
             let overlay = DmlCommandMutationOverlay::new(engine);
             crate::sql::select::execute_query_plan_output(
-                engine,
+                read_engine,
                 source,
                 params,
                 &mut source_scope,
@@ -660,7 +692,7 @@ pub(in crate::sql) fn run_insert_inner(
         let mut source_scope = scope.returning_statement_snapshot_scope();
         source_scope.enable_command_progress_streaming();
         let result = crate::sql::select::execute_query_plan_with_ctes(
-            engine,
+            read_engine,
             source,
             params,
             &mut source_scope,
@@ -721,7 +753,7 @@ pub(in crate::sql) fn run_insert_inner(
         let mut document = Document::new();
         for (i, col) in columns.iter().take(row.len()).enumerate() {
             if let Some(value) = eval_mutation_assignment(
-                engine,
+                read_engine,
                 &snapshot_scope,
                 MutationAssignmentTarget {
                     table: &stmt.table,

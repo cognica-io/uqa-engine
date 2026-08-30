@@ -18,12 +18,13 @@ use super::{
 
 pub(in crate::sql) fn run_update_from(
     engine: &Engine,
+    read_engine: &Engine,
     stmt: &UpdatePlan,
     from_clause: &SourcePlan,
     params: &[SQLParam],
     ctes: &mut CteScope,
 ) -> Result<SQLResult, SQLError> {
-    let from_rows = build_join_spill_with_ctes(engine, from_clause, params, ctes)?;
+    let from_rows = build_join_spill_with_ctes(read_engine, from_clause, params, ctes)?;
     validate_returning_alias_relations(
         &stmt.target_qualifier,
         &stmt.returning_aliases,
@@ -38,11 +39,11 @@ pub(in crate::sql) fn run_update_from(
         .iter()
         .map(|assignment| assignment.column.clone())
         .collect::<Vec<_>>();
-    let target_tables = engine.hierarchy_scan_tables(&target, stmt.include_descendants)?;
+    let target_tables = read_engine.hierarchy_scan_tables(&target, stmt.include_descendants)?;
     let mut target_rows = Vec::new();
     for table in target_tables {
         target_rows.extend(
-            engine
+            read_engine
                 .table_doc_ids(&table)?
                 .into_iter()
                 .map(|doc_id| (table.clone(), doc_id)),
@@ -54,13 +55,18 @@ pub(in crate::sql) fn run_update_from(
     let mut locked_ids = std::collections::BTreeSet::new();
     for (storage_table, doc_id) in target_rows {
         cancel.check()?;
-        let Some(candidate) = engine.get_document(&storage_table, doc_id)? else {
+        let Some(candidate) = read_engine.get_document(&storage_table, doc_id)? else {
             continue;
         };
-        let candidate_row =
-            dml_target_row(engine, &target, &stmt.target_qualifier, doc_id, &candidate)?;
+        let candidate_row = dml_target_row(
+            read_engine,
+            &target,
+            &stmt.target_qualifier,
+            doc_id,
+            &candidate,
+        )?;
         let Some(candidate_source) = matching_update_source(
-            engine,
+            read_engine,
             stmt,
             &snapshot_ctes,
             &from_rows,
@@ -102,7 +108,7 @@ pub(in crate::sql) fn run_update_from(
         )?;
         let source_context = if recheck {
             update_join_qualifies(
-                engine,
+                read_engine,
                 stmt,
                 &snapshot_ctes,
                 &target_row,
@@ -120,7 +126,7 @@ pub(in crate::sql) fn run_update_from(
         // Apply assignments evaluated against the rechecked joined row so RHS expressions cannot consume a target image from before the lock wait.
         for assignment in &stmt.assignments {
             let value = eval_mutation_assignment(
-                engine,
+                read_engine,
                 &snapshot_ctes,
                 MutationAssignmentTarget {
                     table: &target,

@@ -187,6 +187,39 @@ impl Engine {
         Ok(())
     }
 
+    /// Capture the relation and catalog state visible at the start of a SQL statement. A `BEFORE STATEMENT` trigger executes inside the statement's transaction and may therefore change the live engine before the statement evaluates its source query. `PostgreSQL` keeps those changes outside the statement snapshot, so the remaining query work must read through an immutable query engine while trigger and row effects continue to use the live engine.
+    pub(crate) fn capture_statement_snapshot_engine(&self) -> Result<Engine, SQLError> {
+        let dependencies = SessionPortalTableDependencies::All;
+        let snapshot_gate = self
+            .row_locks
+            .begin_change_snapshot(&self.runtime.cancellation)?;
+        let transaction_overlay = self.capture_session_portal_transaction_overlay()?;
+        snapshot_gate.baseline()?;
+        drop(snapshot_gate);
+        let table_sources = {
+            let stack = self.session.transactions.lock();
+            let fixed_snapshot = stack
+                .first()
+                .and_then(|frame| frame.fixed_snapshot.as_ref());
+            self.capture_session_portal_table_sources(fixed_snapshot, &dependencies)
+        };
+        let table_snapshots = Self::detach_session_portal_table_snapshots(
+            table_sources,
+            transaction_overlay.as_ref(),
+        )?;
+        let catalog_snapshot = std::sync::Arc::new(self.durable.snapshot());
+        let view_snapshots = std::sync::Arc::new(catalog_snapshot.views.clone());
+        let sql_function_snapshots =
+            std::sync::Arc::new(catalog_snapshot.sql_user_functions.clone());
+        Ok(self.session_portal_worker_engine(
+            table_snapshots,
+            view_snapshots,
+            sql_function_snapshots,
+            catalog_snapshot,
+            self.allocate_session_portal_transaction_origin(),
+        ))
+    }
+
     pub(crate) fn ensure_session_portal_available(&self, name: &str) -> Result<(), SQLError> {
         if self.session.portals.lock().contains_key(name) {
             return Err(cursor_error(name, "already exists", "42P03"));

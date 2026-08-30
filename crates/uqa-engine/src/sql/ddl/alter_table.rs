@@ -68,23 +68,24 @@ pub(in crate::sql) fn run_alter_table(
     {
         Some((canonical, "table")) => stmt.table = canonical,
         Some((canonical, "view"))
-            if stmt
-                .actions
-                .iter()
-                .all(|action| matches!(action, AlterTableAction::RenameRule { .. })) =>
+            if stmt.actions.iter().all(|action| {
+                matches!(
+                    action,
+                    AlterTableAction::RenameRule { .. } | AlterTableAction::RenameTrigger { .. }
+                )
+            }) =>
         {
             stmt.table = canonical;
-            engine.lock_relation(
-                &stmt.table,
-                crate::row_locks::RelationLockMode::AccessExclusive,
-            )?;
             return engine.with_implicit_transaction(move |engine| {
                 for action in stmt.actions {
                     match action {
                         AlterTableAction::RenameRule { from, to } => {
                             engine.rename_rule(&stmt.table, &from, &to)?;
                         }
-                        _ => unreachable!("view ALTER was restricted to rule lifecycle actions"),
+                        AlterTableAction::RenameTrigger { from, to } => {
+                            engine.rename_trigger(&stmt.table, &from, &to)?;
+                        }
+                        _ => unreachable!("view ALTER was restricted to event lifecycle actions"),
                     }
                 }
                 Ok(SQLResult::empty())

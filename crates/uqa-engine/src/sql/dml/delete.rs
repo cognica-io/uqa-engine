@@ -37,6 +37,9 @@ pub(in crate::sql) fn run_delete_inner(
     stmt: &DeletePlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
+    if super::view_triggers::target_is_view(engine, &stmt.table)? {
+        return super::view_triggers::run_view_delete_inner(engine, stmt, params);
+    }
     let _transition_capture_scope = crate::sql::triggers::TransitionCaptureScope::enter();
     engine.lock_relation(
         &stmt.table,
@@ -53,6 +56,19 @@ pub(in crate::sql) fn run_delete_inner(
     let delete_original_query = !delete_rules
         .iter()
         .any(|rule| rule.definition.instead && rule.definition.condition.is_none());
+    let has_before_statement_trigger = delete_original_query
+        && !engine
+            .triggers_for(
+                &stmt.table,
+                uqa_sql::ast::TriggerTiming::Before,
+                uqa_sql::ast::TriggerEvent::Delete,
+                false,
+                &[],
+            )?
+            .is_empty();
+    let statement_snapshot = has_before_statement_trigger
+        .then(|| engine.capture_statement_snapshot_engine())
+        .transpose()?;
     if delete_original_query && !has_delete_rules {
         crate::sql::triggers::fire_statement_triggers(
             engine,
@@ -62,6 +78,7 @@ pub(in crate::sql) fn run_delete_inner(
             &[],
         )?;
     }
+    let read_engine = statement_snapshot.as_ref().unwrap_or(engine);
     let mut affected = 0u64;
     let cancel = engine.cancellation_token();
     let mut qualified_targets: Vec<(
@@ -72,7 +89,7 @@ pub(in crate::sql) fn run_delete_inner(
     )> = Vec::new();
     let mut returning_rows = Vec::new();
     let mut ctes = CteScope::new_for_current_routine();
-    crate::sql::select::materialize_plan_ctes(engine, &stmt.ctes, params, &mut ctes)?;
+    crate::sql::select::materialize_plan_ctes(read_engine, &stmt.ctes, params, &mut ctes)?;
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
     if stmt.source.is_none() {
         let allowed = BTreeSet::from([stmt.target_qualifier.clone()]);
@@ -84,7 +101,10 @@ pub(in crate::sql) fn run_delete_inner(
     // first, then collect target doc ids whose joined image satisfies WHERE.
     let using_rows: Option<uqa_execution::SharedSpill> = match stmt.source.as_deref() {
         Some(source) => Some(build_join_spill_with_ctes(
-            engine, source, params, &mut ctes,
+            read_engine,
+            source,
+            params,
+            &mut ctes,
         )?),
         None => None,
     };
@@ -104,7 +124,7 @@ pub(in crate::sql) fn run_delete_inner(
         && stmt.source.is_none()
         && stmt.predicate.is_some()
         && !predicate_is_volatile;
-    let target_tables = engine.hierarchy_scan_tables(&stmt.table, stmt.include_descendants)?;
+    let target_tables = read_engine.hierarchy_scan_tables(&stmt.table, stmt.include_descendants)?;
     let candidates: Vec<(String, uqa_core::DocId)> = if preselected {
         let filter = stmt.predicate.as_ref().ok_or_else(|| {
             SQLError::Internal("DELETE preselection is missing its predicate".into())
@@ -113,7 +133,7 @@ pub(in crate::sql) fn run_delete_inner(
         for table in &target_tables {
             candidates.extend(
                 crate::sql::where_eval::collect_where_doc_ids(
-                    engine,
+                    read_engine,
                     table,
                     &stmt.target_qualifier,
                     filter,
@@ -129,7 +149,7 @@ pub(in crate::sql) fn run_delete_inner(
         let mut candidates = Vec::new();
         for table in &target_tables {
             candidates.extend(
-                engine
+                read_engine
                     .table_doc_ids(table)?
                     .into_iter()
                     .map(|doc_id| (table.clone(), doc_id)),
@@ -146,7 +166,7 @@ pub(in crate::sql) fn run_delete_inner(
             None
         } else {
             let Some(candidate) = qualified_delete_candidate(
-                engine,
+                read_engine,
                 stmt,
                 &storage_table,
                 params,
@@ -174,25 +194,27 @@ pub(in crate::sql) fn run_delete_inner(
         let qualified = if recheck {
             engine.refresh_explicit_statement_snapshot()?;
             if let Some((_, Some(source_context))) = candidate.as_ref() {
-                recheck_delete_candidate(
+                recheck_delete_candidate(DeleteCandidateRecheck {
                     engine,
+                    expression_engine: read_engine,
                     stmt,
-                    &storage_table,
+                    storage_table: &storage_table,
                     params,
-                    &snapshot_ctes,
+                    ctes: &snapshot_ctes,
                     doc_id,
-                    Some(source_context),
-                )?
+                    source_context: Some(source_context),
+                })?
             } else {
-                recheck_delete_candidate(
+                recheck_delete_candidate(DeleteCandidateRecheck {
                     engine,
+                    expression_engine: read_engine,
                     stmt,
-                    &storage_table,
+                    storage_table: &storage_table,
                     params,
-                    &snapshot_ctes,
+                    ctes: &snapshot_ctes,
                     doc_id,
-                    None,
-                )?
+                    source_context: None,
+                })?
             }
         } else if let Some(candidate) = candidate {
             Some(candidate)
@@ -404,15 +426,30 @@ pub(in crate::sql) fn run_delete_inner(
     Ok(SQLResult::from_affected(affected))
 }
 
-fn recheck_delete_candidate(
-    engine: &Engine,
-    stmt: &DeletePlan,
-    storage_table: &str,
-    params: &[SQLParam],
-    ctes: &CteScope,
+struct DeleteCandidateRecheck<'a> {
+    engine: &'a Engine,
+    expression_engine: &'a Engine,
+    stmt: &'a DeletePlan,
+    storage_table: &'a str,
+    params: &'a [SQLParam],
+    ctes: &'a CteScope,
     doc_id: DocId,
-    source_context: Option<&uqa_execution::OwnedPhysicalRow>,
+    source_context: Option<&'a uqa_execution::OwnedPhysicalRow>,
+}
+
+fn recheck_delete_candidate(
+    context: DeleteCandidateRecheck<'_>,
 ) -> Result<Option<(Document, Option<uqa_execution::OwnedPhysicalRow>)>, SQLError> {
+    let DeleteCandidateRecheck {
+        engine,
+        expression_engine,
+        stmt,
+        storage_table,
+        params,
+        ctes,
+        doc_id,
+        source_context,
+    } = context;
     let Some(doc) = engine.get_document(storage_table, doc_id)? else {
         return Ok(None);
     };
@@ -421,7 +458,7 @@ fn recheck_delete_candidate(
         .map(|source_context| dml_join_rows(&target_row, source_context))
         .unwrap_or(target_row);
     let qualifies = stmt.predicate.as_ref().map_or(Ok(true), |filter| {
-        eval_mutation_expr(engine, ctes, filter, Some(&joined), params)
+        eval_mutation_expr(expression_engine, ctes, filter, Some(&joined), params)
             .map(|value| uqa_sql::expr::truthy(&value))
     })?;
     Ok(qualifies.then(|| (doc, source_context.cloned())))

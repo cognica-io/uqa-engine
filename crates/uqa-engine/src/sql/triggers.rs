@@ -563,13 +563,10 @@ impl VariableResolver for TriggerVariableResolver<'_> {
 }
 
 fn trigger_column_types(engine: &Engine, table: &str) -> Result<BTreeMap<String, String>> {
-    let columns = engine
-        .try_describe_table(table)
-        .map_err(|error| SQLError::Internal(format!("read trigger row type: {error}")))?
-        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+    let columns = engine.rule_relation_columns(table)?;
     Ok(columns
         .into_iter()
-        .map(|column| (column.name, column.ty.sql_name()))
+        .map(|(name, ty)| (name, ty.sql_name()))
         .collect())
 }
 
@@ -677,6 +674,7 @@ fn timing_name(timing: TriggerTiming) -> &'static str {
     match timing {
         TriggerTiming::Before => "BEFORE",
         TriggerTiming::After => "AFTER",
+        TriggerTiming::InsteadOf => "INSTEAD OF",
     }
 }
 
@@ -748,12 +746,123 @@ fn invoke_trigger(
             when: timing_name(invocation.timing).into(),
             level: if invocation.row { "ROW" } else { "STATEMENT" }.into(),
             operation: operation_name(invocation.event).into(),
-            relation_oid: super::catalog::table_relation_oid(engine, invocation.table)?,
+            relation_oid: super::catalog::event_relation_oid(engine, invocation.table)?,
             table_name: relation.name,
             table_schema: relation.schema,
             arguments: invocation.trigger.definition.arguments.clone(),
         },
     )
+}
+
+fn positional_trigger_record(
+    columns: &[(String, uqa_sql::ast::ColumnType)],
+    values: Option<&[Value]>,
+) -> Result<Value> {
+    if values.is_some_and(|values| values.len() != columns.len()) {
+        return Err(SQLError::Internal(
+            "INSTEAD OF trigger row does not match the view row type".into(),
+        ));
+    }
+    Ok(Value::Record(
+        columns
+            .iter()
+            .enumerate()
+            .map(|(position, (name, _))| {
+                (
+                    name.clone(),
+                    values
+                        .and_then(|values| values.get(position))
+                        .cloned()
+                        .unwrap_or(Value::Null),
+                )
+            })
+            .collect(),
+    ))
+}
+
+fn normalize_instead_of_trigger_record(
+    columns: &[(String, uqa_sql::ast::ColumnType)],
+    value: Value,
+) -> Result<Option<Vec<Value>>> {
+    let fields = match value {
+        Value::Null => return Ok(None),
+        Value::Record(fields) => fields.into_iter().collect::<BTreeMap<_, _>>(),
+        _ => {
+            return Err(SQLError::Routine {
+                sqlstate: "39P01".into(),
+                message: "trigger function returned non-composite value".into(),
+            })
+        }
+    };
+    if let Some(unknown) = fields
+        .keys()
+        .find(|name| !columns.iter().any(|(column, _)| column == *name))
+    {
+        return Err(SQLError::UnknownColumn(unknown.clone()));
+    }
+    columns
+        .iter()
+        .map(|(name, ty)| {
+            crate::sql::convert_value_to_column_type(
+                fields.get(name).cloned().unwrap_or(Value::Null),
+                ty,
+            )
+        })
+        .collect::<Result<Vec<_>>>()
+        .map(Some)
+}
+
+pub(super) fn fire_instead_of_row_triggers(
+    engine: &Engine,
+    view: &str,
+    event: TriggerEvent,
+    old_values: Option<&[Value]>,
+    new_values: Option<&[Value]>,
+    updated_columns: &[String],
+) -> Result<Option<Vec<Value>>> {
+    let columns = engine.rule_relation_columns(view)?;
+    let old = positional_trigger_record(&columns, old_values)?;
+    let mut new = positional_trigger_record(&columns, new_values)?;
+    let triggers =
+        engine.triggers_for(view, TriggerTiming::InsteadOf, event, true, updated_columns)?;
+    if triggers.is_empty() {
+        return Err(SQLError::Routine {
+            sqlstate: "55000".into(),
+            message: format!(
+                "cannot {} view \"{}\": no active INSTEAD OF trigger",
+                operation_name(event).to_ascii_lowercase(),
+                RelationIdentity::from_legacy_name(view)
+                    .map_or_else(|_| view.to_string(), |relation| relation.name)
+            ),
+        });
+    }
+    for trigger in triggers {
+        let returned = invoke_trigger(
+            engine,
+            TriggerInvocation {
+                table: view,
+                trigger: &trigger,
+                timing: TriggerTiming::InsteadOf,
+                event,
+                row: true,
+                old: old.clone(),
+                new: new.clone(),
+            },
+            None,
+        )?;
+        let Some(values) = normalize_instead_of_trigger_record(&columns, returned)? else {
+            return Ok(None);
+        };
+        if event != TriggerEvent::Delete {
+            new = positional_trigger_record(&columns, Some(&values))?;
+        }
+    }
+    let final_record = if event == TriggerEvent::Delete {
+        old
+    } else {
+        new
+    };
+    normalize_instead_of_trigger_record(&columns, final_record)
 }
 
 pub(super) fn fire_statement_triggers(

@@ -23,13 +23,15 @@ impl Engine {
         self.restore_sequences_from_catalog(catalog)?;
         self.restore_roles_from_metadata(catalog)?;
         self.restore_sql_functions_from_metadata(catalog)?;
-        self.restore_triggers_from_metadata(catalog)?;
         self.restore_analyzers_from_catalog(catalog)?;
         self.restore_foreign_registries_from_catalog(catalog)?;
         // Stored view plans are rebound only after every row-producing
         // relation kind is present. Legacy unqualified sources may refer to a
         // foreign table and must not be classified as missing during reopen.
         self.restore_views_from_catalog(catalog)?;
+        // Triggers and rules may target views, so both event registries must be
+        // restored only after the complete relation namespace is available.
+        self.restore_triggers_from_metadata(catalog)?;
         self.restore_rules_from_metadata(catalog)?;
         self.restore_catalog_indexes_from_catalog(catalog)?;
         self.restore_path_indexes_from_catalog(catalog)?;

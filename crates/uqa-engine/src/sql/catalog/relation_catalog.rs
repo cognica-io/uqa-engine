@@ -107,7 +107,7 @@ pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
         let definition = engine.view_definition(&name)?.ok_or_else(|| {
             SQLError::Internal(format!("view `{name}` disappeared during catalog scan"))
         })?;
-        out.push(pg_class_row_with_lifecycle(
+        let mut row = pg_class_row_with_lifecycle(
             &schema,
             &view,
             "v",
@@ -117,7 +117,12 @@ pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
             definition.persistence,
             true,
             &definition.options,
-        ));
+        );
+        row.insert(
+            "relhastriggers".into(),
+            bool_value(engine.relation_has_triggers(&name)?),
+        );
+        out.push(row);
     }
     for name in engine.list_materialized_views()? {
         let (schema, view) = split_schema_name(&name)?;

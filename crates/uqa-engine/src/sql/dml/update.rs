@@ -37,6 +37,9 @@ pub(in crate::sql) fn run_update_inner(
     stmt: &UpdatePlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
+    if super::view_triggers::target_is_view(engine, &stmt.table)? {
+        return super::view_triggers::run_view_update_inner(engine, stmt, params);
+    }
     let _transition_capture_scope = crate::sql::triggers::TransitionCaptureScope::enter();
     engine.lock_relation(
         &stmt.table,
@@ -57,9 +60,6 @@ pub(in crate::sql) fn run_update_inner(
             .map(|assignment| assignment.column.as_str()),
         "UPDATE",
     )?;
-    let mut ctes = CteScope::new_for_current_routine();
-    crate::sql::select::materialize_plan_ctes(engine, &stmt.ctes, params, &mut ctes)?;
-    ctes.scalar_subqueries.clone_from(&stmt.subqueries);
     let assigned_columns = stmt
         .assignments
         .iter()
@@ -70,6 +70,19 @@ pub(in crate::sql) fn run_update_inner(
     let update_original_query = !update_rules
         .iter()
         .any(|rule| rule.definition.instead && rule.definition.condition.is_none());
+    let has_before_statement_trigger = update_original_query
+        && !engine
+            .triggers_for(
+                &stmt.table,
+                uqa_sql::ast::TriggerTiming::Before,
+                uqa_sql::ast::TriggerEvent::Update,
+                false,
+                &assigned_columns,
+            )?
+            .is_empty();
+    let statement_snapshot = has_before_statement_trigger
+        .then(|| engine.capture_statement_snapshot_engine())
+        .transpose()?;
     if update_original_query && !has_update_rules {
         crate::sql::triggers::fire_statement_triggers(
             engine,
@@ -79,6 +92,10 @@ pub(in crate::sql) fn run_update_inner(
             &assigned_columns,
         )?;
     }
+    let read_engine = statement_snapshot.as_ref().unwrap_or(engine);
+    let mut ctes = CteScope::new_for_current_routine();
+    crate::sql::select::materialize_plan_ctes(read_engine, &stmt.ctes, params, &mut ctes)?;
+    ctes.scalar_subqueries.clone_from(&stmt.subqueries);
 
     if stmt.source.is_none() {
         let allowed = BTreeSet::from([stmt.target_qualifier.clone()]);
@@ -94,10 +111,10 @@ pub(in crate::sql) fn run_update_inner(
     // evaluate WHERE against each joined row, and apply assignments to the
     // matching target rows.
     if let Some(source) = stmt.source.as_deref() {
-        return run_update_from(engine, stmt, source, params, &mut ctes);
+        return run_update_from(engine, read_engine, stmt, source, params, &mut ctes);
     }
-    let target_tables = engine.hierarchy_scan_tables(&stmt.table, stmt.include_descendants)?;
-    let target_hierarchy = engine
+    let target_tables = read_engine.hierarchy_scan_tables(&stmt.table, stmt.include_descendants)?;
+    let target_hierarchy = read_engine
         .try_table_hierarchy(&stmt.table)
         .map_err(|error| SQLError::Internal(format!("read UPDATE hierarchy: {error}")))?;
     let target_is_partitioned =
@@ -106,6 +123,7 @@ pub(in crate::sql) fn run_update_inner(
     if !has_runtime_scope
         && target_tables.len() == 1
         && !target_is_partitioned
+        && statement_snapshot.is_none()
         && !engine.has_row_triggers(&stmt.table, uqa_sql::ast::TriggerEvent::Update)?
         && !crate::sql::triggers::transition_capture_required(
             engine,
@@ -144,7 +162,7 @@ pub(in crate::sql) fn run_update_inner(
         for table in &target_tables {
             candidates.extend(
                 crate::sql::where_eval::collect_where_doc_ids(
-                    engine,
+                    read_engine,
                     table,
                     &stmt.target_qualifier,
                     filter,
@@ -160,7 +178,7 @@ pub(in crate::sql) fn run_update_inner(
         let mut candidates = Vec::new();
         for table in &target_tables {
             candidates.extend(
-                engine
+                read_engine
                     .table_doc_ids(table)?
                     .into_iter()
                     .map(|doc_id| (table.clone(), doc_id)),
@@ -176,11 +194,11 @@ pub(in crate::sql) fn run_update_inner(
     let mut locked_ids = BTreeSet::new();
     for (storage_table, doc_id) in candidates {
         cancel.check()?;
-        let Some(candidate) = engine.get_document(&storage_table, doc_id)? else {
+        let Some(candidate) = read_engine.get_document(&storage_table, doc_id)? else {
             continue;
         };
         let candidate_row = dml_target_row(
-            engine,
+            read_engine,
             &stmt.table,
             &stmt.target_qualifier,
             doc_id,
@@ -189,7 +207,7 @@ pub(in crate::sql) fn run_update_inner(
         if !preselected {
             if let Some(filter) = stmt.predicate.as_ref() {
                 if !uqa_sql::expr::truthy(&eval_mutation_expr(
-                    engine,
+                    read_engine,
                     &snapshot_ctes,
                     filter,
                     Some(&candidate_row),
@@ -231,7 +249,7 @@ pub(in crate::sql) fn run_update_inner(
         if recheck || preselected {
             if let Some(filter) = stmt.predicate.as_ref() {
                 if !uqa_sql::expr::truthy(&eval_mutation_expr(
-                    engine,
+                    read_engine,
                     &snapshot_ctes,
                     filter,
                     Some(&target_row),
@@ -243,7 +261,7 @@ pub(in crate::sql) fn run_update_inner(
         }
         for assignment in &stmt.assignments {
             let value = eval_mutation_assignment(
-                engine,
+                read_engine,
                 &snapshot_ctes,
                 MutationAssignmentTarget {
                     table: &stmt.table,

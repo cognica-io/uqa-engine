@@ -31,6 +31,27 @@ const TRIGGER_TYPE_INSERT: i64 = 4;
 const TRIGGER_TYPE_DELETE: i64 = 8;
 const TRIGGER_TYPE_UPDATE: i64 = 16;
 const TRIGGER_TYPE_TRUNCATE: i64 = 32;
+const TRIGGER_TYPE_INSTEAD: i64 = 64;
+
+pub(in crate::sql) fn event_relation_oid(engine: &Engine, relation: &str) -> Result<i64, SQLError> {
+    if engine
+        .try_resolve_table_name(relation)
+        .map_err(|error| {
+            SQLError::Internal(format!("resolve event relation `{relation}`: {error}"))
+        })?
+        .is_some()
+    {
+        return table_relation_oid(engine, relation);
+    }
+    let canonical = engine
+        .try_resolve_view_name(relation)
+        .map_err(|error| {
+            SQLError::Internal(format!("resolve event relation `{relation}`: {error}"))
+        })?
+        .ok_or_else(|| SQLError::UnknownTable(relation.to_string()))?;
+    let (schema, name) = split_schema_name(&canonical)?;
+    Ok(relation_oid("v", &schema, &name))
+}
 
 pub(super) fn trigger_catalog_oid(
     engine: &Engine,
@@ -40,7 +61,7 @@ pub(super) fn trigger_catalog_oid(
         format!(
             "{}:{}",
             hex_object_id(object_id),
-            table_relation_oid(engine, &trigger.definition.table)?
+            event_relation_oid(engine, &trigger.definition.table)?
         )
     } else {
         format!("{}.{}", trigger.definition.table, trigger.definition.name)
@@ -63,7 +84,7 @@ pub(super) fn trigger_constraint_catalog_oid(
         format!(
             "{}:{}",
             hex_object_id(object_id),
-            table_relation_oid(engine, &trigger.definition.table)?
+            event_relation_oid(engine, &trigger.definition.table)?
         )
     } else {
         format!("{}.{}", trigger.definition.table, constraint_name)
@@ -204,17 +225,14 @@ fn pg_trigger_row(
 ) -> Result<ResultRow, SQLError> {
     let definition = &trigger.definition;
     let function = engine.resolve_trigger_function(&definition.function)?;
-    let columns = engine
-        .try_describe_table(&definition.table)
-        .map_err(|error| SQLError::Internal(format!("read trigger columns: {error}")))?
-        .ok_or_else(|| SQLError::UnknownTable(definition.table.clone()))?;
+    let columns = engine.rule_relation_columns(&definition.table)?;
     let attributes = definition
         .update_columns
         .iter()
         .map(|name| {
             columns
                 .iter()
-                .position(|column| column.name == *name)
+                .position(|(column, _)| column == name)
                 .ok_or_else(|| SQLError::UnknownColumn(name.clone()))
                 .and_then(|index| {
                     i64::try_from(index + 1).map_err(|_| {
@@ -240,7 +258,7 @@ fn pg_trigger_row(
         ("oid", int_value(trigger_catalog_oid(engine, &trigger)?)),
         (
             "tgrelid",
-            int_value(table_relation_oid(engine, &definition.table)?),
+            int_value(event_relation_oid(engine, &definition.table)?),
         ),
         ("tgparentid", int_value(parent_oid)),
         ("tgname", str_value(definition.name.clone())),
@@ -289,26 +307,6 @@ fn pg_trigger_row(
     ]))
 }
 
-fn rule_relation_oid(engine: &Engine, relation: &str) -> Result<i64, SQLError> {
-    if engine
-        .try_resolve_table_name(relation)
-        .map_err(|error| {
-            SQLError::Internal(format!("resolve rule relation `{relation}`: {error}"))
-        })?
-        .is_some()
-    {
-        return table_relation_oid(engine, relation);
-    }
-    let canonical = engine
-        .try_resolve_view_name(relation)
-        .map_err(|error| {
-            SQLError::Internal(format!("resolve rule relation `{relation}`: {error}"))
-        })?
-        .ok_or_else(|| SQLError::UnknownTable(relation.to_string()))?;
-    let (schema, name) = split_schema_name(&canonical)?;
-    Ok(relation_oid("v", &schema, &name))
-}
-
 pub(super) fn build_pg_rewrite(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows = engine
         .list_rules()
@@ -320,7 +318,7 @@ pub(super) fn build_pg_rewrite(engine: &Engine) -> Result<Vec<ResultRow>, SQLErr
                 ("rulename", str_value(definition.name.clone())),
                 (
                     "ev_class",
-                    int_value(rule_relation_oid(engine, &definition.table)?),
+                    int_value(event_relation_oid(engine, &definition.table)?),
                 ),
                 ("ev_type", str_value(rule_event_code(definition.event))),
                 ("ev_enabled", str_value(rule.enabled.catalog_code())),
@@ -348,7 +346,7 @@ pub(super) fn build_pg_rewrite(engine: &Engine) -> Result<Vec<ResultRow>, SQLErr
                 int_value(stable_oid("rule", &format!("{name}._RETURN"))),
             ),
             ("rulename", str_value("_RETURN")),
-            ("ev_class", int_value(rule_relation_oid(engine, &name)?)),
+            ("ev_class", int_value(event_relation_oid(engine, &name)?)),
             ("ev_type", str_value("1")),
             ("ev_enabled", str_value("O")),
             ("is_instead", bool_value(true)),
@@ -475,8 +473,10 @@ fn definition_arguments(
 
 fn trigger_type(definition: &CreateTrigger) -> i64 {
     let mut value = if definition.row { TRIGGER_TYPE_ROW } else { 0 };
-    if definition.timing == TriggerTiming::Before {
-        value |= TRIGGER_TYPE_BEFORE;
+    match definition.timing {
+        TriggerTiming::Before => value |= TRIGGER_TYPE_BEFORE,
+        TriggerTiming::InsteadOf => value |= TRIGGER_TYPE_INSTEAD,
+        TriggerTiming::After => {}
     }
     for event in &definition.events {
         value |= match event {
@@ -604,6 +604,7 @@ fn render_trigger_definition(
         match definition.timing {
             TriggerTiming::Before => "BEFORE",
             TriggerTiming::After => "AFTER",
+            TriggerTiming::InsteadOf => "INSTEAD OF",
         },
         events,
         render_trigger_relation(engine, &definition.table, pretty)?,
@@ -672,10 +673,13 @@ fn render_trigger_relation(engine: &Engine, name: &str, pretty: bool) -> Result<
     })?;
     if pretty {
         let local = uqa_sql::expr::quote_ident(&relation.name);
-        let visible = engine.try_resolve_table_name(&local).map_err(|error| {
+        let visible_table = engine.try_resolve_table_name(&local).map_err(|error| {
             SQLError::Internal(format!("resolve trigger relation `{name}`: {error}"))
         })?;
-        if visible.as_deref() == Some(name) {
+        let visible_view = engine.try_resolve_view_name(&local).map_err(|error| {
+            SQLError::Internal(format!("resolve trigger relation `{name}`: {error}"))
+        })?;
+        if visible_table.as_deref() == Some(name) || visible_view.as_deref() == Some(name) {
             return Ok(local);
         }
     }

@@ -14,6 +14,7 @@ use super::{Expr, Statement};
 pub enum TriggerTiming {
     Before,
     After,
+    InsteadOf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

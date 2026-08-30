@@ -1204,6 +1204,7 @@ mod merge;
 mod update;
 mod update_from;
 mod vectors;
+mod view_triggers;
 
 pub(in crate::sql) use conflict::*;
 pub(crate) use constraints::*;

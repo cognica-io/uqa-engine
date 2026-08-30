@@ -1174,8 +1174,12 @@ pub(in crate::sql) fn dml_returning_result_with_projections(
 fn returning_target_schema(engine: &Engine, table: &str) -> Result<RowSchema, SQLError> {
     let definitions = engine
         .try_describe_table_row_type(table)
-        .map_err(|error| dml_storage_error("RETURNING schema lookup", error))?
-        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+        .map_err(|error| dml_storage_error("RETURNING schema lookup", error))?;
+    let Some(definitions) = definitions else {
+        return engine
+            .view_schema(table)?
+            .ok_or_else(|| SQLError::UnknownTable(table.to_string()));
+    };
     if definitions.is_empty() {
         let columns = engine
             .try_table_columns(table)

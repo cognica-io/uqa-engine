@@ -742,3 +742,171 @@ SELECT setting FROM pg_catalog.pg_settings WHERE name = 'session_replication_rol
 -- @case session_replication_role_pg_settings rows
 SELECT setting, context, vartype, enumvals, boot_val, reset_val FROM pg_catalog.pg_settings WHERE name = 'session_replication_role';
 -- @end
+
+-- @case create_insert_select_statement_snapshot_fixture ok
+CREATE TABLE trigger_snapshot_insert_target (id integer PRIMARY KEY, value text NOT NULL); CREATE TABLE trigger_snapshot_mutation_target (id integer PRIMARY KEY, value text NOT NULL); CREATE TABLE trigger_snapshot_source (id integer PRIMARY KEY, value text NOT NULL); CREATE FUNCTION trigger_seed_snapshot_source() RETURNS trigger LANGUAGE plpgsql AS $probe$ BEGIN INSERT INTO trigger_snapshot_source VALUES (1, 'seeded'); RETURN NULL; END $probe$; CREATE FUNCTION trigger_seed_snapshot_update() RETURNS trigger LANGUAGE plpgsql AS $probe$ BEGIN INSERT INTO trigger_snapshot_mutation_target VALUES (2, 'update-seeded'); RETURN NULL; END $probe$; CREATE FUNCTION trigger_seed_snapshot_delete() RETURNS trigger LANGUAGE plpgsql AS $probe$ BEGIN INSERT INTO trigger_snapshot_mutation_target VALUES (3, 'delete-seeded'); RETURN NULL; END $probe$; CREATE TRIGGER seed_snapshot_source BEFORE INSERT ON trigger_snapshot_insert_target FOR EACH STATEMENT EXECUTE FUNCTION trigger_seed_snapshot_source(); CREATE TRIGGER seed_snapshot_update BEFORE UPDATE ON trigger_snapshot_mutation_target FOR EACH STATEMENT EXECUTE FUNCTION trigger_seed_snapshot_update(); CREATE TRIGGER seed_snapshot_delete BEFORE DELETE ON trigger_snapshot_mutation_target FOR EACH STATEMENT EXECUTE FUNCTION trigger_seed_snapshot_delete();
+-- @end
+
+-- @case insert_select_keeps_statement_snapshot rows
+INSERT INTO trigger_snapshot_insert_target SELECT id, value FROM trigger_snapshot_source RETURNING id, value;
+-- @end
+
+-- @case insert_select_statement_snapshot_state rows
+SELECT (SELECT count(*) FROM trigger_snapshot_source) AS source_rows, (SELECT count(*) FROM trigger_snapshot_insert_target) AS inserted_rows;
+-- @end
+
+-- @case update_keeps_statement_snapshot rows
+UPDATE trigger_snapshot_mutation_target SET value = 'updated' RETURNING id, value;
+-- @end
+
+-- @case update_statement_snapshot_state rows
+SELECT id, value FROM trigger_snapshot_mutation_target ORDER BY id;
+-- @end
+
+-- @case delete_keeps_statement_snapshot rows
+DELETE FROM trigger_snapshot_mutation_target RETURNING id, value;
+-- @end
+
+-- @case delete_statement_snapshot_state rows
+SELECT id, value FROM trigger_snapshot_mutation_target ORDER BY id;
+-- @end
+
+-- @case create_instead_of_view_trigger_fixture ok
+CREATE TABLE instead_view_base (id integer PRIMARY KEY, value text NOT NULL); INSERT INTO instead_view_base VALUES (1, 'one'), (2, 'two'); CREATE VIEW instead_item_view AS SELECT id, value FROM instead_view_base WHERE id > 0; CREATE TABLE instead_view_log (seq bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, entry text NOT NULL); CREATE FUNCTION instead_view_statement_log() RETURNS trigger LANGUAGE plpgsql AS $probe$ BEGIN INSERT INTO instead_view_log(entry) VALUES (TG_WHEN || ':' || TG_LEVEL || ':' || TG_OP); RETURN NULL; END $probe$; CREATE FUNCTION instead_view_transform() RETURNS trigger LANGUAGE plpgsql AS $probe$ BEGIN INSERT INTO instead_view_log(entry) VALUES ('a:' || TG_OP || ':' || coalesce(OLD.id::text, '-') || ':' || coalesce(NEW.id::text, '-')); IF TG_OP <> 'DELETE' AND NEW.value = 'suppress' THEN RETURN NULL; END IF; IF TG_OP <> 'DELETE' THEN NEW.value := NEW.value || ':a'; RETURN NEW; END IF; OLD.value := OLD.value || ':a'; RETURN OLD; END $probe$; CREATE FUNCTION instead_view_apply() RETURNS trigger LANGUAGE plpgsql AS $probe$ BEGIN INSERT INTO instead_view_log(entry) VALUES ('b:' || TG_OP || ':' || coalesce(OLD.value, '-') || ':' || coalesce(NEW.value, '-')); IF TG_OP = 'INSERT' THEN INSERT INTO instead_view_base VALUES (NEW.id, NEW.value || ':stored'); NEW.value := NEW.value || ':returned'; RETURN NEW; ELSIF TG_OP = 'UPDATE' THEN UPDATE instead_view_base SET id = NEW.id, value = NEW.value || ':stored' WHERE id = OLD.id; NEW.value := NEW.value || ':returned'; RETURN NEW; ELSE DELETE FROM instead_view_base WHERE id = OLD.id; OLD.value := OLD.value || ':returned'; RETURN OLD; END IF; END $probe$;
+-- @end
+
+-- @case reject_instead_of_trigger_on_table error
+CREATE TRIGGER invalid_instead INSTEAD OF INSERT ON instead_view_base FOR EACH ROW EXECUTE FUNCTION instead_view_transform();
+-- @end
+
+-- @case reject_instead_of_statement_trigger error
+CREATE TRIGGER invalid_instead INSTEAD OF INSERT ON instead_item_view FOR EACH STATEMENT EXECUTE FUNCTION instead_view_transform();
+-- @end
+
+-- @case reject_instead_of_when_condition error
+CREATE TRIGGER invalid_instead INSTEAD OF INSERT ON instead_item_view FOR EACH ROW WHEN (NEW.id > 0) EXECUTE FUNCTION instead_view_transform();
+-- @end
+
+-- @case reject_instead_of_update_column_list error
+CREATE TRIGGER invalid_instead INSTEAD OF UPDATE OF value ON instead_item_view FOR EACH ROW EXECUTE FUNCTION instead_view_transform();
+-- @end
+
+-- @case reject_instead_of_truncate_on_view error
+CREATE TRIGGER invalid_instead INSTEAD OF TRUNCATE ON instead_item_view FOR EACH ROW EXECUTE FUNCTION instead_view_transform();
+-- @end
+
+-- @case reject_instead_of_transition_table error
+CREATE TRIGGER invalid_instead INSTEAD OF INSERT ON instead_item_view REFERENCING NEW TABLE AS changed_rows FOR EACH ROW EXECUTE FUNCTION instead_view_transform();
+-- @end
+
+-- @case reject_before_row_trigger_on_view error
+CREATE TRIGGER invalid_view_row BEFORE INSERT ON instead_item_view FOR EACH ROW EXECUTE FUNCTION instead_view_transform();
+-- @end
+
+-- @case create_instead_of_view_triggers ok
+CREATE TRIGGER instead_before_insert BEFORE INSERT ON instead_item_view FOR EACH STATEMENT EXECUTE FUNCTION instead_view_statement_log(); CREATE TRIGGER instead_before_update BEFORE UPDATE ON instead_item_view FOR EACH STATEMENT EXECUTE FUNCTION instead_view_statement_log(); CREATE TRIGGER instead_before_delete BEFORE DELETE ON instead_item_view FOR EACH STATEMENT EXECUTE FUNCTION instead_view_statement_log(); CREATE TRIGGER a_instead_transform INSTEAD OF INSERT OR UPDATE OR DELETE ON instead_item_view FOR EACH ROW EXECUTE FUNCTION instead_view_transform(); CREATE TRIGGER b_instead_apply INSTEAD OF INSERT OR UPDATE OR DELETE ON instead_item_view FOR EACH ROW EXECUTE FUNCTION instead_view_apply(); CREATE TRIGGER instead_after_insert AFTER INSERT ON instead_item_view FOR EACH STATEMENT EXECUTE FUNCTION instead_view_statement_log(); CREATE TRIGGER instead_after_update AFTER UPDATE ON instead_item_view FOR EACH STATEMENT EXECUTE FUNCTION instead_view_statement_log(); CREATE TRIGGER instead_after_delete AFTER DELETE ON instead_item_view FOR EACH STATEMENT EXECUTE FUNCTION instead_view_statement_log();
+-- @end
+
+-- @case instead_of_view_trigger_catalog rows
+SELECT t.tgname, t.tgtype, t.tgenabled, c.relhastriggers, c.relhasrules, pg_get_triggerdef(t.oid, true) FROM pg_catalog.pg_trigger AS t JOIN pg_catalog.pg_class AS c ON c.oid = t.tgrelid WHERE c.relname = 'instead_item_view' AND t.tgname IN ('a_instead_transform', 'b_instead_apply') ORDER BY t.tgname;
+-- @end
+
+-- @case instead_of_insert_chain_suppression_returning rows
+INSERT INTO instead_item_view VALUES (3, 'three'), (4, 'suppress') RETURNING WITH (OLD AS o, NEW AS n) o.id AS old_id, n.id AS new_id, id, value;
+-- @end
+
+-- @case instead_of_update_returning_old_and_final_new rows
+UPDATE instead_item_view SET id = id + 10, value = value || ':updated' WHERE id IN (1, 2) RETURNING WITH (OLD AS o, NEW AS n) o.id AS old_id, o.value AS old_value, n.id AS new_id, n.value AS new_value, id, value;
+-- @end
+
+-- @case instead_of_delete_returns_original_old rows
+DELETE FROM instead_item_view WHERE id = 11 RETURNING WITH (OLD AS o, NEW AS n) o.value AS old_value, n.value AS new_value, id, value;
+-- @end
+
+-- @case instead_of_trigger_chain_and_base_state rows
+SELECT seq, entry FROM instead_view_log UNION ALL SELECT 9223372036854775807, 'base:' || id::text || ':' || value FROM instead_view_base ORDER BY 1;
+-- @end
+
+-- @case clear_instead_of_log_before_zero_row ok
+DELETE FROM instead_view_log;
+-- @end
+
+-- @case instead_of_zero_row_update ok
+UPDATE instead_item_view SET value = value WHERE id = 999;
+-- @end
+
+-- @case instead_of_zero_row_statement_triggers rows
+SELECT entry FROM instead_view_log ORDER BY seq;
+-- @end
+
+-- @case create_instead_of_source_context_fixture ok
+CREATE TABLE instead_view_source (id integer PRIMARY KEY, next_value text NOT NULL); INSERT INTO instead_view_source VALUES (3, 'changed'), (12, 'remove'); DELETE FROM instead_view_log;
+-- @end
+
+-- @case instead_of_update_from_source_returning rows
+UPDATE instead_item_view AS target SET value = source.next_value FROM instead_view_source AS source WHERE target.id = source.id AND source.id = 3 RETURNING target.id, source.next_value AS source_value, value;
+-- @end
+
+-- @case instead_of_delete_using_source_returning rows
+DELETE FROM instead_item_view AS target USING instead_view_source AS source WHERE target.id = source.id AND source.id = 12 RETURNING target.id, source.id AS source_id, value;
+-- @end
+
+-- @case instead_of_source_context_final_state rows
+SELECT 'base', id, value FROM instead_view_base UNION ALL SELECT 'source', id, next_value FROM instead_view_source ORDER BY 1, 2;
+-- @end
+
+-- @case instead_of_insert_select_returning rows
+INSERT INTO instead_item_view SELECT id + 20, next_value || ':selected' FROM instead_view_source WHERE id = 3 RETURNING id, value;
+-- @end
+
+-- @case instead_of_insert_select_base_state rows
+SELECT id, value FROM instead_view_base WHERE id = 23;
+-- @end
+
+-- @case create_instead_of_insert_select_snapshot_fixture ok
+CREATE TABLE instead_view_snapshot_source (id integer PRIMARY KEY, value text NOT NULL); CREATE FUNCTION instead_view_seed_snapshot_source() RETURNS trigger LANGUAGE plpgsql AS $probe$ BEGIN INSERT INTO instead_view_snapshot_source VALUES (30, 'seeded'); RETURN NULL; END $probe$; CREATE FUNCTION instead_view_seed_snapshot_update() RETURNS trigger LANGUAGE plpgsql AS $probe$ BEGIN INSERT INTO instead_view_base VALUES (30, 'update-seeded'); RETURN NULL; END $probe$; CREATE FUNCTION instead_view_seed_snapshot_delete() RETURNS trigger LANGUAGE plpgsql AS $probe$ BEGIN INSERT INTO instead_view_base VALUES (31, 'delete-seeded'); RETURN NULL; END $probe$; CREATE TRIGGER a_seed_snapshot_source BEFORE INSERT ON instead_item_view FOR EACH STATEMENT EXECUTE FUNCTION instead_view_seed_snapshot_source(); CREATE TRIGGER a_seed_snapshot_update BEFORE UPDATE ON instead_item_view FOR EACH STATEMENT EXECUTE FUNCTION instead_view_seed_snapshot_update(); CREATE TRIGGER a_seed_snapshot_delete BEFORE DELETE ON instead_item_view FOR EACH STATEMENT EXECUTE FUNCTION instead_view_seed_snapshot_delete();
+-- @end
+
+-- @case instead_of_insert_select_keeps_statement_snapshot rows
+INSERT INTO instead_item_view SELECT id, value FROM instead_view_snapshot_source RETURNING id, value;
+-- @end
+
+-- @case instead_of_insert_select_snapshot_state rows
+SELECT (SELECT count(*) FROM instead_view_snapshot_source) AS source_rows, (SELECT count(*) FROM instead_view_base WHERE id = 30) AS inserted_rows;
+-- @end
+
+-- @case instead_of_update_keeps_statement_snapshot rows
+UPDATE instead_item_view SET value = 'updated' WHERE id = 30 RETURNING id, value;
+-- @end
+
+-- @case instead_of_update_statement_snapshot_state rows
+SELECT id, value FROM instead_view_base WHERE id = 30;
+-- @end
+
+-- @case instead_of_delete_keeps_statement_snapshot rows
+DELETE FROM instead_item_view WHERE id IN (30, 31) RETURNING id, value;
+-- @end
+
+-- @case instead_of_delete_statement_snapshot_state rows
+SELECT id, value FROM instead_view_base WHERE id IN (30, 31) ORDER BY id;
+-- @end
+
+-- @case reject_instead_of_view_trigger_disable error
+ALTER TABLE instead_item_view DISABLE TRIGGER a_instead_transform;
+-- @end
+
+-- @case rename_instead_of_view_trigger ok
+ALTER TRIGGER a_instead_transform ON instead_item_view RENAME TO renamed_instead_transform;
+-- @end
+
+-- @case renamed_instead_of_view_trigger_catalog rows
+SELECT tgname, tgenabled FROM pg_trigger WHERE tgrelid = 'instead_item_view'::regclass AND tgname = 'renamed_instead_transform';
+-- @end
+
+-- @case drop_renamed_instead_of_view_trigger ok
+DROP TRIGGER renamed_instead_transform ON instead_item_view;
+-- @end
+
+-- @case dropped_instead_of_view_trigger_catalog rows
+SELECT count(*) FROM pg_trigger WHERE tgrelid = 'instead_item_view'::regclass AND tgname = 'renamed_instead_transform';
+-- @end

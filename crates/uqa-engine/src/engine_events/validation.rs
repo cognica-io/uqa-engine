@@ -8,9 +8,9 @@
 
 use uqa_core::Value;
 use uqa_sql::ast::{
-    ColumnType, CreateRule, CreateTrigger, Expr, FromClause, FunctionReturns, OnConflictAction,
-    RuleEvent, SelectStmt, Statement, TableHierarchy, TriggerEvent, TriggerTiming,
-    TriggerTransitionRelation,
+    ColumnDef, ColumnType, CreateRule, CreateTrigger, Expr, FromClause, FunctionReturns,
+    OnConflictAction, RuleEvent, SelectStmt, Statement, TableHierarchy, TriggerEvent,
+    TriggerTiming, TriggerTransitionRelation,
 };
 use uqa_sql::plpgsql::{bind_expr, ResolvedVariable, VariableResolver};
 use uqa_sql::SQLError;
@@ -1088,16 +1088,84 @@ impl Engine {
         Ok(relation)
     }
 
+    fn resolve_trigger_relation_kind(
+        &self,
+        name: &str,
+    ) -> Result<(RelationIdentity, &'static str), SQLError> {
+        let candidates = self.relation_lookup_candidates(name).map_err(|error| {
+            SQLError::Internal(format!("resolve trigger relation `{name}`: {error}"))
+        })?;
+        let tables = self.storage.tables.read();
+        let views = self.durable.views.read();
+        candidates
+            .into_iter()
+            .find_map(|relation| {
+                if tables.contains_key(&relation) {
+                    return Some((relation, "table"));
+                }
+                views.get(&relation).map(|view| {
+                    (
+                        relation,
+                        match view.kind {
+                            StoredViewKind::View => "view",
+                            StoredViewKind::Materialized => "materialized view",
+                        },
+                    )
+                })
+            })
+            .ok_or_else(|| SQLError::UnknownTable(name.to_string()))
+    }
+
     pub(super) fn resolve_trigger_table(&self, name: &str) -> Result<RelationIdentity, SQLError> {
-        let canonical = self
-            .try_resolve_table_name(name)
-            .map_err(|error| {
-                SQLError::Internal(format!("resolve trigger relation `{name}`: {error}"))
-            })?
-            .ok_or_else(|| SQLError::UnknownTable(name.to_string()))?;
-        RelationIdentity::from_legacy_name(&canonical).map_err(|error| {
-            SQLError::Internal(format!("decode trigger relation `{canonical}`: {error}"))
-        })
+        self.resolve_trigger_relation_kind(name)
+            .map(|(relation, _)| relation)
+    }
+
+    fn trigger_relation_columns(
+        &self,
+        relation: &RelationIdentity,
+        kind: &str,
+    ) -> Result<Vec<ColumnDef>, SQLError> {
+        if kind == "table" {
+            return self
+                .try_describe_table(&relation.qualified_name())
+                .map_err(|error| SQLError::Internal(format!("read trigger columns: {error}")))?
+                .ok_or_else(|| SQLError::UnknownTable(relation.qualified_name()));
+        }
+        let view = self
+            .restored_catalog_view_definition(&relation.qualified_name())?
+            .ok_or_else(|| SQLError::UnknownTable(relation.qualified_name()))?;
+        let schema = self.stored_view_schema(&view)?;
+        Ok(schema
+            .columns()
+            .iter()
+            .enumerate()
+            .map(|(position, name)| ColumnDef {
+                name: schema.public_name(position).unwrap_or(name).to_string(),
+                ty: schema
+                    .column_type(position)
+                    .cloned()
+                    .unwrap_or(ColumnType::Text),
+                object_id: None,
+                missing_value: None,
+                primary_key: false,
+                not_null: false,
+                not_null_explicit: false,
+                not_null_name: None,
+                not_null_validated: true,
+                not_null_no_inherit: false,
+                auto_increment: None,
+                unique: false,
+                default: None,
+                generated: None,
+                check: None,
+                check_name: None,
+                check_enforced: true,
+                check_validated: true,
+                check_no_inherit: false,
+                references: None,
+            })
+            .collect())
     }
 
     pub(crate) fn resolve_trigger_function(
@@ -1147,6 +1215,68 @@ impl Engine {
         Ok(function)
     }
 
+    fn validate_trigger_relation_kind(
+        definition: &CreateTrigger,
+        relation: &RelationIdentity,
+        relation_kind: &str,
+    ) -> Result<(), SQLError> {
+        match relation_kind {
+            "table" if definition.timing == TriggerTiming::InsteadOf => Err(SQLError::Routine {
+                sqlstate: "42809".into(),
+                message: format!("\"{}\" is a table", relation.name),
+            }),
+            "view" if definition.timing == TriggerTiming::InsteadOf => {
+                if definition.events.contains(&TriggerEvent::Truncate)
+                    || !definition.transition_relations.is_empty()
+                {
+                    return Err(SQLError::Routine {
+                        sqlstate: "42809".into(),
+                        message: format!("\"{}\" is a view", relation.name),
+                    });
+                }
+                if !definition.row {
+                    return Err(SQLError::Routine {
+                        sqlstate: "0A000".into(),
+                        message: "INSTEAD OF triggers must be FOR EACH ROW".into(),
+                    });
+                }
+                if definition.when.is_some() {
+                    return Err(SQLError::Routine {
+                        sqlstate: "0A000".into(),
+                        message: "INSTEAD OF triggers cannot have WHEN conditions".into(),
+                    });
+                }
+                if !definition.update_columns.is_empty() {
+                    return Err(SQLError::Routine {
+                        sqlstate: "0A000".into(),
+                        message: "INSTEAD OF triggers cannot have column lists".into(),
+                    });
+                }
+                Ok(())
+            }
+            "view"
+                if definition.events.contains(&TriggerEvent::Truncate)
+                    || !definition.transition_relations.is_empty()
+                    || definition.row =>
+            {
+                Err(SQLError::Routine {
+                    sqlstate: "42809".into(),
+                    message: format!("\"{}\" is a view", relation.name),
+                })
+            }
+            "view" => Ok(()),
+            "materialized view" => Err(SQLError::Routine {
+                sqlstate: "42809".into(),
+                message: format!("relation \"{}\" cannot have triggers", relation.name),
+            }),
+            kind if kind != "table" => Err(SQLError::Routine {
+                sqlstate: "42809".into(),
+                message: format!("relation \"{}\" cannot have triggers", relation.name),
+            }),
+            _ => Ok(()),
+        }
+    }
+
     pub(super) fn validate_trigger_definition(
         &self,
         definition: &mut CreateTrigger,
@@ -1170,10 +1300,18 @@ impl Engine {
                 "ordinary trigger retained constraint-only metadata".into(),
             ));
         }
-        let relation = self.resolve_trigger_table(&definition.table)?;
+        let (relation, relation_kind) = self.resolve_trigger_relation_kind(&definition.table)?;
         definition.table = relation.qualified_name();
+        Self::validate_trigger_relation_kind(definition, &relation, relation_kind)?;
         if let Some(referenced_table) = definition.referenced_table.as_mut() {
-            let referenced = self.resolve_trigger_table(referenced_table)?;
+            let (referenced, referenced_kind) =
+                self.resolve_trigger_relation_kind(referenced_table)?;
+            if referenced_kind != "table" {
+                return Err(SQLError::Routine {
+                    sqlstate: "42809".into(),
+                    message: format!("\"{}\" is a {referenced_kind}", referenced.name),
+                });
+            }
             *referenced_table = referenced.qualified_name();
         }
         definition.function.clone_from(
@@ -1182,11 +1320,10 @@ impl Engine {
                 .def
                 .name,
         );
-        let columns = self
-            .try_describe_table(&definition.table)
-            .map_err(|error| SQLError::Internal(format!("read trigger columns: {error}")))?
-            .ok_or_else(|| SQLError::UnknownTable(definition.table.clone()))?;
-        self.validate_trigger_transition_relations(definition, &relation)?;
+        let columns = self.trigger_relation_columns(&relation, relation_kind)?;
+        if relation_kind == "table" {
+            self.validate_trigger_transition_relations(definition, &relation)?;
+        }
         if definition.events.contains(&TriggerEvent::Truncate) && definition.row {
             return Err(SQLError::Routine {
                 sqlstate: "0A000".into(),
