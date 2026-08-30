@@ -139,6 +139,11 @@ struct ConnectionPool {
     max_connections: usize,
     state: Mutex<PoolState>,
     available: Condvar,
+    /// Stable, never-mutating connection used for `PRAGMA data_version`.
+    /// Every logical session over this pool must compare versions on this
+    /// same connection, and encrypted databases must not repeat key
+    /// derivation merely to create a request-local change monitor.
+    data_version_monitor: Mutex<Option<Connection>>,
 }
 
 impl ConnectionPool {
@@ -151,6 +156,7 @@ impl ConnectionPool {
                 open: 1,
             }),
             available: Condvar::new(),
+            data_version_monitor: Mutex::new(None),
         })
     }
 
@@ -236,10 +242,6 @@ struct SessionState {
     transaction: Mutex<Option<PooledConnection>>,
     transaction_failure: Mutex<Option<String>>,
     cleanup_failure: Mutex<Option<String>>,
-    /// Dedicated, never-mutating connection used for `PRAGMA data_version`.
-    /// `SQLite` only guarantees comparisons on the same connection, so a
-    /// pooled checkout cannot serve as an external-commit monitor.
-    data_version_monitor: Mutex<Option<Connection>>,
 }
 
 impl SessionState {
@@ -249,7 +251,6 @@ impl SessionState {
             transaction: Mutex::new(None),
             transaction_failure: Mutex::new(None),
             cleanup_failure: Mutex::new(None),
-            data_version_monitor: Mutex::new(None),
         }
     }
 }
@@ -489,15 +490,15 @@ impl ManagedConnection {
         !matches!(&self.pool.spec, ConnectionSpec::Compressed { .. })
     }
 
-    /// Database change counter observed on a connection permanently owned by
-    /// this logical session. The value changes when another `SQLite` connection
-    /// commits. In-memory databases have no independent connections and
-    /// therefore return `None`.
+    /// Database change counter observed on one stable connection shared by
+    /// every logical session over this pool. The value changes when another
+    /// `SQLite` connection commits. In-memory databases have no independent
+    /// connections and therefore return `None`.
     pub fn data_version(&self) -> Result<Option<u64>> {
         if matches!(&self.pool.spec, ConnectionSpec::Memory) {
             return Ok(None);
         }
-        let mut monitor = self.session.data_version_monitor.lock();
+        let mut monitor = self.pool.data_version_monitor.lock();
         if monitor.is_none() {
             *monitor = Some(self.pool.spec.open(false)?);
         }

@@ -46,15 +46,18 @@ fn derived_epoch_coordinator_shares_only_publication() {
     source.table_data.published.store(7, Ordering::Release);
     source.table_data.seen.store(6, Ordering::Release);
     source.table_data.dirty.store(true, Ordering::Release);
+    let observed = source.published_epochs();
+    source.table_data.published.store(8, Ordering::Release);
 
     let mut derived = EpochCoordinator::new();
-    derived.share_published_from(&source);
+    derived.share_published_from_at(&source, observed);
 
     assert!(Arc::ptr_eq(
         &source.table_data.published,
         &derived.table_data.published
     ));
-    assert_eq!(derived.table_data.seen.load(Ordering::Acquire), 0);
+    assert_eq!(derived.table_data.seen.load(Ordering::Acquire), 7);
+    assert_eq!(derived.table_data.published.load(Ordering::Acquire), 8);
     assert!(!derived.table_data.dirty.load(Ordering::Acquire));
     derived.table_data.dirty.store(true, Ordering::Release);
     assert!(source.table_data.dirty.load(Ordering::Acquire));

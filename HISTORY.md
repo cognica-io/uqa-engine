@@ -6,6 +6,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-08-30
+
+### Added
+
+- Implemented PostgreSQL 18 partition-moving `UPDATE` trigger behavior, including source `DELETE` and destination `INSERT` row lifecycles, destination suppression and mutation, root update transition rows, `UPDATE FROM`, and the distinct empty transition sets used by partition-moving `MERGE` actions.
+- Implemented the superuser-only PostgreSQL 18 `session_replication_role` setting for `origin`, `local`, and `replica`, including trigger and rewrite-rule enable modes and replica-mode suppression of foreign-key checks and referential actions.
+- Implemented durable PostgreSQL 18 `INSTEAD OF` row triggers on views for `INSERT`, `UPDATE`, and `DELETE`, including row chaining, suppression, statement timing, statement-start snapshots, `RETURNING`, catalog lifecycle, and durable reopen.
+
+### Fixed
+
+- Reduced encrypted request-session startup latency by sharing the storage pool's stable data-version monitor and by avoiding open-only catalog migrations after the persistent engine has already initialized them, while retaining catalog refresh after concurrent storage changes.
+- Made npm publication tolerate packages that the registry has accepted but is still processing, and extended verification to wait for installability within a bounded deadline.
+
 ## [0.1.11] - 2026-08-30
 
 ### Added

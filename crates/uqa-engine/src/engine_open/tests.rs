@@ -205,6 +205,31 @@ fn pinned_and_rollback_reload_do_not_consume_late_legacy_sequences() {
 }
 
 #[test]
+fn new_session_does_not_repeat_open_time_catalog_migrations() {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = Engine::open(&directory.path().join("new-session-migration.db")).unwrap();
+    let catalog = engine.storage.catalog.as_ref().expect("persistent catalog");
+    let legacy = r#"{"late":{"start":7,"increment":2,"current":5}}"#;
+    catalog
+        .set_metadata(crate::SEQUENCES_METADATA_KEY, legacy)
+        .unwrap();
+    let before = sqlite_data_version(&engine);
+
+    let session = engine.new_session().unwrap();
+    session.sql("SELECT 1", &[]).unwrap();
+
+    assert_eq!(sqlite_data_version(&engine), before);
+    assert_eq!(
+        catalog
+            .get_metadata(crate::SEQUENCES_METADATA_KEY)
+            .unwrap()
+            .as_deref(),
+        Some(legacy)
+    );
+    assert!(catalog.load_sequence_rows().unwrap().is_empty());
+}
+
+#[test]
 fn pinned_reload_reports_a_missing_public_schema_without_repairing_it() {
     let directory = tempfile::tempdir().unwrap();
     let engine = Engine::open(&directory.path().join("missing-public.db")).unwrap();
