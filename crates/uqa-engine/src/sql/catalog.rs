@@ -74,6 +74,7 @@ mod information_schema;
 mod partitioning;
 mod pg_catalog;
 mod pg_proc;
+mod pg_settings;
 mod relation_catalog;
 mod schema;
 
@@ -140,10 +141,10 @@ pub(in crate::sql) use pg_catalog::table_relation_oid;
 use pg_catalog::{
     build_pg_attrdef, build_pg_attribute, build_pg_constraint, build_pg_database, build_pg_index,
     build_pg_indexes, build_pg_matviews, build_pg_namespace, build_pg_range, build_pg_roles,
-    build_pg_sequences, build_pg_settings, build_pg_tables, build_pg_type, build_pg_user,
-    build_pg_views,
+    build_pg_sequences, build_pg_tables, build_pg_type, build_pg_user, build_pg_views,
 };
 use pg_proc::build_pg_proc;
+use pg_settings::build_pg_settings;
 use relation_catalog::{build_pg_class, build_pg_inherits};
 use schema::{resolve_virtual_relation, VirtualRelation};
 pub(in crate::sql) use schema::{virtual_relation_accepts_row_lock, virtual_relation_schema};
