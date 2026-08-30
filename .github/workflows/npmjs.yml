@@ -187,9 +187,22 @@ jobs:
             --check-registry \
             --pending-file "$pending" \
             dist/*.tgz
+          publish_log="$RUNNER_TEMP/npm-publish.log"
           while IFS= read -r filename; do
             [ -n "$filename" ] || continue
-            npm publish "./dist/$filename" --access public
+            if npm publish "./dist/$filename" --access public 2>&1 | tee "$publish_log"; then
+              continue
+            else
+              publish_status=$?
+            fi
+            # npm can accept a large package into its processing queue while
+            # the public install packument still reports the version missing.
+            # A retry then returns this precise 409 until processing finishes.
+            if grep -Fq 'Cannot publish over previously staged version' "$publish_log"; then
+              echo "npm is still processing the staged package: $filename"
+              continue
+            fi
+            exit "$publish_status"
           done < "$pending"
 
       - name: Verify the published npm release
