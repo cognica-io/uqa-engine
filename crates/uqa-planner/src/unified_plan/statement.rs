@@ -107,6 +107,10 @@ impl UnifiedPlan {
                     returning,
                     returning_aliases: statement.returning_aliases,
                     subqueries,
+                    view_checks: Vec::new(),
+                    view_rule_relations: Vec::new(),
+                    view_rule_insert_plans: Vec::new(),
+                    view_rule_returning: None,
                 }))))
             }
             Statement::Update(statement) => {
@@ -138,6 +142,10 @@ impl UnifiedPlan {
                     returning,
                     returning_aliases: statement.returning_aliases,
                     subqueries,
+                    view_checks: Vec::new(),
+                    view_rule_relations: Vec::new(),
+                    view_rule_update_plans: Vec::new(),
+                    view_rule_returning: None,
                 }))))
             }
             Statement::Delete(statement) => {
@@ -166,6 +174,8 @@ impl UnifiedPlan {
                     returning,
                     returning_aliases: statement.returning_aliases,
                     subqueries,
+                    view_rule_relations: Vec::new(),
+                    view_rule_returning: None,
                 }))))
             }
             Statement::Drop(value) => Self::Command(Box::new(CommandPlan::Drop(value))),

@@ -108,9 +108,10 @@ fn view_column_names_and_types_are_visible_in_catalogs() {
     );
     assert_eq!(info.rows[0]["data_type"], Value::Str("smallint".into()));
     assert_eq!(info.rows[0]["is_nullable"], Value::Str("YES".into()));
-    assert_eq!(info.rows[0]["is_updatable"], Value::Str("NO".into()));
+    assert_eq!(info.rows[0]["is_updatable"], Value::Str("YES".into()));
     assert_eq!(info.rows[1]["column_name"], Value::Str("Label".into()));
     assert_eq!(info.rows[1]["character_maximum_length"], Value::Int(3));
+    assert_eq!(info.rows[1]["is_updatable"], Value::Str("YES".into()));
 
     let class = exec(
         &engine,

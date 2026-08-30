@@ -17,7 +17,7 @@ use super::{
     prepare_document_rewrite, reject_partition_rewrite, update_lock_strength, BTreeMap, BTreeSet,
     ConflictActionPlan, ConflictPlan, CteScope, DocId, Document, Engine, MutationAssignmentTarget,
     MutationLockTarget, PhysicalDocumentIdentity, PreparedDocumentRewrite, ProjectionPlan,
-    SQLError, SQLParam, SQLResult, Value, DOC_ID_COLUMN,
+    SQLError, SQLParam, SQLResult, Value, DOC_ID_COLUMN, TABLE_OID_COLUMN,
 };
 use rusqlite::OptionalExtension;
 use uqa_execution::{ColumnIdentity, OwnedPhysicalRow, PhysicalRow, RowSchema};
@@ -60,12 +60,6 @@ impl InsertConflictOverlay {
                 .iter()
                 .map(String::as_str)
                 .collect::<BTreeSet<_>>();
-            if target.len() != on_conflict.conflict_columns.len() {
-                return Err(SQLError::TypeMismatch(format!(
-                    "ON CONFLICT target ({}) names a column more than once",
-                    on_conflict.conflict_columns.join(", ")
-                )));
-            }
             let index = constraints
                 .iter()
                 .position(|constraint| {
@@ -263,12 +257,6 @@ pub(in crate::sql) fn find_insert_conflict(
             .iter()
             .map(String::as_str)
             .collect();
-        if target.len() != on_conflict.conflict_columns.len() {
-            return Err(SQLError::TypeMismatch(format!(
-                "ON CONFLICT target ({}) names a column more than once",
-                on_conflict.conflict_columns.join(", ")
-            )));
-        }
         let constraint = constraints
             .iter()
             .find(|constraint| {
@@ -748,13 +736,14 @@ fn rollback_lock_acquisitions(
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(in crate::sql) struct ReturningRowImage<'a> {
+    pub storage_table: String,
     pub doc_id: DocId,
     pub document: &'a Document,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(in crate::sql) struct ReturningRowImages<'a> {
     pub old: Option<ReturningRowImage<'a>>,
     pub new: Option<ReturningRowImage<'a>>,
@@ -793,7 +782,7 @@ pub(in crate::sql) fn returning_row_context(
     images: ReturningRowImages<'_>,
     aliases: &ReturningAliases,
 ) -> Result<OwnedPhysicalRow, SQLError> {
-    let current = images.new.or(images.old).ok_or_else(|| {
+    let current = images.new.as_ref().or(images.old.as_ref()).ok_or_else(|| {
         SQLError::Internal(format!(
             "RETURNING for table `{table}` has neither an old nor a new row image"
         ))
@@ -809,12 +798,14 @@ pub(in crate::sql) fn returning_row_context(
         columns.push(DOC_ID_COLUMN.into());
         types.push(Some(uqa_sql::ast::ColumnType::BigInteger));
     }
+    columns.push(TABLE_OID_COLUMN.into());
+    types.push(Some(uqa_sql::ast::ColumnType::Oid));
     columns.push(crate::sql::XMIN_COLUMN.into());
     types.push(Some(uqa_sql::ast::ColumnType::Xid));
     let schema = returning_context_schema(&columns, &types, target_qualifier, aliases);
-    let current_values = returning_image_values(Some(current), &columns, &definitions)?;
-    let old_values = returning_image_values(images.old, &columns, &definitions)?;
-    let new_values = returning_image_values(images.new, &columns, &definitions)?;
+    let current_values = returning_image_values(engine, Some(current), &columns, &definitions)?;
+    let old_values = returning_image_values(engine, images.old.as_ref(), &columns, &definitions)?;
+    let new_values = returning_image_values(engine, images.new.as_ref(), &columns, &definitions)?;
     let values = current_values
         .into_iter()
         .chain(old_values)
@@ -827,7 +818,8 @@ pub(in crate::sql) fn returning_row_context(
 }
 
 fn returning_image_values(
-    image: Option<ReturningRowImage<'_>>,
+    engine: &Engine,
+    image: Option<&ReturningRowImage<'_>>,
     columns: &[String],
     definitions: &[uqa_sql::ast::ColumnDef],
 ) -> Result<Vec<Value>, SQLError> {
@@ -847,6 +839,11 @@ fn returning_image_values(
                 })
             {
                 doc_id_value(image.doc_id)
+            } else if column == TABLE_OID_COLUMN {
+                Ok(Value::Int(crate::sql::catalog::table_relation_oid(
+                    engine,
+                    &image.storage_table,
+                )?))
             } else {
                 Ok(document.get(column).cloned().unwrap_or(Value::Null))
             }
@@ -890,7 +887,7 @@ fn returning_context_schema(
     RowSchema::with_physical_identity_aliases(&schema, &identity_aliases)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(in crate::sql) struct ReturningProjectionRow<'a> {
     pub table: &'a str,
     pub target_qualifier: &'a str,
@@ -916,7 +913,7 @@ pub(in crate::sql) fn build_returning_row(
     params: &[SQLParam],
     ctes: &CteScope,
 ) -> Result<OwnedPhysicalRow, SQLError> {
-    let row = returning_projection_context(engine, input)?;
+    let row = returning_projection_context(engine, input.clone())?;
     let projections = expanded_returning_projections(
         engine,
         input.table,
@@ -1210,6 +1207,8 @@ fn returning_expression_schema(
         columns.push(DOC_ID_COLUMN.into());
         types.push(Some(uqa_sql::ast::ColumnType::BigInteger));
     }
+    columns.push(TABLE_OID_COLUMN.into());
+    types.push(Some(uqa_sql::ast::ColumnType::Oid));
     columns.push(crate::sql::XMIN_COLUMN.into());
     types.push(Some(uqa_sql::ast::ColumnType::Xid));
     let target = returning_context_schema(&columns, &types, target_qualifier, aliases);

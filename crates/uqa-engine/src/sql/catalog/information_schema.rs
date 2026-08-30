@@ -64,6 +64,7 @@ pub(super) fn build_info_tables(engine: &Engine) -> Result<Vec<ResultRow>, SQLEr
     }
     for name in engine.list_views()? {
         let (schema, view) = split_schema_name(&name)?;
+        let updatability = crate::sql::dml::view_automatic::view_updatability(engine, &name)?;
         out.push(row([
             ("table_catalog", catalog_name()),
             ("table_schema", str_value(schema)),
@@ -74,7 +75,14 @@ pub(super) fn build_info_tables(engine: &Engine) -> Result<Vec<ResultRow>, SQLEr
             ("user_defined_type_catalog", Value::Null),
             ("user_defined_type_schema", Value::Null),
             ("user_defined_type_name", Value::Null),
-            ("is_insertable_into", str_value("NO")),
+            (
+                "is_insertable_into",
+                str_value(if updatability.catalog.insertable {
+                    "YES"
+                } else {
+                    "NO"
+                }),
+            ),
             ("is_typed", str_value("NO")),
             ("commit_action", Value::Null),
         ]));
@@ -274,13 +282,18 @@ pub(super) fn build_info_columns(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
     }
     for view_name in engine.list_views()? {
         let (schema, view) = split_schema_name(&view_name)?;
+        let updatability = crate::sql::dml::view_automatic::view_updatability(engine, &view_name)?;
         for (idx, column) in view_columns_for(engine, &view_name)?.iter().enumerate() {
             out.push(information_schema_column_row(
                 schema.clone(),
                 view.clone(),
                 idx,
                 column,
-                false,
+                updatability
+                    .catalog_columns
+                    .get(idx)
+                    .copied()
+                    .unwrap_or(false),
             )?);
         }
     }
@@ -292,6 +305,22 @@ pub(super) fn build_info_views(engine: &Engine) -> Result<Vec<ResultRow>, SQLErr
     let mut rows = Vec::new();
     for name in engine.list_views()? {
         let (schema, view) = split_schema_name(&name)?;
+        let updatability = crate::sql::dml::view_automatic::view_updatability(engine, &name)?;
+        let trigger_insertable = crate::sql::dml::view_automatic::has_instead_of_trigger(
+            engine,
+            &name,
+            uqa_sql::ast::TriggerEvent::Insert,
+        )?;
+        let trigger_updatable = crate::sql::dml::view_automatic::has_instead_of_trigger(
+            engine,
+            &name,
+            uqa_sql::ast::TriggerEvent::Update,
+        )?;
+        let trigger_deletable = crate::sql::dml::view_automatic::has_instead_of_trigger(
+            engine,
+            &name,
+            uqa_sql::ast::TriggerEvent::Delete,
+        )?;
         let definition = engine
             .view(&name)?
             .map_or_else(String::new, |stmt| format!("{stmt:?}"));
@@ -300,12 +329,35 @@ pub(super) fn build_info_views(engine: &Engine) -> Result<Vec<ResultRow>, SQLErr
             ("table_schema", str_value(schema)),
             ("table_name", str_value(view)),
             ("view_definition", str_value(definition)),
-            ("check_option", str_value("NONE")),
-            ("is_updatable", str_value("NO")),
-            ("is_insertable_into", str_value("NO")),
-            ("is_trigger_updatable", str_value("NO")),
-            ("is_trigger_deletable", str_value("NO")),
-            ("is_trigger_insertable_into", str_value("NO")),
+            ("check_option", str_value(updatability.check_option)),
+            (
+                "is_updatable",
+                str_value(if updatability.catalog.fully_updatable() {
+                    "YES"
+                } else {
+                    "NO"
+                }),
+            ),
+            (
+                "is_insertable_into",
+                str_value(if updatability.catalog.insertable {
+                    "YES"
+                } else {
+                    "NO"
+                }),
+            ),
+            (
+                "is_trigger_updatable",
+                str_value(if trigger_updatable { "YES" } else { "NO" }),
+            ),
+            (
+                "is_trigger_deletable",
+                str_value(if trigger_deletable { "YES" } else { "NO" }),
+            ),
+            (
+                "is_trigger_insertable_into",
+                str_value(if trigger_insertable { "YES" } else { "NO" }),
+            ),
         ]));
     }
     Ok(rows)

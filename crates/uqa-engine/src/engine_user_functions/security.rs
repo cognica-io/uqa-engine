@@ -40,6 +40,7 @@ impl Engine {
         let requested_types = resolve_alter_routine_identity_types(self, &identity)?;
         let new_owner = self.resolve_role_reference(&stmt.new_owner);
         let current_user = self.current_user_name();
+        self.prepare_explicit_transaction_writer()?;
         let roles = self.durable.roles.read();
         if !roles.contains_key(&new_owner) {
             return Err(SQLError::Routine {
@@ -81,6 +82,7 @@ impl Engine {
             .map(|role| self.resolve_role_reference(role))
             .collect::<Vec<_>>();
         let current_user = self.current_user_name();
+        self.prepare_explicit_transaction_writer()?;
         let roles = self.durable.roles.read();
         for role in &grantees {
             if role != "PUBLIC" && !roles.contains_key(role) {

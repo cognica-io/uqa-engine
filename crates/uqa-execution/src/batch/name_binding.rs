@@ -85,6 +85,22 @@ impl RowSchema {
             .map(|(identity, ty)| (identity, ty.as_ref()))
     }
 
+    /// Iterate over hidden lookup aliases that resolve to physical value slots while retaining their declared SQL types.
+    pub fn typed_physical_alias_identities(
+        &self,
+    ) -> impl Iterator<Item = (&ColumnIdentity, Option<&ColumnType>)> {
+        self.index.aliases.keys().map(|identity| {
+            (
+                identity,
+                self.index
+                    .cold
+                    .aliases
+                    .get(identity)
+                    .and_then(Option::as_ref),
+            )
+        })
+    }
+
     /// Resolve an unqualified logical identity to its static type.
     pub fn type_of(&self, name: &str) -> Option<&ColumnType> {
         if self.index.ambiguous_unqualified.contains(name) {

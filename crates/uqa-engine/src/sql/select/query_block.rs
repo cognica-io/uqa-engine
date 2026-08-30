@@ -42,6 +42,17 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
     validate_query_set_contexts(engine, &type_resolver, stmt, &expression_schema, params)?;
 
     let Some(from) = stmt.from.as_ref() else {
+        if stmt
+            .projections
+            .iter()
+            .any(|projection| matches!(projection.expr, ScalarExpr::Star))
+            && outer.is_none()
+        {
+            return Err(SQLError::Routine {
+                sqlstate: "42601".into(),
+                message: "SELECT * with no tables specified is not valid".into(),
+            });
+        }
         validate_query_block_projection_references(engine, stmt, &expression_schema, params, ctes)?;
         return run_select_without_from_output(engine, block, stmt, params, ctes, output_mode);
     };

@@ -16,6 +16,34 @@ use crate::{Engine, RelationIdentity};
 use super::{StoredRule, StoredTrigger};
 
 impl Engine {
+    pub(crate) fn rule_definitions_for(
+        &self,
+        table: &str,
+        event: RuleEvent,
+    ) -> Result<Vec<StoredRule>, SQLError> {
+        let relation = self.resolve_rule_relation(table)?;
+        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
+            return Ok(snapshot
+                .rules
+                .get(&relation)
+                .into_iter()
+                .flat_map(BTreeMap::values)
+                .filter(|rule| rule.definition.event == event)
+                .cloned()
+                .collect());
+        }
+        Ok(self
+            .durable
+            .rules
+            .read()
+            .get(&relation)
+            .into_iter()
+            .flat_map(BTreeMap::values)
+            .filter(|rule| rule.definition.event == event)
+            .cloned()
+            .collect())
+    }
+
     pub(crate) fn rules_for(
         &self,
         table: &str,
@@ -137,6 +165,32 @@ impl Engine {
                             .any(|column| updated_columns.contains(column)))
             })
             .collect())
+    }
+
+    pub(crate) fn has_trigger_definition(
+        &self,
+        table: &str,
+        timing: TriggerTiming,
+        event: TriggerEvent,
+        row: bool,
+    ) -> Result<bool, SQLError> {
+        let relation = self.resolve_trigger_table(table)?;
+        let matches = |entries: &BTreeMap<String, StoredTrigger>| {
+            entries.values().any(|trigger| {
+                trigger.definition.timing == timing
+                    && trigger.definition.row == row
+                    && trigger.definition.events.contains(&event)
+            })
+        };
+        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
+            return Ok(snapshot.triggers.get(&relation).is_some_and(matches));
+        }
+        Ok(self
+            .durable
+            .triggers
+            .read()
+            .get(&relation)
+            .is_some_and(matches))
     }
 
     pub(crate) fn has_row_triggers(

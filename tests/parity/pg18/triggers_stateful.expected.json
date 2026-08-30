@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "70268b8ab6cf7c5e391496080764bf10d4697514ed45c91872867a2b7956b57c",
+  "fixture_sha256": "2452339ad8dc679140ba063ef36770b5a7fdd4ac8287e32d0abd6e739405e2aa",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -2165,6 +2165,2101 @@
       "rows": [
         [
           "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_automatic_view_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_view_insert_defaults_computed_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "one",
+          "t",
+          "14"
+        ],
+        [
+          "2",
+          "two",
+          "t",
+          "14"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_view_insert_select_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          "3",
+          "three",
+          "14"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_view_implicit_values_use_leading_columns",
+      "kind": "rows",
+      "rows": [
+        [
+          "5",
+          "five",
+          "t",
+          "14"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_view_implicit_select_uses_leading_columns",
+      "kind": "rows",
+      "rows": [
+        [
+          "4",
+          "four",
+          "t",
+          "14"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_view_reject_computed_insert",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "automatic_view_upsert_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "one:conflict",
+          "14"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_view_upsert_rejects_ambiguous_target_column",
+      "kind": "error",
+      "sqlstate": "42702"
+    },
+    {
+      "name": "automatic_view_update_returning_computed",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "one:conflict:updated",
+          "14"
+        ]
+      ]
+    },
+    {
+      "name": "create_automatic_view_ambiguity_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_view_update_from_rejects_ambiguous_column",
+      "kind": "error",
+      "sqlstate": "42702"
+    },
+    {
+      "name": "automatic_view_delete_using_rejects_ambiguous_column",
+      "kind": "error",
+      "sqlstate": "42702"
+    },
+    {
+      "name": "automatic_view_ambiguity_failures_are_atomic",
+      "kind": "rows",
+      "rows": [
+        [
+          "2",
+          "two"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_view_update_from_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          "3",
+          "three",
+          "three:from",
+          "14"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_view_reject_computed_update",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "automatic_view_without_check_option_can_leave_view",
+      "kind": "rows",
+      "rows": [
+        [
+          "2",
+          "two",
+          "f",
+          "14"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_view_delete_using_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          "3",
+          "three",
+          "three:from",
+          "14"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_view_base_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "one:conflict:updated",
+          "t",
+          "7"
+        ],
+        [
+          "2",
+          "two",
+          "f",
+          "7"
+        ],
+        [
+          "4",
+          "four",
+          "t",
+          "7"
+        ],
+        [
+          "5",
+          "five",
+          "t",
+          "7"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_view_only_base_triggers_fire",
+      "kind": "rows",
+      "rows": [
+        [
+          "automatic_view_base:BEFORE:STATEMENT:INSERT"
+        ],
+        [
+          "automatic_view_base:BEFORE:ROW:INSERT"
+        ],
+        [
+          "automatic_view_base:BEFORE:ROW:INSERT"
+        ],
+        [
+          "automatic_view_base:AFTER:ROW:INSERT"
+        ],
+        [
+          "automatic_view_base:AFTER:ROW:INSERT"
+        ],
+        [
+          "automatic_view_base:AFTER:STATEMENT:INSERT"
+        ],
+        [
+          "automatic_view_base:BEFORE:STATEMENT:INSERT"
+        ],
+        [
+          "automatic_view_base:BEFORE:ROW:INSERT"
+        ],
+        [
+          "automatic_view_base:AFTER:ROW:INSERT"
+        ],
+        [
+          "automatic_view_base:AFTER:STATEMENT:INSERT"
+        ],
+        [
+          "automatic_view_base:BEFORE:STATEMENT:INSERT"
+        ],
+        [
+          "automatic_view_base:BEFORE:ROW:INSERT"
+        ],
+        [
+          "automatic_view_base:AFTER:ROW:INSERT"
+        ],
+        [
+          "automatic_view_base:AFTER:STATEMENT:INSERT"
+        ],
+        [
+          "automatic_view_base:BEFORE:STATEMENT:INSERT"
+        ],
+        [
+          "automatic_view_base:BEFORE:ROW:INSERT"
+        ],
+        [
+          "automatic_view_base:AFTER:ROW:INSERT"
+        ],
+        [
+          "automatic_view_base:AFTER:STATEMENT:INSERT"
+        ],
+        [
+          "automatic_view_base:BEFORE:STATEMENT:INSERT"
+        ],
+        [
+          "automatic_view_base:BEFORE:STATEMENT:UPDATE"
+        ],
+        [
+          "automatic_view_base:BEFORE:ROW:INSERT"
+        ],
+        [
+          "automatic_view_base:BEFORE:ROW:UPDATE"
+        ],
+        [
+          "automatic_view_base:AFTER:ROW:UPDATE"
+        ],
+        [
+          "automatic_view_base:AFTER:STATEMENT:UPDATE"
+        ],
+        [
+          "automatic_view_base:AFTER:STATEMENT:INSERT"
+        ],
+        [
+          "automatic_view_base:BEFORE:STATEMENT:UPDATE"
+        ],
+        [
+          "automatic_view_base:BEFORE:ROW:UPDATE"
+        ],
+        [
+          "automatic_view_base:AFTER:ROW:UPDATE"
+        ],
+        [
+          "automatic_view_base:AFTER:STATEMENT:UPDATE"
+        ],
+        [
+          "automatic_view_base:BEFORE:STATEMENT:UPDATE"
+        ],
+        [
+          "automatic_view_base:BEFORE:ROW:UPDATE"
+        ],
+        [
+          "automatic_view_base:AFTER:ROW:UPDATE"
+        ],
+        [
+          "automatic_view_base:AFTER:STATEMENT:UPDATE"
+        ],
+        [
+          "automatic_view_base:BEFORE:STATEMENT:UPDATE"
+        ],
+        [
+          "automatic_view_base:BEFORE:ROW:UPDATE"
+        ],
+        [
+          "automatic_view_base:AFTER:ROW:UPDATE"
+        ],
+        [
+          "automatic_view_base:AFTER:STATEMENT:UPDATE"
+        ],
+        [
+          "automatic_view_base:BEFORE:STATEMENT:DELETE"
+        ],
+        [
+          "automatic_view_base:BEFORE:ROW:DELETE"
+        ],
+        [
+          "automatic_view_base:AFTER:ROW:DELETE"
+        ],
+        [
+          "automatic_view_base:AFTER:STATEMENT:DELETE"
+        ]
+      ]
+    },
+    {
+      "name": "create_automatic_replica_view_trigger_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_replica_suppresses_defined_instead_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_replica_preserves_catalog_flag_without_base_write",
+      "kind": "rows",
+      "rows": [
+        [
+          "YES",
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_automatic_check_option_views",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_local_check_insert_rejects",
+      "kind": "error",
+      "sqlstate": "44000"
+    },
+    {
+      "name": "automatic_local_check_insert_failure_is_atomic",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_local_check_update_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_local_check_update_rejects",
+      "kind": "error",
+      "sqlstate": "44000"
+    },
+    {
+      "name": "automatic_local_check_update_failure_is_atomic",
+      "kind": "rows",
+      "rows": [
+        [
+          "10",
+          "ten",
+          "t",
+          "7"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_local_check_update_from_rejects",
+      "kind": "error",
+      "sqlstate": "44000"
+    },
+    {
+      "name": "automatic_local_check_update_from_failure_is_atomic",
+      "kind": "rows",
+      "rows": [
+        [
+          "10",
+          "ten",
+          "t",
+          "7"
+        ]
+      ]
+    },
+    {
+      "name": "create_automatic_check_option_before_row_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_check_option_sees_before_insert_result",
+      "kind": "error",
+      "sqlstate": "44000"
+    },
+    {
+      "name": "automatic_check_option_before_insert_failure_is_atomic",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_check_option_multirow_failure_is_atomic",
+      "kind": "error",
+      "sqlstate": "44000"
+    },
+    {
+      "name": "automatic_check_option_multirow_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_check_option_before_update_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_check_option_sees_before_update_result",
+      "kind": "error",
+      "sqlstate": "44000"
+    },
+    {
+      "name": "automatic_check_option_sees_conflict_update_result",
+      "kind": "error",
+      "sqlstate": "44000"
+    },
+    {
+      "name": "automatic_check_option_trigger_failure_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "11",
+          "eleven",
+          "t",
+          "7"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_nested_local_ignores_unchecked_inner",
+      "kind": "rows",
+      "rows": [
+        [
+          "20",
+          "f",
+          "t",
+          "defaulted"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_nested_cascaded_checks_inner",
+      "kind": "error",
+      "sqlstate": "44000"
+    },
+    {
+      "name": "automatic_nested_local_checks_self",
+      "kind": "error",
+      "sqlstate": "44000"
+    },
+    {
+      "name": "automatic_nested_local_preserves_inner_check",
+      "kind": "error",
+      "sqlstate": "44000"
+    },
+    {
+      "name": "automatic_nested_alias_insert_defaults_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          "24",
+          "twenty-four"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_nested_alias_update_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          "24",
+          "twenty-four:updated"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_nested_alias_delete_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          "24",
+          "twenty-four:updated"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_nested_base_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "20",
+          "f",
+          "t",
+          "defaulted"
+        ]
+      ]
+    },
+    {
+      "name": "create_automatic_view_name_boundary_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_view_hidden_assignment_rejected",
+      "kind": "error",
+      "sqlstate": "42703"
+    },
+    {
+      "name": "automatic_view_hidden_predicate_rejected",
+      "kind": "error",
+      "sqlstate": "42703"
+    },
+    {
+      "name": "automatic_view_hidden_returning_rejected",
+      "kind": "error",
+      "sqlstate": "42703"
+    },
+    {
+      "name": "automatic_view_hidden_insert_returning_rejected",
+      "kind": "error",
+      "sqlstate": "42703"
+    },
+    {
+      "name": "automatic_view_hidden_column_failures_are_atomic",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "shown",
+          "secret"
+        ],
+        [
+          "2",
+          "two",
+          "hidden"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_view_source_alias_named_new",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "new-source",
+          "new-source"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_view_source_alias_named_old",
+      "kind": "rows",
+      "rows": [
+        [
+          "2",
+          "old-source"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_view_returning_star_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_view_update_from_returning_star",
+      "kind": "rows",
+      "rows": []
+    },
+    {
+      "name": "automatic_view_delete_using_returning_star",
+      "kind": "rows",
+      "rows": []
+    },
+    {
+      "name": "create_automatic_ordered_check_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_nested_checks_run_inner_before_outer",
+      "kind": "error",
+      "sqlstate": "44000"
+    },
+    {
+      "name": "create_non_updatable_views",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_distinct_view_insert_rejected",
+      "kind": "error",
+      "sqlstate": "55000"
+    },
+    {
+      "name": "automatic_join_view_update_rejected",
+      "kind": "error",
+      "sqlstate": "55000"
+    },
+    {
+      "name": "automatic_aggregate_view_delete_rejected",
+      "kind": "error",
+      "sqlstate": "55000"
+    },
+    {
+      "name": "automatic_constant_view_insert_rejected",
+      "kind": "error",
+      "sqlstate": "55000"
+    },
+    {
+      "name": "automatic_constant_view_update_rejected",
+      "kind": "error",
+      "sqlstate": "55000"
+    },
+    {
+      "name": "automatic_xmin_view_insert_rejected",
+      "kind": "error",
+      "sqlstate": "55000"
+    },
+    {
+      "name": "automatic_xmin_view_update_rejected",
+      "kind": "error",
+      "sqlstate": "55000"
+    },
+    {
+      "name": "automatic_constant_view_unknown_insert_column",
+      "kind": "error",
+      "sqlstate": "42703"
+    },
+    {
+      "name": "automatic_constant_view_unknown_update_column",
+      "kind": "error",
+      "sqlstate": "42703"
+    },
+    {
+      "name": "create_automatic_duplicate_and_tableoid_views",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_duplicate_mapped_assignments_rejected",
+      "kind": "error",
+      "sqlstate": "42601"
+    },
+    {
+      "name": "automatic_tableoid_projection_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_constant_view_remains_deletable",
+      "kind": "rows",
+      "rows": [
+        [
+          "2"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_materialized_view_insert_rejected",
+      "kind": "error",
+      "sqlstate": "42809"
+    },
+    {
+      "name": "automatic_materialized_view_update_rejected",
+      "kind": "error",
+      "sqlstate": "42809"
+    },
+    {
+      "name": "automatic_materialized_view_delete_rejected",
+      "kind": "error",
+      "sqlstate": "42809"
+    },
+    {
+      "name": "automatic_view_catalog_updatability",
+      "kind": "rows",
+      "rows": [
+        [
+          "automatic_aggregate_view",
+          "NO",
+          "NO",
+          "NONE"
+        ],
+        [
+          "automatic_constant_view",
+          "NO",
+          "NO",
+          "NONE"
+        ],
+        [
+          "automatic_distinct_view",
+          "NO",
+          "NO",
+          "NONE"
+        ],
+        [
+          "automatic_item_view",
+          "YES",
+          "YES",
+          "NONE"
+        ],
+        [
+          "automatic_join_view",
+          "NO",
+          "NO",
+          "NONE"
+        ],
+        [
+          "automatic_local_view",
+          "YES",
+          "YES",
+          "LOCAL"
+        ],
+        [
+          "automatic_xmin_view",
+          "NO",
+          "NO",
+          "NONE"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_view_column_updatability",
+      "kind": "rows",
+      "rows": [
+        [
+          "item_id",
+          "YES"
+        ],
+        [
+          "label",
+          "YES"
+        ],
+        [
+          "visible",
+          "YES"
+        ],
+        [
+          "doubled",
+          "NO"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_readonly_view_column_updatability",
+      "kind": "rows",
+      "rows": [
+        [
+          "automatic_constant_view",
+          "computed_id",
+          "NO"
+        ],
+        [
+          "automatic_xmin_view",
+          "xmin",
+          "NO"
+        ]
+      ]
+    },
+    {
+      "name": "create_automatic_view_rule_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_view_insert_instead_rule",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_view_insert_instead_rule_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "0",
+          "insert-instead",
+          "1",
+          "10"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_view_insert_also_rule",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_view_insert_also_rule_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "20",
+          "20"
+        ]
+      ]
+    },
+    {
+      "name": "create_automatic_view_update_delete_rules",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_view_update_instead_rule",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_view_update_instead_rule_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "30",
+          "31"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_view_delete_instead_rule",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_view_delete_instead_rule_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "30"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_view_update_also_rule",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_view_delete_also_rule",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_view_also_rules_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "delete-also",
+          "21"
+        ],
+        [
+          "update-also",
+          "21"
+        ]
+      ]
+    },
+    {
+      "name": "create_automatic_view_returning_rule",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_view_rule_provides_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          "4",
+          "40"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_view_rule_returning_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "0",
+          "4",
+          "40"
+        ]
+      ]
+    },
+    {
+      "name": "create_automatic_source_only_name_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_view_source_only_update_column",
+      "kind": "rows",
+      "rows": [
+        [
+          "source-seven",
+          "source-seven"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_view_source_only_delete_column",
+      "kind": "rows",
+      "rows": [
+        [
+          "8",
+          "source-eight"
+        ]
+      ]
+    },
+    {
+      "name": "create_nested_automatic_view_rule_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "nested_automatic_view_runs_layer_rules",
+      "kind": "ok"
+    },
+    {
+      "name": "nested_automatic_view_rule_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "inner-insert"
+        ],
+        [
+          "outer-insert"
+        ],
+        [
+          "outer-update"
+        ],
+        [
+          "inner-update"
+        ],
+        [
+          "outer-delete"
+        ],
+        [
+          "inner-delete"
+        ]
+      ]
+    },
+    {
+      "name": "create_conditional_automatic_view_rule_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "conditional_instead_rule_does_not_enable_insert",
+      "kind": "error",
+      "sqlstate": "55000"
+    },
+    {
+      "name": "conditional_instead_rule_does_not_enable_update",
+      "kind": "error",
+      "sqlstate": "55000"
+    },
+    {
+      "name": "conditional_instead_rule_does_not_enable_delete",
+      "kind": "error",
+      "sqlstate": "55000"
+    },
+    {
+      "name": "conditional_instead_rule_failures_are_atomic",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "10"
+        ]
+      ]
+    },
+    {
+      "name": "create_automatic_partition_tableoid_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_partition_tableoid_predicate_and_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_partition_rule_tracks_physical_tableoid",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_partition_rule_uses_physical_tableoid",
+      "kind": "rows",
+      "rows": [
+        [
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "drop_automatic_partition_tableoid_rule",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_partition_move_returning_row_images",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_partition_delete_uses_physical_tableoid",
+      "kind": "rows",
+      "rows": [
+        [
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "create_fixed_star_automatic_view_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "fixed_star_automatic_view_insert_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "one",
+          "one:computed"
+        ]
+      ]
+    },
+    {
+      "name": "fixed_star_automatic_view_row_type_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "one",
+          "one:computed",
+          "7"
+        ]
+      ]
+    },
+    {
+      "name": "create_set_returning_view_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "set_returning_view_update_rejected",
+      "kind": "error",
+      "sqlstate": "55000"
+    },
+    {
+      "name": "set_returning_view_catalog_is_not_updatable",
+      "kind": "rows",
+      "rows": [
+        [
+          "NO",
+          "NO"
+        ]
+      ]
+    },
+    {
+      "name": "non_updatable_view_check_option_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "non_updatable_join_unknown_insert_column",
+      "kind": "error",
+      "sqlstate": "42703"
+    },
+    {
+      "name": "non_updatable_join_unknown_update_column",
+      "kind": "error",
+      "sqlstate": "42703"
+    },
+    {
+      "name": "create_correlated_automatic_view_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "correlated_hidden_view_column_rejected",
+      "kind": "error",
+      "sqlstate": "42703"
+    },
+    {
+      "name": "correlated_visible_view_column_updates",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "after"
+        ]
+      ]
+    },
+    {
+      "name": "create_view_rule_trigger_order_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "view_also_rule_and_instead_trigger_both_run",
+      "kind": "ok"
+    },
+    {
+      "name": "view_also_rule_runs_after_instead_trigger",
+      "kind": "rows",
+      "rows": [
+        [
+          "trigger"
+        ],
+        [
+          "rule"
+        ]
+      ]
+    },
+    {
+      "name": "create_view_instead_rule_suppresses_trigger_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "view_instead_rule_suppresses_instead_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "view_instead_rule_suppressed_trigger_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "rule"
+        ]
+      ]
+    },
+    {
+      "name": "create_nested_insert_suppression_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "outer_instead_rule_suppresses_inner_insert_rule",
+      "kind": "ok"
+    },
+    {
+      "name": "outer_instead_rule_suppression_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "outer"
+        ]
+      ]
+    },
+    {
+      "name": "create_suppressed_identity_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "suppressed_view_insert_does_not_apply_defaults",
+      "kind": "ok"
+    },
+    {
+      "name": "suppressed_view_insert_rule_sees_nulls",
+      "kind": "rows",
+      "rows": [
+        [
+          null,
+          null
+        ]
+      ]
+    },
+    {
+      "name": "drop_suppressed_identity_rule",
+      "kind": "ok"
+    },
+    {
+      "name": "suppressed_view_insert_does_not_consume_identity",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "base-default"
+        ]
+      ]
+    },
+    {
+      "name": "create_nested_conditional_instead_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "nested_conditional_instead_rejects_whole_update",
+      "kind": "error",
+      "sqlstate": "55000"
+    },
+    {
+      "name": "nested_conditional_instead_update_is_atomic",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "10"
+        ],
+        [
+          "2",
+          "20"
+        ]
+      ]
+    },
+    {
+      "name": "create_nested_returning_provider_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "nested_inner_rule_provides_returning",
+      "kind": "ok"
+    },
+    {
+      "name": "nested_returning_provider_actions_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "0",
+          "1",
+          "1",
+          "1",
+          "10"
+        ]
+      ]
+    },
+    {
+      "name": "create_lazy_automatic_rule_projection_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_rule_projection_is_lazy",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_rule_projection_lazy_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "create_insert_rule_layer_order_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_rules_run_base_to_outer",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_rule_layer_order_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "base"
+        ],
+        [
+          "inner"
+        ],
+        [
+          "outer"
+        ]
+      ]
+    },
+    {
+      "name": "create_unaliased_derived_source_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "unaliased_derived_source_preserves_hidden_name",
+      "kind": "rows",
+      "rows": [
+        [
+          "source"
+        ]
+      ]
+    },
+    {
+      "name": "create_alter_check_option_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "alter_non_updatable_view_check_option_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "rejected_alter_check_option_does_not_persist",
+      "kind": "rows",
+      "rows": [
+        [
+          "NONE"
+        ]
+      ]
+    },
+    {
+      "name": "create_non_updatable_hidden_binding_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "non_updatable_view_binds_public_columns_before_shape",
+      "kind": "error",
+      "sqlstate": "42703"
+    },
+    {
+      "name": "create_view_update_delete_rule_trigger_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "view_update_also_rule_and_instead_trigger_both_run",
+      "kind": "ok"
+    },
+    {
+      "name": "view_delete_also_rule_and_instead_trigger_both_run",
+      "kind": "ok"
+    },
+    {
+      "name": "view_update_delete_rule_trigger_order",
+      "kind": "rows",
+      "rows": [
+        [
+          "update-rule"
+        ],
+        [
+          "update-trigger"
+        ],
+        [
+          "delete-rule"
+        ],
+        [
+          "delete-trigger"
+        ]
+      ]
+    },
+    {
+      "name": "create_view_update_delete_instead_rule_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "view_update_instead_rule_suppresses_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "view_delete_instead_rule_suppresses_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "view_update_delete_instead_rule_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "update-rule",
+          "1",
+          "10"
+        ],
+        [
+          "update-rule",
+          "2",
+          "20"
+        ],
+        [
+          "delete-rule",
+          "1",
+          "10"
+        ],
+        [
+          "delete-rule",
+          "2",
+          "20"
+        ]
+      ]
+    },
+    {
+      "name": "create_suppressed_generated_view_rule_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "suppressed_view_rule_does_not_evaluate_generated_column",
+      "kind": "ok"
+    },
+    {
+      "name": "suppressed_view_rule_generated_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "create_suppressed_partition_view_rule_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "suppressed_view_rule_does_not_route_partition",
+      "kind": "ok"
+    },
+    {
+      "name": "suppressed_view_rule_partition_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "20"
+        ]
+      ]
+    },
+    {
+      "name": "create_insert_rule_default_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_rule_sees_applied_default",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_rule_default_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "5",
+          "5"
+        ]
+      ]
+    },
+    {
+      "name": "create_insert_rule_identity_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_rule_sees_prepared_identity",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_rule_identity_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "create_conditional_rule_projection_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "unmatched_rule_does_not_project_action_columns",
+      "kind": "ok"
+    },
+    {
+      "name": "conditional_rule_projection_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_rule_returning_subquery_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "rule_returning_preserves_provider_subqueries",
+      "kind": "rows",
+      "rows": [
+        [
+          "one"
+        ]
+      ]
+    },
+    {
+      "name": "create_unrouted_rule_tableoid_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "unrouted_rule_tableoid_and_command_tag",
+      "kind": "ok"
+    },
+    {
+      "name": "unrouted_rule_tableoid_and_command_tag_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "non_updatable_insert_returning_binds_before_shape",
+      "kind": "error",
+      "sqlstate": "42703"
+    },
+    {
+      "name": "create_rule_expression_suppression_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "suppressed_rules_defer_unused_expressions",
+      "kind": "ok"
+    },
+    {
+      "name": "suppressed_rule_expression_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "insert",
+          "0",
+          "10"
+        ],
+        [
+          "update",
+          "0",
+          "10"
+        ]
+      ]
+    },
+    {
+      "name": "create_computed_column_rule_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "rules_consume_supplied_computed_columns",
+      "kind": "ok"
+    },
+    {
+      "name": "computed_column_rule_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "insert",
+          "2",
+          "8"
+        ],
+        [
+          "update",
+          "1",
+          "12"
+        ]
+      ]
+    },
+    {
+      "name": "create_multiple_instead_rule_count_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "multiple_instead_rule_command_tag",
+      "kind": "ok"
+    },
+    {
+      "name": "multiple_instead_rule_command_tag_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "2",
+          "2",
+          "2"
+        ]
+      ]
+    },
+    {
+      "name": "create_suppressed_statement_trigger_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "unconditional_instead_rule_suppresses_all_view_triggers",
+      "kind": "ok"
+    },
+    {
+      "name": "suppressed_view_statement_trigger_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "rule"
+        ]
+      ]
+    },
+    {
+      "name": "create_complete_dml_subquery_scope_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "conflict_subquery_keeps_excluded_scope",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "from-excluded"
+        ]
+      ]
+    },
+    {
+      "name": "update_returning_subqueries_keep_source_and_row_images",
+      "kind": "rows",
+      "rows": [
+        [
+          "from-source",
+          "from-excluded",
+          "from-source"
+        ]
+      ]
+    },
+    {
+      "name": "create_delete_subquery_scope_row",
+      "kind": "ok"
+    },
+    {
+      "name": "delete_returning_subqueries_keep_source_and_target",
+      "kind": "rows",
+      "rows": [
+        [
+          "delete-source",
+          "before-delete"
+        ]
+      ]
+    },
+    {
+      "name": "create_nested_rule_rewrite_stop_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "nested_instead_rules_stop_lower_rewrite_layers",
+      "kind": "ok"
+    },
+    {
+      "name": "nested_rule_rewrite_stop_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "delete",
+          "0",
+          "0",
+          "1:10,2:20"
+        ],
+        [
+          "update",
+          "0",
+          "0",
+          "1:10,2:20"
+        ]
+      ]
+    },
+    {
+      "name": "create_omitted_computed_rule_image_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "omitted_computed_insert_rule_image_stays_null",
+      "kind": "ok"
+    },
+    {
+      "name": "omitted_computed_rule_image_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "null",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "create_view_rule_conflict_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "view_also_rule_allows_on_conflict",
+      "kind": "ok"
+    },
+    {
+      "name": "view_rule_conflict_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "0",
+          "10",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "create_suppressed_insert_select_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "suppressed_insert_select_skips_unused_projection",
+      "kind": "ok"
+    },
+    {
+      "name": "suppressed_insert_select_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "direct",
+          "0",
+          "0"
+        ],
+        [
+          "nested",
+          "0",
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_constant_insert_rule_cardinality_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "constant_insert_rule_action_tracks_input_rows",
+      "kind": "ok"
+    },
+    {
+      "name": "constant_insert_rule_cardinality_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "3",
+          "3"
+        ]
+      ]
+    },
+    {
+      "name": "create_nested_suppressed_update_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "nested_suppressed_updates_skip_assignments",
+      "kind": "ok"
+    },
+    {
+      "name": "nested_suppressed_update_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "from",
+          "0",
+          "10"
+        ],
+        [
+          "plain",
+          "0",
+          "10"
+        ]
+      ]
+    },
+    {
+      "name": "create_direct_suppressed_view_materialization_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "direct_suppressed_view_dml_skips_materialization",
+      "kind": "ok"
+    },
+    {
+      "name": "direct_suppressed_view_dml_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "delete",
+          "0",
+          "1"
+        ],
+        [
+          "update",
+          "0",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "create_lazy_rule_case_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "rule_case_condition_short_circuits_projection",
+      "kind": "ok"
+    },
+    {
+      "name": "lazy_rule_case_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_correlated_source_only_scalar_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "correlated_scalar_source_only_name_stays_source_bound",
+      "kind": "rows",
+      "rows": [
+        [
+          "source"
+        ]
+      ]
+    },
+    {
+      "name": "create_rule_catalog_flag_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "rule_backed_view_catalog_flags",
+      "kind": "rows",
+      "rows": [
+        [
+          "automatic_catalog_rule_all",
+          "YES",
+          "YES",
+          "YES"
+        ],
+        [
+          "automatic_catalog_rule_insert",
+          "NO",
+          "YES",
+          "NO"
+        ],
+        [
+          "automatic_catalog_rule_update",
+          "NO",
+          "NO",
+          "NO"
+        ]
+      ]
+    },
+    {
+      "name": "create_view_check_error_order_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "view_insert_uniqueness_precedes_check_option",
+      "kind": "error",
+      "sqlstate": "23505"
+    },
+    {
+      "name": "view_update_uniqueness_precedes_check_option",
+      "kind": "error",
+      "sqlstate": "23505"
+    },
+    {
+      "name": "create_duplicate_view_mapping_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "duplicate_mapped_insert_alias_is_syntax_error",
+      "kind": "error",
+      "sqlstate": "42601"
+    },
+    {
+      "name": "duplicate_conflict_inference_mapping_is_accepted",
+      "kind": "ok"
+    },
+    {
+      "name": "duplicate_view_mapping_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "2"
+        ]
+      ]
+    },
+    {
+      "name": "create_rule_action_cardinality_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "rule_action_cardinality_tracks_event_semantics",
+      "kind": "ok"
+    },
+    {
+      "name": "rule_action_cardinality_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "delete-none",
+          "0",
+          "0"
+        ],
+        [
+          "delete-two",
+          "2",
+          "2"
+        ],
+        [
+          "direct-from-source",
+          "0",
+          "2"
+        ],
+        [
+          "direct-from-target",
+          "0",
+          "2"
+        ],
+        [
+          "update-all",
+          "3",
+          "1"
+        ],
+        [
+          "update-from-source",
+          "3",
+          "2"
+        ],
+        [
+          "update-from-target",
+          "1",
+          "2"
+        ],
+        [
+          "update-none",
+          "0",
+          "0"
+        ],
+        [
+          "update-qualified",
+          "3",
+          "3"
+        ]
+      ]
+    },
+    {
+      "name": "create_check_option_nonupdatable_source_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "check_option_nonupdatable_source_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "NO",
+          "NO"
+        ]
+      ]
+    },
+    {
+      "name": "create_only_partition_view_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "only_partition_view_insert_routes_to_child",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_nested_computed_rule_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "nested_rules_consume_outer_computed_inputs",
+      "kind": "ok"
+    },
+    {
+      "name": "nested_computed_rule_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "8,12",
+          "automatic_nested_computed_inner:YES:YES,automatic_nested_computed_outer:YES:YES"
+        ]
+      ]
+    },
+    {
+      "name": "create_nested_nonautomatic_rule_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "nested_nonautomatic_rule_executes",
+      "kind": "ok"
+    },
+    {
+      "name": "nested_nonautomatic_rule_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "9",
+          "automatic_nested_aggregate_inner:NO:NO,automatic_nested_aggregate_outer:NO:NO"
+        ]
+      ]
+    },
+    {
+      "name": "create_consumed_lazy_rule_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "consumed_rule_inputs_skip_unused_expressions",
+      "kind": "ok"
+    },
+    {
+      "name": "consumed_lazy_rule_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "update",
+          "1"
+        ],
+        [
+          "insert-select",
+          "2"
+        ],
+        [
+          "nested-values",
+          "3"
+        ]
+      ]
+    },
+    {
+      "name": "create_replication_mode_catalog_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "set_replica_for_rule_catalog",
+      "kind": "ok"
+    },
+    {
+      "name": "rule_catalog_flags_ignore_replication_mode",
+      "kind": "rows",
+      "rows": [
+        [
+          "YES"
+        ]
+      ]
+    },
+    {
+      "name": "reset_replica_for_rule_catalog",
+      "kind": "ok"
+    },
+    {
+      "name": "select_star_without_relation_rejected",
+      "kind": "error",
+      "sqlstate": "42601"
+    },
+    {
+      "name": "create_view_star_without_relation_rejected",
+      "kind": "error",
+      "sqlstate": "42601"
+    },
+    {
+      "name": "create_nonautomatic_rule_boundary_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "nonautomatic_rule_boundary_preserves_outer_layers",
+      "kind": "ok"
+    },
+    {
+      "name": "nonautomatic_rule_boundary_order",
+      "kind": "rows",
+      "rows": [
+        [
+          "inner-insert",
+          "3"
+        ],
+        [
+          "outer-insert",
+          "3"
+        ],
+        [
+          "outer-update",
+          "9"
+        ],
+        [
+          "inner-update",
+          "9"
+        ],
+        [
+          "outer-delete",
+          "1"
+        ],
+        [
+          "inner-delete",
+          "1"
         ]
       ]
     }

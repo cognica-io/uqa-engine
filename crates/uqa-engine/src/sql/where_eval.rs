@@ -98,23 +98,31 @@ fn filter_table_rows(
     // a per-row field projection fetched in one storage scan instead
     // of materialising every document.
     let mut columns = std::collections::BTreeSet::new();
-    if filter.collect_columns(&mut columns) {
+    let collected_columns = filter.collect_columns(&mut columns);
+    let references_tableoid = columns.contains(super::TABLE_OID_COLUMN);
+    if collected_columns && !references_tableoid {
         let names: Vec<String> = columns.into_iter().collect();
-        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
-        let field_values = engine.get_query_document_fields_multi(table, &doc_ids, &refs)?;
-        let mut documents = Vec::with_capacity(doc_ids.len());
-        for &doc_id in &doc_ids {
-            let values = field_values.get(&doc_id).ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "WHERE scan: document {doc_id} listed by table `{table}` disappeared during the statement"
-                ))
-            })?;
-            let mut document = uqa_storage::document_store::Document::new();
-            for (name, value) in names.iter().zip(values) {
-                document.insert(name.clone(), value.clone());
+        let documents = if names.is_empty() {
+            // A constant predicate needs only the candidate document ids. Some persistent stores represent a zero-column projection as an empty result map, so asking storage for no fields incorrectly makes every listed row look missing.
+            vec![uqa_storage::document_store::Document::new(); doc_ids.len()]
+        } else {
+            let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+            let field_values = engine.get_query_document_fields_multi(table, &doc_ids, &refs)?;
+            let mut documents = Vec::with_capacity(doc_ids.len());
+            for &doc_id in &doc_ids {
+                let values = field_values.get(&doc_id).ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "WHERE scan: document {doc_id} listed by table `{table}` disappeared during the statement"
+                    ))
+                })?;
+                let mut document = uqa_storage::document_store::Document::new();
+                for (name, value) in names.iter().zip(values) {
+                    document.insert(name.clone(), value.clone());
+                }
+                documents.push(document);
             }
-            documents.push(document);
-        }
+            documents
+        };
         let (schema, document_id) = table_filter_schema(engine, table, qualifier, names)?;
         return filter_documents(
             engine,
@@ -131,16 +139,29 @@ fn filter_table_rows(
     }
     let mut documents = Vec::with_capacity(doc_ids.len());
     for &doc_id in &doc_ids {
-        let document = engine.get_query_document(table, doc_id)?.ok_or_else(|| {
+        let mut document = engine.get_query_document(table, doc_id)?.ok_or_else(|| {
             SQLError::Internal(format!(
                 "WHERE scan: document {doc_id} listed by table `{table}` disappeared during the statement"
             ))
         })?;
+        if references_tableoid {
+            document.insert(
+                super::TABLE_OID_COLUMN.into(),
+                uqa_core::Value::Int(crate::sql::catalog::table_relation_oid(engine, table)?),
+            );
+        }
         documents.push(document);
     }
-    let columns = engine.try_query_table_columns(table).map_err(|error| {
+    let mut columns = engine.try_query_table_columns(table).map_err(|error| {
         SQLError::Internal(format!("read table columns for `{table}`: {error}"))
     })?;
+    if references_tableoid
+        && !columns
+            .iter()
+            .any(|column| column == super::TABLE_OID_COLUMN)
+    {
+        columns.push(super::TABLE_OID_COLUMN.into());
+    }
     let (schema, document_id) = table_filter_schema(engine, table, qualifier, columns)?;
     filter_documents(
         engine,
@@ -169,6 +190,9 @@ fn table_filter_schema(
     let types = columns
         .iter()
         .map(|column| {
+            if column == super::TABLE_OID_COLUMN {
+                return Some(uqa_sql::ast::ColumnType::Oid);
+            }
             definitions
                 .iter()
                 .find(|definition| definition.name == *column)
@@ -213,11 +237,15 @@ pub(super) fn collect_where_doc_ids(
     params: &[SQLParam],
     ctes: &CteScope,
 ) -> Result<Vec<DocId>, SQLError> {
+    let references_tableoid = expression_references_tableoid(filter);
+    let optimized = if references_tableoid {
+        None
+    } else {
+        crate::operator_tree_bridge::run_optimised(engine, table, Some(filter), params)?
+    };
     let scored = if is_jsonpath_fts_match_filter(filter) {
         execute_mixed_where_expr(engine, table, qualifier, filter, params, ctes)?
-    } else if let Some(entries) =
-        crate::operator_tree_bridge::run_optimised(engine, table, Some(filter), params)?
-    {
+    } else if let Some(entries) = optimized {
         entries
     } else {
         match filter {
@@ -228,6 +256,11 @@ pub(super) fn collect_where_doc_ids(
         }
     };
     Ok(scored.into_iter().map(|entry| entry.doc_id).collect())
+}
+
+fn expression_references_tableoid(expression: &ScalarExpr) -> bool {
+    let mut columns = BTreeSet::new();
+    expression.collect_columns(&mut columns) && columns.contains(super::TABLE_OID_COLUMN)
 }
 
 fn is_jsonpath_fts_match_filter(filter: &ScalarExpr) -> bool {

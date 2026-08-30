@@ -14,7 +14,7 @@ use uqa_sql::SQLError;
 pub(crate) use rule_binding::{
     bind_rule_action, bind_rule_expr_scoped, first_rule_row_reference_in_expr,
     first_rule_row_reference_in_select, rule_action_has_set_operation, rule_expr_references_row,
-    rule_statement_references_row,
+    rule_expr_row_columns, rule_statement_references_row, rule_statement_row_columns,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

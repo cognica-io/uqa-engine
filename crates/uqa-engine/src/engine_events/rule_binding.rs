@@ -20,6 +20,32 @@ struct RuleRowReferenceDetector {
     qualifier: Option<String>,
 }
 
+#[derive(Default)]
+struct RuleRowColumnCollector {
+    columns: BTreeSet<String>,
+}
+
+impl VariableResolver for RuleRowColumnCollector {
+    fn resolve_name(&mut self, _name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
+        Ok(None)
+    }
+
+    fn resolve_qualified(
+        &mut self,
+        qualifier: &str,
+        column: &str,
+    ) -> Result<Option<ResolvedVariable>, SQLError> {
+        if qualifier.eq_ignore_ascii_case("old") || qualifier.eq_ignore_ascii_case("new") {
+            self.columns.insert(column.to_string());
+        }
+        Ok(None)
+    }
+
+    fn resolve_param(&mut self, _index: usize) -> Result<Option<ResolvedVariable>, SQLError> {
+        Ok(None)
+    }
+}
+
 impl VariableResolver for RuleRowReferenceDetector {
     fn resolve_name(&mut self, _name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
         Ok(None)
@@ -80,6 +106,21 @@ pub(crate) fn rule_statement_references_row(
     let mut detector = RuleRowReferenceDetector::default();
     let _ = bind_rule_action(statement, action_columns, &mut detector)?;
     Ok(detector.qualifier.is_some())
+}
+
+pub(crate) fn rule_expr_row_columns(expr: &Expr) -> BTreeSet<String> {
+    let mut collector = RuleRowColumnCollector::default();
+    let _ = bind_rule_expr_scoped(expr, &mut collector, &BTreeSet::new());
+    collector.columns
+}
+
+pub(crate) fn rule_statement_row_columns(
+    statement: &Statement,
+    action_columns: &BTreeSet<String>,
+) -> Result<BTreeSet<String>, SQLError> {
+    let mut collector = RuleRowColumnCollector::default();
+    let _ = bind_rule_action(statement, action_columns, &mut collector)?;
+    Ok(collector.columns)
 }
 
 /// Bind an action body's event-row OLD/NEW references while preserving DML

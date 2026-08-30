@@ -145,6 +145,9 @@ pub(super) fn rewrite_command_scalars(
                 }
             }
             rewrite_projections(&mut plan.returning, rewrite);
+            for check in &mut plan.view_checks {
+                rewrite_scalar(&mut check.predicate, rewrite);
+            }
             rewrite_subqueries(&mut plan.subqueries, rewrite);
         }
         CommandPlan::Update(plan) => {
@@ -157,6 +160,9 @@ pub(super) fn rewrite_command_scalars(
             rewrite_assignments(&mut plan.assignments, rewrite);
             rewrite_optional_scalar(&mut plan.predicate, rewrite);
             rewrite_projections(&mut plan.returning, rewrite);
+            for check in &mut plan.view_checks {
+                rewrite_scalar(&mut check.predicate, rewrite);
+            }
             rewrite_subqueries(&mut plan.subqueries, rewrite);
         }
         CommandPlan::Delete(plan) => {

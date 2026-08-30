@@ -212,6 +212,7 @@ impl Engine {
                 "must be superuser to create superusers",
             ));
         }
+        self.prepare_explicit_transaction_writer()?;
         let mut roles = self.durable.roles.write();
         if roles.contains_key(&statement.name) {
             return Err(SQLError::Routine {
@@ -235,6 +236,7 @@ impl Engine {
         self.require_role_administration("alter role")?;
         let name = self.resolve_role_reference(&statement.name);
         let current = self.current_user_name();
+        self.prepare_explicit_transaction_writer()?;
         let mut roles = self.durable.roles.write();
         let existing = roles.get(&name).cloned().ok_or_else(|| SQLError::Routine {
             sqlstate: "42704".into(),
@@ -275,6 +277,7 @@ impl Engine {
         self.require_role_administration("drop role")?;
         let current = self.current_user_name();
         let session = self.session_user_name();
+        self.prepare_explicit_transaction_writer()?;
         let mut roles = self.durable.roles.write();
         let snapshot = roles.clone();
         let mut names = Vec::new();

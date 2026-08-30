@@ -277,7 +277,11 @@ fn unlogged_table_and_sequence_keep_catalog_identity_across_clean_reopen() {
     let hits = reopened
         .knn_search("events", "embedding", vec![1.0, 0.0], 1)
         .unwrap();
-    assert_eq!(hits.first().map(|hit| hit.doc_id), Some(4));
+    assert_eq!(
+        hits.first().map(|hit| hit.doc_id),
+        Some(1),
+        "an unconstrained user id is not the internal document identity"
+    );
     let classes = reopened
         .sql(
             "SELECT relname, relpersistence FROM pg_catalog.pg_class WHERE relname IN ('events', 'event_ids') ORDER BY relname",

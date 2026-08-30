@@ -267,6 +267,35 @@ pub struct AssignmentPlan {
 }
 
 #[derive(Debug, Clone)]
+pub struct ViewCheckPlan {
+    pub view: String,
+    pub predicate: ScalarExpr,
+}
+
+#[derive(Debug, Clone)]
+pub struct ViewRuleReturningPlan {
+    pub relation: String,
+    pub target_qualifier: String,
+    pub returning: Vec<ProjectionPlan>,
+    pub aliases: uqa_sql::ast::ReturningAliases,
+    pub subqueries: Vec<QueryPlan>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ViewRuleInsertPlan {
+    pub relation: String,
+    pub supplied_columns: Vec<String>,
+    pub input_columns: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ViewRuleUpdatePlan {
+    pub relation: String,
+    pub assigned_columns: Vec<String>,
+    pub input_columns: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
 pub struct InsertPlan {
     pub table: String,
     pub target_qualifier: String,
@@ -279,6 +308,10 @@ pub struct InsertPlan {
     pub returning: Vec<ProjectionPlan>,
     pub returning_aliases: uqa_sql::ast::ReturningAliases,
     pub subqueries: Vec<QueryPlan>,
+    pub view_checks: Vec<ViewCheckPlan>,
+    pub view_rule_relations: Vec<String>,
+    pub view_rule_insert_plans: Vec<ViewRuleInsertPlan>,
+    pub view_rule_returning: Option<ViewRuleReturningPlan>,
 }
 
 #[derive(Debug, Clone)]
@@ -308,6 +341,10 @@ pub struct UpdatePlan {
     pub returning: Vec<ProjectionPlan>,
     pub returning_aliases: uqa_sql::ast::ReturningAliases,
     pub subqueries: Vec<QueryPlan>,
+    pub view_checks: Vec<ViewCheckPlan>,
+    pub view_rule_relations: Vec<String>,
+    pub view_rule_update_plans: Vec<ViewRuleUpdatePlan>,
+    pub view_rule_returning: Option<ViewRuleReturningPlan>,
 }
 
 #[derive(Debug, Clone)]
@@ -321,6 +358,8 @@ pub struct DeletePlan {
     pub returning: Vec<ProjectionPlan>,
     pub returning_aliases: uqa_sql::ast::ReturningAliases,
     pub subqueries: Vec<QueryPlan>,
+    pub view_rule_relations: Vec<String>,
+    pub view_rule_returning: Option<ViewRuleReturningPlan>,
 }
 
 #[derive(Debug, Clone)]

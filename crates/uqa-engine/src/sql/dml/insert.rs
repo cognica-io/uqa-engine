@@ -15,19 +15,26 @@ use super::{
     apply_validated_prepared_document_rewrite, build_returning_row, coerce_to_column_type,
     decode_prepared_insert_conflict, dml_returning_result, dml_storage_error, document_supplied_id,
     encode_prepared_insert_conflict, eval_lowered_expression, eval_mutation_assignment,
-    index_vectors_for_type, insert_identity_columns, lock_document_key_dependencies,
-    lock_existing_document_foreign_key_dependencies, partition_insert_target,
-    persist_auto_increment_identity, prepare_auto_increment_identity, prepare_insert_identity,
-    stage_prepared_document_rewrite, validate_document_non_key_constraints,
-    validate_key_constraints, validate_mutation_columns, validate_returning_alias_relations,
-    BTreeMap, ColumnType, ConflictActionPlan, ConflictPlan, CteScope, DmlCommandMutationOverlay,
-    DmlReturningShape, DocId, Document, Engine, InsertConflictLocks, InsertConflictPreparation,
-    InsertPlan, MutationAssignmentTarget, PreparedInsertConflict, ReturningProjectionRow,
-    ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult,
+    eval_mutation_expr, index_vectors_for_type, insert_identity_columns,
+    lock_document_key_dependencies, lock_existing_document_foreign_key_dependencies,
+    partition_insert_target, persist_auto_increment_identity, prepare_auto_increment_identity,
+    prepare_insert_identity, stage_prepared_document_rewrite,
+    validate_document_non_key_constraints, validate_key_constraints, validate_mutation_columns,
+    validate_returning_alias_relations, validate_view_checks, BTreeMap, BTreeSet, ColumnType,
+    ConflictActionPlan, ConflictPlan, CteScope, DmlCommandMutationOverlay, DmlReturningShape,
+    DocId, Document, Engine, InsertConflictLocks, InsertConflictPreparation, InsertPlan,
+    MutationAssignmentTarget, PreparedInsertConflict, ReturningProjectionRow, ReturningRowImage,
+    ReturningRowImages, SQLError, SQLParam, SQLResult, ViewCheckContext,
 };
 
 struct InsertSelectConsumer {
     state: RefCell<InsertSelectConsumerState>,
+}
+
+struct InsertSelectIdentity {
+    auto_id_column: Option<String>,
+    id_column: String,
+    accepts_supplied_identity: bool,
 }
 
 struct InsertSelectConsumerState {
@@ -36,6 +43,7 @@ struct InsertSelectConsumerState {
     snapshot_scope: CteScope,
     auto_id_column: Option<String>,
     id_column: String,
+    accepts_supplied_identity: bool,
     conflict_update_columns: Vec<String>,
     columns: Option<Vec<String>>,
     result_width: Option<usize>,
@@ -110,10 +118,14 @@ impl InsertSelectConsumer {
         stmt: &InsertPlan,
         params: &[SQLParam],
         snapshot_scope: CteScope,
-        auto_id_column: Option<String>,
-        id_column: String,
+        identity: InsertSelectIdentity,
         conflict_update_columns: Vec<String>,
     ) -> Result<Self, SQLError> {
+        let InsertSelectIdentity {
+            auto_id_column,
+            id_column,
+            accepts_supplied_identity,
+        } = identity;
         let prepared_relation = uqa_sql::ast::InternalRelationId::allocate();
         let prepared_columns = [
             prepared_relation.column(0),
@@ -131,6 +143,7 @@ impl InsertSelectConsumer {
                 snapshot_scope,
                 auto_id_column,
                 id_column,
+                accepts_supplied_identity,
                 conflict_update_columns,
                 columns: None,
                 result_width: None,
@@ -237,6 +250,7 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
             snapshot_scope,
             auto_id_column,
             id_column,
+            accepts_supplied_identity,
             conflict_update_columns,
             columns,
             result_width,
@@ -302,6 +316,7 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
                 engine,
                 &target_table,
                 id_column,
+                *accepts_supplied_identity,
                 None,
                 &mut document,
                 "prepare INSERT SELECT identity",
@@ -329,6 +344,7 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
             engine,
             &target_table,
             id_column,
+            *accepts_supplied_identity,
             auto_id_column.as_deref(),
             &document,
             &mut insert_identity,
@@ -464,8 +480,23 @@ pub(in crate::sql) fn run_insert_inner(
     stmt: &InsertPlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    if super::view_triggers::target_is_view(engine, &stmt.table)? {
-        return super::view_triggers::run_view_insert_inner(engine, stmt, params);
+    if let Some(kind) = super::view_triggers::target_view_kind(engine, &stmt.table)? {
+        if kind == crate::StoredViewKind::Materialized {
+            return super::view_triggers::run_view_insert_inner(engine, stmt, params);
+        }
+        if super::view_automatic::has_instead_of_trigger(
+            engine,
+            &stmt.table,
+            uqa_sql::ast::TriggerEvent::Insert,
+        )? || crate::sql::rules::relation_suppresses_original_query(
+            engine,
+            &stmt.table,
+            uqa_sql::ast::RuleEvent::Insert,
+        )? {
+            return super::view_triggers::run_view_insert_inner(engine, stmt, params);
+        }
+        let rewritten = super::view_automatic::rewrite_insert_to_base(engine, stmt, params)?;
+        return run_insert_inner(engine, &rewritten, params);
     }
     let _transition_capture_scope = crate::sql::triggers::TransitionCaptureScope::enter();
     engine.lock_relation(
@@ -474,6 +505,8 @@ pub(in crate::sql) fn run_insert_inner(
     )?;
     let insert_rules = engine.rules_for(&stmt.table, uqa_sql::ast::RuleEvent::Insert)?;
     let has_insert_rules = !insert_rules.is_empty();
+    let has_view_insert_rules = !stmt.view_rule_relations.is_empty();
+    let has_any_insert_rules = has_insert_rules || has_view_insert_rules;
     if stmt.on_conflict.is_some()
         && (has_insert_rules
             || !engine
@@ -492,6 +525,14 @@ pub(in crate::sql) fn run_insert_inner(
         uqa_sql::ast::RuleEvent::Insert,
         !stmt.returning.is_empty(),
     )?;
+    if let Some(view_returning) = &stmt.view_rule_returning {
+        crate::sql::rules::validate_rule_returning_contract(
+            engine,
+            &view_returning.relation,
+            uqa_sql::ast::RuleEvent::Insert,
+            !view_returning.returning.is_empty(),
+        )?;
+    }
     let conflict_update_columns = if let Some(ConflictPlan {
         action: ConflictActionPlan::Update { assignments, .. },
         ..
@@ -514,9 +555,20 @@ pub(in crate::sql) fn run_insert_inner(
     } else {
         None
     };
-    let insert_original_query = !insert_rules
-        .iter()
-        .any(|rule| rule.definition.instead && rule.definition.condition.is_none());
+    let view_original_query = !stmt.view_rule_relations.iter().try_fold(
+        false,
+        |suppressed, relation| -> Result<bool, SQLError> {
+            Ok(suppressed
+                || engine
+                    .rules_for(relation, uqa_sql::ast::RuleEvent::Insert)?
+                    .iter()
+                    .any(|rule| rule.definition.instead && rule.definition.condition.is_none()))
+        },
+    )?;
+    let insert_original_query = view_original_query
+        && !insert_rules
+            .iter()
+            .any(|rule| rule.definition.instead && rule.definition.condition.is_none());
     let has_before_insert_statement_trigger = insert_original_query
         && !engine
             .triggers_for(
@@ -573,11 +625,20 @@ pub(in crate::sql) fn run_insert_inner(
     // Both VALUES and SELECT sources must derive the internal doc id
     // from this same column or later primary-key rewrites can address a
     // different row than the one that was inserted.
-    let (auto_id_col, id_column) = insert_identity_columns(engine, &stmt.table, "INSERT")?;
+    let (auto_id_col, id_column, accepts_supplied_identity) =
+        insert_identity_columns(engine, &stmt.table, "INSERT")?;
     let mut rule_source_rows = None;
     // INSERT ... SELECT: the query executor feeds each positional physical row directly into the INSERT sink. Ordinary source scans and scalar subqueries retain the statement snapshot, while a VOLATILE callback observes the logical mutations staged by preceding rows of this command.
     if let Some(source) = stmt.source.as_deref() {
-        if !has_insert_rules {
+        let surviving_view_rules_require_rows =
+            crate::sql::rules::surviving_view_rules_require_event_rows(
+                engine,
+                &stmt.view_rule_relations,
+                uqa_sql::ast::RuleEvent::Insert,
+            )?;
+        if !view_original_query && !surviving_view_rules_require_rows {
+            rule_source_rows = Some(Vec::new());
+        } else if !has_any_insert_rules {
             let snapshot_scope = scope.returning_statement_snapshot_scope();
             let mut source_scope = snapshot_scope.clone();
             source_scope.enable_command_progress_streaming();
@@ -586,8 +647,11 @@ pub(in crate::sql) fn run_insert_inner(
                 stmt,
                 params,
                 snapshot_scope,
-                auto_id_col.clone(),
-                id_column.clone(),
+                InsertSelectIdentity {
+                    auto_id_column: auto_id_col.clone(),
+                    id_column: id_column.clone(),
+                    accepts_supplied_identity,
+                },
                 conflict_update_columns.clone().unwrap_or_default(),
             )?);
             let overlay = DmlCommandMutationOverlay::new(engine);
@@ -689,15 +753,29 @@ pub(in crate::sql) fn run_insert_inner(
             }
             return Ok(SQLResult::from_affected(affected));
         }
-        let mut source_scope = scope.returning_statement_snapshot_scope();
-        source_scope.enable_command_progress_streaming();
-        let result = crate::sql::select::execute_query_plan_with_ctes(
-            read_engine,
-            source,
-            params,
-            &mut source_scope,
-        )?;
-        rule_source_rows = Some(insert_source_expression_rows(result)?);
+        if rule_source_rows.is_none() {
+            let mut source = source.clone();
+            if !view_original_query {
+                if let Some(required_positions) =
+                    required_view_rule_insert_input_positions(engine, stmt)?
+                {
+                    super::prune_unused_query_outputs(
+                        &mut source,
+                        &required_positions,
+                        stmt.columns.len(),
+                    );
+                }
+            }
+            let mut source_scope = scope.returning_statement_snapshot_scope();
+            source_scope.enable_command_progress_streaming();
+            let result = crate::sql::select::execute_query_plan_with_ctes(
+                read_engine,
+                &source,
+                params,
+                &mut source_scope,
+            )?;
+            rule_source_rows = Some(insert_source_expression_rows(result)?);
+        }
     }
 
     let implicit_columns = stmt.columns.is_empty();
@@ -715,12 +793,14 @@ pub(in crate::sql) fn run_insert_inner(
     } else {
         stmt.columns.clone()
     };
-    validate_mutation_columns(
-        engine,
-        &stmt.table,
-        columns.iter().map(String::as_str),
-        "INSERT",
-    )?;
+    if view_original_query {
+        validate_mutation_columns(
+            engine,
+            &stmt.table,
+            columns.iter().map(String::as_str),
+            "INSERT",
+        )?;
+    }
 
     // No explicit id and no auto-increment column: allocate a synthetic
     // u64 doc_id at insert time. Every table has an implicit doc_id even when the
@@ -740,7 +820,12 @@ pub(in crate::sql) fn run_insert_inner(
     let mut after_row_events = Vec::with_capacity(input_rows.len());
     let mut referential_actions = super::ReferentialActionContext::default();
     let mut has_prepared_effect = false;
+    let mut has_prepared_auto_identity = false;
     let mut pending_rule_rows = Vec::with_capacity(input_rows.len());
+    let required_rule_input_positions = (!view_original_query)
+        .then(|| required_view_rule_insert_input_positions(engine, stmt))
+        .transpose()?
+        .flatten();
     for row in input_rows {
         cancel.check()?;
         if row.len() > columns.len() || (!implicit_columns && row.len() != columns.len()) {
@@ -752,20 +837,42 @@ pub(in crate::sql) fn run_insert_inner(
         }
         let mut document = Document::new();
         for (i, col) in columns.iter().take(row.len()).enumerate() {
-            if let Some(value) = eval_mutation_assignment(
-                read_engine,
-                &snapshot_scope,
-                MutationAssignmentTarget {
-                    table: &stmt.table,
-                    column: col,
-                    action: "INSERT",
-                },
-                &row[i],
-                None,
-                params,
-            )? {
+            if required_rule_input_positions
+                .as_ref()
+                .is_some_and(|required| !required.contains(&i))
+            {
+                continue;
+            }
+            let value = if has_any_insert_rules && matches!(row[i], super::ScalarExpr::Default) {
+                None
+            } else if !view_original_query {
+                let value =
+                    eval_mutation_expr(read_engine, &snapshot_scope, &row[i], None, params)?;
+                match view_rule_insert_column_type(engine, stmt, i)? {
+                    Some(ty) => Some(crate::sql::convert_value_to_column_type(value, &ty)?),
+                    None => Some(value),
+                }
+            } else {
+                eval_mutation_assignment(
+                    read_engine,
+                    &snapshot_scope,
+                    MutationAssignmentTarget {
+                        table: &stmt.table,
+                        column: col,
+                        action: "INSERT",
+                    },
+                    &row[i],
+                    None,
+                    params,
+                )?
+            };
+            if let Some(value) = value {
                 document.insert(col.clone(), value);
             }
+        }
+        if has_any_insert_rules {
+            pending_rule_rows.push(document);
+            continue;
         }
         apply_missing_column_defaults(engine, &stmt.table, &mut document, params)?;
         let prepared_auto_identity = prepare_auto_increment_identity(
@@ -776,6 +883,7 @@ pub(in crate::sql) fn run_insert_inner(
             &mut document,
             "prepare INSERT identity",
         )?;
+        has_prepared_auto_identity |= prepared_auto_identity.is_some();
         let target_table = partition_insert_target(
             engine,
             &stmt.table,
@@ -793,14 +901,13 @@ pub(in crate::sql) fn run_insert_inner(
                 engine,
                 &target_table,
                 &id_column,
+                accepts_supplied_identity,
                 None,
                 &mut document,
                 "prepare INSERT identity",
             )?,
         };
-        if has_insert_rules {
-            pending_rule_rows.push((target_table, document, insert_identity));
-        } else if let Some(staged) = prepare_values_insert_row(
+        if let Some(staged) = prepare_values_insert_row(
             engine,
             stmt,
             params,
@@ -808,6 +915,7 @@ pub(in crate::sql) fn run_insert_inner(
             conflict_update_columns.as_deref().unwrap_or(&[]),
             auto_id_col.as_deref(),
             &id_column,
+            accepts_supplied_identity,
             target_table,
             document,
             insert_identity,
@@ -830,40 +938,119 @@ pub(in crate::sql) fn run_insert_inner(
             prepared_conflicts.push(staged.prepared);
         }
     }
-    let rule_batch = if has_insert_rules {
-        let mut rule_rows = Vec::with_capacity(pending_rule_rows.len());
-        for (_, document, (doc_id, _)) in &pending_rule_rows {
-            let mut rule_document = document.clone();
-            crate::sql::generated::refresh_stored_generated_columns(
-                engine,
-                &stmt.table,
-                &mut rule_document,
-            )?;
-            rule_rows.push(crate::sql::rules::RuleRowImage {
-                old_doc_id: None,
-                old: None,
-                new_doc_id: Some(*doc_id),
-                new: Some(rule_document),
-                context: None,
-            });
+    let mut view_rule_rows = Vec::with_capacity(pending_rule_rows.len());
+    for document in &pending_rule_rows {
+        let rule_doc_id = document_supplied_id(
+            document,
+            &id_column,
+            auto_id_col.as_deref() == Some(id_column.as_str()),
+        )?;
+        view_rule_rows.push(crate::sql::rules::RuleRowImage {
+            old_storage_table: None,
+            old_doc_id: None,
+            old: None,
+            new_storage_table: None,
+            new_doc_id: rule_doc_id,
+            new: Some(document.clone()),
+            context: None,
+        });
+    }
+    let view_rule_batches = super::prepare_view_rule_batches(super::ViewRuleBatchRequest {
+        engine,
+        relations: &stmt.view_rule_relations,
+        event: uqa_sql::ast::RuleEvent::Insert,
+        rows: &view_rule_rows,
+        params,
+        scope: &snapshot_scope,
+        insert_plans: &stmt.view_rule_insert_plans,
+        update_plans: &[],
+        document_relation: None,
+    })?;
+    let mut pending_base_rows = Vec::with_capacity(pending_rule_rows.len());
+    for (index, mut document) in pending_rule_rows.into_iter().enumerate() {
+        if view_rule_batches.suppresses(index) {
+            continue;
         }
-        Some(crate::sql::rules::prepare_rule_batch(
+        apply_missing_column_defaults(engine, &stmt.table, &mut document, params)?;
+        let prepared_auto_identity = prepare_auto_increment_identity(
             engine,
             &stmt.table,
-            uqa_sql::ast::RuleEvent::Insert,
-            rule_rows,
-        )?)
-    } else {
-        debug_assert!(pending_rule_rows.is_empty());
-        None
-    };
-    if let Some(rule_batch) = rule_batch.as_ref() {
-        for (rule_index, (target_table, document, insert_identity)) in
-            pending_rule_rows.into_iter().enumerate()
+            &id_column,
+            auto_id_col.as_deref(),
+            &mut document,
+            "prepare INSERT identity",
+        )?;
+        has_prepared_auto_identity |= prepared_auto_identity.is_some();
+        pending_base_rows.push((document, prepared_auto_identity));
+    }
+    let rule_batch = (has_insert_rules && view_original_query)
+        .then(|| {
+            let rule_rows = pending_base_rows
+                .iter()
+                .map(|(document, _)| {
+                    let mut rule_document = document.clone();
+                    crate::sql::generated::refresh_stored_generated_columns(
+                        engine,
+                        &stmt.table,
+                        &mut rule_document,
+                    )?;
+                    let rule_doc_id = document_supplied_id(
+                        &rule_document,
+                        &id_column,
+                        auto_id_col.as_deref() == Some(id_column.as_str()),
+                    )?;
+                    Ok(crate::sql::rules::RuleRowImage {
+                        old_storage_table: None,
+                        old_doc_id: None,
+                        old: None,
+                        new_storage_table: None,
+                        new_doc_id: rule_doc_id,
+                        new: Some(rule_document),
+                        context: None,
+                    })
+                })
+                .collect::<Result<Vec<_>, SQLError>>()?;
+            crate::sql::rules::prepare_rule_batch(
+                engine,
+                &stmt.table,
+                uqa_sql::ast::RuleEvent::Insert,
+                rule_rows,
+            )
+        })
+        .transpose()?;
+    if has_any_insert_rules {
+        for (rule_index, (mut document, prepared_auto_identity)) in
+            pending_base_rows.into_iter().enumerate()
         {
-            if rule_batch.suppresses(rule_index) {
+            if rule_batch
+                .as_ref()
+                .is_some_and(|rule_batch| rule_batch.suppresses(rule_index))
+            {
                 continue;
             }
+            let target_table = partition_insert_target(
+                engine,
+                &stmt.table,
+                &document,
+                params,
+                stmt.include_descendants,
+            )?;
+            engine.lock_relation(
+                &target_table,
+                crate::row_locks::RelationLockMode::RowExclusive,
+            )?;
+            let insert_identity = match prepared_auto_identity {
+                Some(identity) => identity,
+                None => prepare_insert_identity(
+                    engine,
+                    &target_table,
+                    &id_column,
+                    accepts_supplied_identity,
+                    None,
+                    &mut document,
+                    "prepare INSERT identity",
+                )?,
+            };
             let Some(staged) = prepare_values_insert_row(
                 engine,
                 stmt,
@@ -872,6 +1059,7 @@ pub(in crate::sql) fn run_insert_inner(
                 conflict_update_columns.as_deref().unwrap_or(&[]),
                 auto_id_col.as_deref(),
                 &id_column,
+                accepts_supplied_identity,
                 target_table,
                 document,
                 insert_identity,
@@ -898,7 +1086,6 @@ pub(in crate::sql) fn run_insert_inner(
         }
     }
     drop(overlay);
-    let has_prepared_auto_identity = auto_id_col.is_some() && !input_rows.is_empty();
     if has_prepared_effect || has_prepared_auto_identity {
         engine.prepare_explicit_transaction_writer()?;
         persist_auto_increment_identity(
@@ -946,21 +1133,37 @@ pub(in crate::sql) fn run_insert_inner(
         &after_row_events,
         &referential_actions,
     )?;
-    let rule_returning = rule_batch
-        .as_ref()
-        .map(|rule_batch| {
-            rule_batch.execute_actions(
+    let (rule_returning, rule_affected, rule_executed) =
+        if let Some(rule_batch) = rule_batch.as_ref() {
+            let outcome = rule_batch.execute_actions_with_affected(
                 engine,
                 crate::sql::rules::RuleReturningRequest::from_plan(
                     &stmt.returning,
                     &stmt.returning_aliases,
                     &stmt.subqueries,
                 ),
+            )?;
+            (
+                outcome.returning,
+                outcome.affected_rows,
+                outcome.executed_action,
             )
-        })
-        .transpose()?
-        .flatten();
+        } else {
+            (None, 0, false)
+        };
+    let view_rule_outcome = view_rule_batches
+        .execute_actions_with_affected(engine, stmt.view_rule_returning.as_ref())?;
+    let view_rule_returning = view_rule_outcome.returning;
+    if view_rule_returning.is_some() && rule_returning.is_some() {
+        return Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: "cannot have RETURNING lists in multiple rules".into(),
+        });
+    }
     if !stmt.returning.is_empty() {
+        if let Some(view_rule_returning) = view_rule_returning {
+            return view_rule_returning.project(engine, params, &scope, None);
+        }
         let shape = DmlReturningShape {
             table: &stmt.table,
             target_qualifier: &stmt.target_qualifier,
@@ -975,7 +1178,84 @@ pub(in crate::sql) fn run_insert_inner(
         }
         return dml_returning_result(engine, shape, returning_rows, affected);
     }
-    Ok(SQLResult::from_affected(affected))
+    let rule_affected = if view_rule_outcome.executed_action {
+        view_rule_outcome.affected_rows
+    } else if rule_executed {
+        rule_affected
+    } else {
+        0
+    };
+    Ok(SQLResult::from_affected(
+        if affected == 0 && !insert_original_query {
+            rule_affected
+        } else {
+            affected
+        },
+    ))
+}
+
+fn view_rule_insert_column_type(
+    engine: &Engine,
+    stmt: &InsertPlan,
+    input_position: usize,
+) -> Result<Option<ColumnType>, SQLError> {
+    for plan in &stmt.view_rule_insert_plans {
+        let Some(column) = plan.supplied_columns.get(input_position) else {
+            continue;
+        };
+        let definition = engine
+            .view_definition(&plan.relation)?
+            .ok_or_else(|| SQLError::UnknownTable(plan.relation.clone()))?;
+        let schema = engine.stored_view_schema(&definition)?;
+        let Some(position) =
+            schema
+                .columns()
+                .iter()
+                .enumerate()
+                .find_map(|(position, internal)| {
+                    let public = schema.public_name(position).unwrap_or(internal);
+                    public.eq_ignore_ascii_case(column).then_some(position)
+                })
+        else {
+            return Err(SQLError::UnknownColumn(format!(
+                "{}.{}",
+                plan.relation, column
+            )));
+        };
+        return Ok(schema.column_type(position).cloned());
+    }
+    Ok(None)
+}
+
+fn required_view_rule_insert_input_positions(
+    engine: &Engine,
+    stmt: &InsertPlan,
+) -> Result<Option<BTreeSet<usize>>, SQLError> {
+    let mut required = BTreeSet::new();
+    for plan in &stmt.view_rule_insert_plans {
+        let Some(columns) = crate::sql::rules::relation_rule_row_columns(
+            engine,
+            &plan.relation,
+            uqa_sql::ast::RuleEvent::Insert,
+        )?
+        else {
+            return Ok(None);
+        };
+        required.extend(
+            plan.supplied_columns
+                .iter()
+                .enumerate()
+                .filter_map(|(position, column)| columns.contains(column).then_some(position)),
+        );
+        if crate::sql::rules::relation_suppresses_original_query(
+            engine,
+            &plan.relation,
+            uqa_sql::ast::RuleEvent::Insert,
+        )? {
+            break;
+        }
+    }
+    Ok(Some(required))
 }
 
 fn fire_insert_after_triggers(
@@ -1077,6 +1357,7 @@ fn prepare_values_insert_row(
     conflict_update_columns: &[String],
     auto_id_column: Option<&str>,
     id_column: &str,
+    accepts_supplied_identity: bool,
     target_table: String,
     mut document: Document,
     mut insert_identity: (DocId, bool),
@@ -1101,6 +1382,7 @@ fn prepare_values_insert_row(
         engine,
         &target_table,
         id_column,
+        accepts_supplied_identity,
         auto_id_column,
         &document,
         &mut insert_identity,
@@ -1197,6 +1479,17 @@ fn stage_prepared_insert_row(
     let (images, after_row_events) = match prepared {
         PreparedInsertConflict::Insert { doc_id, .. } => {
             validate_key_constraints(engine, storage_table, document, None)?;
+            validate_view_checks(ViewCheckContext {
+                engine,
+                table: &stmt.table,
+                storage_table,
+                target_qualifier: &stmt.target_qualifier,
+                doc_id: *doc_id,
+                document,
+                checks: &stmt.view_checks,
+                params,
+                scope,
+            })?;
             if let Some(shared_document) = shared_document {
                 engine.stage_shared_command_document(
                     storage_table,
@@ -1226,6 +1519,7 @@ fn stage_prepared_insert_row(
                 ReturningRowImages {
                     old: None,
                     new: Some(ReturningRowImage {
+                        storage_table: storage_table.to_string(),
                         doc_id: *doc_id,
                         document,
                     }),
@@ -1234,7 +1528,37 @@ fn stage_prepared_insert_row(
             )
         }
         PreparedInsertConflict::Updated(prepared) => {
+            let old_storage_table = prepared.table.clone();
+            let new_storage_table = prepared
+                .destination
+                .as_ref()
+                .map_or_else(|| old_storage_table.clone(), |(table, _)| table.clone());
             let old_doc_id = prepared.doc_id;
+            let primary_key_doc_id =
+                super::integer_primary_key_doc_id(engine, &stmt.table, &prepared.new_document)?;
+            let new_doc_id = prepared
+                .destination
+                .as_ref()
+                .map(|(_, doc_id)| *doc_id)
+                .or(primary_key_doc_id)
+                .unwrap_or(old_doc_id);
+            validate_key_constraints(
+                engine,
+                &new_storage_table,
+                &prepared.new_document,
+                (new_storage_table == old_storage_table).then_some(old_doc_id),
+            )?;
+            validate_view_checks(ViewCheckContext {
+                engine,
+                table: &stmt.table,
+                storage_table: &new_storage_table,
+                target_qualifier: &stmt.target_qualifier,
+                doc_id: new_doc_id,
+                document: &prepared.new_document,
+                checks: &stmt.view_checks,
+                params,
+                scope,
+            })?;
             let mut after_row_events = Vec::new();
             let doc_id = stage_prepared_document_rewrite(
                 engine,
@@ -1246,10 +1570,12 @@ fn stage_prepared_insert_row(
             (
                 ReturningRowImages {
                     old: Some(ReturningRowImage {
+                        storage_table: old_storage_table,
                         doc_id: old_doc_id,
                         document: &prepared.old_document,
                     }),
                     new: Some(ReturningRowImage {
+                        storage_table: new_storage_table,
                         doc_id,
                         document: &prepared.new_document,
                     }),
@@ -1322,10 +1648,14 @@ pub(in crate::sql) fn refresh_insert_identity_after_trigger(
     engine: &Engine,
     table: &str,
     id_column: &str,
+    accepts_supplied_identity: bool,
     auto_id_column: Option<&str>,
     document: &Document,
     identity: &mut (DocId, bool),
 ) -> Result<(), SQLError> {
+    if !accepts_supplied_identity {
+        return Ok(());
+    }
     let Some(doc_id) =
         document_supplied_id(document, id_column, auto_id_column == Some(id_column))?
     else {

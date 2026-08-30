@@ -206,6 +206,14 @@ pub(crate) fn bind_catalog_query_routines_with_outer(
     )
 }
 
+pub(crate) fn validate_stored_view_check_option(
+    engine: &Engine,
+    name: &str,
+    view: &crate::StoredView,
+) -> Result<(), SQLError> {
+    dml::view_automatic::validate_view_definition_check_option(engine, name, view)
+}
+
 const SCORE_COLUMN: &str = "_score";
 pub(in crate::sql) const DOC_ID_COLUMN: &str = "_doc_id";
 pub(in crate::sql) const TABLE_OID_COLUMN: &str = "tableoid";

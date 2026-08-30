@@ -766,3 +766,51 @@ SET session_replication_role = replica; INSERT INTO replication_rule_items VALUE
 -- @case session_replication_rule_mode_rows rows
 SELECT message FROM replication_rule_log ORDER BY seq;
 -- @end
+
+-- @case create_rule_event_cardinality_fixture ok
+CREATE TABLE event_cardinality_empty_update (id integer PRIMARY KEY, value integer); CREATE TABLE event_cardinality_constant_log (message text); CREATE TABLE event_cardinality_row_log (id integer); CREATE TABLE event_cardinality_statement_log (event text); CREATE FUNCTION log_event_cardinality_statement() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO event_cardinality_statement_log VALUES (TG_OP); RETURN NULL; END $$; CREATE TRIGGER event_cardinality_statement AFTER INSERT ON event_cardinality_row_log FOR EACH STATEMENT EXECUTE FUNCTION log_event_cardinality_statement(); CREATE RULE event_cardinality_update_constant AS ON UPDATE TO event_cardinality_empty_update DO ALSO INSERT INTO event_cardinality_constant_log VALUES ('unconditional'); CREATE RULE event_cardinality_update_false AS ON UPDATE TO event_cardinality_empty_update WHERE false DO ALSO INSERT INTO event_cardinality_constant_log VALUES ('false'); CREATE RULE event_cardinality_update_row AS ON UPDATE TO event_cardinality_empty_update DO ALSO INSERT INTO event_cardinality_row_log VALUES (NEW.id); CREATE RULE event_cardinality_update_true AS ON UPDATE TO event_cardinality_empty_update WHERE true DO ALSO INSERT INTO event_cardinality_constant_log VALUES ('true'); CREATE TABLE event_cardinality_delete (id integer PRIMARY KEY); INSERT INTO event_cardinality_delete VALUES (1), (2); CREATE TABLE event_cardinality_delete_log (message text); CREATE RULE event_cardinality_delete_constant AS ON DELETE TO event_cardinality_delete DO ALSO INSERT INTO event_cardinality_delete_log VALUES ('delete');
+-- @end
+
+-- @case execute_rule_event_cardinality_fixture ok
+UPDATE event_cardinality_empty_update SET value = value + 1; DELETE FROM event_cardinality_delete;
+-- @end
+
+-- @case rule_event_cardinality_rows rows
+SELECT (SELECT string_agg(message, ',' ORDER BY message) FROM event_cardinality_constant_log) AS empty_constant_actions, (SELECT count(*) FROM event_cardinality_row_log) AS empty_row_actions, (SELECT count(*) FROM event_cardinality_statement_log) AS empty_action_statements, (SELECT count(*) FROM event_cardinality_delete_log) AS delete_actions;
+-- @end
+
+-- @case create_delete_using_rule_cardinality_fixture ok
+CREATE TABLE delete_using_cardinality_base (id integer PRIMARY KEY); INSERT INTO delete_using_cardinality_base VALUES (1), (2); CREATE TABLE delete_using_cardinality_source (id integer); INSERT INTO delete_using_cardinality_source VALUES (1), (1), (2), (3); CREATE TABLE delete_using_cardinality_log (marker text); CREATE RULE delete_using_cardinality_rule AS ON DELETE TO delete_using_cardinality_base DO ALSO INSERT INTO delete_using_cardinality_log VALUES ('deleted'); CREATE TABLE delete_using_cardinality_direct_base (id integer PRIMARY KEY); INSERT INTO delete_using_cardinality_direct_base VALUES (1), (2); CREATE VIEW delete_using_cardinality_direct_view AS SELECT id FROM delete_using_cardinality_direct_base; CREATE TABLE delete_using_cardinality_direct_log (marker text); CREATE RULE delete_using_cardinality_direct_rule AS ON DELETE TO delete_using_cardinality_direct_view DO INSTEAD INSERT INTO delete_using_cardinality_direct_log VALUES ('deleted'); CREATE TABLE delete_using_cardinality_capture (event text, affected bigint, action_count bigint);
+-- @end
+
+-- @case delete_using_rule_actions_follow_qualification_cardinality ok
+DO $$ DECLARE affected bigint; BEGIN DELETE FROM delete_using_cardinality_base AS target USING delete_using_cardinality_source AS source; GET DIAGNOSTICS affected = ROW_COUNT; INSERT INTO delete_using_cardinality_capture SELECT 'base-all', affected, count(*) FROM delete_using_cardinality_log; TRUNCATE delete_using_cardinality_log; INSERT INTO delete_using_cardinality_base VALUES (1), (2); DELETE FROM delete_using_cardinality_base AS target USING delete_using_cardinality_source AS source WHERE source.id > 1; GET DIAGNOSTICS affected = ROW_COUNT; INSERT INTO delete_using_cardinality_capture SELECT 'base-source', affected, count(*) FROM delete_using_cardinality_log; TRUNCATE delete_using_cardinality_log; INSERT INTO delete_using_cardinality_base VALUES (1), (2); DELETE FROM delete_using_cardinality_base AS target USING delete_using_cardinality_source AS source WHERE target.id = source.id; GET DIAGNOSTICS affected = ROW_COUNT; INSERT INTO delete_using_cardinality_capture SELECT 'base-target', affected, count(*) FROM delete_using_cardinality_log; TRUNCATE delete_using_cardinality_log; DELETE FROM delete_using_cardinality_base AS target USING delete_using_cardinality_source AS source WHERE source.id > 1; GET DIAGNOSTICS affected = ROW_COUNT; INSERT INTO delete_using_cardinality_capture SELECT 'base-empty-source', affected, count(*) FROM delete_using_cardinality_log; DELETE FROM delete_using_cardinality_direct_view AS target USING delete_using_cardinality_source AS source; GET DIAGNOSTICS affected = ROW_COUNT; INSERT INTO delete_using_cardinality_capture SELECT 'direct-all', affected, count(*) FROM delete_using_cardinality_direct_log; TRUNCATE delete_using_cardinality_direct_log; DELETE FROM delete_using_cardinality_direct_view AS target USING delete_using_cardinality_source AS source WHERE source.id > 1; GET DIAGNOSTICS affected = ROW_COUNT; INSERT INTO delete_using_cardinality_capture SELECT 'direct-source', affected, count(*) FROM delete_using_cardinality_direct_log; TRUNCATE delete_using_cardinality_direct_log; DELETE FROM delete_using_cardinality_direct_view AS target USING delete_using_cardinality_source AS source WHERE target.id = source.id; GET DIAGNOSTICS affected = ROW_COUNT; INSERT INTO delete_using_cardinality_capture SELECT 'direct-target', affected, count(*) FROM delete_using_cardinality_direct_log; TRUNCATE delete_using_cardinality_direct_log; TRUNCATE delete_using_cardinality_direct_base; DELETE FROM delete_using_cardinality_direct_view AS target USING delete_using_cardinality_source AS source WHERE source.id > 1; GET DIAGNOSTICS affected = ROW_COUNT; INSERT INTO delete_using_cardinality_capture SELECT 'direct-empty-source', affected, count(*) FROM delete_using_cardinality_direct_log; END $$;
+-- @end
+
+-- @case delete_using_rule_cardinality_rows rows
+SELECT event, affected, action_count FROM delete_using_cardinality_capture ORDER BY event;
+-- @end
+
+-- @case create_system_column_qualification_fixture ok
+CREATE TABLE system_qualification_base (id integer PRIMARY KEY); INSERT INTO system_qualification_base VALUES (1), (2); CREATE TABLE system_qualification_log (event text); CREATE RULE system_qualification_update AS ON UPDATE TO system_qualification_base DO ALSO INSERT INTO system_qualification_log VALUES ('update');
+-- @end
+
+-- @case unqualified_tableoid_update_qualification ok
+UPDATE system_qualification_base AS target SET id = target.id FROM (VALUES (1), (2), (3)) AS source(value) WHERE tableoid = 'system_qualification_base'::regclass;
+-- @end
+
+-- @case unqualified_tableoid_update_action_count rows
+SELECT count(*) AS action_count FROM system_qualification_log;
+-- @end
+
+-- @case create_system_column_delete_rule ok
+TRUNCATE system_qualification_log; CREATE RULE system_qualification_delete AS ON DELETE TO system_qualification_base DO ALSO INSERT INTO system_qualification_log VALUES ('delete');
+-- @end
+
+-- @case unqualified_tableoid_delete_qualification ok
+DELETE FROM system_qualification_base USING (VALUES (1), (2), (3)) AS source(value) WHERE tableoid = 'system_qualification_base'::regclass;
+-- @end
+
+-- @case unqualified_tableoid_delete_action_count rows
+SELECT count(*) AS action_count FROM system_qualification_log;
+-- @end

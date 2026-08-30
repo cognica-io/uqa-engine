@@ -170,6 +170,18 @@ impl SchemaScope {
         };
         match root {
             RelationalPlan::QueryBlock(block) => {
+                if block.from.is_none()
+                    && block
+                        .projections
+                        .iter()
+                        .any(|projection| matches!(projection.expr, ScalarExpr::Star))
+                    && outer.is_none()
+                {
+                    return Err(SQLError::Routine {
+                        sqlstate: "42601".into(),
+                        message: "SELECT * with no tables specified is not valid".into(),
+                    });
+                }
                 let source_schema = block.from.as_ref().map_or_else(
                     || Ok(RowSchema::default()),
                     |source| self.bind_source(engine, source, &block.subqueries, params, outer),
@@ -195,6 +207,10 @@ impl SchemaScope {
                         outer,
                     )?;
                 }
+                block.projections = crate::sql::select::expand_bound_projection_stars(
+                    &block.projections,
+                    &source_schema,
+                )?;
                 for expression in &mut block.group_by {
                     self.bind_scalar_routines_for_storage(
                         engine,

@@ -1426,12 +1426,18 @@ pub(in crate::sql) fn overlay_outer_schema(
     let Some(outer) = outer else {
         return current.clone();
     };
-    let columns = outer
+    let mut columns = outer
         .identities()
         .iter()
         .enumerate()
         .map(|(position, identity)| (identity.clone(), outer.column_type(position).cloned()))
-        .collect::<Vec<_>>();
+        .collect::<BTreeMap<_, _>>();
+    columns.extend(
+        outer
+            .typed_physical_alias_identities()
+            .map(|(identity, ty)| (identity.clone(), ty.cloned())),
+    );
+    let columns = columns.into_iter().collect::<Vec<_>>();
     let schema = RowSchema::with_typed_outer_identities(current, &columns);
     let virtual_identities = outer
         .typed_virtual_identities()

@@ -190,7 +190,7 @@ fn bound_projection_expression(schema: &uqa_execution::RowSchema, position: usiz
     ScalarExpr::Position(position)
 }
 
-fn expand_bound_projection_stars(
+pub(in crate::sql) fn expand_bound_projection_stars(
     projections: &[ProjectionPlan],
     schema: &uqa_execution::RowSchema,
 ) -> Result<Vec<ProjectionPlan>, SQLError> {

@@ -14,13 +14,452 @@ use super::{
     partition_insert_target, validate_vector_dimensions, value_to_tensor, value_to_vector,
     BTreeMap, BTreeSet, BinaryOp, ColumnType, CteScope, DocId, Document, Engine, ForeignKey,
     ForeignKeyAction, ForeignKeyMatch, RowIndependentUpdateValues, SQLError, SQLParam, SQLResult,
-    Value, DOC_ID_COLUMN, XMIN_COLUMN, XMIN_STORAGE_COLUMN, XMIN_USER_STORAGE_COLUMN,
+    Value, DOC_ID_COLUMN, TABLE_OID_COLUMN, XMIN_COLUMN, XMIN_STORAGE_COLUMN,
+    XMIN_USER_STORAGE_COLUMN,
 };
+use crate::RelationIdentity;
 use uqa_execution::{ColumnIdentity, OwnedPhysicalRow, PhysicalRow, RowSchema, ScalarExpr};
 use uqa_planner::{
-    ConflictActionPlan, ConflictPlan, DeletePlan, InsertPlan, MergePlan, MergeWhenPlan,
-    ProjectionPlan, SourcePlan, UpdatePlan,
+    ComputePlan, ConflictActionPlan, ConflictPlan, DeletePlan, InsertPlan, MergePlan,
+    MergeWhenPlan, ProjectionPlan, QueryPlan, RelationalPlan, SourcePlan, UpdatePlan,
+    ViewCheckPlan, ViewRuleInsertPlan, ViewRuleReturningPlan, ViewRuleUpdatePlan,
 };
+
+fn prune_unused_query_outputs(
+    query: &mut QueryPlan,
+    required_positions: &BTreeSet<usize>,
+    expected_width: usize,
+) {
+    let RelationalPlan::QueryBlock(block) = &mut query.root else {
+        return;
+    };
+    let projection_can_be_pruned = matches!(block.compute, ComputePlan::Project)
+        && !block.distinct
+        && block.distinct_on.is_empty()
+        && block.order_by.is_empty()
+        && block.projections.len() == expected_width;
+    if !projection_can_be_pruned {
+        return;
+    }
+    for (position, projection) in block.projections.iter_mut().enumerate() {
+        if !required_positions.contains(&position) {
+            projection.expr = ScalarExpr::Literal(Value::Null);
+        }
+    }
+}
+
+struct PreparedViewRuleLayer {
+    relation: String,
+    batch: crate::sql::rules::PreparedRuleBatch,
+}
+
+struct PreparedViewRuleBatches {
+    event: uqa_sql::ast::RuleEvent,
+    layers: Vec<PreparedViewRuleLayer>,
+    suppress_original: Vec<bool>,
+}
+
+struct ViewRuleReturningCapture {
+    plan: ViewRuleReturningPlan,
+    result: crate::sql::rules::RuleReturningResult,
+}
+
+struct ViewRuleExecutionOutcome {
+    returning: Option<ViewRuleReturningCapture>,
+    affected_rows: u64,
+    executed_action: bool,
+}
+
+impl ViewRuleReturningCapture {
+    fn project(
+        self,
+        engine: &Engine,
+        params: &[SQLParam],
+        ctes: &CteScope,
+        supplemental_schema: Option<&RowSchema>,
+    ) -> Result<SQLResult, SQLError> {
+        let mut returning_scope = ctes.clone();
+        returning_scope
+            .scalar_subqueries
+            .clone_from(&self.plan.subqueries);
+        self.result.project(
+            engine,
+            DmlReturningShape {
+                table: &self.plan.relation,
+                target_qualifier: &self.plan.target_qualifier,
+                aliases: &self.plan.aliases,
+                returning: &self.plan.returning,
+                params,
+                ctes: &returning_scope,
+                supplemental_schema,
+            },
+        )
+    }
+}
+
+impl PreparedViewRuleBatches {
+    fn empty(row_count: usize, event: uqa_sql::ast::RuleEvent) -> Self {
+        Self {
+            event,
+            layers: Vec::new(),
+            suppress_original: vec![false; row_count],
+        }
+    }
+
+    fn suppresses(&self, index: usize) -> bool {
+        self.suppress_original.get(index).copied().unwrap_or(false)
+    }
+
+    fn configure_action_qualification(&mut self, row_independent_count: Option<usize>) {
+        debug_assert!(matches!(
+            self.event,
+            uqa_sql::ast::RuleEvent::Update | uqa_sql::ast::RuleEvent::Delete
+        ));
+        for layer in &mut self.layers {
+            let count = row_independent_count.unwrap_or_else(|| layer.batch.event_row_count());
+            layer.batch.set_action_qualification_count(count);
+        }
+    }
+
+    fn execute_actions(
+        &self,
+        engine: &Engine,
+        returning: Option<&ViewRuleReturningPlan>,
+    ) -> Result<Option<ViewRuleReturningCapture>, SQLError> {
+        Ok(self
+            .execute_actions_with_affected(engine, returning)?
+            .returning)
+    }
+
+    fn execute_actions_with_affected(
+        &self,
+        engine: &Engine,
+        returning: Option<&ViewRuleReturningPlan>,
+    ) -> Result<ViewRuleExecutionOutcome, SQLError> {
+        let mut captured = None;
+        let mut affected_rows = 0_u64;
+        let mut executed_action = false;
+        let layers = if self.event == uqa_sql::ast::RuleEvent::Insert {
+            self.layers.iter().rev().collect::<Vec<_>>()
+        } else {
+            self.layers.iter().collect::<Vec<_>>()
+        };
+        for layer in layers {
+            let request = returning
+                .filter(|plan| plan.relation == layer.relation)
+                .map_or_else(crate::sql::rules::RuleReturningRequest::default, |plan| {
+                    crate::sql::rules::RuleReturningRequest::from_plan(
+                        &plan.returning,
+                        &plan.aliases,
+                        &plan.subqueries,
+                    )
+                });
+            let outcome = layer.batch.execute_actions_with_affected(engine, request)?;
+            if outcome.executed_action {
+                affected_rows = outcome.affected_rows;
+                executed_action = true;
+            }
+            let Some(result) = outcome.returning else {
+                continue;
+            };
+            if captured.is_some() {
+                return Err(SQLError::Routine {
+                    sqlstate: "0A000".into(),
+                    message: "cannot have RETURNING lists in multiple rules".into(),
+                });
+            }
+            let plan = returning
+                .filter(|plan| plan.relation == layer.relation)
+                .cloned()
+                .ok_or_else(|| {
+                    SQLError::Internal(
+                        "automatic-view rule captured RETURNING without an outer projection".into(),
+                    )
+                })?;
+            captured = Some(ViewRuleReturningCapture { plan, result });
+        }
+        Ok(ViewRuleExecutionOutcome {
+            returning: captured,
+            affected_rows,
+            executed_action,
+        })
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ViewRuleDocumentProjection<'a> {
+    engine: &'a Engine,
+    relation: &'a str,
+    document_relation: Option<&'a str>,
+    required_columns: &'a BTreeSet<String>,
+    insert_plan: Option<&'a ViewRuleInsertPlan>,
+    update_plan: Option<&'a ViewRuleUpdatePlan>,
+    params: &'a [SQLParam],
+    scope: &'a CteScope,
+}
+
+struct ViewRuleBatchRequest<'a> {
+    engine: &'a Engine,
+    relations: &'a [String],
+    event: uqa_sql::ast::RuleEvent,
+    rows: &'a [crate::sql::rules::RuleRowImage],
+    params: &'a [SQLParam],
+    scope: &'a CteScope,
+    insert_plans: &'a [ViewRuleInsertPlan],
+    update_plans: &'a [ViewRuleUpdatePlan],
+    document_relation: Option<&'a str>,
+}
+
+fn project_view_rule_document(
+    projection: &ViewRuleDocumentProjection<'_>,
+    side: crate::sql::rules::RuleRowSide,
+    storage_table: Option<&str>,
+    doc_id: Option<DocId>,
+    document: Option<&Document>,
+) -> Result<Option<Document>, SQLError> {
+    document
+        .map(|document| {
+            if let Some(insert_plan) = projection.insert_plan {
+                let mut projected = Document::new();
+                for column in projection.required_columns {
+                    let value = insert_plan
+                        .supplied_columns
+                        .iter()
+                        .position(|supplied| supplied == column)
+                        .and_then(|position| insert_plan.input_columns.get(position))
+                        .and_then(|input| document.get(input))
+                        .cloned()
+                        .unwrap_or(Value::Null);
+                    projected.insert(column.clone(), value);
+                }
+                return Ok(projected);
+            }
+            let mut projected = view_automatic::automatic_view_rule_document(
+                view_automatic::AutomaticViewRuleDocument {
+                    engine: projection.engine,
+                    view: projection.relation,
+                    document_relation: projection.document_relation,
+                    storage_table,
+                    doc_id,
+                    document,
+                    required_columns: projection.required_columns,
+                    params: projection.params,
+                    scope: projection.scope,
+                },
+            )?;
+            if matches!(side, crate::sql::rules::RuleRowSide::New) {
+                if let Some(update_plan) = projection.update_plan {
+                    for column in projection.required_columns {
+                        let Some(position) = update_plan
+                            .assigned_columns
+                            .iter()
+                            .position(|assigned| assigned == column)
+                        else {
+                            continue;
+                        };
+                        let Some(input) = update_plan.input_columns.get(position) else {
+                            continue;
+                        };
+                        if let Some(value) = document.get(input) {
+                            projected.insert(column.clone(), value.clone());
+                        }
+                    }
+                }
+            }
+            Ok(projected)
+        })
+        .transpose()
+}
+
+fn project_view_rule_row(
+    projection: &ViewRuleDocumentProjection<'_>,
+    row: &crate::sql::rules::RuleRowImage,
+) -> Result<crate::sql::rules::RuleRowImage, SQLError> {
+    Ok(crate::sql::rules::RuleRowImage {
+        old_storage_table: row.old_storage_table.clone(),
+        old_doc_id: row.old_doc_id,
+        old: project_view_rule_document(
+            projection,
+            crate::sql::rules::RuleRowSide::Old,
+            row.old_storage_table.as_deref(),
+            row.old_doc_id,
+            row.old.as_ref(),
+        )?,
+        new_storage_table: row.new_storage_table.clone(),
+        new_doc_id: row.new_doc_id,
+        new: project_view_rule_document(
+            projection,
+            crate::sql::rules::RuleRowSide::New,
+            row.new_storage_table.as_deref(),
+            row.new_doc_id,
+            row.new.as_ref(),
+        )?,
+        context: row.context.clone(),
+    })
+}
+
+fn project_view_rule_row_sides(
+    projection: &ViewRuleDocumentProjection<'_>,
+    row: &crate::sql::rules::RuleRowImage,
+    old_columns: &BTreeSet<String>,
+    new_columns: &BTreeSet<String>,
+) -> Result<crate::sql::rules::RuleRowImage, SQLError> {
+    let old_projection = ViewRuleDocumentProjection {
+        required_columns: old_columns,
+        ..*projection
+    };
+    let new_projection = ViewRuleDocumentProjection {
+        required_columns: new_columns,
+        ..*projection
+    };
+    Ok(crate::sql::rules::RuleRowImage {
+        old_storage_table: row.old_storage_table.clone(),
+        old_doc_id: row.old_doc_id,
+        old: project_view_rule_document(
+            &old_projection,
+            crate::sql::rules::RuleRowSide::Old,
+            row.old_storage_table.as_deref(),
+            row.old_doc_id,
+            row.old.as_ref(),
+        )?,
+        new_storage_table: row.new_storage_table.clone(),
+        new_doc_id: row.new_doc_id,
+        new: project_view_rule_document(
+            &new_projection,
+            crate::sql::rules::RuleRowSide::New,
+            row.new_storage_table.as_deref(),
+            row.new_doc_id,
+            row.new.as_ref(),
+        )?,
+        context: row.context.clone(),
+    })
+}
+
+fn prepare_view_rule_batches(
+    request: ViewRuleBatchRequest<'_>,
+) -> Result<PreparedViewRuleBatches, SQLError> {
+    let ViewRuleBatchRequest {
+        engine,
+        relations,
+        event,
+        rows,
+        params,
+        scope,
+        insert_plans,
+        update_plans,
+        document_relation,
+    } = request;
+    if relations.is_empty() {
+        return Ok(PreparedViewRuleBatches::empty(rows.len(), event));
+    }
+    let mut prepared = PreparedViewRuleBatches::empty(rows.len(), event);
+    for relation in relations {
+        let required_columns = BTreeSet::new();
+        let insert_plan = insert_plans.iter().find(|plan| plan.relation == *relation);
+        let update_plan = update_plans.iter().find(|plan| plan.relation == *relation);
+        let projection = ViewRuleDocumentProjection {
+            engine,
+            relation,
+            document_relation,
+            required_columns: &required_columns,
+            insert_plan,
+            update_plan,
+            params,
+            scope,
+        };
+        let row_indices = (0..rows.len())
+            .filter(|index| !prepared.suppress_original[*index])
+            .collect::<Vec<_>>();
+        let view_rows = row_indices
+            .iter()
+            .map(|index| {
+                let row = rows.get(*index).ok_or_else(|| {
+                    SQLError::Internal("automatic-view rule lost its event row".into())
+                })?;
+                project_view_rule_row(&projection, row)
+            })
+            .collect::<Result<Vec<_>, SQLError>>()?;
+        let mut batch = crate::sql::rules::prepare_rule_batch_with_projection(
+            engine,
+            relation,
+            event,
+            view_rows,
+            |local_index, side, column| {
+                let row_index = row_indices.get(local_index).copied().ok_or_else(|| {
+                    SQLError::Internal("automatic-view rule lost its event row".into())
+                })?;
+                let row = rows.get(row_index).ok_or_else(|| {
+                    SQLError::Internal("automatic-view rule lost its event row".into())
+                })?;
+                let (storage_table, doc_id, document) = match side {
+                    crate::sql::rules::RuleRowSide::Old => (
+                        row.old_storage_table.as_deref(),
+                        row.old_doc_id,
+                        row.old.as_ref(),
+                    ),
+                    crate::sql::rules::RuleRowSide::New => (
+                        row.new_storage_table.as_deref(),
+                        row.new_doc_id,
+                        row.new.as_ref(),
+                    ),
+                };
+                let Some(document) = document else {
+                    return Ok(None);
+                };
+                let required = BTreeSet::from([column.to_string()]);
+                let projection = ViewRuleDocumentProjection {
+                    required_columns: &required,
+                    ..projection
+                };
+                let projected = project_view_rule_document(
+                    &projection,
+                    side,
+                    storage_table,
+                    doc_id,
+                    Some(document),
+                )?
+                .ok_or_else(|| {
+                    SQLError::Internal("automatic-view rule projection lost its row".into())
+                })?;
+                projected.get(column).cloned().map(Some).ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "automatic-view rule projection omitted column `{column}`"
+                    ))
+                })
+            },
+        )?;
+        let action_columns = batch.missing_action_row_columns();
+        if action_columns
+            .iter()
+            .any(|(old, new)| !old.is_empty() || !new.is_empty())
+        {
+            let supplemental_rows = row_indices
+                .iter()
+                .zip(action_columns)
+                .map(|(index, (old_columns, new_columns))| {
+                    let row = rows.get(*index).ok_or_else(|| {
+                        SQLError::Internal("automatic-view rule lost its event row".into())
+                    })?;
+                    project_view_rule_row_sides(&projection, row, &old_columns, &new_columns)
+                })
+                .collect::<Result<Vec<_>, SQLError>>()?;
+            batch.supplement_rows(supplemental_rows)?;
+        }
+        for (local_index, row_index) in row_indices.iter().copied().enumerate() {
+            if batch.suppresses(local_index) {
+                prepared.suppress_original[row_index] = true;
+            }
+        }
+        prepared.layers.push(PreparedViewRuleLayer {
+            relation: relation.clone(),
+            batch,
+        });
+        if crate::sql::rules::relation_suppresses_original_query(engine, relation, event)? {
+            break;
+        }
+    }
+    Ok(prepared)
+}
 
 fn dml_storage_error(action: &str, err: impl std::fmt::Display) -> SQLError {
     SQLError::Internal(format!("{action} failed in storage backend: {err}"))
@@ -643,15 +1082,54 @@ fn dml_target_row(
     doc_id: DocId,
     document: &Document,
 ) -> Result<OwnedPhysicalRow, SQLError> {
+    dml_target_row_for_storage(engine, table, table, qualifier, doc_id, document)
+}
+
+fn dml_target_row_for_storage(
+    engine: &Engine,
+    table: &str,
+    storage_table: &str,
+    qualifier: &str,
+    doc_id: DocId,
+    document: &Document,
+) -> Result<OwnedPhysicalRow, SQLError> {
+    dml_target_row_for_storage_optional(
+        engine,
+        table,
+        Some(storage_table),
+        qualifier,
+        Some(doc_id),
+        document,
+        None,
+    )
+}
+
+fn dml_target_row_for_storage_optional(
+    engine: &Engine,
+    table: &str,
+    storage_table: Option<&str>,
+    qualifier: &str,
+    doc_id: Option<DocId>,
+    document: &Document,
+    selected_columns: Option<&BTreeSet<String>>,
+) -> Result<OwnedPhysicalRow, SQLError> {
     let definitions = engine
         .try_describe_table(table)
         .map_err(|error| dml_storage_error("DML row schema lookup", error))?
         .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
     let mut materialized = document.clone();
-    crate::engine_generated::materialize_virtual_generated_columns(
-        &definitions,
-        &mut materialized,
-    )?;
+    if let Some(selected_columns) = selected_columns {
+        crate::engine_generated::materialize_selected_virtual_generated_columns(
+            &definitions,
+            &mut materialized,
+            selected_columns,
+        )?;
+    } else {
+        crate::engine_generated::materialize_virtual_generated_columns(
+            &definitions,
+            &mut materialized,
+        )?;
+    }
     let mut columns = if definitions.is_empty() {
         materialized
             .keys()
@@ -681,6 +1159,8 @@ fn dml_target_row(
         columns.push(DOC_ID_COLUMN.into());
         types.push(Some(ColumnType::BigInteger));
     }
+    columns.push(TABLE_OID_COLUMN.into());
+    types.push(Some(ColumnType::Oid));
     columns.push(XMIN_COLUMN.into());
     types.push(Some(ColumnType::Xid));
     let values = columns
@@ -693,7 +1173,14 @@ fn dml_target_row(
                         && definition.ty.is_integer()
                 })
             {
-                doc_id_value(doc_id)
+                doc_id.map_or(Ok(Value::Null), doc_id_value)
+            } else if column == TABLE_OID_COLUMN {
+                storage_table.map_or(Ok(Value::Null), |storage_table| {
+                    Ok(Value::Int(crate::sql::catalog::table_relation_oid(
+                        engine,
+                        storage_table,
+                    )?))
+                })
             } else if column == XMIN_COLUMN {
                 Ok(materialized
                     .get(XMIN_STORAGE_COLUMN)
@@ -708,6 +1195,57 @@ fn dml_target_row(
         RowSchema::with_qualified_types(qualifier, columns, types),
         PhysicalRow::from_values(values),
     ))
+}
+
+struct ViewCheckContext<'a> {
+    engine: &'a Engine,
+    table: &'a str,
+    storage_table: &'a str,
+    target_qualifier: &'a str,
+    doc_id: DocId,
+    document: &'a Document,
+    checks: &'a [ViewCheckPlan],
+    params: &'a [SQLParam],
+    scope: &'a CteScope,
+}
+
+fn validate_view_checks(context: ViewCheckContext<'_>) -> Result<(), SQLError> {
+    let ViewCheckContext {
+        engine,
+        table,
+        storage_table,
+        target_qualifier,
+        doc_id,
+        document,
+        checks,
+        params,
+        scope,
+    } = context;
+    if checks.is_empty() {
+        return Ok(());
+    }
+    let row = dml_target_row_for_storage(
+        engine,
+        table,
+        storage_table,
+        target_qualifier,
+        doc_id,
+        document,
+    )?;
+    for check in checks {
+        let value = eval_mutation_expr(engine, scope, &check.predicate, Some(&row), params)?;
+        if !uqa_sql::expr::truthy(&value) {
+            return Err(SQLError::Routine {
+                sqlstate: "44000".into(),
+                message: format!(
+                    "new row violates check option for view \"{}\"",
+                    RelationIdentity::from_legacy_name(&check.view)
+                        .map_or_else(|_| check.view.clone(), |relation| relation.name)
+                ),
+            });
+        }
+    }
+    Ok(())
 }
 
 fn dml_null_target_row(
@@ -742,6 +1280,8 @@ fn dml_null_target_row(
         columns.push(DOC_ID_COLUMN.into());
         types.push(Some(ColumnType::BigInteger));
     }
+    columns.push(TABLE_OID_COLUMN.into());
+    types.push(Some(ColumnType::Oid));
     columns.push(XMIN_COLUMN.into());
     types.push(Some(ColumnType::Xid));
     let width = columns.len();
@@ -805,21 +1345,31 @@ fn insert_identity_columns(
     engine: &Engine,
     table: &str,
     action: &str,
-) -> Result<(Option<String>, String), SQLError> {
+) -> Result<(Option<String>, String, bool), SQLError> {
     let auto_increment = engine
         .auto_increment_column(table)
         .map_err(|err| dml_storage_error(action, err))?;
-    let id_column = if auto_increment.is_some() {
-        auto_increment.clone()
-    } else {
-        engine
-            .try_describe_table(table)
-            .map_err(|err| dml_storage_error(action, err))?
-            .and_then(|columns| columns.into_iter().find(|column| column.primary_key))
-            .map(|column| column.name)
-    }
-    .unwrap_or_else(|| "id".into());
-    Ok((auto_increment, id_column))
+    let definitions = engine
+        .try_describe_table(table)
+        .map_err(|err| dml_storage_error(action, err))?
+        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+    let primary_keys = definitions
+        .iter()
+        .filter(|column| column.primary_key)
+        .map(|column| column.name.clone())
+        .collect::<Vec<_>>();
+    let primary_key = (primary_keys.len() == 1).then(|| primary_keys[0].clone());
+    let accepts_supplied_identity =
+        auto_increment.is_some() || primary_key.is_some() || definitions.is_empty();
+    let id_column = auto_increment
+        .clone()
+        .or(primary_key)
+        .unwrap_or_else(|| "id".into());
+    // The conventional `id` field is a storage identity only for the legacy
+    // schema-less document API. A declared SQL table without an identity or
+    // primary key may contain duplicate ordinary `id` values, so using that
+    // field as the physical document key would silently replace rows.
+    Ok((auto_increment, id_column, accepts_supplied_identity))
 }
 
 fn prepare_auto_increment_identity(
@@ -884,6 +1434,7 @@ fn prepare_auto_increment_identity(
                 engine,
                 table,
                 id_column,
+                true,
                 Some(auto_id_column),
                 document,
                 action,
@@ -900,6 +1451,7 @@ fn prepare_auto_increment_identity(
                 engine,
                 &owner,
                 id_column,
+                true,
                 Some(auto_id_column),
                 document,
                 action,
@@ -937,11 +1489,16 @@ fn prepare_insert_identity(
     engine: &Engine,
     allocation_table: &str,
     id_column: &str,
+    accepts_supplied_identity: bool,
     auto_id_column: Option<&str>,
     document: &mut Document,
     action: &str,
 ) -> Result<(DocId, bool), SQLError> {
-    let supplied_id = document_supplied_id(document, id_column, auto_id_column == Some(id_column))?;
+    let supplied_id = if accepts_supplied_identity {
+        document_supplied_id(document, id_column, auto_id_column == Some(id_column))?
+    } else {
+        None
+    };
     let supplied = supplied_id.is_some();
     let doc_id = match supplied_id {
         Some(doc_id) => doc_id,
@@ -1023,6 +1580,24 @@ fn eval_mutation_expr(
     }
 }
 
+fn row_independent_mutation_qualification_count(
+    engine: &Engine,
+    predicate: Option<&ScalarExpr>,
+    params: &[SQLParam],
+    ctes: &CteScope,
+) -> Result<Option<usize>, SQLError> {
+    let Some(predicate) = predicate else {
+        return Ok(Some(1));
+    };
+    let mut columns = BTreeSet::new();
+    if !predicate.collect_columns(&mut columns) || !columns.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(usize::from(uqa_sql::expr::truthy(
+        &eval_mutation_expr(engine, ctes, predicate, None, params)?,
+    ))))
+}
+
 struct MutationAssignmentTarget<'a> {
     table: &'a str,
     column: &'a str,
@@ -1063,6 +1638,51 @@ fn eval_mutation_assignment(
     }
     let value = eval_mutation_expr(engine, ctes, expression, row, params)?;
     coerce_to_column_type(engine, table, column, value).map(Some)
+}
+
+fn eval_view_rule_update_assignment(
+    engine: &Engine,
+    ctes: &CteScope,
+    stmt: &UpdatePlan,
+    assignment_position: usize,
+    expression: &ScalarExpr,
+    row: Option<&OwnedPhysicalRow>,
+    params: &[SQLParam],
+) -> Result<Option<Value>, SQLError> {
+    let value = if matches!(expression, ScalarExpr::Default) {
+        Value::Null
+    } else {
+        eval_mutation_expr(engine, ctes, expression, row, params)?
+    };
+    for plan in &stmt.view_rule_update_plans {
+        let Some(column) = plan.assigned_columns.get(assignment_position) else {
+            continue;
+        };
+        let definition = engine
+            .view_definition(&plan.relation)?
+            .ok_or_else(|| SQLError::UnknownTable(plan.relation.clone()))?;
+        let schema = engine.stored_view_schema(&definition)?;
+        let Some(position) =
+            schema
+                .columns()
+                .iter()
+                .enumerate()
+                .find_map(|(position, internal)| {
+                    let public = schema.public_name(position).unwrap_or(internal);
+                    public.eq_ignore_ascii_case(column).then_some(position)
+                })
+        else {
+            return Err(SQLError::UnknownColumn(format!(
+                "{}.{}",
+                plan.relation, column
+            )));
+        };
+        return match schema.column_type(position) {
+            Some(ty) => crate::sql::convert_value_to_column_type(value, ty).map(Some),
+            None => Ok(Some(value)),
+        };
+    }
+    Ok(Some(value))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1204,6 +1824,7 @@ mod merge;
 mod update;
 mod update_from;
 mod vectors;
+pub(in crate::sql) mod view_automatic;
 mod view_triggers;
 
 pub(in crate::sql) use conflict::*;

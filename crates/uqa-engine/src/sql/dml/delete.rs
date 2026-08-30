@@ -9,14 +9,15 @@
 use super::{
     apply_set_action_to_child, apply_validated_prepared_document_rewrite,
     build_join_spill_with_ctes, build_returning_row, dml_join_rows, dml_returning_result,
-    dml_target_row, eval_mutation_expr, foreign_key_comparison_types, foreign_key_lookup_values,
-    lock_mutation_target, lock_physical_mutation_target, period_foreign_key_coverage,
-    prepare_referential_document_rewrite, referencing_rows, referrers_to_for_actions,
-    validate_dml_expression_qualifiers, validate_returning_alias_relations, BTreeSet, CteScope,
-    DeletePlan, DmlCommandMutationOverlay, DmlReturningShape, DocId, Document, Engine, ForeignKey,
-    ForeignKeyAction, MutationLockTarget, PhysicalDocumentIdentity, PhysicalMutationLockTarget,
-    PreparedDeleteAction, PreparedDocumentDelete, ReferencingChildLock, ReturningProjectionRow,
-    ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult, Value,
+    dml_target_row_for_storage, eval_mutation_expr, foreign_key_comparison_types,
+    foreign_key_lookup_values, lock_mutation_target, lock_physical_mutation_target,
+    period_foreign_key_coverage, prepare_referential_document_rewrite, referencing_rows,
+    referrers_to_for_actions, validate_dml_expression_qualifiers,
+    validate_returning_alias_relations, BTreeSet, CteScope, DeletePlan, DmlCommandMutationOverlay,
+    DmlReturningShape, DocId, Document, Engine, ForeignKey, ForeignKeyAction, MutationLockTarget,
+    PhysicalDocumentIdentity, PhysicalMutationLockTarget, PreparedDeleteAction,
+    PreparedDocumentDelete, ReferencingChildLock, ReturningProjectionRow, ReturningRowImage,
+    ReturningRowImages, SQLError, SQLParam, SQLResult, Value,
 };
 
 pub(in crate::sql) fn run_delete(
@@ -37,8 +38,23 @@ pub(in crate::sql) fn run_delete_inner(
     stmt: &DeletePlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    if super::view_triggers::target_is_view(engine, &stmt.table)? {
-        return super::view_triggers::run_view_delete_inner(engine, stmt, params);
+    if let Some(kind) = super::view_triggers::target_view_kind(engine, &stmt.table)? {
+        if kind == crate::StoredViewKind::Materialized {
+            return super::view_triggers::run_view_delete_inner(engine, stmt, params);
+        }
+        if super::view_automatic::has_instead_of_trigger(
+            engine,
+            &stmt.table,
+            uqa_sql::ast::TriggerEvent::Delete,
+        )? || crate::sql::rules::relation_suppresses_original_query(
+            engine,
+            &stmt.table,
+            uqa_sql::ast::RuleEvent::Delete,
+        )? {
+            return super::view_triggers::run_view_delete_inner(engine, stmt, params);
+        }
+        let rewritten = super::view_automatic::rewrite_delete_to_base(engine, stmt, params)?;
+        return run_delete_inner(engine, &rewritten, params);
     }
     let _transition_capture_scope = crate::sql::triggers::TransitionCaptureScope::enter();
     engine.lock_relation(
@@ -51,11 +67,32 @@ pub(in crate::sql) fn run_delete_inner(
         uqa_sql::ast::RuleEvent::Delete,
         !stmt.returning.is_empty(),
     )?;
+    if let Some(view_returning) = &stmt.view_rule_returning {
+        crate::sql::rules::validate_rule_returning_contract(
+            engine,
+            &view_returning.relation,
+            uqa_sql::ast::RuleEvent::Delete,
+            !view_returning.returning.is_empty(),
+        )?;
+    }
     let delete_rules = engine.rules_for(&stmt.table, uqa_sql::ast::RuleEvent::Delete)?;
     let has_delete_rules = !delete_rules.is_empty();
-    let delete_original_query = !delete_rules
-        .iter()
-        .any(|rule| rule.definition.instead && rule.definition.condition.is_none());
+    let has_view_delete_rules = !stmt.view_rule_relations.is_empty();
+    let has_any_delete_rules = has_delete_rules || has_view_delete_rules;
+    let view_original_query = !stmt.view_rule_relations.iter().try_fold(
+        false,
+        |suppressed, relation| -> Result<bool, SQLError> {
+            Ok(suppressed
+                || engine
+                    .rules_for(relation, uqa_sql::ast::RuleEvent::Delete)?
+                    .iter()
+                    .any(|rule| rule.definition.instead && rule.definition.condition.is_none()))
+        },
+    )?;
+    let delete_original_query = view_original_query
+        && !delete_rules
+            .iter()
+            .any(|rule| rule.definition.instead && rule.definition.condition.is_none());
     let has_before_statement_trigger = delete_original_query
         && !engine
             .triggers_for(
@@ -69,7 +106,7 @@ pub(in crate::sql) fn run_delete_inner(
     let statement_snapshot = has_before_statement_trigger
         .then(|| engine.capture_statement_snapshot_engine())
         .transpose()?;
-    if delete_original_query && !has_delete_rules {
+    if delete_original_query && !has_any_delete_rules {
         crate::sql::triggers::fire_statement_triggers(
             engine,
             &stmt.table,
@@ -91,6 +128,16 @@ pub(in crate::sql) fn run_delete_inner(
     let mut ctes = CteScope::new_for_current_routine();
     crate::sql::select::materialize_plan_ctes(read_engine, &stmt.ctes, params, &mut ctes)?;
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
+    let mut action_qualification_count = if has_any_delete_rules && stmt.source.is_none() {
+        super::row_independent_mutation_qualification_count(
+            read_engine,
+            stmt.predicate.as_ref(),
+            params,
+            &ctes,
+        )?
+    } else {
+        None
+    };
     if stmt.source.is_none() {
         let allowed = BTreeSet::from([stmt.target_qualifier.clone()]);
         if let Some(predicate) = stmt.predicate.as_ref() {
@@ -108,6 +155,20 @@ pub(in crate::sql) fn run_delete_inner(
         )?),
         None => None,
     };
+    let qualification_references_target = if has_any_delete_rules && using_rows.is_some() {
+        delete_qualification_references_target(read_engine, stmt, stmt.predicate.as_ref())?
+    } else {
+        false
+    };
+    if has_any_delete_rules {
+        if let Some(using_rows) = using_rows.as_ref() {
+            action_qualification_count = Some(if qualification_references_target {
+                0
+            } else {
+                count_delete_source_qualifications(read_engine, stmt, &ctes, using_rows, params)?
+            });
+        }
+    }
     validate_returning_alias_relations(
         &stmt.target_qualifier,
         &stmt.returning_aliases,
@@ -165,16 +226,21 @@ pub(in crate::sql) fn run_delete_inner(
         let candidate = if preselected {
             None
         } else {
-            let Some(candidate) = qualified_delete_candidate(
-                read_engine,
+            let candidate = qualified_delete_candidate(DeleteCandidateQualification {
+                engine: read_engine,
                 stmt,
-                &storage_table,
+                storage_table: &storage_table,
                 params,
-                &snapshot_ctes,
-                using_rows.as_ref(),
+                ctes: &snapshot_ctes,
+                using_rows: using_rows.as_ref(),
                 doc_id,
-            )?
-            else {
+                count_all_qualifications: qualification_references_target,
+            })?;
+            if qualification_references_target {
+                let count = action_qualification_count.get_or_insert(0);
+                *count += candidate.qualification_count;
+            }
+            let Some(candidate) = candidate.row else {
                 continue;
             };
             Some(candidate)
@@ -229,7 +295,7 @@ pub(in crate::sql) fn run_delete_inner(
         if !qualified_ids.insert((storage_table.clone(), doc_id)) {
             continue;
         }
-        if has_delete_rules {
+        if has_any_delete_rules {
             qualified_targets.push((storage_table, doc_id, doc, returning_context));
         } else if crate::sql::triggers::fire_before_row_triggers(
             engine,
@@ -247,32 +313,82 @@ pub(in crate::sql) fn run_delete_inner(
         }
     }
     drop(qualification_overlay);
-    let (rule_returning, to_delete) = if has_delete_rules {
-        let rule_batch = crate::sql::rules::prepare_rule_batch(
-            engine,
-            &stmt.table,
-            uqa_sql::ast::RuleEvent::Delete,
-            qualified_targets
-                .iter()
-                .map(
-                    |(_, doc_id, old, returning_context)| crate::sql::rules::RuleRowImage {
-                        old_doc_id: Some(*doc_id),
-                        old: Some(old.clone()),
-                        new_doc_id: None,
-                        new: None,
-                        context: returning_context.clone(),
-                    },
+    let (view_rule_returning, rule_returning, to_delete) = if has_any_delete_rules {
+        let rule_rows = qualified_targets
+            .iter()
+            .map(|(storage_table, doc_id, old, returning_context)| {
+                crate::sql::rules::RuleRowImage {
+                    old_storage_table: Some(storage_table.clone()),
+                    old_doc_id: Some(*doc_id),
+                    old: Some(old.clone()),
+                    new_storage_table: None,
+                    new_doc_id: None,
+                    new: None,
+                    context: returning_context.clone(),
+                }
+            })
+            .collect::<Vec<_>>();
+        let mut view_rule_batches =
+            super::prepare_view_rule_batches(super::ViewRuleBatchRequest {
+                engine,
+                relations: &stmt.view_rule_relations,
+                event: uqa_sql::ast::RuleEvent::Delete,
+                rows: &rule_rows,
+                params,
+                scope: &snapshot_ctes,
+                insert_plans: &[],
+                update_plans: &[],
+                document_relation: None,
+            })?;
+        view_rule_batches.configure_action_qualification(action_qualification_count);
+        let base_rule_indices = (0..rule_rows.len())
+            .filter(|index| !view_rule_batches.suppresses(*index))
+            .collect::<Vec<_>>();
+        let mut rule_batch = (has_delete_rules && view_original_query)
+            .then(|| {
+                crate::sql::rules::prepare_rule_batch(
+                    engine,
+                    &stmt.table,
+                    uqa_sql::ast::RuleEvent::Delete,
+                    base_rule_indices
+                        .iter()
+                        .filter_map(|index| rule_rows.get(*index).cloned())
+                        .collect(),
                 )
-                .collect(),
-        )?;
-        let rule_returning = rule_batch.execute_actions(
-            engine,
-            crate::sql::rules::RuleReturningRequest::from_plan(
-                &stmt.returning,
-                &stmt.returning_aliases,
-                &stmt.subqueries,
-            ),
-        )?;
+            })
+            .transpose()?;
+        if let Some(rule_batch) = rule_batch.as_mut() {
+            let count = action_qualification_count.unwrap_or_else(|| rule_batch.event_row_count());
+            rule_batch.set_action_qualification_count(count);
+        }
+        let mut base_rule_suppressed = vec![false; rule_rows.len()];
+        if let Some(rule_batch) = rule_batch.as_ref() {
+            for (local_index, global_index) in base_rule_indices.iter().copied().enumerate() {
+                base_rule_suppressed[global_index] = rule_batch.suppresses(local_index);
+            }
+        }
+        let view_rule_returning =
+            view_rule_batches.execute_actions(engine, stmt.view_rule_returning.as_ref())?;
+        let rule_returning = rule_batch
+            .as_ref()
+            .map(|rule_batch| {
+                rule_batch.execute_actions(
+                    engine,
+                    crate::sql::rules::RuleReturningRequest::from_plan(
+                        &stmt.returning,
+                        &stmt.returning_aliases,
+                        &stmt.subqueries,
+                    ),
+                )
+            })
+            .transpose()?
+            .flatten();
+        if view_rule_returning.is_some() && rule_returning.is_some() {
+            return Err(SQLError::Routine {
+                sqlstate: "0A000".into(),
+                message: "cannot have RETURNING lists in multiple rules".into(),
+            });
+        }
         if delete_original_query {
             crate::sql::triggers::fire_statement_triggers(
                 engine,
@@ -287,7 +403,7 @@ pub(in crate::sql) fn run_delete_inner(
         for (index, (storage_table, doc_id, doc, returning_context)) in
             qualified_targets.into_iter().enumerate()
         {
-            if rule_batch.suppresses(index) {
+            if view_rule_batches.suppresses(index) || base_rule_suppressed[index] {
                 continue;
             }
             if crate::sql::triggers::fire_before_row_triggers(
@@ -307,9 +423,9 @@ pub(in crate::sql) fn run_delete_inner(
             to_delete.push((storage_table, doc_id, doc, returning_context));
         }
         drop(qualification_overlay);
-        (rule_returning, to_delete)
+        (view_rule_returning, rule_returning, to_delete)
     } else {
-        (None, qualified_targets)
+        (None, None, qualified_targets)
     };
     let root_deletes: BTreeSet<(String, DocId)> = to_delete
         .iter()
@@ -339,6 +455,7 @@ pub(in crate::sql) fn run_delete_inner(
                         target_qualifier: &stmt.target_qualifier,
                         images: ReturningRowImages {
                             old: Some(ReturningRowImage {
+                                storage_table: prepared.table.clone(),
                                 doc_id: prepared.doc_id,
                                 document: &prepared.document,
                             }),
@@ -407,6 +524,16 @@ pub(in crate::sql) fn run_delete_inner(
         }
     }
     if !stmt.returning.is_empty() {
+        if let Some(view_rule_returning) = view_rule_returning {
+            return view_rule_returning.project(
+                engine,
+                params,
+                &ctes,
+                using_rows
+                    .as_ref()
+                    .map(uqa_execution::SharedSpill::row_schema),
+            );
+        }
         let shape = DmlReturningShape {
             table: &stmt.table,
             target_qualifier: &stmt.target_qualifier,
@@ -453,7 +580,14 @@ fn recheck_delete_candidate(
     let Some(doc) = engine.get_document(storage_table, doc_id)? else {
         return Ok(None);
     };
-    let target_row = dml_target_row(engine, &stmt.table, &stmt.target_qualifier, doc_id, &doc)?;
+    let target_row = dml_target_row_for_storage(
+        engine,
+        &stmt.table,
+        storage_table,
+        &stmt.target_qualifier,
+        doc_id,
+        &doc,
+    )?;
     let joined = source_context
         .map(|source_context| dml_join_rows(&target_row, source_context))
         .unwrap_or(target_row);
@@ -464,31 +598,66 @@ fn recheck_delete_candidate(
     Ok(qualifies.then(|| (doc, source_context.cloned())))
 }
 
-fn qualified_delete_candidate(
-    engine: &Engine,
-    stmt: &DeletePlan,
-    storage_table: &str,
-    params: &[SQLParam],
-    ctes: &CteScope,
-    using_rows: Option<&uqa_execution::SharedSpill>,
+struct QualifiedDeleteCandidate {
+    row: Option<(Document, Option<uqa_execution::OwnedPhysicalRow>)>,
+    qualification_count: usize,
+}
+
+struct DeleteCandidateQualification<'a> {
+    engine: &'a Engine,
+    stmt: &'a DeletePlan,
+    storage_table: &'a str,
+    params: &'a [SQLParam],
+    ctes: &'a CteScope,
+    using_rows: Option<&'a uqa_execution::SharedSpill>,
     doc_id: DocId,
-) -> Result<Option<(Document, Option<uqa_execution::OwnedPhysicalRow>)>, SQLError> {
+    count_all_qualifications: bool,
+}
+
+fn qualified_delete_candidate(
+    context: DeleteCandidateQualification<'_>,
+) -> Result<QualifiedDeleteCandidate, SQLError> {
+    let DeleteCandidateQualification {
+        engine,
+        stmt,
+        storage_table,
+        params,
+        ctes,
+        using_rows,
+        doc_id,
+        count_all_qualifications,
+    } = context;
     let Some(doc) = engine.get_document(storage_table, doc_id)? else {
-        return Ok(None);
+        return Ok(QualifiedDeleteCandidate {
+            row: None,
+            qualification_count: 0,
+        });
     };
-    let target_row = dml_target_row(engine, &stmt.table, &stmt.target_qualifier, doc_id, &doc)?;
+    let target_row = dml_target_row_for_storage(
+        engine,
+        &stmt.table,
+        storage_table,
+        &stmt.target_qualifier,
+        doc_id,
+        &doc,
+    )?;
     match using_rows {
         None => {
             let qualifies = stmt.predicate.as_ref().map_or(Ok(true), |filter| {
                 eval_mutation_expr(engine, ctes, filter, Some(&target_row), params)
                     .map(|value| uqa_sql::expr::truthy(&value))
             })?;
-            Ok(qualifies.then_some((doc, None)))
+            Ok(QualifiedDeleteCandidate {
+                row: qualifies.then_some((doc, None)),
+                qualification_count: usize::from(qualifies),
+            })
         }
         Some(rows) => {
             let reader = rows
                 .read_rows()
                 .map_err(crate::sql::select::physical_exec_error)?;
+            let mut first = None;
+            let mut qualification_count = 0;
             for using_row in reader {
                 let source_context = using_row.map_err(crate::sql::select::physical_exec_error)?;
                 let joined = dml_join_rows(&target_row, &source_context);
@@ -497,12 +666,81 @@ fn qualified_delete_candidate(
                         .map(|value| uqa_sql::expr::truthy(&value))
                 })?;
                 if qualifies {
-                    return Ok(Some((doc, Some(source_context))));
+                    qualification_count += 1;
+                    if first.is_none() {
+                        first = Some(source_context);
+                    }
+                    if !count_all_qualifications {
+                        break;
+                    }
                 }
             }
-            Ok(None)
+            Ok(QualifiedDeleteCandidate {
+                row: first.map(|source_context| (doc, Some(source_context))),
+                qualification_count,
+            })
         }
     }
+}
+
+fn delete_qualification_references_target(
+    engine: &Engine,
+    stmt: &DeletePlan,
+    predicate: Option<&uqa_execution::ScalarExpr>,
+) -> Result<bool, SQLError> {
+    let Some(predicate) = predicate else {
+        return Ok(false);
+    };
+    if crate::sql::select::expr_contains_subquery(predicate) {
+        return Ok(true);
+    }
+    let qualifiers = crate::sql::select::expr_qualifiers(predicate);
+    if qualifiers.iter().any(|qualifier| {
+        qualifier.eq_ignore_ascii_case(&stmt.target_qualifier)
+            || qualifier.eq_ignore_ascii_case(&stmt.table)
+    }) {
+        return Ok(true);
+    }
+    if !crate::sql::select::expr_has_unqualified_column(predicate) {
+        return Ok(false);
+    }
+    let mut columns = BTreeSet::new();
+    if !predicate.collect_columns(&mut columns) {
+        return Ok(true);
+    }
+    let target_columns = engine
+        .try_query_table_columns(&stmt.table)
+        .map_err(|error| SQLError::Internal(format!("read DELETE target columns: {error}")))?
+        .into_iter()
+        .chain([
+            super::DOC_ID_COLUMN.to_string(),
+            super::TABLE_OID_COLUMN.to_string(),
+            super::XMIN_COLUMN.to_string(),
+        ])
+        .collect::<BTreeSet<_>>();
+    Ok(!columns.is_disjoint(&target_columns))
+}
+
+fn count_delete_source_qualifications(
+    engine: &Engine,
+    stmt: &DeletePlan,
+    ctes: &CteScope,
+    using_rows: &uqa_execution::SharedSpill,
+    params: &[SQLParam],
+) -> Result<usize, SQLError> {
+    let mut count = 0;
+    for source in using_rows
+        .read_rows()
+        .map_err(crate::sql::select::physical_exec_error)?
+    {
+        let source = source.map_err(crate::sql::select::physical_exec_error)?;
+        let qualifies = stmt.predicate.as_ref().map_or(Ok(true), |predicate| {
+            eval_mutation_expr(engine, ctes, predicate, Some(&source), params)
+                .map(|value| uqa_sql::expr::truthy(&value))
+        })?;
+        count += usize::from(qualifies);
+    }
+    Ok(count)
 }
 
 pub(in crate::sql) fn prepare_document_delete(

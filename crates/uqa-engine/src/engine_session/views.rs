@@ -420,6 +420,7 @@ impl Engine {
             materialized_column_types: Vec::new(),
             populated: true,
         };
+        crate::sql::validate_stored_view_check_option(self, &name, &view)?;
         let mut views = self.durable.views.write();
         if persistence != uqa_sql::ast::RelationPersistence::Temporary {
             if let Some(catalog) = self.storage.catalog.as_ref() {

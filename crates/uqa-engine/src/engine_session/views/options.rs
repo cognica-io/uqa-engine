@@ -67,6 +67,9 @@ impl Engine {
                     view.options.retain(|(current, _)| !names.contains(current));
                 }
             }
+            if statement.kind == AlterViewKind::View {
+                crate::sql::validate_stored_view_check_option(engine, &canonical, &view)?;
+            }
             if view.persistence != uqa_sql::ast::RelationPersistence::Temporary {
                 if let Some(catalog) = engine.storage.catalog.as_ref() {
                     let definition_json = serde_json::to_string(&view).map_err(|error| {

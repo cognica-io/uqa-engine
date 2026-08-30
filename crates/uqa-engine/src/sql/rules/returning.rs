@@ -369,10 +369,38 @@ pub(super) fn rule_returning_columns(
     engine: &Engine,
     table: &str,
 ) -> Result<Vec<uqa_sql::ast::ColumnDef>, SQLError> {
-    engine
+    let columns = engine
         .try_describe_table_row_type(table)
-        .map_err(|error| SQLError::Internal(format!("read rule RETURNING row type: {error}")))?
-        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))
+        .map_err(|error| SQLError::Internal(format!("read rule RETURNING row type: {error}")))?;
+    if let Some(columns) = columns {
+        return Ok(columns);
+    }
+    Ok(engine
+        .rule_relation_columns(table)?
+        .into_iter()
+        .map(|(name, ty)| uqa_sql::ast::ColumnDef {
+            name,
+            ty,
+            object_id: None,
+            missing_value: None,
+            primary_key: false,
+            not_null: false,
+            not_null_explicit: false,
+            not_null_name: None,
+            not_null_validated: true,
+            not_null_no_inherit: false,
+            auto_increment: None,
+            unique: false,
+            default: None,
+            generated: None,
+            check: None,
+            check_name: None,
+            check_enforced: true,
+            check_validated: true,
+            check_no_inherit: false,
+            references: None,
+        })
+        .collect())
 }
 
 pub(super) fn capture_rule_returning_result(

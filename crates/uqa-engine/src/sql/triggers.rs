@@ -826,6 +826,9 @@ pub(super) fn fire_instead_of_row_triggers(
     let triggers =
         engine.triggers_for(view, TriggerTiming::InsteadOf, event, true, updated_columns)?;
     if triggers.is_empty() {
+        if engine.has_trigger_definition(view, TriggerTiming::InsteadOf, event, true)? {
+            return Ok(None);
+        }
         return Err(SQLError::Routine {
             sqlstate: "55000".into(),
             message: format!(

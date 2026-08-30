@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "9c918888c556b2eccbce81bf9f7679f1e1991da3767a1af0ebd5f841f352e67e",
+  "fixture_sha256": "a825dad1dcf71f37abff9bfc98c2e6493a1cc86c43bcfc92f96331e8e79ccc5b",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -1145,6 +1145,114 @@
         ],
         [
           "rule_replica:3"
+        ]
+      ]
+    },
+    {
+      "name": "create_rule_event_cardinality_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "execute_rule_event_cardinality_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "rule_event_cardinality_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "true,unconditional",
+          "0",
+          "1",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "create_delete_using_rule_cardinality_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "delete_using_rule_actions_follow_qualification_cardinality",
+      "kind": "ok"
+    },
+    {
+      "name": "delete_using_rule_cardinality_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "base-all",
+          "2",
+          "4"
+        ],
+        [
+          "base-empty-source",
+          "0",
+          "2"
+        ],
+        [
+          "base-source",
+          "2",
+          "2"
+        ],
+        [
+          "base-target",
+          "2",
+          "3"
+        ],
+        [
+          "direct-all",
+          "0",
+          "4"
+        ],
+        [
+          "direct-empty-source",
+          "0",
+          "2"
+        ],
+        [
+          "direct-source",
+          "0",
+          "2"
+        ],
+        [
+          "direct-target",
+          "0",
+          "3"
+        ]
+      ]
+    },
+    {
+      "name": "create_system_column_qualification_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "unqualified_tableoid_update_qualification",
+      "kind": "ok"
+    },
+    {
+      "name": "unqualified_tableoid_update_action_count",
+      "kind": "rows",
+      "rows": [
+        [
+          "6"
+        ]
+      ]
+    },
+    {
+      "name": "create_system_column_delete_rule",
+      "kind": "ok"
+    },
+    {
+      "name": "unqualified_tableoid_delete_qualification",
+      "kind": "ok"
+    },
+    {
+      "name": "unqualified_tableoid_delete_action_count",
+      "kind": "rows",
+      "rows": [
+        [
+          "6"
         ]
       ]
     }

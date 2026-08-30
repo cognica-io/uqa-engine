@@ -8,16 +8,16 @@
 
 use super::{
     apply_validated_prepared_document_rewrite, build_returning_row, coerce_to_column_type,
-    dml_returning_result, dml_storage_error, dml_target_row, eval_mutation_assignment,
-    eval_mutation_expr, index_vectors_for_type, lock_mutation_target,
-    lock_physical_mutation_target, prepare_partition_update_route, prepare_routed_document_rewrite,
-    referrers_to_for_actions, run_update_from, stage_prepared_document_rewrite,
-    update_lock_strength, validate_dml_expression_qualifiers, validate_mutation_columns,
-    validate_returning_alias_relations, BTreeMap, BTreeSet, BinaryOp, ColumnType, CteScope,
-    DmlCommandMutationOverlay, DmlReturningShape, Engine, MutationAssignmentTarget,
-    MutationLockTarget, PhysicalMutationLockTarget, ReturningProjectionRow, ReturningRowImage,
-    ReturningRowImages, RowIndependentUpdateValues, SQLError, SQLParam, SQLResult, ScalarExpr,
-    UpdatePlan, Value,
+    dml_returning_result, dml_storage_error, dml_target_row_for_storage, eval_mutation_assignment,
+    eval_mutation_expr, eval_view_rule_update_assignment, index_vectors_for_type,
+    lock_mutation_target, lock_physical_mutation_target, prepare_partition_update_route,
+    prepare_routed_document_rewrite, referrers_to_for_actions, run_update_from,
+    stage_prepared_document_rewrite, update_lock_strength, validate_dml_expression_qualifiers,
+    validate_mutation_columns, validate_returning_alias_relations, validate_view_checks, BTreeMap,
+    BTreeSet, BinaryOp, ColumnType, CteScope, DmlCommandMutationOverlay, DmlReturningShape, Engine,
+    MutationAssignmentTarget, MutationLockTarget, PhysicalMutationLockTarget,
+    ReturningProjectionRow, ReturningRowImage, ReturningRowImages, RowIndependentUpdateValues,
+    SQLError, SQLParam, SQLResult, ScalarExpr, UpdatePlan, Value, ViewCheckContext,
 };
 
 pub(in crate::sql) fn run_update(
@@ -37,8 +37,23 @@ pub(in crate::sql) fn run_update_inner(
     stmt: &UpdatePlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    if super::view_triggers::target_is_view(engine, &stmt.table)? {
-        return super::view_triggers::run_view_update_inner(engine, stmt, params);
+    if let Some(kind) = super::view_triggers::target_view_kind(engine, &stmt.table)? {
+        if kind == crate::StoredViewKind::Materialized {
+            return super::view_triggers::run_view_update_inner(engine, stmt, params);
+        }
+        if super::view_automatic::has_instead_of_trigger(
+            engine,
+            &stmt.table,
+            uqa_sql::ast::TriggerEvent::Update,
+        )? || crate::sql::rules::relation_suppresses_original_query(
+            engine,
+            &stmt.table,
+            uqa_sql::ast::RuleEvent::Update,
+        )? {
+            return super::view_triggers::run_view_update_inner(engine, stmt, params);
+        }
+        let rewritten = super::view_automatic::rewrite_update_to_base(engine, stmt, params)?;
+        return run_update_inner(engine, &rewritten, params);
     }
     let _transition_capture_scope = crate::sql::triggers::TransitionCaptureScope::enter();
     engine.lock_relation(
@@ -52,14 +67,24 @@ pub(in crate::sql) fn run_update_inner(
         uqa_sql::ast::RuleEvent::Update,
         !stmt.returning.is_empty(),
     )?;
-    validate_mutation_columns(
-        engine,
-        &stmt.table,
-        stmt.assignments
-            .iter()
-            .map(|assignment| assignment.column.as_str()),
-        "UPDATE",
-    )?;
+    if let Some(view_returning) = &stmt.view_rule_returning {
+        crate::sql::rules::validate_rule_returning_contract(
+            engine,
+            &view_returning.relation,
+            uqa_sql::ast::RuleEvent::Update,
+            !view_returning.returning.is_empty(),
+        )?;
+    }
+    if stmt.view_rule_update_plans.is_empty() {
+        validate_mutation_columns(
+            engine,
+            &stmt.table,
+            stmt.assignments
+                .iter()
+                .map(|assignment| assignment.column.as_str()),
+            "UPDATE",
+        )?;
+    }
     let assigned_columns = stmt
         .assignments
         .iter()
@@ -67,9 +92,28 @@ pub(in crate::sql) fn run_update_inner(
         .collect::<Vec<_>>();
     let update_rules = engine.rules_for(&stmt.table, uqa_sql::ast::RuleEvent::Update)?;
     let has_update_rules = !update_rules.is_empty();
-    let update_original_query = !update_rules
-        .iter()
-        .any(|rule| rule.definition.instead && rule.definition.condition.is_none());
+    let has_view_update_rules = !stmt.view_rule_relations.is_empty();
+    let has_any_update_rules = has_update_rules || has_view_update_rules;
+    let view_original_query = !stmt.view_rule_relations.iter().try_fold(
+        false,
+        |suppressed, relation| -> Result<bool, SQLError> {
+            Ok(suppressed
+                || engine
+                    .rules_for(relation, uqa_sql::ast::RuleEvent::Update)?
+                    .iter()
+                    .any(|rule| rule.definition.instead && rule.definition.condition.is_none()))
+        },
+    )?;
+    let update_original_query = view_original_query
+        && !update_rules
+            .iter()
+            .any(|rule| rule.definition.instead && rule.definition.condition.is_none());
+    let evaluate_view_assignments = view_original_query
+        || crate::sql::rules::surviving_view_rules_reference_row(
+            engine,
+            &stmt.view_rule_relations,
+            uqa_sql::ast::RuleEvent::Update,
+        )?;
     let has_before_statement_trigger = update_original_query
         && !engine
             .triggers_for(
@@ -83,7 +127,7 @@ pub(in crate::sql) fn run_update_inner(
     let statement_snapshot = has_before_statement_trigger
         .then(|| engine.capture_statement_snapshot_engine())
         .transpose()?;
-    if update_original_query && !has_update_rules {
+    if update_original_query && !has_any_update_rules {
         crate::sql::triggers::fire_statement_triggers(
             engine,
             &stmt.table,
@@ -113,6 +157,16 @@ pub(in crate::sql) fn run_update_inner(
     if let Some(source) = stmt.source.as_deref() {
         return run_update_from(engine, read_engine, stmt, source, params, &mut ctes);
     }
+    let row_independent_update_qualification = if has_any_update_rules {
+        super::row_independent_mutation_qualification_count(
+            read_engine,
+            stmt.predicate.as_ref(),
+            params,
+            &ctes,
+        )?
+    } else {
+        None
+    };
     let target_tables = read_engine.hierarchy_scan_tables(&stmt.table, stmt.include_descendants)?;
     let target_hierarchy = read_engine
         .try_table_hierarchy(&stmt.table)
@@ -132,6 +186,7 @@ pub(in crate::sql) fn run_update_inner(
             &assigned_columns,
         )?
         && !engine.relation_has_rules(&stmt.table)?
+        && !has_view_update_rules
     {
         if let Some(result) = try_run_point_update(engine, stmt, params)? {
             if update_original_query {
@@ -197,9 +252,10 @@ pub(in crate::sql) fn run_update_inner(
         let Some(candidate) = read_engine.get_document(&storage_table, doc_id)? else {
             continue;
         };
-        let candidate_row = dml_target_row(
+        let candidate_row = dml_target_row_for_storage(
             read_engine,
             &stmt.table,
+            &storage_table,
             &stmt.target_qualifier,
             doc_id,
             &candidate,
@@ -239,9 +295,10 @@ pub(in crate::sql) fn run_update_inner(
             continue;
         };
         let original_doc = doc.clone();
-        let target_row = dml_target_row(
+        let target_row = dml_target_row_for_storage(
             engine,
             &stmt.table,
+            &storage_table,
             &stmt.target_qualifier,
             doc_id,
             &original_doc,
@@ -259,26 +316,40 @@ pub(in crate::sql) fn run_update_inner(
                 }
             }
         }
-        for assignment in &stmt.assignments {
-            let value = eval_mutation_assignment(
-                read_engine,
-                &snapshot_ctes,
-                MutationAssignmentTarget {
-                    table: &stmt.table,
-                    column: &assignment.column,
-                    action: "UPDATE",
-                },
-                &assignment.value,
-                Some(&target_row),
-                params,
-            )?;
-            if let Some(value) = value {
-                doc.insert(assignment.column.clone(), value);
-            } else {
-                doc.remove(&assignment.column);
+        if evaluate_view_assignments {
+            for (position, assignment) in stmt.assignments.iter().enumerate() {
+                let value = if view_original_query {
+                    eval_mutation_assignment(
+                        read_engine,
+                        &snapshot_ctes,
+                        MutationAssignmentTarget {
+                            table: &stmt.table,
+                            column: &assignment.column,
+                            action: "UPDATE",
+                        },
+                        &assignment.value,
+                        Some(&target_row),
+                        params,
+                    )?
+                } else {
+                    eval_view_rule_update_assignment(
+                        read_engine,
+                        &snapshot_ctes,
+                        stmt,
+                        position,
+                        &assignment.value,
+                        Some(&target_row),
+                        params,
+                    )?
+                };
+                if let Some(value) = value {
+                    doc.insert(assignment.column.clone(), value);
+                } else {
+                    doc.remove(&assignment.column);
+                }
             }
         }
-        if has_update_rules {
+        if has_any_update_rules {
             pending_updates.push((storage_table, doc_id, original_doc, doc));
         } else if let Some(prepared) = prepare_update_row(
             engine,
@@ -300,30 +371,83 @@ pub(in crate::sql) fn run_update_inner(
         }
     }
     drop(overlay);
-    let rule_returning = if has_update_rules {
-        let rule_batch = crate::sql::rules::prepare_rule_batch(
-            engine,
-            &stmt.table,
-            uqa_sql::ast::RuleEvent::Update,
-            pending_updates
-                .iter()
-                .map(|(_, doc_id, old, new)| crate::sql::rules::RuleRowImage {
+    let (view_rule_returning, rule_returning) = if has_any_update_rules {
+        let rule_rows = pending_updates
+            .iter()
+            .map(
+                |(storage_table, doc_id, old, new)| crate::sql::rules::RuleRowImage {
+                    old_storage_table: Some(storage_table.clone()),
                     old_doc_id: Some(*doc_id),
                     old: Some(old.clone()),
+                    new_storage_table: Some(storage_table.clone()),
                     new_doc_id: Some(*doc_id),
                     new: Some(new.clone()),
                     context: None,
-                })
-                .collect(),
-        )?;
-        let rule_returning = rule_batch.execute_actions(
-            engine,
-            crate::sql::rules::RuleReturningRequest::from_plan(
-                &stmt.returning,
-                &stmt.returning_aliases,
-                &stmt.subqueries,
-            ),
-        )?;
+                },
+            )
+            .collect::<Vec<_>>();
+        let mut view_rule_batches =
+            super::prepare_view_rule_batches(super::ViewRuleBatchRequest {
+                engine,
+                relations: &stmt.view_rule_relations,
+                event: uqa_sql::ast::RuleEvent::Update,
+                rows: &rule_rows,
+                params,
+                scope: &snapshot_ctes,
+                insert_plans: &[],
+                update_plans: &stmt.view_rule_update_plans,
+                document_relation: None,
+            })?;
+        view_rule_batches.configure_action_qualification(row_independent_update_qualification);
+        let base_rule_indices = (0..rule_rows.len())
+            .filter(|index| !view_rule_batches.suppresses(*index))
+            .collect::<Vec<_>>();
+        let mut rule_batch = (has_update_rules && view_original_query)
+            .then(|| {
+                crate::sql::rules::prepare_rule_batch(
+                    engine,
+                    &stmt.table,
+                    uqa_sql::ast::RuleEvent::Update,
+                    base_rule_indices
+                        .iter()
+                        .filter_map(|index| rule_rows.get(*index).cloned())
+                        .collect(),
+                )
+            })
+            .transpose()?;
+        if let Some(rule_batch) = rule_batch.as_mut() {
+            let count = row_independent_update_qualification
+                .unwrap_or_else(|| rule_batch.event_row_count());
+            rule_batch.set_action_qualification_count(count);
+        }
+        let mut base_rule_suppressed = vec![false; rule_rows.len()];
+        if let Some(rule_batch) = rule_batch.as_ref() {
+            for (local_index, global_index) in base_rule_indices.iter().copied().enumerate() {
+                base_rule_suppressed[global_index] = rule_batch.suppresses(local_index);
+            }
+        }
+        let view_rule_returning =
+            view_rule_batches.execute_actions(engine, stmt.view_rule_returning.as_ref())?;
+        let rule_returning = rule_batch
+            .as_ref()
+            .map(|rule_batch| {
+                rule_batch.execute_actions(
+                    engine,
+                    crate::sql::rules::RuleReturningRequest::from_plan(
+                        &stmt.returning,
+                        &stmt.returning_aliases,
+                        &stmt.subqueries,
+                    ),
+                )
+            })
+            .transpose()?
+            .flatten();
+        if view_rule_returning.is_some() && rule_returning.is_some() {
+            return Err(SQLError::Routine {
+                sqlstate: "0A000".into(),
+                message: "cannot have RETURNING lists in multiple rules".into(),
+            });
+        }
         if update_original_query {
             crate::sql::triggers::fire_statement_triggers(
                 engine,
@@ -337,7 +461,7 @@ pub(in crate::sql) fn run_update_inner(
         for (index, (storage_table, doc_id, original_doc, doc)) in
             pending_updates.into_iter().enumerate()
         {
-            if rule_batch.suppresses(index) {
+            if view_rule_batches.suppresses(index) || base_rule_suppressed[index] {
                 continue;
             }
             if let Some(prepared) = prepare_update_row(
@@ -360,10 +484,10 @@ pub(in crate::sql) fn run_update_inner(
             }
         }
         drop(overlay);
-        rule_returning
+        (view_rule_returning, rule_returning)
     } else {
         debug_assert!(pending_updates.is_empty());
-        None
+        (None, None)
     };
     if !prepared_updates.is_empty() {
         engine.prepare_explicit_transaction_writer()?;
@@ -420,6 +544,9 @@ pub(in crate::sql) fn run_update_inner(
         }
     }
     if !stmt.returning.is_empty() {
+        if let Some(view_rule_returning) = view_rule_returning {
+            return view_rule_returning.project(engine, params, &ctes, None);
+        }
         let shape = DmlReturningShape {
             table: &stmt.table,
             target_qualifier: &stmt.target_qualifier,
@@ -494,6 +621,35 @@ fn prepare_update_row(
     else {
         return Ok(None);
     };
+    let primary_key_doc_id =
+        super::integer_primary_key_doc_id(engine, &stmt.table, &rewrite.new_document)?;
+    let rewritten_doc_id = rewrite
+        .destination
+        .as_ref()
+        .map(|(_, doc_id)| *doc_id)
+        .or(primary_key_doc_id)
+        .unwrap_or(rewrite.doc_id);
+    let rewritten_storage_table = rewrite
+        .destination
+        .as_ref()
+        .map_or_else(|| rewrite.table.clone(), |(table, _)| table.clone());
+    super::validate_key_constraints(
+        engine,
+        &rewritten_storage_table,
+        &rewrite.new_document,
+        (rewritten_storage_table == rewrite.table).then_some(rewrite.doc_id),
+    )?;
+    validate_view_checks(ViewCheckContext {
+        engine,
+        table: &stmt.table,
+        storage_table: &rewritten_storage_table,
+        target_qualifier: &stmt.target_qualifier,
+        doc_id: rewritten_doc_id,
+        document: &rewrite.new_document,
+        checks: &stmt.view_checks,
+        params,
+        scope: snapshot_ctes,
+    })?;
     let affected = !rewrite.is_partition_move_delete();
     let mut after_row_events = Vec::new();
     let rewritten_doc_id = stage_prepared_document_rewrite(
@@ -513,10 +669,12 @@ fn prepare_update_row(
                 target_qualifier: &stmt.target_qualifier,
                 images: ReturningRowImages {
                     old: Some(ReturningRowImage {
+                        storage_table: rewrite.table.clone(),
                         doc_id: rewrite.doc_id,
                         document: &rewrite.old_document,
                     }),
                     new: Some(ReturningRowImage {
+                        storage_table: rewritten_storage_table,
                         doc_id: rewritten_doc_id,
                         document: &rewrite.new_document,
                     }),

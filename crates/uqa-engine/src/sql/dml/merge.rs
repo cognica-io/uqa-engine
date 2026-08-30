@@ -11,14 +11,15 @@ use super::{
     apply_validated_prepared_document_rewrite, build_join_spill_with_ctes,
     build_projection_physical_row_with_ctes, decode_merge_pair, decode_prepared_doc_id,
     decode_prepared_document_delete, decode_prepared_document_rewrite, dml_join_rows,
-    dml_null_target_row, dml_returning_result_with_projections, dml_storage_error, dml_target_row,
-    document_vectors, encode_merge_pair, encode_prepared_doc_id, encode_prepared_document_delete,
-    encode_prepared_document_rewrite, eval_mutation_assignment, eval_mutation_expr,
-    expanded_returning_projections, insert_identity_columns, lock_document_key_dependencies,
-    lock_existing_document_foreign_key_dependencies, lock_physical_mutation_target,
-    merge_pair_schema, merge_source_index_value, missing_document_error, partition_insert_target,
-    persist_auto_increment_identity, prepare_auto_increment_identity, prepare_document_delete,
-    prepare_insert_identity, prepare_partition_update_route, prepare_routed_document_rewrite,
+    dml_null_target_row, dml_returning_result_with_projections, dml_storage_error,
+    dml_target_row_for_storage, document_vectors, encode_merge_pair, encode_prepared_doc_id,
+    encode_prepared_document_delete, encode_prepared_document_rewrite, eval_mutation_assignment,
+    eval_mutation_expr, expanded_returning_projections, insert_identity_columns,
+    lock_document_key_dependencies, lock_existing_document_foreign_key_dependencies,
+    lock_physical_mutation_target, merge_pair_schema, merge_source_index_value,
+    missing_document_error, partition_insert_target, persist_auto_increment_identity,
+    prepare_auto_increment_identity, prepare_document_delete, prepare_insert_identity,
+    prepare_partition_update_route, prepare_routed_document_rewrite,
     refresh_insert_identity_after_trigger, returning_row_context, stage_prepared_document_delete,
     stage_prepared_document_rewrite, update_lock_strength, validate_document_constraints,
     validate_mutation_columns, validate_returning_alias_relations, BTreeMap, BTreeSet, CteScope,
@@ -230,7 +231,14 @@ pub(in crate::sql) fn run_merge_inner(
             let Some(doc) = engine.get_document(storage_table, *doc_id)? else {
                 return Err(missing_document_error("MERGE scan", storage_table, *doc_id));
             };
-            let target_row = dml_target_row(engine, &target_table, &target_qual, *doc_id, &doc)?;
+            let target_row = dml_target_row_for_storage(
+                engine,
+                &target_table,
+                storage_table,
+                &target_qual,
+                *doc_id,
+                &doc,
+            )?;
             let mut target_matched = false;
             let source_reader = source_rows
                 .read_rows()
@@ -403,9 +411,16 @@ pub(in crate::sql) fn run_merge_inner(
             pair.target_document = Some(document.clone());
         }
         let mut target_row = match (pair.doc_id, pair.target_document.as_ref()) {
-            (Some(doc_id), Some(document)) => {
-                dml_target_row(engine, &target_table, &target_qual, doc_id, document)?
-            }
+            (Some(doc_id), Some(document)) => dml_target_row_for_storage(
+                engine,
+                &target_table,
+                pair.storage_table.as_deref().ok_or_else(|| {
+                    SQLError::Internal("MERGE target row lost its physical relation".into())
+                })?,
+                &target_qual,
+                doc_id,
+                document,
+            )?,
             _ => dml_null_target_row(engine, &target_table, &target_qual)?,
         };
         let mut joined = dml_join_rows(&target_row, &pair.source_row);
@@ -498,6 +513,11 @@ pub(in crate::sql) fn run_merge_inner(
                 })?;
                 prepared.capture_partition_move_update_transition = false;
                 let row_affected = !prepared.is_partition_move_delete();
+                let old_storage_table = prepared.table.clone();
+                let new_storage_table = prepared
+                    .destination
+                    .as_ref()
+                    .map_or_else(|| old_storage_table.clone(), |(table, _)| table.clone());
                 let rewritten_doc_id = stage_prepared_document_rewrite(
                     engine,
                     &mut prepared,
@@ -513,10 +533,12 @@ pub(in crate::sql) fn run_merge_inner(
                             target_qual: &target_qual,
                             images: ReturningRowImages {
                                 old: Some(ReturningRowImage {
+                                    storage_table: old_storage_table,
                                     doc_id: prepared.doc_id,
                                     document: &prepared.old_document,
                                 }),
                                 new: Some(ReturningRowImage {
+                                    storage_table: new_storage_table,
                                     doc_id: rewritten_doc_id,
                                     document: &prepared.new_document,
                                 }),
@@ -594,6 +616,7 @@ pub(in crate::sql) fn run_merge_inner(
                             target_qual: &target_qual,
                             images: ReturningRowImages {
                                 old: Some(ReturningRowImage {
+                                    storage_table: prepared.table.clone(),
                                     doc_id: prepared.doc_id,
                                     document: &prepared.document,
                                 }),
@@ -620,7 +643,7 @@ pub(in crate::sql) fn run_merge_inner(
                 )?;
             }
             SelectedMergeAction::Insert { mut document } => {
-                let (auto_id_col, id_column) =
+                let (auto_id_col, id_column, accepts_supplied_identity) =
                     insert_identity_columns(engine, &target_table, "MERGE INSERT")?;
                 let prepared_auto_identity = prepare_auto_increment_identity(
                     engine,
@@ -643,6 +666,7 @@ pub(in crate::sql) fn run_merge_inner(
                         engine,
                         &storage_table,
                         &id_column,
+                        accepts_supplied_identity,
                         None,
                         &mut document,
                         "prepare MERGE INSERT identity",
@@ -671,6 +695,7 @@ pub(in crate::sql) fn run_merge_inner(
                     engine,
                     &storage_table,
                     &id_column,
+                    accepts_supplied_identity,
                     auto_id_col.as_deref(),
                     &document,
                     &mut insert_identity,
@@ -714,6 +739,7 @@ pub(in crate::sql) fn run_merge_inner(
                             images: ReturningRowImages {
                                 old: None,
                                 new: Some(ReturningRowImage {
+                                    storage_table: storage_table.clone(),
                                     doc_id,
                                     document: &document,
                                 }),
@@ -1321,7 +1347,7 @@ fn merge_target_lock_strength(
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(in crate::sql) struct MergeReturningRow<'a> {
     target_table: &'a str,
     target_qual: &'a str,
@@ -1340,7 +1366,7 @@ pub(in crate::sql) fn build_merge_returning_row(
     params: &[SQLParam],
     ctes: &CteScope,
 ) -> Result<uqa_execution::OwnedPhysicalRow, SQLError> {
-    let row = merge_returning_context(engine, input)?;
+    let row = merge_returning_context(engine, input.clone())?;
     let projections = expanded_merge_returning_projections(
         engine,
         input.target_table,

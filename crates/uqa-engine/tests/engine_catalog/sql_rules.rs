@@ -211,7 +211,7 @@ fn update_delete_rules_bind_row_images_and_apply_instead() {
 }
 
 #[test]
-fn insert_select_and_constant_actions_preserve_statement_cardinality() {
+fn insert_select_and_constant_actions_follow_event_cardinality() {
     let engine = Engine::new();
     exec(
         &engine,
@@ -323,7 +323,7 @@ fn rule_actions_execute_once_over_the_qualified_row_set() {
 }
 
 #[test]
-fn empty_event_sets_still_execute_rule_actions_once() {
+fn empty_event_sets_preserve_rule_action_statement_semantics() {
     let engine = Engine::new();
     exec(
         &engine,
@@ -348,13 +348,25 @@ fn empty_event_sets_still_execute_rule_actions_once() {
         &engine,
         "CREATE RULE b_empty_rows AS ON UPDATE TO empty_rule_event DO ALSO INSERT INTO empty_rule_rows VALUES (NEW.id)",
     );
+    exec(
+        &engine,
+        "CREATE RULE c_empty_false AS ON UPDATE TO empty_rule_event WHERE false DO ALSO INSERT INTO empty_rule_constant VALUES ('false')",
+    );
+    exec(
+        &engine,
+        "CREATE RULE d_empty_true AS ON UPDATE TO empty_rule_event WHERE true DO ALSO INSERT INTO empty_rule_constant VALUES ('true')",
+    );
 
     let result = exec(&engine, "UPDATE empty_rule_event SET value = value + 1");
 
     assert_eq!(result.affected_rows, 0);
     assert_eq!(
-        exec(&engine, "SELECT value FROM empty_rule_constant").value_at(0, 0),
-        Some(&Value::Str("ran".into()))
+        strings(
+            &engine,
+            "SELECT value FROM empty_rule_constant ORDER BY value",
+            "value"
+        ),
+        ["ran", "true"]
     );
     assert!(exec(&engine, "SELECT id FROM empty_rule_rows")
         .rows

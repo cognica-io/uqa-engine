@@ -184,6 +184,7 @@ impl Engine {
     /// `PostgreSQL` conflict rules for `(schema, name, argument types)`
     /// collisions and persists the updated overload set.
     pub(crate) fn register_sql_function(&self, mut def: CreateFunction) -> Result<(), SQLError> {
+        self.prepare_explicit_transaction_writer()?;
         let requested_name = def.name.clone();
         def.name = self
             .try_relation_name_for_create(&requested_name)
@@ -282,6 +283,7 @@ impl Engine {
 
     /// Change mutable routine attributes without replacing its identity or compiled body.
     pub(crate) fn alter_sql_routine(&self, stmt: &AlterRoutineStmt) -> Result<(), SQLError> {
+        self.prepare_explicit_transaction_writer()?;
         let requested_types = resolve_alter_routine_identity_types(self, stmt)?;
         let current_user = self.current_user_name();
         let roles = self.durable.roles.read();
