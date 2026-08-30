@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
-- Implemented PostgreSQL 18 `MERGE` through automatically updatable nested single-source projection views, including target predicates, writable-column mapping, `INSERT`, `UPDATE`, and `DELETE`, source, target, `OLD`, and `NEW` `RETURNING`, post-trigger check options, base defaults and triggers, exact relation-kind and updatability errors, and a 512-case stateful PostgreSQL 18.4 oracle.
+- Implemented PostgreSQL 18 `MERGE` through automatically updatable nested single-source projection views and direct or nested `INSTEAD OF` view-trigger paths, including target predicates, writable-column mapping, `INSERT`, `UPDATE`, and `DELETE`, source, target, `OLD`, and `NEW` `RETURNING`, action-path selection, statement-trigger ordering, trigger suppression, repeated candidates, post-trigger check options, base defaults and triggers, exact relation-kind and updatability errors, and a 555-case stateful PostgreSQL 18.4 oracle.
 
 ## [0.1.12] - 2026-08-30
 

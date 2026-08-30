@@ -20,12 +20,13 @@ use super::{
     missing_document_error, partition_insert_target, persist_auto_increment_identity,
     prepare_auto_increment_identity, prepare_document_delete, prepare_insert_identity,
     prepare_partition_update_route, prepare_routed_document_rewrite,
-    refresh_insert_identity_after_trigger, returning_row_context, stage_prepared_document_delete,
-    stage_prepared_document_rewrite, update_lock_strength, validate_document_constraints,
-    validate_mutation_columns, validate_returning_alias_relations, validate_view_checks, BTreeMap,
-    BTreeSet, CteScope, DmlCommandMutationOverlay, DmlReturningShape, Document, Engine, MergePlan,
-    MergeWhenPlan, MutationAssignmentTarget, PhysicalMutationLockTarget, ProjectionPlan,
-    ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult, Value, ViewCheckContext,
+    refresh_insert_identity_after_trigger, returning_row_context, returning_value_context,
+    stage_prepared_document_delete, stage_prepared_document_rewrite, update_lock_strength,
+    validate_document_constraints, validate_mutation_columns, validate_returning_alias_relations,
+    validate_view_checks, BTreeMap, BTreeSet, CteScope, DmlCommandMutationOverlay,
+    DmlReturningShape, Document, Engine, MergePlan, MergeWhenPlan, MutationAssignmentTarget,
+    PhysicalMutationLockTarget, ProjectionPlan, ReturningRowImage, ReturningRowImages,
+    ReturningValueProjectionRow, SQLError, SQLParam, SQLResult, Value, ViewCheckContext,
 };
 
 const MERGE_PREPARED_UPDATE: i64 = 1;
@@ -70,8 +71,16 @@ pub(in crate::sql) fn run_merge_inner(
 ) -> Result<SQLResult, SQLError> {
     use uqa_sql::expr::truthy;
     if super::view_triggers::target_view_kind(engine, &stmt.target)?.is_some() {
-        let rewritten = super::view_automatic::rewrite_merge_to_base(engine, stmt, params)?;
-        return run_merge_inner(engine, &rewritten, params);
+        validate_view_merge_dispatch_contract(engine, stmt, params)?;
+        return match super::view_automatic::merge_view_target_path(engine, stmt)? {
+            super::view_automatic::MergeViewTargetPath::AutomaticRewrite => {
+                let rewritten = super::view_automatic::rewrite_merge_to_base(engine, stmt, params)?;
+                run_merge_inner(engine, &rewritten, params)
+            }
+            super::view_automatic::MergeViewTargetPath::ViewTriggers => {
+                super::view_triggers::run_view_merge_inner(engine, stmt, params)
+            }
+        };
     }
     let _transition_capture_scope = crate::sql::triggers::TransitionCaptureScope::enter();
     let target_table = stmt.target.clone();
@@ -1019,7 +1028,20 @@ pub(in crate::sql) fn run_merge_inner(
     Ok(SQLResult::from_affected(affected))
 }
 
-fn validate_merge_action_scopes(
+fn validate_view_merge_dispatch_contract(
+    engine: &Engine,
+    stmt: &MergePlan,
+    params: &[SQLParam],
+) -> Result<(), SQLError> {
+    let mut scope = CteScope::new_for_current_routine();
+    scope.scalar_subqueries.clone_from(&stmt.subqueries);
+    let source =
+        crate::sql::select::analyze_source_plan_schema(engine, &stmt.source, params, &scope, None)?;
+    super::view_automatic::validate_public_merge_targets(engine, stmt)?;
+    super::view_automatic::validate_public_merge_contract(engine, stmt, &source)
+}
+
+pub(in crate::sql) fn validate_merge_action_scopes(
     engine: &Engine,
     stmt: &MergePlan,
     target_schema: &uqa_execution::RowSchema,
@@ -1433,6 +1455,29 @@ pub(in crate::sql) struct MergeReturningRow<'a> {
     action: &'a str,
 }
 
+pub(in crate::sql) struct ViewMergeReturningRow<'a> {
+    pub table: &'a str,
+    pub target_qualifier: &'a str,
+    pub current: &'a [Value],
+    pub old: Option<&'a [Value]>,
+    pub new: Option<&'a [Value]>,
+    pub returning_aliases: &'a uqa_sql::ast::ReturningAliases,
+    pub source_row: &'a uqa_execution::OwnedPhysicalRow,
+    pub source_schema: &'a uqa_execution::RowSchema,
+    pub source_relation: uqa_sql::ast::InternalRelationId,
+    pub action: &'a str,
+}
+
+pub(in crate::sql) struct ViewMergeReturningResult<'a> {
+    pub stmt: &'a MergePlan,
+    pub source_schema: &'a uqa_execution::RowSchema,
+    pub source_relation: uqa_sql::ast::InternalRelationId,
+    pub params: &'a [SQLParam],
+    pub ctes: &'a CteScope,
+    pub rows: Vec<uqa_execution::OwnedPhysicalRow>,
+    pub affected: u64,
+}
+
 pub(in crate::sql) fn build_merge_returning_row(
     engine: &Engine,
     input: MergeReturningRow<'_>,
@@ -1458,13 +1503,29 @@ fn merge_returning_context(
     engine: &Engine,
     input: MergeReturningRow<'_>,
 ) -> Result<uqa_execution::OwnedPhysicalRow, SQLError> {
-    let mut row = returning_row_context(
+    let row = returning_row_context(
         engine,
         input.target_table,
         input.target_qual,
         input.images,
         input.returning_aliases,
     )?;
+    append_merge_returning_metadata(
+        row,
+        input.source_row,
+        input.source_schema,
+        input.source_relation,
+        input.action,
+    )
+}
+
+fn append_merge_returning_metadata(
+    mut row: uqa_execution::OwnedPhysicalRow,
+    source_row: &uqa_execution::OwnedPhysicalRow,
+    source_schema: &uqa_execution::RowSchema,
+    source_relation: uqa_sql::ast::InternalRelationId,
+    action: &str,
+) -> Result<uqa_execution::OwnedPhysicalRow, SQLError> {
     row.schema = uqa_execution::RowSchema::append_internal_typed(
         &row.schema,
         &[(
@@ -1472,38 +1533,113 @@ fn merge_returning_context(
             Some(uqa_sql::ast::ColumnType::Text),
         )],
     );
-    row.row = row.row.append_values(vec![Value::Str(input.action.into())]);
-    let aliases = input
-        .source_schema
+    row.row = row.row.append_values(vec![Value::Str(action.into())]);
+    let aliases = source_schema
         .columns()
         .iter()
         .enumerate()
         .map(|(position, _)| {
-            let slot = input
-                .source_row
-                .schema
-                .physical_slot(position)
-                .ok_or_else(|| {
-                    SQLError::Internal(format!(
-                        "MERGE RETURNING source lost physical column {position}"
-                    ))
-                })?;
+            let slot = source_row.schema.physical_slot(position).ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "MERGE RETURNING source lost physical column {position}"
+                ))
+            })?;
             Ok((
-                input.source_relation.column(position),
+                source_relation.column(position),
                 slot,
-                input.source_schema.column_type(position).cloned(),
+                source_schema.column_type(position).cloned(),
             ))
         })
         .collect::<Result<Vec<_>, SQLError>>()?;
-    let source_schema = uqa_execution::RowSchema::with_physical_internal_aliases(
-        &input.source_row.schema,
-        &aliases,
-    );
+    let source_schema =
+        uqa_execution::RowSchema::with_physical_internal_aliases(&source_row.schema, &aliases);
     row = uqa_execution::OwnedPhysicalRow::new(
         uqa_execution::RowSchema::join(&row.schema, &source_schema, std::iter::empty()),
-        uqa_execution::PhysicalRow::concat(&row.row, &input.source_row.row),
+        uqa_execution::PhysicalRow::concat(&row.row, &source_row.row),
     );
     Ok(row)
+}
+
+pub(in crate::sql) fn build_view_merge_returning_row(
+    engine: &Engine,
+    input: ViewMergeReturningRow<'_>,
+    returning: &[ProjectionPlan],
+    params: &[SQLParam],
+    ctes: &CteScope,
+) -> Result<uqa_execution::OwnedPhysicalRow, SQLError> {
+    let target = returning_value_context(
+        engine,
+        ReturningValueProjectionRow {
+            table: input.table,
+            target_qualifier: input.target_qualifier,
+            current: input.current,
+            old: input.old,
+            new: input.new,
+            aliases: input.returning_aliases,
+            context: None,
+        },
+    )?;
+    let row = append_merge_returning_metadata(
+        target,
+        input.source_row,
+        input.source_schema,
+        input.source_relation,
+        input.action,
+    )?;
+    let projections = expanded_merge_returning_projections(
+        engine,
+        input.table,
+        input.target_qualifier,
+        input.returning_aliases,
+        input.source_schema,
+        input.source_relation,
+        returning,
+    )?;
+    let snapshot_scope = ctes.returning_statement_snapshot_scope();
+    build_projection_physical_row_with_ctes(engine, &row, &projections, params, &snapshot_scope)
+}
+
+pub(in crate::sql) fn finish_view_merge_returning(
+    engine: &Engine,
+    input: ViewMergeReturningResult<'_>,
+) -> Result<SQLResult, SQLError> {
+    let ViewMergeReturningResult {
+        stmt,
+        source_schema,
+        source_relation,
+        params,
+        ctes,
+        rows,
+        affected,
+    } = input;
+    if stmt.returning.is_empty() {
+        return Ok(SQLResult::from_affected(affected));
+    }
+    let projections = expanded_merge_returning_projections(
+        engine,
+        &stmt.target,
+        &stmt.target_qualifier,
+        &stmt.returning_aliases,
+        source_schema,
+        source_relation,
+        &stmt.returning,
+    )?;
+    let returning_source_schema = merge_returning_source_schema(source_schema, source_relation);
+    dml_returning_result_with_projections(
+        engine,
+        DmlReturningShape {
+            table: &stmt.target,
+            target_qualifier: &stmt.target_qualifier,
+            aliases: &stmt.returning_aliases,
+            returning: &stmt.returning,
+            params,
+            ctes,
+            supplemental_schema: Some(&returning_source_schema),
+        },
+        &projections,
+        rows,
+        affected,
+    )
 }
 
 fn merge_returning_source_schema(

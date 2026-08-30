@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "dc6e53e622097d60c0e04baf2d01779a425277c0693288a3a714e094741987ef",
+  "fixture_sha256": "03e3f0134151cc392f9d042570a4ff6d3b6973b25da1446f96947a23b670c005",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -4493,6 +4493,366 @@
         [
           "1",
           "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_trigger_view_merge_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "prepare_trigger_view_merge_update",
+      "kind": "ok"
+    },
+    {
+      "name": "trigger_view_merge_update_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          "UPDATE",
+          "1",
+          "1",
+          "115",
+          "100",
+          "10",
+          "100",
+          "115",
+          "100"
+        ]
+      ]
+    },
+    {
+      "name": "trigger_view_merge_update_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1:115,2:20",
+          "BEFORE:UPDATE:-:-,INSTEAD OF:UPDATE:10:15,AFTER:UPDATE:-:-"
+        ]
+      ]
+    },
+    {
+      "name": "prepare_trigger_view_merge_insert",
+      "kind": "ok"
+    },
+    {
+      "name": "trigger_view_merge_insert_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          "INSERT",
+          "3",
+          "3",
+          "31",
+          null,
+          null,
+          null,
+          "31",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "trigger_view_merge_insert_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1:115,2:20,3:31",
+          "BEFORE:INSERT:-:-,INSTEAD OF:INSERT:-:30,AFTER:INSERT:-:-"
+        ]
+      ]
+    },
+    {
+      "name": "prepare_trigger_view_merge_delete",
+      "kind": "ok"
+    },
+    {
+      "name": "trigger_view_merge_delete_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          "DELETE",
+          null,
+          "2",
+          "20",
+          "200",
+          "20",
+          "200",
+          null,
+          null
+        ]
+      ]
+    },
+    {
+      "name": "trigger_view_merge_delete_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1:115,3:31",
+          "BEFORE:DELETE:-:-,INSTEAD OF:DELETE:20:-,AFTER:DELETE:-:-"
+        ]
+      ]
+    },
+    {
+      "name": "prepare_trigger_view_merge_suppression",
+      "kind": "ok"
+    },
+    {
+      "name": "trigger_view_merge_null_results_are_suppressed",
+      "kind": "rows",
+      "rows": []
+    },
+    {
+      "name": "trigger_view_merge_suppression_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1:115,3:31",
+          "BEFORE:INSERT,BEFORE:UPDATE,AFTER:UPDATE,AFTER:INSERT",
+          "1",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "prepare_trigger_view_merge_repeated_candidates",
+      "kind": "ok"
+    },
+    {
+      "name": "trigger_view_merge_repeated_candidates",
+      "kind": "rows",
+      "rows": [
+        [
+          "UPDATE",
+          "1",
+          "21",
+          "115",
+          "121"
+        ],
+        [
+          "UPDATE",
+          "2",
+          "22",
+          "115",
+          "122"
+        ]
+      ]
+    },
+    {
+      "name": "trigger_view_merge_repeated_candidate_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "122",
+          "115:21,115:22",
+          "BEFORE:UPDATE,AFTER:UPDATE"
+        ]
+      ]
+    },
+    {
+      "name": "create_view_merge_path_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "view_merge_public_column_error_precedes_missing_trigger",
+      "kind": "error",
+      "sqlstate": "42703"
+    },
+    {
+      "name": "view_merge_cannot_mix_automatic_and_trigger_actions",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "view_merge_uses_automatic_path_for_unrelated_trigger",
+      "kind": "rows",
+      "rows": [
+        [
+          "UPDATE",
+          "1",
+          "10",
+          "20"
+        ]
+      ]
+    },
+    {
+      "name": "view_merge_automatic_path_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "20"
+        ]
+      ]
+    },
+    {
+      "name": "view_merge_missing_action_trigger_rejected",
+      "kind": "error",
+      "sqlstate": "55000"
+    },
+    {
+      "name": "view_merge_do_nothing_needs_no_trigger",
+      "kind": "rows",
+      "rows": []
+    },
+    {
+      "name": "prepare_trigger_view_merge_replica_mode",
+      "kind": "ok"
+    },
+    {
+      "name": "trigger_view_merge_replica_mode_suppresses_defined_path",
+      "kind": "ok"
+    },
+    {
+      "name": "trigger_view_merge_replica_mode_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "122",
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_trigger_view_merge_rule_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "trigger_view_merge_user_rule_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "create_nested_trigger_view_merge_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "nested_trigger_view_merge_update_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          "UPDATE",
+          "1",
+          "1",
+          "10",
+          "30"
+        ]
+      ]
+    },
+    {
+      "name": "nested_trigger_view_merge_update_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "30"
+        ],
+        [
+          "2",
+          "150"
+        ]
+      ]
+    },
+    {
+      "name": "prepare_nested_trigger_view_merge_check_failure",
+      "kind": "ok"
+    },
+    {
+      "name": "nested_trigger_view_merge_checks_final_trigger_row",
+      "kind": "error",
+      "sqlstate": "44000"
+    },
+    {
+      "name": "nested_trigger_view_merge_check_failure_is_atomic",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "30"
+        ],
+        [
+          "2",
+          "150"
+        ]
+      ]
+    },
+    {
+      "name": "prepare_nested_trigger_view_merge_delete",
+      "kind": "ok"
+    },
+    {
+      "name": "nested_trigger_view_merge_delete_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          "DELETE",
+          null,
+          "1",
+          "30",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "nested_trigger_view_merge_delete_preserves_hidden_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "2",
+          "150"
+        ]
+      ]
+    },
+    {
+      "name": "create_trigger_view_merge_snapshot_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "trigger_view_merge_uses_pre_statement_snapshot",
+      "kind": "rows",
+      "rows": []
+    },
+    {
+      "name": "trigger_view_merge_pre_statement_snapshot_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1:target",
+          "1:source"
+        ]
+      ]
+    },
+    {
+      "name": "create_trigger_view_merge_action_snapshot_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "trigger_view_merge_action_subqueries_use_statement_snapshot",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "10",
+          "21"
+        ],
+        [
+          "2",
+          "20",
+          "21"
+        ]
+      ]
+    },
+    {
+      "name": "trigger_view_merge_action_snapshot_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "21"
+        ],
+        [
+          "2",
+          "21"
         ]
       ]
     }

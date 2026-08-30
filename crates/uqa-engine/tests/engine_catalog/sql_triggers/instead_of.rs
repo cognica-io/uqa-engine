@@ -207,6 +207,403 @@ fn instead_of_row_chain_suppression_returning_and_statement_order_match_postgres
 }
 
 #[test]
+fn instead_of_view_merge_actions_and_statement_order_match_postgresql() {
+    let engine = Engine::new();
+    install_fixture(&engine);
+    exec(
+        &engine,
+        "CREATE TABLE merge_source (id INTEGER, value TEXT);
+         INSERT INTO merge_source VALUES (1, 'changed'), (3, 'three')",
+    );
+    let merged = exec(
+        &engine,
+        "MERGE INTO item_view AS target
+         USING merge_source AS source ON target.id = source.id
+         WHEN MATCHED THEN UPDATE SET value = source.value
+         WHEN NOT MATCHED THEN INSERT (id, value) VALUES (source.id, source.value)
+         WHEN NOT MATCHED BY SOURCE THEN DELETE
+         RETURNING merge_action() AS action, source.id AS source_id,
+           target.id, target.value, old.value AS old_value, new.value AS new_value",
+    );
+    assert_eq!(merged.affected_rows, 3);
+    let update = merged
+        .rows
+        .iter()
+        .find(|row| row["action"] == Value::Str("UPDATE".into()))
+        .unwrap();
+    assert_eq!(update["old_value"], Value::Str("one".into()));
+    assert_eq!(update["new_value"], Value::Str("changed:a:returned".into()));
+    let insert = merged
+        .rows
+        .iter()
+        .find(|row| row["action"] == Value::Str("INSERT".into()))
+        .unwrap();
+    assert_eq!(insert["old_value"], Value::Null);
+    assert_eq!(insert["new_value"], Value::Str("three:a:returned".into()));
+    let delete = merged
+        .rows
+        .iter()
+        .find(|row| row["action"] == Value::Str("DELETE".into()))
+        .unwrap();
+    assert_eq!(delete["source_id"], Value::Null);
+    assert_eq!(delete["value"], Value::Str("two".into()));
+    assert_eq!(
+        strings(
+            &engine,
+            "SELECT entry FROM view_trigger_log
+             WHERE entry LIKE 'BEFORE:%' OR entry LIKE 'AFTER:%'
+             ORDER BY sequence",
+            "entry",
+        ),
+        vec![
+            "BEFORE:STATEMENT:INSERT",
+            "BEFORE:STATEMENT:UPDATE",
+            "BEFORE:STATEMENT:DELETE",
+            "AFTER:STATEMENT:DELETE",
+            "AFTER:STATEMENT:UPDATE",
+            "AFTER:STATEMENT:INSERT",
+        ]
+    );
+    assert_eq!(
+        strings(
+            &engine,
+            "SELECT id::text || ':' || value AS item FROM view_base_items ORDER BY id",
+            "item",
+        ),
+        vec!["1:changed:a:stored", "3:three:a:stored"]
+    );
+}
+
+#[test]
+fn instead_of_view_merge_allows_repeated_candidates_and_suppresses_null_results() {
+    let engine = Engine::new();
+    install_fixture(&engine);
+    exec(
+        &engine,
+        "CREATE TABLE merge_source (id INTEGER, value TEXT);
+         INSERT INTO merge_source VALUES (1, 'first'), (1, 'second')",
+    );
+    let repeated = exec(
+        &engine,
+        "MERGE INTO item_view AS target
+         USING merge_source AS source ON target.id = source.id
+         WHEN MATCHED THEN UPDATE SET value = source.value
+         RETURNING merge_action() AS action, source.value AS source_value,
+           old.value AS old_value, new.value AS new_value",
+    );
+    assert_eq!(repeated.affected_rows, 2);
+    assert_eq!(repeated.rows.len(), 2);
+    assert!(repeated
+        .rows
+        .iter()
+        .all(|row| row["old_value"] == Value::Str("one".into())));
+    assert_eq!(
+        repeated.rows[0]["new_value"],
+        Value::Str("first:a:returned".into())
+    );
+    assert_eq!(
+        repeated.rows[1]["new_value"],
+        Value::Str("second:a:returned".into())
+    );
+    assert_eq!(
+        strings(
+            &engine,
+            "SELECT value FROM view_base_items WHERE id = 1",
+            "value"
+        ),
+        vec!["second:a:stored"]
+    );
+    exec(
+        &engine,
+        "DELETE FROM view_trigger_log;
+         TRUNCATE merge_source;
+         INSERT INTO merge_source VALUES (4, 'suppress')",
+    );
+    let suppressed = exec(
+        &engine,
+        "MERGE INTO item_view AS target
+         USING merge_source AS source ON target.id = source.id
+         WHEN NOT MATCHED THEN INSERT (id, value) VALUES (source.id, source.value)
+         RETURNING merge_action(), source.id, target.id",
+    );
+    assert_eq!(suppressed.affected_rows, 0);
+    assert!(suppressed.rows.is_empty());
+    assert_eq!(
+        strings(
+            &engine,
+            "SELECT entry FROM view_trigger_log ORDER BY sequence",
+            "entry"
+        ),
+        vec![
+            "BEFORE:STATEMENT:INSERT",
+            "a:INSERT:-:4",
+            "AFTER:STATEMENT:INSERT",
+        ]
+    );
+}
+
+#[test]
+fn view_merge_selects_one_complete_trigger_or_automatic_path() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE path_base (id INTEGER PRIMARY KEY, value INTEGER);
+         INSERT INTO path_base VALUES (1, 10);
+         CREATE TABLE path_source (id INTEGER, value INTEGER);
+         INSERT INTO path_source VALUES (1, 20), (2, 30);
+         CREATE VIEW path_view AS SELECT id, value FROM path_base;
+         CREATE FUNCTION path_insert() RETURNS trigger LANGUAGE plpgsql AS $$
+         BEGIN INSERT INTO path_base VALUES (NEW.id, NEW.value + 1); RETURN NEW; END $$;
+         CREATE TRIGGER path_insert INSTEAD OF INSERT ON path_view
+           FOR EACH ROW EXECUTE FUNCTION path_insert()",
+    );
+    let mixed = engine
+        .sql(
+            "MERGE INTO path_view AS target USING path_source AS source
+             ON target.id = source.id
+             WHEN MATCHED THEN UPDATE SET value = source.value
+             WHEN NOT MATCHED THEN INSERT (id, value) VALUES (source.id, source.value)",
+            &[],
+        )
+        .expect_err("one MERGE cannot mix automatic and trigger action paths");
+    assert_eq!(mixed.sqlstate(), Some("0A000"));
+    assert_eq!(
+        exec(
+            &engine,
+            "MERGE INTO path_view AS target USING path_source AS source
+             ON target.id = source.id
+             WHEN MATCHED THEN UPDATE SET value = source.value"
+        )
+        .affected_rows,
+        1
+    );
+    assert_eq!(
+        exec(&engine, "SELECT value FROM path_base WHERE id = 1").rows[0]["value"],
+        Value::Int(20)
+    );
+    exec(
+        &engine,
+        "CREATE VIEW distinct_path AS SELECT DISTINCT id, value FROM path_base;
+         CREATE TRIGGER distinct_update INSTEAD OF UPDATE ON distinct_path
+           FOR EACH ROW EXECUTE FUNCTION path_insert()",
+    );
+    let unknown_column = engine
+        .sql(
+            "MERGE INTO distinct_path AS target USING path_source AS source
+             ON target.id = source.id
+             WHEN NOT MATCHED THEN INSERT (missing) VALUES (source.value)",
+            &[],
+        )
+        .expect_err("the public view row type is validated before trigger capability");
+    assert_eq!(unknown_column.sqlstate(), Some("42703"));
+    let missing = engine
+        .sql(
+            "MERGE INTO distinct_path AS target USING path_source AS source
+             ON target.id = source.id
+             WHEN NOT MATCHED THEN INSERT (id, value) VALUES (source.id, source.value)",
+            &[],
+        )
+        .expect_err("a nonautomatic action needs its own INSTEAD OF trigger");
+    assert_eq!(missing.sqlstate(), Some("55000"));
+    exec(
+        &engine,
+        "CREATE VIEW read_only_path AS SELECT DISTINCT id, value FROM path_base",
+    );
+    assert_eq!(
+        exec(
+            &engine,
+            "MERGE INTO read_only_path AS target USING path_source AS source
+             ON target.id = source.id WHEN MATCHED THEN DO NOTHING"
+        )
+        .affected_rows,
+        0
+    );
+}
+
+#[test]
+fn view_merge_trigger_definitions_route_even_when_replica_mode_suppresses_them() {
+    let engine = Engine::new();
+    install_fixture(&engine);
+    exec(
+        &engine,
+        "CREATE TABLE merge_source (id INTEGER, value TEXT);
+         INSERT INTO merge_source VALUES (1, 'changed');
+         DELETE FROM view_trigger_log;
+         SET session_replication_role = replica",
+    );
+    let result = exec(
+        &engine,
+        "MERGE INTO item_view AS target USING merge_source AS source
+         ON target.id = source.id
+         WHEN MATCHED THEN UPDATE SET value = source.value
+         RETURNING merge_action(), old.value, new.value",
+    );
+    assert_eq!(result.affected_rows, 0);
+    assert!(result.rows.is_empty());
+    assert_eq!(
+        strings(
+            &engine,
+            "SELECT value FROM view_base_items WHERE id = 1",
+            "value"
+        ),
+        vec!["one"]
+    );
+    assert!(exec(&engine, "SELECT entry FROM view_trigger_log")
+        .rows
+        .is_empty());
+    exec(&engine, "RESET session_replication_role");
+}
+
+#[test]
+fn nested_automatic_view_merge_uses_inner_triggers_and_final_check_options() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE nested_merge_base (id INTEGER PRIMARY KEY, value INTEGER);
+         INSERT INTO nested_merge_base VALUES (1, 10), (2, 150);
+         CREATE TABLE nested_merge_source (id INTEGER, value INTEGER);
+         INSERT INTO nested_merge_source VALUES (1, 20);
+         CREATE VIEW nested_merge_inner AS SELECT id, value FROM nested_merge_base;
+         CREATE FUNCTION nested_merge_apply() RETURNS trigger LANGUAGE plpgsql AS $$
+         BEGIN
+           IF TG_OP = 'UPDATE' THEN
+             NEW.value := NEW.value + 10;
+             UPDATE nested_merge_base SET value = NEW.value WHERE id = OLD.id;
+             RETURN NEW;
+           ELSIF TG_OP = 'INSERT' THEN
+             INSERT INTO nested_merge_base VALUES (NEW.id, NEW.value);
+             RETURN NEW;
+           END IF;
+           DELETE FROM nested_merge_base WHERE id = OLD.id;
+           RETURN OLD;
+         END $$;
+         CREATE TRIGGER nested_merge_apply INSTEAD OF INSERT OR UPDATE OR DELETE
+           ON nested_merge_inner FOR EACH ROW EXECUTE FUNCTION nested_merge_apply();
+         CREATE VIEW nested_merge_outer (item_id, amount) AS
+           SELECT id, value FROM nested_merge_inner WHERE value < 100
+           WITH CASCADED CHECK OPTION",
+    );
+    let updated = exec(
+        &engine,
+        "MERGE INTO nested_merge_outer AS target USING nested_merge_source AS source
+         ON target.item_id = source.id
+         WHEN MATCHED THEN UPDATE SET amount = source.value
+         RETURNING merge_action(), source.id, target.item_id,
+           old.amount AS old_amount, new.amount AS new_amount",
+    );
+    assert_eq!(updated.affected_rows, 1);
+    assert_eq!(updated.rows[0]["old_amount"], Value::Int(10));
+    assert_eq!(updated.rows[0]["new_amount"], Value::Int(30));
+    exec(
+        &engine,
+        "UPDATE nested_merge_source SET value = 95 WHERE id = 1",
+    );
+    let check = engine
+        .sql(
+            "MERGE INTO nested_merge_outer AS target USING nested_merge_source AS source
+             ON target.item_id = source.id
+             WHEN MATCHED THEN UPDATE SET amount = source.value",
+            &[],
+        )
+        .expect_err("the outer check option sees the inner trigger's returned NEW row");
+    assert_eq!(check.sqlstate(), Some("44000"));
+    let state = exec(
+        &engine,
+        "SELECT id, value FROM nested_merge_base ORDER BY id",
+    );
+    assert_eq!(state.rows[0]["value"], Value::Int(30));
+    assert_eq!(state.rows[1]["value"], Value::Int(150));
+}
+
+#[test]
+fn view_merge_keeps_source_and_target_on_the_pre_statement_trigger_snapshot() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE snapshot_merge_base (id INTEGER PRIMARY KEY, value TEXT);
+         CREATE TABLE snapshot_merge_source (id INTEGER PRIMARY KEY, value TEXT);
+         CREATE VIEW snapshot_merge_view AS SELECT id, value FROM snapshot_merge_base;
+         CREATE FUNCTION seed_snapshot_merge() RETURNS trigger LANGUAGE plpgsql AS $$
+         BEGIN
+           INSERT INTO snapshot_merge_base VALUES (1, 'target');
+           INSERT INTO snapshot_merge_source VALUES (1, 'source');
+           RETURN NULL;
+         END $$;
+         CREATE FUNCTION apply_snapshot_merge() RETURNS trigger LANGUAGE plpgsql AS $$
+         BEGIN UPDATE snapshot_merge_base SET value = NEW.value WHERE id = OLD.id; RETURN NEW; END $$;
+         CREATE TRIGGER seed_snapshot_merge BEFORE UPDATE ON snapshot_merge_view
+           FOR EACH STATEMENT EXECUTE FUNCTION seed_snapshot_merge();
+         CREATE TRIGGER apply_snapshot_merge INSTEAD OF UPDATE ON snapshot_merge_view
+           FOR EACH ROW EXECUTE FUNCTION apply_snapshot_merge()",
+    );
+    let merged = exec(
+        &engine,
+        "MERGE INTO snapshot_merge_view AS target USING snapshot_merge_source AS source
+         ON target.id = source.id
+         WHEN MATCHED THEN UPDATE SET value = source.value
+         RETURNING merge_action(), target.id, target.value",
+    );
+    assert_eq!(merged.affected_rows, 0);
+    assert!(merged.rows.is_empty());
+    assert_eq!(
+        strings(
+            &engine,
+            "SELECT value FROM snapshot_merge_base ORDER BY id",
+            "value"
+        ),
+        vec!["target"]
+    );
+}
+
+#[test]
+fn view_merge_action_subqueries_keep_the_statement_snapshot_across_row_triggers() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE action_snapshot_base (id INTEGER PRIMARY KEY, value INTEGER);
+         INSERT INTO action_snapshot_base VALUES (1, 10), (2, 20);
+         CREATE TABLE action_snapshot_source (id INTEGER);
+         INSERT INTO action_snapshot_source VALUES (1), (2);
+         CREATE VIEW action_snapshot_view AS
+           SELECT DISTINCT id, value FROM action_snapshot_base;
+         CREATE FUNCTION apply_action_snapshot() RETURNS trigger LANGUAGE plpgsql AS $$
+         BEGIN
+           UPDATE action_snapshot_base SET value = NEW.value WHERE id = OLD.id;
+           RETURN NEW;
+         END $$;
+         CREATE TRIGGER apply_action_snapshot INSTEAD OF UPDATE ON action_snapshot_view
+           FOR EACH ROW EXECUTE FUNCTION apply_action_snapshot()",
+    );
+    let merged = exec(
+        &engine,
+        "MERGE INTO action_snapshot_view AS target USING action_snapshot_source AS source
+         ON target.id = source.id
+         WHEN MATCHED AND (SELECT max(value) FROM action_snapshot_base) = 20
+           THEN UPDATE SET value = (SELECT max(value) + 1 FROM action_snapshot_base)
+         RETURNING target.id, old.value AS old_value, new.value AS new_value",
+    );
+    assert_eq!(merged.affected_rows, 2);
+    assert_eq!(merged.rows.len(), 2);
+    assert_eq!(merged.rows[0]["old_value"], Value::Int(10));
+    assert_eq!(merged.rows[1]["old_value"], Value::Int(20));
+    assert!(merged
+        .rows
+        .iter()
+        .all(|row| row["new_value"] == Value::Int(21)));
+    assert_eq!(
+        exec(
+            &engine,
+            "SELECT value FROM action_snapshot_base ORDER BY id"
+        )
+        .rows
+        .iter()
+        .map(|row| row["value"].clone())
+        .collect::<Vec<_>>(),
+        vec![Value::Int(21), Value::Int(21)]
+    );
+}
+
+#[test]
 fn instead_of_update_from_and_delete_using_preserve_source_context() {
     let engine = Engine::new();
     install_fixture(&engine);

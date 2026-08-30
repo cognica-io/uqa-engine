@@ -621,7 +621,7 @@ fn validate_public_insert_contract(engine: &Engine, plan: &InsertPlan) -> Result
     Ok(())
 }
 
-fn validate_public_merge_contract(
+pub(in crate::sql) fn validate_public_merge_contract(
     engine: &Engine,
     plan: &MergePlan,
     source: &RowSchema,
@@ -717,7 +717,10 @@ fn validate_merge_targets(layer: &AutomaticViewLayer, plan: &MergePlan) -> Resul
     Ok(())
 }
 
-fn validate_public_merge_targets(engine: &Engine, plan: &MergePlan) -> Result<(), SQLError> {
+pub(in crate::sql) fn validate_public_merge_targets(
+    engine: &Engine,
+    plan: &MergePlan,
+) -> Result<(), SQLError> {
     for clause in &plan.when_clauses {
         match clause {
             MergeWhenPlan::UpdateMatched { assignments, .. }
@@ -810,23 +813,74 @@ fn merge_uses_event(plan: &MergePlan, event: TriggerEvent) -> bool {
     })
 }
 
-fn validate_automatic_merge_trigger_path(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum MergeViewTargetPath {
+    AutomaticRewrite,
+    ViewTriggers,
+}
+
+pub(super) fn merge_view_target_path(
     engine: &Engine,
-    view: &str,
     plan: &MergePlan,
-) -> Result<(), SQLError> {
-    for event in [
-        TriggerEvent::Insert,
-        TriggerEvent::Update,
-        TriggerEvent::Delete,
-    ] {
-        if merge_uses_event(plan, event) && instead_of_trigger_definition(engine, view, event)? {
-            return Err(SQLError::Unsupported(
-                "MERGE through INSTEAD OF view triggers is not implemented".into(),
-            ));
-        }
+) -> Result<MergeViewTargetPath, SQLError> {
+    let canonical = engine
+        .try_resolve_view_name(&plan.target)
+        .map_err(|error| SQLError::Internal(format!("resolve MERGE view: {error}")))?
+        .ok_or_else(|| SQLError::UnknownTable(plan.target.clone()))?;
+    let definition = engine
+        .view_definition(&canonical)?
+        .ok_or_else(|| SQLError::UnknownTable(plan.target.clone()))?;
+    if definition.kind == crate::StoredViewKind::Materialized {
+        return Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: format!(
+                "cannot execute MERGE on relation \"{}\"",
+                display_relation(&canonical)
+            ),
+        });
     }
-    Ok(())
+    validate_merge_rule_free(engine, &canonical)?;
+    let automatic = view_updatability(engine, &canonical)?.automatic;
+    let insert_trigger = instead_of_trigger_definition(engine, &canonical, TriggerEvent::Insert)?;
+    let update_trigger = instead_of_trigger_definition(engine, &canonical, TriggerEvent::Update)?;
+    let delete_trigger = instead_of_trigger_definition(engine, &canonical, TriggerEvent::Delete)?;
+    let supported = ViewMutationCapabilities {
+        insertable: automatic.insertable || insert_trigger,
+        updatable: automatic.updatable || update_trigger,
+        deletable: automatic.deletable || delete_trigger,
+    };
+    if let Some(error) = merge_action_capability_error(&canonical, &plan.when_clauses, supported) {
+        return Err(error);
+    }
+    let mut uses_automatic = false;
+    let mut uses_trigger = false;
+    let mut has_action = false;
+    for (event, trigger) in [
+        (TriggerEvent::Insert, insert_trigger),
+        (TriggerEvent::Update, update_trigger),
+        (TriggerEvent::Delete, delete_trigger),
+    ] {
+        if !merge_uses_event(plan, event) {
+            continue;
+        }
+        has_action = true;
+        uses_trigger |= trigger;
+        uses_automatic |= !trigger;
+    }
+    if uses_trigger && uses_automatic {
+        return Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: format!(
+                "cannot merge into view \"{}\"",
+                display_relation(&canonical)
+            ),
+        });
+    }
+    if uses_trigger || !has_action {
+        Ok(MergeViewTargetPath::ViewTriggers)
+    } else {
+        Ok(MergeViewTargetPath::AutomaticRewrite)
+    }
 }
 
 fn validate_public_view_targets<'a>(
@@ -2844,7 +2898,11 @@ pub(super) fn rewrite_merge_to_base(
     )?;
     validate_public_merge_targets(engine, statement)?;
     validate_public_merge_contract(engine, statement, &source_schema)?;
-    validate_merge_rule_free(engine, &statement.target)?;
+    if merge_view_target_path(engine, statement)? != MergeViewTargetPath::AutomaticRewrite {
+        return Err(SQLError::Internal(
+            "automatic MERGE rewrite selected for a view-trigger target".into(),
+        ));
+    }
     let Some(initial_layer) = automatic_view_layer(engine, &statement.target)? else {
         return Err(merge_action_capability_error(
             &statement.target,
@@ -2855,7 +2913,6 @@ pub(super) fn rewrite_merge_to_base(
     };
     validate_merge_targets(&initial_layer, statement)?;
     validate_merge_expressions(engine, statement, &initial_layer, &source_schema, params)?;
-    validate_automatic_merge_trigger_path(engine, &initial_layer.canonical_name, statement)?;
     if let Some(error) = merge_action_capability_error(
         &statement.target,
         &statement.when_clauses,
@@ -2869,6 +2926,11 @@ pub(super) fn rewrite_merge_to_base(
     let mut visited = BTreeSet::new();
     let mut source_star_boundaries = Vec::new();
     loop {
+        if !visited.is_empty()
+            && merge_view_target_path(engine, &plan)? == MergeViewTargetPath::ViewTriggers
+        {
+            break;
+        }
         let Some(layer) = automatic_view_layer(engine, &plan.target)? else {
             return Err(merge_action_capability_error(
                 &plan.target,
@@ -2883,8 +2945,6 @@ pub(super) fn rewrite_merge_to_base(
                 layer.canonical_name
             )));
         }
-        validate_merge_rule_free(engine, &layer.canonical_name)?;
-        validate_automatic_merge_trigger_path(engine, &layer.canonical_name, &plan)?;
         validate_merge_targets(&layer, &plan)?;
 
         let matched_subqueries = merge_matched_subquery_ids(&plan);

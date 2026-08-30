@@ -14,6 +14,11 @@ use super::{
     SQLResult, ScalarExpr, UpdatePlan, Value,
 };
 
+#[path = "view_triggers/merge.rs"]
+mod merge;
+
+pub(super) use merge::run_view_merge_inner;
+
 struct ViewDmlTarget {
     canonical_name: String,
     definition: crate::StoredView,

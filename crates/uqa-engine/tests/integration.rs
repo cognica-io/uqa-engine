@@ -4,6 +4,9 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+// The required single libtest harness has more than 2,048 generated test descriptors.
+#![allow(clippy::large_stack_arrays)]
+
 //! Single integration-test executable for every engine test domain.
 
 #[path = "engine_catalog.rs"]

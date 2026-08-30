@@ -2094,3 +2094,175 @@ MERGE INTO automatic_merge_only_view AS target USING automatic_merge_only_source
 -- @case automatic_merge_only_view_state rows
 SELECT (SELECT count(*) FROM automatic_merge_only_child) AS child_count, (SELECT count(*) FROM automatic_merge_only_view) AS view_count;
 -- @end
+
+-- @case create_trigger_view_merge_fixture ok
+CREATE TABLE trigger_view_merge_base (id integer PRIMARY KEY, value integer); INSERT INTO trigger_view_merge_base VALUES (1, 10), (2, 20); CREATE TABLE trigger_view_merge_source (ordinal integer, id integer, value integer); CREATE TABLE trigger_view_merge_log (seq bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, timing text, event text, old_id integer, new_id integer, old_value integer, new_value integer); CREATE VIEW trigger_view_merge_target AS SELECT DISTINCT id, value, value * 10 AS computed FROM trigger_view_merge_base; CREATE FUNCTION trigger_view_merge_row() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO trigger_view_merge_log(timing, event, old_id, new_id, old_value, new_value) VALUES (TG_WHEN, TG_OP, OLD.id, NEW.id, OLD.value, NEW.value); IF TG_OP = 'INSERT' THEN IF NEW.id = 9 THEN RETURN NULL; END IF; NEW.value := NEW.value + 1; INSERT INTO trigger_view_merge_base VALUES (NEW.id, NEW.value); RETURN NEW; ELSIF TG_OP = 'UPDATE' THEN IF NEW.value = 99 THEN RETURN NULL; END IF; NEW.value := NEW.value + 100; UPDATE trigger_view_merge_base SET value = NEW.value WHERE id = OLD.id; RETURN NEW; END IF; DELETE FROM trigger_view_merge_base WHERE id = OLD.id; RETURN OLD; END $$; CREATE FUNCTION trigger_view_merge_statement() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO trigger_view_merge_log(timing, event) VALUES (TG_WHEN, TG_OP); RETURN NULL; END $$; CREATE TRIGGER trigger_view_merge_insert INSTEAD OF INSERT ON trigger_view_merge_target FOR EACH ROW EXECUTE FUNCTION trigger_view_merge_row(); CREATE TRIGGER trigger_view_merge_update INSTEAD OF UPDATE ON trigger_view_merge_target FOR EACH ROW EXECUTE FUNCTION trigger_view_merge_row(); CREATE TRIGGER trigger_view_merge_delete INSTEAD OF DELETE ON trigger_view_merge_target FOR EACH ROW EXECUTE FUNCTION trigger_view_merge_row(); CREATE TRIGGER trigger_view_merge_before_insert BEFORE INSERT ON trigger_view_merge_target FOR EACH STATEMENT EXECUTE FUNCTION trigger_view_merge_statement(); CREATE TRIGGER trigger_view_merge_before_update BEFORE UPDATE ON trigger_view_merge_target FOR EACH STATEMENT EXECUTE FUNCTION trigger_view_merge_statement(); CREATE TRIGGER trigger_view_merge_before_delete BEFORE DELETE ON trigger_view_merge_target FOR EACH STATEMENT EXECUTE FUNCTION trigger_view_merge_statement(); CREATE TRIGGER trigger_view_merge_after_insert AFTER INSERT ON trigger_view_merge_target FOR EACH STATEMENT EXECUTE FUNCTION trigger_view_merge_statement(); CREATE TRIGGER trigger_view_merge_after_update AFTER UPDATE ON trigger_view_merge_target FOR EACH STATEMENT EXECUTE FUNCTION trigger_view_merge_statement(); CREATE TRIGGER trigger_view_merge_after_delete AFTER DELETE ON trigger_view_merge_target FOR EACH STATEMENT EXECUTE FUNCTION trigger_view_merge_statement();
+-- @end
+
+-- @case prepare_trigger_view_merge_update ok
+TRUNCATE trigger_view_merge_source, trigger_view_merge_log RESTART IDENTITY; INSERT INTO trigger_view_merge_source VALUES (1, 1, 15);
+-- @end
+
+-- @case trigger_view_merge_update_returning rows
+MERGE INTO trigger_view_merge_target AS target USING trigger_view_merge_source AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET value = source.value RETURNING merge_action(), source.id, target.id, target.value, target.computed, old.value, old.computed, new.value, new.computed;
+-- @end
+
+-- @case trigger_view_merge_update_state rows
+SELECT (SELECT string_agg(id::text || ':' || value::text, ',' ORDER BY id) FROM trigger_view_merge_base) AS base_rows, string_agg(timing || ':' || event || ':' || coalesce(old_value::text, '-') || ':' || coalesce(new_value::text, '-'), ',' ORDER BY seq) AS events FROM trigger_view_merge_log;
+-- @end
+
+-- @case prepare_trigger_view_merge_insert ok
+TRUNCATE trigger_view_merge_source, trigger_view_merge_log RESTART IDENTITY; INSERT INTO trigger_view_merge_source VALUES (1, 3, 30);
+-- @end
+
+-- @case trigger_view_merge_insert_returning rows
+MERGE INTO trigger_view_merge_target AS target USING trigger_view_merge_source AS source ON target.id = source.id WHEN NOT MATCHED THEN INSERT (id, value) VALUES (source.id, source.value) RETURNING merge_action(), source.id, target.id, target.value, target.computed, old.value, old.computed, new.value, new.computed;
+-- @end
+
+-- @case trigger_view_merge_insert_state rows
+SELECT (SELECT string_agg(id::text || ':' || value::text, ',' ORDER BY id) FROM trigger_view_merge_base) AS base_rows, string_agg(timing || ':' || event || ':' || coalesce(old_value::text, '-') || ':' || coalesce(new_value::text, '-'), ',' ORDER BY seq) AS events FROM trigger_view_merge_log;
+-- @end
+
+-- @case prepare_trigger_view_merge_delete ok
+TRUNCATE trigger_view_merge_source, trigger_view_merge_log RESTART IDENTITY; INSERT INTO trigger_view_merge_source VALUES (1, 1, 115), (2, 3, 31);
+-- @end
+
+-- @case trigger_view_merge_delete_returning rows
+MERGE INTO trigger_view_merge_target AS target USING trigger_view_merge_source AS source ON target.id = source.id WHEN NOT MATCHED BY SOURCE THEN DELETE RETURNING merge_action(), source.id, target.id, target.value, target.computed, old.value, old.computed, new.value, new.computed;
+-- @end
+
+-- @case trigger_view_merge_delete_state rows
+SELECT (SELECT string_agg(id::text || ':' || value::text, ',' ORDER BY id) FROM trigger_view_merge_base) AS base_rows, string_agg(timing || ':' || event || ':' || coalesce(old_value::text, '-') || ':' || coalesce(new_value::text, '-'), ',' ORDER BY seq) AS events FROM trigger_view_merge_log;
+-- @end
+
+-- @case prepare_trigger_view_merge_suppression ok
+TRUNCATE trigger_view_merge_source, trigger_view_merge_log RESTART IDENTITY; INSERT INTO trigger_view_merge_source VALUES (1, 1, 99), (2, 9, 90);
+-- @end
+
+-- @case trigger_view_merge_null_results_are_suppressed rows
+MERGE INTO trigger_view_merge_target AS target USING (SELECT ordinal, id, value FROM trigger_view_merge_source ORDER BY ordinal) AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET value = source.value WHEN NOT MATCHED THEN INSERT (id, value) VALUES (source.id, source.value) RETURNING merge_action(), source.id, target.id, old.value, new.value;
+-- @end
+
+-- @case trigger_view_merge_suppression_state rows
+SELECT (SELECT string_agg(id::text || ':' || value::text, ',' ORDER BY id) FROM trigger_view_merge_base) AS base_rows, (SELECT string_agg(timing || ':' || event, ',' ORDER BY seq) FROM trigger_view_merge_log WHERE timing <> 'INSTEAD OF') AS statement_events, count(*) FILTER (WHERE timing = 'INSTEAD OF' AND event = 'UPDATE') AS update_rows, count(*) FILTER (WHERE timing = 'INSTEAD OF' AND event = 'INSERT') AS insert_rows FROM trigger_view_merge_log;
+-- @end
+
+-- @case prepare_trigger_view_merge_repeated_candidates ok
+TRUNCATE trigger_view_merge_source, trigger_view_merge_log RESTART IDENTITY; INSERT INTO trigger_view_merge_source VALUES (1, 1, 21), (2, 1, 22);
+-- @end
+
+-- @case trigger_view_merge_repeated_candidates rows
+MERGE INTO trigger_view_merge_target AS target USING (SELECT ordinal, id, value FROM trigger_view_merge_source ORDER BY ordinal) AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET value = source.value RETURNING merge_action(), source.ordinal, source.value, old.value, new.value;
+-- @end
+
+-- @case trigger_view_merge_repeated_candidate_state rows
+SELECT (SELECT value FROM trigger_view_merge_base WHERE id = 1) AS stored_value, (SELECT string_agg(old_value::text || ':' || new_value::text, ',' ORDER BY seq) FROM trigger_view_merge_log WHERE timing = 'INSTEAD OF') AS row_images, (SELECT string_agg(timing || ':' || event, ',' ORDER BY seq) FROM trigger_view_merge_log WHERE timing <> 'INSTEAD OF') AS statement_events;
+-- @end
+
+-- @case create_view_merge_path_fixture ok
+CREATE TABLE view_merge_path_base (id integer PRIMARY KEY, value integer); INSERT INTO view_merge_path_base VALUES (1, 10); CREATE TABLE view_merge_path_source (id integer, value integer); INSERT INTO view_merge_path_source VALUES (1, 20), (2, 30); CREATE VIEW view_merge_path_automatic AS SELECT id, value FROM view_merge_path_base; CREATE FUNCTION view_merge_path_insert() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO view_merge_path_base VALUES (NEW.id, NEW.value + 1); RETURN NEW; END $$; CREATE FUNCTION view_merge_path_keep() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$; CREATE TRIGGER view_merge_path_insert INSTEAD OF INSERT ON view_merge_path_automatic FOR EACH ROW EXECUTE FUNCTION view_merge_path_insert(); CREATE VIEW view_merge_path_distinct AS SELECT DISTINCT id, value FROM view_merge_path_base; CREATE TRIGGER view_merge_path_update INSTEAD OF UPDATE ON view_merge_path_distinct FOR EACH ROW EXECUTE FUNCTION view_merge_path_keep(); CREATE VIEW view_merge_path_read_only AS SELECT DISTINCT id, value FROM view_merge_path_base;
+-- @end
+
+-- @case view_merge_public_column_error_precedes_missing_trigger error
+MERGE INTO view_merge_path_distinct AS target USING view_merge_path_source AS source ON target.id = source.id WHEN NOT MATCHED THEN INSERT (missing) VALUES (source.value);
+-- @end
+
+-- @case view_merge_cannot_mix_automatic_and_trigger_actions error
+MERGE INTO view_merge_path_automatic AS target USING view_merge_path_source AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET value = source.value WHEN NOT MATCHED THEN INSERT (id, value) VALUES (source.id, source.value);
+-- @end
+
+-- @case view_merge_uses_automatic_path_for_unrelated_trigger rows
+MERGE INTO view_merge_path_automatic AS target USING view_merge_path_source AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET value = source.value RETURNING merge_action(), target.id, old.value, new.value;
+-- @end
+
+-- @case view_merge_automatic_path_state rows
+SELECT id, value FROM view_merge_path_base ORDER BY id;
+-- @end
+
+-- @case view_merge_missing_action_trigger_rejected error
+MERGE INTO view_merge_path_distinct AS target USING view_merge_path_source AS source ON target.id = source.id WHEN NOT MATCHED THEN INSERT (id, value) VALUES (source.id, source.value);
+-- @end
+
+-- @case view_merge_do_nothing_needs_no_trigger rows
+MERGE INTO view_merge_path_read_only AS target USING view_merge_path_source AS source ON target.id = source.id WHEN MATCHED THEN DO NOTHING RETURNING merge_action(), target.id;
+-- @end
+
+-- @case prepare_trigger_view_merge_replica_mode ok
+TRUNCATE trigger_view_merge_source, trigger_view_merge_log RESTART IDENTITY; INSERT INTO trigger_view_merge_source VALUES (1, 1, 50);
+-- @end
+
+-- @case trigger_view_merge_replica_mode_suppresses_defined_path ok
+SET session_replication_role = replica; MERGE INTO trigger_view_merge_target AS target USING trigger_view_merge_source AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET value = source.value; RESET session_replication_role;
+-- @end
+
+-- @case trigger_view_merge_replica_mode_state rows
+SELECT (SELECT value FROM trigger_view_merge_base WHERE id = 1) AS stored_value, (SELECT count(*) FROM trigger_view_merge_log) AS log_rows;
+-- @end
+
+-- @case create_trigger_view_merge_rule_fixture ok
+CREATE TABLE trigger_view_merge_rule_base (id integer PRIMARY KEY, value integer); INSERT INTO trigger_view_merge_rule_base VALUES (1, 10); CREATE TABLE trigger_view_merge_rule_source (id integer, value integer); INSERT INTO trigger_view_merge_rule_source VALUES (1, 20); CREATE TABLE trigger_view_merge_rule_log (value integer); CREATE VIEW trigger_view_merge_rule_target AS SELECT DISTINCT id, value FROM trigger_view_merge_rule_base; CREATE FUNCTION trigger_view_merge_rule_apply() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$; CREATE TRIGGER trigger_view_merge_rule_update INSTEAD OF UPDATE ON trigger_view_merge_rule_target FOR EACH ROW EXECUTE FUNCTION trigger_view_merge_rule_apply(); CREATE RULE trigger_view_merge_user_rule AS ON UPDATE TO trigger_view_merge_rule_target DO ALSO INSERT INTO trigger_view_merge_rule_log VALUES (NEW.value);
+-- @end
+
+-- @case trigger_view_merge_user_rule_rejected error
+MERGE INTO trigger_view_merge_rule_target AS target USING trigger_view_merge_rule_source AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET value = source.value;
+-- @end
+
+-- @case create_nested_trigger_view_merge_fixture ok
+CREATE TABLE nested_trigger_view_merge_base (id integer PRIMARY KEY, value integer); INSERT INTO nested_trigger_view_merge_base VALUES (1, 10), (2, 150); CREATE TABLE nested_trigger_view_merge_source (id integer, value integer); INSERT INTO nested_trigger_view_merge_source VALUES (1, 20); CREATE VIEW nested_trigger_view_merge_inner AS SELECT id, value FROM nested_trigger_view_merge_base; CREATE FUNCTION nested_trigger_view_merge_apply() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF TG_OP = 'UPDATE' THEN NEW.value := NEW.value + 10; UPDATE nested_trigger_view_merge_base SET value = NEW.value WHERE id = OLD.id; RETURN NEW; ELSIF TG_OP = 'INSERT' THEN INSERT INTO nested_trigger_view_merge_base VALUES (NEW.id, NEW.value); RETURN NEW; END IF; DELETE FROM nested_trigger_view_merge_base WHERE id = OLD.id; RETURN OLD; END $$; CREATE TRIGGER nested_trigger_view_merge_apply INSTEAD OF INSERT OR UPDATE OR DELETE ON nested_trigger_view_merge_inner FOR EACH ROW EXECUTE FUNCTION nested_trigger_view_merge_apply(); CREATE VIEW nested_trigger_view_merge_outer (item_id, amount) AS SELECT id, value FROM nested_trigger_view_merge_inner WHERE value < 100 WITH CASCADED CHECK OPTION;
+-- @end
+
+-- @case nested_trigger_view_merge_update_returning rows
+MERGE INTO nested_trigger_view_merge_outer AS target USING nested_trigger_view_merge_source AS source ON target.item_id = source.id WHEN MATCHED THEN UPDATE SET amount = source.value RETURNING merge_action(), source.id, target.item_id, old.amount, new.amount;
+-- @end
+
+-- @case nested_trigger_view_merge_update_state rows
+SELECT id, value FROM nested_trigger_view_merge_base ORDER BY id;
+-- @end
+
+-- @case prepare_nested_trigger_view_merge_check_failure ok
+UPDATE nested_trigger_view_merge_source SET value = 95 WHERE id = 1;
+-- @end
+
+-- @case nested_trigger_view_merge_checks_final_trigger_row error
+MERGE INTO nested_trigger_view_merge_outer AS target USING nested_trigger_view_merge_source AS source ON target.item_id = source.id WHEN MATCHED THEN UPDATE SET amount = source.value;
+-- @end
+
+-- @case nested_trigger_view_merge_check_failure_is_atomic rows
+SELECT id, value FROM nested_trigger_view_merge_base ORDER BY id;
+-- @end
+
+-- @case prepare_nested_trigger_view_merge_delete ok
+TRUNCATE nested_trigger_view_merge_source;
+-- @end
+
+-- @case nested_trigger_view_merge_delete_returning rows
+MERGE INTO nested_trigger_view_merge_outer AS target USING nested_trigger_view_merge_source AS source ON false WHEN NOT MATCHED BY SOURCE THEN DELETE RETURNING merge_action(), source.id, target.item_id, old.amount, new.amount;
+-- @end
+
+-- @case nested_trigger_view_merge_delete_preserves_hidden_rows rows
+SELECT id, value FROM nested_trigger_view_merge_base ORDER BY id;
+-- @end
+
+-- @case create_trigger_view_merge_snapshot_fixture ok
+CREATE TABLE trigger_view_merge_snapshot_base (id integer PRIMARY KEY, value text); CREATE TABLE trigger_view_merge_snapshot_source (id integer PRIMARY KEY, value text); CREATE VIEW trigger_view_merge_snapshot_target AS SELECT id, value FROM trigger_view_merge_snapshot_base; CREATE FUNCTION trigger_view_merge_snapshot_seed() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO trigger_view_merge_snapshot_base VALUES (1, 'target'); INSERT INTO trigger_view_merge_snapshot_source VALUES (1, 'source'); RETURN NULL; END $$; CREATE FUNCTION trigger_view_merge_snapshot_apply() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN UPDATE trigger_view_merge_snapshot_base SET value = NEW.value WHERE id = OLD.id; RETURN NEW; END $$; CREATE TRIGGER trigger_view_merge_snapshot_seed BEFORE UPDATE ON trigger_view_merge_snapshot_target FOR EACH STATEMENT EXECUTE FUNCTION trigger_view_merge_snapshot_seed(); CREATE TRIGGER trigger_view_merge_snapshot_apply INSTEAD OF UPDATE ON trigger_view_merge_snapshot_target FOR EACH ROW EXECUTE FUNCTION trigger_view_merge_snapshot_apply();
+-- @end
+
+-- @case trigger_view_merge_uses_pre_statement_snapshot rows
+MERGE INTO trigger_view_merge_snapshot_target AS target USING trigger_view_merge_snapshot_source AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET value = source.value RETURNING merge_action(), target.id, old.value, new.value;
+-- @end
+
+-- @case trigger_view_merge_pre_statement_snapshot_state rows
+SELECT (SELECT string_agg(id::text || ':' || value, ',' ORDER BY id) FROM trigger_view_merge_snapshot_base) AS base_rows, (SELECT string_agg(id::text || ':' || value, ',' ORDER BY id) FROM trigger_view_merge_snapshot_source) AS source_rows;
+-- @end
+
+-- @case create_trigger_view_merge_action_snapshot_fixture ok
+CREATE TABLE trigger_view_merge_action_snapshot_base (id integer PRIMARY KEY, value integer); INSERT INTO trigger_view_merge_action_snapshot_base VALUES (1, 10), (2, 20); CREATE TABLE trigger_view_merge_action_snapshot_source (id integer); INSERT INTO trigger_view_merge_action_snapshot_source VALUES (1), (2); CREATE VIEW trigger_view_merge_action_snapshot_target AS SELECT DISTINCT id, value FROM trigger_view_merge_action_snapshot_base; CREATE FUNCTION trigger_view_merge_action_snapshot_apply() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN UPDATE trigger_view_merge_action_snapshot_base SET value = NEW.value WHERE id = OLD.id; RETURN NEW; END $$; CREATE TRIGGER trigger_view_merge_action_snapshot_apply INSTEAD OF UPDATE ON trigger_view_merge_action_snapshot_target FOR EACH ROW EXECUTE FUNCTION trigger_view_merge_action_snapshot_apply();
+-- @end
+
+-- @case trigger_view_merge_action_subqueries_use_statement_snapshot rows
+MERGE INTO trigger_view_merge_action_snapshot_target AS target USING trigger_view_merge_action_snapshot_source AS source ON target.id = source.id WHEN MATCHED AND (SELECT max(value) FROM trigger_view_merge_action_snapshot_base) = 20 THEN UPDATE SET value = (SELECT max(value) + 1 FROM trigger_view_merge_action_snapshot_base) RETURNING target.id, old.value, new.value;
+-- @end
+
+-- @case trigger_view_merge_action_snapshot_state rows
+SELECT id, value FROM trigger_view_merge_action_snapshot_base ORDER BY id;
+-- @end

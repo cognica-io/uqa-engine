@@ -87,9 +87,11 @@ python3 tests/parity/pg18/run_diff.py --validate-manifest
 python3 tests/parity/pg18/run_diff.py
 ```
 
-Stateful compatibility suites keep one PostgreSQL schema while reopening the UQA database between cases. They cover 129 routine cases, 162 constraint cases, 49 type-and-temporal cases, 512 trigger cases, and 194 rewrite-rule cases:
+Stateful compatibility suites keep one PostgreSQL schema while reopening the UQA database between cases. They cover 129 routine cases, 162 constraint cases, 49 type-and-temporal cases, 555 trigger cases, and 194 rewrite-rule cases:
 
 The automatic-view cases include nested computed and nonautomatic rule-backed views, lazy rule input projection, `WITH CHECK OPTION` over non-updatable sources, `ONLY` partition-view insert routing, replication-independent catalog flags, no-relation star errors, and unqualified system-column rewrite cardinality.
+
+The trigger-backed view `MERGE` cases cover direct and nested targets, INSERT, UPDATE, DELETE, and DO NOTHING actions, action-path selection and errors, statement event order, current, OLD, and NEW row images, NULL suppression, repeated candidates, replication-mode suppression, user-rule rejection, final check options, hidden target rows, failure atomicity, and statement-start snapshots.
 
 ```sh
 python3 tests/parity/pg18/run_routines_stateful.py

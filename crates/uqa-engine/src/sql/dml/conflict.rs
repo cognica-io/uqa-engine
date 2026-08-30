@@ -896,6 +896,7 @@ pub(in crate::sql) struct ReturningProjectionRow<'a> {
     pub context: Option<&'a OwnedPhysicalRow>,
 }
 
+#[derive(Clone, Copy)]
 pub(in crate::sql) struct ReturningValueProjectionRow<'a> {
     pub table: &'a str,
     pub target_qualifier: &'a str,
@@ -936,6 +937,22 @@ pub(in crate::sql) fn build_returning_value_row(
     params: &[SQLParam],
     ctes: &CteScope,
 ) -> Result<OwnedPhysicalRow, SQLError> {
+    let row = returning_value_context(engine, input)?;
+    let projections = expanded_returning_projections(
+        engine,
+        input.table,
+        input.target_qualifier,
+        input.aliases,
+        returning,
+    )?;
+    let snapshot_scope = ctes.returning_statement_snapshot_scope();
+    build_projection_physical_row_with_ctes(engine, &row, &projections, params, &snapshot_scope)
+}
+
+pub(in crate::sql) fn returning_value_context(
+    engine: &Engine,
+    input: ReturningValueProjectionRow<'_>,
+) -> Result<OwnedPhysicalRow, SQLError> {
     let target = returning_target_schema(engine, input.table)?;
     let width = target.len();
     if input.current.len() != width
@@ -971,21 +988,12 @@ pub(in crate::sql) fn build_returning_value_row(
         .chain(image(input.new))
         .collect();
     let target = OwnedPhysicalRow::new(schema, PhysicalRow::from_values(values));
-    let row = input.context.map_or(target.clone(), |context| {
+    Ok(input.context.map_or(target.clone(), |context| {
         OwnedPhysicalRow::new(
             RowSchema::join(&target.schema, &context.schema, std::iter::empty()),
             PhysicalRow::concat(&target.row, &context.row),
         )
-    });
-    let projections = expanded_returning_projections(
-        engine,
-        input.table,
-        input.target_qualifier,
-        input.aliases,
-        returning,
-    )?;
-    let snapshot_scope = ctes.returning_statement_snapshot_scope();
-    build_projection_physical_row_with_ctes(engine, &row, &projections, params, &snapshot_scope)
+    }))
 }
 
 pub(in crate::sql) fn returning_projection_context(
