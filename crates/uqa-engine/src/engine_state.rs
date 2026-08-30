@@ -8,7 +8,7 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use parking_lot::{Mutex, ReentrantMutex, RwLock};
@@ -391,6 +391,13 @@ pub(super) struct EpochCoordinator {
     pub(super) catalog_registry: EpochChannel,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct PublishedEpochs {
+    table_catalog: u64,
+    table_data: u64,
+    catalog_registry: u64,
+}
+
 impl EpochCoordinator {
     pub(super) fn new() -> Self {
         Self {
@@ -402,19 +409,38 @@ impl EpochCoordinator {
         }
     }
 
+    pub(super) fn published_epochs(&self) -> PublishedEpochs {
+        PublishedEpochs {
+            table_catalog: self.table_catalog.published.load(Ordering::Acquire),
+            table_data: self.table_data.published.load(Ordering::Acquire),
+            catalog_registry: self.catalog_registry.published.load(Ordering::Acquire),
+        }
+    }
+
     pub(super) fn share_published_from(&mut self, source: &Self) {
+        self.share_published_from_at(
+            source,
+            PublishedEpochs {
+                table_catalog: 0,
+                table_data: 0,
+                catalog_registry: 0,
+            },
+        );
+    }
+
+    pub(super) fn share_published_from_at(&mut self, source: &Self, observed: PublishedEpochs) {
         self.table_catalog.published = source.table_catalog.published.clone();
         self.table_data.published = source.table_data.published.clone();
         self.catalog_registry.published = source.catalog_registry.published.clone();
         self.table_catalog
             .seen
-            .store(0, std::sync::atomic::Ordering::Release);
+            .store(observed.table_catalog, Ordering::Release);
         self.table_data
             .seen
-            .store(0, std::sync::atomic::Ordering::Release);
+            .store(observed.table_data, Ordering::Release);
         self.catalog_registry
             .seen
-            .store(0, std::sync::atomic::Ordering::Release);
+            .store(observed.catalog_registry, Ordering::Release);
     }
 }
 

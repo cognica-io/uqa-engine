@@ -177,16 +177,33 @@ impl Engine {
                 "independent sessions require a PersistentStorageProvider".into(),
             )
         })?;
+        let observed_epochs = self.epochs.published_epochs();
         let storage_session = provider.open_session()?;
+        let storage_version_before_restore = storage_session.backend.change_version()?;
         let mut session =
-            Self::from_persistent_session(storage_session, Some(Arc::clone(provider)))?;
+            Self::from_initialized_persistent_session(storage_session, Some(Arc::clone(provider)))?;
         session.row_locks = Arc::clone(&self.row_locks);
         session.session_id = self.row_locks.allocate_session();
-        session.epochs.share_published_from(&self.epochs);
-        // Force one catalog rebind after attaching the shared generation.
-        // Otherwise a DDL commit racing the initial restore could leave this
-        // session with the old table snapshot but the new generation marked
-        // as already observed.
+        let storage_version_after_restore = session
+            .storage
+            .backend
+            .as_ref()
+            .ok_or_else(|| {
+                StorageBackendError::Other(
+                    "persistent session lost its storage backend during restore".into(),
+                )
+            })?
+            .change_version()?;
+        if storage_version_before_restore == storage_version_after_restore {
+            session
+                .epochs
+                .share_published_from_at(&self.epochs, observed_epochs);
+        } else {
+            session.epochs.share_published_from(&self.epochs);
+        }
+        // A commit that raced the load advanced a shared publication beyond
+        // the generation or storage version captured before the session
+        // restored. Only that case needs a second catalog or data refresh.
         // Durable registries remain session-local. Sharing these maps
         // would expose a writer's uncommitted graph/schema/view/FDW changes
         // to sibling sessions before storage COMMIT. Runtime-only registries
@@ -236,6 +253,21 @@ impl Engine {
         storage_session: PersistentStorageSession,
         provider: Option<Arc<dyn PersistentStorageProvider>>,
     ) -> StorageBackendResult<Self> {
+        Self::build_persistent_session(storage_session, provider, true)
+    }
+
+    fn from_initialized_persistent_session(
+        storage_session: PersistentStorageSession,
+        provider: Option<Arc<dyn PersistentStorageProvider>>,
+    ) -> StorageBackendResult<Self> {
+        Self::build_persistent_session(storage_session, provider, false)
+    }
+
+    fn build_persistent_session(
+        storage_session: PersistentStorageSession,
+        provider: Option<Arc<dyn PersistentStorageProvider>>,
+        initialize_catalog: bool,
+    ) -> StorageBackendResult<Self> {
         let PersistentStorageSession { catalog, backend } = storage_session;
         let restore_catalog = Arc::clone(&catalog);
         let restore_backend = Arc::clone(&backend);
@@ -258,11 +290,15 @@ impl Engine {
             query_transaction_overlay: None,
             query_transaction_origin: None,
         };
-        Self::prepare_catalog_for_initial_restore(restore_catalog.as_ref())?;
-        restore_backend.migrate_inverted_index_storage()?;
+        if initialize_catalog {
+            Self::prepare_catalog_for_initial_restore(restore_catalog.as_ref())?;
+            restore_backend.migrate_inverted_index_storage()?;
+        }
         engine.restore_from_catalog(restore_catalog.as_ref(), restore_backend.as_ref())?;
-        engine.repair_reset_fts_storage(restore_catalog.as_ref())?;
-        engine.repair_persistent_value_indexes_on_open()?;
+        if initialize_catalog {
+            engine.repair_reset_fts_storage(restore_catalog.as_ref())?;
+            engine.repair_persistent_value_indexes_on_open()?;
+        }
         // Eagerly and fallibly populate read caches. Once open succeeds,
         // cache misses mean absence rather than a swallowed catalog error.
         for (name, json) in restore_catalog.load_models()? {

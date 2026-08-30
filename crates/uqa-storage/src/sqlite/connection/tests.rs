@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::Duration;
 
@@ -122,6 +122,21 @@ fn data_version_uses_one_stable_monitor_connection() {
     let after = observer.data_version().unwrap().unwrap();
     assert_ne!(after, before);
     assert_eq!(observer.data_version().unwrap(), Some(after));
+}
+
+#[test]
+fn logical_sessions_share_the_pool_data_version_monitor() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("shared-data-version-monitor.db");
+    let base = ManagedConnection::open(&path).unwrap();
+    let first = base.new_session();
+    let second = base.new_session();
+
+    assert!(Arc::ptr_eq(&first.pool, &second.pool));
+    assert!(base.pool.data_version_monitor.lock().is_none());
+    let first_version = first.data_version().unwrap();
+    assert!(base.pool.data_version_monitor.lock().is_some());
+    assert_eq!(second.data_version().unwrap(), first_version);
 }
 
 #[test]

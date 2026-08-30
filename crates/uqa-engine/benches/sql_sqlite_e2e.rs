@@ -217,5 +217,38 @@ fn bench_sqlite_writes(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_sqlite_reads, bench_sqlite_writes);
+fn bench_sqlite_sessions(c: &mut Criterion) {
+    let plain_dir = tempfile::tempdir().unwrap();
+    let plain_engine = seeded_engine(&plain_dir, true);
+    let encrypted_dir = tempfile::tempdir().unwrap();
+    let encrypted_engine = Engine::open_encrypted(
+        &encrypted_dir.path().join("encrypted-bench.db"),
+        "benchmark-database-key",
+    )
+    .unwrap();
+
+    let mut group = c.benchmark_group("sqlite_e2e_session");
+    group.sample_size(20);
+    group.bench_function("new_session_select_one_10k", |b| {
+        b.iter(|| {
+            let session = plain_engine.new_session().unwrap();
+            session.sql("SELECT 1", &[]).unwrap()
+        });
+    });
+    group.sample_size(10);
+    group.bench_function("new_encrypted_session_select_one", |b| {
+        b.iter(|| {
+            let session = encrypted_engine.new_session().unwrap();
+            session.sql("SELECT 1", &[]).unwrap()
+        });
+    });
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_sqlite_reads,
+    bench_sqlite_writes,
+    bench_sqlite_sessions
+);
 criterion_main!(benches);
