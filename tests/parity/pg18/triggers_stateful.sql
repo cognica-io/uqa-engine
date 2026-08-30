@@ -1970,3 +1970,127 @@ INSERT INTO automatic_rule_boundary_insert_outer VALUES (3); UPDATE automatic_ru
 -- @case nonautomatic_rule_boundary_order rows
 SELECT event, value FROM automatic_rule_boundary_log ORDER BY seq;
 -- @end
+
+-- @case create_automatic_merge_view_fixture ok
+CREATE TABLE automatic_merge_base (id integer PRIMARY KEY, value integer, hidden text DEFAULT 'defaulted'); INSERT INTO automatic_merge_base VALUES (1, 10, 'one'), (2, 20, 'two'), (4, 140, 'outside'); CREATE VIEW automatic_merge_inner (item_id, value, computed) AS SELECT id, value, value + 1 FROM automatic_merge_base; CREATE VIEW automatic_merge_outer (id, visible_value, doubled_computed) AS SELECT item_id, value, computed * 2 FROM automatic_merge_inner WHERE value < 100; CREATE TABLE automatic_merge_source (id integer, value integer);
+-- @end
+
+-- @case prepare_automatic_merge_update_source ok
+INSERT INTO automatic_merge_source VALUES (1, 30);
+-- @end
+
+-- @case automatic_merge_view_update_returning rows
+MERGE INTO automatic_merge_outer AS target USING automatic_merge_source AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET visible_value = source.value RETURNING merge_action(), source.id, target.id, target.visible_value, target.doubled_computed, old.visible_value, new.visible_value;
+-- @end
+
+-- @case prepare_automatic_merge_insert_source ok
+TRUNCATE automatic_merge_source; INSERT INTO automatic_merge_source VALUES (3, 40);
+-- @end
+
+-- @case automatic_merge_view_insert_returning rows
+MERGE INTO automatic_merge_outer AS target USING automatic_merge_source AS source ON target.id = source.id WHEN NOT MATCHED THEN INSERT (id, visible_value) VALUES (source.id, source.value) RETURNING merge_action(), source.id, target.id, target.visible_value, target.doubled_computed, old.visible_value, new.visible_value;
+-- @end
+
+-- @case prepare_automatic_merge_delete_source ok
+TRUNCATE automatic_merge_source; INSERT INTO automatic_merge_source VALUES (1, 30), (3, 40);
+-- @end
+
+-- @case automatic_merge_view_delete_returning rows
+MERGE INTO automatic_merge_outer AS target USING automatic_merge_source AS source ON target.id = source.id WHEN MATCHED THEN DO NOTHING WHEN NOT MATCHED BY SOURCE THEN DELETE RETURNING merge_action(), source.id, target.id, target.visible_value, target.doubled_computed, old.visible_value, new.visible_value;
+-- @end
+
+-- @case automatic_merge_view_state rows
+SELECT id, value, hidden FROM automatic_merge_base ORDER BY id;
+-- @end
+
+-- @case prepare_automatic_merge_leave_source ok
+TRUNCATE automatic_merge_source; INSERT INTO automatic_merge_source VALUES (1, 130);
+-- @end
+
+-- @case automatic_merge_view_can_leave_filter rows
+MERGE INTO automatic_merge_outer AS target USING automatic_merge_source AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET visible_value = source.value RETURNING merge_action(), target.id, target.visible_value, target.doubled_computed;
+-- @end
+
+-- @case prepare_automatic_merge_star_source ok
+TRUNCATE automatic_merge_source; INSERT INTO automatic_merge_source VALUES (3, 45);
+-- @end
+
+-- @case automatic_merge_view_bare_returning_star rows
+MERGE INTO automatic_merge_outer AS target USING automatic_merge_source AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET visible_value = source.value RETURNING *;
+-- @end
+
+-- @case automatic_merge_view_filter_state rows
+SELECT (SELECT string_agg(id::text || ':' || value::text, ',' ORDER BY id) FROM automatic_merge_base) AS base_rows, (SELECT string_agg(id::text || ':' || visible_value::text, ',' ORDER BY id) FROM automatic_merge_outer) AS visible_rows;
+-- @end
+
+-- @case create_automatic_merge_check_fixture ok
+CREATE TABLE automatic_merge_check_base (id integer PRIMARY KEY, value integer); INSERT INTO automatic_merge_check_base VALUES (1, 10); CREATE VIEW automatic_merge_check_view AS SELECT id, value, value + 1 AS computed FROM automatic_merge_check_base WHERE value > 0 WITH CASCADED CHECK OPTION; CREATE FUNCTION automatic_merge_check_mutate() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.value = 40 THEN NEW.value := -40; END IF; RETURN NEW; END; $$; CREATE TRIGGER automatic_merge_check_mutate_before BEFORE UPDATE ON automatic_merge_check_base FOR EACH ROW EXECUTE FUNCTION automatic_merge_check_mutate(); CREATE TABLE automatic_merge_check_source (id integer, value integer); INSERT INTO automatic_merge_check_source VALUES (1, -1), (2, -2); CREATE MATERIALIZED VIEW automatic_merge_materialized AS SELECT id, value FROM automatic_merge_check_base; CREATE VIEW automatic_merge_aggregate AS SELECT sum(value)::integer AS value FROM automatic_merge_check_base;
+-- @end
+
+-- @case automatic_merge_update_check_option error
+MERGE INTO automatic_merge_check_view AS target USING (SELECT id, value FROM automatic_merge_check_source WHERE id = 1) AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET value = source.value;
+-- @end
+
+-- @case automatic_merge_insert_check_option error
+MERGE INTO automatic_merge_check_view AS target USING (SELECT id, value FROM automatic_merge_check_source WHERE id = 2) AS source ON target.id = source.id WHEN NOT MATCHED THEN INSERT (id, value) VALUES (source.id, source.value);
+-- @end
+
+-- @case prepare_automatic_merge_post_trigger_check_source ok
+UPDATE automatic_merge_check_source SET value = 40 WHERE id = 1;
+-- @end
+
+-- @case automatic_merge_update_post_trigger_check_option error
+MERGE INTO automatic_merge_check_view AS target USING (SELECT id, value FROM automatic_merge_check_source WHERE id = 1) AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET value = source.value;
+-- @end
+
+-- @case automatic_merge_post_trigger_check_is_atomic rows
+SELECT id, value FROM automatic_merge_check_base ORDER BY id;
+-- @end
+
+-- @case automatic_merge_computed_target_rejected error
+MERGE INTO automatic_merge_check_view AS target USING automatic_merge_check_source AS source ON false WHEN NOT MATCHED THEN INSERT (id, computed) VALUES (source.id, source.value);
+-- @end
+
+-- @case create_automatic_merge_rule_fixture ok
+CREATE TABLE automatic_merge_rule_log (value integer); CREATE RULE automatic_merge_rule AS ON UPDATE TO automatic_merge_check_view DO ALSO INSERT INTO automatic_merge_rule_log VALUES (NEW.value);
+-- @end
+
+-- @case automatic_merge_rule_target_rejected error
+MERGE INTO automatic_merge_check_view AS target USING automatic_merge_check_source AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET value = source.value;
+-- @end
+
+-- @case automatic_merge_materialized_target_rejected error
+MERGE INTO automatic_merge_materialized AS target USING automatic_merge_check_source AS source ON target.id = source.id WHEN NOT MATCHED THEN INSERT (id, value) VALUES (source.id, source.value);
+-- @end
+
+-- @case automatic_merge_aggregate_target_rejected error
+MERGE INTO automatic_merge_aggregate AS target USING automatic_merge_check_source AS source ON false WHEN NOT MATCHED THEN INSERT (value) VALUES (source.value);
+-- @end
+
+-- @case automatic_merge_errors_are_atomic rows
+SELECT (SELECT string_agg(id::text || ':' || value::text, ',' ORDER BY id) FROM automatic_merge_check_base) AS base_rows, (SELECT count(*) FROM automatic_merge_rule_log) AS rule_rows;
+-- @end
+
+-- @case create_automatic_merge_delete_only_fixture ok
+CREATE TABLE automatic_merge_delete_base (value integer); INSERT INTO automatic_merge_delete_base VALUES (1), (2); CREATE VIEW automatic_merge_delete_view AS SELECT value + 1 AS computed FROM automatic_merge_delete_base; CREATE TABLE automatic_merge_delete_source (computed integer); INSERT INTO automatic_merge_delete_source VALUES (2);
+-- @end
+
+-- @case automatic_merge_delete_only_computed_view rows
+MERGE INTO automatic_merge_delete_view AS target USING automatic_merge_delete_source AS source ON target.computed = source.computed WHEN NOT MATCHED BY SOURCE THEN DELETE RETURNING merge_action(), target.computed;
+-- @end
+
+-- @case automatic_merge_delete_only_state rows
+SELECT value FROM automatic_merge_delete_base ORDER BY value;
+-- @end
+
+-- @case create_automatic_merge_only_partition_fixture ok
+CREATE TABLE automatic_merge_only_parent (id integer, value integer) PARTITION BY RANGE (id); CREATE TABLE automatic_merge_only_child PARTITION OF automatic_merge_only_parent FOR VALUES FROM (0) TO (10); CREATE VIEW automatic_merge_only_view AS SELECT id, value FROM ONLY automatic_merge_only_parent; CREATE TABLE automatic_merge_only_source (id integer, value integer); INSERT INTO automatic_merge_only_source VALUES (1, 10);
+-- @end
+
+-- @case automatic_merge_only_view_insert_routes_child ok
+MERGE INTO automatic_merge_only_view AS target USING automatic_merge_only_source AS source ON false WHEN NOT MATCHED THEN INSERT VALUES (source.id, source.value);
+-- @end
+
+-- @case automatic_merge_only_view_state rows
+SELECT (SELECT count(*) FROM automatic_merge_only_child) AS child_count, (SELECT count(*) FROM automatic_merge_only_view) AS view_count;
+-- @end

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "2452339ad8dc679140ba063ef36770b5a7fdd4ac8287e32d0abd6e739405e2aa",
+  "fixture_sha256": "dc6e53e622097d60c0e04baf2d01779a425277c0693288a3a714e094741987ef",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -4260,6 +4260,239 @@
         [
           "inner-delete",
           "1"
+        ]
+      ]
+    },
+    {
+      "name": "create_automatic_merge_view_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "prepare_automatic_merge_update_source",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_merge_view_update_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          "UPDATE",
+          "1",
+          "1",
+          "30",
+          "62",
+          "10",
+          "30"
+        ]
+      ]
+    },
+    {
+      "name": "prepare_automatic_merge_insert_source",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_merge_view_insert_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          "INSERT",
+          "3",
+          "3",
+          "40",
+          "82",
+          null,
+          "40"
+        ]
+      ]
+    },
+    {
+      "name": "prepare_automatic_merge_delete_source",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_merge_view_delete_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          "DELETE",
+          null,
+          "2",
+          "20",
+          "42",
+          "20",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "automatic_merge_view_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "30",
+          "one"
+        ],
+        [
+          "3",
+          "40",
+          "defaulted"
+        ],
+        [
+          "4",
+          "140",
+          "outside"
+        ]
+      ]
+    },
+    {
+      "name": "prepare_automatic_merge_leave_source",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_merge_view_can_leave_filter",
+      "kind": "rows",
+      "rows": [
+        [
+          "UPDATE",
+          "1",
+          "130",
+          "262"
+        ]
+      ]
+    },
+    {
+      "name": "prepare_automatic_merge_star_source",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_merge_view_bare_returning_star",
+      "kind": "rows",
+      "rows": [
+        [
+          "3",
+          "45",
+          "3",
+          "45",
+          "92"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_merge_view_filter_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1:130,3:45,4:140",
+          "3:45"
+        ]
+      ]
+    },
+    {
+      "name": "create_automatic_merge_check_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_merge_update_check_option",
+      "kind": "error",
+      "sqlstate": "44000"
+    },
+    {
+      "name": "automatic_merge_insert_check_option",
+      "kind": "error",
+      "sqlstate": "44000"
+    },
+    {
+      "name": "prepare_automatic_merge_post_trigger_check_source",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_merge_update_post_trigger_check_option",
+      "kind": "error",
+      "sqlstate": "44000"
+    },
+    {
+      "name": "automatic_merge_post_trigger_check_is_atomic",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "10"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_merge_computed_target_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "create_automatic_merge_rule_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_merge_rule_target_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "automatic_merge_materialized_target_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "automatic_merge_aggregate_target_rejected",
+      "kind": "error",
+      "sqlstate": "55000"
+    },
+    {
+      "name": "automatic_merge_errors_are_atomic",
+      "kind": "rows",
+      "rows": [
+        [
+          "1:10",
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_automatic_merge_delete_only_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_merge_delete_only_computed_view",
+      "kind": "rows",
+      "rows": [
+        [
+          "DELETE",
+          "3"
+        ]
+      ]
+    },
+    {
+      "name": "automatic_merge_delete_only_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "create_automatic_merge_only_partition_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_merge_only_view_insert_routes_child",
+      "kind": "ok"
+    },
+    {
+      "name": "automatic_merge_only_view_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "0"
         ]
       ]
     }

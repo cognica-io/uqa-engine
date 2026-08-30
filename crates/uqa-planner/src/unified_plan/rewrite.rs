@@ -178,6 +178,7 @@ pub(super) fn rewrite_command_scalars(
         }
         CommandPlan::Merge(plan) => {
             rewrite_source_scalars(&mut plan.source, rewrite);
+            rewrite_optional_scalar(&mut plan.target_predicate, rewrite);
             rewrite_scalar(&mut plan.join_condition, rewrite);
             for clause in &mut plan.when_clauses {
                 match clause {
@@ -210,6 +211,9 @@ pub(super) fn rewrite_command_scalars(
                 }
             }
             rewrite_projections(&mut plan.returning, rewrite);
+            for check in &mut plan.view_checks {
+                rewrite_scalar(&mut check.predicate, rewrite);
+            }
             rewrite_subqueries(&mut plan.subqueries, rewrite);
         }
         CommandPlan::CreateView { query, .. }

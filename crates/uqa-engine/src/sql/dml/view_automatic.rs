@@ -12,8 +12,8 @@ use uqa_core::DocId;
 use uqa_execution::{ColumnIdentity, OwnedPhysicalRow, PhysicalRow, RowSchema, ScalarExpr};
 use uqa_planner::{
     AssignmentPlan, ComputePlan, ConflictActionPlan, ConflictPlan, DeletePlan, InsertPlan,
-    ProjectionPlan, QueryPlan, RelationalPlan, SourcePlan, UpdatePlan, ViewCheckPlan,
-    ViewRuleInsertPlan, ViewRuleReturningPlan, ViewRuleUpdatePlan,
+    MergePlan, MergeWhenPlan, ProjectionPlan, QueryPlan, RelationalPlan, SourcePlan, UpdatePlan,
+    ViewCheckPlan, ViewRuleInsertPlan, ViewRuleReturningPlan, ViewRuleUpdatePlan,
 };
 use uqa_sql::ast::{ReturningAliases, TriggerEvent, TriggerTiming};
 use uqa_sql::SQLError;
@@ -621,6 +621,214 @@ fn validate_public_insert_contract(engine: &Engine, plan: &InsertPlan) -> Result
     Ok(())
 }
 
+fn validate_public_merge_contract(
+    engine: &Engine,
+    plan: &MergePlan,
+    source: &RowSchema,
+) -> Result<(), SQLError> {
+    let columns = public_view_columns(engine, &plan.target)?;
+    let matched_scope = ExpressionScope {
+        target_qualifier: &plan.target_qualifier,
+        returning_aliases: None,
+        source: Some(source),
+        include_excluded: false,
+    };
+    let target_only_scope = ExpressionScope {
+        source: None,
+        ..matched_scope
+    };
+    validate_public_view_expression(&plan.join_condition, &columns, matched_scope)?;
+    for clause in &plan.when_clauses {
+        match clause {
+            MergeWhenPlan::UpdateMatched {
+                condition,
+                assignments,
+            } => {
+                if let Some(condition) = condition {
+                    validate_public_view_expression(condition, &columns, matched_scope)?;
+                }
+                for assignment in assignments {
+                    validate_public_view_expression(&assignment.value, &columns, matched_scope)?;
+                }
+            }
+            MergeWhenPlan::DeleteMatched { condition }
+            | MergeWhenPlan::NothingMatched { condition } => {
+                if let Some(condition) = condition {
+                    validate_public_view_expression(condition, &columns, matched_scope)?;
+                }
+            }
+            MergeWhenPlan::UpdateNotMatchedBySource {
+                condition,
+                assignments,
+            } => {
+                if let Some(condition) = condition {
+                    validate_public_view_expression(condition, &columns, target_only_scope)?;
+                }
+                for assignment in assignments {
+                    validate_public_view_expression(
+                        &assignment.value,
+                        &columns,
+                        target_only_scope,
+                    )?;
+                }
+            }
+            MergeWhenPlan::DeleteNotMatchedBySource { condition }
+            | MergeWhenPlan::NothingNotMatchedBySource { condition } => {
+                if let Some(condition) = condition {
+                    validate_public_view_expression(condition, &columns, target_only_scope)?;
+                }
+            }
+            MergeWhenPlan::InsertNotMatched { .. } | MergeWhenPlan::NothingNotMatched { .. } => {}
+        }
+    }
+    let returning_scope = ExpressionScope {
+        returning_aliases: Some(&plan.returning_aliases),
+        ..matched_scope
+    };
+    for projection in &plan.returning {
+        validate_public_view_expression(&projection.expr, &columns, returning_scope)?;
+    }
+    Ok(())
+}
+
+fn validate_merge_targets(layer: &AutomaticViewLayer, plan: &MergePlan) -> Result<(), SQLError> {
+    for clause in &plan.when_clauses {
+        match clause {
+            MergeWhenPlan::UpdateMatched { assignments, .. }
+            | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => {
+                validate_view_target_columns(
+                    layer,
+                    assignments
+                        .iter()
+                        .map(|assignment| assignment.column.as_str()),
+                    duplicate_assignment,
+                )?;
+            }
+            MergeWhenPlan::InsertNotMatched { columns, .. } if !columns.is_empty() => {
+                validate_view_target_columns(
+                    layer,
+                    columns.iter().map(String::as_str),
+                    duplicate_insert_column,
+                )?;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn validate_public_merge_targets(engine: &Engine, plan: &MergePlan) -> Result<(), SQLError> {
+    for clause in &plan.when_clauses {
+        match clause {
+            MergeWhenPlan::UpdateMatched { assignments, .. }
+            | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => {
+                let columns = assignments
+                    .iter()
+                    .map(|assignment| assignment.column.as_str())
+                    .collect::<Vec<_>>();
+                validate_public_view_targets(engine, &plan.target, columns.iter().copied())?;
+                validate_mapped_columns(
+                    &columns
+                        .iter()
+                        .map(|column| (*column).to_string())
+                        .collect::<Vec<_>>(),
+                    duplicate_assignment,
+                )?;
+            }
+            MergeWhenPlan::InsertNotMatched { columns, .. } if !columns.is_empty() => {
+                validate_public_view_targets(
+                    engine,
+                    &plan.target,
+                    columns.iter().map(String::as_str),
+                )?;
+                validate_mapped_columns(columns, duplicate_insert_column)?;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn merge_action_capability_error(
+    view: &str,
+    clauses: &[MergeWhenPlan],
+    capabilities: ViewMutationCapabilities,
+) -> Option<SQLError> {
+    clauses.iter().find_map(|clause| match clause {
+        MergeWhenPlan::UpdateMatched { .. } | MergeWhenPlan::UpdateNotMatchedBySource { .. }
+            if !capabilities.updatable =>
+        {
+            Some(not_automatically_updatable(view, "UPDATE"))
+        }
+        MergeWhenPlan::DeleteMatched { .. } | MergeWhenPlan::DeleteNotMatchedBySource { .. }
+            if !capabilities.deletable =>
+        {
+            Some(not_automatically_updatable(view, "DELETE FROM"))
+        }
+        MergeWhenPlan::InsertNotMatched { .. } if !capabilities.insertable => {
+            Some(not_automatically_updatable(view, "INSERT INTO"))
+        }
+        _ => None,
+    })
+}
+
+fn validate_merge_rule_free(engine: &Engine, relation: &str) -> Result<(), SQLError> {
+    let has_rules = [
+        uqa_sql::ast::RuleEvent::Insert,
+        uqa_sql::ast::RuleEvent::Update,
+        uqa_sql::ast::RuleEvent::Delete,
+    ]
+    .into_iter()
+    .map(|event| engine.rules_for(relation, event))
+    .collect::<Result<Vec<_>, SQLError>>()?
+    .iter()
+    .any(|rules| !rules.is_empty());
+    if !has_rules {
+        return Ok(());
+    }
+    Err(SQLError::Routine {
+        sqlstate: "0A000".into(),
+        message: format!(
+            "cannot execute MERGE on relation \"{}\"",
+            display_relation(relation)
+        ),
+    })
+}
+
+fn merge_uses_event(plan: &MergePlan, event: TriggerEvent) -> bool {
+    plan.when_clauses.iter().any(|clause| match event {
+        TriggerEvent::Insert => matches!(clause, MergeWhenPlan::InsertNotMatched { .. }),
+        TriggerEvent::Update => matches!(
+            clause,
+            MergeWhenPlan::UpdateMatched { .. } | MergeWhenPlan::UpdateNotMatchedBySource { .. }
+        ),
+        TriggerEvent::Delete => matches!(
+            clause,
+            MergeWhenPlan::DeleteMatched { .. } | MergeWhenPlan::DeleteNotMatchedBySource { .. }
+        ),
+        TriggerEvent::Truncate => false,
+    })
+}
+
+fn validate_automatic_merge_trigger_path(
+    engine: &Engine,
+    view: &str,
+    plan: &MergePlan,
+) -> Result<(), SQLError> {
+    for event in [
+        TriggerEvent::Insert,
+        TriggerEvent::Update,
+        TriggerEvent::Delete,
+    ] {
+        if merge_uses_event(plan, event) && instead_of_trigger_definition(engine, view, event)? {
+            return Err(SQLError::Unsupported(
+                "MERGE through INSTEAD OF view triggers is not implemented".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn validate_public_view_targets<'a>(
     engine: &Engine,
     view: &str,
@@ -1031,6 +1239,52 @@ fn returning_subquery_ids(returning: &[ProjectionPlan]) -> BTreeSet<usize> {
     collect_expression_subquery_ids(returning.iter().map(|projection| &projection.expr))
 }
 
+fn merge_matched_subquery_ids(plan: &MergePlan) -> BTreeSet<usize> {
+    let mut ids = collect_expression_subquery_ids(std::iter::once(&plan.join_condition));
+    for clause in &plan.when_clauses {
+        match clause {
+            MergeWhenPlan::UpdateMatched {
+                condition,
+                assignments,
+            } => {
+                ids.extend(collect_expression_subquery_ids(condition.iter()));
+                ids.extend(collect_expression_subquery_ids(
+                    assignments.iter().map(|assignment| &assignment.value),
+                ));
+            }
+            MergeWhenPlan::DeleteMatched { condition }
+            | MergeWhenPlan::NothingMatched { condition } => {
+                ids.extend(collect_expression_subquery_ids(condition.iter()));
+            }
+            _ => {}
+        }
+    }
+    ids
+}
+
+fn merge_target_only_subquery_ids(plan: &MergePlan) -> BTreeSet<usize> {
+    let mut ids = BTreeSet::new();
+    for clause in &plan.when_clauses {
+        match clause {
+            MergeWhenPlan::UpdateNotMatchedBySource {
+                condition,
+                assignments,
+            } => {
+                ids.extend(collect_expression_subquery_ids(condition.iter()));
+                ids.extend(collect_expression_subquery_ids(
+                    assignments.iter().map(|assignment| &assignment.value),
+                ));
+            }
+            MergeWhenPlan::DeleteNotMatchedBySource { condition }
+            | MergeWhenPlan::NothingNotMatchedBySource { condition } => {
+                ids.extend(collect_expression_subquery_ids(condition.iter()));
+            }
+            _ => {}
+        }
+    }
+    ids
+}
+
 fn insert_conflict_subquery_ids(plan: &InsertPlan) -> BTreeSet<usize> {
     let Some(ConflictPlan {
         action:
@@ -1243,6 +1497,115 @@ fn validate_delete_expressions(
     Ok(())
 }
 
+fn validate_merge_expressions(
+    engine: &Engine,
+    plan: &MergePlan,
+    layer: &AutomaticViewLayer,
+    source: &RowSchema,
+    params: &[uqa_sql::SQLParam],
+) -> Result<(), SQLError> {
+    validate_correlated_dml_context(
+        CorrelatedDmlContext {
+            engine,
+            layer,
+            target_qualifier: &plan.target_qualifier,
+            source: Some(source),
+            returning_aliases: None,
+            include_excluded: false,
+            ctes: &[],
+            ids: &merge_matched_subquery_ids(plan),
+            params,
+        },
+        &plan.subqueries,
+    )?;
+    validate_correlated_dml_context(
+        CorrelatedDmlContext {
+            engine,
+            layer,
+            target_qualifier: &plan.target_qualifier,
+            source: None,
+            returning_aliases: None,
+            include_excluded: false,
+            ctes: &[],
+            ids: &merge_target_only_subquery_ids(plan),
+            params,
+        },
+        &plan.subqueries,
+    )?;
+    validate_correlated_dml_context(
+        CorrelatedDmlContext {
+            engine,
+            layer,
+            target_qualifier: &plan.target_qualifier,
+            source: Some(source),
+            returning_aliases: Some(&plan.returning_aliases),
+            include_excluded: false,
+            ctes: &[],
+            ids: &returning_subquery_ids(&plan.returning),
+            params,
+        },
+        &plan.subqueries,
+    )?;
+    let matched_scope = ExpressionScope {
+        target_qualifier: &plan.target_qualifier,
+        returning_aliases: None,
+        source: Some(source),
+        include_excluded: false,
+    };
+    let target_only_scope = ExpressionScope {
+        source: None,
+        ..matched_scope
+    };
+    validate_view_expression(&plan.join_condition, layer, matched_scope)?;
+    for clause in &plan.when_clauses {
+        match clause {
+            MergeWhenPlan::UpdateMatched {
+                condition,
+                assignments,
+            } => {
+                if let Some(condition) = condition {
+                    validate_view_expression(condition, layer, matched_scope)?;
+                }
+                for assignment in assignments {
+                    validate_view_expression(&assignment.value, layer, matched_scope)?;
+                }
+            }
+            MergeWhenPlan::DeleteMatched { condition }
+            | MergeWhenPlan::NothingMatched { condition } => {
+                if let Some(condition) = condition {
+                    validate_view_expression(condition, layer, matched_scope)?;
+                }
+            }
+            MergeWhenPlan::UpdateNotMatchedBySource {
+                condition,
+                assignments,
+            } => {
+                if let Some(condition) = condition {
+                    validate_view_expression(condition, layer, target_only_scope)?;
+                }
+                for assignment in assignments {
+                    validate_view_expression(&assignment.value, layer, target_only_scope)?;
+                }
+            }
+            MergeWhenPlan::DeleteNotMatchedBySource { condition }
+            | MergeWhenPlan::NothingNotMatchedBySource { condition } => {
+                if let Some(condition) = condition {
+                    validate_view_expression(condition, layer, target_only_scope)?;
+                }
+            }
+            MergeWhenPlan::InsertNotMatched { .. } | MergeWhenPlan::NothingNotMatched { .. } => {}
+        }
+    }
+    let returning_scope = ExpressionScope {
+        returning_aliases: Some(&plan.returning_aliases),
+        ..matched_scope
+    };
+    for projection in &plan.returning {
+        validate_view_expression(&projection.expr, layer, returning_scope)?;
+    }
+    Ok(())
+}
+
 fn validate_insert_expressions(
     engine: &Engine,
     plan: &InsertPlan,
@@ -1427,6 +1790,54 @@ fn rewrite_returning(
             if bare_star && source.is_some() {
                 source_star_boundaries.push(rewritten.len());
             }
+            continue;
+        }
+        let derived_alias = projection
+            .alias
+            .clone()
+            .or_else(|| top_level_view_column(&projection.expr, layer, scope));
+        let mut expression = projection.expr;
+        rewrite_target_expression(&mut expression, layer, scope);
+        rewritten.push(ProjectionPlan {
+            expr: expression,
+            alias: derived_alias,
+        });
+    }
+    (rewritten, source_star_boundaries)
+}
+
+fn rewrite_merge_returning(
+    returning: Vec<ProjectionPlan>,
+    layer: &AutomaticViewLayer,
+    target_qualifier: &str,
+    returning_aliases: &ReturningAliases,
+    source: &RowSchema,
+) -> (Vec<ProjectionPlan>, Vec<usize>) {
+    let scope = ExpressionScope {
+        target_qualifier,
+        returning_aliases: Some(returning_aliases),
+        source: Some(source),
+        include_excluded: false,
+    };
+    let mut rewritten = Vec::new();
+    let mut source_star_boundaries = Vec::new();
+    for projection in returning {
+        let bare_star = matches!(projection.expr, ScalarExpr::Star);
+        let star_qualifier = match &projection.expr {
+            ScalarExpr::Star => Some(target_qualifier),
+            ScalarExpr::QualifiedStar(qualifier) if scope.target_qualifier(qualifier) => {
+                Some(qualifier.as_str())
+            }
+            _ => None,
+        };
+        if let Some(qualifier) = star_qualifier {
+            if bare_star {
+                source_star_boundaries.push(rewritten.len());
+            }
+            rewritten.extend(layer.columns.iter().map(|column| ProjectionPlan {
+                expr: retarget_source_expression(&column.expression, layer, qualifier),
+                alias: Some(column.name.clone()),
+            }));
             continue;
         }
         let derived_alias = projection
@@ -2402,6 +2813,247 @@ pub(super) fn rewrite_delete_to_base(
         &plan.table,
         plan.returning,
         source_schema.as_ref(),
+        &source_star_boundaries,
+    )?;
+    Ok(plan)
+}
+
+pub(super) fn rewrite_merge_to_base(
+    engine: &Engine,
+    statement: &MergePlan,
+    params: &[uqa_sql::SQLParam],
+) -> Result<MergePlan, SQLError> {
+    if super::view_triggers::target_view_kind(engine, &statement.target)?
+        == Some(StoredViewKind::Materialized)
+    {
+        return Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: format!(
+                "cannot execute MERGE on relation \"{}\"",
+                display_relation(&statement.target)
+            ),
+        });
+    }
+    let analysis_scope = dml_analysis_scope(&[], &statement.subqueries);
+    let source_schema = crate::sql::select::analyze_source_plan_schema(
+        engine,
+        &statement.source,
+        params,
+        &analysis_scope,
+        None,
+    )?;
+    validate_public_merge_targets(engine, statement)?;
+    validate_public_merge_contract(engine, statement, &source_schema)?;
+    validate_merge_rule_free(engine, &statement.target)?;
+    let Some(initial_layer) = automatic_view_layer(engine, &statement.target)? else {
+        return Err(merge_action_capability_error(
+            &statement.target,
+            &statement.when_clauses,
+            ViewMutationCapabilities::default(),
+        )
+        .unwrap_or_else(|| not_automatically_updatable(&statement.target, "MERGE")));
+    };
+    validate_merge_targets(&initial_layer, statement)?;
+    validate_merge_expressions(engine, statement, &initial_layer, &source_schema, params)?;
+    validate_automatic_merge_trigger_path(engine, &initial_layer.canonical_name, statement)?;
+    if let Some(error) = merge_action_capability_error(
+        &statement.target,
+        &statement.when_clauses,
+        view_updatability(engine, &statement.target)?.automatic,
+    ) {
+        return Err(error);
+    }
+
+    let mut plan = statement.clone();
+    let mut cascaded = false;
+    let mut visited = BTreeSet::new();
+    let mut source_star_boundaries = Vec::new();
+    loop {
+        let Some(layer) = automatic_view_layer(engine, &plan.target)? else {
+            return Err(merge_action_capability_error(
+                &plan.target,
+                &plan.when_clauses,
+                ViewMutationCapabilities::default(),
+            )
+            .unwrap_or_else(|| not_automatically_updatable(&plan.target, "MERGE")));
+        };
+        if !visited.insert(layer.canonical_name.clone()) {
+            return Err(SQLError::Internal(format!(
+                "cycle while rewriting automatically updatable view `{}`",
+                layer.canonical_name
+            )));
+        }
+        validate_merge_rule_free(engine, &layer.canonical_name)?;
+        validate_automatic_merge_trigger_path(engine, &layer.canonical_name, &plan)?;
+        validate_merge_targets(&layer, &plan)?;
+
+        let matched_subqueries = merge_matched_subquery_ids(&plan);
+        rewrite_correlated_dml_context(
+            CorrelatedDmlContext {
+                engine,
+                layer: &layer,
+                target_qualifier: &plan.target_qualifier,
+                source: Some(&source_schema),
+                returning_aliases: None,
+                include_excluded: false,
+                ctes: &[],
+                ids: &matched_subqueries,
+                params,
+            },
+            &mut plan.subqueries,
+        )?;
+        let target_only_subqueries = merge_target_only_subquery_ids(&plan);
+        rewrite_correlated_dml_context(
+            CorrelatedDmlContext {
+                engine,
+                layer: &layer,
+                target_qualifier: &plan.target_qualifier,
+                source: None,
+                returning_aliases: None,
+                include_excluded: false,
+                ctes: &[],
+                ids: &target_only_subqueries,
+                params,
+            },
+            &mut plan.subqueries,
+        )?;
+        let returning_subqueries = returning_subquery_ids(&plan.returning);
+        rewrite_correlated_dml_context(
+            CorrelatedDmlContext {
+                engine,
+                layer: &layer,
+                target_qualifier: &plan.target_qualifier,
+                source: Some(&source_schema),
+                returning_aliases: Some(&plan.returning_aliases),
+                include_excluded: false,
+                ctes: &[],
+                ids: &returning_subqueries,
+                params,
+            },
+            &mut plan.subqueries,
+        )?;
+
+        let matched_scope = ExpressionScope {
+            target_qualifier: &plan.target_qualifier,
+            returning_aliases: None,
+            source: Some(&source_schema),
+            include_excluded: false,
+        };
+        let target_only_scope = ExpressionScope {
+            source: None,
+            ..matched_scope
+        };
+        rewrite_target_expression(&mut plan.join_condition, &layer, matched_scope);
+        if let Some(predicate) = &mut plan.target_predicate {
+            rewrite_target_expression(predicate, &layer, target_only_scope);
+        }
+        for clause in &mut plan.when_clauses {
+            match clause {
+                MergeWhenPlan::UpdateMatched {
+                    condition,
+                    assignments,
+                } => {
+                    if let Some(condition) = condition {
+                        rewrite_target_expression(condition, &layer, matched_scope);
+                    }
+                    for assignment in assignments.iter_mut() {
+                        rewrite_target_expression(&mut assignment.value, &layer, matched_scope);
+                        assignment.column =
+                            writable_column(&layer, &assignment.column, "MERGE INTO")?;
+                    }
+                    validate_mapped_columns(
+                        &assignments
+                            .iter()
+                            .map(|assignment| assignment.column.clone())
+                            .collect::<Vec<_>>(),
+                        duplicate_assignment,
+                    )?;
+                }
+                MergeWhenPlan::DeleteMatched { condition }
+                | MergeWhenPlan::NothingMatched { condition } => {
+                    if let Some(condition) = condition {
+                        rewrite_target_expression(condition, &layer, matched_scope);
+                    }
+                }
+                MergeWhenPlan::UpdateNotMatchedBySource {
+                    condition,
+                    assignments,
+                } => {
+                    if let Some(condition) = condition {
+                        rewrite_target_expression(condition, &layer, target_only_scope);
+                    }
+                    for assignment in assignments.iter_mut() {
+                        rewrite_target_expression(&mut assignment.value, &layer, target_only_scope);
+                        assignment.column =
+                            writable_column(&layer, &assignment.column, "MERGE INTO")?;
+                    }
+                    validate_mapped_columns(
+                        &assignments
+                            .iter()
+                            .map(|assignment| assignment.column.clone())
+                            .collect::<Vec<_>>(),
+                        duplicate_assignment,
+                    )?;
+                }
+                MergeWhenPlan::DeleteNotMatchedBySource { condition }
+                | MergeWhenPlan::NothingNotMatchedBySource { condition } => {
+                    if let Some(condition) = condition {
+                        rewrite_target_expression(condition, &layer, target_only_scope);
+                    }
+                }
+                MergeWhenPlan::InsertNotMatched {
+                    columns, values, ..
+                } => {
+                    let supplied_columns = if columns.is_empty() {
+                        layer
+                            .columns
+                            .iter()
+                            .take(values.len())
+                            .map(|column| column.name.clone())
+                            .collect::<Vec<_>>()
+                    } else {
+                        columns.clone()
+                    };
+                    *columns = supplied_columns
+                        .iter()
+                        .map(|column| writable_column(&layer, column, "MERGE INTO"))
+                        .collect::<Result<Vec<_>, SQLError>>()?;
+                    validate_mapped_columns(columns, duplicate_insert_column)?;
+                }
+                MergeWhenPlan::NothingNotMatched { .. } => {}
+            }
+        }
+        rewrite_existing_view_checks(&mut plan.view_checks, &layer, &plan.target_qualifier);
+        let (returning, boundaries) = rewrite_merge_returning(
+            plan.returning,
+            &layer,
+            &plan.target_qualifier,
+            &plan.returning_aliases,
+            &source_schema,
+        );
+        plan.returning = returning;
+        if visited.len() == 1 {
+            source_star_boundaries = boundaries;
+        }
+        plan.target_predicate =
+            combine_view_predicate(plan.target_predicate, &layer, &plan.target_qualifier);
+        add_check_option(
+            &mut plan.view_checks,
+            &layer,
+            &plan.target_qualifier,
+            &mut cascaded,
+        );
+        plan.target = layer.source_name;
+        plan.include_descendants = layer.source_include_descendants;
+        if !super::view_triggers::target_is_view(engine, &plan.target)? {
+            break;
+        }
+    }
+    plan.returning = finalize_source_returning(
+        engine,
+        &plan.target,
+        plan.returning,
+        Some(&source_schema),
         &source_star_boundaries,
     )?;
     Ok(plan)

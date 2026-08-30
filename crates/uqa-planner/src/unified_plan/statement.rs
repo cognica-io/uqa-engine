@@ -360,12 +360,14 @@ impl UnifiedPlan {
                     target_qualifier: statement.target_qualifier,
                     target_alias: statement.target_alias,
                     include_descendants: statement.include_descendants,
+                    target_predicate: None,
                     source: Box::new(source),
                     join_condition,
                     when_clauses,
                     returning,
                     returning_aliases: statement.returning_aliases,
                     subqueries,
+                    view_checks: Vec::new(),
                 }))))
             }
             Statement::CreateFunction(value) => {

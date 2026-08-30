@@ -22,10 +22,10 @@ use super::{
     prepare_partition_update_route, prepare_routed_document_rewrite,
     refresh_insert_identity_after_trigger, returning_row_context, stage_prepared_document_delete,
     stage_prepared_document_rewrite, update_lock_strength, validate_document_constraints,
-    validate_mutation_columns, validate_returning_alias_relations, BTreeMap, BTreeSet, CteScope,
-    DmlCommandMutationOverlay, DmlReturningShape, Document, Engine, MergePlan, MergeWhenPlan,
-    MutationAssignmentTarget, PhysicalMutationLockTarget, ProjectionPlan, ReturningRowImage,
-    ReturningRowImages, SQLError, SQLParam, SQLResult, Value,
+    validate_mutation_columns, validate_returning_alias_relations, validate_view_checks, BTreeMap,
+    BTreeSet, CteScope, DmlCommandMutationOverlay, DmlReturningShape, Document, Engine, MergePlan,
+    MergeWhenPlan, MutationAssignmentTarget, PhysicalMutationLockTarget, ProjectionPlan,
+    ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult, Value, ViewCheckContext,
 };
 
 const MERGE_PREPARED_UPDATE: i64 = 1;
@@ -69,6 +69,10 @@ pub(in crate::sql) fn run_merge_inner(
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
     use uqa_sql::expr::truthy;
+    if super::view_triggers::target_view_kind(engine, &stmt.target)?.is_some() {
+        let rewritten = super::view_automatic::rewrite_merge_to_base(engine, stmt, params)?;
+        return run_merge_inner(engine, &rewritten, params);
+    }
     let _transition_capture_scope = crate::sql::triggers::TransitionCaptureScope::enter();
     let target_table = stmt.target.clone();
     engine.lock_relation(
@@ -239,6 +243,17 @@ pub(in crate::sql) fn run_merge_inner(
                 *doc_id,
                 &doc,
             )?;
+            if let Some(predicate) = &stmt.target_predicate {
+                if !truthy(&eval_mutation_expr(
+                    engine,
+                    &ctes,
+                    predicate,
+                    Some(&target_row),
+                    params,
+                )?) {
+                    continue;
+                }
+            }
             let mut target_matched = false;
             let source_reader = source_rows
                 .read_rows()
@@ -424,6 +439,32 @@ pub(in crate::sql) fn run_merge_inner(
             _ => dml_null_target_row(engine, &target_table, &target_qual)?,
         };
         let mut joined = dml_join_rows(&target_row, &pair.source_row);
+        if recheck_matches && pair.doc_id.is_some() {
+            let target_visible = match &stmt.target_predicate {
+                Some(predicate) => truthy(&eval_mutation_expr(
+                    engine,
+                    &snapshot_ctes,
+                    predicate,
+                    Some(&target_row),
+                    params,
+                )?),
+                None => true,
+            };
+            if !target_visible {
+                match pair.kind {
+                    super::MergePairKind::Matched => {
+                        pair.kind = super::MergePairKind::NotMatchedByTarget;
+                        pair.storage_table = None;
+                        pair.doc_id = None;
+                        pair.target_document = None;
+                        target_row = dml_null_target_row(engine, &target_table, &target_qual)?;
+                        joined = dml_join_rows(&target_row, &pair.source_row);
+                    }
+                    super::MergePairKind::NotMatchedBySource => continue,
+                    super::MergePairKind::NotMatchedByTarget => {}
+                }
+            }
+        }
         if matches!(pair.kind, super::MergePairKind::Matched)
             && recheck_matches
             && !uqa_sql::expr::truthy(&eval_mutation_expr(
@@ -518,6 +559,28 @@ pub(in crate::sql) fn run_merge_inner(
                     .destination
                     .as_ref()
                     .map_or_else(|| old_storage_table.clone(), |(table, _)| table.clone());
+                let primary_key_doc_id = super::integer_primary_key_doc_id(
+                    engine,
+                    &target_table,
+                    &prepared.new_document,
+                )?;
+                let checked_doc_id = prepared
+                    .destination
+                    .as_ref()
+                    .map(|(_, doc_id)| *doc_id)
+                    .or(primary_key_doc_id)
+                    .unwrap_or(prepared.doc_id);
+                validate_view_checks(ViewCheckContext {
+                    engine,
+                    table: &target_table,
+                    storage_table: &new_storage_table,
+                    target_qualifier: &target_qual,
+                    doc_id: checked_doc_id,
+                    document: &prepared.new_document,
+                    checks: &stmt.view_checks,
+                    params,
+                    scope: &snapshot_ctes,
+                })?;
                 let rewritten_doc_id = stage_prepared_document_rewrite(
                     engine,
                     &mut prepared,
@@ -714,6 +777,17 @@ pub(in crate::sql) fn run_merge_inner(
                 let _key_locks =
                     lock_document_key_dependencies(engine, &storage_table, &document, None)?;
                 validate_document_constraints(engine, &storage_table, &document, params, None)?;
+                validate_view_checks(ViewCheckContext {
+                    engine,
+                    table: &target_table,
+                    storage_table: &storage_table,
+                    target_qualifier: &target_qual,
+                    doc_id,
+                    document: &document,
+                    checks: &stmt.view_checks,
+                    params,
+                    scope: &snapshot_ctes,
+                })?;
                 engine.stage_command_document(&storage_table, doc_id, Some(document.clone()))?;
                 if let Some(event) = crate::sql::triggers::AfterRowTriggerEvent::prepare(
                     engine,

@@ -368,12 +368,14 @@ pub struct MergePlan {
     pub target_qualifier: String,
     pub target_alias: Option<String>,
     pub include_descendants: bool,
+    pub target_predicate: Option<ScalarExpr>,
     pub source: Box<SourcePlan>,
     pub join_condition: ScalarExpr,
     pub when_clauses: Vec<MergeWhenPlan>,
     pub returning: Vec<ProjectionPlan>,
     pub returning_aliases: uqa_sql::ast::ReturningAliases,
     pub subqueries: Vec<QueryPlan>,
+    pub view_checks: Vec<ViewCheckPlan>,
 }
 
 #[derive(Debug, Clone)]
