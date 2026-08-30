@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "167f17562290c3a4b78589510e2c96ebda47dfb98108239438fb663dfcc9cd3e",
+  "fixture_sha256": "8ed44b8dc8643456453765a7761eb113ab095642621cfb790172d3213c2f600d",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -1309,6 +1309,360 @@
         [
           "0",
           "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_partition_move_trigger_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "partition_move_update_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "1",
+          "before",
+          "1",
+          "11",
+          "after"
+        ]
+      ]
+    },
+    {
+      "name": "partition_move_trigger_order_and_transition_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "partition_move_parent_before_statement:BEFORE:UPDATE:partition_move_items:STATEMENT"
+        ],
+        [
+          "partition_move_low_before_update:BEFORE:UPDATE:partition_move_items_low:ROW:old=1/1:new=1/11"
+        ],
+        [
+          "partition_move_parent_before_update:BEFORE:UPDATE:partition_move_items_low:ROW:old=1/1:new=1/11"
+        ],
+        [
+          "partition_move_low_before_delete:BEFORE:DELETE:partition_move_items_low:ROW:old=1/1:new=NULL"
+        ],
+        [
+          "partition_move_high_before_insert:BEFORE:INSERT:partition_move_items_high:ROW:old=NULL:new=1/11"
+        ],
+        [
+          "partition_move_low_after_delete:AFTER:DELETE:partition_move_items_low:ROW:old=1/1:new=NULL"
+        ],
+        [
+          "partition_move_high_after_insert:AFTER:INSERT:partition_move_items_high:ROW:old=NULL:new=1/11"
+        ],
+        [
+          "partition_move_parent_after_statement:AFTER:UPDATE:partition_move_items:STATEMENT:old=1/1:new=1/11"
+        ]
+      ]
+    },
+    {
+      "name": "partition_move_final_leaf",
+      "kind": "rows",
+      "rows": [
+        [
+          "high",
+          "1",
+          "11",
+          "after"
+        ]
+      ]
+    },
+    {
+      "name": "create_partition_move_cancellation_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "partition_move_before_delete_cancel_returning",
+      "kind": "rows",
+      "rows": []
+    },
+    {
+      "name": "partition_move_before_delete_cancel_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "source_cancel_delete:BEFORE:DELETE:partition_move_cancel_items_low",
+          null,
+          null
+        ],
+        [
+          "2",
+          "transition:0/0:0/0",
+          null,
+          null
+        ],
+        [
+          "9223372036854775807",
+          "row",
+          "1",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "configure_partition_move_before_insert_cancel",
+      "kind": "ok"
+    },
+    {
+      "name": "partition_move_before_insert_cancel_returning",
+      "kind": "rows",
+      "rows": []
+    },
+    {
+      "name": "partition_move_before_insert_cancel_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "3",
+          "source_before_delete:BEFORE:DELETE:partition_move_cancel_items_low"
+        ],
+        [
+          "4",
+          "destination_before_insert:BEFORE:INSERT:partition_move_cancel_items_high"
+        ],
+        [
+          "5",
+          "destination_cancel_insert:BEFORE:INSERT:partition_move_cancel_items_high"
+        ],
+        [
+          "6",
+          "source_after_delete:AFTER:DELETE:partition_move_cancel_items_low"
+        ],
+        [
+          "7",
+          "transition:1/1:0/0"
+        ],
+        [
+          "9223372036854775807",
+          "remaining:0"
+        ]
+      ]
+    },
+    {
+      "name": "create_partition_move_cancel_foreign_key_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "partition_move_cancel_foreign_key_returning",
+      "kind": "rows",
+      "rows": []
+    },
+    {
+      "name": "partition_move_cancel_foreign_key_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "child",
+          "1",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "create_merge_partition_move_trigger_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "merge_partition_move_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          "UPDATE",
+          "1",
+          "1",
+          "1",
+          "11"
+        ]
+      ]
+    },
+    {
+      "name": "merge_partition_move_trigger_and_transition_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "destination_before_insert:BEFORE:INSERT:merge_partition_move_items_high",
+          null
+        ],
+        [
+          "2",
+          "source_after_delete:AFTER:DELETE:merge_partition_move_items_low",
+          null
+        ],
+        [
+          "3",
+          "destination_after_insert:AFTER:INSERT:merge_partition_move_items_high",
+          null
+        ],
+        [
+          "4",
+          "transition:0:0",
+          null
+        ],
+        [
+          "9223372036854775807",
+          "high",
+          "11"
+        ]
+      ]
+    },
+    {
+      "name": "configure_merge_partition_move_cancel",
+      "kind": "ok"
+    },
+    {
+      "name": "merge_partition_move_cancel_returning",
+      "kind": "rows",
+      "rows": []
+    },
+    {
+      "name": "merge_partition_move_cancel_trigger_and_transition_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "5",
+          "destination_before_insert:BEFORE:INSERT:merge_partition_move_items_high"
+        ],
+        [
+          "6",
+          "destination_cancel_insert:BEFORE:INSERT:merge_partition_move_items_high"
+        ],
+        [
+          "7",
+          "source_after_delete:AFTER:DELETE:merge_partition_move_items_low"
+        ],
+        [
+          "8",
+          "transition:0:0"
+        ],
+        [
+          "9223372036854775807",
+          "remaining:0"
+        ]
+      ]
+    },
+    {
+      "name": "configure_update_from_partition_move",
+      "kind": "ok"
+    },
+    {
+      "name": "update_from_partition_move_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          "2",
+          "2",
+          "before-from",
+          "2",
+          "12",
+          "after-from"
+        ]
+      ]
+    },
+    {
+      "name": "update_from_partition_move_trigger_and_transition_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "9",
+          "partition_move_parent_before_statement:BEFORE:UPDATE:partition_move_items:STATEMENT"
+        ],
+        [
+          "10",
+          "partition_move_low_before_update:BEFORE:UPDATE:partition_move_items_low:ROW:old=2/2:new=2/12"
+        ],
+        [
+          "11",
+          "partition_move_parent_before_update:BEFORE:UPDATE:partition_move_items_low:ROW:old=2/2:new=2/12"
+        ],
+        [
+          "12",
+          "partition_move_low_before_delete:BEFORE:DELETE:partition_move_items_low:ROW:old=2/2:new=NULL"
+        ],
+        [
+          "13",
+          "partition_move_high_before_insert:BEFORE:INSERT:partition_move_items_high:ROW:old=NULL:new=2/12"
+        ],
+        [
+          "14",
+          "partition_move_low_after_delete:AFTER:DELETE:partition_move_items_low:ROW:old=2/2:new=NULL"
+        ],
+        [
+          "15",
+          "partition_move_high_after_insert:AFTER:INSERT:partition_move_items_high:ROW:old=NULL:new=2/12"
+        ],
+        [
+          "16",
+          "partition_move_parent_after_statement:AFTER:UPDATE:partition_move_items:STATEMENT:old=1/2:new=1/12"
+        ],
+        [
+          "9223372036854775807",
+          "high:2/12/after-from"
+        ]
+      ]
+    },
+    {
+      "name": "create_partition_move_destination_mutation_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "partition_move_destination_value_mutation_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "1",
+          "before",
+          "1",
+          "11",
+          "changed-by-trigger"
+        ]
+      ]
+    },
+    {
+      "name": "partition_move_destination_value_mutation_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "high",
+          "1",
+          "11",
+          "changed-by-trigger"
+        ],
+        [
+          "low",
+          "2",
+          "2",
+          "reroute"
+        ]
+      ]
+    },
+    {
+      "name": "reject_partition_move_destination_reroute",
+      "kind": "error",
+      "sqlstate": "23514"
+    },
+    {
+      "name": "partition_move_destination_reroute_is_atomic",
+      "kind": "rows",
+      "rows": [
+        [
+          "high",
+          "1",
+          "11",
+          "changed-by-trigger"
+        ],
+        [
+          "low",
+          "2",
+          "2",
+          "reroute"
         ]
       ]
     }

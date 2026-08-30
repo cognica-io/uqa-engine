@@ -180,6 +180,9 @@ fn materialize_transition_rows(
     );
     let mut rows = Vec::with_capacity(uqa_execution::DEFAULT_BATCH_SIZE);
     for value in values {
+        if matches!(value, Value::Null) {
+            continue;
+        }
         let Value::Record(fields) = value else {
             return Err(SQLError::Internal(
                 "transition relation row is not a record".into(),
@@ -1133,6 +1136,42 @@ impl AfterRowTriggerEvent {
             old,
             new,
             triggers: matching,
+            sequence: usize::MAX,
+            cascade_parent,
+        }))
+    }
+
+    pub(super) fn prepare_transition_capture(
+        engine: &Engine,
+        input: AfterRowTriggerInput<'_>,
+    ) -> Result<Option<Self>> {
+        let AfterRowTriggerInput {
+            table,
+            event,
+            old_doc_id,
+            new_doc_id,
+            old_document,
+            new_document,
+            updated_columns,
+            cascade_parent,
+        } = input;
+        if !transition_capture_required(engine, table, event, updated_columns)? {
+            return Ok(None);
+        }
+        let old = match old_document {
+            Some(document) => trigger_record(engine, table, old_doc_id, Some(document), false)?,
+            None => Value::Null,
+        };
+        let new = match new_document {
+            Some(document) => trigger_record(engine, table, new_doc_id, Some(document), false)?,
+            None => Value::Null,
+        };
+        Ok(Some(Self {
+            table: table.to_string(),
+            event,
+            old,
+            new,
+            triggers: Vec::new(),
             sequence: usize::MAX,
             cascade_parent,
         }))

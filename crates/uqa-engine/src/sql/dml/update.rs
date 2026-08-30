@@ -9,15 +9,15 @@
 use super::{
     apply_validated_prepared_document_rewrite, build_returning_row, coerce_to_column_type,
     dml_returning_result, dml_storage_error, dml_target_row, eval_mutation_assignment,
-    eval_mutation_expr, finalize_partition_rewrite, index_vectors_for_type, lock_mutation_target,
-    lock_physical_mutation_target, prepare_document_rewrite, referrers_to_for_actions,
-    run_update_from, stage_prepared_document_rewrite, update_lock_strength,
-    validate_dml_expression_qualifiers, validate_mutation_columns,
+    eval_mutation_expr, index_vectors_for_type, lock_mutation_target,
+    lock_physical_mutation_target, prepare_partition_update_route, prepare_routed_document_rewrite,
+    referrers_to_for_actions, run_update_from, stage_prepared_document_rewrite,
+    update_lock_strength, validate_dml_expression_qualifiers, validate_mutation_columns,
     validate_returning_alias_relations, BTreeMap, BTreeSet, BinaryOp, ColumnType, CteScope,
     DmlCommandMutationOverlay, DmlReturningShape, Engine, MutationAssignmentTarget,
-    MutationLockTarget, PartitionRewritePolicy, PhysicalMutationLockTarget, ReturningProjectionRow,
-    ReturningRowImage, ReturningRowImages, RowIndependentUpdateValues, SQLError, SQLParam,
-    SQLResult, ScalarExpr, UpdatePlan, Value,
+    MutationLockTarget, PhysicalMutationLockTarget, ReturningProjectionRow, ReturningRowImage,
+    ReturningRowImages, RowIndependentUpdateValues, SQLError, SQLParam, SQLResult, ScalarExpr,
+    UpdatePlan, Value,
 };
 
 pub(in crate::sql) fn run_update(
@@ -277,7 +277,7 @@ pub(in crate::sql) fn run_update_inner(
             if let Some(returning) = prepared.returning {
                 returning_rows.push(returning);
             }
-            affected += 1;
+            affected += u64::from(prepared.affected);
             prepared_updates.push((prepared.rewrite, prepared.after_row_events));
         }
     }
@@ -337,7 +337,7 @@ pub(in crate::sql) fn run_update_inner(
                 if let Some(returning) = prepared.returning {
                     returning_rows.push(returning);
                 }
-                affected += 1;
+                affected += u64::from(prepared.affected);
                 prepared_updates.push((prepared.rewrite, prepared.after_row_events));
             }
         }
@@ -423,6 +423,7 @@ struct PreparedUpdateRow {
     rewrite: super::PreparedDocumentRewrite,
     after_row_events: Vec<crate::sql::triggers::AfterRowTriggerEvent>,
     returning: Option<uqa_execution::OwnedPhysicalRow>,
+    affected: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -450,26 +451,32 @@ fn prepare_update_row(
     else {
         return Ok(None);
     };
-    let Some(mut rewrite) = prepare_document_rewrite(
+    let Some(route) = prepare_partition_update_route(
+        engine,
+        storage_table,
+        doc_id,
+        &original_document,
+        triggered_document,
+        &stmt.table,
+        params,
+        stmt.include_descendants,
+    )?
+    else {
+        return Ok(None);
+    };
+    let Some(mut rewrite) = prepare_routed_document_rewrite(
         engine,
         storage_table,
         doc_id,
         original_document,
-        triggered_document,
+        route,
         params,
         referential_actions,
     )?
     else {
         return Ok(None);
     };
-    finalize_partition_rewrite(
-        engine,
-        &mut rewrite,
-        &stmt.table,
-        params,
-        stmt.include_descendants,
-        PartitionRewritePolicy::Move,
-    )?;
+    let affected = !rewrite.is_partition_move_delete();
     let mut after_row_events = Vec::new();
     let rewritten_doc_id = stage_prepared_document_rewrite(
         engine,
@@ -478,7 +485,7 @@ fn prepare_update_row(
         Some(assigned_columns),
         &mut after_row_events,
     )?;
-    let returning = if stmt.returning.is_empty() {
+    let returning = if !affected || stmt.returning.is_empty() {
         None
     } else {
         Some(build_returning_row(
@@ -508,6 +515,7 @@ fn prepare_update_row(
         rewrite,
         after_row_events,
         returning,
+        affected,
     }))
 }
 

@@ -557,7 +557,7 @@ pub(in crate::sql) fn stage_prepared_document_delete(
     stage_prepared_document_delete_with_parent(engine, prepared, params, after_row_events, None)
 }
 
-fn stage_prepared_document_delete_with_parent(
+pub(in crate::sql) fn stage_prepared_document_delete_with_parent(
     engine: &Engine,
     prepared: &mut PreparedDocumentDelete,
     params: &[SQLParam],

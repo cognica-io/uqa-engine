@@ -12,12 +12,12 @@ use super::{
     bind_projection_output_schema, build_projection_physical_row_with_ctes, decode_prepared_doc_id,
     decode_prepared_document_rewrite, dml_append_hidden_qualified_row, dml_storage_error,
     dml_target_row, doc_id_value, encode_prepared_doc_id, encode_prepared_document_rewrite,
-    eval_mutation_assignment, eval_mutation_expr, finalize_partition_rewrite,
-    key_constraint_values, lock_document_key_dependencies, lock_mutation_target,
-    missing_document_error, prepare_document_rewrite, update_lock_strength, BTreeMap, BTreeSet,
+    eval_mutation_assignment, eval_mutation_expr, key_constraint_values,
+    lock_document_key_dependencies, lock_mutation_target, missing_document_error,
+    prepare_document_rewrite, reject_partition_rewrite, update_lock_strength, BTreeMap, BTreeSet,
     ConflictActionPlan, ConflictPlan, CteScope, DocId, Document, Engine, MutationAssignmentTarget,
-    MutationLockTarget, PartitionRewritePolicy, PhysicalDocumentIdentity, PreparedDocumentRewrite,
-    ProjectionPlan, SQLError, SQLParam, SQLResult, Value, DOC_ID_COLUMN,
+    MutationLockTarget, PhysicalDocumentIdentity, PreparedDocumentRewrite, ProjectionPlan,
+    SQLError, SQLParam, SQLResult, Value, DOC_ID_COLUMN,
 };
 use rusqlite::OptionalExtension;
 use uqa_execution::{ColumnIdentity, OwnedPhysicalRow, PhysicalRow, RowSchema};
@@ -704,7 +704,7 @@ impl InsertConflictLocks {
                     return Ok(PreparedInsertConflict::Skip);
                 };
                 new_document = triggered_document;
-                let mut prepared = prepare_document_rewrite(
+                let prepared = prepare_document_rewrite(
                     engine,
                     &existing.table,
                     existing.doc_id,
@@ -719,14 +719,7 @@ impl InsertConflictLocks {
                     )
                 })?;
                 if let Some(root) = engine.partition_hierarchy_root(&prepared.table)? {
-                    finalize_partition_rewrite(
-                        engine,
-                        &mut prepared,
-                        &root,
-                        params,
-                        true,
-                        PartitionRewritePolicy::RejectOnConflict,
-                    )?;
+                    reject_partition_rewrite(engine, &prepared, &root, params, true)?;
                 }
                 self.overlay
                     .as_mut()

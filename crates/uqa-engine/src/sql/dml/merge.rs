@@ -18,8 +18,8 @@ use super::{
     lock_existing_document_foreign_key_dependencies, lock_physical_mutation_target,
     merge_pair_schema, merge_source_index_value, missing_document_error, partition_insert_target,
     persist_auto_increment_identity, prepare_auto_increment_identity, prepare_document_delete,
-    prepare_document_rewrite, prepare_insert_identity, refresh_insert_identity_after_trigger,
-    retarget_prepared_document_rewrite, returning_row_context, stage_prepared_document_delete,
+    prepare_insert_identity, prepare_partition_update_route, prepare_routed_document_rewrite,
+    refresh_insert_identity_after_trigger, returning_row_context, stage_prepared_document_delete,
     stage_prepared_document_rewrite, update_lock_strength, validate_document_constraints,
     validate_mutation_columns, validate_returning_alias_relations, BTreeMap, BTreeSet, CteScope,
     DmlCommandMutationOverlay, DmlReturningShape, Document, Engine, MergePlan, MergeWhenPlan,
@@ -96,11 +96,6 @@ pub(in crate::sql) fn run_merge_inner(
     }
     let target_qual = stmt.target_qualifier.clone();
     let target_tables = engine.hierarchy_scan_tables(&target_table, stmt.include_descendants)?;
-    let target_hierarchy = engine
-        .try_table_hierarchy(&target_table)
-        .map_err(|error| SQLError::Internal(format!("read MERGE hierarchy: {error}")))?;
-    let target_is_partitioned =
-        target_hierarchy.partition_spec.is_some() || target_hierarchy.partition_bound.is_some();
     let mut ctes = CteScope::new_for_current_routine();
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
     for clause in &stmt.when_clauses {
@@ -451,7 +446,7 @@ pub(in crate::sql) fn run_merge_inner(
             SelectedMergeAction::Update {
                 doc_id,
                 old_document,
-                mut new_document,
+                new_document,
                 updated_columns,
             } => {
                 let storage_table = pair.storage_table.as_deref().ok_or_else(|| {
@@ -474,19 +469,25 @@ pub(in crate::sql) fn run_merge_inner(
                     storage_table,
                     doc_id,
                 )?;
-                new_document = triggered_document;
-                let destination_table = if target_is_partitioned {
-                    // PostgreSQL's ONLY modifier limits target matching, not the partition routing performed by an action.
-                    partition_insert_target(engine, &target_table, &new_document, params, true)?
-                } else {
-                    storage_table.to_string()
+                let Some(route) = prepare_partition_update_route(
+                    engine,
+                    storage_table,
+                    doc_id,
+                    &old_document,
+                    triggered_document,
+                    &target_table,
+                    params,
+                    true,
+                )?
+                else {
+                    continue;
                 };
-                let mut prepared = prepare_document_rewrite(
+                let mut prepared = prepare_routed_document_rewrite(
                     engine,
                     storage_table,
                     doc_id,
                     old_document,
-                    new_document,
+                    route,
                     params,
                     &mut referential_actions,
                 )?
@@ -495,7 +496,8 @@ pub(in crate::sql) fn run_merge_inner(
                         "MERGE rewrite dependency tree was cyclic at its root".into(),
                     )
                 })?;
-                retarget_prepared_document_rewrite(engine, &mut prepared, &destination_table)?;
+                prepared.capture_partition_move_update_transition = false;
+                let row_affected = !prepared.is_partition_move_delete();
                 let rewritten_doc_id = stage_prepared_document_rewrite(
                     engine,
                     &mut prepared,
@@ -503,7 +505,7 @@ pub(in crate::sql) fn run_merge_inner(
                     Some(&updated_columns),
                     &mut after_row_events,
                 )?;
-                if !stmt.returning.is_empty() {
+                if row_affected && !stmt.returning.is_empty() {
                     returning_rows.push(build_merge_returning_row(
                         engine,
                         MergeReturningRow {
@@ -530,7 +532,7 @@ pub(in crate::sql) fn run_merge_inner(
                         &snapshot_ctes,
                     )?);
                 }
-                affected += 1;
+                affected += u64::from(row_affected);
                 has_mutation = true;
                 push_merge_prepared_action(
                     &mut prepared_actions,

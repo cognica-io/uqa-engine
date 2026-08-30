@@ -590,3 +590,111 @@ INSERT INTO transition_persistence_items VALUES (42);
 -- @case transition_persistence_failure_is_atomic rows
 SELECT (SELECT count(*) FROM transition_persistence_items), (SELECT count(*) FROM pg_class WHERE relname = 'transition_leaked_view');
 -- @end
+
+-- @case create_partition_move_trigger_fixture ok
+CREATE TABLE partition_move_log (seq bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, message text NOT NULL); CREATE TABLE partition_move_items (id integer, bucket integer, value text) PARTITION BY RANGE (bucket); CREATE TABLE partition_move_items_low PARTITION OF partition_move_items FOR VALUES FROM (0) TO (10); CREATE TABLE partition_move_items_high PARTITION OF partition_move_items FOR VALUES FROM (10) TO (20); CREATE FUNCTION partition_move_row_probe() RETURNS trigger LANGUAGE plpgsql AS $probe$ BEGIN IF TG_LEVEL = 'STATEMENT' THEN INSERT INTO partition_move_log(message) VALUES (TG_NAME || ':' || TG_WHEN || ':' || TG_OP || ':' || TG_TABLE_NAME || ':' || TG_LEVEL); RETURN NULL; ELSIF TG_OP = 'DELETE' THEN INSERT INTO partition_move_log(message) VALUES (TG_NAME || ':' || TG_WHEN || ':' || TG_OP || ':' || TG_TABLE_NAME || ':' || TG_LEVEL || ':old=' || OLD.id::text || '/' || OLD.bucket::text || ':new=NULL'); RETURN OLD; ELSIF TG_OP = 'INSERT' THEN INSERT INTO partition_move_log(message) VALUES (TG_NAME || ':' || TG_WHEN || ':' || TG_OP || ':' || TG_TABLE_NAME || ':' || TG_LEVEL || ':old=NULL:new=' || NEW.id::text || '/' || NEW.bucket::text); RETURN NEW; ELSE INSERT INTO partition_move_log(message) VALUES (TG_NAME || ':' || TG_WHEN || ':' || TG_OP || ':' || TG_TABLE_NAME || ':' || TG_LEVEL || ':old=' || OLD.id::text || '/' || OLD.bucket::text || ':new=' || NEW.id::text || '/' || NEW.bucket::text); RETURN NEW; END IF; END $probe$; CREATE FUNCTION partition_move_transition_probe() RETURNS trigger LANGUAGE plpgsql AS $probe$ DECLARE old_count bigint; new_count bigint; old_bucket_sum bigint; new_bucket_sum bigint; BEGIN SELECT count(*), coalesce(sum(bucket), 0) INTO old_count, old_bucket_sum FROM old_rows; SELECT count(*), coalesce(sum(bucket), 0) INTO new_count, new_bucket_sum FROM new_rows; INSERT INTO partition_move_log(message) VALUES (TG_NAME || ':' || TG_WHEN || ':' || TG_OP || ':' || TG_TABLE_NAME || ':' || TG_LEVEL || ':old=' || old_count::text || '/' || old_bucket_sum::text || ':new=' || new_count::text || '/' || new_bucket_sum::text); RETURN NULL; END $probe$; CREATE TRIGGER partition_move_parent_before_statement BEFORE UPDATE ON partition_move_items FOR EACH STATEMENT EXECUTE FUNCTION partition_move_row_probe(); CREATE TRIGGER partition_move_parent_before_update BEFORE UPDATE ON partition_move_items FOR EACH ROW EXECUTE FUNCTION partition_move_row_probe(); CREATE TRIGGER partition_move_parent_after_update AFTER UPDATE ON partition_move_items FOR EACH ROW EXECUTE FUNCTION partition_move_row_probe(); CREATE TRIGGER partition_move_parent_after_statement AFTER UPDATE ON partition_move_items REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION partition_move_transition_probe(); CREATE TRIGGER partition_move_low_before_update BEFORE UPDATE ON partition_move_items_low FOR EACH ROW EXECUTE FUNCTION partition_move_row_probe(); CREATE TRIGGER partition_move_low_after_update AFTER UPDATE ON partition_move_items_low FOR EACH ROW EXECUTE FUNCTION partition_move_row_probe(); CREATE TRIGGER partition_move_low_before_delete BEFORE DELETE ON partition_move_items_low FOR EACH ROW EXECUTE FUNCTION partition_move_row_probe(); CREATE TRIGGER partition_move_low_after_delete AFTER DELETE ON partition_move_items_low FOR EACH ROW EXECUTE FUNCTION partition_move_row_probe(); CREATE TRIGGER partition_move_high_before_insert BEFORE INSERT ON partition_move_items_high FOR EACH ROW EXECUTE FUNCTION partition_move_row_probe(); CREATE TRIGGER partition_move_high_after_insert AFTER INSERT ON partition_move_items_high FOR EACH ROW EXECUTE FUNCTION partition_move_row_probe(); INSERT INTO partition_move_items VALUES (1, 1, 'before'); DELETE FROM partition_move_log;
+-- @end
+
+-- @case partition_move_update_returning rows
+UPDATE partition_move_items SET bucket = 11, value = 'after' WHERE id = 1 RETURNING old.id, old.bucket, old.value, new.id, new.bucket, new.value;
+-- @end
+
+-- @case partition_move_trigger_order_and_transition_rows rows
+SELECT message FROM partition_move_log ORDER BY seq;
+-- @end
+
+-- @case partition_move_final_leaf rows
+SELECT 'low', id, bucket, value FROM partition_move_items_low UNION ALL SELECT 'high', id, bucket, value FROM partition_move_items_high ORDER BY 1, 2;
+-- @end
+
+-- @case create_partition_move_cancellation_fixture ok
+CREATE TABLE partition_move_cancel_log (seq bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, message text NOT NULL); CREATE TABLE partition_move_cancel_items (id integer, bucket integer, value text) PARTITION BY RANGE (bucket); CREATE TABLE partition_move_cancel_items_low PARTITION OF partition_move_cancel_items FOR VALUES FROM (0) TO (10); CREATE TABLE partition_move_cancel_items_high PARTITION OF partition_move_cancel_items FOR VALUES FROM (10) TO (20); CREATE FUNCTION partition_move_cancel_log_probe() RETURNS trigger LANGUAGE plpgsql AS $probe$ BEGIN INSERT INTO partition_move_cancel_log(message) VALUES (TG_NAME || ':' || TG_WHEN || ':' || TG_OP || ':' || TG_TABLE_NAME); IF TG_OP = 'DELETE' THEN RETURN OLD; END IF; RETURN NEW; END $probe$; CREATE FUNCTION partition_move_cancel_row() RETURNS trigger LANGUAGE plpgsql AS $probe$ BEGIN INSERT INTO partition_move_cancel_log(message) VALUES (TG_NAME || ':' || TG_WHEN || ':' || TG_OP || ':' || TG_TABLE_NAME); RETURN NULL; END $probe$; CREATE FUNCTION partition_move_cancel_transition_probe() RETURNS trigger LANGUAGE plpgsql AS $probe$ DECLARE old_count bigint; new_count bigint; old_bucket_sum bigint; new_bucket_sum bigint; BEGIN SELECT count(*), coalesce(sum(bucket), 0) INTO old_count, old_bucket_sum FROM old_rows; SELECT count(*), coalesce(sum(bucket), 0) INTO new_count, new_bucket_sum FROM new_rows; INSERT INTO partition_move_cancel_log(message) VALUES ('transition:' || old_count::text || '/' || old_bucket_sum::text || ':' || new_count::text || '/' || new_bucket_sum::text); RETURN NULL; END $probe$; CREATE TRIGGER source_cancel_delete BEFORE DELETE ON partition_move_cancel_items_low FOR EACH ROW EXECUTE FUNCTION partition_move_cancel_row(); CREATE TRIGGER source_after_delete AFTER DELETE ON partition_move_cancel_items_low FOR EACH ROW EXECUTE FUNCTION partition_move_cancel_log_probe(); CREATE TRIGGER destination_before_insert BEFORE INSERT ON partition_move_cancel_items_high FOR EACH ROW EXECUTE FUNCTION partition_move_cancel_log_probe(); CREATE TRIGGER destination_after_insert AFTER INSERT ON partition_move_cancel_items_high FOR EACH ROW EXECUTE FUNCTION partition_move_cancel_log_probe(); CREATE TRIGGER partition_move_cancel_transition AFTER UPDATE ON partition_move_cancel_items REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION partition_move_cancel_transition_probe(); INSERT INTO partition_move_cancel_items VALUES (1, 1, 'before');
+-- @end
+
+-- @case partition_move_before_delete_cancel_returning rows
+UPDATE partition_move_cancel_items SET bucket = 11 WHERE id = 1 RETURNING old.id, old.bucket, new.id, new.bucket;
+-- @end
+
+-- @case partition_move_before_delete_cancel_state rows
+SELECT seq, message, NULL::integer, NULL::integer FROM partition_move_cancel_log UNION ALL SELECT 9223372036854775807, 'row', id, bucket FROM partition_move_cancel_items ORDER BY 1;
+-- @end
+
+-- @case configure_partition_move_before_insert_cancel ok
+DROP TRIGGER source_cancel_delete ON partition_move_cancel_items_low; CREATE TRIGGER source_before_delete BEFORE DELETE ON partition_move_cancel_items_low FOR EACH ROW EXECUTE FUNCTION partition_move_cancel_log_probe(); CREATE TRIGGER destination_cancel_insert BEFORE INSERT ON partition_move_cancel_items_high FOR EACH ROW EXECUTE FUNCTION partition_move_cancel_row(); DELETE FROM partition_move_cancel_log;
+-- @end
+
+-- @case partition_move_before_insert_cancel_returning rows
+UPDATE partition_move_cancel_items SET bucket = 11 WHERE id = 1 RETURNING old.id, old.bucket, new.id, new.bucket;
+-- @end
+
+-- @case partition_move_before_insert_cancel_state rows
+SELECT seq, message FROM partition_move_cancel_log UNION ALL SELECT 9223372036854775807, 'remaining:' || count(*)::text FROM partition_move_cancel_items ORDER BY 1;
+-- @end
+
+-- @case create_partition_move_cancel_foreign_key_fixture ok
+CREATE TABLE partition_move_cancel_parent (id integer, bucket integer, PRIMARY KEY (id, bucket)) PARTITION BY RANGE (bucket); CREATE TABLE partition_move_cancel_parent_low PARTITION OF partition_move_cancel_parent FOR VALUES FROM (0) TO (10); CREATE TABLE partition_move_cancel_parent_high PARTITION OF partition_move_cancel_parent FOR VALUES FROM (10) TO (20); CREATE TABLE partition_move_cancel_child (id integer, bucket integer, FOREIGN KEY (id, bucket) REFERENCES partition_move_cancel_parent(id, bucket) ON UPDATE CASCADE ON DELETE CASCADE); CREATE FUNCTION partition_move_cancel_destination_insert() RETURNS trigger LANGUAGE plpgsql AS $probe$ BEGIN RETURN NULL; END $probe$; CREATE TRIGGER cancel_destination_insert BEFORE INSERT ON partition_move_cancel_parent_high FOR EACH ROW EXECUTE FUNCTION partition_move_cancel_destination_insert(); INSERT INTO partition_move_cancel_parent VALUES (1, 1); INSERT INTO partition_move_cancel_child VALUES (1, 1);
+-- @end
+
+-- @case partition_move_cancel_foreign_key_returning rows
+UPDATE partition_move_cancel_parent SET bucket = 11 WHERE id = 1 RETURNING old.id, old.bucket, new.id, new.bucket;
+-- @end
+
+-- @case partition_move_cancel_foreign_key_state rows
+SELECT 'parent', id, bucket FROM partition_move_cancel_parent UNION ALL SELECT 'child', id, bucket FROM partition_move_cancel_child ORDER BY 1, 2, 3;
+-- @end
+
+-- @case create_merge_partition_move_trigger_fixture ok
+CREATE TABLE merge_partition_move_log (seq bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, message text NOT NULL); CREATE TABLE merge_partition_move_items (id integer, bucket integer, value text) PARTITION BY RANGE (bucket); CREATE TABLE merge_partition_move_items_low PARTITION OF merge_partition_move_items FOR VALUES FROM (0) TO (10); CREATE TABLE merge_partition_move_items_high PARTITION OF merge_partition_move_items FOR VALUES FROM (10) TO (20); CREATE TABLE merge_partition_move_source (id integer PRIMARY KEY, bucket integer); CREATE FUNCTION merge_partition_move_log_probe() RETURNS trigger LANGUAGE plpgsql AS $probe$ BEGIN INSERT INTO merge_partition_move_log(message) VALUES (TG_NAME || ':' || TG_WHEN || ':' || TG_OP || ':' || TG_TABLE_NAME); IF TG_OP = 'DELETE' THEN RETURN OLD; END IF; RETURN NEW; END $probe$; CREATE FUNCTION merge_partition_move_cancel_insert() RETURNS trigger LANGUAGE plpgsql AS $probe$ BEGIN INSERT INTO merge_partition_move_log(message) VALUES (TG_NAME || ':' || TG_WHEN || ':' || TG_OP || ':' || TG_TABLE_NAME); RETURN NULL; END $probe$; CREATE FUNCTION merge_partition_move_transition_probe() RETURNS trigger LANGUAGE plpgsql AS $probe$ DECLARE old_count bigint; new_count bigint; BEGIN SELECT count(*) INTO old_count FROM old_rows; SELECT count(*) INTO new_count FROM new_rows; INSERT INTO merge_partition_move_log(message) VALUES ('transition:' || old_count::text || ':' || new_count::text); RETURN NULL; END $probe$; CREATE TRIGGER source_after_delete AFTER DELETE ON merge_partition_move_items_low FOR EACH ROW EXECUTE FUNCTION merge_partition_move_log_probe(); CREATE TRIGGER destination_before_insert BEFORE INSERT ON merge_partition_move_items_high FOR EACH ROW EXECUTE FUNCTION merge_partition_move_log_probe(); CREATE TRIGGER destination_after_insert AFTER INSERT ON merge_partition_move_items_high FOR EACH ROW EXECUTE FUNCTION merge_partition_move_log_probe(); CREATE TRIGGER merge_partition_move_transition AFTER UPDATE ON merge_partition_move_items REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION merge_partition_move_transition_probe(); INSERT INTO merge_partition_move_items VALUES (1, 1, 'success'); INSERT INTO merge_partition_move_source VALUES (1, 11);
+-- @end
+
+-- @case merge_partition_move_returning rows
+MERGE INTO merge_partition_move_items AS target USING merge_partition_move_source AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET bucket = source.bucket RETURNING merge_action(), old.id, old.bucket, new.id, new.bucket;
+-- @end
+
+-- @case merge_partition_move_trigger_and_transition_state rows
+SELECT seq, message, NULL::integer FROM merge_partition_move_log UNION ALL SELECT 9223372036854775807, 'high', bucket FROM merge_partition_move_items_high ORDER BY 1;
+-- @end
+
+-- @case configure_merge_partition_move_cancel ok
+CREATE TRIGGER destination_cancel_insert BEFORE INSERT ON merge_partition_move_items_high FOR EACH ROW EXECUTE FUNCTION merge_partition_move_cancel_insert(); INSERT INTO merge_partition_move_items VALUES (2, 2, 'cancel'); INSERT INTO merge_partition_move_source VALUES (2, 12); DELETE FROM merge_partition_move_log;
+-- @end
+
+-- @case merge_partition_move_cancel_returning rows
+MERGE INTO merge_partition_move_items AS target USING merge_partition_move_source AS source ON target.id = source.id WHEN MATCHED AND target.id = 2 THEN UPDATE SET bucket = source.bucket RETURNING merge_action(), old.id, old.bucket, new.id, new.bucket;
+-- @end
+
+-- @case merge_partition_move_cancel_trigger_and_transition_state rows
+SELECT seq, message FROM merge_partition_move_log UNION ALL SELECT 9223372036854775807, 'remaining:' || count(*)::text FROM merge_partition_move_items WHERE id = 2 ORDER BY 1;
+-- @end
+
+-- @case configure_update_from_partition_move ok
+CREATE TABLE partition_move_update_source (id integer PRIMARY KEY, bucket integer, value text); INSERT INTO partition_move_items VALUES (2, 2, 'before-from'); INSERT INTO partition_move_update_source VALUES (2, 12, 'after-from'); DELETE FROM partition_move_log;
+-- @end
+
+-- @case update_from_partition_move_returning rows
+UPDATE partition_move_items AS target SET bucket = source.bucket, value = source.value FROM partition_move_update_source AS source WHERE target.id = source.id RETURNING old.id, old.bucket, old.value, new.id, new.bucket, new.value;
+-- @end
+
+-- @case update_from_partition_move_trigger_and_transition_state rows
+SELECT seq, message FROM partition_move_log UNION ALL SELECT 9223372036854775807, 'high:' || id::text || '/' || bucket::text || '/' || value FROM partition_move_items_high WHERE id = 2 ORDER BY 1;
+-- @end
+
+-- @case create_partition_move_destination_mutation_fixture ok
+CREATE TABLE partition_move_mutation_items (id integer, bucket integer, value text) PARTITION BY RANGE (bucket); CREATE TABLE partition_move_mutation_items_low PARTITION OF partition_move_mutation_items FOR VALUES FROM (0) TO (10); CREATE TABLE partition_move_mutation_items_high PARTITION OF partition_move_mutation_items FOR VALUES FROM (10) TO (20); CREATE TABLE partition_move_mutation_items_other PARTITION OF partition_move_mutation_items FOR VALUES FROM (20) TO (30); CREATE FUNCTION partition_move_mutate_destination() RETURNS trigger LANGUAGE plpgsql AS $probe$ BEGIN IF NEW.id = 1 THEN NEW.value := 'changed-by-trigger'; ELSIF NEW.id = 2 THEN NEW.bucket := 21; END IF; RETURN NEW; END $probe$; CREATE TRIGGER mutate_destination BEFORE INSERT ON partition_move_mutation_items_high FOR EACH ROW EXECUTE FUNCTION partition_move_mutate_destination(); INSERT INTO partition_move_mutation_items VALUES (1, 1, 'before'), (2, 2, 'reroute');
+-- @end
+
+-- @case partition_move_destination_value_mutation_returning rows
+UPDATE partition_move_mutation_items SET bucket = 11 WHERE id = 1 RETURNING old.id, old.bucket, old.value, new.id, new.bucket, new.value;
+-- @end
+
+-- @case partition_move_destination_value_mutation_state rows
+SELECT 'low', id, bucket, value FROM partition_move_mutation_items_low UNION ALL SELECT 'high', id, bucket, value FROM partition_move_mutation_items_high UNION ALL SELECT 'other', id, bucket, value FROM partition_move_mutation_items_other ORDER BY 1, 2;
+-- @end
+
+-- @case reject_partition_move_destination_reroute error
+UPDATE partition_move_mutation_items SET bucket = 12 WHERE id = 2;
+-- @end
+
+-- @case partition_move_destination_reroute_is_atomic rows
+SELECT 'low', id, bucket, value FROM partition_move_mutation_items_low UNION ALL SELECT 'high', id, bucket, value FROM partition_move_mutation_items_high UNION ALL SELECT 'other', id, bucket, value FROM partition_move_mutation_items_other ORDER BY 1, 2;
+-- @end

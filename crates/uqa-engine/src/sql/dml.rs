@@ -95,10 +95,18 @@ pub(in crate::sql) struct PreparedDocumentRewrite {
     pub table: String,
     pub doc_id: DocId,
     pub destination: Option<(String, DocId)>,
+    pub partition_move_delete: Option<Box<PreparedDocumentDelete>>,
     pub old_document: Document,
     pub new_document: Document,
     pub actions: Vec<PreparedDocumentRewrite>,
     pub trigger_updated_columns: Option<Vec<String>>,
+    pub capture_partition_move_update_transition: bool,
+}
+
+impl PreparedDocumentRewrite {
+    pub(in crate::sql) fn is_partition_move_delete(&self) -> bool {
+        self.partition_move_delete.is_some()
+    }
 }
 
 pub(in crate::sql) enum PreparedDeleteAction {
@@ -199,6 +207,14 @@ pub(in crate::sql) fn encode_prepared_document_rewrite(prepared: PreparedDocumen
                 ]))
             }),
         ),
+        (
+            "partition_move_delete".into(),
+            prepared
+                .partition_move_delete
+                .map_or(Value::Null, |delete| {
+                    encode_prepared_document_delete(*delete)
+                }),
+        ),
         ("old".into(), Value::Map(prepared.old_document)),
         ("new".into(), Value::Map(prepared.new_document)),
         (
@@ -210,6 +226,10 @@ pub(in crate::sql) fn encode_prepared_document_rewrite(prepared: PreparedDocumen
                     .map(encode_prepared_document_rewrite)
                     .collect(),
             ),
+        ),
+        (
+            "capture_partition_move_update_transition".into(),
+            Value::Bool(prepared.capture_partition_move_update_transition),
         ),
     ]))
 }
@@ -261,6 +281,10 @@ pub(in crate::sql) fn decode_prepared_document_rewrite(
             ))
         }
     };
+    let partition_move_delete = match fields.remove("partition_move_delete") {
+        Some(Value::Null) | None => None,
+        Some(delete) => Some(Box::new(decode_prepared_document_delete(delete)?)),
+    };
     let old_document = match fields.remove("old") {
         Some(Value::Map(document)) => document,
         _ => {
@@ -288,14 +312,26 @@ pub(in crate::sql) fn decode_prepared_document_rewrite(
             ))
         }
     };
+    let capture_partition_move_update_transition = match fields
+        .remove("capture_partition_move_update_transition")
+    {
+        Some(Value::Bool(capture)) => capture,
+        _ => {
+            return Err(SQLError::Internal(
+                "prepared rewrite spill payload has no partition movement transition mode".into(),
+            ))
+        }
+    };
     Ok(PreparedDocumentRewrite {
         table,
         doc_id,
         destination,
+        partition_move_delete,
         old_document,
         new_document,
         actions,
         trigger_updated_columns: None,
+        capture_partition_move_update_transition,
     })
 }
 

@@ -909,10 +909,12 @@ pub(in crate::sql) fn prepare_document_rewrite(
         table: table.to_string(),
         doc_id,
         destination: None,
+        partition_move_delete: None,
         old_document,
         new_document,
         actions: actions?,
         trigger_updated_columns: None,
+        capture_partition_move_update_transition: true,
     }))
 }
 
@@ -941,12 +943,33 @@ pub(in crate::sql) fn prepare_referential_document_rewrite(
     else {
         return Ok(None);
     };
-    let Some(mut prepared) = prepare_document_rewrite(
+    let route = if let Some(root) = engine.partition_hierarchy_root(table)? {
+        let Some(route) = prepare_partition_update_route(
+            engine,
+            table,
+            doc_id,
+            &old_document,
+            new_document,
+            &root,
+            params,
+            true,
+        )?
+        else {
+            return Ok(None);
+        };
+        route
+    } else {
+        PartitionUpdateRoute::Rewrite {
+            document: new_document,
+            destination: None,
+        }
+    };
+    let Some(mut prepared) = prepare_routed_document_rewrite(
         engine,
         table,
         doc_id,
         old_document,
-        new_document,
+        route,
         params,
         referential_actions,
     )?
@@ -954,14 +977,15 @@ pub(in crate::sql) fn prepare_referential_document_rewrite(
         return Ok(None);
     };
     prepared.trigger_updated_columns = Some(updated_columns);
-    finalize_referential_partition_rewrite(engine, &mut prepared, params)?;
-    referential_actions.record_pending_document(
-        PhysicalDocumentIdentity {
-            table: prepared.table.clone(),
-            doc_id: prepared.doc_id,
-        },
-        Some(prepared.new_document.clone()),
-    );
+    if !prepared.is_partition_move_delete() {
+        referential_actions.record_pending_document(
+            PhysicalDocumentIdentity {
+                table: prepared.table.clone(),
+                doc_id: prepared.doc_id,
+            },
+            Some(prepared.new_document.clone()),
+        );
+    }
     Ok(Some(prepared))
 }
 
@@ -991,19 +1015,153 @@ pub(in crate::sql) fn retarget_prepared_document_rewrite(
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::sql) enum PartitionRewritePolicy {
-    Move,
-    RejectOnConflict,
+pub(in crate::sql) enum PartitionUpdateRoute {
+    Rewrite {
+        document: Document,
+        destination: Option<String>,
+    },
+    Delete {
+        attempted_document: Document,
+    },
 }
 
-pub(in crate::sql) fn finalize_partition_rewrite(
+#[allow(clippy::too_many_arguments)]
+pub(in crate::sql) fn prepare_partition_update_route(
     engine: &Engine,
-    prepared: &mut PreparedDocumentRewrite,
+    storage_table: &str,
+    doc_id: DocId,
+    old_document: &Document,
+    document: Document,
     routing_table: &str,
     params: &[SQLParam],
     include_descendants: bool,
-    policy: PartitionRewritePolicy,
+) -> Result<Option<PartitionUpdateRoute>, SQLError> {
+    let hierarchy = engine
+        .try_table_hierarchy(routing_table)
+        .map_err(|error| SQLError::Internal(format!("read rewrite hierarchy: {error}")))?;
+    if hierarchy.partition_spec.is_none() && !hierarchy.is_partition() {
+        return Ok(Some(PartitionUpdateRoute::Rewrite {
+            document,
+            destination: None,
+        }));
+    }
+    let destination = partition_insert_target(
+        engine,
+        routing_table,
+        &document,
+        params,
+        include_descendants,
+    )?;
+    if destination == storage_table {
+        return Ok(Some(PartitionUpdateRoute::Rewrite {
+            document,
+            destination: None,
+        }));
+    }
+    if crate::sql::triggers::fire_before_row_triggers(
+        engine,
+        storage_table,
+        uqa_sql::ast::TriggerEvent::Delete,
+        doc_id,
+        Some(old_document),
+        None,
+        &[],
+    )?
+    .is_none()
+    {
+        return Ok(None);
+    }
+    engine.lock_relation(
+        &destination,
+        crate::row_locks::RelationLockMode::RowExclusive,
+    )?;
+    let Some(triggered_document) = crate::sql::triggers::fire_before_row_triggers(
+        engine,
+        &destination,
+        uqa_sql::ast::TriggerEvent::Insert,
+        doc_id,
+        None,
+        Some(&document),
+        &[],
+    )?
+    else {
+        return Ok(Some(PartitionUpdateRoute::Delete {
+            attempted_document: document,
+        }));
+    };
+    partition_insert_target(engine, &destination, &triggered_document, params, false)?;
+    Ok(Some(PartitionUpdateRoute::Rewrite {
+        document: triggered_document,
+        destination: Some(destination),
+    }))
+}
+
+pub(in crate::sql) fn prepare_routed_document_rewrite(
+    engine: &Engine,
+    table: &str,
+    doc_id: DocId,
+    old_document: Document,
+    route: PartitionUpdateRoute,
+    params: &[SQLParam],
+    referential_actions: &mut ReferentialActionContext,
+) -> Result<Option<PreparedDocumentRewrite>, SQLError> {
+    match route {
+        PartitionUpdateRoute::Rewrite {
+            document,
+            destination,
+        } => {
+            let Some(mut prepared) = prepare_document_rewrite(
+                engine,
+                table,
+                doc_id,
+                old_document,
+                document,
+                params,
+                referential_actions,
+            )?
+            else {
+                return Ok(None);
+            };
+            if let Some(destination) = destination {
+                retarget_prepared_document_rewrite(engine, &mut prepared, &destination)?;
+            }
+            Ok(Some(prepared))
+        }
+        PartitionUpdateRoute::Delete { attempted_document } => {
+            let delete = super::PreparedDocumentDelete {
+                table: table.to_string(),
+                doc_id,
+                document: old_document.clone(),
+                actions: Vec::new(),
+            };
+            referential_actions.record_pending_document(
+                PhysicalDocumentIdentity {
+                    table: table.to_string(),
+                    doc_id,
+                },
+                None,
+            );
+            Ok(Some(PreparedDocumentRewrite {
+                table: table.to_string(),
+                doc_id,
+                destination: None,
+                partition_move_delete: Some(Box::new(delete)),
+                old_document,
+                new_document: attempted_document,
+                actions: Vec::new(),
+                trigger_updated_columns: None,
+                capture_partition_move_update_transition: true,
+            }))
+        }
+    }
+}
+
+pub(in crate::sql) fn reject_partition_rewrite(
+    engine: &Engine,
+    prepared: &PreparedDocumentRewrite,
+    routing_table: &str,
+    params: &[SQLParam],
+    include_descendants: bool,
 ) -> Result<(), SQLError> {
     let hierarchy = engine
         .try_table_hierarchy(routing_table)
@@ -1021,31 +1179,10 @@ pub(in crate::sql) fn finalize_partition_rewrite(
     if destination == prepared.table {
         return Ok(());
     }
-    if policy == PartitionRewritePolicy::RejectOnConflict {
-        return Err(SQLError::Routine {
-            sqlstate: "0A000".into(),
-            message: "invalid ON UPDATE specification\nDETAIL: The result tuple would appear in a different partition than the original tuple.".into(),
-        });
-    }
-    retarget_prepared_document_rewrite(engine, prepared, &destination)
-}
-
-pub(in crate::sql) fn finalize_referential_partition_rewrite(
-    engine: &Engine,
-    prepared: &mut PreparedDocumentRewrite,
-    params: &[SQLParam],
-) -> Result<(), SQLError> {
-    let Some(root) = engine.partition_hierarchy_root(&prepared.table)? else {
-        return Ok(());
-    };
-    finalize_partition_rewrite(
-        engine,
-        prepared,
-        &root,
-        params,
-        true,
-        PartitionRewritePolicy::Move,
-    )
+    Err(SQLError::Routine {
+        sqlstate: "0A000".into(),
+        message: "invalid ON UPDATE specification\nDETAIL: The result tuple would appear in a different partition than the original tuple.".into(),
+    })
 }
 
 pub(in crate::sql) fn stage_prepared_document_rewrite(
@@ -1076,6 +1213,37 @@ pub(in crate::sql) fn stage_prepared_document_rewrite_with_parent(
     let trigger_updated_columns = root_updated_columns
         .map(<[String]>::to_vec)
         .or_else(|| prepared.trigger_updated_columns.clone());
+    if let Some(delete) = prepared.partition_move_delete.as_mut() {
+        super::stage_prepared_document_delete_with_parent(
+            engine,
+            delete,
+            params,
+            after_row_events,
+            cascade_parent,
+        )?;
+        if prepared.capture_partition_move_update_transition {
+            if let Some(updated_columns) = trigger_updated_columns.as_deref() {
+                if let Some(event) =
+                    crate::sql::triggers::AfterRowTriggerEvent::prepare_transition_capture(
+                        engine,
+                        crate::sql::triggers::AfterRowTriggerInput {
+                            table: &prepared.table,
+                            event: uqa_sql::ast::TriggerEvent::Update,
+                            old_doc_id: prepared.doc_id,
+                            new_doc_id: prepared.doc_id,
+                            old_document: Some(&prepared.old_document),
+                            new_document: None,
+                            updated_columns,
+                            cascade_parent,
+                        },
+                    )?
+                {
+                    crate::sql::triggers::AfterRowTriggerEvent::push(after_row_events, event);
+                }
+            }
+        }
+        return Ok(prepared.doc_id);
+    }
     let rewritten_doc_id =
         if let Some((destination_table, destination_doc_id)) = prepared.destination.as_ref() {
             validate_document_non_key_constraints(
@@ -1114,7 +1282,73 @@ pub(in crate::sql) fn stage_prepared_document_rewrite_with_parent(
             )?;
             rewritten_doc_id
         };
-    if let Some(updated_columns) = trigger_updated_columns.as_deref() {
+    if let Some((destination_table, _)) = prepared.destination.as_ref() {
+        let movement_parent = cascade_parent;
+        let mut last_movement_event = None;
+        if let Some(event) = crate::sql::triggers::AfterRowTriggerEvent::prepare(
+            engine,
+            crate::sql::triggers::AfterRowTriggerInput {
+                table: &prepared.table,
+                event: uqa_sql::ast::TriggerEvent::Delete,
+                old_doc_id: prepared.doc_id,
+                new_doc_id: prepared.doc_id,
+                old_document: Some(&prepared.old_document),
+                new_document: None,
+                updated_columns: &[],
+                cascade_parent: movement_parent,
+            },
+        )? {
+            last_movement_event = Some(crate::sql::triggers::AfterRowTriggerEvent::push(
+                after_row_events,
+                event,
+            ));
+        }
+        if let Some(event) = crate::sql::triggers::AfterRowTriggerEvent::prepare(
+            engine,
+            crate::sql::triggers::AfterRowTriggerInput {
+                table: destination_table,
+                event: uqa_sql::ast::TriggerEvent::Insert,
+                old_doc_id: rewritten_doc_id,
+                new_doc_id: rewritten_doc_id,
+                old_document: None,
+                new_document: Some(&prepared.new_document),
+                updated_columns: &[],
+                cascade_parent: movement_parent,
+            },
+        )? {
+            last_movement_event = Some(crate::sql::triggers::AfterRowTriggerEvent::push(
+                after_row_events,
+                event,
+            ));
+        }
+        if prepared.capture_partition_move_update_transition {
+            if let Some(updated_columns) = trigger_updated_columns.as_deref() {
+                if let Some(event) =
+                    crate::sql::triggers::AfterRowTriggerEvent::prepare_transition_capture(
+                        engine,
+                        crate::sql::triggers::AfterRowTriggerInput {
+                            table: &prepared.table,
+                            event: uqa_sql::ast::TriggerEvent::Update,
+                            old_doc_id: prepared.doc_id,
+                            new_doc_id: rewritten_doc_id,
+                            old_document: Some(&prepared.old_document),
+                            new_document: Some(&prepared.new_document),
+                            updated_columns,
+                            cascade_parent: movement_parent,
+                        },
+                    )?
+                {
+                    last_movement_event = Some(crate::sql::triggers::AfterRowTriggerEvent::push(
+                        after_row_events,
+                        event,
+                    ));
+                }
+            }
+        }
+        if let Some(event) = last_movement_event {
+            cascade_parent = Some(event);
+        }
+    } else if let Some(updated_columns) = trigger_updated_columns.as_deref() {
         if let Some(event) = crate::sql::triggers::AfterRowTriggerEvent::prepare(
             engine,
             crate::sql::triggers::AfterRowTriggerInput {
@@ -1151,6 +1385,10 @@ pub(in crate::sql) fn apply_validated_prepared_document_rewrite(
     engine: &Engine,
     prepared: &mut PreparedDocumentRewrite,
 ) -> Result<DocId, SQLError> {
+    if let Some(delete) = prepared.partition_move_delete.as_mut() {
+        super::apply_validated_prepared_document_delete(engine, delete)?;
+        return Ok(prepared.doc_id);
+    }
     if let Some((destination_table, destination_doc_id)) = prepared.destination.as_ref() {
         engine.delete_document(&prepared.table, prepared.doc_id)?;
         engine.add_prepared_document_with_vector_values(

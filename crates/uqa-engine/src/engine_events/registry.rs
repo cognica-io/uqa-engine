@@ -53,6 +53,7 @@ impl Engine {
             })?;
             return Ok(());
         }
+        self.prepare_explicit_transaction_writer()?;
         let mut rules = self.durable.rules.write();
         let mut next = rules.clone();
         let relation_rules = next.entry(relation).or_default();
@@ -92,6 +93,7 @@ impl Engine {
                 ),
             });
         }
+        self.prepare_explicit_transaction_writer()?;
         let mut rules = self.durable.rules.write();
         let mut next = rules.clone();
         let removed = next
@@ -132,6 +134,7 @@ impl Engine {
         if is_view && to == "_RETURN" {
             return Err(duplicate_object("rule", to, &relation.qualified_name()));
         }
+        self.prepare_explicit_transaction_writer()?;
         let mut rules = self.durable.rules.write();
         let mut next = rules.clone();
         let entries = next.entry(relation).or_default();
@@ -156,6 +159,7 @@ impl Engine {
         mode: EventEnableMode,
     ) -> Result<(), SQLError> {
         let relation = self.resolve_rule_relation(table)?;
+        self.prepare_explicit_transaction_writer()?;
         let mut rules = self.durable.rules.write();
         let mut next = rules.clone();
         next.entry(relation)
@@ -176,6 +180,7 @@ impl Engine {
             &definition.name,
             definition.or_replace,
         )?;
+        self.prepare_explicit_transaction_writer()?;
         let mut triggers = self.durable.triggers.write();
         let mut next = triggers.clone();
         let table_triggers = next.entry(relation).or_default();
@@ -287,6 +292,7 @@ impl Engine {
     pub(crate) fn drop_trigger(&self, statement: &DropTrigger) -> Result<(), SQLError> {
         let relation = self.resolve_trigger_table(&statement.table)?;
         let table = relation.qualified_name();
+        self.prepare_explicit_transaction_writer()?;
         let mut triggers = self.durable.triggers.write();
         let mut next = triggers.clone();
         let removed = next
@@ -320,6 +326,7 @@ impl Engine {
 
     pub(crate) fn rename_trigger(&self, table: &str, from: &str, to: &str) -> Result<(), SQLError> {
         let relation = self.resolve_trigger_table(table)?;
+        self.prepare_explicit_transaction_writer()?;
         let mut triggers = self.durable.triggers.write();
         let mut next = triggers.clone();
         let entries = next.entry(relation).or_default();
@@ -391,6 +398,7 @@ impl Engine {
                 ),
             });
         }
+        self.prepare_explicit_transaction_writer()?;
         let mut triggers = self.durable.triggers.write();
         let mut next = triggers.clone();
         let entries = next.entry(relation.clone()).or_default();
@@ -428,6 +436,7 @@ impl Engine {
         mode: EventEnableMode,
     ) -> Result<(), SQLError> {
         let relation = self.resolve_trigger_table(table)?;
+        self.prepare_explicit_transaction_writer()?;
         let mut triggers = self.durable.triggers.write();
         let mut next = triggers.clone();
         let entries = next.entry(relation).or_default();

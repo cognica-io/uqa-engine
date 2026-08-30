@@ -9,12 +9,11 @@
 use super::{
     apply_validated_prepared_document_rewrite, build_join_spill_with_ctes, build_returning_row,
     dml_join_rows, dml_returning_result, dml_target_row, eval_mutation_assignment,
-    eval_mutation_expr, finalize_partition_rewrite, lock_physical_mutation_target,
-    prepare_document_rewrite, stage_prepared_document_rewrite, update_lock_strength,
+    eval_mutation_expr, lock_physical_mutation_target, prepare_partition_update_route,
+    prepare_routed_document_rewrite, stage_prepared_document_rewrite, update_lock_strength,
     validate_returning_alias_relations, CteScope, DmlCommandMutationOverlay, DmlReturningShape,
-    Engine, MutationAssignmentTarget, PartitionRewritePolicy, PhysicalMutationLockTarget,
-    ReturningProjectionRow, ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult,
-    SourcePlan, UpdatePlan,
+    Engine, MutationAssignmentTarget, PhysicalMutationLockTarget, ReturningProjectionRow,
+    ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult, SourcePlan, UpdatePlan,
 };
 
 pub(in crate::sql) fn run_update_from(
@@ -182,7 +181,7 @@ pub(in crate::sql) fn run_update_from(
     let overlay = DmlCommandMutationOverlay::new(engine);
     let mut prepared_updates = Vec::new();
     let mut referential_actions = super::ReferentialActionContext::default();
-    for (index, (storage_table, doc_id, original_doc, mut doc, source_context)) in
+    for (index, (storage_table, doc_id, original_doc, doc, source_context)) in
         pending_updates.into_iter().enumerate()
     {
         if rule_batch.suppresses(index) {
@@ -200,24 +199,29 @@ pub(in crate::sql) fn run_update_from(
         else {
             continue;
         };
-        doc = triggered_document;
-        if let Some(mut prepared) = prepare_document_rewrite(
+        let Some(route) = prepare_partition_update_route(
+            engine,
+            &storage_table,
+            doc_id,
+            &original_doc,
+            triggered_document,
+            &target,
+            params,
+            stmt.include_descendants,
+        )?
+        else {
+            continue;
+        };
+        if let Some(mut prepared) = prepare_routed_document_rewrite(
             engine,
             &storage_table,
             doc_id,
             original_doc,
-            doc,
+            route,
             params,
             &mut referential_actions,
         )? {
-            finalize_partition_rewrite(
-                engine,
-                &mut prepared,
-                &target,
-                params,
-                stmt.include_descendants,
-                PartitionRewritePolicy::Move,
-            )?;
+            let row_affected = !prepared.is_partition_move_delete();
             let mut after_row_events = Vec::new();
             let rewritten_doc_id = stage_prepared_document_rewrite(
                 engine,
@@ -226,7 +230,7 @@ pub(in crate::sql) fn run_update_from(
                 Some(&assigned_columns),
                 &mut after_row_events,
             )?;
-            if !stmt.returning.is_empty() {
+            if row_affected && !stmt.returning.is_empty() {
                 returning_rows.push(build_returning_row(
                     engine,
                     ReturningProjectionRow {
@@ -250,7 +254,7 @@ pub(in crate::sql) fn run_update_from(
                     &snapshot_ctes,
                 )?);
             }
-            affected += 1;
+            affected += u64::from(row_affected);
             prepared_updates.push((prepared, source_context, after_row_events));
         }
     }
