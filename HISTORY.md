@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-08-30
+
+### Added
+
+- Implemented PostgreSQL 18 `REFERENCING OLD TABLE` and `REFERENCING NEW TABLE` transition relations for typed `AFTER` row and statement triggers across multi-row and zero-row `INSERT`, `UPDATE`, and `DELETE`, `INSERT SELECT`, `ON CONFLICT`, `UPDATE FROM`, `MERGE`, partition and inheritance descendants, direct and recursive foreign-key actions, catalog deparsing, nested-routine isolation, persistence guards, and a 136-case PostgreSQL 18.4 stateful oracle.
+
+### Fixed
+
+- Matched PostgreSQL 18 trigger-queue transition-set boundaries for recursive chain and branching cascades, including coalesced sets, split waves, and trailing empty statement-trigger invocations.
+- Preserved statement-global AFTER ROW event ordering and cascade-parent relationships when multi-row `ON CONFLICT DO UPDATE` combines independently prepared cascade trees.
+
 ## [0.1.10] - 2026-08-30
 
 ### Added
