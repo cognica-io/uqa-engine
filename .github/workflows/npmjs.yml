@@ -199,15 +199,17 @@ jobs:
           version="${{ inputs.tag }}"
           version="${version#v}"
           # Newly created packages can expose version metadata before the
-          # install packument. Wait up to five minutes for npm installability.
-          for attempt in {1..60}; do
+          # install packument. npm can keep large native packages in its
+          # processing queue for more than ten minutes after accepting them.
+          deadline=$((SECONDS + 1800))
+          while :; do
             if python3 scripts/npm-release.py check \
               --version "$version" \
               --require-published \
               dist/*.tgz; then
               exit 0
             fi
-            if [ "$attempt" -eq 60 ]; then
+            if (( SECONDS >= deadline )); then
               echo "npm registry did not expose the complete release in time" >&2
               exit 1
             fi
