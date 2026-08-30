@@ -746,3 +746,23 @@ DELETE FROM delete_context_event AS event USING delete_context_source AS source 
 -- @case delete_context_relations rows
 SELECT (SELECT count(*) FROM delete_context_event) AS event_count, (SELECT count(*) FROM delete_context_action) AS action_count;
 -- @end
+
+-- @case create_session_replication_rule_fixture ok
+CREATE TABLE replication_rule_items (id integer PRIMARY KEY); CREATE TABLE replication_rule_log (seq bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, message text NOT NULL); CREATE RULE rule_origin AS ON INSERT TO replication_rule_items DO ALSO INSERT INTO replication_rule_log(message) VALUES ('rule_origin:' || NEW.id::text); CREATE RULE rule_replica AS ON INSERT TO replication_rule_items DO ALSO INSERT INTO replication_rule_log(message) VALUES ('rule_replica:' || NEW.id::text); CREATE RULE rule_always AS ON INSERT TO replication_rule_items DO ALSO INSERT INTO replication_rule_log(message) VALUES ('rule_always:' || NEW.id::text); CREATE RULE rule_disabled AS ON INSERT TO replication_rule_items DO ALSO INSERT INTO replication_rule_log(message) VALUES ('rule_disabled:' || NEW.id::text); ALTER TABLE replication_rule_items ENABLE REPLICA RULE rule_replica; ALTER TABLE replication_rule_items ENABLE ALWAYS RULE rule_always; ALTER TABLE replication_rule_items DISABLE RULE rule_disabled;
+-- @end
+
+-- @case session_replication_origin_rule_execution ok
+SET session_replication_role = origin; INSERT INTO replication_rule_items VALUES (1); RESET session_replication_role;
+-- @end
+
+-- @case session_replication_local_rule_execution ok
+SET session_replication_role = local; INSERT INTO replication_rule_items VALUES (2); RESET session_replication_role;
+-- @end
+
+-- @case session_replication_replica_rule_execution ok
+SET session_replication_role = replica; INSERT INTO replication_rule_items VALUES (3); RESET session_replication_role;
+-- @end
+
+-- @case session_replication_rule_mode_rows rows
+SELECT message FROM replication_rule_log ORDER BY seq;
+-- @end

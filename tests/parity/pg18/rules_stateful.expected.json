@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "9b2858664e317544b83489d820b0ec7acfdda22c5ed35b74b4f55bc4c9729a25",
+  "fixture_sha256": "9c918888c556b2eccbce81bf9f7679f1e1991da3767a1af0ebd5f841f352e67e",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -1105,6 +1105,46 @@
         [
           "1",
           "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_session_replication_rule_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "session_replication_origin_rule_execution",
+      "kind": "ok"
+    },
+    {
+      "name": "session_replication_local_rule_execution",
+      "kind": "ok"
+    },
+    {
+      "name": "session_replication_replica_rule_execution",
+      "kind": "ok"
+    },
+    {
+      "name": "session_replication_rule_mode_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "rule_always:1"
+        ],
+        [
+          "rule_origin:1"
+        ],
+        [
+          "rule_always:2"
+        ],
+        [
+          "rule_origin:2"
+        ],
+        [
+          "rule_always:3"
+        ],
+        [
+          "rule_replica:3"
         ]
       ]
     }

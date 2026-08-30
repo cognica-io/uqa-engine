@@ -151,4 +151,9 @@ impl EventEnableMode {
     pub const fn fires_in_origin(self) -> bool {
         matches!(self, Self::Origin | Self::Always)
     }
+
+    #[must_use]
+    pub const fn fires_in_replica(self) -> bool {
+        matches!(self, Self::Replica | Self::Always)
+    }
 }

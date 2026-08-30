@@ -75,6 +75,47 @@ fn insert_rules_run_by_name_bind_new_and_apply_conditional_instead() {
 }
 
 #[test]
+fn session_replication_role_selects_rule_enable_modes() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE replication_rule_items (id INTEGER PRIMARY KEY); CREATE TABLE replication_rule_log (seq BIGSERIAL PRIMARY KEY, message TEXT)",
+    );
+    for rule in [
+        "CREATE RULE rule_origin AS ON INSERT TO replication_rule_items DO ALSO INSERT INTO replication_rule_log(message) VALUES ('rule_origin:' || NEW.id::text)",
+        "CREATE RULE rule_replica AS ON INSERT TO replication_rule_items DO ALSO INSERT INTO replication_rule_log(message) VALUES ('rule_replica:' || NEW.id::text)",
+        "CREATE RULE rule_always AS ON INSERT TO replication_rule_items DO ALSO INSERT INTO replication_rule_log(message) VALUES ('rule_always:' || NEW.id::text)",
+        "CREATE RULE rule_disabled AS ON INSERT TO replication_rule_items DO ALSO INSERT INTO replication_rule_log(message) VALUES ('rule_disabled:' || NEW.id::text)",
+    ] {
+        exec(&engine, rule);
+    }
+    exec(
+        &engine,
+        "ALTER TABLE replication_rule_items ENABLE REPLICA RULE rule_replica; ALTER TABLE replication_rule_items ENABLE ALWAYS RULE rule_always; ALTER TABLE replication_rule_items DISABLE RULE rule_disabled",
+    );
+
+    exec(
+        &engine,
+        "SET session_replication_role = origin; INSERT INTO replication_rule_items VALUES (1); SET session_replication_role = local; INSERT INTO replication_rule_items VALUES (2); SET session_replication_role = replica; INSERT INTO replication_rule_items VALUES (3); RESET session_replication_role",
+    );
+    assert_eq!(
+        strings(
+            &engine,
+            "SELECT message FROM replication_rule_log ORDER BY seq",
+            "message",
+        ),
+        [
+            "rule_always:1",
+            "rule_origin:1",
+            "rule_always:2",
+            "rule_origin:2",
+            "rule_always:3",
+            "rule_replica:3",
+        ]
+    );
+}
+
+#[test]
 fn rule_row_images_keep_missing_nullable_integers_null() {
     let engine = Engine::new();
     exec(

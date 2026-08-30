@@ -155,6 +155,34 @@ impl Engine {
         {
             return self.set_transaction_parameter(name, value);
         }
+        if name.eq_ignore_ascii_case("session_replication_role") {
+            if !self.current_user_is_superuser() {
+                return Err(SQLError::Routine {
+                    sqlstate: "42501".into(),
+                    message: "permission denied to set parameter \"session_replication_role\""
+                        .into(),
+                });
+            }
+            let value = match value.trim().to_ascii_lowercase().as_str() {
+                "origin" => "origin",
+                "replica" => "replica",
+                "local" => "local",
+                _ => {
+                    return Err(SQLError::Routine {
+                        sqlstate: "22023".into(),
+                        message: format!(
+                            "invalid value for parameter \"session_replication_role\": \"{value}\"\nHINT: Available values: origin, replica, local."
+                        ),
+                    })
+                }
+            };
+            let mut session = self.session.state.write();
+            session
+                .session_vars
+                .insert("session_replication_role".into(), value.into());
+            session.sql_statement_cache.clear();
+            return Ok(());
+        }
         let value = Self::validate_default_transaction_parameter(name, value)?;
         if name.eq_ignore_ascii_case("work_mem") {
             Self::parse_work_mem_bytes(&value)?;
@@ -193,6 +221,14 @@ impl Engine {
             return Err(SQLError::Routine {
                 sqlstate: "0A000".into(),
                 message: format!("parameter \"{name}\" cannot be reset"),
+            });
+        }
+        if name.eq_ignore_ascii_case("session_replication_role")
+            && !self.current_user_is_superuser()
+        {
+            return Err(SQLError::Routine {
+                sqlstate: "42501".into(),
+                message: "permission denied to set parameter \"session_replication_role\"".into(),
             });
         }
         if !crate::is_mutable_runtime_parameter(name) {
@@ -252,6 +288,16 @@ impl Engine {
 
     pub(crate) fn work_mem_bytes(&self) -> Result<usize, SQLError> {
         Self::parse_work_mem_bytes(&self.show_variable("work_mem")?)
+    }
+
+    pub(crate) fn session_replication_role_is_replica(&self) -> bool {
+        self.session
+            .state
+            .read()
+            .session_vars
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("session_replication_role"))
+            .is_some_and(|(_, value)| value == "replica")
     }
 
     fn parse_work_mem_bytes(raw: &str) -> Result<usize, SQLError> {

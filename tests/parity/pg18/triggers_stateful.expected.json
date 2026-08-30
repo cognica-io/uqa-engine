@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "8ed44b8dc8643456453765a7761eb113ab095642621cfb790172d3213c2f600d",
+  "fixture_sha256": "47abb7a101469b46c9578fe1557b4999e17d1841bea7234c21ebf968ec637933",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -1663,6 +1663,96 @@
           "2",
           "2",
           "reroute"
+        ]
+      ]
+    },
+    {
+      "name": "create_session_replication_trigger_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "session_replication_origin_trigger_execution",
+      "kind": "ok"
+    },
+    {
+      "name": "session_replication_local_trigger_execution",
+      "kind": "ok"
+    },
+    {
+      "name": "session_replication_replica_trigger_execution",
+      "kind": "ok"
+    },
+    {
+      "name": "session_replication_trigger_mode_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "trigger_always:1"
+        ],
+        [
+          "trigger_origin:1"
+        ],
+        [
+          "trigger_always:2"
+        ],
+        [
+          "trigger_origin:2"
+        ],
+        [
+          "trigger_always:3"
+        ],
+        [
+          "trigger_replica:3"
+        ]
+      ]
+    },
+    {
+      "name": "session_replication_replica_disables_foreign_key_triggers",
+      "kind": "ok"
+    },
+    {
+      "name": "session_replication_replica_foreign_key_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "1"
+        ],
+        [
+          "2",
+          "999"
+        ]
+      ]
+    },
+    {
+      "name": "reject_invalid_session_replication_role",
+      "kind": "error",
+      "sqlstate": "22023"
+    },
+    {
+      "name": "session_replication_role_transaction_rollback",
+      "kind": "ok"
+    },
+    {
+      "name": "session_replication_role_after_rollback",
+      "kind": "rows",
+      "rows": [
+        [
+          "origin"
+        ]
+      ]
+    },
+    {
+      "name": "session_replication_role_pg_settings",
+      "kind": "rows",
+      "rows": [
+        [
+          "origin",
+          "superuser",
+          "enum",
+          "{origin,replica,local}",
+          "origin",
+          "origin"
         ]
       ]
     }

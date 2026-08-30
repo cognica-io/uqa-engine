@@ -222,6 +222,9 @@ fn lock_document_foreign_key_dependencies(
     allow_missing: bool,
     old_document: Option<&Document>,
 ) -> Result<(), SQLError> {
+    if engine.session_replication_role_is_replica() {
+        return Ok(());
+    }
     for fk in engine
         .try_foreign_keys(table)
         .map_err(|err| dml_storage_error("constraint validation", err))?
@@ -1487,6 +1490,9 @@ pub(in crate::sql) fn referrers_to_for_actions(
     engine: &Engine,
     table: &str,
 ) -> Result<Vec<(String, ForeignKey)>, SQLError> {
+    if engine.session_replication_role_is_replica() {
+        return Ok(Vec::new());
+    }
     let mut output = Vec::new();
     for target in engine.hierarchy_ancestor_tables(table)? {
         let referrers = engine

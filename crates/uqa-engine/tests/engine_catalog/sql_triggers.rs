@@ -308,6 +308,63 @@ fn trigger_enable_modes_and_rename_are_durable_catalog_mutations() {
 }
 
 #[test]
+fn session_replication_role_selects_trigger_modes_and_disables_foreign_key_triggers() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE replication_items (id INTEGER PRIMARY KEY); CREATE TABLE replication_log (seq BIGSERIAL PRIMARY KEY, message TEXT); CREATE FUNCTION replication_probe() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO replication_log(message) VALUES (TG_NAME || ':' || NEW.id::text); RETURN NEW; END $$",
+    );
+    for trigger in [
+        "CREATE TRIGGER trigger_origin AFTER INSERT ON replication_items FOR EACH ROW EXECUTE FUNCTION replication_probe()",
+        "CREATE TRIGGER trigger_replica AFTER INSERT ON replication_items FOR EACH ROW EXECUTE FUNCTION replication_probe()",
+        "CREATE TRIGGER trigger_always AFTER INSERT ON replication_items FOR EACH ROW EXECUTE FUNCTION replication_probe()",
+        "CREATE TRIGGER trigger_disabled AFTER INSERT ON replication_items FOR EACH ROW EXECUTE FUNCTION replication_probe()",
+    ] {
+        exec(&engine, trigger);
+    }
+    exec(
+        &engine,
+        "ALTER TABLE replication_items ENABLE REPLICA TRIGGER trigger_replica; ALTER TABLE replication_items ENABLE ALWAYS TRIGGER trigger_always; ALTER TABLE replication_items DISABLE TRIGGER trigger_disabled",
+    );
+
+    exec(
+        &engine,
+        "SET session_replication_role = origin; INSERT INTO replication_items VALUES (1); SET session_replication_role = local; INSERT INTO replication_items VALUES (2); SET session_replication_role = replica; INSERT INTO replication_items VALUES (3); RESET session_replication_role",
+    );
+    assert_eq!(
+        strings(
+            &engine,
+            "SELECT message FROM replication_log ORDER BY seq",
+            "message",
+        ),
+        [
+            "trigger_always:1",
+            "trigger_origin:1",
+            "trigger_always:2",
+            "trigger_origin:2",
+            "trigger_always:3",
+            "trigger_replica:3",
+        ]
+    );
+
+    exec(
+        &engine,
+        "CREATE TABLE replication_parent (id INTEGER PRIMARY KEY); CREATE TABLE replication_child (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES replication_parent(id) ON DELETE CASCADE); INSERT INTO replication_parent VALUES (1); INSERT INTO replication_child VALUES (1, 1)",
+    );
+    exec(
+        &engine,
+        "SET session_replication_role = replica; INSERT INTO replication_child VALUES (2, 999); DELETE FROM replication_parent WHERE id = 1; RESET session_replication_role",
+    );
+    let children = exec(
+        &engine,
+        "SELECT id, parent_id FROM replication_child ORDER BY id",
+    );
+    assert_eq!(children.rows.len(), 2);
+    assert_eq!(children.rows[0]["parent_id"], Value::Int(1));
+    assert_eq!(children.rows[1]["parent_id"], Value::Int(999));
+}
+
+#[test]
 fn trigger_creation_validates_postgresql_18_when_and_update_of_contracts() {
     let engine = Engine::new();
     exec(

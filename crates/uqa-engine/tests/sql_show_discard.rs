@@ -90,6 +90,55 @@ fn registered_defaults_and_read_only_parameters_are_explicit() {
 }
 
 #[test]
+fn session_replication_role_validates_values_privileges_and_transaction_scope() {
+    let eng = Engine::new();
+    assert_eq!(
+        eng.show_variable("session_replication_role").unwrap(),
+        "origin"
+    );
+
+    let settings = eng
+        .sql(
+            "SELECT setting, context, vartype, boot_val, reset_val FROM pg_catalog.pg_settings WHERE name = 'session_replication_role'",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(settings.rows[0]["setting"], Value::Str("origin".into()));
+    assert_eq!(settings.rows[0]["context"], Value::Str("superuser".into()));
+    assert_eq!(settings.rows[0]["vartype"], Value::Str("enum".into()));
+    assert_eq!(settings.rows[0]["boot_val"], Value::Str("origin".into()));
+    assert_eq!(settings.rows[0]["reset_val"], Value::Str("origin".into()));
+
+    let invalid = eng
+        .sql("SET session_replication_role = rep", &[])
+        .unwrap_err();
+    assert_eq!(invalid.sqlstate(), Some("22023"));
+    assert!(invalid
+        .to_string()
+        .contains("Available values: origin, replica, local"));
+
+    eng.sql(
+        "BEGIN; SET session_replication_role = replica; ROLLBACK",
+        &[],
+    )
+    .unwrap();
+    assert_eq!(
+        eng.show_variable("session_replication_role").unwrap(),
+        "origin"
+    );
+
+    eng.sql("CREATE ROLE replication_role_user", &[]).unwrap();
+    eng.sql("SET ROLE replication_role_user", &[]).unwrap();
+    let denied = eng
+        .sql("SET session_replication_role = replica", &[])
+        .unwrap_err();
+    assert_eq!(denied.sqlstate(), Some("42501"));
+    let denied = eng.sql("RESET session_replication_role", &[]).unwrap_err();
+    assert_eq!(denied.sqlstate(), Some("42501"));
+    eng.sql("RESET ROLE", &[]).unwrap();
+}
+
+#[test]
 fn show_unknown_variable_is_an_error() {
     let eng = Engine::new();
     let err = eng.sql("SHOW some_unknown_var", &[]).unwrap_err();

@@ -1398,6 +1398,7 @@ pub(super) fn build_pg_settings(engine: &Engine) -> Result<Vec<ResultRow>, SQLEr
         ("DateStyle", "Locale and formatting"),
         ("TimeZone", "Locale and formatting"),
         ("work_mem", "Resource usage"),
+        ("session_replication_role", "Replication"),
         ("search_path", "Client connection defaults"),
         (
             "default_transaction_isolation",
@@ -1419,6 +1420,18 @@ pub(super) fn build_pg_settings(engine: &Engine) -> Result<Vec<ResultRow>, SQLEr
         .into_iter()
         .map(|(name, category)| {
             let setting = engine.show_variable(name)?;
+            let replication_role = name == "session_replication_role";
+            let enumvals = if replication_role {
+                catalog_array(
+                    ["origin", "replica", "local"]
+                        .into_iter()
+                        .map(str_value)
+                        .collect(),
+                    "session_replication_role enum values",
+                )?
+            } else {
+                Value::Null
+            };
             Ok(row([
                 ("name", str_value(name)),
                 ("setting", str_value(setting.as_str())),
@@ -1426,14 +1439,34 @@ pub(super) fn build_pg_settings(engine: &Engine) -> Result<Vec<ResultRow>, SQLEr
                 ("category", str_value(category)),
                 ("short_desc", str_value(name)),
                 ("extra_desc", Value::Null),
-                ("context", str_value("user")),
-                ("vartype", str_value("string")),
+                (
+                    "context",
+                    str_value(if replication_role {
+                        "superuser"
+                    } else {
+                        "user"
+                    }),
+                ),
+                (
+                    "vartype",
+                    str_value(if replication_role { "enum" } else { "string" }),
+                ),
                 ("source", str_value("default")),
                 ("min_val", Value::Null),
                 ("max_val", Value::Null),
-                ("enumvals", Value::Null),
-                ("boot_val", str_value(setting.as_str())),
-                ("reset_val", str_value(setting)),
+                ("enumvals", enumvals),
+                (
+                    "boot_val",
+                    str_value(if replication_role {
+                        "origin"
+                    } else {
+                        setting.as_str()
+                    }),
+                ),
+                (
+                    "reset_val",
+                    str_value(if replication_role { "origin" } else { &setting }),
+                ),
                 ("sourcefile", Value::Null),
                 ("sourceline", Value::Null),
                 ("pending_restart", bool_value(false)),

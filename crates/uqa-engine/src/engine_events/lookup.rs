@@ -22,6 +22,7 @@ impl Engine {
         event: RuleEvent,
     ) -> Result<Vec<StoredRule>, SQLError> {
         let relation = self.resolve_rule_relation(table)?;
+        let replica = self.session_replication_role_is_replica();
         Ok(self
             .durable
             .rules
@@ -29,7 +30,13 @@ impl Engine {
             .get(&relation)
             .into_iter()
             .flat_map(BTreeMap::values)
-            .filter(|rule| rule.enabled.fires_in_origin() && rule.definition.event == event)
+            .filter(|rule| {
+                (if replica {
+                    rule.enabled.fires_in_replica()
+                } else {
+                    rule.enabled.fires_in_origin()
+                }) && rule.definition.event == event
+            })
             .cloned()
             .collect())
     }
@@ -92,6 +99,7 @@ impl Engine {
         updated_columns: &[String],
     ) -> Result<Vec<StoredTrigger>, SQLError> {
         let relation = self.resolve_trigger_table(table)?;
+        let replica = self.session_replication_role_is_replica();
         let relations = if row {
             self.partition_trigger_sources(&relation.qualified_name())?
         } else {
@@ -113,8 +121,11 @@ impl Engine {
         Ok(candidates
             .into_values()
             .filter(|trigger| {
-                trigger.enabled.fires_in_origin()
-                    && trigger.definition.timing == timing
+                (if replica {
+                    trigger.enabled.fires_in_replica()
+                } else {
+                    trigger.enabled.fires_in_origin()
+                }) && trigger.definition.timing == timing
                     && trigger.definition.row == row
                     && trigger.definition.events.contains(&event)
                     && (event != TriggerEvent::Update
@@ -135,12 +146,16 @@ impl Engine {
     ) -> Result<bool, SQLError> {
         let relation = self.resolve_trigger_table(table)?;
         let sources = self.partition_trigger_sources(&relation.qualified_name())?;
+        let replica = self.session_replication_role_is_replica();
         let triggers = self.durable.triggers.read();
         Ok(sources.iter().any(|source| {
             triggers.get(source).is_some_and(|entries| {
                 entries.values().any(|trigger| {
-                    trigger.enabled.fires_in_origin()
-                        && trigger.definition.row
+                    (if replica {
+                        trigger.enabled.fires_in_replica()
+                    } else {
+                        trigger.enabled.fires_in_origin()
+                    }) && trigger.definition.row
                         && trigger.definition.events.contains(&event)
                 })
             })

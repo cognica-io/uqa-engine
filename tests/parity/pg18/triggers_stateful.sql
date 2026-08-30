@@ -698,3 +698,47 @@ UPDATE partition_move_mutation_items SET bucket = 12 WHERE id = 2;
 -- @case partition_move_destination_reroute_is_atomic rows
 SELECT 'low', id, bucket, value FROM partition_move_mutation_items_low UNION ALL SELECT 'high', id, bucket, value FROM partition_move_mutation_items_high UNION ALL SELECT 'other', id, bucket, value FROM partition_move_mutation_items_other ORDER BY 1, 2;
 -- @end
+
+-- @case create_session_replication_trigger_fixture ok
+CREATE TABLE replication_trigger_items (id integer PRIMARY KEY); CREATE TABLE replication_trigger_log (seq bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, message text NOT NULL); CREATE FUNCTION replication_trigger_probe() RETURNS trigger LANGUAGE plpgsql AS $probe$ BEGIN INSERT INTO replication_trigger_log(message) VALUES (TG_NAME || ':' || NEW.id::text); RETURN NEW; END $probe$; CREATE TRIGGER trigger_origin AFTER INSERT ON replication_trigger_items FOR EACH ROW EXECUTE FUNCTION replication_trigger_probe(); CREATE TRIGGER trigger_replica AFTER INSERT ON replication_trigger_items FOR EACH ROW EXECUTE FUNCTION replication_trigger_probe(); CREATE TRIGGER trigger_always AFTER INSERT ON replication_trigger_items FOR EACH ROW EXECUTE FUNCTION replication_trigger_probe(); CREATE TRIGGER trigger_disabled AFTER INSERT ON replication_trigger_items FOR EACH ROW EXECUTE FUNCTION replication_trigger_probe(); ALTER TABLE replication_trigger_items ENABLE REPLICA TRIGGER trigger_replica; ALTER TABLE replication_trigger_items ENABLE ALWAYS TRIGGER trigger_always; ALTER TABLE replication_trigger_items DISABLE TRIGGER trigger_disabled; CREATE TABLE replication_fk_parent (id integer PRIMARY KEY); CREATE TABLE replication_fk_child (id integer PRIMARY KEY, parent_id integer REFERENCES replication_fk_parent(id) ON DELETE CASCADE); INSERT INTO replication_fk_parent VALUES (1); INSERT INTO replication_fk_child VALUES (1, 1);
+-- @end
+
+-- @case session_replication_origin_trigger_execution ok
+SET session_replication_role = origin; INSERT INTO replication_trigger_items VALUES (1); RESET session_replication_role;
+-- @end
+
+-- @case session_replication_local_trigger_execution ok
+SET session_replication_role = local; INSERT INTO replication_trigger_items VALUES (2); RESET session_replication_role;
+-- @end
+
+-- @case session_replication_replica_trigger_execution ok
+SET session_replication_role = replica; INSERT INTO replication_trigger_items VALUES (3); RESET session_replication_role;
+-- @end
+
+-- @case session_replication_trigger_mode_rows rows
+SELECT message FROM replication_trigger_log ORDER BY seq;
+-- @end
+
+-- @case session_replication_replica_disables_foreign_key_triggers ok
+SET session_replication_role = replica; INSERT INTO replication_fk_child VALUES (2, 999); DELETE FROM replication_fk_parent WHERE id = 1; RESET session_replication_role;
+-- @end
+
+-- @case session_replication_replica_foreign_key_rows rows
+SELECT id, parent_id FROM replication_fk_child ORDER BY id;
+-- @end
+
+-- @case reject_invalid_session_replication_role error
+SET session_replication_role = rep;
+-- @end
+
+-- @case session_replication_role_transaction_rollback ok
+BEGIN; SET session_replication_role = replica; ROLLBACK;
+-- @end
+
+-- @case session_replication_role_after_rollback rows
+SELECT setting FROM pg_catalog.pg_settings WHERE name = 'session_replication_role';
+-- @end
+
+-- @case session_replication_role_pg_settings rows
+SELECT setting, context, vartype, enumvals, boot_val, reset_val FROM pg_catalog.pg_settings WHERE name = 'session_replication_role';
+-- @end

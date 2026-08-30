@@ -958,6 +958,9 @@ fn default_runtime_parameter(name: &str) -> Option<&'static str> {
     if name.eq_ignore_ascii_case("work_mem") {
         return Some("64MB");
     }
+    if name.eq_ignore_ascii_case("session_replication_role") {
+        return Some("origin");
+    }
     if name.eq_ignore_ascii_case("default_transaction_isolation")
         || name.eq_ignore_ascii_case("transaction_isolation")
     {
@@ -983,6 +986,7 @@ fn is_mutable_runtime_parameter(name: &str) -> bool {
         || name.eq_ignore_ascii_case("datestyle")
         || name.eq_ignore_ascii_case("timezone")
         || name.eq_ignore_ascii_case("work_mem")
+        || name.eq_ignore_ascii_case("session_replication_role")
         || name.eq_ignore_ascii_case("default_transaction_isolation")
         || name.eq_ignore_ascii_case("default_transaction_read_only")
         || name.eq_ignore_ascii_case("default_transaction_deferrable")
