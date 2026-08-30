@@ -12,9 +12,9 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
-allow_dirty=()
+cargo_package_args=(--no-verify --locked)
 if [[ "${1:-}" == "--allow-dirty" ]]; then
-  allow_dirty=(--allow-dirty)
+  cargo_package_args+=(--allow-dirty)
   shift
 fi
 
@@ -54,7 +54,7 @@ done <<EOF
 $package_rows
 EOF
 
-cargo package --no-verify --locked "${allow_dirty[@]}" "${package_args[@]}"
+cargo package "${cargo_package_args[@]}" "${package_args[@]}"
 
 for archive in "${archives[@]}"; do
   if [[ ! -f "$archive" ]]; then
