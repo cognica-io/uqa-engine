@@ -61,28 +61,29 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
         };
         return Ok(Some((Box::new(selection), false)));
     }
-    if engine.view_plan(name)?.is_some()
-        || engine
-            .foreign_table(name)
-            .map_err(SQLError::Unsupported)?
-            .is_some()
+    let catalog = ctes.catalog_read_view()?;
+    let resolution = ctes.relation_name_resolution()?;
+    if catalog.view_resolved(&resolution, name)?.is_some()
+        || catalog.foreign_table_resolved(&resolution, name)?.is_some()
     {
         return Ok(None);
     }
-    let Some(root_table) = engine
-        .try_query_table(name)
-        .map_err(|error| SQLError::Internal(format!("resolve table `{name}`: {error}")))?
-    else {
+    let Some(root_name) = catalog.table_name_resolved(&resolution, name)? else {
         return Ok(None);
     };
+    let root_table = catalog
+        .table_resolved(&resolution, &root_name)?
+        .ok_or_else(|| SQLError::UnknownTable(name.clone()))?;
     let wanted = prune.and_then(|prune| prune.get(&qualifier)).cloned();
     let metadata = wanted
         .as_ref()
         .map(super::super::SourceProjection::metadata)
         .unwrap_or_default();
-    let table_columns = engine
-        .try_query_table_columns(name)
-        .map_err(|error| SQLError::Internal(format!("read table columns for `{name}`: {error}")))?;
+    let table_columns = root_table
+        .columns
+        .iter()
+        .map(|column| column.name.clone())
+        .collect::<Vec<_>>();
     // An unqualified reference is conservatively requested from every FROM source during pruning. The scan schema must still describe only real table columns: advertising those over-inclusive requests as columns can make later joins bind an unqualified name to a non-existent value.
     let mut columns = match wanted.as_ref() {
         Some(wanted) => table_columns
@@ -104,7 +105,7 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
     if include_table_oid {
         schema.push(TABLE_OID_COLUMN.into());
     }
-    let root_column_definitions = root_table.columns.read().clone();
+    let root_column_definitions = &root_table.columns;
     let mut column_types = columns
         .iter()
         .map(|column| {
@@ -205,19 +206,23 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
         physical_schema =
             uqa_execution::RowSchema::with_physical_identity_aliases(&physical_schema, &aliases);
     }
-    let table_names = engine.query_hierarchy_scan_tables(name, *include_descendants)?;
+    let table_names = catalog.hierarchy_scan_tables(&resolution, name, *include_descendants)?;
     let mut sources = Vec::with_capacity(table_names.len());
     let mut filter_pushed = false;
     for table_name in table_names {
-        let table = engine
-            .try_query_table(&table_name)
-            .map_err(|error| {
-                SQLError::Internal(format!("resolve inherited table `{table_name}`: {error}"))
-            })?
-            .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?;
-        let column_definitions = table.columns.read().clone();
-        let lock_origin =
-            table_lock_origin(engine, &table_name, &qualifier, ctes.lock_identities.emit)?;
+        let table = engine.require_query_table(&table_name)?;
+        let column_definitions = catalog
+            .table_resolved(&resolution, &table_name)?
+            .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?
+            .columns
+            .clone();
+        let lock_origin = table_lock_origin(
+            &catalog,
+            &resolution,
+            &table_name,
+            &qualifier,
+            ctes.lock_identities.emit,
+        )?;
         let predicate_expression = qualifier_filter(filters, &qualifier);
         let predicate = predicate_expression
             .filter(|predicate| !expression_references_tableoid(predicate))
@@ -243,7 +248,9 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
         };
         let estimated_cardinality = engine.table_doc_count(&table_name)?;
         let table_oid = include_table_oid
-            .then(|| crate::sql::catalog::table_relation_oid(engine, &table_name))
+            .then(|| {
+                crate::sql::catalog::snapshot_table_relation_oid(&catalog, &resolution, &table_name)
+            })
             .transpose()?
             .map(Value::Int);
         sources.push(EngineTableRowSource {

@@ -6,18 +6,22 @@
 
 //! `pg_class` and `pg_inherits` rows for physical and virtual relations.
 
-use super::helpers::{
-    bool_value, catalog_usize, int_value, row, split_schema_name, str_value, table_columns_for,
-    view_columns_for,
-};
+use super::helpers::oids::split_schema_name;
+use super::helpers::rows::{bool_value, catalog_usize, int_value, row, str_value};
+use super::helpers::views::view_columns_for;
 use super::partitioning::partition_bound_node;
 use super::pg_catalog::{
     catalog_index_relations, index_access_method_oid, pg_class_catalog_row, pg_class_row,
-    pg_class_row_with_lifecycle, table_relation_oid, table_rowtype_oid,
+    pg_class_row_with_lifecycle, table_relation_oid_from, table_rowtype_oid_from,
 };
 use super::{Engine, ResultRow, SQLError};
+use crate::engine_capabilities::{CatalogReadView, RelationNameResolution};
 
-pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+pub(super) fn build_pg_class(
+    engine: &Engine,
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = vec![pg_class_catalog_row(
         13_313,
         13_315,
@@ -28,16 +32,14 @@ pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
         -1.0,
         false,
     )];
-    let catalog_indexes = catalog_index_relations(engine)?;
-    for name in engine
-        .query_table_names()
-        .map_err(|err| SQLError::Internal(format!("read table catalog: {err}")))?
-    {
+    let catalog_indexes = catalog_index_relations(catalog, resolution)?;
+    for name in catalog.table_names() {
         let (schema, table) = split_schema_name(&name)?;
-        let columns = table_columns_for(engine, &name)?;
-        let hierarchy = engine
-            .try_table_hierarchy(&name)
-            .map_err(|error| SQLError::Internal(format!("read table hierarchy: {error}")))?;
+        let table_snapshot = catalog
+            .table(resolution, &name)?
+            .ok_or_else(|| SQLError::UnknownTable(name.clone()))?;
+        let columns = &table_snapshot.columns;
+        let hierarchy = &table_snapshot.hierarchy;
         let relkind = if hierarchy.partition_spec.is_some() {
             "p"
         } else {
@@ -45,7 +47,7 @@ pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
         };
         let tuples = if hierarchy.partition_spec.is_some() {
             let mut total = 0_u64;
-            for member in engine.query_hierarchy_scan_tables(&name, true)? {
+            for member in catalog.hierarchy_scan_tables(resolution, &name, true)? {
                 total = total
                     .checked_add(engine.table_doc_count(&member)?)
                     .ok_or_else(|| {
@@ -65,17 +67,17 @@ pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
             catalog_usize(columns.len(), "pg_class column count")?,
             tuples as f64,
             catalog_indexes.iter().any(|index| index.table_name == name),
-            engine
-                .table_persistence(&name)
-                .map_err(|error| SQLError::Internal(format!("read table persistence: {error}")))?
-                .unwrap_or_default(),
+            table_snapshot.persistence,
             true,
             &[],
         );
-        row.insert("oid".into(), int_value(table_relation_oid(engine, &name)?));
+        row.insert(
+            "oid".into(),
+            int_value(table_relation_oid_from(catalog, resolution, &name)?),
+        );
         row.insert(
             "reltype".into(),
-            int_value(table_rowtype_oid(engine, &name)?),
+            int_value(table_rowtype_oid_from(catalog, resolution, &name)?),
         );
         row.insert(
             "relispartition".into(),
@@ -83,30 +85,33 @@ pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
         );
         row.insert(
             "relhassubclass".into(),
-            bool_value(!engine.query_direct_hierarchy_children(&name)?.is_empty()),
+            bool_value(
+                !catalog
+                    .direct_hierarchy_children(resolution, &name)?
+                    .is_empty(),
+            ),
         );
         row.insert(
             "relhastriggers".into(),
-            bool_value(engine.query_relation_has_triggers(&name)?),
+            bool_value(catalog.relation_has_triggers(resolution, &name)?),
         );
         row.insert(
             "relhasrules".into(),
-            bool_value(engine.query_relation_has_rules(&name)?),
+            bool_value(catalog.table_has_rules(resolution, &name)?),
         );
         if let Some(bound) = hierarchy.partition_bound.as_ref() {
             row.insert(
                 "relpartbound".into(),
-                str_value(partition_bound_node(engine, &name, bound)?),
+                str_value(partition_bound_node(
+                    engine, catalog, resolution, &name, bound,
+                )?),
             );
         }
         out.push(row);
     }
-    for name in engine.list_views()? {
+    for (name, definition) in catalog.views_of_kind(crate::StoredViewKind::View) {
         let (schema, view) = split_schema_name(&name)?;
-        let columns = view_columns_for(engine, &name)?;
-        let definition = engine.view_definition(&name)?.ok_or_else(|| {
-            SQLError::Internal(format!("view `{name}` disappeared during catalog scan"))
-        })?;
+        let columns = view_columns_for(engine, catalog, resolution, &definition)?;
         let mut row = pg_class_row_with_lifecycle(
             &schema,
             &view,
@@ -120,18 +125,13 @@ pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
         );
         row.insert(
             "relhastriggers".into(),
-            bool_value(engine.relation_has_triggers(&name)?),
+            bool_value(catalog.relation_has_triggers(resolution, &name)?),
         );
         out.push(row);
     }
-    for name in engine.list_materialized_views()? {
+    for (name, definition) in catalog.views_of_kind(crate::StoredViewKind::Materialized) {
         let (schema, view) = split_schema_name(&name)?;
-        let definition = engine.view_definition(&name)?.ok_or_else(|| {
-            SQLError::Internal(format!(
-                "materialized view `{name}` disappeared during catalog scan"
-            ))
-        })?;
-        let columns = view_columns_for(engine, &name)?;
+        let columns = view_columns_for(engine, catalog, resolution, &definition)?;
         out.push(pg_class_row_with_lifecycle(
             &schema,
             &view,
@@ -144,27 +144,21 @@ pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
             &definition.options,
         ));
     }
-    for name in engine.list_foreign_tables().map_err(SQLError::Internal)? {
+    for (name, foreign_table) in catalog.foreign_tables() {
         let (schema, table) = split_schema_name(&name)?;
         out.push(pg_class_row(
             &schema,
             &table,
             "f",
             catalog_usize(
-                engine
-                    .foreign_table_columns(&name)
-                    .map_err(SQLError::Internal)?
-                    .len(),
+                foreign_table.columns.len(),
                 "pg_class foreign-table column count",
             )?,
             0.0,
             false,
         ));
     }
-    for sequence in engine
-        .list_sequences()
-        .map_err(|err| SQLError::Internal(format!("read sequence catalog: {err}")))?
-    {
+    for (sequence, persistence) in catalog.sequences() {
         let (schema, name) = split_schema_name(&sequence)?;
         out.push(pg_class_row_with_lifecycle(
             &schema,
@@ -173,10 +167,7 @@ pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
             0,
             0.0,
             false,
-            engine
-                .query_sequence_persistence(&sequence)
-                .map_err(|error| SQLError::Internal(format!("read sequence persistence: {error}")))?
-                .unwrap_or_default(),
+            persistence,
             true,
             &[],
         ));
@@ -198,23 +189,30 @@ pub(super) fn build_pg_class(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
         index_row.insert("relhassubclass".into(), bool_value(index.has_children));
         out.push(index_row);
     }
-    out.extend(super::ag_catalog::age_pg_class_rows(engine)?);
+    out.extend(super::ag_catalog::age_pg_class_rows(catalog)?);
     Ok(out)
 }
 
-pub(super) fn build_pg_inherits(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+pub(super) fn build_pg_inherits(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = Vec::new();
-    for child in engine
-        .query_table_names()
-        .map_err(|error| SQLError::Internal(format!("read inheritance catalog: {error}")))?
-    {
-        let hierarchy = engine
-            .try_table_hierarchy(&child)
-            .map_err(|error| SQLError::Internal(format!("read inheritance metadata: {error}")))?;
+    for child in catalog.table_names() {
+        let hierarchy = &catalog
+            .table(resolution, &child)?
+            .ok_or_else(|| SQLError::UnknownTable(child.clone()))?
+            .hierarchy;
         for (position, parent) in hierarchy.parents.iter().enumerate() {
             out.push(row([
-                ("inhrelid", int_value(table_relation_oid(engine, &child)?)),
-                ("inhparent", int_value(table_relation_oid(engine, parent)?)),
+                (
+                    "inhrelid",
+                    int_value(table_relation_oid_from(catalog, resolution, &child)?),
+                ),
+                (
+                    "inhparent",
+                    int_value(table_relation_oid_from(catalog, resolution, parent)?),
+                ),
                 (
                     "inhseqno",
                     int_value(i64::from(hierarchy.parent_sequence_number(position))),
@@ -223,7 +221,7 @@ pub(super) fn build_pg_inherits(engine: &Engine) -> Result<Vec<ResultRow>, SQLEr
             ]));
         }
     }
-    for index in catalog_index_relations(engine)? {
+    for index in catalog_index_relations(catalog, resolution)? {
         if let Some(parent_oid) = index.parent_index_oid {
             out.push(row([
                 ("inhrelid", int_value(index.oid())),

@@ -10,8 +10,9 @@ use super::{
     bind_source_plan_schema, recheck_storage_names_match, ComputePlan, CteScope, Engine,
     QueryBlockPlan, QueryPlan, RelationalPlan, SQLError, SQLParam, ScalarExpr, SourcePlan, Value,
 };
+use crate::engine_capabilities::{CatalogReadView, RelationNameResolution};
 use crate::row_locks::LockAcquire;
-use crate::sql::virtual_relation_accepts_row_lock;
+use crate::sql::virtual_relation_accepts_row_lock as virtual_row_lockable;
 use uqa_execution::{
     Batch, ExecResult, PhysicalOperator, PhysicalRow, RowProjectionValue, RowSchema,
 };
@@ -220,7 +221,7 @@ pub(in crate::sql) fn validate_query_row_locks(
     query: &QueryPlan,
     params: &[SQLParam],
 ) -> Result<(), SQLError> {
-    let ctes = CteScope::new_for_current_routine();
+    let ctes = CteScope::new_for_current_routine(engine);
     validate_query_plan_row_locks(engine, query, params, &ctes)
 }
 
@@ -350,7 +351,7 @@ pub(in crate::sql) fn resolve_row_locks(
             )));
         }
     }
-    let sources = collect_source_leaves(engine, &effective_from, false, ctes)?;
+    let sources = collect_source_leaves(&effective_from, false, ctes)?;
     let mut assigned: Vec<Option<(LockStrength, LockWait)>> = vec![None; sources.len()];
     for clause in locking {
         let selected = if clause.relations.is_empty() {
@@ -559,7 +560,6 @@ impl LockLeafKind {
 }
 
 fn collect_source_leaves(
-    engine: &Engine,
     source: &SourcePlan,
     nullable: bool,
     ctes: &CteScope,
@@ -579,10 +579,12 @@ fn collect_source_leaves(
                     push_unique(&mut names, local);
                 }
             }
-            let kind = classify_table_leaf(engine, name, ctes)?;
+            let catalog = ctes.catalog_read_view()?;
+            let resolution = ctes.relation_name_resolution()?;
+            let kind = classify_table_leaf(&catalog, &resolution, name, ctes)?;
             if matches!(kind, LockLeafKind::Base) {
-                return Ok(engine
-                    .query_hierarchy_scan_tables(name, *include_descendants)?
+                return Ok(catalog
+                    .hierarchy_scan_tables(&resolution, name, *include_descendants)?
                     .into_iter()
                     .map(|storage_name| LockLeaf {
                         names: names.clone(),
@@ -614,8 +616,8 @@ fn collect_source_leaves(
                     (nullable, nullable)
                 }
             };
-            let mut leaves = collect_source_leaves(engine, left, left_nullable, ctes)?;
-            leaves.extend(collect_source_leaves(engine, right, right_nullable, ctes)?);
+            let mut leaves = collect_source_leaves(left, left_nullable, ctes)?;
+            leaves.extend(collect_source_leaves(right, right_nullable, ctes)?);
             Ok(leaves)
         }
         SourcePlan::Values { alias, .. } => Ok(vec![LockLeaf {
@@ -763,31 +765,24 @@ fn copy_recheck_source_row(
 }
 
 fn classify_table_leaf(
-    engine: &Engine,
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
     name: &str,
     ctes: &CteScope,
 ) -> Result<LockLeafKind, SQLError> {
     if ctes.is_visible_cte(name) {
         return Ok(LockLeafKind::Cte);
     }
-    if let Some(plan) = engine.view_plan(name)? {
-        return Ok(LockLeafKind::View(Box::new(plan)));
+    if let Some(view) = catalog.view_resolved(resolution, name)? {
+        return Ok(LockLeafKind::View(Box::new(view.query.clone())));
     }
-    if engine
-        .foreign_table(name)
-        .map_err(SQLError::Unsupported)?
-        .is_some()
-    {
+    if catalog.foreign_table_resolved(resolution, name)?.is_some() {
         return Ok(LockLeafKind::Foreign);
     }
-    if engine
-        .try_query_table(name)
-        .map_err(|error| SQLError::Internal(format!("resolve lock target `{name}`: {error}")))?
-        .is_some()
-    {
+    if catalog.table(resolution, name)?.is_some() {
         return Ok(LockLeafKind::Base);
     }
-    let lockable = virtual_relation_accepts_row_lock(engine, name).unwrap_or(false);
+    let lockable = virtual_row_lockable(resolution, name).unwrap_or(false);
     Ok(LockLeafKind::Virtual { lockable })
 }
 

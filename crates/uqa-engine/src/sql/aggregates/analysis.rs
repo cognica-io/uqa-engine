@@ -110,6 +110,11 @@ pub(in crate::sql) fn has_aggregate(engine: &Engine, projections: &[ProjectionPl
 }
 
 pub(in crate::sql) fn is_aggregate(engine: &Engine, expr: &ScalarExpr) -> bool {
+    is_builtin_aggregate(expr)
+        || matches!(expr, ScalarExpr::Func { name, .. } if engine.has_registered_aggregate_function(name))
+}
+
+pub(in crate::sql) fn is_builtin_aggregate(expr: &ScalarExpr) -> bool {
     matches!(expr, ScalarExpr::Func { name, .. } if matches!(
         name.to_ascii_lowercase().as_str(),
         "count"
@@ -134,7 +139,7 @@ pub(in crate::sql) fn is_aggregate(engine: &Engine, expr: &ScalarExpr) -> bool {
             | "jsonb_agg"
             | "json_object_agg"
             | "jsonb_object_agg"
-    ) || engine.has_registered_aggregate_function(name))
+    ))
 }
 
 pub(in crate::sql) fn aggregate_exprs<'a>(

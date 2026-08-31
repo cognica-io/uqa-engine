@@ -960,7 +960,7 @@ mod tests {
     #[test]
     fn huge_partition_stays_disk_backed_with_a_tiny_output_budget() {
         let engine = Engine::new();
-        let ctes = CteScope::new_for_current_routine();
+        let ctes = CteScope::new_for_current_routine(&engine);
         let hook = ScopedEngineHook::new(&engine, &ctes);
         let subqueries = Vec::new();
         let arena = PlanSubqueryArena::new(&subqueries, Some(&hook));

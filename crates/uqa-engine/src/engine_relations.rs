@@ -300,30 +300,6 @@ impl Engine {
         Ok(self.storage.tables.read().get(&relation).cloned())
     }
 
-    /// Resolve a table only against the live in-memory catalog without running epoch synchronization. Catalog restoration uses this while a registry refresh is already in progress and must not recursively enter either the refresh lock or transaction snapshots.
-    pub(crate) fn restored_catalog_table(
-        &self,
-        name: &str,
-    ) -> StorageBackendResult<Option<Arc<TableState>>> {
-        let tables = self.storage.tables.read();
-        Ok(self
-            .relation_lookup_candidates(name)?
-            .into_iter()
-            .find_map(|relation| tables.get(&relation).cloned()))
-    }
-
-    pub(crate) fn resolve_restored_catalog_table_name(
-        &self,
-        name: &str,
-    ) -> StorageBackendResult<Option<String>> {
-        let tables = self.storage.tables.read();
-        Ok(self
-            .relation_lookup_candidates(name)?
-            .into_iter()
-            .find(|relation| tables.contains_key(relation))
-            .map(|relation| relation.qualified_name()))
-    }
-
     pub(crate) fn try_query_table(
         &self,
         name: &str,
@@ -445,19 +421,6 @@ impl Engine {
             .read()
             .get(&relation)
             .copied())
-    }
-
-    pub(crate) fn query_sequence_persistence(
-        &self,
-        name: &str,
-    ) -> StorageBackendResult<Option<uqa_sql::ast::RelationPersistence>> {
-        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
-            return Ok(self
-                .relation_lookup_candidates(name)?
-                .into_iter()
-                .find_map(|relation| snapshot.sequence_persistence.get(&relation).copied()));
-        }
-        self.sequence_persistence(name)
     }
 
     pub(crate) fn training_set_from_table(

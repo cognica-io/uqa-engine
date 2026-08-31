@@ -10,19 +10,23 @@ use super::{
     expr_contains_function, expr_contains_subquery, expr_contains_volatile_function,
     expr_has_unqualified_column, expr_qualifiers, flatten_and_filter_parts, from_qualifier_set,
     optimize_engine_plan, projection_columns, qualify_unqualified_columns,
-    query_contains_volatile_function, BTreeMap, BTreeSet, ComputePlan, Engine, ProjectionPlan,
-    QualifierFilters, QueryBlockPlan, QueryPlan, RelationalPlan, SQLError, ScalarExpr, SourcePlan,
-    UnifiedPlan, TABLE_OID_COLUMN, XMIN_COLUMN,
+    query_contains_volatile_function, BTreeMap, BTreeSet, ComputePlan, CteScope, Engine,
+    ProjectionPlan, QualifierFilters, QueryBlockPlan, QueryPlan, RelationalPlan, SQLError,
+    ScalarExpr, SourcePlan, UnifiedPlan, TABLE_OID_COLUMN, XMIN_COLUMN,
 };
+mod source_columns;
 
-type ColumnOwners = BTreeMap<String, Option<String>>;
+use source_columns::{source_column_owners, ColumnOwners};
 
 pub(in crate::sql) fn qualifier_filters_for_stmt(
     engine: &Engine,
     stmt: &QueryBlockPlan,
     from: &SourcePlan,
-) -> Option<QualifierFilters> {
-    let filter = stmt.r#where.as_ref()?;
+    ctes: &CteScope,
+) -> Result<Option<QualifierFilters>, SQLError> {
+    let Some(filter) = stmt.r#where.as_ref() else {
+        return Ok(None);
+    };
     // Pushdown is decided per conjunct, not for the WHERE clause as a whole.
     // `qualifier_filter_for_part` already refuses any part containing a
     // subquery, and `final_filter_after_qualifier_pushdown` recomputes the
@@ -35,12 +39,14 @@ pub(in crate::sql) fn qualifier_filters_for_stmt(
     // with "scalar evaluation of `text_match` is not supported".
     let from_quals = from_qualifier_set(from);
     if from_quals.is_empty() {
-        return None;
+        return Ok(None);
     }
     let single_qualifier = (from_quals.len() == 1)
         .then(|| from_quals.iter().next().cloned())
         .flatten();
-    let column_owners = source_column_owners(engine, from);
+    let catalog = ctes.catalog_read_view()?;
+    let resolution = ctes.relation_name_resolution()?;
+    let column_owners = source_column_owners(&catalog, &resolution, from)?;
     let nullable_qualifiers = outer_join_nullable_qualifiers(from);
     let mut filters = QualifierFilters::new();
     for part in flatten_and_filter_parts(filter) {
@@ -70,7 +76,7 @@ pub(in crate::sql) fn qualifier_filters_for_stmt(
             }
         }
     }
-    (!filters.is_empty()).then_some(filters)
+    Ok((!filters.is_empty()).then_some(filters))
 }
 
 /// Qualifiers whose rows can be synthesized as NULLs by an outer join cannot
@@ -233,16 +239,21 @@ pub(in crate::sql) fn final_filter_after_qualifier_pushdown(
     stmt: &QueryBlockPlan,
     from: &SourcePlan,
     filters: Option<&QualifierFilters>,
-) -> Option<ScalarExpr> {
-    let filter = stmt.r#where.as_ref()?;
+    ctes: &CteScope,
+) -> Result<Option<ScalarExpr>, SQLError> {
+    let Some(filter) = stmt.r#where.as_ref() else {
+        return Ok(None);
+    };
     if !qualifier_filter_elision_safe(from) {
-        return Some(filter.clone());
+        return Ok(Some(filter.clone()));
     }
     let from_quals = from_qualifier_set(from);
     let single_qualifier = (from_quals.len() == 1)
         .then(|| from_quals.iter().next().cloned())
         .flatten();
-    let column_owners = source_column_owners(engine, from);
+    let catalog = ctes.catalog_read_view()?;
+    let resolution = ctes.relation_name_resolution()?;
+    let column_owners = source_column_owners(&catalog, &resolution, from)?;
     let mut guaranteed = Vec::new();
     collect_guaranteed_join_filters(from, &mut guaranteed);
     let residual: Vec<ScalarExpr> = flatten_and_filter_parts(filter)
@@ -264,7 +275,7 @@ pub(in crate::sql) fn final_filter_after_qualifier_pushdown(
         })
         .cloned()
         .collect();
-    combine_filter_parts(residual)
+    Ok(combine_filter_parts(residual))
 }
 
 pub(in crate::sql) fn qualifier_filter_elision_safe(from: &SourcePlan) -> bool {
@@ -307,15 +318,16 @@ pub(in crate::sql) fn combine_filter_parts(mut parts: Vec<ScalarExpr>) -> Option
 pub(in crate::sql) fn cte_output_filters(
     engine: &Engine,
     plan: &QueryPlan,
-) -> BTreeMap<String, (String, ScalarExpr)> {
+    ctes: &CteScope,
+) -> Result<BTreeMap<String, (String, ScalarExpr)>, SQLError> {
     let RelationalPlan::QueryBlock(block) = &plan.root else {
-        return BTreeMap::new();
+        return Ok(BTreeMap::new());
     };
     let (Some(from), Some(filter)) = (block.from.as_ref(), block.r#where.as_ref()) else {
-        return BTreeMap::new();
+        return Ok(BTreeMap::new());
     };
     if expr_contains_subquery(filter) || expr_contains_volatile_function(engine, filter) {
-        return BTreeMap::new();
+        return Ok(BTreeMap::new());
     }
 
     let cte_names: BTreeSet<&str> = plan.ctes.iter().map(|cte| cte.name.as_str()).collect();
@@ -328,14 +340,16 @@ pub(in crate::sql) fn cte_output_filters(
         })
         .collect();
     if qualifier_to_cte.is_empty() {
-        return BTreeMap::new();
+        return Ok(BTreeMap::new());
     }
 
     let from_qualifiers = from_qualifier_set(from);
     let single_qualifier = (from_qualifiers.len() == 1)
         .then(|| from_qualifiers.iter().next().cloned())
         .flatten();
-    let column_owners = source_column_owners(engine, from);
+    let catalog = ctes.catalog_read_view()?;
+    let resolution = ctes.relation_name_resolution()?;
+    let column_owners = source_column_owners(&catalog, &resolution, from)?;
     let mut grouped: BTreeMap<String, (String, Vec<ScalarExpr>)> = BTreeMap::new();
     for part in flatten_and_filter_parts(filter) {
         let Some((qualifier, predicate)) = qualifier_filter_for_part(
@@ -357,12 +371,12 @@ pub(in crate::sql) fn cte_output_filters(
         entry.1.push(predicate);
     }
 
-    grouped
+    Ok(grouped
         .into_iter()
         .filter_map(|(name, (qualifier, predicates))| {
             combine_filter_parts(predicates).map(|predicate| (name, (qualifier, predicate)))
         })
-        .collect()
+        .collect())
 }
 
 fn unique_unqualified_column_owner<'a>(
@@ -710,113 +724,6 @@ fn collect_pushdown_outer_columns(expression: &ScalarExpr, output: &mut BTreeSet
         | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::WindowCall { .. } => false,
-    }
-}
-
-fn source_column_owners(engine: &Engine, source: &SourcePlan) -> ColumnOwners {
-    let mut owners = ColumnOwners::new();
-    collect_source_column_owners(engine, source, &mut owners);
-    owners
-}
-
-fn collect_source_column_owners(engine: &Engine, source: &SourcePlan, owners: &mut ColumnOwners) {
-    match source {
-        SourcePlan::Table {
-            name,
-            qualifier,
-            alias,
-            ..
-        } => {
-            let qualifier = alias.as_deref().unwrap_or(qualifier);
-            let mut columns = engine.try_query_table_columns(name).unwrap_or_default();
-            if columns.is_empty() {
-                columns = engine
-                    .view_definition(name)
-                    .ok()
-                    .flatten()
-                    .as_ref()
-                    .and_then(|view| {
-                        view.output_columns
-                            .clone()
-                            .or_else(|| query_plan_output_columns(&view.query))
-                    })
-                    .unwrap_or_default();
-            }
-            if columns.is_empty() {
-                columns = engine.foreign_table_columns(name).unwrap_or_default();
-            }
-            if engine.try_query_table(name).ok().flatten().is_some() {
-                columns.push(TABLE_OID_COLUMN.into());
-                columns.push(XMIN_COLUMN.into());
-            }
-            register_column_owners(owners, qualifier, columns);
-        }
-        SourcePlan::Join {
-            left, right, alias, ..
-        } => {
-            if alias.is_none() {
-                collect_source_column_owners(engine, left, owners);
-                collect_source_column_owners(engine, right, owners);
-            }
-        }
-        SourcePlan::Values {
-            rows,
-            alias: Some(alias),
-            column_aliases,
-            ..
-        } => {
-            let columns = if column_aliases.is_empty() {
-                (1..=rows.first().map_or(0, Vec::len))
-                    .map(|index| format!("column{index}"))
-                    .collect()
-            } else {
-                column_aliases.clone()
-            };
-            register_column_owners(owners, alias, columns);
-        }
-        SourcePlan::Subquery {
-            body,
-            alias: Some(alias),
-            column_aliases,
-        } => {
-            let columns = if column_aliases.is_empty() {
-                query_plan_output_columns(body).unwrap_or_default()
-            } else {
-                column_aliases.clone()
-            };
-            register_column_owners(owners, alias, columns);
-        }
-        SourcePlan::Function {
-            alias: Some(alias),
-            column_aliases,
-            ..
-        } if !column_aliases.is_empty() => {
-            register_column_owners(owners, alias, column_aliases.clone());
-        }
-        SourcePlan::FunctionGroup {
-            alias: Some(alias),
-            column_aliases,
-            ..
-        } if !column_aliases.is_empty() => {
-            register_column_owners(owners, alias, column_aliases.clone());
-        }
-        SourcePlan::Values { alias: None, .. }
-        | SourcePlan::Function { .. }
-        | SourcePlan::FunctionGroup { .. }
-        | SourcePlan::Subquery { alias: None, .. } => {}
-    }
-}
-
-fn register_column_owners(
-    owners: &mut ColumnOwners,
-    qualifier: &str,
-    columns: impl IntoIterator<Item = String>,
-) {
-    for column in columns {
-        owners
-            .entry(column)
-            .and_modify(|owner| *owner = None)
-            .or_insert_with(|| Some(qualifier.to_string()));
     }
 }
 
@@ -1351,6 +1258,7 @@ mod tests {
     #[test]
     fn inner_join_guarantee_elides_duplicate_where_conjunct() {
         let engine = Engine::new();
+        let ctes = CteScope::new_for_current_routine(&engine);
         let join_equality = equality("l.key", "r.key");
         let residual = ScalarExpr::Literal(Value::Bool(true));
         let from = joined_source(JoinKind::Inner, join_equality.clone());
@@ -1360,7 +1268,7 @@ mod tests {
         );
 
         assert_eq!(
-            final_filter_after_qualifier_pushdown(&engine, &block, &from, None),
+            final_filter_after_qualifier_pushdown(&engine, &block, &from, None, &ctes).unwrap(),
             Some(residual)
         );
     }
@@ -1368,6 +1276,7 @@ mod tests {
     #[test]
     fn outer_join_keeps_duplicate_where_conjunct() {
         let engine = Engine::new();
+        let ctes = CteScope::new_for_current_routine(&engine);
         let join_equality = equality("l.key", "r.key");
         let filter = ScalarExpr::And(vec![
             join_equality.clone(),
@@ -1377,7 +1286,7 @@ mod tests {
         let block = query_block(filter.clone(), from.clone());
 
         assert_eq!(
-            final_filter_after_qualifier_pushdown(&engine, &block, &from, None),
+            final_filter_after_qualifier_pushdown(&engine, &block, &from, None, &ctes).unwrap(),
             Some(filter)
         );
     }

@@ -89,8 +89,9 @@ pub(super) fn try_build_streaming_subquery_operator<'a>(
     ctes.lock_identities.emit = emit_lock_identities;
     ctes.lock_identities.retain_after_lock = previous_lock_identities.emit;
     let result = (|| {
-        let column_prune = crate::sql::select::column_prune_for_stmt(engine, block, from);
-        let qualifier_filters = crate::sql::select::qualifier_filters_for_stmt(engine, block, from);
+        let column_prune = crate::sql::select::column_prune_for_stmt(engine, block, from, ctes)?;
+        let qualifier_filters =
+            crate::sql::select::qualifier_filters_for_stmt(engine, block, from, ctes)?;
         let source_row_locks = resolve_row_locks(
             engine,
             from,
@@ -115,9 +116,16 @@ pub(super) fn try_build_streaming_subquery_operator<'a>(
             block,
             from,
             qualifier_filters.as_ref(),
-        );
+            ctes,
+        )?;
         let (mut operator, resjunk) = crate::sql::select::build_relational_operator(
-            engine, operator, residual, block, params, ctes,
+            engine,
+            operator,
+            residual,
+            block,
+            params,
+            ctes,
+            engine.query_runtime_view(),
         )?;
         if !resjunk.is_empty() {
             operator = Box::new(

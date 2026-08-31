@@ -62,7 +62,7 @@ fn run_create_table_as_inner(
     engine: &Engine,
     execution: &CreateTableAsExecution<'_>,
 ) -> Result<SQLResult, SQLError> {
-    let ctes = crate::sql::select::CteScope::new_for_current_routine();
+    let ctes = crate::sql::select::CteScope::new_for_current_routine(engine);
     let mut query_schema = execution
         .with_no_data
         .then(|| {

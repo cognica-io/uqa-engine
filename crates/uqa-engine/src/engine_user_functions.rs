@@ -17,6 +17,7 @@ mod security;
 
 pub(crate) use resolution::{
     routine_local_name, routine_returns_anonymous_record, routine_signature_types, RoutineCallKind,
+    RoutineResolution,
 };
 pub(crate) use uqa_execution::canonical_routine_type_name;
 use uqa_planner::UnifiedPlan;

@@ -6,16 +6,18 @@
 
 //! Capability-scoped `pg_namespace` row synthesis.
 
-use crate::engine_capabilities::{CatalogReadView, SessionExecutionView};
+use crate::engine_capabilities::{CatalogReadView, RelationNameResolution};
 use uqa_sql::{ResultRow, SQLError};
 
-use super::helpers::{all_schema_names, current_user_oid, int_value, row, schema_oid, str_value};
+use super::helpers::oids::{current_user_oid, schema_oid};
+use super::helpers::rows::{int_value, row, str_value};
+use super::helpers::views::all_schema_names;
 
 pub(super) fn build_pg_namespace(
-    catalog: CatalogReadView<'_>,
-    session: SessionExecutionView<'_>,
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
-    Ok(all_schema_names(catalog, session)?
+    Ok(all_schema_names(catalog, resolution)?
         .into_iter()
         .map(|schema| {
             row([

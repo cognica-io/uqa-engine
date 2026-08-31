@@ -193,36 +193,6 @@ impl Engine {
             .collect())
     }
 
-    pub(crate) fn query_direct_hierarchy_children(
-        &self,
-        parent: &str,
-    ) -> Result<Vec<String>, SQLError> {
-        let Some(tables) = self.query_table_snapshots.as_ref() else {
-            return self.direct_hierarchy_children(parent);
-        };
-        let parent = self
-            .relation_lookup_candidates(parent)
-            .map_err(|error| {
-                SQLError::Internal(format!("resolve query table `{parent}`: {error}"))
-            })?
-            .into_iter()
-            .find(|candidate| tables.contains_key(candidate))
-            .ok_or_else(|| SQLError::UnknownTable(parent.to_string()))?
-            .qualified_name();
-        Ok(tables
-            .iter()
-            .filter(|(_, state)| {
-                state
-                    .hierarchy
-                    .read()
-                    .parents
-                    .iter()
-                    .any(|candidate| candidate == &parent)
-            })
-            .map(|(identity, _)| identity.qualified_name())
-            .collect())
-    }
-
     /// Return the canonical relation followed by each direct ancestor in breadth-first declaration order. Physical row identity stays attached to the relation that stores the row; this list is only for discovering constraints declared against a logical ancestor.
     pub(crate) fn hierarchy_ancestor_tables(&self, table: &str) -> Result<Vec<String>, SQLError> {
         let table = self

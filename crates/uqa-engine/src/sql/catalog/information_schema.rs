@@ -7,47 +7,55 @@
 //! Virtual `information_schema` relation builders.
 
 use super::builtin_routines::PG18_BUILTIN_ROUTINES;
-use super::helpers::{
-    all_schema_names, catalog_name, catalog_ordinal, catalog_type_name, constraint_catalog_rows,
-    current_user_name, default_expr_text, info_character_maximum_length,
-    info_character_octet_length, info_data_type, info_datetime_precision, info_numeric_precision,
-    info_numeric_scale, info_udt_name, int_value, row, schema_expr_text, split_schema_name,
-    stable_oid, str_value, view_columns_for, ConstraintCatalogKind,
+use super::expression_text::{default_expr_text, schema_expr_text};
+use super::helpers::constraints::{constraint_catalog_rows, ConstraintCatalogKind};
+use super::helpers::information_schema_types::{
+    info_character_maximum_length, info_character_octet_length, info_data_type,
+    info_datetime_precision, info_numeric_precision, info_numeric_scale, info_udt_name,
 };
-use super::{
-    registered_names, routine_signature_types, value_to_text, Engine, ResultRow, SQLColumnDef,
-    SQLError, Value,
-};
+use super::helpers::oids::{current_user_name, split_schema_name, stable_oid};
+use super::helpers::rows::{catalog_name, catalog_ordinal, int_value, row, str_value};
+use super::helpers::type_metadata::catalog_type_name;
+use super::helpers::views::{all_schema_names, view_columns_for};
+use crate::engine_capabilities::{CatalogReadView, RelationNameResolution};
+use crate::engine_user_functions::routine_signature_types;
+use crate::sql::value_to_text;
+use crate::Engine;
+use uqa_core::Value;
+use uqa_sql::ast::ColumnDef as SQLColumnDef;
+use uqa_sql::registry::registered_names;
+use uqa_sql::{ResultRow, SQLError};
 
 pub(super) fn build_info_catalog_name() -> Vec<ResultRow> {
     vec![row([("catalog_name", catalog_name())])]
 }
 
-pub(super) fn build_info_schemata(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
-    Ok(
-        all_schema_names(engine.catalog_read_view(), engine.session_execution_view())?
-            .into_iter()
-            .map(|schema| {
-                row([
-                    ("catalog_name", catalog_name()),
-                    ("schema_name", str_value(schema)),
-                    ("schema_owner", str_value(current_user_name())),
-                    ("default_character_set_catalog", catalog_name()),
-                    ("default_character_set_schema", str_value("pg_catalog")),
-                    ("default_character_set_name", str_value("UTF8")),
-                    ("sql_path", Value::Null),
-                ])
-            })
-            .collect(),
-    )
+pub(super) fn build_info_schemata(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+) -> Result<Vec<ResultRow>, SQLError> {
+    Ok(all_schema_names(catalog, resolution)?
+        .into_iter()
+        .map(|schema| {
+            row([
+                ("catalog_name", catalog_name()),
+                ("schema_name", str_value(schema)),
+                ("schema_owner", str_value(current_user_name())),
+                ("default_character_set_catalog", catalog_name()),
+                ("default_character_set_schema", str_value("pg_catalog")),
+                ("default_character_set_name", str_value("UTF8")),
+                ("sql_path", Value::Null),
+            ])
+        })
+        .collect())
 }
 
-pub(super) fn build_info_tables(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+pub(super) fn build_info_tables(
+    engine: &Engine,
+    catalog: &CatalogReadView,
+) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = Vec::new();
-    for name in engine
-        .query_table_names()
-        .map_err(|err| SQLError::Internal(format!("read table catalog: {err}")))?
-    {
+    for name in catalog.table_names() {
         let (schema, table) = split_schema_name(&name)?;
         out.push(row([
             ("table_catalog", catalog_name()),
@@ -64,7 +72,7 @@ pub(super) fn build_info_tables(engine: &Engine) -> Result<Vec<ResultRow>, SQLEr
             ("commit_action", Value::Null),
         ]));
     }
-    for name in engine.list_views()? {
+    for (name, _) in catalog.views_of_kind(crate::StoredViewKind::View) {
         let (schema, view) = split_schema_name(&name)?;
         let updatability = crate::sql::dml::view_automatic::view_updatability(engine, &name)?;
         out.push(row([
@@ -89,7 +97,7 @@ pub(super) fn build_info_tables(engine: &Engine) -> Result<Vec<ResultRow>, SQLEr
             ("commit_action", Value::Null),
         ]));
     }
-    for name in engine.list_foreign_tables().map_err(SQLError::Internal)? {
+    for name in catalog.foreign_table_names() {
         let (schema, table) = split_schema_name(&name)?;
         out.push(row([
             ("table_catalog", catalog_name()),
@@ -106,7 +114,7 @@ pub(super) fn build_info_tables(engine: &Engine) -> Result<Vec<ResultRow>, SQLEr
             ("commit_action", Value::Null),
         ]));
     }
-    out.extend(super::ag_catalog::age_info_table_rows(engine)?);
+    out.extend(super::ag_catalog::age_info_table_rows(catalog)?);
     out.sort_by(|a, b| {
         value_to_text(a.get("table_schema").unwrap_or(&Value::Null))
             .cmp(&value_to_text(
@@ -258,19 +266,17 @@ fn information_schema_column_row(
     ]))
 }
 
-pub(super) fn build_info_columns(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+pub(super) fn build_info_columns(
+    engine: &Engine,
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+) -> Result<Vec<ResultRow>, SQLError> {
     let mut out: Vec<ResultRow> = Vec::new();
-    let mut tables = engine
-        .query_table_names()
-        .map_err(|err| SQLError::Internal(format!("read table catalog: {err}")))?;
-    tables.sort();
-    for tname in tables {
-        let Some(cols) = engine
-            .describe_table(&tname)
-            .map_err(|err| SQLError::Internal(format!("read table schema: {err}")))?
-        else {
-            continue;
-        };
+    for tname in catalog.table_names() {
+        let cols = &catalog
+            .table(resolution, &tname)?
+            .ok_or_else(|| SQLError::UnknownTable(tname.clone()))?
+            .columns;
         let (schema, table) = split_schema_name(&tname)?;
         for (idx, col) in cols.iter().enumerate() {
             out.push(information_schema_column_row(
@@ -282,10 +288,11 @@ pub(super) fn build_info_columns(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
             )?);
         }
     }
-    for view_name in engine.list_views()? {
+    for (view_name, stored) in catalog.views_of_kind(crate::StoredViewKind::View) {
         let (schema, view) = split_schema_name(&view_name)?;
         let updatability = crate::sql::dml::view_automatic::view_updatability(engine, &view_name)?;
-        for (idx, column) in view_columns_for(engine, &view_name)?.iter().enumerate() {
+        let columns = view_columns_for(engine, catalog, resolution, &stored)?;
+        for (idx, column) in columns.iter().enumerate() {
             out.push(information_schema_column_row(
                 schema.clone(),
                 view.clone(),
@@ -299,13 +306,16 @@ pub(super) fn build_info_columns(engine: &Engine) -> Result<Vec<ResultRow>, SQLE
             )?);
         }
     }
-    out.extend(super::ag_catalog::age_info_column_rows(engine)?);
+    out.extend(super::ag_catalog::age_info_column_rows(catalog)?);
     Ok(out)
 }
 
-pub(super) fn build_info_views(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+pub(super) fn build_info_views(
+    engine: &Engine,
+    catalog: &CatalogReadView,
+) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows = Vec::new();
-    for name in engine.list_views()? {
+    for (name, stored) in catalog.views_of_kind(crate::StoredViewKind::View) {
         let (schema, view) = split_schema_name(&name)?;
         let updatability = crate::sql::dml::view_automatic::view_updatability(engine, &name)?;
         let trigger_insertable = crate::sql::dml::view_automatic::has_instead_of_trigger(
@@ -323,9 +333,7 @@ pub(super) fn build_info_views(engine: &Engine) -> Result<Vec<ResultRow>, SQLErr
             &name,
             uqa_sql::ast::TriggerEvent::Delete,
         )?;
-        let definition = engine
-            .view(&name)?
-            .map_or_else(String::new, |stmt| format!("{stmt:?}"));
+        let definition = format!("{:?}", stored.query);
         rows.push(row([
             ("table_catalog", catalog_name()),
             ("table_schema", str_value(schema)),
@@ -365,7 +373,7 @@ pub(super) fn build_info_views(engine: &Engine) -> Result<Vec<ResultRow>, SQLErr
     Ok(rows)
 }
 
-pub(super) fn build_info_routines(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+pub(super) fn build_info_routines(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows: Vec<ResultRow> = PG18_BUILTIN_ROUTINES
         .iter()
         .map(|routine| {
@@ -448,7 +456,7 @@ pub(super) fn build_info_routines(engine: &Engine) -> Result<Vec<ResultRow>, SQL
             ("is_udt_dependent", str_value("NO")),
         ])
     }));
-    for function in engine.list_sql_functions() {
+    for function in catalog.all_sql_functions() {
         let def = &function.def;
         let (routine_schema, routine_name) = split_schema_name(&def.name)?;
         let signature = routine_signature_types(def);
@@ -531,12 +539,11 @@ pub(super) fn build_info_routines(engine: &Engine) -> Result<Vec<ResultRow>, SQL
     Ok(rows)
 }
 
-pub(super) fn build_info_sequences(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
-    engine
-        .list_sequences()
-        .map_err(|err| SQLError::Internal(format!("read sequence catalog: {err}")))?
+pub(super) fn build_info_sequences(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
+    catalog
+        .sequences()
         .into_iter()
-        .map(|name| {
+        .map(|(name, _)| {
             let (schema, sequence) = split_schema_name(&name)?;
             Ok(row([
                 ("sequence_catalog", catalog_name()),
@@ -556,8 +563,11 @@ pub(super) fn build_info_sequences(engine: &Engine) -> Result<Vec<ResultRow>, SQ
         .collect::<Result<Vec<_>, SQLError>>()
 }
 
-pub(super) fn build_info_table_constraints(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
-    Ok(constraint_catalog_rows(engine)?
+pub(super) fn build_info_table_constraints(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+) -> Result<Vec<ResultRow>, SQLError> {
+    Ok(constraint_catalog_rows(catalog, resolution)?
         .into_iter()
         .map(|constraint| {
             let constraint_type = if constraint.kind == ConstraintCatalogKind::NotNull {
@@ -608,9 +618,12 @@ pub(super) fn build_info_table_constraints(engine: &Engine) -> Result<Vec<Result
         .collect())
 }
 
-pub(super) fn build_info_key_column_usage(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+pub(super) fn build_info_key_column_usage(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows = Vec::new();
-    for constraint in constraint_catalog_rows(engine)? {
+    for constraint in constraint_catalog_rows(catalog, resolution)? {
         if !matches!(
             constraint.kind,
             ConstraintCatalogKind::PrimaryKey

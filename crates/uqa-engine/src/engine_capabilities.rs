@@ -4,9 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Narrow borrowed views over the engine's state ownership domains.
+//! Narrow capabilities over the engine's state ownership domains.
 
+use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use uqa_sql::ast::TransactionIsolationLevel;
 use uqa_sql::SQLError;
@@ -21,6 +23,8 @@ use super::{
     Engine, RegisteredSQLFunction, SQLAggregateFunction, SQLScalarFunction, SQLTableFunction,
 };
 
+mod catalog;
+
 /// Stable catalog generations observed by one statement boundary.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct CatalogEpochs {
@@ -29,71 +33,36 @@ pub(crate) struct CatalogEpochs {
     pub(crate) catalog_registry: u64,
 }
 
-/// Read-only access to catalog-owned state. This view cannot mutate transactions, acquire locks, publish caches, or recover the enclosing [`Engine`].
-#[derive(Clone, Copy)]
-pub(crate) struct CatalogReadView<'a> {
-    storage: &'a StorageContext,
-    durable: &'a DurableCatalogState,
-    epochs: &'a EpochCoordinator,
-    query_catalog_snapshot: Option<&'a DurableCatalogSnapshot>,
+/// Read-only access to catalog-owned state. This view cannot mutate transactions, acquire locks, publish caches, or recover the enclosing [`crate::Engine`].
+#[derive(Clone)]
+pub(crate) struct CatalogReadView {
+    pub(super) snapshot: Arc<CatalogReadSnapshot>,
 }
 
-impl CatalogReadView<'_> {
-    pub(crate) fn stable_epochs(&self) -> CatalogEpochs {
-        CatalogEpochs {
-            table_catalog: self.epochs.table_catalog.seen.load(Ordering::Acquire),
-            table_data: self.epochs.table_data.seen.load(Ordering::Acquire),
-            catalog_registry: self.epochs.catalog_registry.seen.load(Ordering::Acquire),
-        }
-    }
+/// Immutable catalog names and durable registries captured at one statement boundary.
+#[derive(Clone)]
+pub(crate) struct CatalogReadSnapshot {
+    pub(super) tables: BTreeMap<crate::RelationIdentity, CatalogTableSnapshot>,
+    pub(super) durable: Arc<DurableCatalogSnapshot>,
+}
 
-    pub(crate) fn all_schema_names(&self, session: SessionExecutionView<'_>) -> Vec<String> {
-        let mut schemas = vec![
-            "pg_catalog".to_string(),
-            "information_schema".to_string(),
-            "ag_catalog".to_string(),
-        ];
-        if let Some(snapshot) = self.query_catalog_snapshot {
-            schemas.extend(snapshot.schemas.iter().cloned());
-            schemas.extend(snapshot.graphs.keys().cloned());
-        } else {
-            schemas.extend(self.durable.schemas.read().iter().cloned());
-            schemas.extend(self.durable.graphs.read().keys().cloned());
-        }
-        let temporary_schema = session.temporary_schema_name();
-        let has_temporary_relation =
-            self.storage
-                .tables
-                .read()
-                .keys()
-                .any(|relation| relation.schema == temporary_schema)
-                || self
-                    .durable
-                    .views
-                    .read()
-                    .keys()
-                    .any(|relation| relation.schema == temporary_schema)
-                || self.durable.sequence_persistence.read().iter().any(
-                    |(relation, persistence)| {
-                        relation.schema == temporary_schema
-                            && *persistence == uqa_sql::ast::RelationPersistence::Temporary
-                    },
-                );
-        if has_temporary_relation {
-            schemas.push(temporary_schema);
-        }
-        schemas.sort();
-        schemas.dedup();
-        schemas
-    }
+/// Immutable table-definition fields used by binding and catalog projection.
+#[derive(Clone)]
+pub(crate) struct CatalogTableSnapshot {
+    pub(crate) object_id: [u8; 16],
+    pub(crate) columns: Vec<uqa_sql::ast::ColumnDef>,
+    pub(crate) checks: Vec<uqa_sql::ast::TableCheck>,
+    pub(crate) foreign_keys: Vec<uqa_sql::ast::ForeignKey>,
+    pub(crate) keys: Vec<uqa_sql::ast::TableKeyConstraint>,
+    pub(crate) hierarchy: uqa_sql::ast::TableHierarchy,
+    pub(crate) persistence: uqa_sql::ast::RelationPersistence,
+}
 
-    #[cfg(test)]
-    pub(crate) fn has_schema(&self, name: &str) -> bool {
-        self.query_catalog_snapshot.map_or_else(
-            || self.durable.schemas.read().contains(name),
-            |snapshot| snapshot.schemas.contains(name),
-        )
-    }
+/// Immutable session inputs used to resolve unqualified relation names during one statement.
+#[derive(Clone)]
+pub(crate) struct RelationNameResolution {
+    pub(super) search_path: Vec<String>,
+    pub(super) temporary_schema: String,
 }
 
 /// Read-only session values visible to statement execution. Durable registries and storage backends are intentionally absent.
@@ -107,15 +76,6 @@ pub(crate) struct SessionExecutionView<'a> {
 impl SessionExecutionView<'_> {
     pub(crate) fn search_path(&self) -> Vec<String> {
         self.session.state.read().search_path.clone()
-    }
-
-    pub(crate) fn search_path_contains(&self, schema: &str) -> bool {
-        self.session
-            .state
-            .read()
-            .search_path
-            .iter()
-            .any(|candidate| candidate == schema)
     }
 
     pub(crate) fn current_user(&self) -> String {
@@ -136,6 +96,13 @@ impl SessionExecutionView<'_> {
 
     pub(crate) fn temporary_schema_name(&self) -> String {
         format!("pg_temp_{}", self.session_id)
+    }
+
+    pub(crate) fn relation_name_resolution(&self) -> RelationNameResolution {
+        RelationNameResolution {
+            search_path: self.search_path(),
+            temporary_schema: self.temporary_schema_name(),
+        }
     }
 
     pub(crate) fn show_variable(&self, name: &str) -> Result<String, SQLError> {
@@ -176,6 +143,7 @@ impl SessionExecutionView<'_> {
 }
 
 /// Runtime-only query services. The view owns no catalog mutation, transaction-stack, or storage-publication capability.
+#[derive(Clone, Copy)]
 pub(crate) struct QueryRuntimeView<'a> {
     runtime: &'a QueryRuntime,
     extensions: &'a RuntimeExtensions,
@@ -353,12 +321,54 @@ impl MutationCoordinator<'_> {
 }
 
 impl Engine {
-    pub(crate) fn catalog_read_view(&self) -> CatalogReadView<'_> {
+    pub(crate) fn catalog_epochs(&self) -> CatalogEpochs {
+        CatalogEpochs {
+            table_catalog: self.epochs.table_catalog.seen.load(Ordering::Acquire),
+            table_data: self.epochs.table_data.seen.load(Ordering::Acquire),
+            catalog_registry: self.epochs.catalog_registry.seen.load(Ordering::Acquire),
+        }
+    }
+
+    pub(crate) fn catalog_read_view(&self) -> CatalogReadView {
+        let durable = self
+            .query_catalog_snapshot
+            .clone()
+            .unwrap_or_else(|| Arc::new(self.durable.snapshot()));
+        let table_sources = self.query_table_snapshots.as_ref().map_or_else(
+            || self.storage.tables.read().clone(),
+            |tables| (**tables).clone(),
+        );
+        Self::catalog_read_view_from(durable, table_sources)
+    }
+
+    pub(crate) fn restored_catalog_read_view(&self) -> CatalogReadView {
+        Self::catalog_read_view_from(
+            Arc::new(self.durable.snapshot()),
+            self.storage.tables.read().clone(),
+        )
+    }
+
+    fn catalog_read_view_from(
+        durable: Arc<DurableCatalogSnapshot>,
+        table_sources: BTreeMap<super::RelationIdentity, Arc<super::TableState>>,
+    ) -> CatalogReadView {
+        let tables = table_sources
+            .into_iter()
+            .map(|(relation, table)| {
+                let snapshot = CatalogTableSnapshot {
+                    object_id: table.object_id(),
+                    columns: table.columns.read().clone(),
+                    checks: table.table_checks.read().clone(),
+                    foreign_keys: table.foreign_keys.read().clone(),
+                    keys: table.key_constraints.read().clone(),
+                    hierarchy: table.hierarchy.read().clone(),
+                    persistence: table.persistence,
+                };
+                (relation, snapshot)
+            })
+            .collect();
         CatalogReadView {
-            storage: &self.storage,
-            durable: self.durable.as_ref(),
-            epochs: &self.epochs,
-            query_catalog_snapshot: self.query_catalog_snapshot.as_deref(),
+            snapshot: Arc::new(CatalogReadSnapshot { tables, durable }),
         }
     }
 
@@ -540,43 +550,4 @@ pub(crate) fn validate_schema_name(name: &str) -> StorageBackendResult<()> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn capability_views_expose_only_their_owned_state() {
-        let engine = Engine::new();
-        let catalog = engine.catalog_read_view();
-        let session = engine.session_execution_view();
-        let runtime = engine.query_runtime_view();
-        assert!(catalog.has_schema("public"));
-        assert_eq!(session.search_path(), vec!["public"]);
-        assert_eq!(session.current_user(), "uqa");
-        assert_eq!(session.session_user(), "uqa");
-        assert_eq!(session.transaction_depth(), 0);
-        assert_eq!(session.transaction_snapshot_identity(), None);
-        assert_eq!(runtime.work_mem_bytes().unwrap(), 64 * 1024 * 1024);
-        runtime.check_cancelled().unwrap();
-    }
-
-    #[test]
-    fn mutation_coordinator_publishes_schema_changes_without_engine_recovery() {
-        let engine = Engine::new();
-        let before = engine.catalog_read_view().stable_epochs();
-        assert!(engine
-            .mutation_coordinator()
-            .register_schema("capability_test", false)
-            .unwrap());
-        assert!(engine.catalog_read_view().has_schema("capability_test"));
-        let after = engine.catalog_read_view().stable_epochs();
-        assert_eq!(after.catalog_registry, before.catalog_registry);
-        assert!(
-            engine
-                .epochs
-                .catalog_registry
-                .published
-                .load(Ordering::Acquire)
-                > before.catalog_registry
-        );
-    }
-}
+mod tests;

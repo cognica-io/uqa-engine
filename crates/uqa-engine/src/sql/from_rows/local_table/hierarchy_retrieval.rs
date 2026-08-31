@@ -47,11 +47,19 @@ pub(super) fn build_hierarchy_retrieval_operator<'a>(
     };
     let direct_vector =
         crate::operator_tree_bridge::direct_vector_retrieval(engine, predicate, params)?;
-    let table_names = engine.query_hierarchy_scan_tables(logical_table, *include_descendants)?;
+    let catalog = ctes.catalog_read_view()?;
+    let resolution = ctes.relation_name_resolution()?;
+    let table_names =
+        catalog.hierarchy_scan_tables(&resolution, logical_table, *include_descendants)?;
     let mut physical = Vec::with_capacity(table_names.len());
     for table_name in table_names {
-        let lock_origin =
-            table_lock_origin(engine, &table_name, qualifier, ctes.lock_identities.emit)?;
+        let lock_origin = table_lock_origin(
+            &catalog,
+            &resolution,
+            &table_name,
+            qualifier,
+            ctes.lock_identities.emit,
+        )?;
         let recheck_pins = lock_origin
             .as_ref()
             .and_then(|(origin_qualifier, storage_name)| {
@@ -111,11 +119,13 @@ pub(super) fn build_hierarchy_retrieval_operator<'a>(
         None => {}
     }
 
-    let mut columns = engine
-        .try_query_table_columns(logical_table)
-        .map_err(|error| {
-            SQLError::Internal(format!("read table columns for `{logical_table}`: {error}"))
-        })?;
+    let mut columns = catalog
+        .table_resolved(&resolution, logical_table)?
+        .ok_or_else(|| SQLError::UnknownTable(logical_table.clone()))?
+        .columns
+        .iter()
+        .map(|column| column.name.clone())
+        .collect::<Vec<_>>();
     if prune
         .and_then(|prune| prune.get(qualifier))
         .is_some_and(|wanted| wanted.contains(TABLE_OID_COLUMN))
@@ -150,8 +160,9 @@ pub(super) fn build_hierarchy_retrieval_operator<'a>(
                 None,
                 super::ScoredSourceAttributes::shared_score(score_column, metadata),
             )
-            .with_table_oid(crate::sql::catalog::table_relation_oid(
-                engine,
+            .with_table_oid(crate::sql::catalog::snapshot_table_relation_oid(
+                &catalog,
+                &resolution,
                 &retrieval.table_name,
             )?)
             .with_lock_origin(retrieval.lock_origin)

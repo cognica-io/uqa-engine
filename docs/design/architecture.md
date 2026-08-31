@@ -192,6 +192,8 @@ flowchart TD
 
 The relational tree owns CTEs, set operations, joins, values and function sources, subqueries, filters, arithmetic projections, aggregates, windows, ordering, distinctness, and limits. INSERT, UPDATE, DELETE, and MERGE own physical scalar, source, conflict, CTE, and returning plans rather than retaining parser statements.
 
+One `CatalogReadView` owns the immutable table-definition and durable-registry snapshot observed by a statement, and the paired `RelationNameResolution` owns its search path and temporary namespace. `CteScope` passes that pair through schema binding, filter pushdown, catalog and relation scans, evaluation, and physical construction. Binding, evaluation scopes, and physical construction have responsibility-owned modules; planner statistics cross the narrow `SourceStatistics` interface, and reusable physical-scalar traversal belongs to `uqa-execution` rather than SELECT-specific recursive copies.
+
 `ScalarExpr` is the executable scalar IR at relational and DML expression sites. Scalar subqueries point to owned `QueryPlan` slots and run through the current physical query scope, while query blocks execute directly from `QueryBlockPlan` without reconstructing a `SelectStmt`.
 
 Prepared statements and stored views retain optimized plans. The exact single-statement cache retains parsed and lowered plans, in-memory read-only calls can reuse optimized plans until relevant state changes, and persistent calls optimize after pinning the current storage snapshot.

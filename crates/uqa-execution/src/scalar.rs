@@ -6,6 +6,8 @@
 
 //! AST-independent scalar physical IR shared by the planner and executors.
 
+mod traversal;
+
 use uqa_core::{ArrayValue, Value};
 use uqa_sql::ast::{
     BinaryOp, FrameMode, FunctionBinding, FunctionDispatch, InternalColumnRef, NullsOrder,
@@ -30,8 +32,7 @@ pub enum ScalarExpr {
     Column(String),
     /// Logical position in an already-bound physical row schema. This variant is introduced only after relational binding so duplicate SQL labels remain independently addressable.
     Position(usize),
-    /// Structural executor-only attribute, resolved independently of SQL
-    /// relation and column names.
+    /// Structural executor-only attribute, resolved independently of SQL relation and column names.
     InternalColumn(InternalColumnRef),
     QualifiedColumn {
         qualifier: String,
@@ -137,340 +138,9 @@ impl ScalarExpr {
             column: column.into(),
         }
     }
-
-    /// Collect every column needed to evaluate this expression. Returns
-    /// `false` when evaluation needs row shape or a relational child that a
-    /// projected field scan cannot provide.
-    pub fn collect_columns(&self, output: &mut std::collections::BTreeSet<String>) -> bool {
-        match self {
-            Self::Column(name) | Self::QualifiedColumn { column: name, .. } => {
-                output.insert(name.clone());
-                true
-            }
-            Self::Literal(_) | Self::Param(_) | Self::InternalColumn(_) => true,
-            Self::Func {
-                args,
-                order_by,
-                filter,
-                ..
-            } => {
-                args.iter().all(|arg| arg.collect_columns(output))
-                    && order_by
-                        .iter()
-                        .all(|order| order.expr.collect_columns(output))
-                    && filter
-                        .as_deref()
-                        .is_none_or(|filter| filter.collect_columns(output))
-            }
-            Self::Array(items) | Self::Row(items) | Self::And(items) | Self::Or(items) => {
-                items.iter().all(|item| item.collect_columns(output))
-            }
-            Self::Binary { lhs, rhs, .. } => {
-                lhs.collect_columns(output) && rhs.collect_columns(output)
-            }
-            Self::UnaryMinus(expr)
-            | Self::Not(expr)
-            | Self::IsNull { expr, .. }
-            | Self::Cast { expr, .. } => expr.collect_columns(output),
-            Self::Between { expr, low, high } => {
-                expr.collect_columns(output)
-                    && low.collect_columns(output)
-                    && high.collect_columns(output)
-            }
-            Self::InList { expr, list, .. } => {
-                expr.collect_columns(output) && list.iter().all(|item| item.collect_columns(output))
-            }
-            Self::Case {
-                base,
-                when,
-                else_branch,
-            } => {
-                base.as_deref()
-                    .is_none_or(|base| base.collect_columns(output))
-                    && when.iter().all(|(condition, result)| {
-                        condition.collect_columns(output) && result.collect_columns(output)
-                    })
-                    && else_branch
-                        .as_deref()
-                        .is_none_or(|branch| branch.collect_columns(output))
-            }
-            Self::Default
-            | Self::Star
-            | Self::QualifiedStar(_)
-            | Self::Position(_)
-            | Self::WindowCall { .. }
-            | Self::ScalarSubquery(_)
-            | Self::Exists { .. }
-            | Self::InSubquery { .. } => false,
-        }
-    }
-
-    #[must_use]
-    pub fn contains_window(&self) -> bool {
-        match self {
-            Self::WindowCall { .. } => true,
-            Self::Func {
-                args,
-                order_by,
-                filter,
-                ..
-            } => {
-                args.iter().any(Self::contains_window)
-                    || order_by.iter().any(|order| order.expr.contains_window())
-                    || filter.as_deref().is_some_and(Self::contains_window)
-            }
-            Self::Array(items) | Self::Row(items) | Self::And(items) | Self::Or(items) => {
-                items.iter().any(Self::contains_window)
-            }
-            Self::Binary { lhs, rhs, .. } => lhs.contains_window() || rhs.contains_window(),
-            Self::UnaryMinus(expr)
-            | Self::Not(expr)
-            | Self::IsNull { expr, .. }
-            | Self::Cast { expr, .. }
-            | Self::InSubquery { expr, .. } => expr.contains_window(),
-            Self::Between { expr, low, high } => {
-                expr.contains_window() || low.contains_window() || high.contains_window()
-            }
-            Self::InList { expr, list, .. } => {
-                expr.contains_window() || list.iter().any(Self::contains_window)
-            }
-            Self::Case {
-                base,
-                when,
-                else_branch,
-            } => {
-                base.as_deref().is_some_and(Self::contains_window)
-                    || when.iter().any(|(condition, result)| {
-                        condition.contains_window() || result.contains_window()
-                    })
-                    || else_branch.as_deref().is_some_and(Self::contains_window)
-            }
-            Self::Default
-            | Self::Star
-            | Self::QualifiedStar(_)
-            | Self::Column(_)
-            | Self::QualifiedColumn { .. }
-            | Self::Position(_)
-            | Self::InternalColumn(_)
-            | Self::Literal(_)
-            | Self::Param(_)
-            | Self::ScalarSubquery(_)
-            | Self::Exists { .. } => false,
-        }
-    }
-
-    #[must_use]
-    pub fn contains_subquery(&self) -> bool {
-        match self {
-            Self::ScalarSubquery(_) | Self::Exists { .. } | Self::InSubquery { .. } => true,
-            Self::Func {
-                args,
-                order_by,
-                filter,
-                ..
-            } => {
-                args.iter().any(Self::contains_subquery)
-                    || order_by.iter().any(|order| order.expr.contains_subquery())
-                    || filter.as_deref().is_some_and(Self::contains_subquery)
-            }
-            Self::Array(items) | Self::Row(items) | Self::And(items) | Self::Or(items) => {
-                items.iter().any(Self::contains_subquery)
-            }
-            Self::Binary { lhs, rhs, .. } => lhs.contains_subquery() || rhs.contains_subquery(),
-            Self::UnaryMinus(expr)
-            | Self::Not(expr)
-            | Self::IsNull { expr, .. }
-            | Self::Cast { expr, .. } => expr.contains_subquery(),
-            Self::Between { expr, low, high } => {
-                expr.contains_subquery() || low.contains_subquery() || high.contains_subquery()
-            }
-            Self::InList { expr, list, .. } => {
-                expr.contains_subquery() || list.iter().any(Self::contains_subquery)
-            }
-            Self::WindowCall { args, spec, .. } => {
-                args.iter().any(Self::contains_subquery)
-                    || spec.partition_by.iter().any(Self::contains_subquery)
-                    || spec
-                        .order_by
-                        .iter()
-                        .any(|order| order.expr.contains_subquery())
-            }
-            Self::Case {
-                base,
-                when,
-                else_branch,
-            } => {
-                base.as_deref().is_some_and(Self::contains_subquery)
-                    || when.iter().any(|(condition, result)| {
-                        condition.contains_subquery() || result.contains_subquery()
-                    })
-                    || else_branch.as_deref().is_some_and(Self::contains_subquery)
-            }
-            Self::Default
-            | Self::Star
-            | Self::QualifiedStar(_)
-            | Self::Column(_)
-            | Self::QualifiedColumn { .. }
-            | Self::Position(_)
-            | Self::InternalColumn(_)
-            | Self::Literal(_)
-            | Self::Param(_) => false,
-        }
-    }
-
-    #[must_use]
-    pub fn contains_parameter(&self) -> bool {
-        match self {
-            Self::Param(_) => true,
-            Self::Func {
-                args,
-                order_by,
-                filter,
-                ..
-            } => {
-                args.iter().any(Self::contains_parameter)
-                    || order_by.iter().any(|order| order.expr.contains_parameter())
-                    || filter.as_deref().is_some_and(Self::contains_parameter)
-            }
-            Self::Array(items) | Self::Row(items) | Self::And(items) | Self::Or(items) => {
-                items.iter().any(Self::contains_parameter)
-            }
-            Self::Binary { lhs, rhs, .. } => lhs.contains_parameter() || rhs.contains_parameter(),
-            Self::UnaryMinus(expr)
-            | Self::Not(expr)
-            | Self::IsNull { expr, .. }
-            | Self::Cast { expr, .. }
-            | Self::InSubquery { expr, .. } => expr.contains_parameter(),
-            Self::Between { expr, low, high } => {
-                expr.contains_parameter() || low.contains_parameter() || high.contains_parameter()
-            }
-            Self::InList { expr, list, .. } => {
-                expr.contains_parameter() || list.iter().any(Self::contains_parameter)
-            }
-            Self::WindowCall { args, spec, .. } => {
-                args.iter().any(Self::contains_parameter)
-                    || spec.partition_by.iter().any(Self::contains_parameter)
-                    || spec
-                        .order_by
-                        .iter()
-                        .any(|order| order.expr.contains_parameter())
-                    || spec.frame.as_ref().is_some_and(|frame| {
-                        scalar_frame_bound_contains_parameter(&frame.start)
-                            || scalar_frame_bound_contains_parameter(&frame.end)
-                    })
-            }
-            Self::Case {
-                base,
-                when,
-                else_branch,
-            } => {
-                base.as_deref().is_some_and(Self::contains_parameter)
-                    || when.iter().any(|(condition, result)| {
-                        condition.contains_parameter() || result.contains_parameter()
-                    })
-                    || else_branch.as_deref().is_some_and(Self::contains_parameter)
-            }
-            Self::Default
-            | Self::Star
-            | Self::QualifiedStar(_)
-            | Self::Column(_)
-            | Self::QualifiedColumn { .. }
-            | Self::Position(_)
-            | Self::InternalColumn(_)
-            | Self::Literal(_)
-            | Self::ScalarSubquery(_)
-            | Self::Exists { .. } => false,
-        }
-    }
-
-    #[must_use]
-    pub fn contains_aggregate(&self, is_aggregate: &dyn Fn(&str) -> bool) -> bool {
-        match self {
-            Self::Func {
-                name,
-                args,
-                order_by,
-                filter,
-                ..
-            } => {
-                is_aggregate(name)
-                    || args
-                        .iter()
-                        .any(|expression| expression.contains_aggregate(is_aggregate))
-                    || order_by
-                        .iter()
-                        .any(|order| order.expr.contains_aggregate(is_aggregate))
-                    || filter
-                        .as_deref()
-                        .is_some_and(|expression| expression.contains_aggregate(is_aggregate))
-            }
-            Self::Array(items) | Self::Row(items) | Self::And(items) | Self::Or(items) => items
-                .iter()
-                .any(|expression| expression.contains_aggregate(is_aggregate)),
-            Self::Binary { lhs, rhs, .. } => {
-                lhs.contains_aggregate(is_aggregate) || rhs.contains_aggregate(is_aggregate)
-            }
-            Self::UnaryMinus(expr)
-            | Self::Not(expr)
-            | Self::IsNull { expr, .. }
-            | Self::Cast { expr, .. }
-            | Self::InSubquery { expr, .. } => expr.contains_aggregate(is_aggregate),
-            Self::Between { expr, low, high } => {
-                expr.contains_aggregate(is_aggregate)
-                    || low.contains_aggregate(is_aggregate)
-                    || high.contains_aggregate(is_aggregate)
-            }
-            Self::InList { expr, list, .. } => {
-                expr.contains_aggregate(is_aggregate)
-                    || list
-                        .iter()
-                        .any(|item| item.contains_aggregate(is_aggregate))
-            }
-            Self::Case {
-                base,
-                when,
-                else_branch,
-            } => {
-                base.as_deref()
-                    .is_some_and(|expression| expression.contains_aggregate(is_aggregate))
-                    || when.iter().any(|(condition, result)| {
-                        condition.contains_aggregate(is_aggregate)
-                            || result.contains_aggregate(is_aggregate)
-                    })
-                    || else_branch
-                        .as_deref()
-                        .is_some_and(|expression| expression.contains_aggregate(is_aggregate))
-            }
-            Self::Default
-            | Self::Star
-            | Self::QualifiedStar(_)
-            | Self::Column(_)
-            | Self::QualifiedColumn { .. }
-            | Self::Position(_)
-            | Self::InternalColumn(_)
-            | Self::Literal(_)
-            | Self::Param(_)
-            | Self::ScalarSubquery(_)
-            | Self::Exists { .. }
-            | Self::WindowCall { .. } => false,
-        }
-    }
 }
 
-fn scalar_frame_bound_contains_parameter(bound: &ScalarFrameBound) -> bool {
-    match bound {
-        ScalarFrameBound::Preceding(expression) | ScalarFrameBound::Following(expression) => {
-            expression.contains_parameter()
-        }
-        ScalarFrameBound::UnboundedPreceding
-        | ScalarFrameBound::UnboundedFollowing
-        | ScalarFrameBound::CurrentRow => false,
-    }
-}
-
-/// Runtime callback for query children referenced by [`SubqueryId`]. The
-/// planner owns the actual query-plan arena; execution only needs this stable
-/// slot interface.
+/// Runtime callback for query children referenced by [`SubqueryId`]. The planner owns the actual query-plan arena; execution only needs this stable slot interface.
 pub trait ScalarSubqueryRunner {
     fn execute_subquery(
         &self,
@@ -556,9 +226,7 @@ pub trait ScalarSubqueryRunner {
     }
 }
 
-/// Pull-based scalar-subquery result. Scalar, EXISTS, and IN consumers never
-/// need to materialize the complete child relation: they respectively inspect
-/// at most two rows, one row, or one row at a time.
+/// Pull-based scalar-subquery result. Scalar, EXISTS, and IN consumers never need to materialize the complete child relation: they respectively inspect at most two rows, one row, or one row at a time.
 pub struct SubqueryResult {
     pub columns: Vec<String>,
     pub rows: Box<dyn Iterator<Item = Result<OwnedPhysicalRow, SQLError>> + Send>,
@@ -706,8 +374,7 @@ impl<'a> ScalarEvalContext<'a> {
     }
 }
 
-/// Evaluate the physical scalar tree directly. No parser expression is
-/// reconstructed at this boundary.
+/// Evaluate the physical scalar tree directly. No parser expression is reconstructed at this boundary.
 pub fn eval_scalar(
     expression: &ScalarExpr,
     context: &ScalarEvalContext<'_>,

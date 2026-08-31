@@ -15,14 +15,18 @@ use uqa_sql::ast::{
 };
 use uqa_sql::{ResultRow, SQLError};
 
+use crate::engine_capabilities::{CatalogReadView, RelationNameResolution};
 use crate::engine_events::{StoredRule, StoredTrigger};
+use crate::engine_user_functions::{
+    canonical_routine_type_name, routine_signature_types, CompiledFunctionBody, SQLUserFunction,
+};
 use crate::{Engine, RelationIdentity};
 
-use super::helpers::{
-    bool_value, catalog_usize, int_value, relation_oid, row, schema_expr_text, schema_oid,
-    split_schema_name, stable_oid, str_value,
-};
-use super::pg_catalog::table_relation_oid;
+use super::expression_text::schema_expr_text;
+use super::helpers::oids::{relation_oid, schema_oid, split_schema_name, stable_oid};
+use super::helpers::rows::{bool_value, catalog_usize, int_value, row, str_value};
+use super::helpers::views::view_columns_for;
+use super::pg_catalog::table_relation_oid_from;
 use super::pg_proc::user_routine_catalog_oid;
 
 const TRIGGER_TYPE_ROW: i64 = 1;
@@ -34,34 +38,36 @@ const TRIGGER_TYPE_TRUNCATE: i64 = 32;
 const TRIGGER_TYPE_INSTEAD: i64 = 64;
 
 pub(in crate::sql) fn event_relation_oid(engine: &Engine, relation: &str) -> Result<i64, SQLError> {
-    if engine
-        .try_resolve_table_name(relation)
-        .map_err(|error| {
-            SQLError::Internal(format!("resolve event relation `{relation}`: {error}"))
-        })?
-        .is_some()
-    {
-        return table_relation_oid(engine, relation);
+    let catalog = engine.catalog_read_view();
+    let resolution = engine.session_execution_view().relation_name_resolution();
+    event_relation_oid_from(&catalog, &resolution, relation)
+}
+
+fn event_relation_oid_from(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    relation: &str,
+) -> Result<i64, SQLError> {
+    if catalog.table_name_resolved(resolution, relation)?.is_some() {
+        return table_relation_oid_from(catalog, resolution, relation);
     }
-    let canonical = engine
-        .try_resolve_view_name(relation)
-        .map_err(|error| {
-            SQLError::Internal(format!("resolve event relation `{relation}`: {error}"))
-        })?
+    let canonical = catalog
+        .view_name_resolved(resolution, relation)?
         .ok_or_else(|| SQLError::UnknownTable(relation.to_string()))?;
     let (schema, name) = split_schema_name(&canonical)?;
     Ok(relation_oid("v", &schema, &name))
 }
 
 pub(super) fn trigger_catalog_oid(
-    engine: &Engine,
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
     trigger: &StoredTrigger,
 ) -> Result<i64, SQLError> {
     let identity = if let Some(object_id) = trigger.object_id {
         format!(
             "{}:{}",
             hex_object_id(object_id),
-            event_relation_oid(engine, &trigger.definition.table)?
+            event_relation_oid_from(catalog, resolution, &trigger.definition.table)?
         )
     } else {
         format!("{}.{}", trigger.definition.table, trigger.definition.name)
@@ -70,7 +76,8 @@ pub(super) fn trigger_catalog_oid(
 }
 
 pub(super) fn trigger_constraint_catalog_oid(
-    engine: &Engine,
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
     trigger: &StoredTrigger,
 ) -> Result<i64, SQLError> {
     if !trigger.definition.constraint {
@@ -84,7 +91,7 @@ pub(super) fn trigger_constraint_catalog_oid(
         format!(
             "{}:{}",
             hex_object_id(object_id),
-            event_relation_oid(engine, &trigger.definition.table)?
+            event_relation_oid_from(catalog, resolution, &trigger.definition.table)?
         )
     } else {
         format!("{}.{}", trigger.definition.table, constraint_name)
@@ -109,15 +116,24 @@ pub(super) fn rule_catalog_oid(rule: &StoredRule) -> i64 {
     )
 }
 
-pub(super) fn build_pg_trigger(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
-    catalog_triggers(engine)?
+pub(super) fn build_pg_trigger(
+    engine: &Engine,
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+) -> Result<Vec<ResultRow>, SQLError> {
+    catalog_triggers(catalog, resolution)?
         .into_iter()
-        .map(|(trigger, parent_oid)| pg_trigger_row(engine, trigger, parent_oid))
+        .map(|(trigger, parent_oid)| {
+            pg_trigger_row(engine, catalog, resolution, trigger, parent_oid)
+        })
         .collect()
 }
 
-pub(super) fn catalog_triggers(engine: &Engine) -> Result<Vec<(StoredTrigger, i64)>, SQLError> {
-    let originals = engine.list_triggers();
+pub(super) fn catalog_triggers(
+    catalog_view: &CatalogReadView,
+    resolution: &RelationNameResolution,
+) -> Result<Vec<(StoredTrigger, i64)>, SQLError> {
+    let originals = catalog_view.triggers();
     let mut catalog = originals
         .iter()
         .cloned()
@@ -131,11 +147,8 @@ pub(super) fn catalog_triggers(engine: &Engine) -> Result<Vec<(StoredTrigger, i6
             )
         })
         .collect::<BTreeMap<_, _>>();
-    for table in engine
-        .query_table_names()
-        .map_err(|error| SQLError::Internal(format!("read trigger tables: {error}")))?
-    {
-        let sources = engine.partition_trigger_sources(&table)?;
+    for table in catalog_view.table_names() {
+        let sources = catalog_view.partition_trigger_sources(resolution, &table)?;
         let Some(parent) = sources.get(1) else {
             continue;
         };
@@ -149,16 +162,22 @@ pub(super) fn catalog_triggers(engine: &Engine) -> Result<Vec<(StoredTrigger, i6
                 parent_clone.definition.table = parent.qualified_name();
                 catalog
                     .entry((table.clone(), clone.definition.name.clone()))
-                    .or_insert((clone, trigger_catalog_oid(engine, &parent_clone)?));
+                    .or_insert((
+                        clone,
+                        trigger_catalog_oid(catalog_view, resolution, &parent_clone)?,
+                    ));
             }
         }
     }
     Ok(catalog.into_values().collect())
 }
 
-pub(super) fn build_trigger_constraints(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+pub(super) fn build_trigger_constraints(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows = Vec::new();
-    for (trigger, _) in catalog_triggers(engine)? {
+    for (trigger, _) in catalog_triggers(catalog, resolution)? {
         if !trigger.definition.constraint {
             continue;
         }
@@ -176,7 +195,9 @@ pub(super) fn build_trigger_constraints(engine: &Engine) -> Result<Vec<ResultRow
         rows.push(row([
             (
                 "oid",
-                int_value(trigger_constraint_catalog_oid(engine, &trigger)?),
+                int_value(trigger_constraint_catalog_oid(
+                    catalog, resolution, &trigger,
+                )?),
             ),
             ("conname", str_value(constraint_name)),
             ("connamespace", int_value(schema_oid(&relation.schema))),
@@ -193,7 +214,11 @@ pub(super) fn build_trigger_constraints(engine: &Engine) -> Result<Vec<ResultRow
             ("convalidated", bool_value(true)),
             (
                 "conrelid",
-                int_value(table_relation_oid(engine, &definition.table)?),
+                int_value(table_relation_oid_from(
+                    catalog,
+                    resolution,
+                    &definition.table,
+                )?),
             ),
             ("contypid", int_value(0)),
             ("conindid", int_value(0)),
@@ -220,12 +245,14 @@ pub(super) fn build_trigger_constraints(engine: &Engine) -> Result<Vec<ResultRow
 
 fn pg_trigger_row(
     engine: &Engine,
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
     trigger: StoredTrigger,
     parent_oid: i64,
 ) -> Result<ResultRow, SQLError> {
     let definition = &trigger.definition;
-    let function = engine.resolve_trigger_function(&definition.function)?;
-    let columns = engine.rule_relation_columns(&definition.table)?;
+    let function = resolve_trigger_function(catalog, resolution, &definition.function)?;
+    let columns = event_relation_columns(engine, catalog, resolution, &definition.table)?;
     let attributes = definition
         .update_columns
         .iter()
@@ -247,18 +274,25 @@ fn pg_trigger_row(
         arguments.extend_from_slice(argument.as_bytes());
         arguments.push(0);
     }
-    let constraint_oid = trigger_constraint_catalog_oid(engine, &trigger)?;
+    let constraint_oid = trigger_constraint_catalog_oid(catalog, resolution, &trigger)?;
     let referenced_relation_oid = definition
         .referenced_table
         .as_deref()
-        .map(|table| table_relation_oid(engine, table))
+        .map(|table| table_relation_oid_from(catalog, resolution, table))
         .transpose()?
         .unwrap_or(0);
     Ok(row([
-        ("oid", int_value(trigger_catalog_oid(engine, &trigger)?)),
+        (
+            "oid",
+            int_value(trigger_catalog_oid(catalog, resolution, &trigger)?),
+        ),
         (
             "tgrelid",
-            int_value(event_relation_oid(engine, &definition.table)?),
+            int_value(event_relation_oid_from(
+                catalog,
+                resolution,
+                &definition.table,
+            )?),
         ),
         ("tgparentid", int_value(parent_oid)),
         ("tgname", str_value(definition.name.clone())),
@@ -307,9 +341,94 @@ fn pg_trigger_row(
     ]))
 }
 
-pub(super) fn build_pg_rewrite(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
-    let mut rows = engine
-        .list_rules()
+fn event_relation_columns(
+    engine: &Engine,
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    relation: &str,
+) -> Result<Vec<(String, uqa_sql::ast::ColumnType)>, SQLError> {
+    if let Some(table) = catalog.table_resolved(resolution, relation)? {
+        return Ok(table
+            .columns
+            .iter()
+            .map(|column| (column.name.clone(), column.ty.clone()))
+            .collect());
+    }
+    if let Some(view) = catalog.view_resolved(resolution, relation)? {
+        return Ok(view_columns_for(engine, catalog, resolution, view)?
+            .into_iter()
+            .map(|column| (column.name, column.ty))
+            .collect());
+    }
+    if let Some(foreign) = catalog.foreign_table_resolved(resolution, relation)? {
+        return Ok(foreign
+            .columns
+            .iter()
+            .map(|column| {
+                (
+                    column.name.clone(),
+                    crate::engine_fdw::fdw_column_type_to_sql(&column.ty),
+                )
+            })
+            .collect());
+    }
+    Err(SQLError::UnknownTable(relation.to_string()))
+}
+
+fn resolve_trigger_function(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    name: &str,
+) -> Result<std::sync::Arc<SQLUserFunction>, SQLError> {
+    let candidates = catalog
+        .sql_functions(resolution, name)?
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|function| {
+            !function.def.is_procedure && routine_signature_types(&function.def).is_empty()
+        })
+        .collect::<Vec<_>>();
+    let function = match candidates.as_slice() {
+        [function] => function.clone(),
+        [] => {
+            return Err(SQLError::Routine {
+                sqlstate: "42883".into(),
+                message: format!("function {name}() does not exist"),
+            });
+        }
+        _ => {
+            return Err(SQLError::Routine {
+                sqlstate: "42725".into(),
+                message: format!("function name \"{name}\" is not unique"),
+            });
+        }
+    };
+    let returns_trigger = matches!(
+        &function.def.returns,
+        uqa_sql::ast::FunctionReturns::Scalar { type_name }
+            if canonical_routine_type_name(type_name) == "trigger"
+    );
+    if !returns_trigger {
+        return Err(SQLError::Routine {
+            sqlstate: "42P17".into(),
+            message: format!("function {} must return type trigger", function.def.name),
+        });
+    }
+    if !matches!(function.compiled, CompiledFunctionBody::PLpgSQL(_)) {
+        return Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: "only LANGUAGE plpgsql trigger functions are executable".into(),
+        });
+    }
+    Ok(function)
+}
+
+pub(super) fn build_pg_rewrite(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+) -> Result<Vec<ResultRow>, SQLError> {
+    let mut rows = catalog
+        .rules()
         .into_iter()
         .map(|rule| {
             let definition = &rule.definition;
@@ -318,7 +437,11 @@ pub(super) fn build_pg_rewrite(engine: &Engine) -> Result<Vec<ResultRow>, SQLErr
                 ("rulename", str_value(definition.name.clone())),
                 (
                     "ev_class",
-                    int_value(event_relation_oid(engine, &definition.table)?),
+                    int_value(event_relation_oid_from(
+                        catalog,
+                        resolution,
+                        &definition.table,
+                    )?),
                 ),
                 ("ev_type", str_value(rule_event_code(definition.event))),
                 ("ev_enabled", str_value(rule.enabled.catalog_code())),
@@ -339,34 +462,33 @@ pub(super) fn build_pg_rewrite(engine: &Engine) -> Result<Vec<ResultRow>, SQLErr
             ]))
         })
         .collect::<Result<Vec<_>, SQLError>>()?;
-    for name in engine.list_views()? {
+    for (name, view) in catalog.views_of_kind(crate::StoredViewKind::View) {
         rows.push(row([
             (
                 "oid",
                 int_value(stable_oid("rule", &format!("{name}._RETURN"))),
             ),
             ("rulename", str_value("_RETURN")),
-            ("ev_class", int_value(event_relation_oid(engine, &name)?)),
+            (
+                "ev_class",
+                int_value(event_relation_oid_from(catalog, resolution, &name)?),
+            ),
             ("ev_type", str_value("1")),
             ("ev_enabled", str_value("O")),
             ("is_instead", bool_value(true)),
             ("ev_qual", str_value("<>")),
-            (
-                "ev_action",
-                str_value(
-                    engine
-                        .view(&name)?
-                        .map_or_else(|| "<>".to_string(), |query| format!("{query:?}")),
-                ),
-            ),
+            ("ev_action", str_value(format!("{:?}", view.query))),
         ]));
     }
     Ok(rows)
 }
 
-pub(super) fn build_pg_rules(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
-    engine
-        .list_rules()
+pub(super) fn build_pg_rules(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+) -> Result<Vec<ResultRow>, SQLError> {
+    catalog
+        .rules()
         .into_iter()
         .filter(|rule| rule.definition.name != "_RETURN")
         .map(|rule| {
@@ -378,7 +500,9 @@ pub(super) fn build_pg_rules(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
                 ("rulename", str_value(definition.name.clone())),
                 (
                     "definition",
-                    str_value(render_rule_definition(engine, definition, false)?),
+                    str_value(render_rule_definition(
+                        catalog, resolution, definition, false,
+                    )?),
                 ),
             ]))
         })
@@ -393,9 +517,11 @@ pub(in crate::sql) fn pg_get_triggerdef_value(
     let Some((oid, pretty)) = definition_arguments else {
         return Ok(Value::Null);
     };
+    let catalog = engine.catalog_read_view();
+    let resolution = engine.session_execution_view().relation_name_resolution();
     let mut found = None;
-    for (trigger, _) in catalog_triggers(engine)? {
-        if trigger_catalog_oid(engine, &trigger)? == oid {
+    for (trigger, _) in catalog_triggers(&catalog, &resolution)? {
+        if trigger_catalog_oid(&catalog, &resolution, &trigger)? == oid {
             found = Some(trigger);
             break;
         }
@@ -404,7 +530,8 @@ pub(in crate::sql) fn pg_get_triggerdef_value(
         return Ok(Value::Null);
     };
     Ok(str_value(render_trigger_definition(
-        engine,
+        &catalog,
+        &resolution,
         &trigger.definition,
         pretty,
     )?))
@@ -418,22 +545,25 @@ pub(in crate::sql) fn pg_get_ruledef_value(
     let Some((oid, pretty)) = definition_arguments else {
         return Ok(Value::Null);
     };
-    if let Some(rule) = engine
-        .list_rules()
+    let catalog = engine.catalog_read_view();
+    let resolution = engine.session_execution_view().relation_name_resolution();
+    if let Some(rule) = catalog
+        .rules()
         .into_iter()
         .find(|rule| rule_catalog_oid(rule) == oid)
     {
         return Ok(str_value(render_rule_definition(
-            engine,
+            &catalog,
+            &resolution,
             &rule.definition,
             pretty,
         )?));
     }
-    for name in engine.list_views()? {
+    for (name, _) in catalog.views_of_kind(crate::StoredViewKind::View) {
         if stable_oid("rule", &format!("{name}._RETURN")) == oid {
             return Ok(str_value(format!(
                 "CREATE RULE \"_RETURN\" AS ON SELECT TO {} DO INSTEAD SELECT ...",
-                render_rule_relation(engine, &name, pretty)?
+                render_rule_relation(&catalog, &resolution, &name, pretty)?
             )));
         }
     }
@@ -499,7 +629,8 @@ const fn rule_event_code(event: RuleEvent) -> &'static str {
 }
 
 fn render_rule_definition(
-    engine: &Engine,
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
     definition: &CreateRule,
     pretty: bool,
 ) -> Result<String, SQLError> {
@@ -512,7 +643,7 @@ fn render_rule_definition(
             RuleEvent::Update => "UPDATE",
             RuleEvent::Delete => "DELETE",
         },
-        render_rule_relation(engine, &definition.table, pretty)?
+        render_rule_relation(catalog, resolution, &definition.table, pretty)?
     );
     if let Some(condition) = &definition.condition {
         rendered.push_str(" WHERE (");
@@ -539,17 +670,18 @@ fn render_rule_definition(
     Ok(rendered)
 }
 
-fn render_rule_relation(engine: &Engine, name: &str, pretty: bool) -> Result<String, SQLError> {
+fn render_rule_relation(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    name: &str,
+    pretty: bool,
+) -> Result<String, SQLError> {
     let relation = RelationIdentity::from_legacy_name(name)
         .map_err(|error| SQLError::Internal(format!("decode rule relation `{name}`: {error}")))?;
     if pretty {
         let local = uqa_sql::expr::quote_ident(&relation.name);
-        let visible_table = engine.try_resolve_table_name(&local).map_err(|error| {
-            SQLError::Internal(format!("resolve rule relation `{name}`: {error}"))
-        })?;
-        let visible_view = engine.try_resolve_view_name(&local).map_err(|error| {
-            SQLError::Internal(format!("resolve rule relation `{name}`: {error}"))
-        })?;
+        let visible_table = catalog.table_name_resolved(resolution, &local)?;
+        let visible_view = catalog.view_name_resolved(resolution, &local)?;
         if visible_table.as_deref() == Some(name) || visible_view.as_deref() == Some(name) {
             return Ok(local);
         }
@@ -558,7 +690,8 @@ fn render_rule_relation(engine: &Engine, name: &str, pretty: bool) -> Result<Str
 }
 
 fn render_trigger_definition(
-    engine: &Engine,
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
     definition: &CreateTrigger,
     pretty: bool,
 ) -> Result<String, SQLError> {
@@ -607,13 +740,18 @@ fn render_trigger_definition(
             TriggerTiming::InsteadOf => "INSTEAD OF",
         },
         events,
-        render_trigger_relation(engine, &definition.table, pretty)?,
+        render_trigger_relation(catalog, resolution, &definition.table, pretty)?,
     );
     if let Some(referenced_table) = definition.referenced_table.as_deref() {
         rendered.push_str(" FROM ");
         // PostgreSQL deparses the constraint trigger's FROM relation with
         // visibility-based qualification even in the non-pretty form.
-        rendered.push_str(&render_trigger_relation(engine, referenced_table, true)?);
+        rendered.push_str(&render_trigger_relation(
+            catalog,
+            resolution,
+            referenced_table,
+            true,
+        )?);
     }
     if definition.constraint {
         rendered.push_str(if definition.deferrability.is_deferrable() {
@@ -660,25 +798,30 @@ fn render_trigger_definition(
         rendered.push(')');
     }
     rendered.push_str(" EXECUTE FUNCTION ");
-    rendered.push_str(&render_trigger_function(engine, &definition.function));
+    rendered.push_str(&render_trigger_function(
+        catalog,
+        resolution,
+        &definition.function,
+    ));
     rendered.push('(');
     rendered.push_str(&arguments);
     rendered.push(')');
     Ok(rendered)
 }
 
-fn render_trigger_relation(engine: &Engine, name: &str, pretty: bool) -> Result<String, SQLError> {
+fn render_trigger_relation(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    name: &str,
+    pretty: bool,
+) -> Result<String, SQLError> {
     let relation = RelationIdentity::from_legacy_name(name).map_err(|error| {
         SQLError::Internal(format!("decode trigger relation `{name}`: {error}"))
     })?;
     if pretty {
         let local = uqa_sql::expr::quote_ident(&relation.name);
-        let visible_table = engine.try_resolve_table_name(&local).map_err(|error| {
-            SQLError::Internal(format!("resolve trigger relation `{name}`: {error}"))
-        })?;
-        let visible_view = engine.try_resolve_view_name(&local).map_err(|error| {
-            SQLError::Internal(format!("resolve trigger relation `{name}`: {error}"))
-        })?;
+        let visible_table = catalog.table_name_resolved(resolution, &local)?;
+        let visible_view = catalog.view_name_resolved(resolution, &local)?;
         if visible_table.as_deref() == Some(name) || visible_view.as_deref() == Some(name) {
             return Ok(local);
         }
@@ -686,13 +829,16 @@ fn render_trigger_relation(engine: &Engine, name: &str, pretty: bool) -> Result<
     Ok(render_qualified_name(name))
 }
 
-fn render_trigger_function(engine: &Engine, name: &str) -> String {
+fn render_trigger_function(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    name: &str,
+) -> String {
     let Ok(function) = RelationIdentity::from_legacy_name(name) else {
         return render_qualified_name(name);
     };
     let local = uqa_sql::expr::quote_ident(&function.name);
-    if engine
-        .resolve_trigger_function(&local)
+    if resolve_trigger_function(catalog, resolution, &local)
         .is_ok_and(|visible| visible.def.name == name)
     {
         local

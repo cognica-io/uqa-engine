@@ -13,22 +13,23 @@
 
 This makes session derivation explicit: `new_session` asks `PersistentStorageProvider` for catalog and backend handles bound to one new transaction context, rebuilds durable caches, shares only published epoch counters and runtime extensions, and creates fresh session/query-runtime state. SQLite sessions bind a `ManagedConnection`; redb sessions share the database but own separate read/write transaction state.
 
-## Borrowed capability boundaries
+## Capability boundaries
 
-Statement and catalog workflows borrow only the state domains they need through four internal capability types:
+Statement and catalog workflows receive only the state domains they need through narrow internal capability types and immutable statement data:
 
-| Capability | Borrowed owners | Current responsibility |
+| Capability | Owned or borrowed inputs | Current responsibility |
 | --- | --- | --- |
-| `CatalogReadView` | `StorageContext`, `DurableCatalogState`, `EpochCoordinator`, and an optional fixed catalog snapshot | Schema projection and stable catalog generations without mutation, locking, or cache publication |
+| `CatalogReadView` | Owned `Arc` snapshot of table definitions and durable registries | One immutable statement catalog for binding, projection, virtual scans, and relation metadata without mutation, locking, or cache publication |
+| `RelationNameResolution` | Owned search path and temporary-schema name | Deterministic unqualified relation resolution against the same statement catalog snapshot |
 | `SessionExecutionView` | `SessionContext` plus immutable session and transaction-snapshot identity | Search path, users, variables, transaction depth, and temporary-schema identity |
 | `QueryRuntimeView` | `QueryRuntime`, `RuntimeExtensions`, and the session-state lock for runtime parameters | Cancellation, callback lookup, diagnostics, and execution memory policy |
 | `MutationCoordinator` | Storage, durable catalog, session, epoch, and query-runtime owners | Schema registration and atomic catalog-registry cache publication |
 
-These capabilities do not contain an `Engine` reference, implement an engine-recovering dereference, or expose unrelated state owners. `Engine` remains the composition facade that constructs the borrowed views, while SQL leaf modules receive the views directly. `UnifiedPlanExecutor` retains the single exhaustive plan match and captures the session, runtime, and mutation capabilities once at construction; catalog scans receive catalog and session views at their scan boundary.
+These capabilities do not contain an `Engine` reference, implement an engine-recovering dereference, or expose unrelated state owners. `Engine` remains the composition facade that constructs them, while SQL leaf modules receive the narrow values directly. `UnifiedPlanExecutor` retains the single exhaustive plan match and captures the session, runtime, and mutation capabilities once at construction; `CteScope` captures one `CatalogReadView` and `RelationNameResolution` pair for binding and query execution.
 
-The checked-in ownership policy enumerates the four capability types and their `CatalogEpochs` support type, rejects undeclared data types and service traits in the capability module, and rejects any capability data declaration, type alias, or function signature that retains, accepts, or returns `Engine`. Declared orchestration adapters remain explicit, while migrated catalog leaves fail the policy check on any `Engine` reference.
+The checked-in ownership policy enumerates the capability and support data types, rejects undeclared data types and service traits in the capability module, and rejects any capability data declaration, type alias, or function signature that retains, accepts, or returns `Engine`. Declared orchestration adapters remain explicit, while migrated catalog and query leaves fail the policy check on any `Engine` reference.
 
-`pg_namespace` and `pg_settings` row synthesis are engine-free leaves. `CREATE SCHEMA` delegates from the public facade or unified command arm to `MutationCoordinator`; there is no parallel direct schema-registration implementation. Other catalog and mutation families keep their established owners until their own complete dependency bundle moves, so a partially migrated command never falls back between two implementations.
+Static catalog metadata and row synthesis are engine-free leaves, while live catalog projection adapters consume `CatalogReadView`, `RelationNameResolution`, and session values. Schema binding has a deterministic catalog fixture without a full engine, physical construction receives explicit runtime capabilities, and reusable scalar traversal belongs to `uqa-execution`. `CREATE SCHEMA` delegates from the public facade or unified command arm to `MutationCoordinator`; other mutation families keep their established owners until the complete mutation bundle moves, so a partially migrated command never falls back between two implementations.
 
 ## Atomicity and locking
 

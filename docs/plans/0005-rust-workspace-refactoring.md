@@ -2,7 +2,7 @@
 
 Status: Active architecture refactoring plan
 
-Current implementation position: Phase 0 and Phase 1 are complete. The checked-in transition ratchet now inventories 66 files at or above 1,000 physical lines, four narrow capability views govern selected statement boundaries, the facade roots and sole dispatcher have been reduced without adding an execution path, and Phase 2 catalog and query-planning migration is next.
+Current implementation position: Phase 0, Phase 1, and Phase 2 are complete. The checked-in transition ratchet now inventories 61 files at or above 1,000 physical lines, immutable statement catalog snapshots and four narrow capabilities govern the read path, catalog projection, schema binding, evaluation scopes, and physical construction have responsibility-owned modules, the facade roots and sole dispatcher remain reduced without adding an execution path, and Phase 3 mutation-path migration is next.
 
 Update rule: Update this plan whenever a listed structural hotspot, capability boundary, crate responsibility, line-budget gate, test ownership rule, rollout phase, or completion metric changes. A file move or line-count reduction is not complete evidence unless the resulting owner, dependency direction, behavior contract, and focused tests satisfy this plan.
 
@@ -102,7 +102,7 @@ Engine coupling also increased. The counts below use the same file-level searche
 
 The existing state split remains the foundation: `StorageContext`, `DurableCatalogState`, `SessionContext`, `RuntimeExtensions`, `EpochCoordinator`, and `QueryRuntime` distinguish ownership domains. The current tree now wraps those owners with `CatalogReadView`, `SessionExecutionView`, `QueryRuntimeView`, and `MutationCoordinator`; engine-free `pg_namespace` and `pg_settings` builders plus the `CREATE SCHEMA` path prove the selected read and write boundaries, while the remaining catalog, query, and mutation migration belongs to the later domain bundles.
 
-The three broad lint boundaries also remain. Phase 0 temporarily removed each root `clippy::too_many_lines` allowance and ran the owning library with `-D warnings`: `uqa-engine/src/sql.rs` exposed 115 existing long-function diagnostics, `uqa-execution/src/lib.rs` exposed 16, and `uqa-sql/src/lib.rs` exposed 40. Phase 1 reduced `sql.rs` from 1,115 to 337 physical lines, but removing its descendant-wide allowance still requires the catalog, query, and mutation ownership moves; the two lower-crate allowances remain Phase 5 work, so none has been replaced by unreviewed local waivers.
+The three broad lint boundaries also remain. Phase 0 temporarily removed each root `clippy::too_many_lines` allowance and ran the owning library with `-D warnings`: `uqa-engine/src/sql.rs` exposed 115 existing long-function diagnostics, `uqa-execution/src/lib.rs` exposed 16, and `uqa-sql/src/lib.rs` exposed 40. Phase 1 reduced `sql.rs` from 1,115 to 337 physical lines and Phase 2 reduced it to 334, but removing its descendant-wide allowance still requires the mutation ownership move; the two lower-crate allowances remain Phase 5 work, so none has been replaced by unreviewed local waivers.
 
 ### 3.1 Phase 0 boundary measurement
 
@@ -146,37 +146,59 @@ The representative read path builds `pg_namespace` and `pg_settings` rows from c
 
 The current release `usql` was executed against the pinned Docker PostgreSQL 18.4 with Apache AGE oracle, not a dry run. All 797 differential probes matched, and the stateful suites matched routines 129/129, roles 136/136, constraints 162/162, type-temporal 49/49, triggers 584/584, rules 194/194, and transactions 61/61.
 
-### 3.3 Phase status at the current implementation
+### 3.3 Phase 2 boundary measurement
+
+The Phase 2 boundary was measured on 2026-08-31 with `bash scripts/measure-rust-refactoring.sh`. `cloc 2.08` reports 1,330 Rust files, 403,255 code lines, 19,067 comment lines, and 27,039 blank lines under `crates/`; the hand-maintained report excludes imported `uqa-pg-query` and reports 1,325 files, 434,070 physical lines, 61 inventoried files, and no file above 1,500 lines. The largest governed file remains `uqa-sql/src/expr.rs` at 1,493 physical lines.
+
+| Boundary | Rust files | Physical lines or current size |
+| --- | ---: | ---: |
+| `uqa-engine` | 614 | 232,629 |
+| `uqa-engine/src/sql`, including `sql.rs` | 220 | 88,422 |
+| `sql/catalog.rs` | 1 | 181 |
+| `sql/catalog/pg_catalog.rs` | 1 | 27; six relation-family children are at most 460 lines |
+| `sql/catalog/helpers.rs` | 1 | 16; seven responsibility-owned children are at most 538 lines |
+| `sql/select/schema_binding.rs` | 1 | 936; focused children are at most 530 lines |
+| `sql/select/evaluation.rs` | 1 | 142; focused children are at most 519 lines |
+| `sql/select/physical_plan.rs` | 1 | 78; focused children are at most 550 lines |
+| `uqa-execution/src/scalar.rs` | 1 | 1,122; owner traversal is 506 lines |
+
+`CatalogReadView` now owns an immutable table-definition and durable-registry snapshot, while `RelationNameResolution` owns the statement search path and temporary namespace used to resolve names. `CteScope` captures both once and passes them through binding, filter pushdown, virtual catalog scans, table access, row-lock planning, evaluation, and physical construction. Catalog roots and helper roots contain declarations and direct owner imports instead of forwarding dumps; static metadata builders are engine-free leaves, and live projection modules are explicit adapters. Schema binding is proven by a deterministic complete-query fixture that has no `Engine`, physical construction is proven with a bound plan and explicit `QueryRuntimeView`, scalar traversal belongs to the physical IR owner, and planner statistics cross a narrow `SourceStatistics` interface that preserves the first callback error.
+
+The enforceable capability policy now covers 79 files: 35 declared adapters and 44 engine-free leaves. The raw coupling scan reports 348 Rust files under `uqa-engine/src`, 234 files mentioning `Engine`, 75 files containing literal `impl Engine`, 140 SQL files mentioning `Engine`, 197 SQL files importing their parent module, and eight SQL files using a parent glob. These raw counts are not completion evidence by themselves; the selected catalog and read-path leaves are enforced by the checked-in allowlist and cannot accept, store, alias, return, or recover `Engine`.
+
+The current `uqa-engine` integration executable reports 2,067 passed, two ignored, and no failures across 2,069 discovered tests. The current release `usql` was executed against the pinned Docker PostgreSQL 18.4 with Apache AGE 1.8.0, not a dry run: all 797 differential probes matched, and the stateful suites matched routines 129/129, roles 136/136, constraints 162/162, type-temporal 49/49, triggers 584/584, rules 194/194, and transactions 61/61.
+
+### 3.4 Phase status at the current implementation
 
 | Phase | Status | Current evidence |
 | --- | --- | --- |
-| Phase 0: structural ratchet | Complete | The exact transition ratchet inventories 66 current files, rejects growth and new 1,000-line files, all six inherited 1,500-line violations are responsibility-split, the root lint debt is explicitly counted, and the fixed runner has clean and warm timing baselines. |
-| Phase 1: capability boundaries and facade roots | Complete | Four narrow borrowed capabilities exist without an `Engine` escape hatch; `pg_namespace`, `pg_settings`, and `CREATE SCHEMA` prove read and write paths; the ownership checker enforces the selected leaves and adapters; `lib.rs`, `sql.rs`, and the sole executor are 885, 337, and 557 physical lines. |
-| Phase 2: catalog and read path | Preliminary decomposition; next bundle | Catalog, schema-binding, evaluation, and physical-plan child modules exist, and two catalog builders now consume narrow views, but broader binding and physical construction still require engine-backed resolution. |
+| Phase 0: structural ratchet | Complete | The exact transition ratchet inventories 61 current files, rejects growth and new 1,000-line files, all six inherited 1,500-line violations are responsibility-split, the root lint debt is explicitly counted, and the fixed runner has clean and warm timing baselines. |
+| Phase 1: capability boundaries and facade roots | Complete | Four narrow capabilities exist without an `Engine` escape hatch; `pg_namespace`, `pg_settings`, and `CREATE SCHEMA` prove read and write paths; the ownership checker enforces the selected leaves and adapters; `lib.rs`, `sql.rs`, and the sole executor are 885, 334, and 557 physical lines. |
+| Phase 2: catalog and read path | Complete | One immutable statement snapshot drives catalog projection, relation resolution, binding, filter pushdown, virtual and local scans, evaluation scopes, and physical construction; catalog, binder, evaluation, physical-plan, and scalar-traversal owners have focused tests; the capability policy, full integration target, release-`usql` differential probes, and all stateful PostgreSQL 18.4 with AGE suites pass. |
 | Phase 3: mutation path | Preliminary boundary only; compatibility growth is not architectural completion | `MutationCoordinator` proves the transactional schema path, and shared carriers and lock helpers exist in `dml.rs`, but INSERT, MERGE, automatic-view rewriting, and view-trigger execution remain large command-oriented paths that accept `&Engine`; the complete shared mutation protocol has not reached its exit gate. |
 | Phase 4: transactions and locks | Preliminary decomposition only | `engine_transactions/` and `row_locks/` contain focused child modules, but their roots remain 1,469 and 1,429 physical lines and continue to own multiple transitions through broad facade methods. |
-| Phase 5: lower crates | Not complete | `uqa-sql/src/expr.rs`, `uqa-execution/src/scalar.rs`, and `uqa-scoring/src/wand.rs` remain between 1,455 and 1,493 physical lines, and the planned ownership moves have not passed their exit gates. |
+| Phase 5: lower crates | Preliminary scalar traversal split only; broader phase not complete | `uqa-execution/src/scalar/traversal.rs` now owns complete physical-scalar walking and the root is 1,122 lines, but `uqa-sql/src/expr.rs`, routine resolution, joins, distinct, scoring WAND, storage migration, decimal, and the remaining scalar responsibilities have not passed their exit gates. |
 | Phase 6: tests and final ceiling | Broader phase not started; initial hotspot resolved | `uqa-engine/tests` contains 86,889 physical lines across 238 files and 237 nested module declarations, and the single integration executable discovers 2,069 tests. The 3,486-line automatic-view source is now seven behavior modules of at most 826 lines, but other inventoried test sources and the final 1,000-line hard ceiling remain Phase 6 work. |
 
-The implementation sequence now moves to Phase 2. The completed capability bundle leaves CI topology unchanged: the harness checker still reports 218 direct integration sources in 18 targets across 18 crates, `UnifiedPlanExecutor` remains the only dispatcher, and the full `uqa-engine` integration target plus focused catalog, schema, cache, cursor, TRUNCATE, and automatic-view tests pass.
+The implementation sequence now moves to Phase 3. The completed read-path bundle leaves CI topology unchanged: the harness checker still reports 218 direct integration sources in 18 targets across 18 crates, `UnifiedPlanExecutor` remains the only dispatcher, and the full `uqa-engine` integration target plus focused catalog, binding, physical-construction, scalar-traversal, cache, cursor, retrieval, CTE, join, aggregate, window, graph, and view tests pass.
 
 ## 4. Findings and root problems
 
 ### 4.1 The composition root is also an implementation container
 
-`uqa-engine` is correctly the only crate that can compose storage, planner, execution, graph, scoring, model, FDW, session, transaction, and extension behavior. That does not require every algorithm to accept `&Engine`. The selected catalog, session, runtime, and schema-mutation paths now expose their needs through borrowed capability types, but the remaining method surface still lets many lower SQL modules acquire unrelated capabilities transitively, so later domain bundles must continue the migration.
+`uqa-engine` is correctly the only crate that can compose storage, planner, execution, graph, scoring, model, FDW, session, transaction, and extension behavior. That does not require every algorithm to accept `&Engine`. The selected catalog, session, runtime, and schema-mutation paths now expose their needs through narrow capability values, but the remaining method surface still lets many lower SQL modules acquire unrelated capabilities transitively, so later domain bundles must continue the migration.
 
 This problem must be fixed with capability-oriented parameters and owned workflow types. Replacing `&Engine` with a single `EngineServices` trait or a context that dereferences back to `Engine` would preserve the same service locator and is not an acceptable result.
 
 ### 4.2 The SQL module root is an ambient namespace
 
-`uqa-engine/src/sql.rs` is now 337 physical lines after its tests and cursor-worker implementation moved to responsibility-owned modules, so it is no longer an oversized implementation container. It still grants a broad lint exception to descendants, and of 187 SQL files, 173 import their parent module while seven use a parent glob import; later read- and write-path bundles must reduce that ambient namespace without manipulating the count as a proxy for ownership.
+`uqa-engine/src/sql.rs` is now 334 physical lines after its tests and cursor-worker implementation moved to responsibility-owned modules, so it is no longer an oversized implementation container. It still grants a broad lint exception to descendants, and of 220 SQL files, 197 import their parent module while eight use a parent glob import; the mutation and later lower-crate bundles must reduce that ambient namespace without manipulating the count as a proxy for ownership.
 
 The SQL root should contain public entry points, top-level orchestration exports, and module declarations. Domain constants, catalog helpers, DML carriers, physical helpers, and function dispatch belong to their owning modules and should be imported directly from those owners.
 
 ### 4.3 Vertical workflows mix distinct correctness stages
 
-The largest DML, SELECT, catalog, transaction, and lock roots do not merely contain many similar helpers. Phase 1 moved TRUNCATE and session-portal workflows out of `UnifiedPlanExecutor`, moved hook and statement-cache algorithms out of `lib.rs`, and made `pg_namespace` and `pg_settings` engine-independent leaves; the remaining root files still combine stages with different invariants:
+The largest DML, transaction, and lock roots do not merely contain many similar helpers. Phase 2 moved catalog projection, schema-binding domains, evaluation scopes, physical-plan construction, and scalar traversal into responsibility-owned modules; the remaining root files still combine mutation and concurrency stages with different invariants:
 
 - `sql/dml.rs` still combines mutation lock targets, prepared rewrite and delete codecs, referential action state, row-image construction, view checks, identity handling, mutation expression evaluation, and MERGE pairing; `sql/dml/view_rules.rs` now owns view-rule projection, batching, and returning capture.
 - `sql/dml/view_automatic.rs` now owns automatic-view layer discovery, source/scalar rewriting, rule projection, and updatability classification; child modules own public validation, correlated-subquery rewriting, `RETURNING` and check propagation, and the four command rewrite workflows.
@@ -184,10 +206,6 @@ The largest DML, SELECT, catalog, transaction, and lock roots do not merely cont
 - `sql/dml/merge.rs` retains source execution, action selection, scope validation, target locking, prepared spill encoding, mutation application, and trigger/rule coordination; `merge/returning.rs` owns MERGE row-image and projection construction.
 - `sql/dml/view_triggers.rs` retains target resolution, materialization, assignment evaluation, rule suppression, UPDATE/DELETE execution, and result finishing; `view_triggers/insert.rs` owns the `INSTEAD OF INSERT` workflow.
 - `sql/dml/constraints.rs` combines non-key checks, key locking, deferred foreign keys, period overlap, parent lookup, partition movement, referential recursion, staging, and final application.
-- `sql/select/physical_plan.rs` combines star expansion, projection binding, ordering, distinct keys, aggregate preparation, row-lock insertion, physical operator assembly, result finishing, and general expression walking.
-- `sql/select/schema_binding.rs` combines scope construction, source binding, function overload resolution, output projection, pseudo-columns, CTE typing, set typing, and outer-scope overlay.
-- `sql/select/evaluation.rs` combines CTE lifetime, subquery caches, lock-recheck state, RAII scopes, expression evaluation, function typing, callback dispatch, and subquery execution.
-- `sql/catalog/pg_catalog.rs` and `sql/catalog/helpers.rs` combine unrelated virtual relations, static PostgreSQL type metadata, OID policy, information-schema projections, constraint state, and expression dependency extraction.
 - `engine_transactions.rs` and `row_locks.rs` each contain several independent state machines whose ordering must remain explicit but whose implementation does not need to occupy one file.
 
 Splitting these files at arbitrary line positions would hide the issue. Each resulting module must own one state transition or one projection family and expose a small typed boundary.
@@ -196,7 +214,7 @@ Splitting these files at arbitrary line positions would hide the issue. Each res
 
 `uqa-execution` currently owns physical rows and operators, but it also owns the full SQL type-resolution tree and routine-signature matching. Some resolution code needs `RowSchema`, while much of the common-type, polymorphic, variadic, and fixed-overload policy is independent of physical execution. The split must follow dependency direction: pure SQL typing policy moves to `uqa-sql` when it can depend only on SQL AST and core values; row-schema adapters remain with planning or execution until a lower neutral interface exists.
 
-Similarly, `uqa-execution/src/scalar.rs` combines the scalar physical IR, tree inspection, subquery protocol, evaluation context, function-call argument validation, and evaluator; `join.rs` combines row storage, in-memory indexing, disk indexing, and the hash-join driver; `uqa-sql/src/expr/casting.rs` combines scalar, binary, array, range, and temporal conversion; and `uqa-scoring/src/wand.rs` combines cursor mechanics, bounds, and search execution. These are module-level ownership problems first and crate moves only where the dependency graph proves a better owner.
+Similarly, `uqa-execution/src/scalar/traversal.rs` now owns complete scalar-tree inspection, but `scalar.rs` still combines the physical IR, subquery protocol, evaluation context, function-call argument validation, and evaluator; `join.rs` combines row storage, in-memory indexing, disk indexing, and the hash-join driver; `uqa-sql/src/expr/casting.rs` combines scalar, binary, array, range, and temporal conversion; and `uqa-scoring/src/wand.rs` combines cursor mechanics, bounds, and search execution. These are module-level ownership problems first and crate moves only where the dependency graph proves a better owner.
 
 ### 4.5 Test consolidation controls executables but not test complexity
 
@@ -230,7 +248,7 @@ The exact internal Rust names may change during implementation, but the followin
 
 | Capability | Required content | Forbidden content |
 | --- | --- | --- |
-| Catalog read view | Resolved relations, columns, indexes, routines, graphs, views, statistics, roles, triggers, rules, and stable epochs needed by one statement snapshot. | Transaction mutation, lock acquisition, cache publication, or an escape hatch to `Engine`. |
+| Catalog read view | Immutable relations, columns, indexes, routines, graphs, views, statistics, roles, triggers, and rules needed by one statement snapshot. | Transaction mutation, lock acquisition, cache publication, or an escape hatch to `Engine`. |
 | Session execution view | Search path, current and session user, statement parameters, prepared or portal identity, session variables, and transaction-visible snapshot identity. | Durable registry mutation or storage backend ownership. |
 | Query runtime view | Cancellation, `work_mem`, callback lookup, subquery runner, row sources, and diagnostics required by physical execution. | DDL, DML publication, catalog writes, or transaction-stack mutation. |
 | Mutation coordinator | Statement snapshot, target resolution, locks, trigger and rule queues, constraint checks, staged row changes, savepoint ownership, and atomic publication. | General-purpose query planning or unrelated durable registries. |
@@ -283,7 +301,7 @@ Every refactoring slice must preserve all of the following:
 
 ### 7.1 Structural measurement and ratchet
 
-- Maintain the checked-in machine-readable inventory that began with 69 non-imported Rust files at or above 1,000 physical lines and now contains 66, recording each audited size, owner, responsibility groups, target modules, and migration state.
+- Maintain the checked-in machine-readable inventory that began with 69 non-imported Rust files at or above 1,000 physical lines and now contains 61, recording each audited size, owner, responsibility groups, target modules, and migration state.
 - Replace the single 1,500-line check with a transition ratchet: existing oversized files cannot grow, new files cannot exceed 1,000 lines, and a file removed from the oversized inventory cannot return.
 - Treat the six files already above 1,500 lines as urgent inventory entries and split them by behavior ownership before beginning Phase 1; do not discard or compress PostgreSQL 18 compatibility cases to satisfy the limit.
 - Lower the final hard limit to 1,000 physical lines after the inventory reaches zero; keep `uqa-pg-query` excluded because it is imported and generated through its own reviewed process.
@@ -295,7 +313,7 @@ Exit gate: The ratchet rejects growth immediately, the inventory accounts for ev
 ### 7.2 Engine facade and state capabilities
 
 - Keep the current storage, durable-catalog, session, extension, epoch, query-runtime, row-lock, and session-identity ownership domains.
-- Add narrow borrowed capability views at statement boundaries and migrate leaf modules away from `&Engine` in dependency order.
+- Add narrow capability values at statement boundaries and migrate leaf modules away from `&Engine` in dependency order.
 - Keep public `impl Engine` methods as stable facade methods that validate API inputs and delegate to an owning workflow; move large private algorithms out of facade implementations.
 - Add a policy check that permits `&Engine` only in declared API and orchestration modules once each SQL domain migrates; do not enforce a raw count without an ownership allowlist.
 - Remove direct state-domain field access outside the state owner and explicit adapter modules.
@@ -318,7 +336,7 @@ Exit gate: The SQL root is a facade rather than an ambient namespace, the binder
 
 - Split `pg_catalog.rs` by virtual relation family: relations and namespaces, attributes and defaults, constraints, indexes, types and ranges, roles and settings, and sequences.
 - Split `catalog/helpers.rs` into value/row construction, stable OID policy, PostgreSQL type metadata, information-schema type projection, index definition rendering, constraint catalog projection, and expression dependency collection.
-- Build one immutable catalog snapshot per statement or stable epoch and pass it to virtual-relation builders; do not reacquire unrelated engine locks for each row.
+- Build one immutable catalog snapshot per statement and pass it to virtual-relation builders; do not reacquire unrelated engine locks for each row.
 - Keep static PostgreSQL metadata separate from live engine state so static builders require no `Engine` parameter.
 - Preserve exact catalog column order, types, OIDs, visibility, relation lifecycle, stored expression text, and PostgreSQL 18 plus Apache AGE oracle rows.
 

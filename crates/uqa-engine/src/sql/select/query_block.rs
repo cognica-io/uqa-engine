@@ -17,6 +17,7 @@ use super::{
     ColumnPrune, CteScope, Engine, QueryBlockPlan, QueryOutput, QueryOutputMode, SQLError,
     SQLParam, ScalarExpr, ScopedEngineHook, SingleRelation, SourcePlan,
 };
+use crate::engine_capabilities::{CatalogReadView, RelationNameResolution};
 use crate::sql::from_rows::SourceProjection;
 use crate::sql::{
     DOC_ID_COLUMN, META_DOC_ID_COLUMN, META_QUALIFIER, META_SCORE_COLUMN, SCORE_COLUMN,
@@ -77,9 +78,9 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
         include_descendants,
     } = from
     {
-        let foreign_table = engine
-            .foreign_table(name)
-            .map_err(|err| SQLError::Internal(format!("resolve foreign table `{name}`: {err}")))?;
+        let catalog = ctes.catalog_read_view()?;
+        let resolution = ctes.relation_name_resolution()?;
+        let foreign_table = catalog.foreign_table_entry_resolved(&resolution, name)?;
         if alias.is_none() && foreign_table.is_some() {
             validate_query_block_projection_references(
                 engine,
@@ -91,7 +92,7 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
             return run_single_foreign_select_output(
                 engine,
                 SingleRelation {
-                    storage_name: name,
+                    relation_name: name,
                     qualifier,
                 },
                 block,
@@ -101,15 +102,13 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
                 output_mode,
             );
         }
-        let local_table = engine
-            .try_query_table(name)
-            .map_err(|err| SQLError::Internal(format!("resolve table `{name}`: {err}")))?;
+        let local_table = catalog.table_name_resolved(&resolution, name)?;
         let is_virtual = name.contains('.') || (local_table.is_none() && foreign_table.is_none());
         let command_overlay =
             ctes.reads_command_overlay() && engine.command_mutation_overlay_active();
         let has_hierarchy_descendants = local_table.is_some()
-            && engine
-                .query_hierarchy_scan_tables(name, *include_descendants)?
+            && catalog
+                .hierarchy_scan_tables(&resolution, name, *include_descendants)?
                 .len()
                 > 1;
         if alias.is_none() && !is_virtual && !command_overlay && !has_hierarchy_descendants {
@@ -123,7 +122,7 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
             return run_single_table_select_output(
                 engine,
                 SingleRelation {
-                    storage_name: name,
+                    relation_name: name,
                     qualifier,
                 },
                 block,
@@ -139,8 +138,8 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
         crate::sql::validate_joined_expr_text_match_fields(engine, from, filter)?;
     }
 
-    let column_prune = column_prune_for_stmt(engine, stmt, from);
-    let qualifier_filters = qualifier_filters_for_stmt(engine, stmt, from);
+    let column_prune = column_prune_for_stmt(engine, stmt, from, ctes)?;
+    let qualifier_filters = qualifier_filters_for_stmt(engine, stmt, from, ctes)?;
     let source_row_locks = resolve_row_locks(
         engine,
         from,
@@ -164,8 +163,13 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
     let projection_schema = with_query_table_pseudo_columns(&source_schema);
     let projection_schema = overlay_outer_schema(&projection_schema, outer.as_ref());
     validate_query_block_projection_references(engine, stmt, &projection_schema, params, ctes)?;
-    let physical_filter =
-        final_filter_after_qualifier_pushdown(engine, stmt, from, qualifier_filters.as_ref());
+    let physical_filter = final_filter_after_qualifier_pushdown(
+        engine,
+        stmt,
+        from,
+        qualifier_filters.as_ref(),
+        ctes,
+    )?;
 
     let columns = expand_from_star_columns(
         projection_columns(&stmt.projections),
@@ -189,8 +193,9 @@ pub(in crate::sql) fn column_prune_for_stmt(
     engine: &Engine,
     stmt: &QueryBlockPlan,
     from: &SourcePlan,
-) -> Option<ColumnPrune> {
-    column_prune_for_stmt_with_filter(engine, stmt, from, stmt.r#where.as_ref())
+    ctes: &CteScope,
+) -> Result<Option<ColumnPrune>, SQLError> {
+    column_prune_for_stmt_with_filter(engine, stmt, from, stmt.r#where.as_ref(), ctes)
 }
 
 /// Compute the document projection for `stmt` while treating `filter` as the
@@ -206,7 +211,10 @@ pub(in crate::sql) fn column_prune_for_stmt_with_filter(
     stmt: &QueryBlockPlan,
     from: &SourcePlan,
     filter: Option<&ScalarExpr>,
-) -> Option<ColumnPrune> {
+    ctes: &CteScope,
+) -> Result<Option<ColumnPrune>, SQLError> {
+    let catalog = ctes.catalog_read_view()?;
+    let resolution = ctes.relation_name_resolution()?;
     let requires_full_projection = source_contains_join_alias(from)
         || has_window(&stmt.projections)
         || stmt.projections.iter().any(|projection| {
@@ -218,10 +226,10 @@ pub(in crate::sql) fn column_prune_for_stmt_with_filter(
     let mut qualifiers = Vec::new();
     collect_from_qualifiers(from, &mut qualifiers);
     if qualifiers.is_empty() {
-        return None;
+        return Ok(None);
     }
 
-    let metadata_binding = single_local_table_metadata_binding(engine, from);
+    let metadata_binding = single_local_table_metadata_binding(&catalog, &resolution, from)?;
     let scope = PruneScope {
         qualifiers: &qualifiers,
         metadata_qualifier: metadata_binding
@@ -249,24 +257,24 @@ pub(in crate::sql) fn column_prune_for_stmt_with_filter(
         .collect();
     let mut valid = true;
     collect_from_prune_columns(from, scope, &mut prune, &mut valid);
-    collect_join_binding_prune_columns(engine, from, &mut prune);
+    collect_join_binding_prune_columns(&catalog, &resolution, from, &mut prune)?;
     collect_query_block_prune_columns(stmt, filter, scope, &mut prune, &mut valid);
     let metadata_requested = prune
         .values()
         .any(|projection| !projection.metadata().is_empty());
     if requires_full_projection {
-        return metadata_requested.then_some(prune);
+        return Ok(metadata_requested.then_some(prune));
     }
     if !valid {
         if metadata_requested {
             for projection in prune.values_mut() {
                 projection.retain_all();
             }
-            return Some(prune);
+            return Ok(Some(prune));
         }
-        return None;
+        return Ok(None);
     }
-    Some(prune)
+    Ok(Some(prune))
 }
 
 #[derive(Clone, Copy)]
@@ -306,13 +314,19 @@ struct LocalTableMetadataBinding {
 }
 
 fn single_local_table_metadata_binding(
-    engine: &Engine,
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
     source: &SourcePlan,
-) -> Option<LocalTableMetadataBinding> {
+) -> Result<Option<LocalTableMetadataBinding>, SQLError> {
     if source_contains_join_alias(source) {
-        return None;
+        return Ok(None);
     }
-    fn collect(engine: &Engine, source: &SourcePlan, relations: &mut BTreeSet<(String, String)>) {
+    fn collect(
+        catalog: &CatalogReadView,
+        resolution: &RelationNameResolution,
+        source: &SourcePlan,
+        relations: &mut BTreeSet<(String, String)>,
+    ) -> Result<(), SQLError> {
         match source {
             SourcePlan::Table {
                 name,
@@ -320,35 +334,38 @@ fn single_local_table_metadata_binding(
                 alias,
                 ..
             } => {
-                if engine.try_query_table(name).ok().flatten().is_some() {
-                    relations.insert((
-                        alias.as_deref().unwrap_or(qualifier).to_string(),
-                        name.clone(),
-                    ));
+                if let Some(name) = catalog.table_name_resolved(resolution, name)? {
+                    relations.insert((alias.as_deref().unwrap_or(qualifier).to_string(), name));
                 }
             }
             SourcePlan::Join { left, right, .. } => {
-                collect(engine, left, relations);
-                collect(engine, right, relations);
+                collect(catalog, resolution, left, relations)?;
+                collect(catalog, resolution, right, relations)?;
             }
             SourcePlan::Values { .. }
             | SourcePlan::Function { .. }
             | SourcePlan::FunctionGroup { .. }
             | SourcePlan::Subquery { .. } => {}
         }
+        Ok(())
     }
     let mut relations = BTreeSet::new();
-    collect(engine, source, &mut relations);
-    let (qualifier, name) = relations.pop_first()?;
+    collect(catalog, resolution, source, &mut relations)?;
+    let Some((qualifier, name)) = relations.pop_first() else {
+        return Ok(None);
+    };
     if !relations.is_empty() {
-        return None;
+        return Ok(None);
     }
-    let columns = engine.try_query_table_columns(&name).ok()?;
-    Some(LocalTableMetadataBinding {
+    let columns = &catalog
+        .table_resolved(resolution, &name)?
+        .ok_or_else(|| SQLError::UnknownTable(name.clone()))?
+        .columns;
+    Ok(Some(LocalTableMetadataBinding {
         qualifier,
-        legacy_doc_id: !columns.iter().any(|column| column == DOC_ID_COLUMN),
-        legacy_score: !columns.iter().any(|column| column == SCORE_COLUMN),
-    })
+        legacy_doc_id: !columns.iter().any(|column| column.name == DOC_ID_COLUMN),
+        legacy_score: !columns.iter().any(|column| column.name == SCORE_COLUMN),
+    }))
 }
 
 fn source_contains_join_alias(source: &SourcePlan) -> bool {
@@ -366,7 +383,12 @@ fn source_contains_join_alias(source: &SourcePlan) -> bool {
     }
 }
 
-fn collect_join_binding_prune_columns(engine: &Engine, from: &SourcePlan, prune: &mut ColumnPrune) {
+fn collect_join_binding_prune_columns(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    from: &SourcePlan,
+    prune: &mut ColumnPrune,
+) -> Result<(), SQLError> {
     match from {
         SourcePlan::Join {
             left,
@@ -375,8 +397,8 @@ fn collect_join_binding_prune_columns(engine: &Engine, from: &SourcePlan, prune:
             natural,
             ..
         } => {
-            collect_join_binding_prune_columns(engine, left, prune);
-            collect_join_binding_prune_columns(engine, right, prune);
+            collect_join_binding_prune_columns(catalog, resolution, left, prune)?;
+            collect_join_binding_prune_columns(catalog, resolution, right, prune)?;
             if let Some(using) = using {
                 for column in &using.columns {
                     add_column_to_source_prune(left, column, prune);
@@ -384,8 +406,8 @@ fn collect_join_binding_prune_columns(engine: &Engine, from: &SourcePlan, prune:
                 }
             }
             if *natural {
-                add_all_source_columns_to_prune(engine, left, prune);
-                add_all_source_columns_to_prune(engine, right, prune);
+                add_all_source_columns_to_prune(catalog, resolution, left, prune)?;
+                add_all_source_columns_to_prune(catalog, resolution, right, prune)?;
             }
         }
         SourcePlan::Table { .. }
@@ -394,6 +416,7 @@ fn collect_join_binding_prune_columns(engine: &Engine, from: &SourcePlan, prune:
         | SourcePlan::FunctionGroup { .. }
         | SourcePlan::Subquery { .. } => {}
     }
+    Ok(())
 }
 
 fn add_column_to_source_prune(source: &SourcePlan, column: &str, prune: &mut ColumnPrune) {
@@ -406,7 +429,12 @@ fn add_column_to_source_prune(source: &SourcePlan, column: &str, prune: &mut Col
     }
 }
 
-fn add_all_source_columns_to_prune(engine: &Engine, source: &SourcePlan, prune: &mut ColumnPrune) {
+fn add_all_source_columns_to_prune(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    source: &SourcePlan,
+    prune: &mut ColumnPrune,
+) -> Result<(), SQLError> {
     match source {
         SourcePlan::Table {
             name,
@@ -415,13 +443,13 @@ fn add_all_source_columns_to_prune(engine: &Engine, source: &SourcePlan, prune: 
             ..
         } => {
             let qualifier = alias.as_deref().unwrap_or(qualifier);
-            match engine.try_query_table_columns(name) {
-                Ok(table_columns) => {
+            match catalog.table_resolved(resolution, name)? {
+                Some(table) => {
                     if let Some(columns) = prune.get_mut(qualifier) {
-                        columns.extend(table_columns);
+                        columns.extend(table.columns.iter().map(|column| column.name.clone()));
                     }
                 }
-                Err(_) => {
+                None => {
                     // A CTE, view, or external relation owns its row type
                     // outside the local table catalog. Omitting its prune
                     // entry retains that source's complete schema.
@@ -430,8 +458,8 @@ fn add_all_source_columns_to_prune(engine: &Engine, source: &SourcePlan, prune: 
             }
         }
         SourcePlan::Join { left, right, .. } => {
-            add_all_source_columns_to_prune(engine, left, prune);
-            add_all_source_columns_to_prune(engine, right, prune);
+            add_all_source_columns_to_prune(catalog, resolution, left, prune)?;
+            add_all_source_columns_to_prune(catalog, resolution, right, prune)?;
         }
         SourcePlan::Values {
             rows,
@@ -440,7 +468,7 @@ fn add_all_source_columns_to_prune(engine: &Engine, source: &SourcePlan, prune: 
             ..
         } => {
             let Some(columns) = alias.as_ref().and_then(|alias| prune.get_mut(alias)) else {
-                return;
+                return Ok(());
             };
             if column_aliases.is_empty() {
                 columns.extend(
@@ -462,29 +490,28 @@ fn add_all_source_columns_to_prune(engine: &Engine, source: &SourcePlan, prune: 
         } => {
             let qualifier = alias.as_ref().unwrap_or(output_name);
             let Some(columns) = prune.get_mut(qualifier) else {
-                return;
+                return Ok(());
             };
-            columns.extend(
-                super::user_function_output_columns(engine, name).map_or_else(
-                    || {
-                        crate::sql::from_rows::table_function_empty_schema(
-                            name,
-                            output_name,
-                            alias.as_deref(),
-                            column_aliases,
-                            args.len(),
-                            *ordinality,
-                        )
-                    },
-                    |base| {
-                        crate::sql::from_rows::apply_table_function_aliases(
-                            base,
-                            column_aliases,
-                            *ordinality,
-                        )
-                    },
-                ),
-            );
+            let routine_columns = super::user_function_output_columns(catalog, resolution, name)?;
+            columns.extend(routine_columns.map_or_else(
+                || {
+                    crate::sql::from_rows::table_function_empty_schema(
+                        name,
+                        output_name,
+                        alias.as_deref(),
+                        column_aliases,
+                        args.len(),
+                        *ordinality,
+                    )
+                },
+                |base| {
+                    crate::sql::from_rows::apply_table_function_aliases(
+                        base,
+                        column_aliases,
+                        *ordinality,
+                    )
+                },
+            ));
         }
         SourcePlan::FunctionGroup {
             functions,
@@ -496,34 +523,34 @@ fn add_all_source_columns_to_prune(engine: &Engine, source: &SourcePlan, prune: 
                 .as_ref()
                 .or_else(|| functions.first().map(|function| &function.output_name))
             else {
-                return;
+                return Ok(());
             };
             let Some(columns) = prune.get_mut(qualifier) else {
-                return;
+                return Ok(());
             };
             let mut group_columns = Vec::new();
             for function in functions {
-                group_columns.extend(
-                    super::user_function_output_columns(engine, &function.name).map_or_else(
-                        || {
-                            crate::sql::from_rows::table_function_empty_schema(
-                                &function.name,
-                                &function.output_name,
-                                None,
-                                &function.column_aliases,
-                                function.args.len(),
-                                false,
-                            )
-                        },
-                        |base| {
-                            crate::sql::from_rows::apply_table_function_aliases(
-                                base,
-                                &function.column_aliases,
-                                false,
-                            )
-                        },
-                    ),
-                );
+                let routine_columns =
+                    super::user_function_output_columns(catalog, resolution, &function.name)?;
+                group_columns.extend(routine_columns.map_or_else(
+                    || {
+                        crate::sql::from_rows::table_function_empty_schema(
+                            &function.name,
+                            &function.output_name,
+                            None,
+                            &function.column_aliases,
+                            function.args.len(),
+                            false,
+                        )
+                    },
+                    |base| {
+                        crate::sql::from_rows::apply_table_function_aliases(
+                            base,
+                            &function.column_aliases,
+                            false,
+                        )
+                    },
+                ));
             }
             if *ordinality {
                 group_columns.push("ordinality".into());
@@ -539,7 +566,7 @@ fn add_all_source_columns_to_prune(engine: &Engine, source: &SourcePlan, prune: 
             column_aliases,
         } => {
             let Some(columns) = alias.as_ref().and_then(|alias| prune.get_mut(alias)) else {
-                return;
+                return Ok(());
             };
             if column_aliases.is_empty() {
                 columns.extend(super::query_plan_output_columns(body).unwrap_or_default());
@@ -548,6 +575,7 @@ fn add_all_source_columns_to_prune(engine: &Engine, source: &SourcePlan, prune: 
             }
         }
     }
+    Ok(())
 }
 
 pub(in crate::sql) fn collect_from_qualifiers(from: &SourcePlan, out: &mut Vec<String>) {

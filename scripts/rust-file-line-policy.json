@@ -23,7 +23,7 @@
     },
     {
       "path": "crates/uqa-engine/src/engine_roles.rs",
-      "baseline_lines": 1376,
+      "baseline_lines": 1357,
       "owner": "uqa-engine role and privilege facade",
       "responsibility_groups": ["role lifecycle", "membership graph", "privilege resolution", "durable role state"],
       "target_modules": ["crates/uqa-engine/src/engine_roles/lifecycle.rs", "crates/uqa-engine/src/engine_roles/membership.rs", "crates/uqa-engine/src/engine_roles/privileges.rs", "crates/uqa-engine/src/engine_roles/persistence.rs"],
@@ -63,7 +63,7 @@
     },
     {
       "path": "crates/uqa-engine/src/engine_user_functions/lifecycle.rs",
-      "baseline_lines": 1348,
+      "baseline_lines": 1325,
       "owner": "uqa-engine user-function lifecycle",
       "responsibility_groups": ["routine creation", "routine alteration", "routine deletion", "catalog and dependency publication"],
       "target_modules": ["crates/uqa-engine/src/engine_user_functions/lifecycle/create.rs", "crates/uqa-engine/src/engine_user_functions/lifecycle/alter.rs", "crates/uqa-engine/src/engine_user_functions/lifecycle/drop.rs", "crates/uqa-engine/src/engine_user_functions/lifecycle/publication.rs"],
@@ -99,22 +99,6 @@
       "owner": "uqa-engine builtin routine catalog projection",
       "responsibility_groups": ["builtin metadata", "signature projection", "routine OIDs", "privilege projection"],
       "target_modules": ["crates/uqa-engine/src/sql/catalog/builtin_routines/metadata.rs", "crates/uqa-engine/src/sql/catalog/builtin_routines/signatures.rs", "crates/uqa-engine/src/sql/catalog/builtin_routines/oids.rs", "crates/uqa-engine/src/sql/catalog/builtin_routines/privileges.rs"],
-      "migration_state": "planned"
-    },
-    {
-      "path": "crates/uqa-engine/src/sql/catalog/helpers.rs",
-      "baseline_lines": 1433,
-      "owner": "uqa-engine virtual catalog helpers",
-      "responsibility_groups": ["row construction", "stable OID policy", "PostgreSQL type metadata", "constraint and dependency projection"],
-      "target_modules": ["crates/uqa-engine/src/sql/catalog/helpers/rows.rs", "crates/uqa-engine/src/sql/catalog/helpers/oids.rs", "crates/uqa-engine/src/sql/catalog/helpers/types.rs", "crates/uqa-engine/src/sql/catalog/helpers/constraints.rs", "crates/uqa-engine/src/sql/catalog/helpers/dependencies.rs"],
-      "migration_state": "planned"
-    },
-    {
-      "path": "crates/uqa-engine/src/sql/catalog/pg_catalog.rs",
-      "baseline_lines": 1424,
-      "owner": "uqa-engine pg_catalog virtual relations",
-      "responsibility_groups": ["relation and namespace rows", "attribute and default rows", "constraint and index rows", "type role and sequence rows"],
-      "target_modules": ["crates/uqa-engine/src/sql/catalog/pg_catalog/relations.rs", "crates/uqa-engine/src/sql/catalog/pg_catalog/attributes.rs", "crates/uqa-engine/src/sql/catalog/pg_catalog/constraints.rs", "crates/uqa-engine/src/sql/catalog/pg_catalog/types.rs", "crates/uqa-engine/src/sql/catalog/pg_catalog/roles.rs"],
       "migration_state": "planned"
     },
     {
@@ -159,7 +143,7 @@
     },
     {
       "path": "crates/uqa-engine/src/sql/dml/insert.rs",
-      "baseline_lines": 1350,
+      "baseline_lines": 1345,
       "owner": "uqa-engine INSERT execution",
       "responsibility_groups": ["streaming source consumption", "identity and defaults", "trigger and rule behavior", "constraint and mutation staging", "FTS side effects"],
       "target_modules": ["crates/uqa-engine/src/sql/dml/insert/source.rs", "crates/uqa-engine/src/sql/dml/insert/identity.rs", "crates/uqa-engine/src/sql/dml/insert/events.rs", "crates/uqa-engine/src/sql/dml/insert/staging.rs", "crates/uqa-engine/src/sql/dml/insert/fts.rs"],
@@ -215,50 +199,26 @@
     },
     {
       "path": "crates/uqa-engine/src/sql/select.rs",
-      "baseline_lines": 1173,
+      "baseline_lines": 1163,
       "owner": "uqa-engine SELECT orchestration",
       "responsibility_groups": ["query entry points", "source execution", "result construction", "operator lifecycle"],
       "target_modules": ["crates/uqa-engine/src/sql/select/driver.rs", "crates/uqa-engine/src/sql/select/query_block.rs", "crates/uqa-engine/src/sql/select/result.rs"],
       "migration_state": "planned"
     },
     {
-      "path": "crates/uqa-engine/src/sql/select/evaluation.rs",
-      "baseline_lines": 1478,
-      "owner": "uqa-engine query evaluation scopes",
-      "responsibility_groups": ["CTE lifetime", "subquery cache", "row-lock and recheck scopes", "expression callback adaptation", "physical subquery execution"],
-      "target_modules": ["crates/uqa-engine/src/sql/select/evaluation/cte.rs", "crates/uqa-engine/src/sql/select/evaluation/subqueries.rs", "crates/uqa-engine/src/sql/select/evaluation/row_locks.rs", "crates/uqa-engine/src/sql/select/evaluation/callbacks.rs"],
-      "migration_state": "planned"
-    },
-    {
       "path": "crates/uqa-engine/src/sql/select/filter_pushdown.rs",
-      "baseline_lines": 1436,
+      "baseline_lines": 1345,
       "owner": "uqa-engine filter pushdown",
       "responsibility_groups": ["predicate classification", "source pushdown", "join pushdown", "residual reconstruction"],
       "target_modules": ["crates/uqa-engine/src/sql/select/filter_pushdown/classify.rs", "crates/uqa-engine/src/sql/select/filter_pushdown/source.rs", "crates/uqa-engine/src/sql/select/filter_pushdown/joins.rs"],
       "migration_state": "planned"
     },
     {
-      "path": "crates/uqa-engine/src/sql/select/physical_plan.rs",
-      "baseline_lines": 1440,
-      "owner": "uqa-engine relational physical-plan construction",
-      "responsibility_groups": ["projection expansion", "order and distinct preparation", "aggregate preparation", "operator assembly", "row-lock attachment and output finishing"],
-      "target_modules": ["crates/uqa-engine/src/sql/select/physical_plan/projection.rs", "crates/uqa-engine/src/sql/select/physical_plan/ordering.rs", "crates/uqa-engine/src/sql/select/physical_plan/aggregation.rs", "crates/uqa-engine/src/sql/select/physical_plan/operators.rs", "crates/uqa-engine/src/sql/select/physical_plan/row_locking.rs"],
-      "migration_state": "planned"
-    },
-    {
       "path": "crates/uqa-engine/src/sql/select/row_locking.rs",
-      "baseline_lines": 1148,
+      "baseline_lines": 1143,
       "owner": "uqa-engine SELECT row-lock planning and execution",
       "responsibility_groups": ["lock clause validation", "lock target resolution", "lock operator attachment", "null-rejection and execution"],
       "target_modules": ["crates/uqa-engine/src/sql/select/row_locking/validation.rs", "crates/uqa-engine/src/sql/select/row_locking/targets.rs", "crates/uqa-engine/src/sql/select/row_locking/execution.rs", "crates/uqa-engine/src/sql/select/row_locking/null_rejection.rs"],
-      "migration_state": "planned"
-    },
-    {
-      "path": "crates/uqa-engine/src/sql/select/schema_binding.rs",
-      "baseline_lines": 1470,
-      "owner": "uqa-engine query schema binding",
-      "responsibility_groups": ["scope construction", "source binding", "routine and type binding", "projection binding", "CTE and outer-scope typing"],
-      "target_modules": ["crates/uqa-engine/src/sql/select/schema_binding/scope.rs", "crates/uqa-engine/src/sql/select/schema_binding/sources.rs", "crates/uqa-engine/src/sql/select/schema_binding/routine_binding.rs", "crates/uqa-engine/src/sql/select/schema_binding/projection.rs", "crates/uqa-engine/src/sql/select/schema_binding/cte_controls.rs"],
       "migration_state": "planned"
     },
     {
@@ -407,11 +367,11 @@
     },
     {
       "path": "crates/uqa-execution/src/scalar.rs",
-      "baseline_lines": 1455,
+      "baseline_lines": 1122,
       "owner": "uqa-execution scalar physical evaluation",
-      "responsibility_groups": ["scalar IR and traversal", "subquery protocol", "evaluation context", "call validation and evaluator"],
-      "target_modules": ["crates/uqa-execution/src/scalar/ir.rs", "crates/uqa-execution/src/scalar/subquery.rs", "crates/uqa-execution/src/scalar/context.rs", "crates/uqa-execution/src/scalar/evaluator.rs"],
-      "migration_state": "planned"
+      "responsibility_groups": ["scalar IR", "subquery protocol", "evaluation context", "call validation and evaluator"],
+      "target_modules": ["crates/uqa-execution/src/scalar/traversal.rs", "crates/uqa-execution/src/scalar/ir.rs", "crates/uqa-execution/src/scalar/subquery.rs", "crates/uqa-execution/src/scalar/context.rs", "crates/uqa-execution/src/scalar/evaluator.rs"],
+      "migration_state": "in-progress"
     },
     {
       "path": "crates/uqa-execution/src/spill.rs",

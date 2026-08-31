@@ -6,15 +6,16 @@
 
 //! Recursive scalar and subquery reference validation.
 
-use super::super::{Engine, SQLError, SQLParam, ScalarExpr};
+use super::super::{SQLError, SQLParam, ScalarExpr};
 use super::functions::{
     is_semantic_all_argument, validate_qualified_column, validate_scalar_function,
     validate_unqualified_column, validate_window_function, ScalarFunctionValidation,
 };
+use crate::engine_user_functions::RoutineResolution;
 use uqa_execution::{FunctionTypeResolver, RowSchema, ScalarFrameBound};
 
 pub(super) fn validate_expression(
-    engine: &Engine,
+    routines: &dyn RoutineResolution,
     expression: &ScalarExpr,
     schema: &RowSchema,
     fallback: Option<&RowSchema>,
@@ -65,16 +66,16 @@ pub(super) fn validate_expression(
                 if is_semantic_all_argument(name, argument) {
                     continue;
                 }
-                validate_expression(engine, argument, schema, None, params, resolver)?;
+                validate_expression(routines, argument, schema, None, params, resolver)?;
             }
             for order in order_by {
-                validate_expression(engine, &order.expr, schema, None, params, resolver)?;
+                validate_expression(routines, &order.expr, schema, None, params, resolver)?;
             }
             if let Some(filter) = filter.as_deref() {
-                validate_expression(engine, filter, schema, None, params, resolver)?;
+                validate_expression(routines, filter, schema, None, params, resolver)?;
             }
             validate_scalar_function(
-                engine,
+                routines,
                 ScalarFunctionValidation {
                     name,
                     binding: binding.as_ref(),
@@ -89,48 +90,48 @@ pub(super) fn validate_expression(
         }
         ScalarExpr::WindowCall { name, args, spec } => {
             for argument in args {
-                validate_expression(engine, argument, schema, None, params, resolver)?;
+                validate_expression(routines, argument, schema, None, params, resolver)?;
             }
             for expression in &spec.partition_by {
-                validate_expression(engine, expression, schema, None, params, resolver)?;
+                validate_expression(routines, expression, schema, None, params, resolver)?;
             }
             for order in &spec.order_by {
-                validate_expression(engine, &order.expr, schema, None, params, resolver)?;
+                validate_expression(routines, &order.expr, schema, None, params, resolver)?;
             }
             if let Some(frame) = &spec.frame {
                 for bound in [&frame.start, &frame.end] {
                     if let ScalarFrameBound::Preceding(expression)
                     | ScalarFrameBound::Following(expression) = bound
                     {
-                        validate_expression(engine, expression, schema, None, params, resolver)?;
+                        validate_expression(routines, expression, schema, None, params, resolver)?;
                     }
                 }
             }
-            validate_window_function(engine, name, args, schema, params, resolver)
+            validate_window_function(routines, name, args, schema, params, resolver)
         }
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)
         | ScalarExpr::And(items)
-        | ScalarExpr::Or(items) => validate_items(engine, items, schema, params, resolver),
+        | ScalarExpr::Or(items) => validate_items(routines, items, schema, params, resolver),
         ScalarExpr::Binary { lhs, rhs, .. } => {
-            validate_expression(engine, lhs, schema, None, params, resolver)?;
-            validate_expression(engine, rhs, schema, None, params, resolver)
+            validate_expression(routines, lhs, schema, None, params, resolver)?;
+            validate_expression(routines, rhs, schema, None, params, resolver)
         }
         ScalarExpr::UnaryMinus(inner)
         | ScalarExpr::Not(inner)
         | ScalarExpr::IsNull { expr: inner, .. }
         | ScalarExpr::Cast { expr: inner, .. } => {
-            validate_expression(engine, inner, schema, None, params, resolver)
+            validate_expression(routines, inner, schema, None, params, resolver)
         }
         ScalarExpr::Between { expr, low, high } => {
             for item in [expr.as_ref(), low.as_ref(), high.as_ref()] {
-                validate_expression(engine, item, schema, None, params, resolver)?;
+                validate_expression(routines, item, schema, None, params, resolver)?;
             }
             Ok(())
         }
         ScalarExpr::InList { expr, list, .. } => {
-            validate_expression(engine, expr, schema, None, params, resolver)?;
-            validate_items(engine, list, schema, params, resolver)
+            validate_expression(routines, expr, schema, None, params, resolver)?;
+            validate_items(routines, list, schema, params, resolver)
         }
         ScalarExpr::Case {
             base,
@@ -138,14 +139,14 @@ pub(super) fn validate_expression(
             else_branch,
         } => {
             if let Some(base) = base.as_deref() {
-                validate_expression(engine, base, schema, None, params, resolver)?;
+                validate_expression(routines, base, schema, None, params, resolver)?;
             }
             for (condition, value) in when {
-                validate_expression(engine, condition, schema, None, params, resolver)?;
-                validate_expression(engine, value, schema, None, params, resolver)?;
+                validate_expression(routines, condition, schema, None, params, resolver)?;
+                validate_expression(routines, value, schema, None, params, resolver)?;
             }
             if let Some(else_branch) = else_branch.as_deref() {
-                validate_expression(engine, else_branch, schema, None, params, resolver)?;
+                validate_expression(routines, else_branch, schema, None, params, resolver)?;
             }
             Ok(())
         }
@@ -156,7 +157,7 @@ pub(super) fn validate_expression(
             .resolve_scalar_subquery_type(*index, schema, params)
             .map(drop),
         ScalarExpr::InSubquery { expr, subquery, .. } => {
-            validate_expression(engine, expr, schema, None, params, resolver)?;
+            validate_expression(routines, expr, schema, None, params, resolver)?;
             resolver
                 .resolve_scalar_subquery_type(*subquery, schema, params)
                 .map(drop)
@@ -168,14 +169,14 @@ pub(super) fn validate_expression(
 }
 
 fn validate_items(
-    engine: &Engine,
+    routines: &dyn RoutineResolution,
     items: &[ScalarExpr],
     schema: &RowSchema,
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<(), SQLError> {
     for item in items {
-        validate_expression(engine, item, schema, None, params, resolver)?;
+        validate_expression(routines, item, schema, None, params, resolver)?;
     }
     Ok(())
 }

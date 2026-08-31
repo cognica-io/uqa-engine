@@ -176,7 +176,7 @@ fn materialize_transition_rows(
             .collect(),
     );
     let mut spill = uqa_execution::SpillBuffer::new(
-        crate::sql::select::physical_work_mem_bytes(engine)?.max(1),
+        crate::sql::select::physical_work_mem_bytes(engine.query_runtime_view())?.max(1),
     );
     let mut rows = Vec::with_capacity(uqa_execution::DEFAULT_BATCH_SIZE);
     for value in values {

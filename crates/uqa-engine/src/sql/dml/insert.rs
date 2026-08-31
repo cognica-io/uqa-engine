@@ -11,6 +11,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 use uqa_sql::expr::RowLookup;
 
+use crate::sql::select::physical_work_mem_bytes;
+
 use super::{
     apply_validated_prepared_document_rewrite, build_returning_row, coerce_to_column_type,
     decode_prepared_insert_conflict, dml_returning_result, dml_storage_error, document_supplied_id,
@@ -160,7 +162,7 @@ impl InsertSelectConsumer {
                 prepared_schema,
                 prepared_columns,
                 prepared_buffer: Some(uqa_execution::SpillBuffer::new(
-                    crate::sql::select::physical_work_mem_bytes(engine)?.max(1),
+                    physical_work_mem_bytes(engine.query_runtime_view())?.max(1),
                 )),
                 conflict_locks: Some(InsertConflictLocks::new(engine)),
                 affected: 0,
@@ -626,15 +628,10 @@ pub(in crate::sql) fn run_insert_inner(
         )?;
     }
     let read_engine = statement_snapshot.as_ref().unwrap_or(engine);
-    let mut scope = CteScope::new_for_current_routine();
+    let mut scope = CteScope::new_for_current_routine(read_engine);
     crate::sql::select::materialize_plan_ctes(read_engine, &stmt.ctes, params, &mut scope)?;
     scope.scalar_subqueries.clone_from(&stmt.subqueries);
-    // Resolve the table's primary-key column name. Auto-increment
-    // (SERIAL / BIGSERIAL) wins; otherwise the scalar PRIMARY KEY
-    // column wins; otherwise use the conventional legacy `id` slot.
-    // Both VALUES and SELECT sources must derive the internal doc id
-    // from this same column or later primary-key rewrites can address a
-    // different row than the one that was inserted.
+    // Resolve the table's primary-key column name. Auto-increment (SERIAL / BIGSERIAL) wins; otherwise the scalar PRIMARY KEY column wins; otherwise use the conventional legacy `id` slot. Both VALUES and SELECT sources must derive the internal doc id from this same column or later primary-key rewrites can address a different row than the one that was inserted.
     let (auto_id_col, id_column, accepts_supplied_identity) =
         insert_identity_columns(engine, &stmt.table, "INSERT")?;
     let mut rule_source_rows = None;
@@ -812,9 +809,7 @@ pub(in crate::sql) fn run_insert_inner(
         )?;
     }
 
-    // No explicit id and no auto-increment column: allocate a synthetic
-    // u64 doc_id at insert time. Every table has an implicit doc_id even when the
-    // schema declares no primary key.
+    // No explicit id and no auto-increment column: allocate a synthetic u64 doc_id at insert time. Every table has an implicit doc_id even when the schema declares no primary key.
 
     let mut affected = 0u64;
     let mut returning_rows = Vec::new();

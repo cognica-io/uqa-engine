@@ -9,7 +9,8 @@
 mod functions;
 mod references;
 
-use super::{Engine, QueryBlockPlan, QueryPlan, SQLError, SQLParam, ScalarExpr, SchemaScope};
+use super::{QueryBlockPlan, QueryPlan, SQLError, SQLParam, ScalarExpr, SchemaScope};
+use crate::engine_user_functions::RoutineResolution;
 use crate::sql::{META_DOC_ID_COLUMN, META_QUALIFIER, META_SCORE_COLUMN};
 use uqa_execution::{ColumnIdentity, FunctionTypeResolver, RowSchema};
 use uqa_sql::ast::{ColumnType, FunctionBinding};
@@ -42,7 +43,7 @@ struct AliasReferenceScope<'a> {
 impl SchemaScope {
     pub(super) fn validate_query_block_clauses(
         &mut self,
-        engine: &Engine,
+        engine: &dyn RoutineResolution,
         block: &QueryBlockPlan,
         source: &RowSchema,
         output: &RowSchema,
@@ -127,7 +128,7 @@ impl SchemaScope {
 
     pub(super) fn validate_set_operation_clauses(
         &mut self,
-        engine: &Engine,
+        engine: &dyn RoutineResolution,
         clauses: SetOperationClauses<'_>,
         params: &[SQLParam],
     ) -> Result<(), SQLError> {
@@ -157,7 +158,7 @@ impl SchemaScope {
 
     fn validate_alias_reference(
         &mut self,
-        engine: &Engine,
+        engine: &dyn RoutineResolution,
         expression: &ScalarExpr,
         scope: AliasReferenceScope<'_>,
     ) -> Result<(), SQLError> {
@@ -184,7 +185,7 @@ impl SchemaScope {
 
     pub(super) fn validate_expression_references(
         &mut self,
-        engine: &Engine,
+        engine: &dyn RoutineResolution,
         expression: &ScalarExpr,
         schema: &RowSchema,
         fallback: Option<&RowSchema>,
@@ -200,19 +201,12 @@ impl SchemaScope {
             Some(schema),
         )?;
         Self::validate_expression_references_with_resolver(
-            engine,
-            expression,
-            schema,
-            fallback,
-            params,
-            resolver
-                .as_ref()
-                .map_or(engine as &dyn FunctionTypeResolver, |resolver| resolver),
+            engine, expression, schema, fallback, params, &resolver,
         )
     }
 
     pub(super) fn validate_expression_references_with_resolver(
-        engine: &Engine,
+        engine: &dyn RoutineResolution,
         expression: &ScalarExpr,
         schema: &RowSchema,
         fallback: Option<&RowSchema>,
@@ -224,7 +218,7 @@ impl SchemaScope {
 
     pub(super) fn validate_table_function_source(
         &mut self,
-        engine: &Engine,
+        engine: &dyn RoutineResolution,
         request: TableFunctionSourceValidation<'_>,
     ) -> Result<Option<crate::sql::from_rows::ResolvedUserTableFunction>, SQLError> {
         let TableFunctionSourceValidation {
@@ -243,15 +237,12 @@ impl SchemaScope {
             params,
             Some(input),
         )?;
-        let resolver = resolver
-            .as_ref()
-            .map_or(engine as &dyn FunctionTypeResolver, |resolver| resolver);
         for argument in args {
             Self::validate_expression_references_with_resolver(
-                engine, argument, input, None, params, resolver,
+                engine, argument, input, None, params, &resolver,
             )?;
         }
-        functions::validate_table_function(engine, name, binding, args, input, params, resolver)
+        functions::validate_table_function(engine, name, binding, args, input, params, &resolver)
     }
 }
 

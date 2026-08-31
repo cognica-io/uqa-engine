@@ -27,20 +27,21 @@ pub(in crate::sql) fn run_single_table_select_output(
     output_mode: QueryOutputMode,
 ) -> Result<QueryOutput, SQLError> {
     let SingleRelation {
-        storage_name: table,
+        relation_name: table,
         qualifier,
     } = relation;
+    let catalog = ctes.catalog_read_view()?;
+    let resolution = ctes.relation_name_resolution()?;
+    let table_snapshot = catalog
+        .table_resolved(&resolution, table)?
+        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
     if let Some(filter) = stmt.r#where.as_ref() {
         crate::sql::validate_expr_text_match_fields(engine, table, filter)?;
     }
-    let has_stored_score_column = engine
-        .try_describe_query_table(table)
-        .map_err(|error| SQLError::Internal(format!("read table schema for `{table}`: {error}")))?
-        .is_some_and(|columns| {
-            columns
-                .iter()
-                .any(|column| column.name == super::SCORE_COLUMN)
-        });
+    let has_stored_score_column = table_snapshot
+        .columns
+        .iter()
+        .any(|column| column.name == super::SCORE_COLUMN);
     let score_top_k = if !has_stored_score_column
         && matches!(
             block.access,
@@ -133,28 +134,28 @@ pub(in crate::sql) fn run_single_table_select_output(
         }
     };
 
-    let source_projection = stmt
-        .from
-        .as_ref()
-        .and_then(|source| {
-            column_prune_for_stmt_with_filter(engine, stmt, source, physical_filter.as_ref())
-        })
-        .and_then(|prune| prune.get(qualifier).cloned());
+    let source_projection = if let Some(source) = stmt.from.as_ref() {
+        column_prune_for_stmt_with_filter(engine, stmt, source, physical_filter.as_ref(), ctes)?
+            .and_then(|prune| prune.get(qualifier).cloned())
+    } else {
+        None
+    };
     let metadata_projection = source_projection
         .as_ref()
         .map(SourceProjection::metadata)
         .unwrap_or_default();
-    let source_schema = source_projection
+    let source_schema: Vec<String> = source_projection
         .and_then(SourceProjection::explicit_columns)
-        .map(|columns| columns.into_iter().collect())
         .map_or_else(
             || {
-                engine.try_query_table_columns(table).map_err(|error| {
-                    SQLError::Internal(format!("read table columns for `{table}`: {error}"))
-                })
+                table_snapshot
+                    .columns
+                    .iter()
+                    .map(|column| column.name.clone())
+                    .collect()
             },
-            Ok,
-        )?;
+            |columns| columns.into_iter().collect(),
+        );
 
     if let Some(facet_fields) = facet_projection_fields(&stmt.projections)? {
         let execution = FacetExecution {
@@ -168,15 +169,11 @@ pub(in crate::sql) fn run_single_table_select_output(
     }
 
     let table_state = engine.require_query_table(table)?;
-    let ordered_primary_key = engine
-        .try_describe_query_table(table)
-        .map_err(|error| SQLError::Internal(format!("read table schema for `{table}`: {error}")))?
-        .and_then(|columns| {
-            columns
-                .into_iter()
-                .find(|column| column.primary_key && column.ty.is_integer())
-                .map(|column| column.name)
-        });
+    let ordered_primary_key = table_snapshot
+        .columns
+        .iter()
+        .find(|column| column.primary_key && column.ty.is_integer())
+        .map(|column| column.name.clone());
     let predicate_schema = uqa_execution::RowSchema::with_qualified_types(
         qualifier,
         source_schema.clone(),
@@ -191,9 +188,8 @@ pub(in crate::sql) fn run_single_table_select_output(
         }
     }
     let lock_origin = if ctes.lock_identities.emit {
-        let storage_name = engine
-            .try_resolve_query_table_name(table)
-            .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
+        let storage_name = catalog
+            .table_name_resolved(&resolution, table)?
             .unwrap_or_else(|| table.to_string());
         Some((
             std::sync::Arc::<str>::from(qualifier),
@@ -216,7 +212,11 @@ pub(in crate::sql) fn run_single_table_select_output(
         pushed_predicate,
         metadata_projection,
     )
-    .with_table_oid(crate::sql::catalog::table_relation_oid(engine, table)?)
+    .with_table_oid(crate::sql::catalog::snapshot_table_relation_oid(
+        &catalog,
+        &resolution,
+        table,
+    )?)
     .with_qualifier(qualifier)
     .with_lock_origin(lock_origin)
     .with_recheck_pins(recheck_pins);

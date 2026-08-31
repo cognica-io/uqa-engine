@@ -165,13 +165,14 @@ type RowUpdateValues = BTreeMap<String, Value>;
 type RowUpdateVectors = BTreeMap<String, Vec<Vec<f32>>>;
 type RowIndependentUpdateValues = (RowUpdateValues, RowUpdateVectors);
 
-/// Analyze a catalog-owned query without executing it or sampling rows.
-pub(crate) fn analyze_catalog_query_schema(
+pub(crate) fn analyze_query_schema_with_catalog(
     engine: &Engine,
     query: &uqa_planner::QueryPlan,
     params: &[SQLParam],
+    catalog: crate::engine_capabilities::CatalogReadView,
+    resolution: crate::engine_capabilities::RelationNameResolution,
 ) -> Result<uqa_execution::RowSchema, SQLError> {
-    select::analyze_catalog_query_plan_schema(engine, query, params)
+    select::analyze_query_plan_schema_with_catalog(engine, query, params, catalog, resolution)
 }
 
 /// Analyze the declared RETURNING row type of a rewrite-rule action without
@@ -189,7 +190,8 @@ pub(crate) fn bind_catalog_query_routines(
     query: &mut uqa_planner::QueryPlan,
     params: &[SQLParam],
 ) -> Result<uqa_execution::RowSchema, SQLError> {
-    select::bind_query_plan_routines_for_storage(engine, query, params, &CteScope::default(), None)
+    let ctes = CteScope::new_for_catalog_binding(engine);
+    select::bind_query_plan_routines_for_storage(engine, query, params, &ctes, None)
 }
 
 /// Bind a catalog-owned query whose expressions may reference a statically typed routine parameter scope.
@@ -199,13 +201,8 @@ pub(crate) fn bind_catalog_query_routines_with_outer(
     params: &[SQLParam],
     outer: &uqa_execution::RowSchema,
 ) -> Result<uqa_execution::RowSchema, SQLError> {
-    select::bind_query_plan_routines_for_storage(
-        engine,
-        query,
-        params,
-        &CteScope::default(),
-        Some(outer),
-    )
+    let ctes = CteScope::new_for_catalog_binding(engine);
+    select::bind_query_plan_routines_for_storage(engine, query, params, &ctes, Some(outer))
 }
 
 pub(crate) fn validate_stored_view_check_option(

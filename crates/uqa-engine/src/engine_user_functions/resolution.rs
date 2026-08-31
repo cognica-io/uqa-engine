@@ -21,6 +21,133 @@ use crate::{Arc, Engine, RelationIdentity};
 
 use super::{canonical_routine_type_name, combined_overloads, SQLUserFunction};
 
+/// Function-catalog operations required by static query binding. The interface deliberately excludes storage, transaction, locking, and execution services so the binder can run against a deterministic catalog fixture.
+pub(crate) trait RoutineResolution: FunctionTypeResolver {
+    fn has_registered_scalar_function(&self, _name: &str) -> bool {
+        false
+    }
+
+    fn has_registered_table_function(&self, _name: &str) -> bool {
+        false
+    }
+
+    fn has_registered_aggregate_function(&self, _name: &str) -> bool {
+        false
+    }
+
+    fn lookup_sql_functions(&self, _name: &str) -> Option<Vec<Arc<SQLUserFunction>>> {
+        None
+    }
+
+    fn resolve_static_sql_function(
+        &self,
+        _name: &str,
+        _binding: Option<&FunctionBinding>,
+        _argument_names: &[Option<String>],
+        _argument_types: &[Option<ColumnType>],
+        _explicit_variadic: bool,
+    ) -> Result<Option<Arc<SQLUserFunction>>, SQLError> {
+        Ok(None)
+    }
+
+    fn resolve_static_sql_function_match(
+        &self,
+        _name: &str,
+        _binding: Option<&FunctionBinding>,
+        _argument_names: &[Option<String>],
+        _argument_types: &[Option<ColumnType>],
+        _explicit_variadic: bool,
+    ) -> Result<Option<StaticFunctionMatch>, SQLError> {
+        Ok(None)
+    }
+
+    fn resolve_table_function_overload_with_builtins(
+        &self,
+        _name: &str,
+        _binding: Option<&FunctionBinding>,
+        _argument_names: &[Option<String>],
+        _argument_types: &[Option<ColumnType>],
+        _explicit_variadic: bool,
+        _builtins: &[BuiltinFunctionOverload],
+    ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
+        Ok(None)
+    }
+}
+
+impl RoutineResolution for Engine {
+    fn has_registered_scalar_function(&self, name: &str) -> bool {
+        Engine::has_registered_scalar_function(self, name)
+    }
+
+    fn has_registered_table_function(&self, name: &str) -> bool {
+        Engine::has_registered_table_function(self, name)
+    }
+
+    fn has_registered_aggregate_function(&self, name: &str) -> bool {
+        Engine::has_registered_aggregate_function(self, name)
+    }
+
+    fn lookup_sql_functions(&self, name: &str) -> Option<Vec<Arc<SQLUserFunction>>> {
+        Engine::lookup_sql_functions(self, name)
+    }
+
+    fn resolve_static_sql_function(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<ColumnType>],
+        explicit_variadic: bool,
+    ) -> Result<Option<Arc<SQLUserFunction>>, SQLError> {
+        Engine::resolve_static_sql_function(
+            self,
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            explicit_variadic,
+        )
+    }
+
+    fn resolve_static_sql_function_match(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<ColumnType>],
+        explicit_variadic: bool,
+    ) -> Result<Option<StaticFunctionMatch>, SQLError> {
+        Engine::resolve_static_sql_function_match(
+            self,
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            explicit_variadic,
+        )
+    }
+
+    fn resolve_table_function_overload_with_builtins(
+        &self,
+        name: &str,
+        binding: Option<&FunctionBinding>,
+        argument_names: &[Option<String>],
+        argument_types: &[Option<ColumnType>],
+        explicit_variadic: bool,
+        builtins: &[BuiltinFunctionOverload],
+    ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
+        Engine::resolve_table_function_overload_with_builtins(
+            self,
+            name,
+            binding,
+            argument_names,
+            argument_types,
+            explicit_variadic,
+            builtins,
+        )
+    }
+}
+
 pub(crate) fn routine_signature_types(def: &CreateFunction) -> Vec<String> {
     def.identity_params()
         .iter()

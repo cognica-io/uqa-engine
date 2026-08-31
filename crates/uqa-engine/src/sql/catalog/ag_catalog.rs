@@ -16,18 +16,19 @@
 //! from the graph registry instead of physical tables.
 
 use uqa_core::Value;
-use uqa_graph::{GraphLabelInfo, GraphStore as _, LabelKind};
+use uqa_graph::{GraphLabelInfo, LabelKind};
 use uqa_sql::ast::ColumnType;
 use uqa_sql::expr::quote_ident;
 use uqa_sql::{ResultRow, SQLError};
 
-use super::helpers::{
-    bool_value, catalog_name, current_user_name, current_user_oid, int_value, relation_oid, row,
-    schema_oid, stable_oid, str_value,
+use super::helpers::oids::{
+    current_user_name, current_user_oid, relation_oid, schema_oid, stable_oid,
 };
+use super::helpers::rows::{bool_value, catalog_name, int_value, row, str_value};
 use super::pg_catalog::pg_class_row;
 use super::schema::{ag_catalog_type_oid, age_agtype, age_graphid, AG_CATALOG_SCHEMA};
-use crate::{Engine, RelationIdentity};
+use crate::engine_capabilities::{CatalogReadView, RelationNameResolution};
+use crate::RelationIdentity;
 
 /// AGE `_label_id_seq`: the per-graph label id allocator.
 const LABEL_ID_SEQUENCE: &str = "_label_id_seq";
@@ -54,31 +55,36 @@ impl AgeLabelRelation {
     }
 }
 
-pub(super) fn graph_catalog_entries(engine: &Engine) -> Result<Vec<GraphCatalogEntry>, SQLError> {
-    Ok(engine
-        .graph_label_catalog()
-        .map_err(|err| SQLError::Internal(format!("read graph catalog: {err}")))?
+pub(super) fn graph_catalog_entries(
+    catalog: &CatalogReadView,
+) -> Result<Vec<GraphCatalogEntry>, SQLError> {
+    catalog
+        .graph_names()
         .into_iter()
-        .map(|(name, labels)| GraphCatalogEntry { name, labels })
-        .collect())
+        .map(|name| {
+            let labels = catalog.graph_labels(&name)?.ok_or_else(|| {
+                SQLError::Internal(format!("graph `{name}` disappeared from catalog snapshot"))
+            })?;
+            Ok(GraphCatalogEntry { name, labels })
+        })
+        .collect()
 }
 
 /// Resolve a graph-label relation through an explicit graph schema or the
 /// current `search_path`. Only surviving `ag_label` entries are relations;
 /// dropped default and user labels remain absent across reopen.
 pub(super) fn resolve_age_label_relation(
-    engine: &Engine,
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
     name: &str,
 ) -> Result<Option<AgeLabelRelation>, SQLError> {
     let (schema, label_name) = RelationIdentity::parse_reference(name).map_err(|error| {
         SQLError::Internal(format!("invalid AGE label relation `{name}`: {error}"))
     })?;
-    let graph_names = schema.map_or_else(|| engine.search_path(), |schema| vec![schema]);
+    let graph_names =
+        schema.map_or_else(|| resolution.search_path().to_vec(), |schema| vec![schema]);
     for graph_name in graph_names {
-        let Some(labels) = engine
-            .list_graph_labels(&graph_name)
-            .map_err(|err| SQLError::Internal(format!("read graph labels: {err}")))?
-        else {
+        let Some(labels) = catalog.graph_labels(&graph_name)? else {
             continue;
         };
         if let Some(label) = labels.into_iter().find(|label| label.name == label_name) {
@@ -92,17 +98,20 @@ pub(super) fn resolve_age_label_relation(
 }
 
 pub(crate) fn resolve_age_label_relation_name(
-    engine: &Engine,
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
     name: &str,
 ) -> Result<Option<String>, SQLError> {
-    Ok(resolve_age_label_relation(engine, name)?.map(|relation| relation.canonical_name()))
+    Ok(resolve_age_label_relation(catalog, resolution, name)?
+        .map(|relation| relation.canonical_name()))
 }
 
 pub(super) fn age_label_relation_schema(
-    engine: &Engine,
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
     name: &str,
 ) -> Result<Option<Vec<(String, ColumnType)>>, SQLError> {
-    let Some(relation) = resolve_age_label_relation(engine, name)? else {
+    let Some(relation) = resolve_age_label_relation(catalog, resolution, name)? else {
         return Ok(None);
     };
     let columns = match relation.label.kind {
@@ -121,59 +130,57 @@ pub(super) fn age_label_relation_schema(
 }
 
 pub(super) fn build_age_label_relation_rows(
-    engine: &Engine,
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
     name: &str,
 ) -> Result<Option<Vec<ResultRow>>, SQLError> {
-    let Some(relation) = resolve_age_label_relation(engine, name)? else {
+    let Some(relation) = resolve_age_label_relation(catalog, resolution, name)? else {
         return Ok(None);
     };
-    let rows = engine
-        .graph_with(&relation.graph, |store| match relation.label.kind {
-            LabelKind::Vertex => store.vertices_in_graph(&relation.graph).map(|vertices| {
-                vertices
-                    .into_iter()
-                    .filter(|vertex| relation.includes_graphid(vertex.vertex_id))
-                    .map(|vertex| {
-                        Ok(row([
-                            ("id", graphid_value(vertex.vertex_id)?),
-                            (
-                                "properties",
-                                Value::Str(uqa_graph::agtype::render(&Value::Map(
-                                    vertex.properties,
-                                ))),
-                            ),
-                        ]))
-                    })
-                    .collect::<Result<Vec<_>, SQLError>>()
-            }),
-            LabelKind::Edge => store.edges_in_graph(&relation.graph).map(|edges| {
-                edges
-                    .into_iter()
-                    .filter(|edge| relation.includes_graphid(edge.edge_id))
-                    .map(|edge| {
-                        Ok(row([
-                            ("id", graphid_value(edge.edge_id)?),
-                            ("start_id", graphid_value(edge.source_id)?),
-                            ("end_id", graphid_value(edge.target_id)?),
-                            (
-                                "properties",
-                                Value::Str(uqa_graph::agtype::render(&Value::Map(edge.properties))),
-                            ),
-                        ]))
-                    })
-                    .collect::<Result<Vec<_>, SQLError>>()
-            }),
-        })
-        .map_err(|error| SQLError::Internal(format!("read AGE label relation `{name}`: {error}")))?
-        .ok_or_else(|| {
-            SQLError::Internal(format!(
-                "AGE label relation `{name}` resolved after graph `{}` disappeared",
-                relation.graph
-            ))
-        })?
-        .map_err(|error| {
-            SQLError::Internal(format!("scan AGE label relation `{name}`: {error}"))
-        })??;
+    let rows = match relation.label.kind {
+        LabelKind::Vertex => catalog
+            .graph_vertices(&relation.graph)?
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "AGE label relation `{name}` resolved after graph `{}` disappeared",
+                    relation.graph
+                ))
+            })?
+            .into_iter()
+            .filter(|vertex| relation.includes_graphid(vertex.vertex_id))
+            .map(|vertex| {
+                Ok(row([
+                    ("id", graphid_value(vertex.vertex_id)?),
+                    (
+                        "properties",
+                        Value::Str(uqa_graph::agtype::render(&Value::Map(vertex.properties))),
+                    ),
+                ]))
+            })
+            .collect::<Result<Vec<_>, SQLError>>()?,
+        LabelKind::Edge => catalog
+            .graph_edges(&relation.graph)?
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "AGE label relation `{name}` resolved after graph `{}` disappeared",
+                    relation.graph
+                ))
+            })?
+            .into_iter()
+            .filter(|edge| relation.includes_graphid(edge.edge_id))
+            .map(|edge| {
+                Ok(row([
+                    ("id", graphid_value(edge.edge_id)?),
+                    ("start_id", graphid_value(edge.source_id)?),
+                    ("end_id", graphid_value(edge.target_id)?),
+                    (
+                        "properties",
+                        Value::Str(uqa_graph::agtype::render(&Value::Map(edge.properties))),
+                    ),
+                ]))
+            })
+            .collect::<Result<Vec<_>, SQLError>>()?,
+    };
     Ok(Some(rows))
 }
 
@@ -213,8 +220,8 @@ pub(super) fn label_sequence_name(label: &str) -> String {
     format!("{label}_id_seq")
 }
 
-pub(super) fn build_ag_graph(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
-    Ok(graph_catalog_entries(engine)?
+pub(super) fn build_ag_graph(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
+    Ok(graph_catalog_entries(catalog)?
         .into_iter()
         .map(|entry| {
             row([
@@ -226,9 +233,9 @@ pub(super) fn build_ag_graph(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
         .collect())
 }
 
-pub(super) fn build_ag_label(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+pub(super) fn build_ag_label(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = Vec::new();
-    for entry in graph_catalog_entries(engine)? {
+    for entry in graph_catalog_entries(catalog)? {
         for label in &entry.labels {
             out.push(row([
                 ("name", str_value(label.name.clone())),
@@ -249,7 +256,11 @@ pub(super) fn build_ag_label(engine: &Engine) -> Result<Vec<ResultRow>, SQLError
 /// `pg_class.reltuples` of a label relation. The default label relations
 /// physically hold only the unlabeled entities; user label relations hold
 /// the entities that carry their label.
-fn label_relation_tuples(engine: &Engine, graph: &str, label: &GraphLabelInfo) -> f64 {
+fn label_relation_tuples(
+    catalog: &CatalogReadView,
+    graph: &str,
+    label: &GraphLabelInfo,
+) -> Result<f64, SQLError> {
     let stored_label = if label.id == uqa_graph::VERTEX_DEFAULT_LABEL_ID
         || label.id == uqa_graph::EDGE_DEFAULT_LABEL_ID
     {
@@ -257,24 +268,9 @@ fn label_relation_tuples(engine: &Engine, graph: &str, label: &GraphLabelInfo) -
     } else {
         label.name.as_str()
     };
-    let count = engine
-        .graph_with(graph, |store| {
-            use uqa_graph::GraphStore as _;
-            match label.kind {
-                LabelKind::Vertex => store
-                    .vertex_ids_by_label(stored_label, graph)
-                    .map(|ids| ids.len())
-                    .unwrap_or(0),
-                LabelKind::Edge => store
-                    .edge_ids_by_label(stored_label, graph)
-                    .map(|ids| ids.len())
-                    .unwrap_or(0),
-            }
-        })
-        .ok()
-        .flatten()
-        .unwrap_or(0);
-    count as f64
+    Ok(catalog
+        .graph_label_count(graph, stored_label, label.kind)?
+        .unwrap_or(0) as f64)
 }
 
 /// AGE label relations expose `id graphid, properties agtype` for
@@ -294,9 +290,9 @@ fn label_columns(kind: LabelKind) -> &'static [(&'static str, &'static str)] {
 
 /// `pg_class` rows for every label relation and label sequence of every
 /// graph.
-pub(super) fn age_pg_class_rows(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+pub(super) fn age_pg_class_rows(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = Vec::new();
-    for entry in graph_catalog_entries(engine)? {
+    for entry in graph_catalog_entries(catalog)? {
         out.push(pg_class_row(
             &entry.name,
             LABEL_ID_SEQUENCE,
@@ -313,7 +309,7 @@ pub(super) fn age_pg_class_rows(engine: &Engine) -> Result<Vec<ResultRow>, SQLEr
                 &label.name,
                 "r",
                 natts,
-                label_relation_tuples(engine, &entry.name, label),
+                label_relation_tuples(catalog, &entry.name, label)?,
                 false,
             ));
             out.push(pg_class_row(
@@ -330,9 +326,9 @@ pub(super) fn age_pg_class_rows(engine: &Engine) -> Result<Vec<ResultRow>, SQLEr
 }
 
 /// `pg_attribute` rows for the columns of every label relation.
-pub(super) fn age_pg_attribute_rows(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+pub(super) fn age_pg_attribute_rows(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = Vec::new();
-    for entry in graph_catalog_entries(engine)? {
+    for entry in graph_catalog_entries(catalog)? {
         for label in &entry.labels {
             let relid = label_relation_oid(&entry.name, &label.name);
             for (index, (column, type_name)) in label_columns(label.kind).iter().enumerate() {
@@ -388,14 +384,11 @@ fn age_pg_attribute_row(relid: i64, attnum: i64, column: &str, type_name: &str) 
 }
 
 /// `pg_sequences` rows for `_label_id_seq` and every `<label>_id_seq`.
-pub(super) fn age_pg_sequences_rows(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+pub(super) fn age_pg_sequences_rows(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = Vec::new();
-    for entry in graph_catalog_entries(engine)? {
-        let next_label_id = engine
-            .graph_with(&entry.name, |store| {
-                store.label_registry(&entry.name).next_label_id
-            })
-            .map_err(|err| SQLError::Internal(format!("read graph label catalog: {err}")))?
+    for entry in graph_catalog_entries(catalog)? {
+        let next_label_id = catalog
+            .graph_next_label_id(&entry.name)
             .unwrap_or(uqa_graph::FIRST_USER_LABEL_ID);
         let last_label_id = i64::from(next_label_id).saturating_sub(1);
         out.push(age_pg_sequence_row(
@@ -442,9 +435,9 @@ fn age_pg_sequence_row(
 }
 
 /// `information_schema.tables` rows for the label relations.
-pub(super) fn age_info_table_rows(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+pub(super) fn age_info_table_rows(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = Vec::new();
-    for entry in graph_catalog_entries(engine)? {
+    for entry in graph_catalog_entries(catalog)? {
         for label in &entry.labels {
             out.push(row([
                 ("table_catalog", catalog_name()),
@@ -466,9 +459,9 @@ pub(super) fn age_info_table_rows(engine: &Engine) -> Result<Vec<ResultRow>, SQL
 }
 
 /// `information_schema.columns` rows for the label relations.
-pub(super) fn age_info_column_rows(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+pub(super) fn age_info_column_rows(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = Vec::new();
-    for entry in graph_catalog_entries(engine)? {
+    for entry in graph_catalog_entries(catalog)? {
         for label in &entry.labels {
             for (index, (column, type_name)) in label_columns(label.kind).iter().enumerate() {
                 let ordinal = i64::try_from(index + 1)

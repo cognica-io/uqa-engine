@@ -245,7 +245,7 @@ fn build_view_merge_pairings(
         ctes,
     } = input;
     let schema = view_merge_pair_schema(source_rows.row_schema());
-    let work_mem = crate::sql::select::physical_work_mem_bytes(engine)?.max(1);
+    let work_mem = crate::sql::select::physical_work_mem_bytes(engine.query_runtime_view())?.max(1);
     let mut pairings = uqa_execution::SpillBuffer::new(work_mem);
     let mut matched_source = uqa_execution::ExactRowSet::new(work_mem);
     let has_source_missing = plan.when_clauses.iter().any(|clause| {
@@ -763,7 +763,7 @@ pub(in crate::sql) fn run_view_merge_inner(
 ) -> Result<SQLResult, SQLError> {
     let target = resolve_view_target(engine, &plan.target)?;
     validate_view_merge_targets(&target, plan)?;
-    let mut analysis_scope = CteScope::new_for_current_routine();
+    let mut analysis_scope = CteScope::new_for_current_routine(engine);
     analysis_scope
         .scalar_subqueries
         .clone_from(&plan.subqueries);
@@ -800,7 +800,7 @@ pub(in crate::sql) fn run_view_merge_inner(
         .transpose()?;
     events.fire_before(engine, &target.canonical_name)?;
     let read_engine = statement_snapshot.as_ref().unwrap_or(engine);
-    let mut ctes = CteScope::new_for_current_routine();
+    let mut ctes = CteScope::new_for_current_routine(read_engine);
     ctes.scalar_subqueries.clone_from(&plan.subqueries);
     let source_rows = build_join_spill_with_ctes(read_engine, &plan.source, params, &mut ctes)?;
     let mut target_scope = ctes.returning_statement_snapshot_scope();

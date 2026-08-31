@@ -387,7 +387,7 @@ impl LockRows<'_> {
             .statement
             .from
             .as_ref()
-            .map(|from| collect_source_leaves(self.engine, from, false, &source.ctes))
+            .map(|from| collect_source_leaves(from, false, &source.ctes))
             .transpose()?
             .unwrap_or_default();
         let mut pins = super::super::RowLockRecheckPins::new();

@@ -88,7 +88,7 @@ impl SQLStatementCache {
 impl Engine {
     pub(crate) fn cached_sql_statement(&self, sql: &str) -> Option<CachedSQLStatement> {
         let cached = self.session.state.read().sql_statement_cache.get(sql)?;
-        (cached.catalog_epochs == self.catalog_read_view().stable_epochs()).then_some(cached)
+        (cached.catalog_epochs == self.catalog_epochs()).then_some(cached)
     }
 
     pub(crate) fn cached_optimized_sql_plan(
@@ -104,7 +104,7 @@ impl Engine {
         statement: Arc<uqa_sql::ast::Statement>,
         logical_plan: Arc<uqa_planner::UnifiedPlan>,
     ) {
-        let epochs = self.catalog_read_view().stable_epochs();
+        let epochs = self.catalog_epochs();
         self.session
             .state
             .write()

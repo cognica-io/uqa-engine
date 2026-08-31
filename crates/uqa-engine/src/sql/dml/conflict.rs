@@ -1086,7 +1086,7 @@ fn analyze_dml_returning_plan(
     if returning.is_empty() {
         return Ok(None);
     }
-    let mut ctes = CteScope::new_for_current_routine();
+    let mut ctes = CteScope::new_for_current_routine(engine);
     for plan in cte_plans {
         ctes.insert_deferred(plan.clone());
     }

@@ -6,28 +6,36 @@
 
 //! `PostgreSQL` 18 declarative-partition catalog rendering and helpers.
 
-use super::helpers::{
-    catalog_usize, int_value, pg_type_by_value, pg_type_collation_oid, pg_type_len,
-    pg_type_modifier, pg_type_oid, row, schema_expr_text, str_value, table_columns_for,
+use super::expression_text::schema_expr_text;
+use super::helpers::rows::{catalog_usize, int_value, row, str_value};
+use super::helpers::type_metadata::{
+    pg_type_by_value, pg_type_collation_oid, pg_type_len, pg_type_modifier, pg_type_oid,
 };
-use super::pg_catalog::table_relation_oid;
-use super::{ColumnType, Engine, ResultRow, SQLError, Value};
-use uqa_sql::ast::{Expr, PartitionBound, PartitionRangeDatum, PartitionSpec, PartitionStrategy};
+use super::pg_catalog::table_relation_oid_from;
+use crate::engine_capabilities::{CatalogReadView, RelationNameResolution};
+use crate::Engine;
+use uqa_core::Value;
+use uqa_sql::ast::{
+    ColumnType, Expr, PartitionBound, PartitionRangeDatum, PartitionSpec, PartitionStrategy,
+};
+use uqa_sql::{ResultRow, SQLError};
 
-pub(super) fn build_pg_partitioned_table(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+pub(super) fn build_pg_partitioned_table(
+    engine: &Engine,
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows = Vec::new();
-    for table in engine
-        .query_table_names()
-        .map_err(|error| SQLError::Internal(format!("read partition catalog: {error}")))?
-    {
-        let hierarchy = engine
-            .try_table_hierarchy(&table)
-            .map_err(|error| SQLError::Internal(format!("read partition metadata: {error}")))?;
+    for table in catalog.table_names() {
+        let table_snapshot = catalog
+            .table(resolution, &table)?
+            .ok_or_else(|| SQLError::UnknownTable(table.clone()))?;
+        let hierarchy = &table_snapshot.hierarchy;
         let Some(spec) = hierarchy.partition_spec.as_ref() else {
             continue;
         };
-        let columns = table_columns_for(engine, &table)?;
-        let key_types = partition_key_types(engine, spec, &columns)?;
+        let columns = &table_snapshot.columns;
+        let key_types = partition_key_types(engine, spec, columns)?;
         let attributes = spec
             .keys
             .iter()
@@ -59,7 +67,10 @@ pub(super) fn build_pg_partitioned_table(engine: &Engine) -> Result<Vec<ResultRo
             .map(schema_expr_text)
             .collect::<Vec<_>>();
         rows.push(row([
-            ("partrelid", int_value(table_relation_oid(engine, &table)?)),
+            (
+                "partrelid",
+                int_value(table_relation_oid_from(catalog, resolution, &table)?),
+            ),
             (
                 "partstrat",
                 str_value(partition_strategy_code(spec.strategy)),
@@ -73,7 +84,7 @@ pub(super) fn build_pg_partitioned_table(engine: &Engine) -> Result<Vec<ResultRo
             ),
             (
                 "partdefid",
-                int_value(default_partition_oid(engine, &table)?),
+                int_value(default_partition_oid(catalog, resolution, &table)?),
             ),
             (
                 "partattrs",
@@ -131,20 +142,20 @@ pub(in crate::sql) fn pg_get_expr_value(
             )));
         }
     }
-    for table in engine
-        .query_table_names()
-        .map_err(|error| SQLError::Internal(format!("read pg_get_expr catalog: {error}")))?
-    {
-        if table_relation_oid(engine, &table)? != relation_oid {
+    let catalog = engine.catalog_read_view();
+    let resolution = engine.session_execution_view().relation_name_resolution();
+    for table in catalog.table_names() {
+        if table_relation_oid_from(&catalog, &resolution, &table)? != relation_oid {
             continue;
         }
-        let hierarchy = engine
-            .try_table_hierarchy(&table)
-            .map_err(|error| SQLError::Internal(format!("read partition metadata: {error}")))?;
+        let hierarchy = &catalog
+            .table(&resolution, &table)?
+            .ok_or_else(|| SQLError::UnknownTable(table.clone()))?
+            .hierarchy;
         let Some(bound) = hierarchy.partition_bound.as_ref() else {
             return Ok(str_value(node.clone()));
         };
-        let rendered_node = partition_bound_node(engine, &table, bound)?;
+        let rendered_node = partition_bound_node(engine, &catalog, &resolution, &table, bound)?;
         if node == &rendered_node {
             return Ok(str_value(partition_bound_expression(bound)));
         }
@@ -168,16 +179,16 @@ pub(in crate::sql) fn pg_get_partkeydef_value(
         return Ok(Value::Null);
     }
     let relation_oid = expect_oid("pg_get_partkeydef", argument)?;
-    for table in engine
-        .query_table_names()
-        .map_err(|error| SQLError::Internal(format!("read partition catalog: {error}")))?
-    {
-        if table_relation_oid(engine, &table)? != relation_oid {
+    let catalog = engine.catalog_read_view();
+    let resolution = engine.session_execution_view().relation_name_resolution();
+    for table in catalog.table_names() {
+        if table_relation_oid_from(&catalog, &resolution, &table)? != relation_oid {
             continue;
         }
-        let hierarchy = engine
-            .try_table_hierarchy(&table)
-            .map_err(|error| SQLError::Internal(format!("read partition metadata: {error}")))?;
+        let hierarchy = &catalog
+            .table(&resolution, &table)?
+            .ok_or_else(|| SQLError::UnknownTable(table.clone()))?
+            .hierarchy;
         return Ok(hierarchy
             .partition_spec
             .as_ref()
@@ -190,21 +201,24 @@ pub(in crate::sql) fn pg_get_partkeydef_value(
 
 pub(super) fn partition_bound_node(
     engine: &Engine,
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
     table: &str,
     bound: &PartitionBound,
 ) -> Result<String, SQLError> {
-    let hierarchy = engine
-        .try_table_hierarchy(table)
-        .map_err(|error| SQLError::Internal(format!("read partition metadata: {error}")))?;
+    let hierarchy = &catalog
+        .table(resolution, table)?
+        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?
+        .hierarchy;
     let strategy = hierarchy
         .parents
         .first()
         .map(|parent| {
-            engine
-                .try_table_hierarchy(parent)
-                .map_err(|error| {
-                    SQLError::Internal(format!("read partition parent metadata: {error}"))
-                })?
+            catalog
+                .table(resolution, parent)?
+                .ok_or_else(|| SQLError::UnknownTable(parent.clone()))?
+                .hierarchy
+                .clone()
                 .partition_spec
                 .map(|spec| spec.strategy)
                 .ok_or_else(|| {
@@ -216,7 +230,7 @@ pub(super) fn partition_bound_node(
     let key_types = hierarchy
         .parents
         .first()
-        .map(|parent| partition_key_types_for_table(engine, parent))
+        .map(|parent| partition_key_types_for_table(engine, catalog, resolution, parent))
         .transpose()?
         .unwrap_or_default();
     let (is_default, modulus, remainder, listdatums, lowerdatums, upperdatums) = match bound {
@@ -309,15 +323,18 @@ pub(super) fn partition_key_definition(spec: &PartitionSpec) -> String {
 
 fn partition_key_types_for_table(
     engine: &Engine,
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
     table: &str,
 ) -> Result<Vec<ColumnType>, SQLError> {
-    let hierarchy = engine
-        .try_table_hierarchy(table)
-        .map_err(|error| SQLError::Internal(format!("read partition metadata: {error}")))?;
+    let table_snapshot = catalog
+        .table(resolution, table)?
+        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+    let hierarchy = &table_snapshot.hierarchy;
     let spec = hierarchy.partition_spec.as_ref().ok_or_else(|| {
         SQLError::Internal(format!("partitioned table `{table}` has no partition key"))
     })?;
-    partition_key_types(engine, spec, &table_columns_for(engine, table)?)
+    partition_key_types(engine, spec, &table_snapshot.columns)
 }
 
 fn partition_key_types(
@@ -359,13 +376,18 @@ fn partition_key_types(
         .collect()
 }
 
-fn default_partition_oid(engine: &Engine, parent: &str) -> Result<i64, SQLError> {
-    for child in engine.direct_hierarchy_children(parent)? {
-        let hierarchy = engine
-            .try_table_hierarchy(&child)
-            .map_err(|error| SQLError::Internal(format!("read partition metadata: {error}")))?;
+fn default_partition_oid(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    parent: &str,
+) -> Result<i64, SQLError> {
+    for child in catalog.direct_hierarchy_children(resolution, parent)? {
+        let hierarchy = &catalog
+            .table(resolution, &child)?
+            .ok_or_else(|| SQLError::UnknownTable(child.clone()))?
+            .hierarchy;
         if matches!(hierarchy.partition_bound, Some(PartitionBound::Default)) {
-            return table_relation_oid(engine, &child);
+            return table_relation_oid_from(catalog, resolution, &child);
         }
     }
     Ok(0)

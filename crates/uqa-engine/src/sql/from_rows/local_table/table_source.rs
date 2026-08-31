@@ -106,7 +106,9 @@ pub(super) fn build_table_source_operator<'a>(
                 ));
             }
 
-            if let Some(view) = engine.view_definition(name)? {
+            let catalog = ctes.catalog_read_view()?;
+            let resolution = ctes.relation_name_resolution()?;
+            if let Some(view) = catalog.view_resolved(&resolution, name)?.cloned() {
                 if view.kind == crate::StoredViewKind::Materialized {
                     if !view.populated {
                         return Err(SQLError::Routine {
@@ -217,15 +219,17 @@ pub(super) fn build_table_source_operator<'a>(
 
             if let Some(rows) = build_info_schema_rows(
                 engine,
-                engine.catalog_read_view(),
+                &catalog,
+                &resolution,
                 engine.session_execution_view(),
                 name,
             )? {
-                let schema = virtual_relation_schema(engine, name)?.ok_or_else(|| {
-                    SQLError::Internal(format!(
-                        "virtual relation `{name}` has rows but no PostgreSQL 18 row type"
-                    ))
-                })?;
+                let schema =
+                    virtual_relation_schema(&catalog, &resolution, name)?.ok_or_else(|| {
+                        SQLError::Internal(format!(
+                            "virtual relation `{name}` has rows but no PostgreSQL 18 row type"
+                        ))
+                    })?;
                 let (columns, types): (Vec<_>, Vec<_>) = schema
                     .into_iter()
                     .map(|(column, ty)| (column, Some(ty)))
@@ -246,17 +250,22 @@ pub(super) fn build_table_source_operator<'a>(
                 ));
             }
 
-            if engine
-                .foreign_table(name)
-                .map_err(SQLError::Unsupported)?
-                .is_some()
+            if let Some((foreign_name, foreign_table)) =
+                catalog.foreign_table_entry_resolved(&resolution, name)?
             {
                 let rows = engine
-                    .scan_foreign_table_stream(name, None, &[], None)
+                    .scan_foreign_table_stream(&foreign_name, None, &[], None)
                     .map_err(SQLError::Unsupported)?;
-                let typed_columns = engine
-                    .foreign_table_typed_columns(name)
-                    .map_err(SQLError::Unsupported)?;
+                let typed_columns = foreign_table
+                    .columns
+                    .into_iter()
+                    .map(|column| {
+                        (
+                            column.name,
+                            crate::engine_fdw::fdw_column_type_to_sql(&column.ty),
+                        )
+                    })
+                    .collect::<Vec<_>>();
                 let columns = typed_columns
                     .iter()
                     .map(|(column, _)| column.clone())

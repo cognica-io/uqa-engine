@@ -137,7 +137,7 @@ pub(in crate::sql) fn run_update_inner(
         )?;
     }
     let read_engine = statement_snapshot.as_ref().unwrap_or(engine);
-    let mut ctes = CteScope::new_for_current_routine();
+    let mut ctes = CteScope::new_for_current_routine(read_engine);
     crate::sql::select::materialize_plan_ctes(read_engine, &stmt.ctes, params, &mut ctes)?;
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
 
@@ -773,7 +773,7 @@ pub(in crate::sql) fn point_lookup_filter(
     };
     if let Some(field) = top_level_column(lhs) {
         if expr_is_row_independent(rhs) {
-            let ctes = CteScope::new_for_current_routine();
+            let ctes = CteScope::new_for_current_routine(engine);
             return Ok(Some((
                 field.to_string(),
                 eval_mutation_expr(engine, &ctes, rhs, None, params)?,
@@ -782,7 +782,7 @@ pub(in crate::sql) fn point_lookup_filter(
     }
     if let Some(field) = top_level_column(rhs) {
         if expr_is_row_independent(lhs) {
-            let ctes = CteScope::new_for_current_routine();
+            let ctes = CteScope::new_for_current_routine(engine);
             return Ok(Some((
                 field.to_string(),
                 eval_mutation_expr(engine, &ctes, lhs, None, params)?,
@@ -807,7 +807,7 @@ pub(in crate::sql) fn row_independent_update_values(
 ) -> Result<Option<RowIndependentUpdateValues>, SQLError> {
     let mut updates = BTreeMap::new();
     let mut vectors = BTreeMap::new();
-    let ctes = CteScope::new_for_current_routine();
+    let ctes = CteScope::new_for_current_routine(engine);
     for assignment in &stmt.assignments {
         if !expr_is_row_independent(&assignment.value) {
             return Ok(None);

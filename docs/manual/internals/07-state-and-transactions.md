@@ -15,11 +15,11 @@
 
 The detailed normative record is [Engine state ownership](../../design/engine-state-ownership.md).
 
-## Borrowed execution capabilities
+## Execution capabilities
 
-The composition facade constructs four narrow borrowed capabilities over these owners: `CatalogReadView` for immutable catalog projection and stable epochs, `SessionExecutionView` for search path, users, variables, and transaction-visible identity, `QueryRuntimeView` for cancellation, `work_mem`, callbacks, and diagnostics, and `MutationCoordinator` for command-specific durable transitions and publication. None can dereference or otherwise recover the enclosing `Engine`.
+The composition facade constructs narrow capabilities over these owners. `CatalogReadView` owns an immutable `Arc` snapshot of statement-visible table definitions and durable registries; `RelationNameResolution` owns the matching search path and temporary namespace; `SessionExecutionView` exposes users, variables, and transaction-visible identity; `QueryRuntimeView` exposes cancellation, `work_mem`, callbacks, and diagnostics; and `MutationCoordinator` owns command-specific durable transitions and publication. None can dereference or otherwise recover the enclosing `Engine`.
 
-`UnifiedPlanExecutor` captures the session, query-runtime, and mutation capabilities at statement construction while retaining one exhaustive top-level plan match. Virtual catalog scans receive catalog and session views explicitly; the `pg_namespace` and `pg_settings` row builders therefore cannot access transaction mutation, locks, storage publication, or unrelated registries. SQL `CREATE SCHEMA` and the public schema facade share the same `MutationCoordinator` implementation, including persistence-before-publication and rollback behavior.
+`UnifiedPlanExecutor` captures the session, query-runtime, and mutation capabilities at statement construction while retaining one exhaustive top-level plan match. `CteScope` captures one catalog and name-resolution snapshot and passes it through binding, filter pushdown, virtual and local scans, evaluation, and physical construction. Static catalog builders and pure query leaves therefore cannot access transaction mutation, locks, storage publication, or unrelated registries. SQL `CREATE SCHEMA` and the public schema facade share the same `MutationCoordinator` implementation, including persistence-before-publication and rollback behavior.
 
 ## Session derivation
 

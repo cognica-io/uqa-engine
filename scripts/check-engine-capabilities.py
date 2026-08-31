@@ -19,7 +19,7 @@ from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 POLICY_PATH = ROOT / "scripts" / "engine-capability-policy.json"
-ENGINE_REFERENCE = re.compile(r"\bEngine\b")
+ENGINE_REFERENCE = re.compile(r"\bEngine\b|\b(?:self|[A-Za-z_][A-Za-z0-9_]*)\.engine\b")
 RUST_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 DATA_TYPE_DECLARATION = re.compile(
     r"\b(?P<kind>struct|enum|union)\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"

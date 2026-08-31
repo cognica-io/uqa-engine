@@ -6,7 +6,8 @@
 
 //! Static column and routine lookup used by query analysis.
 
-use super::super::{ColumnType, Engine, SQLError, SQLParam, ScalarExpr};
+use super::super::{ColumnType, SQLError, SQLParam, ScalarExpr};
+use crate::engine_user_functions::RoutineResolution;
 use std::collections::BTreeSet;
 use uqa_execution::type_resolution::builtin_function_type;
 use uqa_execution::{FunctionTypeResolver, RowSchema, ScalarOrder};
@@ -118,7 +119,7 @@ pub(super) struct ScalarFunctionValidation<'a> {
 }
 
 pub(super) fn validate_scalar_function(
-    engine: &Engine,
+    routines: &dyn RoutineResolution,
     validation: ScalarFunctionValidation<'_>,
 ) -> Result<(), SQLError> {
     let ScalarFunctionValidation {
@@ -138,30 +139,30 @@ pub(super) fn validate_scalar_function(
         return Ok(());
     }
     uqa_execution::scalar_call_arguments(args)?;
-    if engine.has_registered_scalar_function(&identity) {
+    if routines.has_registered_scalar_function(&identity) {
         return Ok(());
     }
-    if validate_fixed_builtin(engine, name, binding, args, schema, params, resolver)? {
+    if validate_fixed_builtin(name, binding, args, schema, params, resolver)? {
         return Ok(());
     }
     if matches!(
         lower.as_str(),
         "uuid_extract_version" | "uuid_extract_timestamp"
     ) {
-        return validate_uuid_extraction_function(engine, name, args, schema, params);
+        return validate_uuid_extraction_function(name, args, schema, params, resolver);
     }
     if binding.is_none() && matches!(lower.as_str(), "array_sort" | "array_reverse") {
         uqa_execution::scalar_type_with_resolver(expression, schema, params, resolver)?;
         return Ok(());
     }
     if uqa_sql::registry::is_registered(&lower)
-        || crate::sql::aggregates::is_aggregate(engine, expression)
-        || engine.has_registered_aggregate_function(&identity)
+        || crate::sql::aggregates::is_builtin_aggregate(expression)
+        || routines.has_registered_aggregate_function(&identity)
         || builtin_scalar_function(&lower, args.len())
     {
         return Ok(());
     }
-    if resolve_sql_function(engine, name, binding, args, schema, params, resolver)?.is_some() {
+    if resolve_sql_function(routines, name, binding, args, schema, params, resolver)?.is_some() {
         return Ok(());
     }
     if builtin_function_type(&lower, args, order_by, schema, params)?.is_some() {
@@ -171,7 +172,6 @@ pub(super) fn validate_scalar_function(
 }
 
 fn validate_fixed_builtin(
-    engine: &Engine,
     name: &str,
     binding: Option<&FunctionBinding>,
     args: &[ScalarExpr],
@@ -190,17 +190,17 @@ fn validate_fixed_builtin(
         &argument_names,
         &argument_types,
         explicit_variadic,
-        Some(engine),
+        Some(resolver),
     )
     .map(|resolved| resolved.is_some())
 }
 
 fn validate_uuid_extraction_function(
-    engine: &Engine,
     name: &str,
     args: &[ScalarExpr],
     schema: &RowSchema,
     params: &[SQLParam],
+    resolver: &dyn FunctionTypeResolver,
 ) -> Result<(), SQLError> {
     let call_arguments = uqa_execution::scalar_call_arguments(args)?;
     let valid = if let [argument] = call_arguments.as_slice() {
@@ -210,7 +210,7 @@ fn validate_uuid_extraction_function(
                 argument.value,
                 schema,
                 params,
-                Some(engine),
+                Some(resolver),
             )?
             .as_ref()
             .is_none_or(uuid_compatible_type)
@@ -220,7 +220,7 @@ fn validate_uuid_extraction_function(
     if valid {
         Ok(())
     } else {
-        Err(undefined_function(name, args, schema, params, engine))
+        Err(undefined_function(name, args, schema, params, resolver))
     }
 }
 
@@ -233,7 +233,7 @@ fn uuid_compatible_type(ty: &ColumnType) -> bool {
 }
 
 pub(super) fn validate_window_function(
-    engine: &Engine,
+    routines: &dyn RoutineResolution,
     name: &str,
     args: &[ScalarExpr],
     schema: &RowSchema,
@@ -249,8 +249,8 @@ pub(super) fn validate_window_function(
             | ("nth_value", 2)
             | ("ntile", 1)
             | ("sum" | "count" | "avg" | "min" | "max", 1)
-    ) || engine.has_registered_aggregate_function(name)
-        || resolve_sql_function(engine, name, None, args, schema, params, resolver)?.is_some()
+    ) || routines.has_registered_aggregate_function(name)
+        || resolve_sql_function(routines, name, None, args, schema, params, resolver)?.is_some()
     {
         Ok(())
     } else {
@@ -259,7 +259,7 @@ pub(super) fn validate_window_function(
 }
 
 pub(super) fn validate_table_function(
-    engine: &Engine,
+    routines: &dyn RoutineResolution,
     name: &str,
     binding: Option<&FunctionBinding>,
     args: &[ScalarExpr],
@@ -273,12 +273,12 @@ pub(super) fn validate_table_function(
     if !selected_user
         && (crate::sql::from_rows::is_builtin_table_function(&lower)
             || crate::operator_tree_bridge::is_operator_join_table_function(&lower)
-            || engine.has_registered_table_function(&identity))
+            || routines.has_registered_table_function(&identity))
     {
         return Ok(None);
     }
     if let Some(resolved) = crate::sql::from_rows::resolve_user_table_function(
-        engine, name, binding, args, input, params, resolver,
+        routines, name, binding, args, input, params, resolver,
     )? {
         return Ok(Some(resolved));
     }
@@ -286,7 +286,7 @@ pub(super) fn validate_table_function(
 }
 
 fn resolve_sql_function(
-    engine: &Engine,
+    routines: &dyn RoutineResolution,
     name: &str,
     binding: Option<&FunctionBinding>,
     args: &[ScalarExpr],
@@ -294,12 +294,12 @@ fn resolve_sql_function(
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<Option<std::sync::Arc<crate::engine_user_functions::SQLUserFunction>>, SQLError> {
-    if binding.is_none() && engine.lookup_sql_functions(name).is_none() {
+    if binding.is_none() && routines.lookup_sql_functions(name).is_none() {
         return Ok(None);
     }
     let (argument_names, argument_types, explicit_variadic) =
         uqa_execution::function_call_argument_signature(args, schema, params, Some(resolver))?;
-    engine.resolve_static_sql_function(
+    routines.resolve_static_sql_function(
         name,
         binding,
         &argument_names,

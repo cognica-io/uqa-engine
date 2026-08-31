@@ -7,14 +7,20 @@
 //! Virtual `pg_catalog.pg_proc` relation builder.
 
 use super::builtin_routines::PG18_BUILTIN_ROUTINES;
-use super::helpers::{
-    bool_value, catalog_array, catalog_usize, current_user_oid, int_value, list_int,
-    routine_type_oid, routine_variadic_element_oid, row, schema_expr_text, schema_oid,
-    split_schema_name, stable_oid, str_value,
+use super::expression_text::schema_expr_text;
+use super::helpers::oids::{current_user_oid, schema_oid, split_schema_name, stable_oid};
+use super::helpers::rows::{
+    bool_value, catalog_array, catalog_usize, int_value, list_int, row, str_value,
 };
-use super::{canonical_routine_type_name, registered_names, Engine, ResultRow, SQLError, Value};
+use super::helpers::type_metadata::{routine_type_oid, routine_variadic_element_oid};
+use crate::engine_capabilities::CatalogReadView;
 use crate::engine_roles::role_oid;
-use crate::engine_user_functions::{builtin_routine_support_oid, SQLUserFunction};
+use crate::engine_user_functions::{
+    builtin_routine_support_oid, canonical_routine_type_name, SQLUserFunction,
+};
+use uqa_core::Value;
+use uqa_sql::registry::registered_names;
+use uqa_sql::{ResultRow, SQLError};
 
 pub(super) fn user_routine_catalog_oid(function: &SQLUserFunction) -> i64 {
     let def = &function.def;
@@ -38,7 +44,7 @@ pub(super) fn user_routine_catalog_oid(function: &SQLUserFunction) -> i64 {
     )
 }
 
-pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+pub(super) fn build_pg_proc(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows: Vec<ResultRow> = PG18_BUILTIN_ROUTINES
         .iter()
         .map(|routine| {
@@ -142,7 +148,7 @@ pub(super) fn build_pg_proc(engine: &Engine) -> Result<Vec<ResultRow>, SQLError>
             ("proacl", Value::Null),
         ])
     }));
-    for function in engine.list_sql_functions() {
+    for function in catalog.all_sql_functions() {
         let def = &function.def;
         let (routine_schema, routine_name) = split_schema_name(&def.name)?;
         let source = match &def.body {

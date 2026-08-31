@@ -9,15 +9,13 @@
 use std::cell::Cell;
 use std::fmt::Write as _;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use smallvec::SmallVec;
 use uqa_core::DocId;
 pub(in crate::sql) use uqa_execution::ProjectionTarget;
 use uqa_execution::{
-    eval_scalar, ExecResult, ExpressionEvaluator, ScalarEvalContext, ScalarExpr, ScalarFrameBound,
-    SharedExpressionEvaluator,
+    eval_scalar, ExecResult, ScalarEvalContext, ScalarExpr, SharedExpressionEvaluator,
 };
 use uqa_planner::{
     AccessPathPlan, ComputePlan, CtePlan, ProjectionPlan, QueryBlockPlan, QueryPlan,
@@ -88,20 +86,17 @@ type OutputColumnMapping = (String, ScalarExpr);
 
 #[derive(Clone, Copy)]
 pub(in crate::sql) struct SingleRelation<'a> {
-    pub storage_name: &'a str,
+    pub relation_name: &'a str,
     pub qualifier: &'a str,
 }
 
-/// Execute the physical relational plan directly. CTEs, set-operation
-/// branches, values, and query blocks recurse through plan children; query
-/// blocks select physical access and row operators without reconstructing a
-/// parser statement.
+/// Execute the physical relational plan directly. CTEs, set-operation branches, values, and query blocks recurse through plan children; query blocks select physical access and row operators without reconstructing a parser statement.
 pub(crate) fn execute_query_plan(
     engine: &Engine,
     plan: &QueryPlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    let mut ctes = CteScope::new_for_current_routine();
+    let mut ctes = CteScope::new_for_current_routine(engine);
     execute_query_plan_with_ctes(engine, plan, params, &mut ctes)
 }
 
@@ -262,8 +257,7 @@ pub(super) enum QueryRows {
 pub(super) struct QueryOutput {
     pub(super) columns: Vec<String>,
     pub(super) column_types: Vec<Option<uqa_sql::ast::ColumnType>>,
-    /// Physical columns include internal row metadata that is available to a
-    /// parent query block but never exposed through [`SQLResult`].
+    /// Physical columns include internal row metadata that is available to a parent query block but never exposed through [`SQLResult`].
     pub(super) internal_columns: Vec<String>,
     pub(super) internal_types: Vec<Option<uqa_sql::ast::ColumnType>>,
     pub(super) rows: QueryRows,
@@ -417,7 +411,7 @@ pub(super) fn execute_query_plan_output(
         }) {
             ctes.insert_deferred(cte.clone());
         }
-        let filters = cte_output_filters(engine, plan);
+        let filters = cte_output_filters(engine, plan, ctes)?;
         materialize_plan_ctes_with_filters(
             engine,
             ordered_ctes.into_iter().filter(|cte| {
@@ -528,11 +522,7 @@ pub(super) fn execute_query_plan_output(
                     },
                 });
             }
-            // Materialize each child directly into a disk-backed, repeatable
-            // stream before starting the next child. A nested set operation
-            // therefore never owns two cardinality-sized `SQLResult.rows`
-            // vectors, and its external merge consumes batches under
-            // `work_mem`.
+            // Materialize each child directly into a disk-backed, repeatable stream before starting the next child. A nested set operation therefore never owns two cardinality-sized `SQLResult.rows` vectors, and its external merge consumes batches under `work_mem`.
             let (lhs, rhs) = {
                 let mut child_ctes = ctes.enter_lock_identity_emission(false);
                 let lhs = execute_query_plan_output(
@@ -561,7 +551,7 @@ pub(super) fn execute_query_plan_output(
                     *kind,
                     *all,
                     set_schema.column_types().to_vec(),
-                    physical_work_mem_bytes(engine)?,
+                    physical_work_mem_bytes(engine.query_runtime_view())?,
                 )
                 .map_err(physical_exec_error)?,
             );
@@ -595,6 +585,7 @@ pub(super) fn execute_query_plan_output(
                     engine,
                     params,
                     &ordering_scope,
+                    engine.query_runtime_view(),
                     evaluator,
                     None,
                 )?;
@@ -672,8 +663,9 @@ pub(super) fn collect_query_operator<'a>(
             }
         }
         QueryOutputMode::SharedSpill => {
-            let mut buffer =
-                uqa_execution::SpillBuffer::new(physical_work_mem_bytes(engine)?.max(1));
+            let mut buffer = uqa_execution::SpillBuffer::new(
+                physical_work_mem_bytes(engine.query_runtime_view())?.max(1),
+            );
             if let Err(error) = operator.open() {
                 return Err(close_after_physical_failure(
                     operator.as_mut(),
@@ -825,10 +817,7 @@ pub(super) fn collect_query_operator<'a>(
     })
 }
 
-/// Collect decorrelated EXISTS keys directly from the filtered input. Direct
-/// column expressions stay as borrowed physical values; non-trivial key
-/// expressions are evaluated into an inline buffer. In either case there is
-/// no projected `PhysicalRow` materialization between the input and hash set.
+/// Collect decorrelated EXISTS keys directly from the filtered input. Direct column expressions stay as borrowed physical values; non-trivial key expressions are evaluated into an inline buffer. In either case there is no projected `PhysicalRow` materialization between the input and hash set.
 pub(in crate::sql) fn collect_exists_key_operator<'a>(
     columns: Vec<String>,
     mut operator: Box<dyn uqa_execution::PhysicalOperator + 'a>,
@@ -1038,7 +1027,7 @@ pub(super) fn combine_set_spills_with_order_output(
             right,
             execution.kind,
             execution.all,
-            physical_work_mem_bytes(engine)?,
+            physical_work_mem_bytes(engine.query_runtime_view())?,
         )
         .map_err(physical_exec_error)?,
     );
@@ -1051,6 +1040,7 @@ pub(super) fn combine_set_spills_with_order_output(
             engine,
             params,
             ctes,
+            engine.query_runtime_view(),
             EngineExpressionEvaluator::shared(engine, params, ctes),
             None,
         )?;

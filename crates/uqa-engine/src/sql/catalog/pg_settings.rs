@@ -6,9 +6,10 @@
 
 //! Virtual `pg_settings` row synthesis.
 
-use super::helpers::{bool_value, catalog_array, row, str_value};
-use super::{ResultRow, SQLError, Value};
+use super::helpers::rows::{bool_value, catalog_array, row, str_value};
 use crate::engine_capabilities::SessionExecutionView;
+use uqa_core::Value;
+use uqa_sql::{ResultRow, SQLError};
 
 pub(super) fn build_pg_settings(
     session: SessionExecutionView<'_>,

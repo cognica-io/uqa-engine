@@ -67,7 +67,7 @@ pub(in crate::sql::dml) fn run_view_insert_inner(
         )?;
     }
     let read_engine = statement_snapshot.as_ref().unwrap_or(engine);
-    let mut ctes = CteScope::new_for_current_routine();
+    let mut ctes = CteScope::new_for_current_routine(read_engine);
     crate::sql::select::materialize_plan_ctes(read_engine, &stmt.ctes, params, &mut ctes)?;
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
     let suppressed_source_is_unused = stmt.source.is_some()

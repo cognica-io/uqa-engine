@@ -33,7 +33,7 @@ pub(in crate::sql::dml) fn rewrite_merge_to_base(
             ),
         });
     }
-    let analysis_scope = dml_analysis_scope(&[], &statement.subqueries);
+    let analysis_scope = dml_analysis_scope(engine, &[], &statement.subqueries);
     let source_schema = crate::sql::select::analyze_source_plan_schema(
         engine,
         &statement.source,

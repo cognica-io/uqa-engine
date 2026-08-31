@@ -81,13 +81,17 @@ env CARGO_TARGET_DIR="$runner_target" /usr/bin/time -p cargo test -p uqa-engine 
 
 The 2026-08-31 structural baseline on Rust and Cargo 1.90.0 for `aarch64-apple-darwin` measured 142.76 seconds clean and 0.30 seconds warm. Absolute time is machine-specific; the stable runner, locked dependency graph, offline mode, and empty-versus-warm target distinction make later measurements comparable on the same host.
 
-The capability boundary has focused executable evidence inside the crate's existing single integration target:
+The capability and read-path boundaries have focused executable evidence inside the existing library targets and the crate's single integration target:
 
 ```sh
+cargo test -p uqa-engine --lib engine_capabilities::tests::
+cargo test -p uqa-engine --lib sql::select::schema_binding::tests::
+cargo test -p uqa-engine --lib sql::select::physical_plan::tests::
+cargo test -p uqa-execution --lib scalar::traversal::tests::
 cargo test -p uqa-engine --test integration engine_catalog::capability_boundaries::
 ```
 
-That filter executes virtual catalog reads against session state and a persistent `CREATE SCHEMA` lifecycle covering sibling isolation, rollback, commit, and reopen; it is not a compile-only check.
+The library filters exercise immutable catalog snapshots, relation-name resolution, a deterministic complete-query binder fixture without `Engine`, physical construction from a bound plan and explicit runtime capabilities, and complete physical-scalar traversal. The integration filter executes virtual catalog reads against session state and a persistent `CREATE SCHEMA` lifecycle covering sibling isolation, rollback, commit, and reopen; none is a compile-only check.
 
 ## Exactness oracles
 
@@ -111,7 +115,7 @@ python3 tests/parity/pg18/run_diff.py --validate-manifest
 python3 tests/parity/pg18/run_diff.py
 ```
 
-Stateful compatibility suites keep one PostgreSQL schema while reopening the UQA database between cases. They cover 129 routine cases, 136 role and routine-security cases, 162 constraint cases, 49 type-and-temporal cases, 584 trigger cases, and 194 rewrite-rule cases:
+Stateful compatibility suites keep one PostgreSQL schema while reopening the UQA database between cases. They cover 129 routine cases, 136 role and routine-security cases, 162 constraint cases, 49 type-and-temporal cases, 584 trigger cases, 194 rewrite-rule cases, and 61 transaction cases:
 
 The automatic-view cases include nested computed and nonautomatic rule-backed views, scalar, `EXISTS`, and `IN` subqueries in view projections and predicates, correlated and unqualified references, local-alias collisions, statement snapshots, `OLD` and `NEW` row images, check options, `MERGE`, rewrite-rule images, lazy rule input projection, `WITH CHECK OPTION` over non-updatable sources, `ONLY` partition-view insert routing, replication-independent catalog flags, no-relation star errors, and unqualified system-column rewrite cardinality.
 
@@ -124,6 +128,7 @@ python3 tests/parity/pg18/run_routines_stateful.py --suite constraints
 python3 tests/parity/pg18/run_routines_stateful.py --suite type-temporal
 python3 tests/parity/pg18/run_routines_stateful.py --suite triggers
 python3 tests/parity/pg18/run_routines_stateful.py --suite rules
+python3 tests/parity/pg18/run_routines_stateful.py --suite transactions
 ```
 
 Run the live TPC-H and driver gates when query output or PostgreSQL-facing I/O changes:

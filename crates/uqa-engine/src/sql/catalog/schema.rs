@@ -8,8 +8,7 @@
 
 use uqa_sql::ast::ColumnType;
 
-use crate::engine_capabilities::SessionExecutionView;
-use crate::Engine;
+use crate::engine_capabilities::{CatalogReadView, RelationNameResolution};
 
 /// Namespace of the Apache AGE catalog relations, types, and functions.
 pub(in crate::sql) const AG_CATALOG_SCHEMA: &str = "ag_catalog";
@@ -60,14 +59,14 @@ pub(super) enum VirtualRelation {
 /// the AGE relations resolve bare only while `ag_catalog` is on the
 /// session `search_path`, exactly like the extension's schema.
 pub(super) fn resolve_virtual_relation(
-    session: SessionExecutionView<'_>,
+    resolution: &RelationNameResolution,
     name: &str,
 ) -> Option<VirtualRelation> {
     let lower = name.to_ascii_lowercase();
     if let Some(local) = lower.strip_prefix("ag_catalog.") {
         return resolve_ag_catalog_relation(local);
     }
-    if !lower.contains('.') && session.search_path_contains(AG_CATALOG_SCHEMA) {
+    if !lower.contains('.') && resolution.search_path_contains(AG_CATALOG_SCHEMA) {
         if let Some(relation) = resolve_ag_catalog_relation(&lower) {
             return Some(relation);
         }
@@ -150,21 +149,21 @@ fn resolve_ag_catalog_relation(local: &str) -> Option<VirtualRelation> {
 }
 
 pub(in crate::sql) fn virtual_relation_schema(
-    engine: &Engine,
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
     name: &str,
 ) -> Result<Option<Vec<(String, ColumnType)>>, uqa_sql::SQLError> {
-    if let Some(relation) = resolve_virtual_relation(engine.session_execution_view(), name) {
+    if let Some(relation) = resolve_virtual_relation(resolution, name) {
         return Ok(Some(relation.schema()));
     }
-    super::ag_catalog::age_label_relation_schema(engine, name)
+    super::ag_catalog::age_label_relation_schema(catalog, resolution, name)
 }
 
 pub(in crate::sql) fn virtual_relation_accepts_row_lock(
-    engine: &Engine,
+    resolution: &RelationNameResolution,
     name: &str,
 ) -> Option<bool> {
-    resolve_virtual_relation(engine.session_execution_view(), name)
-        .map(VirtualRelation::accepts_row_lock)
+    resolve_virtual_relation(resolution, name).map(VirtualRelation::accepts_row_lock)
 }
 
 impl VirtualRelation {
@@ -732,7 +731,7 @@ fn ag_catalog_domain(name: &str, base: ColumnType) -> ColumnType {
 /// Stable OID of an `ag_catalog` type; the extension assigns these from
 /// the OID counter, so any collision-free assignment is faithful.
 pub(super) fn ag_catalog_type_oid(name: &str) -> u32 {
-    let oid = super::helpers::stable_oid("type", &format!("{AG_CATALOG_SCHEMA}.{name}"));
+    let oid = super::helpers::oids::stable_oid("type", &format!("{AG_CATALOG_SCHEMA}.{name}"));
     u32::try_from(oid).unwrap_or(0)
 }
 
@@ -897,100 +896,4 @@ fn information_routines_schema() -> Vec<(String, ColumnType)> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn pg18_catalog_shapes_include_empty_relations_and_removed_columns() {
-        let engine = Engine::new();
-        let description = virtual_relation_schema(&engine, "pg_catalog.pg_description")
-            .unwrap()
-            .unwrap();
-        assert_eq!(description.len(), 4);
-        assert_eq!(description[0], ("objoid".into(), ColumnType::Oid));
-
-        let attrdef = virtual_relation_schema(&engine, "pg_attrdef")
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            attrdef
-                .iter()
-                .map(|(name, _)| name.as_str())
-                .collect::<Vec<_>>(),
-            vec!["oid", "adrelid", "adnum", "adbin"]
-        );
-    }
-
-    #[test]
-    fn pg18_information_schema_domains_retain_their_oid_identity() {
-        let engine = Engine::new();
-        let routines = virtual_relation_schema(&engine, "information_schema.routines")
-            .unwrap()
-            .unwrap();
-        assert_eq!(routines.len(), 82);
-        assert!(matches!(
-            routines[0].1,
-            ColumnType::Domain { oid: 13_312, .. }
-        ));
-        assert!(matches!(
-            routines[54].1,
-            ColumnType::Domain { oid: 13_318, .. }
-        ));
-    }
-
-    #[test]
-    fn ag_catalog_relations_resolve_qualified_or_through_the_search_path() {
-        let engine = Engine::new();
-        assert_eq!(
-            resolve_virtual_relation(engine.session_execution_view(), "ag_catalog.ag_graph"),
-            Some(VirtualRelation::AgGraph)
-        );
-        assert_eq!(
-            resolve_virtual_relation(engine.session_execution_view(), "AG_CATALOG.AG_LABEL"),
-            Some(VirtualRelation::AgLabel)
-        );
-        assert_eq!(
-            resolve_virtual_relation(engine.session_execution_view(), "ag_graph"),
-            None
-        );
-        engine
-            .set_variable("search_path", "ag_catalog, \"$user\", public")
-            .unwrap();
-        assert_eq!(
-            resolve_virtual_relation(engine.session_execution_view(), "ag_graph"),
-            Some(VirtualRelation::AgGraph)
-        );
-        assert_eq!(
-            resolve_virtual_relation(engine.session_execution_view(), "ag_label"),
-            Some(VirtualRelation::AgLabel)
-        );
-        assert_eq!(
-            resolve_virtual_relation(engine.session_execution_view(), "public.ag_graph"),
-            None
-        );
-
-        let graph = virtual_relation_schema(&engine, "ag_catalog.ag_graph")
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            graph
-                .iter()
-                .map(|(name, _)| name.as_str())
-                .collect::<Vec<_>>(),
-            vec!["graphid", "name", "namespace"]
-        );
-        assert_eq!(graph[2].1, ColumnType::Regnamespace);
-        let label = virtual_relation_schema(&engine, "ag_catalog.ag_label")
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            label
-                .iter()
-                .map(|(name, _)| name.as_str())
-                .collect::<Vec<_>>(),
-            vec!["name", "graph", "id", "kind", "relation", "seq_name"]
-        );
-        assert!(matches!(&label[2].1, ColumnType::Domain { name, .. } if name == "label_id"));
-        assert!(matches!(&label[3].1, ColumnType::Domain { name, .. } if name == "label_kind"));
-    }
-}
+mod tests;

@@ -988,29 +988,6 @@ impl Engine {
         (!candidates.is_empty()).then_some(candidates)
     }
 
-    /// Every registered routine, sorted by qualified name then signature. Feeds
-    /// `pg_catalog.pg_proc` / `information_schema.routines`.
-    pub(crate) fn list_sql_functions(&self) -> Vec<Arc<SQLUserFunction>> {
-        let live_registry;
-        let registry = if let Some(snapshot) = self.query_sql_function_snapshots.as_ref() {
-            snapshot.as_ref()
-        } else {
-            live_registry = self.durable.sql_user_functions.read();
-            &live_registry
-        };
-        let mut out: Vec<Arc<SQLUserFunction>> = Vec::new();
-        for overloads in registry.values() {
-            let mut sorted = overloads.clone();
-            sorted.sort_by(|left, right| {
-                routine_signature_types(&left.def)
-                    .cmp(&routine_signature_types(&right.def))
-                    .then_with(|| left.def.is_procedure.cmp(&right.def.is_procedure))
-            });
-            out.extend(sorted);
-        }
-        out
-    }
-
     /// Current nesting cap for user-defined routine calls.
     pub fn sql_function_depth_limit(&self) -> usize {
         self.runtime

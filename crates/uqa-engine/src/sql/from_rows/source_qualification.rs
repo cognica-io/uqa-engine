@@ -12,7 +12,9 @@ use super::{
     QueryOutput, QueryOutputMode, QueryPlan, QueryRows, ResultRow, SQLError, SQLParam, ScalarExpr,
     Value,
 };
-use crate::engine_user_functions::{routine_returns_anonymous_record, SQLUserFunction};
+use crate::engine_user_functions::{
+    routine_returns_anonymous_record, RoutineResolution, SQLUserFunction,
+};
 use std::sync::Arc;
 use uqa_execution::{BuiltinFunctionOverload, FunctionTypeResolver, RowSchema};
 use uqa_sql::ast::{
@@ -104,7 +106,7 @@ fn redundant_out_column_definition_error() -> SQLError {
 }
 
 pub(in crate::sql) fn resolve_user_table_function(
-    engine: &Engine,
+    routines: &dyn RoutineResolution,
     name: &str,
     binding: Option<&FunctionBinding>,
     args: &[ScalarExpr],
@@ -113,7 +115,7 @@ pub(in crate::sql) fn resolve_user_table_function(
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<Option<ResolvedUserTableFunction>, SQLError> {
     let Some(binding) = resolve_table_function_binding(
-        engine,
+        routines,
         name,
         binding,
         args,
@@ -134,7 +136,7 @@ pub(in crate::sql) fn resolve_user_table_function(
             params,
             Some(resolver),
         )?;
-    let Some(matched) = engine.resolve_static_sql_function_match(
+    let Some(matched) = routines.resolve_static_sql_function_match(
         name,
         Some(&binding),
         &argument_names,
@@ -151,7 +153,7 @@ pub(in crate::sql) fn resolve_user_table_function(
 }
 
 pub(in crate::sql) fn resolve_table_function_binding(
-    engine: &Engine,
+    routines: &dyn RoutineResolution,
     name: &str,
     binding: Option<&FunctionBinding>,
     args: &[ScalarExpr],
@@ -173,7 +175,7 @@ pub(in crate::sql) fn resolve_table_function_binding(
         )?;
     let builtins = builtin_table_function_overloads(&builtin, &argument_types);
     if !builtins.is_empty() || has_builtin_table_function_overloads(&builtin) {
-        return engine
+        return routines
             .resolve_table_function_overload_with_builtins(
                 name,
                 None,
@@ -186,11 +188,11 @@ pub(in crate::sql) fn resolve_table_function_binding(
     }
     let builtin_surface = is_builtin_table_function(&builtin)
         || crate::operator_tree_bridge::is_operator_join_table_function(&builtin)
-        || engine.has_registered_table_function(&identity);
-    if engine.lookup_sql_functions(name).is_none() {
+        || routines.has_registered_table_function(&identity);
+    if routines.lookup_sql_functions(name).is_none() {
         return Ok(None);
     }
-    match engine.resolve_static_sql_function_match(
+    match routines.resolve_static_sql_function_match(
         name,
         None,
         &argument_names,
@@ -612,7 +614,7 @@ pub(in crate::sql) struct TableFunctionTypeRequest<'a> {
 }
 
 pub(in crate::sql) fn table_function_column_types(
-    engine: &Engine,
+    routines: &dyn RoutineResolution,
     request: TableFunctionTypeRequest<'_>,
     input_schema: &uqa_execution::RowSchema,
     params: &[SQLParam],
@@ -652,7 +654,7 @@ pub(in crate::sql) fn table_function_column_types(
         )
     } else if let Some(function) = user_function {
         align(user_function_column_types(
-            engine,
+            routines,
             function,
             user_invocation,
         ))
@@ -719,9 +721,14 @@ pub(in crate::sql) fn table_function_column_types(
                 Some(ColumnType::BigInteger),
                 Some(ColumnType::DoublePrecision),
             ],
-            _ => {
-                user_table_function_column_types(engine, name, args, input_schema, params, resolver)
-            }
+            _ => user_table_function_column_types(
+                routines,
+                name,
+                args,
+                input_schema,
+                params,
+                resolver,
+            ),
         })
     };
     if ordinality {
@@ -731,7 +738,7 @@ pub(in crate::sql) fn table_function_column_types(
 }
 
 fn user_table_function_column_types(
-    engine: &Engine,
+    routines: &dyn RoutineResolution,
     name: &str,
     args: &[ScalarExpr],
     input_schema: &uqa_execution::RowSchema,
@@ -743,7 +750,7 @@ fn user_table_function_column_types(
     else {
         return Vec::new();
     };
-    let Ok(Some(matched)) = engine.resolve_static_sql_function_match(
+    let Ok(Some(matched)) = routines.resolve_static_sql_function_match(
         name,
         None,
         &argument_names,
@@ -752,11 +759,11 @@ fn user_table_function_column_types(
     ) else {
         return Vec::new();
     };
-    user_function_column_types(engine, &matched.function, Some(&matched.invocation))
+    user_function_column_types(routines, &matched.function, Some(&matched.invocation))
 }
 
 fn user_function_column_types(
-    engine: &Engine,
+    routines: &dyn RoutineResolution,
     function: &SQLUserFunction,
     invocation: Option<&RoutineInvocationBinding>,
 ) -> Vec<Option<ColumnType>> {
@@ -779,7 +786,7 @@ fn user_function_column_types(
                 let type_name = invocation
                     .and_then(|binding| binding.parameter_types.get(index))
                     .unwrap_or(&parameter.type_name);
-                resolve_table_function_column_type(engine, type_name)
+                resolve_table_function_column_type(routines, type_name)
             })
             .collect();
     }
@@ -788,14 +795,20 @@ fn user_function_column_types(
             let type_name = invocation
                 .and_then(|binding| binding.return_type.as_ref())
                 .unwrap_or(type_name);
-            vec![resolve_table_function_column_type(engine, type_name)]
+            vec![resolve_table_function_column_type(routines, type_name)]
         }
         FunctionReturns::None | FunctionReturns::Table => Vec::new(),
     }
 }
 
-fn resolve_table_function_column_type(engine: &Engine, type_name: &str) -> Option<ColumnType> {
-    crate::sql::resolve_catalog_column_type(engine, type_name)
+fn resolve_table_function_column_type(
+    routines: &dyn RoutineResolution,
+    type_name: &str,
+) -> Option<ColumnType> {
+    routines
+        .resolve_type_name(type_name)
+        .ok()
+        .flatten()
         .or_else(|| ColumnType::from_sql_name(type_name).ok())
 }
 

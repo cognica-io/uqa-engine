@@ -733,7 +733,7 @@ pub(super) fn run_view_update_inner(
         )?;
     }
     let read_engine = statement_snapshot.as_ref().unwrap_or(engine);
-    let mut ctes = CteScope::new_for_current_routine();
+    let mut ctes = CteScope::new_for_current_routine(read_engine);
     crate::sql::select::materialize_plan_ctes(read_engine, &stmt.ctes, params, &mut ctes)?;
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
     let row_independent_update_qualification = if stmt.source.is_none()
@@ -1157,7 +1157,7 @@ pub(super) fn run_view_delete_inner(
         )?;
     }
     let read_engine = statement_snapshot.as_ref().unwrap_or(engine);
-    let mut ctes = CteScope::new_for_current_routine();
+    let mut ctes = CteScope::new_for_current_routine(read_engine);
     crate::sql::select::materialize_plan_ctes(read_engine, &stmt.ctes, params, &mut ctes)?;
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
     let row_independent_delete_qualification = if stmt.source.is_none()

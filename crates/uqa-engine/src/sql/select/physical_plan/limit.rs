@@ -8,11 +8,14 @@
 
 use std::sync::Arc;
 
-use super::{
-    physical_work_mem_bytes, resolve_fetch_limit_with_ties, resolve_limit_offset_with_ctes,
-    resolve_order_expression, CteScope, Engine, OutputColumnMapping, QueryBlockPlan, SQLError,
-    SQLParam, SharedExpressionEvaluator,
+use crate::engine_capabilities::QueryRuntimeView;
+
+use super::super::{
+    resolve_fetch_limit_with_ties, resolve_limit_offset_with_ctes, CteScope, Engine,
+    OutputColumnMapping, QueryBlockPlan, SQLError, SQLParam, SharedExpressionEvaluator,
 };
+use super::ordering::resolve_order_expression;
+use super::projection::physical_work_mem_bytes;
 
 #[allow(clippy::too_many_arguments)]
 pub(in crate::sql) fn attach_order_limit<'a>(
@@ -22,6 +25,7 @@ pub(in crate::sql) fn attach_order_limit<'a>(
     engine: &'a Engine,
     params: &'a [SQLParam],
     ctes: &CteScope,
+    runtime: QueryRuntimeView<'a>,
     evaluator: SharedExpressionEvaluator<'a>,
     recheck_source: Option<crate::sql::select::LockRowsRecheckSource>,
 ) -> Result<Box<dyn uqa_execution::PhysicalOperator + 'a>, SQLError> {
@@ -43,7 +47,7 @@ pub(in crate::sql) fn attach_order_limit<'a>(
     };
     let mut tie_keys = None;
     if !statement.order_by.is_empty() {
-        let work_mem_bytes = physical_work_mem_bytes(engine)?;
+        let work_mem_bytes = physical_work_mem_bytes(runtime)?;
         let keys = resolved_sort_keys(statement, output_columns, None)?;
         if with_ties {
             tie_keys = Some(keys.clone());

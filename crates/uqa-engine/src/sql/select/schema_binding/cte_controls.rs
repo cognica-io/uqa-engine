@@ -6,7 +6,8 @@
 
 //! Static row types and validation for recursive CTE control columns.
 
-use super::{CteScope, Engine, QueryPlan, RowSchema, SQLError, SQLParam, SchemaScope};
+use super::{CteScope, QueryPlan, RowSchema, SQLError, SQLParam, SchemaScope};
+use crate::engine_user_functions::RoutineResolution;
 use uqa_sql::ast::ColumnType;
 
 pub(super) fn hide_recursive_generated_schema(schema: &RowSchema, visible: usize) -> RowSchema {
@@ -31,16 +32,16 @@ pub(super) fn hide_recursive_generated_schema(schema: &RowSchema, visible: usize
 }
 
 pub(in crate::sql) fn extend_cte_generated_schema(
-    engine: &Engine,
+    routines: &dyn RoutineResolution,
     cte: &uqa_planner::CtePlan,
     schema: RowSchema,
     params: &[SQLParam],
 ) -> Result<RowSchema, SQLError> {
-    extend_cte_generated_schema_mode(engine, cte, schema, params, true)
+    extend_cte_generated_schema_mode(routines, cte, schema, params, true)
 }
 
 fn extend_cte_generated_schema_mode(
-    engine: &Engine,
+    routines: &dyn RoutineResolution,
     cte: &uqa_planner::CtePlan,
     schema: RowSchema,
     params: &[SQLParam],
@@ -103,8 +104,13 @@ fn extend_cte_generated_schema_mode(
         reject_conflict(&cycle.path_column, "cycle path")?;
         let empty = RowSchema::default();
         let mark_type = match (
-            uqa_execution::scalar_type_with_resolver(&cycle.mark_value, &empty, params, engine)?,
-            uqa_execution::scalar_type_with_resolver(&cycle.mark_default, &empty, params, engine)?,
+            uqa_execution::scalar_type_with_resolver(&cycle.mark_value, &empty, params, routines)?,
+            uqa_execution::scalar_type_with_resolver(
+                &cycle.mark_default,
+                &empty,
+                params,
+                routines,
+            )?,
         ) {
             (Some(left), Some(right)) => Some(uqa_execution::common_type(&left, &right)?),
             (left @ Some(_), None) | (None, left @ Some(_)) => left,
@@ -131,12 +137,12 @@ fn extend_cte_generated_schema_mode(
 }
 
 pub(in crate::sql) fn extend_recursive_cte_binding_schema(
-    engine: &Engine,
+    routines: &dyn RoutineResolution,
     cte: &uqa_planner::CtePlan,
     schema: RowSchema,
     params: &[SQLParam],
 ) -> Result<RowSchema, SQLError> {
-    let extended = extend_cte_generated_schema_mode(engine, cte, schema.clone(), params, false)?;
+    let extended = extend_cte_generated_schema_mode(routines, cte, schema.clone(), params, false)?;
     let generated = extended
         .columns()
         .iter()
@@ -155,15 +161,15 @@ pub(in crate::sql) fn extend_recursive_cte_binding_schema(
 }
 
 pub(in crate::sql) fn analyze_recursive_control_step(
-    engine: &Engine,
+    routines: &dyn RoutineResolution,
     cte: &uqa_planner::CtePlan,
     step: &QueryPlan,
     base_schema: RowSchema,
     params: &[SQLParam],
     ctes: &CteScope,
 ) -> Result<(), SQLError> {
-    let provisional = extend_recursive_cte_binding_schema(engine, cte, base_schema, params)?;
-    let mut scope = SchemaScope::for_analysis(ctes);
+    let provisional = extend_recursive_cte_binding_schema(routines, cte, base_schema, params)?;
+    let mut scope = SchemaScope::for_analysis(ctes)?;
     scope.ctes.insert(cte.name.clone(), provisional);
-    scope.bind_query(engine, step, params, None).map(|_| ())
+    scope.bind_query(routines, step, params, None).map(|_| ())
 }

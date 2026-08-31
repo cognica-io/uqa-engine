@@ -121,7 +121,7 @@ pub(in crate::sql) fn run_merge_inner(
     }
     let target_qual = stmt.target_qualifier.clone();
     let target_tables = engine.hierarchy_scan_tables(&target_table, stmt.include_descendants)?;
-    let mut ctes = CteScope::new_for_current_routine();
+    let mut ctes = CteScope::new_for_current_routine(engine);
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
     for clause in &stmt.when_clauses {
         match clause {
@@ -220,7 +220,7 @@ pub(in crate::sql) fn run_merge_inner(
     let mut returning_rows = Vec::new();
 
     let pair_schema = merge_pair_schema(source_rows.row_schema());
-    let work_mem = crate::sql::select::physical_work_mem_bytes(engine)?.max(1);
+    let work_mem = crate::sql::select::physical_work_mem_bytes(engine.query_runtime_view())?.max(1);
     let mut pairings = uqa_execution::SpillBuffer::new(work_mem);
     let mut matched_source = uqa_execution::ExactRowSet::new(work_mem);
     let mut lock_target_ids = BTreeSet::new();
@@ -1044,7 +1044,7 @@ fn validate_view_merge_dispatch_contract(
     stmt: &MergePlan,
     params: &[SQLParam],
 ) -> Result<(), SQLError> {
-    let mut scope = CteScope::new_for_current_routine();
+    let mut scope = CteScope::new_for_current_routine(engine);
     scope.scalar_subqueries.clone_from(&stmt.subqueries);
     let source =
         crate::sql::select::analyze_source_plan_schema(engine, &stmt.source, params, &scope, None)?;

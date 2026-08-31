@@ -9,13 +9,167 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use super::{
-    attach_order_limit, build_set_projection, identity_order_columns, projection_columns,
-    projection_set_batch_size, projection_target_expression, projections_may_return_set,
-    resolve_order_expression, CteScope, Engine, OutputColumnMapping, PhysicalProjection,
-    ProjectionTarget, QueryBlockPlan, RowAtATime, SQLError, SQLParam, ScalarExpr, ScopedEngineHook,
-    SharedExpressionEvaluator, Value,
+use crate::engine_capabilities::QueryRuntimeView;
+
+use super::super::{
+    build_set_projection, projection_columns, projections_may_return_set, CteScope, Engine,
+    OutputColumnMapping, PhysicalProjection, ProjectionPlan, ProjectionTarget, QueryBlockPlan,
+    SQLError, SQLParam, ScalarExpr, ScopedEngineHook, SharedExpressionEvaluator, Value,
 };
+use super::limit::attach_order_limit;
+use super::projection::{
+    projection_set_batch_size, projection_target_expression, visible_projection_source_position,
+};
+use super::row_at_a_time::RowAtATime;
+
+pub(super) struct FinalProjectionExecution<'engine, 'scope> {
+    pub(super) engine: &'engine Engine,
+    pub(super) params: &'engine [SQLParam],
+    pub(super) ctes: &'scope CteScope,
+    pub(super) runtime: QueryRuntimeView<'engine>,
+    pub(super) evaluator: SharedExpressionEvaluator<'engine>,
+}
+
+/// Build collision-free physical target columns for a plain SELECT whose ORDER BY must be able to see both input columns and SELECT-list aliases. Public aliases cannot safely be appended directly: `SELECT x + 1 AS x ... ORDER BY x` must order by the output alias, while `ORDER BY x + 1` still resolves `x` against the input namespace. Each non-star target is therefore computed once under an opaque internal attribute and assigned its public label only after Sort/Limit has consumed it.
+pub(in crate::sql) fn order_projection(
+    projections: &[ProjectionPlan],
+    input_schema: &uqa_execution::RowSchema,
+) -> Result<(Vec<PhysicalProjection>, Vec<OutputColumnMapping>), SQLError> {
+    let labels = projection_columns(projections);
+    let mut physical = Vec::new();
+    let mut output = Vec::new();
+    let internal_relation = uqa_sql::ast::InternalRelationId::allocate();
+    let mut next_internal_attribute = 0usize;
+
+    for (index, projection) in projections.iter().enumerate() {
+        if matches!(projection.expr, ScalarExpr::Star) {
+            for (position, column) in input_schema.columns().iter().enumerate() {
+                if visible_projection_source_position(input_schema, position) {
+                    output.push((
+                        input_schema
+                            .public_name(position)
+                            .unwrap_or(column)
+                            .to_string(),
+                        ScalarExpr::Position(position),
+                    ));
+                }
+            }
+            continue;
+        }
+        if let ScalarExpr::QualifiedStar(qualifier) = &projection.expr {
+            let columns = input_schema.qualified_star_position_layout(qualifier);
+            if columns.is_empty() {
+                return Err(SQLError::UnknownTable(qualifier.clone()));
+            }
+            for (column, logical, _, _) in columns {
+                if logical.is_some_and(|position| {
+                    !visible_projection_source_position(input_schema, position)
+                }) {
+                    continue;
+                }
+                if let Some(logical) = logical {
+                    output.push((column, ScalarExpr::Position(logical)));
+                    continue;
+                }
+                let internal = internal_relation.column(next_internal_attribute);
+                next_internal_attribute += 1;
+                physical.push((
+                    ProjectionTarget::Internal(internal),
+                    ScalarExpr::qualified_column(qualifier, &column),
+                ));
+                output.push((column, ScalarExpr::InternalColumn(internal)));
+            }
+            continue;
+        }
+
+        if let ScalarExpr::Column(source) = &projection.expr {
+            if &labels[index] == source {
+                if let Some(position) = input_schema.unqualified_position(source) {
+                    output.push((labels[index].clone(), ScalarExpr::Position(position)));
+                    continue;
+                }
+            }
+        }
+        if let ScalarExpr::QualifiedColumn { qualifier, column } = &projection.expr {
+            if &labels[index] == column {
+                if let Some(position) = input_schema.qualified_position(qualifier, column) {
+                    output.push((labels[index].clone(), ScalarExpr::Position(position)));
+                    continue;
+                }
+            }
+        }
+
+        let internal = internal_relation.column(next_internal_attribute);
+        next_internal_attribute += 1;
+        physical.push((
+            ProjectionTarget::Internal(internal),
+            projection.expr.clone(),
+        ));
+        output.push((labels[index].clone(), ScalarExpr::InternalColumn(internal)));
+    }
+    Ok((physical, output))
+}
+
+pub(in crate::sql) fn identity_order_columns(columns: &[String]) -> Vec<OutputColumnMapping> {
+    columns
+        .iter()
+        .map(|column| (column.clone(), ScalarExpr::Column(column.clone())))
+        .collect()
+}
+
+pub(in crate::sql) fn output_selection_positions(
+    schema: &uqa_execution::RowSchema,
+    output: Vec<OutputColumnMapping>,
+) -> Result<Vec<(String, usize)>, SQLError> {
+    output
+        .into_iter()
+        .map(|(label, source)| {
+            let position = match source {
+                ScalarExpr::Position(position) if position < schema.len() => {
+                    schema.physical_slot(position)
+                }
+                ScalarExpr::Column(column) => schema
+                    .position(&column)
+                    .and_then(|logical| schema.physical_slot(logical)),
+                ScalarExpr::InternalColumn(column) => schema.internal_slot(column),
+                _ => None,
+            }
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "bound output column `{label}` is unavailable in the physical row"
+                ))
+            })?;
+            Ok((label, position))
+        })
+        .collect()
+}
+
+pub(in crate::sql) fn resolve_order_expression(
+    expression: &ScalarExpr,
+    output_columns: &[OutputColumnMapping],
+) -> Result<ScalarExpr, SQLError> {
+    match expression {
+        ScalarExpr::Literal(Value::Int(position)) => {
+            let index = usize::try_from(*position)
+                .ok()
+                .and_then(|position| position.checked_sub(1))
+                .filter(|index| *index < output_columns.len())
+                .ok_or_else(|| output_position_error("ORDER BY", *position))?;
+            Ok(output_columns[index].1.clone())
+        }
+        ScalarExpr::Column(name) => {
+            let mut matches = output_columns.iter().filter(|(output, _)| output == name);
+            let Some((_, physical)) = matches.next() else {
+                return Ok(expression.clone());
+            };
+            if matches.next().is_some() {
+                return Err(SQLError::AmbiguousColumn(name.clone()));
+            }
+            Ok(physical.clone())
+        }
+        _ => Ok(expression.clone()),
+    }
+}
 
 #[derive(Clone, Copy)]
 pub(super) struct OutputTarget {
@@ -256,32 +410,33 @@ pub(super) fn attach_final_projection_order<'a>(
     mut operator: Box<dyn uqa_execution::PhysicalOperator + 'a>,
     ordering: (&QueryBlockPlan, &[OutputColumnMapping]),
     projections: Vec<PhysicalProjection>,
-    engine: &'a Engine,
-    params: &'a [SQLParam],
-    ctes: &CteScope,
-    evaluator: SharedExpressionEvaluator<'a>,
+    execution: FinalProjectionExecution<'a, '_>,
 ) -> Result<Box<dyn uqa_execution::PhysicalOperator + 'a>, SQLError> {
     let (statement, output) = ordering;
-    let type_resolver = ScopedEngineHook::new(engine, ctes);
+    let type_resolver = ScopedEngineHook::new(execution.engine, execution.ctes);
     let returns_set = projections_may_return_set(
-        engine,
+        execution.engine,
         &type_resolver,
         &projections,
         operator.row_schema(),
-        params,
+        execution.params,
     )?;
-    if ctes.streams_command_progress() && !statement.order_by.is_empty() && !returns_set {
+    if execution.ctes.streams_command_progress() && !statement.order_by.is_empty() && !returns_set {
         return attach_deferred_order_projection(
             operator,
             statement,
             output,
             projections,
-            engine,
-            params,
-            ctes,
-            evaluator,
+            execution,
         );
     }
+    let FinalProjectionExecution {
+        engine,
+        params,
+        ctes,
+        runtime,
+        evaluator,
+    } = execution;
     let batch_size = projection_set_batch_size(statement, ctes);
     operator = if returns_set {
         build_set_projection(
@@ -305,21 +460,24 @@ pub(super) fn attach_final_projection_order<'a>(
         ))
     };
     attach_order_limit(
-        operator, statement, output, engine, params, ctes, evaluator, None,
+        operator, statement, output, engine, params, ctes, runtime, evaluator, None,
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn attach_deferred_order_projection<'a>(
     mut operator: Box<dyn uqa_execution::PhysicalOperator + 'a>,
     statement: &QueryBlockPlan,
     output: &[OutputColumnMapping],
     mut projections: Vec<PhysicalProjection>,
-    engine: &'a Engine,
-    params: &'a [SQLParam],
-    ctes: &CteScope,
-    evaluator: SharedExpressionEvaluator<'a>,
+    execution: FinalProjectionExecution<'a, '_>,
 ) -> Result<Box<dyn uqa_execution::PhysicalOperator + 'a>, SQLError> {
+    let FinalProjectionExecution {
+        engine,
+        params,
+        ctes,
+        runtime,
+        evaluator,
+    } = execution;
     let mut sort_statement = statement.clone();
     let sort_relation = uqa_sql::ast::InternalRelationId::allocate();
     let mut sort_projections =
@@ -379,6 +537,7 @@ fn attach_deferred_order_projection<'a>(
         engine,
         params,
         ctes,
+        runtime,
         Arc::clone(&evaluator),
         None,
     )?;

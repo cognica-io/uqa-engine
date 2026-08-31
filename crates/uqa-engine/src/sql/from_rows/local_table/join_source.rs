@@ -204,7 +204,7 @@ pub(super) fn build_join_source_operator<'a>(
             };
             let left_nulls = null_row_for_schema(left_operator.schema());
             let right_nulls = null_row_for_schema(right_operator.schema());
-            let work_mem = physical_work_mem_bytes(engine)?;
+            let work_mem = physical_work_mem_bytes(engine.query_runtime_view())?;
             let joined: Box<dyn PhysicalOperator + 'a> = match (strategy, hash_plan) {
                 (
                     JoinExecutionStrategy::Auto | JoinExecutionStrategy::Hash,

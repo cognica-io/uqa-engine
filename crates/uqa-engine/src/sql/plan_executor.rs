@@ -76,7 +76,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         if self.session.transaction_depth() != 0 {
             select::lock_query_relations(self.engine, query)?;
         }
-        let mut ctes = select::CteScope::new_for_current_routine();
+        let mut ctes = select::CteScope::new_for_current_routine(self.engine);
         select::execute_query_plan_with_ctes(self.engine, query, self.params, &mut ctes)
     }
 
@@ -94,7 +94,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         if self.session.transaction_depth() != 0 {
             select::lock_query_relations(self.engine, query)?;
         }
-        let mut ctes = select::CteScope::new_for_current_routine();
+        let mut ctes = select::CteScope::new_for_current_routine(self.engine);
         select::execute_query_plan_output(
             self.engine,
             query,
@@ -194,7 +194,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         let plan = self.engine.lookup_prepared(name).ok_or_else(|| {
             SQLError::Unsupported(format!("Prepared statement `{name}` does not exist"))
         })?;
-        let scope = select::CteScope::new_for_current_routine();
+        let scope = select::CteScope::new_for_current_routine(self.engine);
         let hook = select::ScopedEngineHook::new(self.engine, &scope);
         let context = PhysicalEvalContext::new(None, self.params)
             .with_function_hook(&hook)
@@ -269,7 +269,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 "cannot use subquery in CALL argument".into(),
             ));
         }
-        let scope = select::CteScope::new_for_current_routine();
+        let scope = select::CteScope::new_for_current_routine(self.engine);
         let (call_arguments, explicit_variadic) = analyze_physical_call_arguments(arguments)?;
         let argument_types = arguments
             .iter()

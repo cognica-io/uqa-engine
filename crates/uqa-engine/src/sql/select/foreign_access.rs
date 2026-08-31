@@ -22,16 +22,28 @@ pub(in crate::sql) fn run_single_foreign_select_output(
     output_mode: QueryOutputMode,
 ) -> Result<QueryOutput, SQLError> {
     let SingleRelation {
-        storage_name: table,
+        relation_name: table,
         qualifier,
     } = relation;
+    let catalog = ctes.catalog_read_view()?;
+    let resolution = ctes.relation_name_resolution()?;
+    let foreign_table = catalog
+        .foreign_table_resolved(&resolution, table)?
+        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
     let predicates = fdw_predicates_from_where(stmt.r#where.as_ref(), params);
     let scanned = engine
         .scan_foreign_table_stream(table, None, &predicates, None)
         .map_err(SQLError::Unsupported)?;
-    let typed_columns = engine
-        .foreign_table_typed_columns(table)
-        .map_err(SQLError::Unsupported)?;
+    let typed_columns = foreign_table
+        .columns
+        .iter()
+        .map(|column| {
+            (
+                column.name.clone(),
+                crate::engine_fdw::fdw_column_type_to_sql(&column.ty),
+            )
+        })
+        .collect::<Vec<_>>();
     let source_columns = typed_columns
         .iter()
         .map(|(column, _)| column.clone())

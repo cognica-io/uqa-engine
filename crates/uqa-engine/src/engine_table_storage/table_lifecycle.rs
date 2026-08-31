@@ -488,17 +488,6 @@ impl Engine {
             .collect())
     }
 
-    /// Sorted list of tables visible through the active query snapshot.
-    pub(crate) fn query_table_names(&self) -> StorageBackendResult<Vec<String>> {
-        if let Some(snapshot) = self.query_table_snapshots.as_ref() {
-            return Ok(snapshot
-                .keys()
-                .map(RelationIdentity::qualified_name)
-                .collect());
-        }
-        self.table_names()
-    }
-
     /// Snapshot the column schema of `table`. Returns `None` when no
     /// table by that name is registered.
     pub fn describe_table(

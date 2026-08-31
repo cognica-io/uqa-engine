@@ -14,10 +14,11 @@ use super::{
 };
 
 pub(super) fn dml_analysis_scope(
+    engine: &Engine,
     ctes: &[uqa_planner::CtePlan],
     subqueries: &[QueryPlan],
 ) -> CteScope {
-    let mut scope = CteScope::new_for_current_routine();
+    let mut scope = CteScope::new_for_current_routine(engine);
     for cte in ctes {
         scope.insert_deferred(cte.clone());
     }
@@ -111,7 +112,7 @@ fn validate_correlated_subquery_ids(
     outer: &RowSchema,
     params: &[uqa_sql::SQLParam],
 ) -> Result<(), SQLError> {
-    let scope = dml_analysis_scope(ctes, subqueries);
+    let scope = dml_analysis_scope(engine, ctes, subqueries);
     for id in ids {
         let query = subqueries.get(*id).ok_or_else(|| {
             SQLError::Internal(format!("DML scalar subquery slot {id} is out of bounds"))
@@ -388,7 +389,7 @@ pub(super) fn dml_source_schema(
     let Some(source) = source else {
         return Ok(None);
     };
-    let scope = dml_analysis_scope(ctes, subqueries);
+    let scope = dml_analysis_scope(engine, ctes, subqueries);
     crate::sql::select::analyze_source_plan_schema(engine, source, params, &scope, None).map(Some)
 }
 
@@ -400,7 +401,7 @@ pub(super) fn insert_input_width(
     let Some(source) = plan.source.as_deref() else {
         return Ok(plan.rows.first().map_or(0, Vec::len));
     };
-    let scope = dml_analysis_scope(&plan.ctes, &plan.subqueries);
+    let scope = dml_analysis_scope(engine, &plan.ctes, &plan.subqueries);
     Ok(crate::sql::select::analyze_query_plan_schema(engine, source, params, &scope, None)?.len())
 }
 
@@ -530,7 +531,7 @@ pub(super) fn rewrite_correlated_dml_context(
         context.returning_aliases,
         context.include_excluded,
     )?;
-    let scope = dml_analysis_scope(context.ctes, subqueries);
+    let scope = dml_analysis_scope(context.engine, context.ctes, subqueries);
     let rewrite_context = CorrelatedRewriteContext {
         engine: context.engine,
         layer: context.layer,

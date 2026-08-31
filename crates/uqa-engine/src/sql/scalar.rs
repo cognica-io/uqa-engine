@@ -165,7 +165,7 @@ pub(super) fn eval_lowered_expression(
         params,
         engine,
     );
-    let scope = CteScope::new_for_current_routine();
+    let scope = CteScope::new_for_current_routine(engine);
     let hook = ScopedEngineHook::new(engine, &scope);
     let context = PhysicalEvalContext::new(row, params)
         .with_function_hook(&hook)
@@ -192,7 +192,7 @@ pub(crate) fn eval_lowered_expression_with_schema(
         params,
         engine,
     );
-    let scope = CteScope::new_for_current_routine();
+    let scope = CteScope::new_for_current_routine(engine);
     let hook = ScopedEngineHook::new(engine, &scope);
     let context = PhysicalEvalContext::new(Some(row), params)
         .with_row_schema(schema)

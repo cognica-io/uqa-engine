@@ -47,7 +47,7 @@ pub(super) fn declare_session_portal(
         });
     }
     select::lock_query_relations(engine, query)?;
-    let ctes = select::CteScope::new_for_current_routine();
+    let ctes = select::CteScope::new_for_current_routine(engine);
     let schema = select::analyze_query_plan_schema(engine, query, params, &ctes, None)?;
     select::validate_query_row_locks(engine, query, params)?;
     engine.open_pending_session_portal(SessionPortalDeclaration {
@@ -162,7 +162,7 @@ pub(crate) fn start_session_portal_worker(
             closed: std::cell::Cell::new(false),
             public_width: std::cell::Cell::new(0),
         });
-        let mut ctes = select::CteScope::new_for_current_routine();
+        let mut ctes = select::CteScope::new_for_current_routine(&engine);
         ctes.enable_command_progress_streaming();
         let result = select::execute_query_plan_output(
             &engine,

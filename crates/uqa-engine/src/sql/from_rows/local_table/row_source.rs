@@ -5,11 +5,13 @@
 //
 //! Physical row production for persisted, generated, pinned, and command-overlay table rows.
 
-use super::{Arc, Engine, EngineTableRowSource, ResultRow, SQLError, SharedLockOrigin, Value};
+use super::{Arc, EngineTableRowSource, ResultRow, SQLError, SharedLockOrigin, Value};
+use crate::engine_capabilities::{CatalogReadView, RelationNameResolution};
 use crate::sql::doc_id_value;
 
 pub(super) fn table_lock_origin(
-    engine: &Engine,
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
     table: &str,
     qualifier: &str,
     enabled: bool,
@@ -17,9 +19,8 @@ pub(super) fn table_lock_origin(
     if !enabled {
         return Ok(None);
     }
-    let storage_name = engine
-        .try_resolve_table_name(table)
-        .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
+    let storage_name = catalog
+        .table_name_resolved(resolution, table)?
         .unwrap_or_else(|| table.to_string());
     Ok(Some((
         Arc::<str>::from(qualifier),

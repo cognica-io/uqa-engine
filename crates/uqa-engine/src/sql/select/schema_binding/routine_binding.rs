@@ -9,16 +9,17 @@
 use super::{
     cte_references_own_name, expr_contains_subquery, extend_cte_generated_schema,
     extend_recursive_cte_binding_schema, operator_join_relation_schema, ordered_plan_ctes,
-    overlay_outer_schema, rename_schema, CteScope, Engine, QueryPlan, RelationalPlan, RowSchema,
-    SQLError, SQLParam, ScalarExpr, SchemaScope, SourcePlan,
+    overlay_outer_schema, rename_schema, CteScope, QueryPlan, RelationalPlan, RowSchema, SQLError,
+    SQLParam, ScalarExpr, SchemaScope, SourcePlan,
 };
+use crate::engine_user_functions::RoutineResolution;
 use uqa_execution::FunctionTypeResolver;
 use uqa_sql::ast::FunctionBinding;
 
 impl SchemaScope {
     fn bind_query_routines_for_storage(
         &mut self,
-        engine: &Engine,
+        routines: &dyn RoutineResolution,
         plan: &mut QueryPlan,
         params: &[SQLParam],
         outer: Option<&RowSchema>,
@@ -38,7 +39,7 @@ impl SchemaScope {
             if let Some(cycle) = plan.ctes[position].cycle.as_mut() {
                 let schema = RowSchema::default();
                 self.bind_scalar_routines_for_storage(
-                    engine,
+                    routines,
                     &mut cycle.mark_value,
                     &schema,
                     &[],
@@ -46,7 +47,7 @@ impl SchemaScope {
                     outer,
                 )?;
                 self.bind_scalar_routines_for_storage(
-                    engine,
+                    routines,
                     &mut cycle.mark_default,
                     &schema,
                     &[],
@@ -55,10 +56,10 @@ impl SchemaScope {
                 )?;
             }
             let provisional = if self_recursive {
-                self.bind_recursive_seed(engine, &plan.ctes[position].query, params, outer)?
+                self.bind_recursive_seed(routines, &plan.ctes[position].query, params, outer)?
             } else {
                 self.bind_query_routines_for_storage(
-                    engine,
+                    routines,
                     &mut plan.ctes[position].query,
                     params,
                     outer,
@@ -68,30 +69,30 @@ impl SchemaScope {
             let provisional = rename_schema(&provisional, &columns, None);
             let provisional = if self_recursive {
                 extend_recursive_cte_binding_schema(
-                    engine,
+                    routines,
                     &plan.ctes[position],
                     provisional,
                     params,
                 )?
             } else {
-                extend_cte_generated_schema(engine, &plan.ctes[position], provisional, params)?
+                extend_cte_generated_schema(routines, &plan.ctes[position], provisional, params)?
             };
             previous.push((name.clone(), self.ctes.insert(name.clone(), provisional)));
             if self_recursive {
                 let complete = self.bind_query_routines_for_storage(
-                    engine,
+                    routines,
                     &mut plan.ctes[position].query,
                     params,
                     outer,
                 )?;
                 let complete = rename_schema(&complete, &columns, None);
                 let complete =
-                    extend_cte_generated_schema(engine, &plan.ctes[position], complete, params)?;
+                    extend_cte_generated_schema(routines, &plan.ctes[position], complete, params)?;
                 self.ctes.insert(name, complete);
             }
         }
 
-        let result = self.bind_root_routines_for_storage(engine, &mut plan.root, params, outer);
+        let result = self.bind_root_routines_for_storage(routines, &mut plan.root, params, outer);
         for (name, schema) in previous.into_iter().rev() {
             match schema {
                 Some(schema) => {
@@ -107,7 +108,7 @@ impl SchemaScope {
 
     fn bind_root_routines_for_storage(
         &mut self,
-        engine: &Engine,
+        routines: &dyn RoutineResolution,
         root: &mut RelationalPlan,
         params: &[SQLParam],
         outer: Option<&RowSchema>,
@@ -116,7 +117,7 @@ impl SchemaScope {
             RelationalPlan::QueryBlock(block) => {
                 let source_schema = match block.from.as_mut() {
                     Some(source) => self.bind_source_for_execution(
-                        engine,
+                        routines,
                         source,
                         &block.subqueries,
                         params,
@@ -126,7 +127,7 @@ impl SchemaScope {
                 };
                 if let Some(source) = block.from.as_mut() {
                     self.bind_source_routines_for_storage(
-                        engine,
+                        routines,
                         source,
                         &block.subqueries,
                         params,
@@ -136,7 +137,7 @@ impl SchemaScope {
                 let expression_schema = overlay_outer_schema(&source_schema, outer);
                 for subquery in &mut block.subqueries {
                     self.bind_query_routines_for_storage(
-                        engine,
+                        routines,
                         subquery,
                         params,
                         Some(&expression_schema),
@@ -149,22 +150,22 @@ impl SchemaScope {
                 subqueries,
                 ..
             } => {
-                self.bind_query_routines_for_storage(engine, left, params, outer)?;
-                self.bind_query_routines_for_storage(engine, right, params, outer)?;
+                self.bind_query_routines_for_storage(routines, left, params, outer)?;
+                self.bind_query_routines_for_storage(routines, right, params, outer)?;
                 for subquery in subqueries {
-                    self.bind_query_routines_for_storage(engine, subquery, params, outer)?;
+                    self.bind_query_routines_for_storage(routines, subquery, params, outer)?;
                 }
             }
             RelationalPlan::Values { subqueries, .. } => {
                 for subquery in subqueries {
-                    self.bind_query_routines_for_storage(engine, subquery, params, outer)?;
+                    self.bind_query_routines_for_storage(routines, subquery, params, outer)?;
                 }
             }
         }
 
         let set_output = match &*root {
             RelationalPlan::SetOp { .. } => {
-                Some(self.bind_root(engine, root, params, outer, false)?)
+                Some(self.bind_root(routines, root, params, outer, false)?)
             }
             RelationalPlan::QueryBlock(_) | RelationalPlan::Values { .. } => None,
         };
@@ -184,12 +185,12 @@ impl SchemaScope {
                 }
                 let source_schema = block.from.as_ref().map_or_else(
                     || Ok(RowSchema::default()),
-                    |source| self.bind_source(engine, source, &block.subqueries, params, outer),
+                    |source| self.bind_source(routines, source, &block.subqueries, params, outer),
                 )?;
                 let expression_schema = overlay_outer_schema(&source_schema, outer);
                 if let Some(filter) = block.r#where.as_mut() {
                     self.bind_scalar_routines_for_storage(
-                        engine,
+                        routines,
                         filter,
                         &expression_schema,
                         &block.subqueries,
@@ -199,7 +200,7 @@ impl SchemaScope {
                 }
                 for projection in &mut block.projections {
                     self.bind_scalar_routines_for_storage(
-                        engine,
+                        routines,
                         &mut projection.expr,
                         &expression_schema,
                         &block.subqueries,
@@ -213,7 +214,7 @@ impl SchemaScope {
                 )?;
                 for expression in &mut block.group_by {
                     self.bind_scalar_routines_for_storage(
-                        engine,
+                        routines,
                         expression,
                         &expression_schema,
                         &block.subqueries,
@@ -224,7 +225,7 @@ impl SchemaScope {
                 for set in &mut block.grouping_sets {
                     for expression in set {
                         self.bind_scalar_routines_for_storage(
-                            engine,
+                            routines,
                             expression,
                             &expression_schema,
                             &block.subqueries,
@@ -235,7 +236,7 @@ impl SchemaScope {
                 }
                 if let Some(having) = block.having.as_mut() {
                     self.bind_scalar_routines_for_storage(
-                        engine,
+                        routines,
                         having,
                         &expression_schema,
                         &block.subqueries,
@@ -245,7 +246,7 @@ impl SchemaScope {
                 }
                 for order in &mut block.order_by {
                     self.bind_scalar_routines_for_storage(
-                        engine,
+                        routines,
                         &mut order.expr,
                         &expression_schema,
                         &block.subqueries,
@@ -255,7 +256,7 @@ impl SchemaScope {
                 }
                 if let Some(limit) = block.limit.as_mut() {
                     self.bind_scalar_routines_for_storage(
-                        engine,
+                        routines,
                         limit,
                         &expression_schema,
                         &block.subqueries,
@@ -265,7 +266,7 @@ impl SchemaScope {
                 }
                 if let Some(offset) = block.offset.as_mut() {
                     self.bind_scalar_routines_for_storage(
-                        engine,
+                        routines,
                         offset,
                         &expression_schema,
                         &block.subqueries,
@@ -275,7 +276,7 @@ impl SchemaScope {
                 }
                 for expression in &mut block.distinct_on {
                     self.bind_scalar_routines_for_storage(
-                        engine,
+                        routines,
                         expression,
                         &expression_schema,
                         &block.subqueries,
@@ -296,7 +297,7 @@ impl SchemaScope {
                     .expect("set-operation output schema was bound before routine expressions");
                 for order in order_by {
                     self.bind_scalar_routines_for_storage(
-                        engine,
+                        routines,
                         &mut order.expr,
                         output,
                         subqueries,
@@ -306,12 +307,12 @@ impl SchemaScope {
                 }
                 if let Some(limit) = limit {
                     self.bind_scalar_routines_for_storage(
-                        engine, limit, output, subqueries, params, outer,
+                        routines, limit, output, subqueries, params, outer,
                     )?;
                 }
                 if let Some(offset) = offset {
                     self.bind_scalar_routines_for_storage(
-                        engine, offset, output, subqueries, params, outer,
+                        routines, offset, output, subqueries, params, outer,
                     )?;
                 }
             }
@@ -319,17 +320,17 @@ impl SchemaScope {
                 let input = outer.cloned().unwrap_or_default();
                 for expression in rows.iter_mut().flatten() {
                     self.bind_scalar_routines_for_storage(
-                        engine, expression, &input, subqueries, params, outer,
+                        routines, expression, &input, subqueries, params, outer,
                     )?;
                 }
             }
         }
-        self.bind_root(engine, root, params, outer, false)
+        self.bind_root(routines, root, params, outer, false)
     }
 
     fn bind_source_routines_for_storage(
         &mut self,
-        engine: &Engine,
+        engine: &dyn RoutineResolution,
         source: &mut SourcePlan,
         subqueries: &[QueryPlan],
         params: &[SQLParam],
@@ -392,9 +393,9 @@ impl SchemaScope {
                 let input = if crate::operator_tree_bridge::is_operator_join_table_function(&local)
                 {
                     operator_join_relation_schema(
-                        engine,
+                        &self.catalog,
+                        &self.resolution,
                         relation.as_deref(),
-                        self.catalog_tables_only,
                     )?
                 } else {
                     outer.cloned().unwrap_or_default()
@@ -412,9 +413,9 @@ impl SchemaScope {
                     let input =
                         if crate::operator_tree_bridge::is_operator_join_table_function(&local) {
                             operator_join_relation_schema(
-                                engine,
+                                &self.catalog,
+                                &self.resolution,
                                 function.relation.as_deref(),
-                                self.catalog_tables_only,
                             )?
                         } else {
                             outer.cloned().unwrap_or_default()
@@ -433,7 +434,7 @@ impl SchemaScope {
 
     fn bind_scalar_routines_for_storage(
         &mut self,
-        engine: &Engine,
+        engine: &dyn RoutineResolution,
         expression: &mut ScalarExpr,
         schema: &RowSchema,
         subqueries: &[QueryPlan],
@@ -473,7 +474,7 @@ impl SchemaScope {
     #[allow(clippy::too_many_arguments)]
     fn bind_scalar_function_for_storage(
         &mut self,
-        engine: &Engine,
+        engine: &dyn RoutineResolution,
         name: &str,
         binding: &mut Option<FunctionBinding>,
         args: &[ScalarExpr],
@@ -490,11 +491,8 @@ impl SchemaScope {
             params,
             outer,
         )?;
-        let resolver = resolver
-            .as_ref()
-            .map_or(engine as &dyn FunctionTypeResolver, |resolver| resolver);
         let (argument_names, argument_types, explicit_variadic) =
-            uqa_execution::function_call_argument_signature(args, schema, params, Some(resolver))?;
+            uqa_execution::function_call_argument_signature(args, schema, params, Some(&resolver))?;
         let selected = if uqa_execution::is_fixed_builtin(name) {
             uqa_execution::resolve_fixed_builtin_call(
                 name,
@@ -502,7 +500,7 @@ impl SchemaScope {
                 &argument_names,
                 &argument_types,
                 explicit_variadic,
-                Some(resolver),
+                Some(&resolver),
             )?
             .map(|resolved| resolved.selected)
         } else {
@@ -522,11 +520,11 @@ impl SchemaScope {
 }
 
 pub(in crate::sql) fn bind_query_plan_routines_for_storage(
-    engine: &Engine,
+    engine: &dyn RoutineResolution,
     plan: &mut QueryPlan,
     params: &[SQLParam],
     ctes: &CteScope,
     outer: Option<&RowSchema>,
 ) -> Result<RowSchema, SQLError> {
-    SchemaScope::for_analysis(ctes).bind_query_routines_for_storage(engine, plan, params, outer)
+    SchemaScope::for_analysis(ctes)?.bind_query_routines_for_storage(engine, plan, params, outer)
 }

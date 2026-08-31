@@ -115,7 +115,7 @@ pub(in crate::sql) fn materialize_recursive_cte(
     let mut working = alias_query_output_to_shared(engine, anchor, &anchor_columns)?;
     let anchor_schema = working.row_schema().clone();
 
-    let work_mem = physical_work_mem_bytes(engine)?.max(1);
+    let work_mem = physical_work_mem_bytes(engine.query_runtime_view())?.max(1);
     // The accumulated rows and UNION duplicate state are live together. Give
     // each at most half of work_mem; SharedSpill working sets are disk-only.
     let state_budget = (work_mem / 2).max(1);
@@ -224,7 +224,7 @@ fn materialize_controlled_recursive_cte(
         .transpose()?;
     let controlled_step = controlled_recursive_step_plan(cte, step_plan)?;
 
-    let work_mem = physical_work_mem_bytes(engine)?.max(1);
+    let work_mem = physical_work_mem_bytes(engine.query_runtime_view())?.max(1);
     let state_budget = (work_mem / 2).max(1);
     let mut seen = (!all).then(|| uqa_execution::ExactRowSet::new(state_budget));
     let (mut emitted, mut expandable) = annotate_recursive_rows(

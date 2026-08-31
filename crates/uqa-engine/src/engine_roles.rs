@@ -206,25 +206,6 @@ impl Engine {
         self.session_execution_view().session_user()
     }
 
-    pub(crate) fn roles_for_catalog(&self) -> Vec<RoleDefinition> {
-        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
-            return snapshot.roles.values().cloned().collect();
-        }
-        self.durable.roles.read().values().cloned().collect()
-    }
-
-    pub(crate) fn role_memberships_for_catalog(&self) -> Vec<RoleMembership> {
-        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
-            return snapshot.role_memberships.values().cloned().collect();
-        }
-        self.durable
-            .role_memberships
-            .read()
-            .values()
-            .cloned()
-            .collect()
-    }
-
     pub(crate) fn current_user_is_superuser(&self) -> bool {
         let current = self.current_user_name();
         self.durable

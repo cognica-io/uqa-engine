@@ -14,7 +14,7 @@
 
 use std::collections::BTreeSet;
 
-use uqa_execution::{ScalarExpr, ScalarFrameBound};
+use uqa_execution::ScalarExpr;
 use uqa_planner::{QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan, UnifiedPlan};
 use uqa_sql::ast::FunctionVolatility;
 use uqa_sql::SQLError;
@@ -150,91 +150,24 @@ fn expr_contains_volatile_function_with(
     expr: &ScalarExpr,
     conservative_subqueries: bool,
 ) -> bool {
-    let recurse = |inner: &ScalarExpr| {
-        expr_contains_volatile_function_with(engine, inner, conservative_subqueries)
-    };
-    match expr {
-        ScalarExpr::Func {
-            name,
-            args,
-            order_by,
-            filter,
-            ..
-        } => {
-            function_volatility(engine, name, args.len()) == FunctionVolatility::Volatile
-                || args.iter().any(recurse)
-                || order_by.iter().any(|order| recurse(&order.expr))
-                || filter.as_ref().is_some_and(|expr| recurse(expr))
+    let mut volatile = false;
+    expr.visit(&mut |part| {
+        if volatile {
+            return;
         }
-        ScalarExpr::Array(items)
-        | ScalarExpr::Row(items)
-        | ScalarExpr::And(items)
-        | ScalarExpr::Or(items) => items.iter().any(recurse),
-        ScalarExpr::Binary { lhs, rhs, .. } => recurse(lhs) || recurse(rhs),
-        ScalarExpr::Not(inner)
-        | ScalarExpr::UnaryMinus(inner)
-        | ScalarExpr::IsNull { expr: inner, .. }
-        | ScalarExpr::Cast { expr: inner, .. } => recurse(inner),
-        ScalarExpr::Between { expr, low, high } => recurse(expr) || recurse(low) || recurse(high),
-        ScalarExpr::InList { expr, list, .. } => recurse(expr) || list.iter().any(recurse),
-        ScalarExpr::WindowCall { name, args, spec } => {
-            function_volatility(engine, name, args.len()) == FunctionVolatility::Volatile
-                || args.iter().any(recurse)
-                || spec.partition_by.iter().any(recurse)
-                || spec.order_by.iter().any(|order| recurse(&order.expr))
-                || spec.frame.as_ref().is_some_and(|frame| {
-                    frame_bound_contains_volatile_function_with(
-                        engine,
-                        &frame.start,
-                        conservative_subqueries,
-                    ) || frame_bound_contains_volatile_function_with(
-                        engine,
-                        &frame.end,
-                        conservative_subqueries,
-                    )
-                })
+        match part {
+            ScalarExpr::Func { name, args, .. } | ScalarExpr::WindowCall { name, args, .. } => {
+                volatile =
+                    function_volatility(engine, name, args.len()) == FunctionVolatility::Volatile;
+            }
+            // Query-valued children are inspected by the enclosing QueryPlan. At expression-only rewrite sites, retaining the conservative rule prevents an opaque child query from being duplicated or reordered.
+            ScalarExpr::ScalarSubquery(_)
+            | ScalarExpr::Exists { .. }
+            | ScalarExpr::InSubquery { .. } => volatile = conservative_subqueries,
+            _ => {}
         }
-        ScalarExpr::Case {
-            base,
-            when,
-            else_branch,
-        } => {
-            base.as_ref().is_some_and(|expr| recurse(expr))
-                || when
-                    .iter()
-                    .any(|(condition, result)| recurse(condition) || recurse(result))
-                || else_branch.as_ref().is_some_and(|expr| recurse(expr))
-        }
-        // Query-valued children are inspected by the enclosing `QueryPlan`.
-        // At expression-only rewrite sites, retaining the conservative rule
-        // prevents an opaque child query from being duplicated or reordered.
-        ScalarExpr::ScalarSubquery(_) | ScalarExpr::Exists { .. } => conservative_subqueries,
-        ScalarExpr::InSubquery { expr, .. } => conservative_subqueries || recurse(expr),
-        ScalarExpr::Default
-        | ScalarExpr::Star
-        | ScalarExpr::QualifiedStar(_)
-        | ScalarExpr::Column(_)
-        | ScalarExpr::Position(_)
-        | ScalarExpr::InternalColumn(_)
-        | ScalarExpr::QualifiedColumn { .. }
-        | ScalarExpr::Literal(_)
-        | ScalarExpr::Param(_) => false,
-    }
-}
-
-fn frame_bound_contains_volatile_function_with(
-    engine: &Engine,
-    bound: &ScalarFrameBound,
-    conservative_subqueries: bool,
-) -> bool {
-    match bound {
-        ScalarFrameBound::Preceding(expr) | ScalarFrameBound::Following(expr) => {
-            expr_contains_volatile_function_with(engine, expr, conservative_subqueries)
-        }
-        ScalarFrameBound::UnboundedPreceding
-        | ScalarFrameBound::UnboundedFollowing
-        | ScalarFrameBound::CurrentRow => false,
-    }
+    });
+    volatile
 }
 
 /// The block's own subquery plans are inspected separately by the query-level walk, so subquery references here are not conservatively volatile.
@@ -436,4 +369,36 @@ pub(super) fn unified_plan_contains_volatile_function(engine: &Engine, plan: &Un
         }
     });
     volatile
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{expr_contains_volatile_function, Engine, ScalarExpr};
+    use uqa_execution::{ScalarFrameBound, ScalarWindowFrame, ScalarWindowSpec};
+    use uqa_sql::ast::FrameMode;
+
+    #[test]
+    fn volatility_inspection_includes_window_frame_expressions() {
+        let expression = ScalarExpr::WindowCall {
+            name: "sum".into(),
+            args: vec![ScalarExpr::Column("amount".into())],
+            spec: ScalarWindowSpec {
+                partition_by: Vec::new(),
+                order_by: Vec::new(),
+                frame: Some(ScalarWindowFrame {
+                    mode: FrameMode::Rows,
+                    start: ScalarFrameBound::Preceding(Box::new(ScalarExpr::Func {
+                        name: "random".into(),
+                        binding: None,
+                        args: Vec::new(),
+                        distinct: false,
+                        order_by: Vec::new(),
+                        filter: None,
+                    })),
+                    end: ScalarFrameBound::CurrentRow,
+                }),
+            },
+        };
+        assert!(expr_contains_volatile_function(&Engine::new(), &expression));
+    }
 }

@@ -147,7 +147,7 @@ pub(in crate::sql) fn build_facet_output(
         .iter()
         .map(|column| (column.clone(), ScalarExpr::Column(column.clone())))
         .collect::<Vec<_>>();
-    let work_mem = physical_work_mem_bytes(engine)?;
+    let work_mem = physical_work_mem_bytes(engine.query_runtime_view())?;
     let aggregate: Box<dyn PhysicalOperator + '_> = Box::new(HashAggregate::new_with_work_mem(
         Box::new(uqa_execution::SharedSpillScan::new(facet_input)),
         group_keys,

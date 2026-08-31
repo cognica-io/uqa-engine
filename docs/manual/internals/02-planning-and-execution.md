@@ -40,19 +40,31 @@ The plan owns read queries and physical command bodies. Relational query blocks 
 ```mermaid
 flowchart LR
     Engine[Engine composition facade] --> Catalog[CatalogReadView]
+    Engine --> Resolution[RelationNameResolution]
     Engine --> Session[SessionExecutionView]
     Engine --> Runtime[QueryRuntimeView]
     Engine --> Mutation[MutationCoordinator]
-    Catalog --> Namespace[pg_namespace rows]
-    Session --> Namespace
+    Catalog --> Bind[Schema binding]
+    Resolution --> Bind
+    Catalog --> Scan[Catalog and relation scans]
+    Resolution --> Scan
+    Session --> Scan
     Session --> Settings[SHOW and pg_settings]
-    Runtime --> Execute[UnifiedPlanExecutor runtime checks]
+    Runtime --> Physical[Physical construction and execution]
     Mutation --> Schema[CREATE SCHEMA]
 ```
 
-The engine facade constructs borrowed capability views at execution boundaries instead of passing its full state surface into migrated leaves. The views borrow existing state owners and contain no `Engine` reference or recovery mechanism. `UnifiedPlanExecutor` stores the statement's session, runtime, and mutation capabilities while remaining the only exhaustive `UnifiedPlan` and `CommandPlan` dispatcher.
+The engine facade constructs narrow capability values at execution boundaries instead of passing its full state surface into migrated leaves. `CatalogReadView` owns an immutable statement snapshot, `RelationNameResolution` owns the matching search path and temporary namespace, and the remaining views borrow only their existing state owners; none contains an `Engine` reference or recovery mechanism. `UnifiedPlanExecutor` stores the statement's session, runtime, and mutation capabilities while remaining the only exhaustive `UnifiedPlan` and `CommandPlan` dispatcher.
 
-Catalog scan orchestration passes `CatalogReadView` and `SessionExecutionView` into engine-free `pg_namespace` and `pg_settings` row builders. The `CREATE SCHEMA` command arm delegates to `MutationCoordinator`, which owns schema persistence and registry publication; the former direct inner implementation is absent. Command families not yet moved retain one established owner and do not gain a fallback path.
+`CteScope` captures the catalog and name-resolution pair once and passes it through schema binding, filter pushdown, virtual catalog scans, table access, row-lock planning, evaluation, and physical construction. Static catalog metadata and pure row builders are engine-free leaves; live builders consume only the snapshot and the session values they require. The `CREATE SCHEMA` command arm delegates to `MutationCoordinator`, which owns schema persistence and registry publication; the former direct inner implementation is absent. Command families not yet moved retain one established owner and do not gain a fallback path.
+
+## Read-path ownership
+
+Catalog projection is split by virtual-relation family under [`sql/catalog/pg_catalog/`](../../../crates/uqa-engine/src/sql/catalog/pg_catalog), and shared projection policy is split by rows, OIDs, type metadata, information-schema types, index definitions, constraints, and dependencies under [`sql/catalog/helpers/`](../../../crates/uqa-engine/src/sql/catalog/helpers). The roots contain declarations and direct owner imports rather than a forwarding implementation dump.
+
+Schema binding keeps scope, source, projection, routine/type, CTE, and catalog-source owners under [`sql/select/schema_binding/`](../../../crates/uqa-engine/src/sql/select/schema_binding). A deterministic fixture binds a complete query against `CatalogReadView` and `RoutineResolution` without constructing `Engine`. Evaluation keeps CTE lifetime, subquery cache, row-lock state, callbacks, and type resolution under [`sql/select/evaluation/`](../../../crates/uqa-engine/src/sql/select/evaluation), while physical construction keeps projection, aggregation, ordering, limits, row locking, operator assembly, and output finishing under [`sql/select/physical_plan/`](../../../crates/uqa-engine/src/sql/select/physical_plan).
+
+Reusable physical-scalar traversal is owned by [`uqa-execution/src/scalar/traversal.rs`](../../../crates/uqa-execution/src/scalar/traversal.rs). SELECT expression-shape and volatility checks use that traversal instead of maintaining incomplete recursive copies. Engine-specific planner statistics implement the narrow `SourceStatistics` contract and preserve the first callback failure instead of substituting guessed statistics.
 
 ## Access path selection
 

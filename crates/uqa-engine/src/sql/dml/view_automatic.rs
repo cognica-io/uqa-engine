@@ -267,7 +267,7 @@ fn automatic_view_layer_from_definition(
     else {
         return Ok(None);
     };
-    let analysis_scope = CteScope::new_for_current_routine();
+    let analysis_scope = CteScope::new_for_current_routine(engine);
     let source_schema = crate::sql::select::analyze_source_plan_schema(
         engine,
         source_plan,
@@ -928,7 +928,7 @@ fn embed_layer_expression(
         )));
     }
     let mut subqueries = layer.subqueries.clone();
-    let scope = CteScope::new_for_current_routine();
+    let scope = CteScope::new_for_current_routine(engine);
     let context = LayerSubqueryRewriteContext {
         engine,
         layer,

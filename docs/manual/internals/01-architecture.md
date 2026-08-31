@@ -159,11 +159,18 @@ flowchart TD
 | Planner | [`crates/uqa-planner/src/lib.rs`](../../../crates/uqa-planner/src/lib.rs) |
 | Query optimizer | [`crates/uqa-planner/src/query_optimizer.rs`](../../../crates/uqa-planner/src/query_optimizer.rs) |
 | Execution | [`crates/uqa-execution/src/lib.rs`](../../../crates/uqa-execution/src/lib.rs) |
+| Physical scalar traversal | [`crates/uqa-execution/src/scalar/traversal.rs`](../../../crates/uqa-execution/src/scalar/traversal.rs) |
 | Engine composition | [`crates/uqa-engine/src/lib.rs`](../../../crates/uqa-engine/src/lib.rs) |
 | Engine capability adapters | [`crates/uqa-engine/src/engine_capabilities.rs`](../../../crates/uqa-engine/src/engine_capabilities.rs) |
+| Statement catalog snapshot | [`crates/uqa-engine/src/engine_capabilities/catalog.rs`](../../../crates/uqa-engine/src/engine_capabilities/catalog.rs) |
 | Unified plan dispatcher | [`crates/uqa-engine/src/sql/plan_executor.rs`](../../../crates/uqa-engine/src/sql/plan_executor.rs) |
 | Session portal workflow | [`crates/uqa-engine/src/sql/session_portal_worker.rs`](../../../crates/uqa-engine/src/sql/session_portal_worker.rs) |
-| Capability-scoped catalog rows | [`crates/uqa-engine/src/sql/catalog/pg_namespace.rs`](../../../crates/uqa-engine/src/sql/catalog/pg_namespace.rs) |
+| Catalog projection | [`crates/uqa-engine/src/sql/catalog.rs`](../../../crates/uqa-engine/src/sql/catalog.rs) |
+| Catalog relation families | [`crates/uqa-engine/src/sql/catalog/pg_catalog.rs`](../../../crates/uqa-engine/src/sql/catalog/pg_catalog.rs) |
+| Catalog projection policy | [`crates/uqa-engine/src/sql/catalog/helpers.rs`](../../../crates/uqa-engine/src/sql/catalog/helpers.rs) |
+| Schema binding | [`crates/uqa-engine/src/sql/select/schema_binding.rs`](../../../crates/uqa-engine/src/sql/select/schema_binding.rs) |
+| Query evaluation scopes | [`crates/uqa-engine/src/sql/select/evaluation.rs`](../../../crates/uqa-engine/src/sql/select/evaluation.rs) |
+| Physical query construction | [`crates/uqa-engine/src/sql/select/physical_plan.rs`](../../../crates/uqa-engine/src/sql/select/physical_plan.rs) |
 | Storage contracts | [`crates/uqa-storage/src/lib.rs`](../../../crates/uqa-storage/src/lib.rs) |
 | Graph runtime | [`crates/uqa-graph/src/lib.rs`](../../../crates/uqa-graph/src/lib.rs) |
 

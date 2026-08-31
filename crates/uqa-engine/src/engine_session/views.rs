@@ -575,6 +575,19 @@ impl Engine {
         &self,
         view: &StoredView,
     ) -> Result<uqa_execution::RowSchema, SQLError> {
+        self.stored_view_schema_with_catalog(
+            view,
+            self.restored_catalog_read_view(),
+            self.session_execution_view().relation_name_resolution(),
+        )
+    }
+
+    pub(crate) fn stored_view_schema_with_catalog(
+        &self,
+        view: &StoredView,
+        catalog: crate::engine_capabilities::CatalogReadView,
+        resolution: crate::engine_capabilities::RelationNameResolution,
+    ) -> Result<uqa_execution::RowSchema, SQLError> {
         if view.kind == StoredViewKind::Materialized {
             let output_columns = view.output_columns.clone().unwrap_or_default();
             if output_columns.len() != view.materialized_column_types.len() {
@@ -587,7 +600,13 @@ impl Engine {
                 view.materialized_column_types.clone(),
             ));
         }
-        let query_schema = crate::sql::analyze_catalog_query_schema(self, &view.query, &[])?;
+        let query_schema = crate::sql::analyze_query_schema_with_catalog(
+            self,
+            &view.query,
+            &[],
+            catalog,
+            resolution,
+        )?;
         let output_columns = match &view.output_columns {
             Some(columns) => columns.clone(),
             None => create_view_output_columns(&query_schema, &[])?,
@@ -655,21 +674,6 @@ impl Engine {
             .filter(|(_, view)| view.kind == StoredViewKind::View)
             .map(|(relation, _)| relation.qualified_name())
             .collect();
-        out.sort_unstable();
-        Ok(out)
-    }
-
-    pub(crate) fn list_materialized_views(&self) -> Result<Vec<String>, SQLError> {
-        self.synchronize_catalog_registries()
-            .map_err(|err| SQLError::Internal(format!("refresh view catalog: {err}")))?;
-        let mut out = self
-            .durable
-            .views
-            .read()
-            .iter()
-            .filter(|(_, view)| view.kind == StoredViewKind::Materialized)
-            .map(|(relation, _)| relation.qualified_name())
-            .collect::<Vec<_>>();
         out.sort_unstable();
         Ok(out)
     }
