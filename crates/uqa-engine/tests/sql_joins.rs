@@ -268,6 +268,47 @@ fn left_join_null_for_unmatched() {
 }
 
 #[test]
+fn outer_join_null_accepting_filters_run_after_null_extension() {
+    let engine = engine_with_orders();
+    let unmatched = query(
+        &engine,
+        "SELECT users.name FROM users LEFT JOIN orders ON users.id = orders.user_id WHERE orders.oid IS NULL ORDER BY users.name",
+    );
+    assert_eq!(unmatched.rows.len(), 1);
+    assert_eq!(unmatched.rows[0]["name"], Value::Str("Carol".into()));
+
+    let coalesced = query(
+        &engine,
+        "SELECT users.name FROM users LEFT JOIN orders ON users.id = orders.user_id WHERE coalesce(orders.oid, 0) = 0 ORDER BY users.name",
+    );
+    assert_eq!(coalesced.rows, unmatched.rows);
+
+    let nested_alias = query(
+        &engine,
+        "SELECT joined.user_name FROM ((users LEFT JOIN orders ON users.id = orders.user_id) CROSS JOIN (VALUES (1)) AS marker(flag)) AS joined(user_id, user_name, order_id, order_user_id, product, flag) WHERE joined.order_id IS NULL ORDER BY joined.user_name",
+    );
+    assert_eq!(nested_alias.rows.len(), 1);
+    assert_eq!(
+        nested_alias.rows[0]["user_name"],
+        Value::Str("Carol".into())
+    );
+
+    exec(
+        &engine,
+        "INSERT INTO orders (oid, user_id, product) VALUES (13, 99, 'Ghost')",
+    );
+    let right_unmatched = query(
+        &engine,
+        "SELECT orders.product FROM users RIGHT JOIN orders ON users.id = orders.user_id WHERE users.id IS NULL",
+    );
+    assert_eq!(right_unmatched.rows.len(), 1);
+    assert_eq!(
+        right_unmatched.rows[0]["product"],
+        Value::Str("Ghost".into())
+    );
+}
+
+#[test]
 fn cross_join_cartesian() {
     let engine = Engine::new();
     exec(&engine, "CREATE TABLE a (id INTEGER PRIMARY KEY, val TEXT)");

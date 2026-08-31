@@ -20,6 +20,8 @@ use uqa_core::ArrayValue;
 use uqa_sql::ast::RangeSubtype;
 use uqa_sql::ast::RoleAttribute;
 
+use crate::engine_roles::role_oid;
+
 pub(super) fn build_pg_tables(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     let mut out: Vec<ResultRow> = Vec::new();
     let mut names = engine
@@ -1361,6 +1363,24 @@ pub(super) fn build_pg_roles(engine: &Engine) -> Vec<ResultRow> {
                     bool_value(role.has(RoleAttribute::BypassRls)),
                 ),
                 ("rolconfig", Value::Null),
+            ])
+        })
+        .collect()
+}
+
+pub(super) fn build_pg_auth_members(engine: &Engine) -> Vec<ResultRow> {
+    engine
+        .role_memberships_for_catalog()
+        .into_iter()
+        .map(|membership| {
+            row([
+                ("oid", int_value(membership.oid)),
+                ("roleid", int_value(role_oid(&membership.role))),
+                ("member", int_value(role_oid(&membership.member))),
+                ("grantor", int_value(role_oid(&membership.grantor))),
+                ("admin_option", bool_value(membership.admin_option)),
+                ("inherit_option", bool_value(membership.inherit_option)),
+                ("set_option", bool_value(membership.set_option)),
             ])
         })
         .collect()

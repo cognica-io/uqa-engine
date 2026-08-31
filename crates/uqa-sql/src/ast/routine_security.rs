@@ -105,6 +105,25 @@ pub struct GrantRoutineStmt {
     pub grantees: Vec<String>,
 }
 
+/// `PostgreSQL` 18 options stored on one role-membership grant.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleMembershipOptions {
+    pub admin: Option<bool>,
+    pub inherit: Option<bool>,
+    pub set: Option<bool>,
+}
+
+/// `GRANT role TO member` or `REVOKE role FROM member`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GrantRoleStmt {
+    pub granted_roles: Vec<String>,
+    pub grantee_roles: Vec<String>,
+    pub is_grant: bool,
+    pub options: RoleMembershipOptions,
+    pub grantor: Option<String>,
+    pub cascade: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum RoleAttribute {
     Superuser,
@@ -121,6 +140,18 @@ pub struct CreateRoleStmt {
     pub name: String,
     pub attributes: BTreeSet<RoleAttribute>,
     pub connection_limit: i32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub in_roles: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub role_members: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub admin_members: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RoleMembershipAction {
+    Add,
+    Drop,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -128,6 +159,8 @@ pub struct AlterRoleStmt {
     pub name: String,
     pub attributes: BTreeMap<RoleAttribute, bool>,
     pub connection_limit: Option<i32>,
+    pub membership_action: Option<RoleMembershipAction>,
+    pub members: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

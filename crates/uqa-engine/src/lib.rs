@@ -153,6 +153,7 @@ const SEQUENCES_METADATA_KEY: &str = "sql_sequences_json";
 const GRAPH_LABELS_METADATA_PREFIX: &str = "graph_label_registry::";
 const FUNCTIONS_METADATA_KEY: &str = "sql_functions_json";
 const ROLES_METADATA_KEY: &str = "sql_roles_json";
+const ROLE_MEMBERSHIPS_METADATA_KEY: &str = "sql_role_memberships_json";
 const TRIGGERS_METADATA_KEY: &str = "sql_triggers_json";
 const RULES_METADATA_KEY: &str = "sql_rules_json";
 const SQL_STATEMENT_CACHE_LIMIT: usize = 256;

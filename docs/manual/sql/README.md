@@ -30,7 +30,7 @@ UQA Engine parses PostgreSQL 18 SQL syntax with `libpg_query`, compiles supporte
 | Session and diagnostics | `SET`, `SHOW`, `DISCARD`, `LOAD`, `ANALYZE`, `EXPLAIN` |
 | Transactions | `BEGIN`, `START TRANSACTION`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`, `RELEASE`, `ROLLBACK TO SAVEPOINT` |
 | Prepared SQL | `PREPARE`, `EXECUTE`, `DEALLOCATE` |
-| Routines and roles | `CREATE FUNCTION`, `CREATE PROCEDURE`, `CREATE OR REPLACE`, implemented `ALTER FUNCTION`/`PROCEDURE`/`ROUTINE` attributes and ownership, routine `GRANT`/`REVOKE`, `CREATE`/`ALTER`/`DROP ROLE`, `CREATE USER`, `SET ROLE`, `RESET ROLE`, `DROP FUNCTION`, `DROP PROCEDURE`, `DO`, `CALL` |
+| Routines and roles | `CREATE FUNCTION`, `CREATE PROCEDURE`, `CREATE OR REPLACE`, implemented `ALTER FUNCTION`/`PROCEDURE`/`ROUTINE` attributes and ownership, routine `GRANT`/`REVOKE`, `CREATE`/`ALTER`/`DROP ROLE`, `CREATE USER`, role-membership `GRANT`/`REVOKE`, legacy `ALTER GROUP ... ADD|DROP USER`, `SET ROLE`, `RESET ROLE`, `DROP FUNCTION`, `DROP PROCEDURE`, `DO`, `CALL` |
 | Triggers and rewrite rules | `CREATE`/`CREATE OR REPLACE`/`DROP TRIGGER`, `ALTER TRIGGER ... RENAME`, `ALTER TABLE ... ENABLE`/`DISABLE TRIGGER`, `CREATE`/`CREATE OR REPLACE`/`DROP RULE`, `ALTER RULE ... RENAME`, `ALTER TABLE ... ENABLE`/`DISABLE RULE` |
 
 Unsupported statement shapes fail with an error instead of silently discarding clauses.
@@ -108,4 +108,4 @@ EXPLAIN (ANALYZE, FORMAT JSON)
 SELECT id FROM articles WHERE status = 'open';
 ```
 
-The virtual `information_schema` and `pg_catalog` relations expose UQA Engine catalog state for inspection and compatibility. They are not a complete PostgreSQL system catalog.
+The virtual `information_schema` and `pg_catalog` relations expose UQA Engine catalog state for inspection and compatibility, including durable logical roles in `pg_roles` and `pg_user` and per-grantor role-membership options in `pg_auth_members`. They are not a complete PostgreSQL system catalog.

@@ -924,6 +924,91 @@ pub(super) fn compile_grant_routine(
     }))
 }
 
+fn compile_membership_role_list(
+    nodes: &[pg_query::protobuf::Node],
+    context: &str,
+) -> Result<Vec<String>> {
+    nodes
+        .iter()
+        .map(|node| {
+            let Some(NodeEnum::RoleSpec(role)) = node.node.as_ref() else {
+                return Err(SQLError::Internal(format!(
+                    "{context} contains a malformed role specification"
+                )));
+            };
+            compile_role_spec(role, false, context)
+        })
+        .collect()
+}
+
+pub(super) fn compile_grant_role(
+    statement: &pg_query::protobuf::GrantRoleStmt,
+) -> Result<Statement> {
+    use crate::ast::{GrantRoleStmt, RoleMembershipOptions};
+    use pg_query::protobuf::DropBehavior;
+
+    let granted_roles = statement
+        .granted_roles
+        .iter()
+        .map(|node| {
+            let Some(NodeEnum::AccessPriv(role)) = node.node.as_ref() else {
+                return Err(SQLError::Internal(
+                    "GRANT/REVOKE ROLE contains a malformed granted role".into(),
+                ));
+            };
+            if !role.cols.is_empty() {
+                return Err(SQLError::Routine {
+                    sqlstate: "42601".into(),
+                    message: "column lists are not valid for role membership".into(),
+                });
+            }
+            Ok(role.priv_name.clone())
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let members = compile_membership_role_list(&statement.grantee_roles, "GRANT/REVOKE ROLE")?;
+    let mut options = RoleMembershipOptions::default();
+    for option in &statement.opt {
+        let Some(NodeEnum::DefElem(option)) = option.node.as_ref() else {
+            return Err(SQLError::Internal(
+                "GRANT/REVOKE ROLE contains a malformed option".into(),
+            ));
+        };
+        let slot = match option.defname.to_ascii_lowercase().as_str() {
+            "admin" => &mut options.admin,
+            "inherit" => &mut options.inherit,
+            "set" => &mut options.set,
+            other => {
+                return Err(SQLError::Unsupported(format!(
+                    "GRANT/REVOKE ROLE option `{other}` is not supported"
+                )))
+            }
+        };
+        if slot.is_some() {
+            return Err(SQLError::Routine {
+                sqlstate: "42601".into(),
+                message: format!(
+                    "conflicting or redundant role membership option `{}`",
+                    option.defname
+                ),
+            });
+        }
+        *slot = Some(def_elem_bool(option, "GRANT/REVOKE ROLE option")?);
+    }
+    let grantor = statement
+        .grantor
+        .as_ref()
+        .map(|role| compile_role_spec(role, false, "GRANTED BY"))
+        .transpose()?;
+    Ok(Statement::GrantRole(GrantRoleStmt {
+        granted_roles,
+        grantee_roles: members,
+        is_grant: statement.is_grant,
+        options,
+        grantor,
+        cascade: matches!(statement.behavior(), DropBehavior::DropCascade),
+    }))
+}
+
 fn role_option_bool(element: &pg_query::protobuf::DefElem, context: &str) -> Result<bool> {
     def_elem_bool(element, context)
 }
@@ -954,6 +1039,9 @@ pub(super) fn compile_create_role(
         name: statement.role.clone(),
         attributes,
         connection_limit: -1,
+        in_roles: Vec::new(),
+        role_members: Vec::new(),
+        admin_members: Vec::new(),
     };
     for option in &statement.options {
         let Some(NodeEnum::DefElem(element)) = option.node.as_ref() else {
@@ -971,6 +1059,24 @@ pub(super) fn compile_create_role(
             "bypassrls" => (RoleAttribute::BypassRls, "BYPASSRLS"),
             "connectionlimit" => {
                 role.connection_limit = role_option_i32(element, "CONNECTION LIMIT")?;
+                continue;
+            }
+            "addroleto" | "rolemembers" | "adminmembers" => {
+                let Some(NodeEnum::List(roles)) =
+                    element.arg.as_ref().and_then(|node| node.node.as_ref())
+                else {
+                    return Err(SQLError::Internal(format!(
+                        "CREATE ROLE option `{}` has a malformed role list",
+                        element.defname
+                    )));
+                };
+                let names = compile_membership_role_list(&roles.items, "CREATE ROLE membership")?;
+                match element.defname.as_str() {
+                    "addroleto" => role.in_roles.extend(names),
+                    "rolemembers" => role.role_members.extend(names),
+                    "adminmembers" => role.admin_members.extend(names),
+                    _ => unreachable!(),
+                }
                 continue;
             }
             other => {
@@ -1000,7 +1106,31 @@ pub(super) fn compile_alter_role(
         name: compile_role_spec(role, false, "ALTER ROLE")?,
         attributes: std::collections::BTreeMap::new(),
         connection_limit: None,
+        membership_action: None,
+        members: Vec::new(),
     };
+    let membership_option = statement.options.iter().find_map(|option| {
+        let NodeEnum::DefElem(element) = option.node.as_ref()? else {
+            return None;
+        };
+        (element.defname == "rolemembers").then_some(element)
+    });
+    if let Some(element) = membership_option {
+        use crate::ast::RoleMembershipAction;
+        let Some(NodeEnum::List(roles)) = element.arg.as_ref().and_then(|node| node.node.as_ref())
+        else {
+            return Err(SQLError::Internal(
+                "ALTER GROUP has a malformed member list".into(),
+            ));
+        };
+        alter.membership_action = Some(if statement.action > 0 {
+            RoleMembershipAction::Add
+        } else {
+            RoleMembershipAction::Drop
+        });
+        alter.members = compile_membership_role_list(&roles.items, "ALTER GROUP")?;
+        return Ok(Statement::AlterRole(alter));
+    }
     for option in &statement.options {
         let Some(NodeEnum::DefElem(element)) = option.node.as_ref() else {
             return Err(SQLError::Internal(

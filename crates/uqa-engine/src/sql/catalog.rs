@@ -54,6 +54,7 @@ pub(super) fn build_info_schema_rows(
         VirtualRelation::PgRange => build_pg_range(),
         VirtualRelation::PgProc => build_pg_proc(engine)?,
         VirtualRelation::PgDatabase => build_pg_database(),
+        VirtualRelation::PgAuthMembers => build_pg_auth_members(engine),
         VirtualRelation::PgRoles => build_pg_roles(engine),
         VirtualRelation::PgUser => build_pg_user(engine),
         VirtualRelation::PgSettings => build_pg_settings(engine)?,
@@ -139,9 +140,10 @@ use partitioning::build_pg_partitioned_table;
 pub(in crate::sql) use partitioning::{pg_get_expr_value, pg_get_partkeydef_value};
 pub(in crate::sql) use pg_catalog::table_relation_oid;
 use pg_catalog::{
-    build_pg_attrdef, build_pg_attribute, build_pg_constraint, build_pg_database, build_pg_index,
-    build_pg_indexes, build_pg_matviews, build_pg_namespace, build_pg_range, build_pg_roles,
-    build_pg_sequences, build_pg_tables, build_pg_type, build_pg_user, build_pg_views,
+    build_pg_attrdef, build_pg_attribute, build_pg_auth_members, build_pg_constraint,
+    build_pg_database, build_pg_index, build_pg_indexes, build_pg_matviews, build_pg_namespace,
+    build_pg_range, build_pg_roles, build_pg_sequences, build_pg_tables, build_pg_type,
+    build_pg_user, build_pg_views,
 };
 use pg_proc::build_pg_proc;
 use pg_settings::build_pg_settings;

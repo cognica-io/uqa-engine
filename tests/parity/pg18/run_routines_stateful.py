@@ -38,6 +38,10 @@ SUITES = {
         HERE / "rules_stateful.sql",
         HERE / "rules_stateful.expected.json",
     ),
+    "roles": (
+        HERE / "roles_stateful.sql",
+        HERE / "roles_stateful.expected.json",
+    ),
     "transactions": (
         HERE / "transaction_stateful.sql",
         HERE / "transaction_stateful.expected.json",
@@ -47,6 +51,26 @@ USQL = os.environ.get("UQA_USQL", str(REPO_ROOT / "target" / "release" / "usql")
 PG_CONTAINER = os.environ.get("UQA_PG_CONTAINER", "uqa-pg18-age")
 PG_DATABASE = os.environ.get("UQA_PG_DATABASE", "postgres")
 SCHEMA_PLACEHOLDER = "__UQA_STATEFUL_SCHEMA__"
+ROLE_PLACEHOLDERS = {
+    "__UQA_ROLE_PARENT__": "parent",
+    "__UQA_ROLE_MEMBER__": "member",
+    "__UQA_ROLE_NOINHERIT__": "noinherit",
+    "__UQA_ROLE_ADMIN__": "admin",
+    "__UQA_ROLE_DELEGATE__": "delegate",
+    "__UQA_ROLE_CREATED__": "created",
+    "__UQA_ROLE_INITIAL_MEMBER__": "initial_member",
+    "__UQA_ROLE_INITIAL_ADMIN__": "initial_admin",
+    "__UQA_ROLE_ALTER_MEMBER__": "alter_member",
+    "__UQA_ROLE_ROLLBACK_MEMBER__": "rollback_member",
+    "__UQA_ROLE_DROPPABLE__": "droppable",
+    "__UQA_ROLE_MIDDLE__": "middle",
+    "__UQA_ROLE_LEAF__": "leaf",
+    "__UQA_ROLE_LIMITED_CREATOR__": "limited_creator",
+    "__UQA_ROLE_MANAGED__": "managed",
+    "__UQA_ROLE_FORBIDDEN__": "forbidden",
+    "__UQA_ROLE_FULL_CREATOR__": "full_creator",
+    "__UQA_ROLE_FULL_CHILD__": "full_child",
+}
 ORACLE_SERVER_VERSION_NUM = "180004"
 CASE_START = re.compile(r"^-- @case ([a-z0-9_]+) (ok|rows|error)$")
 SQLSTATE_ERROR = re.compile(r"^ERROR:\s+([0-9A-Z]{5}):")
@@ -102,6 +126,25 @@ def parse_cases(source: str) -> list[Case]:
 
 def quote_identifier(identifier: str) -> str:
     return '"' + identifier.replace('"', '""') + '"'
+
+
+def quote_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def rendered_role_names(schema: str) -> dict[str, str]:
+    return {
+        placeholder: f"{schema}_{suffix}"
+        for placeholder, suffix in ROLE_PLACEHOLDERS.items()
+    }
+
+
+def render_case_sql(case: Case, schema: str) -> str:
+    sql = case.sql.replace(SCHEMA_PLACEHOLDER, quote_identifier(schema))
+    for placeholder, role in rendered_role_names(schema).items():
+        sql = sql.replace(quote_literal(placeholder), quote_literal(role))
+        sql = sql.replace(placeholder, quote_identifier(role))
+    return sql
 
 
 def sql_error(output: str) -> str | None:
@@ -254,7 +297,7 @@ def pg_oracle_metadata() -> dict[str, str]:
 
 
 def execute_pg_case(case: Case, schema: str) -> dict:
-    sql = case.sql.replace(SCHEMA_PLACEHOLDER, quote_identifier(schema))
+    sql = render_case_sql(case, schema)
     prefix = (
         ""
         if SCHEMA_PLACEHOLDER in case.sql
@@ -282,15 +325,32 @@ def run_postgres(cases: list[Case]) -> tuple[dict[str, str], list[dict]]:
             entry = execute_pg_case(case, schema)
             entries.append(entry)
     finally:
+        active_roles = [
+            role
+            for placeholder, role in rendered_role_names(schema).items()
+            if any(placeholder in case.sql for case in cases)
+        ]
+        drop_roles = (
+            "DROP ROLE IF EXISTS "
+            + ", ".join(quote_identifier(role) for role in active_roles)
+            + "; "
+            if active_roles
+            else ""
+        )
         cleanup = pg_query(
-            f"DROP SCHEMA IF EXISTS {quote_identifier(schema)} CASCADE", timeout=60
+            f"DROP FUNCTION IF EXISTS public.{quote_identifier(schema)}(), "
+            f"public.{quote_identifier(schema)}(boolean), "
+            f"public.{quote_identifier(schema)}(text); "
+            f"DROP SCHEMA IF EXISTS {quote_identifier(schema)} CASCADE; "
+            + drop_roles,
+            timeout=60,
         )
         require_success("PostgreSQL stateful fixture cleanup", cleanup)
     return metadata, entries
 
 
 def execute_usql_case(case: Case, schema: str, database: Path) -> dict:
-    sql = case.sql.replace(SCHEMA_PLACEHOLDER, quote_identifier(schema))
+    sql = render_case_sql(case, schema)
     prefix = (
         ""
         if SCHEMA_PLACEHOLDER in case.sql

@@ -79,7 +79,7 @@ SET timezone TO 'UTC';
 SHOW timezone;
 ```
 
-`SET ROLE name` changes `current_user` for the session while preserving `session_user`; `RESET ROLE`, `SET ROLE NONE`, and `SET ROLE DEFAULT` restore the session identity. The embedded connection starts as the durable bootstrap superuser role `uqa`, so it may assume any defined role. Role membership and non-superuser role assumption are not implemented.
+`SET ROLE name` changes `current_user` for the session while preserving `session_user`; `RESET ROLE`, `SET ROLE NONE`, and `SET ROLE DEFAULT` restore the session identity. The embedded connection starts as the durable bootstrap superuser role `uqa`, so it may assume any defined role. A non-superuser session may assume a directly or transitively granted role only through membership edges whose `SET` option is true. A successful `SET ROLE` executed by a `SECURITY INVOKER` routine remains visible to the session, while an error restores the prior identity and any `SET ROLE` attempted inside a `SECURITY DEFINER` context fails with `42501`, including through a nested invoker.
 
 `DISCARD ALL`, `DISCARD PLANS`, and `DISCARD SEQUENCES` reset their implemented session state. `DISCARD TEMP` removes the session's temporary tables, views, sequences, and sequence state; PostgreSQL rejects it inside a transaction, and UQA Engine does the same.
 
@@ -185,7 +185,7 @@ Trigger functions declare no ordinary parameters and return `trigger`. They rece
 
 Trigger definitions participate in table, referenced-table, column, and exact zero-argument function dependencies, survive storage reopen, roll back with catalog transactions, preserve temporary triggers across unrelated catalog reloads, and invalidate prepared plans. `pg_trigger`, including `tgoldtable` and `tgnewtable`, trigger-owned `pg_constraint` rows, `pg_class.relhastriggers`, `pg_tables.hastriggers`, and both PostgreSQL 18 `pg_get_triggerdef` overloads expose the implemented catalog; the boolean overload selects compact or pretty rendering and propagates `NULL`, and trigger deparsing includes transition-table clauses. Trigger and constraint names have independent rename lifecycles and stable independent OIDs. A row trigger created on a partitioned table fires for leaf rows and appears as a parent-linked leaf clone with its own trigger and constraint identities.
 
-Remaining PostgreSQL automatic-updatability shapes involving CTEs or more complex scalar subqueries, direct ALTER or DROP operations on generated partition clones, trigger privileges, exact PostgreSQL `pg_node_tree` serialization, dump and restore, and the complete upstream trigger regression schedule remain compatibility bugs.
+Remaining PostgreSQL automatic-updatability shapes involving CTE-backed definitions or other unverified query forms, direct ALTER or DROP operations on generated partition clones, trigger privileges, exact PostgreSQL `pg_node_tree` serialization, dump and restore, and the complete upstream trigger regression schedule remain compatibility bugs.
 
 ## Rewrite rules
 
@@ -293,9 +293,20 @@ SELECT manual_identity(7);
 
 The durable bootstrap role is `uqa`. The implemented role lifecycle includes `CREATE ROLE` or `CREATE USER`, `ALTER ROLE`, and `DROP ROLE` for the `SUPERUSER`, `INHERIT`, `CREATEROLE`, `CREATEDB`, `LOGIN`, `REPLICATION`, `BYPASSRLS`, and connection-limit attributes. `pg_roles` and `pg_user` expose this state, and a role that owns a routine or appears in its ACL cannot be dropped until that dependency is removed.
 
+Role membership accepts PostgreSQL 18 `GRANT role [, ...] TO role [, ...] [WITH ADMIN {TRUE|FALSE}, INHERIT {TRUE|FALSE}, SET {TRUE|FALSE}] [GRANTED BY role]` and the corresponding full or option-only `REVOKE ... [CASCADE|RESTRICT]`. New edges default `ADMIN` to false and `SET` to true, while `INHERIT` follows the grantee role's `INHERIT` attribute; a re-grant changes only named options. Independent grantors retain independent rows, revoking the last ADMIN path observes dependent grants and `CASCADE`, cycles fail with `0LP01`, role drops remove member edges but reject a surviving grantor dependency, and every mutation is transactional and durable. `CREATE ROLE ... IN ROLE ... ROLE ... ADMIN ...` and legacy `ALTER GROUP ... ADD|DROP USER` use the same graph. `pg_auth_members` exposes PostgreSQL 18's `oid`, `roleid`, `member`, `grantor`, `admin_option`, `inherit_option`, and `set_option` columns.
+
+```sql
+GRANT reporting TO analyst WITH ADMIN FALSE, INHERIT TRUE, SET TRUE;
+REVOKE SET OPTION FOR reporting FROM analyst;
+```
+
+A `CREATEROLE` user receives an ADMIN, non-inheritable, non-settable membership in each role it creates and can administer that role, but it may create or alter `CREATEDB`, `REPLICATION`, `BYPASSRLS`, `CREATEROLE`, or `SUPERUSER` attributes only when its own current role holds the corresponding authority. `SUPERUSER` changes remain superuser-only.
+
 New routines are owned by `current_user` and grant `EXECUTE` to `PUBLIC` by default. `GRANT` and `REVOKE` accept `EXECUTE` or `ALL [PRIVILEGES]`, exact function, procedure, or routine signatures, `PUBLIC`, `CURRENT_USER`, `SESSION_USER`, and grant-option changes. An owner or superuser may transfer ownership and alter ACLs; execution checks occur before `STRICT` null short-circuiting. `CREATE OR REPLACE` preserves the existing owner and ACL.
 
-`SECURITY INVOKER` runs with the caller's `current_user`; `SECURITY DEFINER` temporarily uses the routine owner while `session_user` remains unchanged. Routine `SET`, `SET ... FROM CURRENT`, `RESET`, and `RESET ALL` configuration is applied only during the call and restored on every return or error. Role memberships, passwords, per-role settings, schema and database privileges, default privileges, non-owner grantor chains, row-level-security consequences, extension languages, and the complete PostgreSQL object privilege model remain compatibility bugs.
+Routine ownership and EXECUTE privileges follow transitive membership edges whose `INHERIT` option is true. An inherited owner may alter, replace, grant on, or drop the routine and retains the owner's implicit EXECUTE privilege; a `SET`-only member must first assume the owner role. Ownership transfer additionally requires the current user to be able to `SET ROLE` to the new owner. Every explicit DROP target is ownership-checked before dependency expansion, so unauthorized multi-target replacement or removal cannot mutate the routine graph.
+
+`SECURITY INVOKER` runs with the caller's `current_user`; `SECURITY DEFINER` temporarily uses the routine owner while `session_user` remains unchanged. Routine `SET`, `SET ... FROM CURRENT`, `RESET`, and `RESET ALL` configuration is applied only during the call and restored on every return or error. Passwords, per-role settings, schema and database privileges, default privileges, non-owner routine-ACL grantor chains, role-introspection helpers such as `pg_has_role`, row-level-security consequences, extension languages, and the complete PostgreSQL object privilege model remain compatibility bugs.
 
 ## Volatility and mutation
 

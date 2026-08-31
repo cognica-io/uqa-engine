@@ -263,6 +263,60 @@ fn routine_context_restores_identity_and_settings_after_callback_panic() {
 }
 
 #[test]
+fn pg18_invoker_set_role_persists_while_security_definer_and_errors_restore_identity() {
+    let engine = Engine::new();
+    for sql in [
+        "CREATE ROLE routine_role_target",
+        "CREATE ROLE routine_definer_owner",
+        "CREATE FUNCTION invoker_set_role_probe() RETURNS text LANGUAGE plpgsql SECURITY INVOKER AS $$ BEGIN EXECUTE 'SET ROLE routine_role_target'; RETURN current_user; END $$",
+        "CREATE FUNCTION failed_invoker_set_role_probe() RETURNS text LANGUAGE plpgsql SECURITY INVOKER AS $$ BEGIN EXECUTE 'SET ROLE routine_role_target'; RAISE EXCEPTION 'stop'; END $$",
+        "CREATE FUNCTION definer_set_role_probe() RETURNS text LANGUAGE plpgsql SECURITY DEFINER AS $$ BEGIN EXECUTE 'SET ROLE routine_role_target'; RETURN current_user; END $$",
+        "ALTER FUNCTION definer_set_role_probe() OWNER TO routine_definer_owner",
+        "CREATE FUNCTION nested_invoker_set_role_probe() RETURNS text LANGUAGE SQL SECURITY INVOKER AS 'SELECT invoker_set_role_probe()'",
+        "CREATE FUNCTION definer_calls_invoker_probe() RETURNS text LANGUAGE SQL SECURITY DEFINER AS 'SELECT nested_invoker_set_role_probe()'",
+        "ALTER FUNCTION definer_calls_invoker_probe() OWNER TO routine_definer_owner",
+    ] {
+        engine
+            .sql(sql, &[])
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+    }
+
+    assert_eq!(
+        scalar(&engine, "SELECT invoker_set_role_probe() AS v"),
+        Value::Str("routine_role_target".into())
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT current_user AS v"),
+        Value::Str("routine_role_target".into()),
+        "successful SECURITY INVOKER SET ROLE must remain visible to the session"
+    );
+    engine.sql("RESET ROLE", &[]).unwrap();
+
+    assert_eq!(
+        sqlstate(&engine, "SELECT failed_invoker_set_role_probe()"),
+        "P0001"
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT current_user AS v"),
+        Value::Str("uqa".into()),
+        "a failing statement must roll back the invoker's role change"
+    );
+    assert_eq!(
+        sqlstate(&engine, "SELECT definer_set_role_probe()"),
+        "42501"
+    );
+    assert_eq!(
+        sqlstate(&engine, "SELECT definer_calls_invoker_probe()"),
+        "42501",
+        "a nested invoker must remain inside the outer security-definer restriction"
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT current_user AS v"),
+        Value::Str("uqa".into())
+    );
+}
+
+#[test]
 fn pg18_role_lifecycle_updates_session_privileges_and_catalogs_atomically() {
     let engine = Engine::new();
     engine
@@ -321,6 +375,427 @@ fn pg18_role_lifecycle_updates_session_privileges_and_catalogs_atomically() {
         ),
         Value::Int(0)
     );
+}
+
+#[test]
+fn pg18_createrole_cannot_delegate_role_attributes_it_does_not_hold() {
+    let engine = Engine::new();
+    for sql in [
+        "CREATE ROLE limited_role_creator CREATEROLE",
+        "CREATE ROLE full_role_creator CREATEROLE CREATEDB REPLICATION BYPASSRLS",
+        "SET ROLE limited_role_creator",
+        "CREATE ROLE limited_managed_role CREATEROLE",
+    ] {
+        engine
+            .sql(sql, &[])
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+    }
+    for sql in [
+        "CREATE ROLE forbidden_createdb_role CREATEDB",
+        "CREATE ROLE forbidden_replication_role REPLICATION",
+        "CREATE ROLE forbidden_bypassrls_role BYPASSRLS",
+        "ALTER ROLE limited_managed_role CREATEDB",
+        "ALTER ROLE limited_managed_role REPLICATION",
+        "ALTER ROLE limited_managed_role BYPASSRLS",
+    ] {
+        assert_eq!(sqlstate(&engine, sql), "42501", "{sql}");
+    }
+    engine.sql("RESET ROLE", &[]).unwrap();
+    assert_eq!(
+        scalar(
+            &engine,
+            "SELECT count(*) AS v FROM pg_catalog.pg_roles WHERE rolname IN ('forbidden_createdb_role', 'forbidden_replication_role', 'forbidden_bypassrls_role')",
+        ),
+        Value::Int(0),
+        "failed CREATE ROLE statements must not publish catalog rows"
+    );
+    let limited = engine
+        .sql(
+            "SELECT rolcreaterole, rolcreatedb, rolreplication, rolbypassrls FROM pg_catalog.pg_roles WHERE rolname = 'limited_managed_role'",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(limited.rows.len(), 1);
+    assert_eq!(limited.rows[0]["rolcreaterole"], Value::Bool(true));
+    assert_eq!(limited.rows[0]["rolcreatedb"], Value::Bool(false));
+    assert_eq!(limited.rows[0]["rolreplication"], Value::Bool(false));
+    assert_eq!(limited.rows[0]["rolbypassrls"], Value::Bool(false));
+
+    engine.sql("SET ROLE full_role_creator", &[]).unwrap();
+    engine
+        .sql(
+            "CREATE ROLE fully_delegated_role CREATEROLE CREATEDB REPLICATION BYPASSRLS",
+            &[],
+        )
+        .unwrap();
+    let delegated = engine
+        .sql(
+            "SELECT rolcreaterole, rolcreatedb, rolreplication, rolbypassrls FROM pg_catalog.pg_roles WHERE rolname = 'fully_delegated_role'",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(delegated.rows.len(), 1);
+    assert!(delegated.rows[0]
+        .values()
+        .all(|value| *value == Value::Bool(true)));
+    engine.sql("RESET ROLE", &[]).unwrap();
+}
+
+fn assert_membership_catalog_and_delegation(engine: &Engine) {
+    let memberships = engine
+        .sql(
+            "SELECT granted.rolname AS granted, member.rolname AS member, grantor.rolname AS grantor, membership.admin_option, membership.inherit_option, membership.set_option FROM pg_catalog.pg_auth_members AS membership JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member JOIN pg_catalog.pg_roles AS grantor ON grantor.oid = membership.grantor WHERE granted.rolname = 'membership_parent' ORDER BY member.rolname, grantor.rolname",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(memberships.rows.len(), 5);
+    assert_eq!(
+        memberships.rows[0]["member"],
+        Value::Str("membership_admin".into())
+    );
+    assert_eq!(memberships.rows[0]["admin_option"], Value::Bool(true));
+    assert_eq!(memberships.rows[0]["inherit_option"], Value::Bool(false));
+    assert_eq!(memberships.rows[0]["set_option"], Value::Bool(false));
+    assert_eq!(
+        memberships.rows[2]["member"],
+        Value::Str("membership_member".into())
+    );
+    assert_eq!(memberships.rows[2]["inherit_option"], Value::Bool(true));
+    assert_eq!(
+        memberships.rows[4]["member"],
+        Value::Str("membership_noinherit".into())
+    );
+    assert_eq!(memberships.rows[4]["inherit_option"], Value::Bool(false));
+
+    assert_eq!(
+        sqlstate(engine, "GRANT membership_member TO membership_parent",),
+        "0LP01"
+    );
+    assert_eq!(
+        sqlstate(
+            engine,
+            "REVOKE ADMIN OPTION FOR membership_parent FROM membership_admin RESTRICT",
+        ),
+        "2BP01"
+    );
+    engine
+        .sql(
+            "REVOKE ADMIN OPTION FOR membership_parent FROM membership_admin CASCADE",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        scalar(
+            engine,
+            "SELECT count(*) AS v FROM pg_catalog.pg_auth_members AS membership JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member WHERE member.rolname = 'membership_delegate'",
+        ),
+        Value::Int(0)
+    );
+    for sql in [
+        "GRANT membership_parent TO membership_admin WITH ADMIN TRUE",
+        "GRANT membership_parent TO membership_delegate GRANTED BY membership_admin",
+        "GRANT membership_parent TO membership_admin WITH ADMIN FALSE",
+    ] {
+        engine
+            .sql(sql, &[])
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+    }
+    let retained_delegation = engine
+        .sql(
+            "SELECT administrator.admin_option, count(delegated.oid) AS delegated_count FROM pg_catalog.pg_auth_members AS administrator LEFT JOIN pg_catalog.pg_auth_members AS delegated ON delegated.roleid = administrator.roleid AND delegated.grantor = administrator.member JOIN pg_catalog.pg_roles AS granted ON granted.oid = administrator.roleid JOIN pg_catalog.pg_roles AS member ON member.oid = administrator.member WHERE granted.rolname = 'membership_parent' AND member.rolname = 'membership_admin' GROUP BY administrator.admin_option",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(retained_delegation.rows.len(), 1);
+    assert_eq!(
+        retained_delegation.rows[0]["admin_option"],
+        Value::Bool(false)
+    );
+    assert_eq!(
+        retained_delegation.rows[0]["delegated_count"],
+        Value::Int(1)
+    );
+    engine
+        .sql(
+            "REVOKE membership_parent FROM membership_delegate GRANTED BY membership_admin",
+            &[],
+        )
+        .unwrap();
+}
+
+fn assert_membership_execution_and_inheritance(engine: &Engine) {
+    for sql in [
+        "CREATE FUNCTION membership_probe() RETURNS text LANGUAGE SQL AS 'SELECT current_user'",
+        "REVOKE ALL ON FUNCTION membership_probe() FROM PUBLIC",
+        "GRANT EXECUTE ON FUNCTION membership_probe() TO membership_parent",
+        "SET ROLE membership_member",
+    ] {
+        engine
+            .sql(sql, &[])
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+    }
+    assert_eq!(
+        scalar(engine, "SELECT membership_probe() AS v"),
+        Value::Str("membership_member".into())
+    );
+    engine.sql("RESET ROLE", &[]).unwrap();
+    engine.sql("SET ROLE membership_noinherit", &[]).unwrap();
+    assert_eq!(sqlstate(engine, "SELECT membership_probe()"), "42501");
+    engine.sql("RESET ROLE", &[]).unwrap();
+    engine
+        .sql(
+            "GRANT membership_parent TO membership_noinherit WITH INHERIT TRUE",
+            &[],
+        )
+        .unwrap();
+    engine.sql("SET ROLE membership_noinherit", &[]).unwrap();
+    assert_eq!(
+        scalar(engine, "SELECT membership_probe() AS v"),
+        Value::Str("membership_noinherit".into())
+    );
+    engine.sql("RESET ROLE", &[]).unwrap();
+
+    engine.sql("SET ROLE membership_leaf", &[]).unwrap();
+    assert_eq!(
+        scalar(engine, "SELECT membership_probe() AS v"),
+        Value::Str("membership_leaf".into())
+    );
+    engine.sql("RESET ROLE", &[]).unwrap();
+}
+
+fn assert_membership_assumption_and_createrole(engine: &Engine) {
+    for sql in [
+        "GRANT membership_leaf TO uqa WITH SET TRUE",
+        "GRANT membership_no_set TO uqa WITH SET FALSE",
+        "GRANT membership_creator TO uqa",
+        "BEGIN",
+        "ALTER ROLE uqa NOSUPERUSER NOCREATEROLE",
+        "SET ROLE membership_parent",
+        "RESET ROLE",
+    ] {
+        engine
+            .sql(sql, &[])
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+    }
+    engine.sql("SAVEPOINT before_no_set", &[]).unwrap();
+    assert_eq!(sqlstate(engine, "SET ROLE membership_no_set"), "42501");
+    engine
+        .sql("ROLLBACK TO SAVEPOINT before_no_set", &[])
+        .unwrap();
+    engine.sql("SET ROLE membership_creator", &[]).unwrap();
+    engine.sql("SAVEPOINT before_foreign_alter", &[]).unwrap();
+    assert_eq!(
+        sqlstate(engine, "ALTER ROLE membership_foreign LOGIN"),
+        "42501"
+    );
+    engine
+        .sql("ROLLBACK TO SAVEPOINT before_foreign_alter", &[])
+        .unwrap();
+    engine.sql("CREATE ROLE membership_owned", &[]).unwrap();
+    let creator_grant = engine
+        .sql(
+            "SELECT membership.admin_option, membership.inherit_option, membership.set_option FROM pg_catalog.pg_auth_members AS membership JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member WHERE granted.rolname = 'membership_owned' AND member.rolname = 'membership_creator'",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(creator_grant.rows.len(), 1);
+    assert_eq!(creator_grant.rows[0]["admin_option"], Value::Bool(true));
+    assert_eq!(creator_grant.rows[0]["inherit_option"], Value::Bool(false));
+    assert_eq!(creator_grant.rows[0]["set_option"], Value::Bool(false));
+    engine
+        .sql("ALTER ROLE membership_owned LOGIN", &[])
+        .unwrap();
+    engine.sql("DROP ROLE membership_owned", &[]).unwrap();
+    engine.sql("RESET ROLE", &[]).unwrap();
+    engine.sql("ROLLBACK", &[]).unwrap();
+}
+
+#[test]
+fn pg18_role_membership_options_delegation_and_assumption_are_durable_security_state() {
+    let engine = Engine::new();
+    for sql in [
+        "CREATE ROLE membership_parent",
+        "CREATE ROLE membership_member INHERIT",
+        "CREATE ROLE membership_noinherit NOINHERIT",
+        "CREATE ROLE membership_admin",
+        "CREATE ROLE membership_delegate",
+        "CREATE ROLE membership_no_set",
+        "CREATE ROLE membership_middle INHERIT",
+        "CREATE ROLE membership_leaf INHERIT",
+        "CREATE ROLE membership_creator CREATEROLE",
+        "CREATE ROLE membership_foreign",
+        "CREATE ROLE membership_bootstrap SUPERUSER",
+        "GRANT membership_parent TO membership_member, membership_noinherit",
+        "GRANT membership_parent TO membership_admin WITH ADMIN OPTION, INHERIT FALSE, SET FALSE",
+        "GRANT membership_parent TO membership_delegate GRANTED BY membership_admin",
+        "GRANT membership_parent TO membership_middle",
+        "GRANT membership_middle TO membership_leaf",
+    ] {
+        engine
+            .sql(sql, &[])
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+    }
+
+    assert_membership_catalog_and_delegation(&engine);
+    assert_membership_execution_and_inheritance(&engine);
+    assert_membership_assumption_and_createrole(&engine);
+}
+
+fn assert_noinherit_member_cannot_manage_owned_routines(engine: &Engine) {
+    assert_eq!(sqlstate(engine, "SELECT owner_execute_probe()"), "42501");
+    assert_eq!(
+        sqlstate(engine, "ALTER FUNCTION owner_alter_probe() IMMUTABLE"),
+        "42501"
+    );
+    assert_eq!(
+        sqlstate(
+            engine,
+            "CREATE OR REPLACE FUNCTION owner_replace_probe() RETURNS integer LANGUAGE SQL AS 'SELECT 99'",
+        ),
+        "42501"
+    );
+    assert_eq!(
+        sqlstate(
+            engine,
+            "GRANT EXECUTE ON FUNCTION owner_grant_probe() TO owner_acl_grantee",
+        ),
+        "42501"
+    );
+    assert_eq!(
+        sqlstate(engine, "DROP FUNCTION owner_drop_probe()"),
+        "42501"
+    );
+    engine.sql("RESET ROLE", &[]).unwrap();
+    assert_eq!(
+        scalar(engine, "SELECT owner_replace_probe() AS v"),
+        Value::Int(13),
+        "a rejected replacement must leave the original body intact"
+    );
+    assert_eq!(
+        scalar(
+            engine,
+            "SELECT count(*) AS v FROM pg_catalog.pg_proc WHERE proname = 'owner_drop_probe'",
+        ),
+        Value::Int(1),
+        "a rejected DROP must leave the routine intact"
+    );
+}
+
+fn assert_inherited_member_manages_owned_routines(engine: &Engine) {
+    engine.sql("SET ROLE inherited_owner_member", &[]).unwrap();
+    assert_eq!(
+        scalar(engine, "SELECT owner_execute_probe() AS v"),
+        Value::Int(11),
+        "an inherited owner role retains its implicit EXECUTE privilege"
+    );
+    for sql in [
+        "ALTER FUNCTION owner_alter_probe() IMMUTABLE",
+        "CREATE OR REPLACE FUNCTION owner_replace_probe() RETURNS integer LANGUAGE SQL AS 'SELECT 99'",
+        "GRANT EXECUTE ON FUNCTION owner_grant_probe() TO owner_acl_grantee",
+        "DROP FUNCTION owner_drop_probe()",
+    ] {
+        engine
+            .sql(sql, &[])
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+    }
+    assert_eq!(
+        sqlstate(
+            engine,
+            "ALTER FUNCTION owner_transfer_probe() OWNER TO owner_transfer_target",
+        ),
+        "42501",
+        "the current owner must also be able to SET ROLE to the new owner"
+    );
+    engine.sql("RESET ROLE", &[]).unwrap();
+    engine
+        .sql(
+            "GRANT owner_transfer_target TO inherited_owner_member WITH INHERIT FALSE, SET TRUE",
+            &[],
+        )
+        .unwrap();
+    engine.sql("SET ROLE inherited_owner_member", &[]).unwrap();
+    engine
+        .sql(
+            "ALTER FUNCTION owner_transfer_probe() OWNER TO owner_transfer_target",
+            &[],
+        )
+        .unwrap();
+    engine.sql("RESET ROLE", &[]).unwrap();
+}
+
+fn assert_owned_routine_changes_are_visible(engine: &Engine) {
+    assert_eq!(
+        scalar(engine, "SELECT owner_replace_probe() AS v"),
+        Value::Int(99)
+    );
+    assert_eq!(
+        scalar(
+            engine,
+            "SELECT count(*) AS v FROM pg_catalog.pg_proc WHERE proname = 'owner_drop_probe'",
+        ),
+        Value::Int(0)
+    );
+    assert_eq!(
+        scalar(
+            engine,
+            "SELECT proc.provolatile AS v FROM pg_catalog.pg_proc AS proc WHERE proc.proname = 'owner_alter_probe'",
+        ),
+        Value::Str("i".into())
+    );
+    assert_eq!(
+        scalar(
+            engine,
+            "SELECT owner.rolname AS v FROM pg_catalog.pg_proc AS proc JOIN pg_catalog.pg_roles AS owner ON owner.oid = proc.proowner WHERE proc.proname = 'owner_transfer_probe'",
+        ),
+        Value::Str("owner_transfer_target".into())
+    );
+    engine.sql("SET ROLE owner_acl_grantee", &[]).unwrap();
+    assert_eq!(
+        scalar(engine, "SELECT owner_grant_probe() AS v"),
+        Value::Int(14)
+    );
+    engine.sql("RESET ROLE", &[]).unwrap();
+}
+
+#[test]
+fn pg18_role_membership_governs_implicit_routine_ownership_and_owner_transfer() {
+    let engine = Engine::new();
+    for sql in [
+        "CREATE ROLE owned_routine_role",
+        "CREATE ROLE inherited_owner_member",
+        "CREATE ROLE noinherit_owner_member NOINHERIT",
+        "CREATE ROLE owner_transfer_target",
+        "CREATE ROLE owner_acl_grantee",
+        "GRANT owned_routine_role TO inherited_owner_member",
+        "GRANT owned_routine_role TO noinherit_owner_member WITH INHERIT FALSE, SET TRUE",
+        "CREATE FUNCTION owner_execute_probe() RETURNS integer LANGUAGE SQL AS 'SELECT 11'",
+        "CREATE FUNCTION owner_alter_probe() RETURNS integer LANGUAGE SQL AS 'SELECT 12'",
+        "CREATE FUNCTION owner_replace_probe() RETURNS integer LANGUAGE SQL AS 'SELECT 13'",
+        "CREATE FUNCTION owner_grant_probe() RETURNS integer LANGUAGE SQL AS 'SELECT 14'",
+        "CREATE FUNCTION owner_drop_probe() RETURNS integer LANGUAGE SQL AS 'SELECT 15'",
+        "CREATE FUNCTION owner_transfer_probe() RETURNS integer LANGUAGE SQL AS 'SELECT 16'",
+        "REVOKE ALL ON FUNCTION owner_execute_probe() FROM PUBLIC",
+        "REVOKE ALL ON FUNCTION owner_alter_probe() FROM PUBLIC",
+        "REVOKE ALL ON FUNCTION owner_replace_probe() FROM PUBLIC",
+        "REVOKE ALL ON FUNCTION owner_grant_probe() FROM PUBLIC",
+        "REVOKE ALL ON FUNCTION owner_drop_probe() FROM PUBLIC",
+        "REVOKE ALL ON FUNCTION owner_transfer_probe() FROM PUBLIC",
+        "ALTER FUNCTION owner_execute_probe() OWNER TO owned_routine_role",
+        "ALTER FUNCTION owner_alter_probe() OWNER TO owned_routine_role",
+        "ALTER FUNCTION owner_replace_probe() OWNER TO owned_routine_role",
+        "ALTER FUNCTION owner_grant_probe() OWNER TO owned_routine_role",
+        "ALTER FUNCTION owner_drop_probe() OWNER TO owned_routine_role",
+        "ALTER FUNCTION owner_transfer_probe() OWNER TO owned_routine_role",
+        "SET ROLE noinherit_owner_member",
+    ] {
+        engine
+            .sql(sql, &[])
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+    }
+
+    assert_noinherit_member_cannot_manage_owned_routines(&engine);
+    assert_inherited_member_manages_owned_routines(&engine);
+    assert_owned_routine_changes_are_visible(&engine);
 }
 
 #[test]
@@ -404,4 +879,86 @@ fn pg18_roles_and_routine_security_survive_reopen_atomically() {
         )
         .unwrap();
     assert_eq!(roles.rows.len(), 2);
+}
+
+#[test]
+fn pg18_role_memberships_survive_reopen_and_roll_back_with_the_role_catalog() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("role-memberships.db");
+    {
+        let engine = Engine::open(&path).unwrap();
+        for sql in [
+            "CREATE ROLE durable_parent",
+            "CREATE ROLE durable_member LOGIN",
+            "CREATE ROLE durable_created_member",
+            "CREATE ROLE durable_created_admin",
+            "CREATE ROLE durable_created IN ROLE durable_parent ROLE durable_created_member ADMIN durable_created_admin",
+            "GRANT durable_parent TO durable_member",
+            "CREATE FUNCTION durable_membership_probe() RETURNS text LANGUAGE SQL AS 'SELECT current_user'",
+            "REVOKE ALL ON FUNCTION durable_membership_probe() FROM PUBLIC",
+            "GRANT EXECUTE ON FUNCTION durable_membership_probe() TO durable_parent",
+            "BEGIN",
+            "CREATE ROLE rolled_back_parent",
+            "GRANT rolled_back_parent TO durable_member",
+            "ROLLBACK",
+        ] {
+            engine
+                .sql(sql, &[])
+                .unwrap_or_else(|error| panic!("{sql}: {error}"));
+        }
+        assert_eq!(
+            scalar(
+                &engine,
+                "SELECT count(*) AS v FROM pg_catalog.pg_roles WHERE rolname = 'rolled_back_parent'",
+            ),
+            Value::Int(0)
+        );
+        assert_eq!(
+            scalar(
+                &engine,
+                "SELECT count(*) AS v FROM pg_catalog.pg_auth_members AS membership JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid WHERE granted.rolname = 'rolled_back_parent'",
+            ),
+            Value::Int(0)
+        );
+    }
+
+    let reopened = Engine::open(&path).unwrap();
+    let initial = reopened
+        .sql(
+            "SELECT granted.rolname AS granted, member.rolname AS member, membership.admin_option, membership.inherit_option, membership.set_option FROM pg_catalog.pg_auth_members AS membership JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member WHERE granted.rolname IN ('durable_parent', 'durable_created') ORDER BY granted.rolname, member.rolname",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(initial.rows.len(), 4);
+    assert!(initial
+        .rows
+        .iter()
+        .any(|row| row["granted"] == Value::Str("durable_created".into())
+            && row["member"] == Value::Str("durable_created_admin".into())
+            && row["admin_option"] == Value::Bool(true)));
+    reopened.sql("SET ROLE durable_member", &[]).unwrap();
+    assert_eq!(
+        scalar(&reopened, "SELECT durable_membership_probe() AS v"),
+        Value::Str("durable_member".into())
+    );
+    reopened.sql("RESET ROLE", &[]).unwrap();
+    reopened.sql("BEGIN", &[]).unwrap();
+    reopened
+        .sql("REVOKE durable_parent FROM durable_member", &[])
+        .unwrap();
+    assert_eq!(
+        scalar(
+            &reopened,
+            "SELECT count(*) AS v FROM pg_catalog.pg_auth_members AS membership JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member WHERE granted.rolname = 'durable_parent' AND member.rolname = 'durable_member'",
+        ),
+        Value::Int(0)
+    );
+    reopened.sql("ROLLBACK", &[]).unwrap();
+    assert_eq!(
+        scalar(
+            &reopened,
+            "SELECT count(*) AS v FROM pg_catalog.pg_auth_members AS membership JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member WHERE granted.rolname = 'durable_parent' AND member.rolname = 'durable_member'",
+        ),
+        Value::Int(1)
+    );
 }

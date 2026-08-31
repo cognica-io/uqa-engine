@@ -108,6 +108,9 @@ pub(super) struct DurableCatalogState {
     pub(super) sql_user_functions:
         RwLock<BTreeMap<String, Vec<Arc<super::engine_user_functions::SQLUserFunction>>>>,
     pub(super) roles: RwLock<BTreeMap<String, super::engine_roles::RoleDefinition>>,
+    pub(super) role_memberships: RwLock<
+        BTreeMap<super::engine_roles::RoleMembershipKey, super::engine_roles::RoleMembership>,
+    >,
     pub(super) triggers: RwLock<
         BTreeMap<
             uqa_storage::RelationIdentity,
@@ -137,6 +140,8 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) sql_user_functions:
         BTreeMap<String, Vec<Arc<super::engine_user_functions::SQLUserFunction>>>,
     pub(super) roles: BTreeMap<String, super::engine_roles::RoleDefinition>,
+    pub(super) role_memberships:
+        BTreeMap<super::engine_roles::RoleMembershipKey, super::engine_roles::RoleMembership>,
     pub(super) triggers: BTreeMap<
         uqa_storage::RelationIdentity,
         BTreeMap<String, super::engine_events::StoredTrigger>,
@@ -166,6 +171,7 @@ impl DurableCatalogState {
                 "uqa".to_string(),
                 super::engine_roles::RoleDefinition::bootstrap(),
             )])),
+            role_memberships: RwLock::new(BTreeMap::new()),
             triggers: RwLock::new(BTreeMap::new()),
             rules: RwLock::new(BTreeMap::new()),
         }
@@ -191,6 +197,7 @@ impl DurableCatalogState {
             foreign_tables: self.foreign_tables.read().clone(),
             sql_user_functions: self.sql_user_functions.read().clone(),
             roles: self.roles.read().clone(),
+            role_memberships: self.role_memberships.read().clone(),
             triggers: self.triggers.read().clone(),
             rules: self.rules.read().clone(),
         }
@@ -213,6 +220,7 @@ impl DurableCatalogState {
         *self.foreign_tables.write() = snapshot.foreign_tables.clone();
         *self.sql_user_functions.write() = snapshot.sql_user_functions.clone();
         *self.roles.write() = snapshot.roles.clone();
+        *self.role_memberships.write() = snapshot.role_memberships.clone();
         *self.triggers.write() = snapshot.triggers.clone();
         *self.rules.write() = snapshot.rules.clone();
     }

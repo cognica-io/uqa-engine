@@ -497,6 +497,10 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 self.engine.grant_sql_routine(statement)?;
                 Ok(SQLResult::empty())
             }
+            CommandPlan::GrantRole(statement) => {
+                self.engine.grant_roles(statement)?;
+                Ok(SQLResult::empty())
+            }
             CommandPlan::CreateRole(statement) => {
                 self.engine.create_role(statement)?;
                 Ok(SQLResult::empty())

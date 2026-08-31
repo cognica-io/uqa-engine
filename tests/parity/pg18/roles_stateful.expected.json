@@ -1,0 +1,538 @@
+{
+  "schema_version": 1,
+  "fixture_sha256": "01c9a6875c1a2e175303d3d5a0ca92dd61a0e766c27f8115bbafa73c5b3725ff",
+  "oracle": {
+    "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
+    "server_version_num": "180004",
+    "version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "age_version": "1.8.0"
+  },
+  "cases": [
+    {
+      "name": "create_schema",
+      "kind": "ok"
+    },
+    {
+      "name": "create_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "create_member",
+      "kind": "ok"
+    },
+    {
+      "name": "create_noinherit",
+      "kind": "ok"
+    },
+    {
+      "name": "create_admin",
+      "kind": "ok"
+    },
+    {
+      "name": "create_delegate",
+      "kind": "ok"
+    },
+    {
+      "name": "create_initial_member",
+      "kind": "ok"
+    },
+    {
+      "name": "create_initial_admin",
+      "kind": "ok"
+    },
+    {
+      "name": "create_alter_member",
+      "kind": "ok"
+    },
+    {
+      "name": "create_rollback_member",
+      "kind": "ok"
+    },
+    {
+      "name": "create_droppable",
+      "kind": "ok"
+    },
+    {
+      "name": "create_middle",
+      "kind": "ok"
+    },
+    {
+      "name": "create_leaf",
+      "kind": "ok"
+    },
+    {
+      "name": "create_limited_creator",
+      "kind": "ok"
+    },
+    {
+      "name": "create_full_creator",
+      "kind": "ok"
+    },
+    {
+      "name": "limited_creator_creates_managed_role",
+      "kind": "ok"
+    },
+    {
+      "name": "creator_receives_managed_admin",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "f",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "limited_creator_cannot_create_createdb",
+      "kind": "error",
+      "sqlstate": "42501"
+    },
+    {
+      "name": "limited_creator_cannot_create_replication",
+      "kind": "error",
+      "sqlstate": "42501"
+    },
+    {
+      "name": "limited_creator_cannot_create_bypassrls",
+      "kind": "error",
+      "sqlstate": "42501"
+    },
+    {
+      "name": "limited_creator_cannot_alter_createdb",
+      "kind": "error",
+      "sqlstate": "42501"
+    },
+    {
+      "name": "limited_creator_cannot_alter_replication",
+      "kind": "error",
+      "sqlstate": "42501"
+    },
+    {
+      "name": "limited_creator_cannot_alter_bypassrls",
+      "kind": "error",
+      "sqlstate": "42501"
+    },
+    {
+      "name": "full_creator_delegates_held_attributes",
+      "kind": "ok"
+    },
+    {
+      "name": "full_creator_attributes_are_visible",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t",
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "grant_default_memberships",
+      "kind": "ok"
+    },
+    {
+      "name": "default_membership_options",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "f",
+          "t",
+          "t"
+        ],
+        [
+          "f",
+          "f",
+          "f",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "grant_parent_to_middle",
+      "kind": "ok"
+    },
+    {
+      "name": "grant_middle_to_leaf",
+      "kind": "ok"
+    },
+    {
+      "name": "transitive_membership_options",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "f",
+          "t",
+          "t"
+        ],
+        [
+          "f",
+          "f",
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "create_transitive_acl_probe",
+      "kind": "ok"
+    },
+    {
+      "name": "restrict_transitive_acl_probe",
+      "kind": "ok"
+    },
+    {
+      "name": "grant_transitive_acl_probe",
+      "kind": "ok"
+    },
+    {
+      "name": "transitive_role_acl_is_inherited",
+      "kind": "ok"
+    },
+    {
+      "name": "transfer_probe_to_role_owner",
+      "kind": "ok"
+    },
+    {
+      "name": "inherited_owner_manages_probe",
+      "kind": "ok"
+    },
+    {
+      "name": "inherited_owner_changes_are_visible",
+      "kind": "rows",
+      "rows": []
+    },
+    {
+      "name": "granted_execute_role_invokes_probe",
+      "kind": "ok"
+    },
+    {
+      "name": "noinherit_member_cannot_alter_owned_probe",
+      "kind": "error",
+      "sqlstate": "42501"
+    },
+    {
+      "name": "noinherit_member_cannot_replace_owned_probe",
+      "kind": "error",
+      "sqlstate": "42501"
+    },
+    {
+      "name": "noinherit_member_cannot_drop_owned_probe",
+      "kind": "error",
+      "sqlstate": "42501"
+    },
+    {
+      "name": "create_invoker_set_role_probe",
+      "kind": "ok"
+    },
+    {
+      "name": "invoker_set_role_survives_return",
+      "kind": "ok"
+    },
+    {
+      "name": "create_definer_set_role_probe",
+      "kind": "ok"
+    },
+    {
+      "name": "transfer_definer_set_role_probe",
+      "kind": "ok"
+    },
+    {
+      "name": "definer_set_role_is_rejected",
+      "kind": "error",
+      "sqlstate": "42501"
+    },
+    {
+      "name": "grant_explicit_admin_options",
+      "kind": "ok"
+    },
+    {
+      "name": "explicit_admin_options",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "f",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "delegated_grant",
+      "kind": "ok"
+    },
+    {
+      "name": "delegated_grantor",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "f",
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "membership_cycle_rejected",
+      "kind": "error",
+      "sqlstate": "0LP01"
+    },
+    {
+      "name": "self_membership_rejected",
+      "kind": "error",
+      "sqlstate": "0LP01"
+    },
+    {
+      "name": "dependent_admin_revoke_restrict",
+      "kind": "error",
+      "sqlstate": "2BP01"
+    },
+    {
+      "name": "dependent_admin_revoke_cascade",
+      "kind": "ok"
+    },
+    {
+      "name": "cascade_removes_delegated_grant",
+      "kind": "rows",
+      "rows": [
+        [
+          "f",
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "restore_admin_option",
+      "kind": "ok"
+    },
+    {
+      "name": "delegated_grant_again",
+      "kind": "ok"
+    },
+    {
+      "name": "direct_grant_same_pair",
+      "kind": "ok"
+    },
+    {
+      "name": "multiple_grantors",
+      "kind": "rows",
+      "rows": [
+        [
+          "2",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "revoke_one_grantor",
+      "kind": "ok"
+    },
+    {
+      "name": "one_grantor_remains",
+      "kind": "rows",
+      "rows": [
+        [
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "regrant_inherit_and_set",
+      "kind": "ok"
+    },
+    {
+      "name": "regrant_named_options",
+      "kind": "rows",
+      "rows": [
+        [
+          "f",
+          "t",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "regrant_set_only",
+      "kind": "ok"
+    },
+    {
+      "name": "unspecified_option_is_retained",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "revoke_inherit_option",
+      "kind": "ok"
+    },
+    {
+      "name": "revoke_set_option",
+      "kind": "ok"
+    },
+    {
+      "name": "option_revoke_retains_membership",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "f",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "revoke_complete_membership",
+      "kind": "ok"
+    },
+    {
+      "name": "complete_revoke_removes_row",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_role_with_memberships",
+      "kind": "ok"
+    },
+    {
+      "name": "create_role_membership_options",
+      "kind": "rows",
+      "rows": [
+        [
+          "admin",
+          "t",
+          "t",
+          "t"
+        ],
+        [
+          "in_role",
+          "f",
+          "f",
+          "t"
+        ],
+        [
+          "role_member",
+          "f",
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "alter_group_add_member",
+      "kind": "ok"
+    },
+    {
+      "name": "alter_group_added",
+      "kind": "rows",
+      "rows": [
+        [
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "alter_group_drop_member",
+      "kind": "ok"
+    },
+    {
+      "name": "alter_group_removed",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "membership_transaction_rollback",
+      "kind": "ok"
+    },
+    {
+      "name": "rolled_back_membership_absent",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "grant_droppable_member",
+      "kind": "ok"
+    },
+    {
+      "name": "drop_member_cascades_memberships",
+      "kind": "ok"
+    },
+    {
+      "name": "no_dangling_member_oid",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "delegated_grant_before_grantor_drop",
+      "kind": "ok"
+    },
+    {
+      "name": "clear_admin_without_cascade",
+      "kind": "ok"
+    },
+    {
+      "name": "cleared_admin_keeps_delegated_grant",
+      "kind": "rows",
+      "rows": [
+        [
+          "f",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "grantor_drop_dependency",
+      "kind": "error",
+      "sqlstate": "2BP01"
+    },
+    {
+      "name": "revoke_grantor_dependency",
+      "kind": "ok"
+    },
+    {
+      "name": "drop_grantor_after_revoke",
+      "kind": "ok"
+    },
+    {
+      "name": "no_dangling_grantor_oid",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "inherited_owner_drops_probe",
+      "kind": "ok"
+    },
+    {
+      "name": "drop_role_context_probes",
+      "kind": "ok"
+    }
+  ]
+}

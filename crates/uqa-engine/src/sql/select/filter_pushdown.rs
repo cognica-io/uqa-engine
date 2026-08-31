@@ -41,6 +41,7 @@ pub(in crate::sql) fn qualifier_filters_for_stmt(
         .then(|| from_quals.iter().next().cloned())
         .flatten();
     let column_owners = source_column_owners(engine, from);
+    let nullable_qualifiers = outer_join_nullable_qualifiers(from);
     let mut filters = QualifierFilters::new();
     for part in flatten_and_filter_parts(filter) {
         if let Some((qualifier, filter)) = qualifier_filter_for_part(
@@ -51,7 +52,9 @@ pub(in crate::sql) fn qualifier_filters_for_stmt(
             &column_owners,
             &stmt.subqueries,
         ) {
-            filters.entry(qualifier).or_default().push(filter);
+            if !nullable_qualifiers.contains(&qualifier) {
+                filters.entry(qualifier).or_default().push(filter);
+            }
         } else if qualifier_filter_elision_safe(from) {
             for (qualifier, filter) in derived_disjunctive_qualifier_filters(
                 engine,
@@ -61,11 +64,61 @@ pub(in crate::sql) fn qualifier_filters_for_stmt(
                 &column_owners,
                 &stmt.subqueries,
             ) {
-                filters.entry(qualifier).or_default().push(filter);
+                if !nullable_qualifiers.contains(&qualifier) {
+                    filters.entry(qualifier).or_default().push(filter);
+                }
             }
         }
     }
     (!filters.is_empty()).then_some(filters)
+}
+
+/// Qualifiers whose rows can be synthesized as NULLs by an outer join cannot
+/// receive an arbitrary WHERE predicate before that join. A predicate such as
+/// `right.id IS NULL` accepts the synthesized row; pushing it into the right
+/// scan first can remove a real match, manufacture a NULL-extended row, and
+/// turn a non-result into a result. Keep predicates on these qualifiers above
+/// the outer join unless a separate rewrite has first reduced it to an inner
+/// join.
+fn outer_join_nullable_qualifiers(from: &SourcePlan) -> BTreeSet<String> {
+    let SourcePlan::Join {
+        left,
+        right,
+        kind,
+        alias,
+        ..
+    } = from
+    else {
+        return BTreeSet::new();
+    };
+    let left_nullable = outer_join_nullable_qualifiers(left);
+    let right_nullable = outer_join_nullable_qualifiers(right);
+    if let Some(alias) = alias {
+        let nullable = matches!(
+            kind,
+            uqa_sql::ast::JoinKind::Left
+                | uqa_sql::ast::JoinKind::Right
+                | uqa_sql::ast::JoinKind::Full
+        ) || !left_nullable.is_empty()
+            || !right_nullable.is_empty();
+        return if nullable {
+            BTreeSet::from([alias.clone()])
+        } else {
+            BTreeSet::new()
+        };
+    }
+    let mut nullable = left_nullable;
+    nullable.extend(right_nullable);
+    match kind {
+        uqa_sql::ast::JoinKind::Left => nullable.extend(from_qualifier_set(right)),
+        uqa_sql::ast::JoinKind::Right => nullable.extend(from_qualifier_set(left)),
+        uqa_sql::ast::JoinKind::Full => {
+            nullable.extend(from_qualifier_set(left));
+            nullable.extend(from_qualifier_set(right));
+        }
+        uqa_sql::ast::JoinKind::Inner | uqa_sql::ast::JoinKind::Cross => {}
+    }
+    nullable
 }
 
 /// Project a multi-relation disjunction onto each relation as a necessary
@@ -1327,5 +1380,57 @@ mod tests {
             final_filter_after_qualifier_pushdown(&engine, &block, &from, None),
             Some(filter)
         );
+    }
+
+    #[test]
+    fn outer_join_marks_only_null_extended_qualifiers_as_unsafe_for_pushdown() {
+        let join_equality = equality("l.key", "r.key");
+        assert_eq!(
+            outer_join_nullable_qualifiers(&joined_source(JoinKind::Left, join_equality.clone())),
+            BTreeSet::from(["r".into()])
+        );
+        assert_eq!(
+            outer_join_nullable_qualifiers(&joined_source(JoinKind::Right, join_equality.clone())),
+            BTreeSet::from(["l".into()])
+        );
+        assert_eq!(
+            outer_join_nullable_qualifiers(&joined_source(JoinKind::Full, join_equality.clone())),
+            BTreeSet::from(["l".into(), "r".into()])
+        );
+        assert!(
+            outer_join_nullable_qualifiers(&joined_source(JoinKind::Inner, join_equality))
+                .is_empty()
+        );
+
+        let nested_outer = joined_source(JoinKind::Left, equality("l.key", "r.key"));
+        let nested_alias = SourcePlan::Join {
+            left: Box::new(nested_outer),
+            right: Box::new(SourcePlan::Table {
+                name: "marker_table".into(),
+                qualifier: "marker_table".into(),
+                alias: Some("marker".into()),
+                include_descendants: true,
+            }),
+            kind: JoinKind::Cross,
+            on: None,
+            using: None,
+            natural: false,
+            alias: Some("joined".into()),
+            column_aliases: Vec::new(),
+            lateral: false,
+            strategy: JoinExecutionStrategy::Auto,
+        };
+        assert_eq!(
+            outer_join_nullable_qualifiers(&nested_alias),
+            BTreeSet::from(["joined".into()]),
+            "an alias around an inner join must retain a nested outer join's nullable output"
+        );
+
+        let mut aliased_inner = joined_source(JoinKind::Inner, equality("l.key", "r.key"));
+        let SourcePlan::Join { alias, .. } = &mut aliased_inner else {
+            unreachable!()
+        };
+        *alias = Some("joined".into());
+        assert!(outer_join_nullable_qualifiers(&aliased_inner).is_empty());
     }
 }

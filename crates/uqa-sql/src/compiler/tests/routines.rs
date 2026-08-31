@@ -258,3 +258,51 @@ fn alter_function_preserves_an_omitted_signature_for_unique_resolution() {
     };
     assert_eq!(zero_arity.arg_types, Some(Vec::new()));
 }
+
+#[test]
+fn pg18_role_membership_statements_preserve_options_and_legacy_entry_points() {
+    let Statement::GrantRole(grant) = first(
+        "GRANT parent_role, audit_role TO member_role, CURRENT_USER WITH ADMIN OPTION, INHERIT FALSE, SET TRUE GRANTED BY grantor_role",
+    ) else {
+        panic!("expected GRANT ROLE");
+    };
+    assert!(grant.is_grant);
+    assert_eq!(grant.granted_roles, ["parent_role", "audit_role"]);
+    assert_eq!(grant.grantee_roles, ["member_role", "CURRENT_USER"]);
+    assert_eq!(grant.options.admin, Some(true));
+    assert_eq!(grant.options.inherit, Some(false));
+    assert_eq!(grant.options.set, Some(true));
+    assert_eq!(grant.grantor.as_deref(), Some("grantor_role"));
+    assert!(!grant.cascade);
+
+    let Statement::GrantRole(revoke) = first(
+        "REVOKE ADMIN OPTION FOR parent_role FROM member_role GRANTED BY grantor_role CASCADE",
+    ) else {
+        panic!("expected REVOKE ROLE");
+    };
+    assert!(!revoke.is_grant);
+    assert_eq!(revoke.options.admin, Some(false));
+    assert_eq!(revoke.options.inherit, None);
+    assert_eq!(revoke.options.set, None);
+    assert!(revoke.cascade);
+
+    let Statement::CreateRole(create) =
+        first("CREATE ROLE created_role IN ROLE parent_role ROLE member_role ADMIN admin_member")
+    else {
+        panic!("expected CREATE ROLE");
+    };
+    assert_eq!(create.in_roles, ["parent_role"]);
+    assert_eq!(create.role_members, ["member_role"]);
+    assert_eq!(create.admin_members, ["admin_member"]);
+
+    let Statement::AlterRole(alter) =
+        first("ALTER GROUP parent_role ADD USER first_member, second_member")
+    else {
+        panic!("expected ALTER GROUP");
+    };
+    assert_eq!(
+        alter.membership_action,
+        Some(crate::ast::RoleMembershipAction::Add)
+    );
+    assert_eq!(alter.members, ["first_member", "second_member"]);
+}

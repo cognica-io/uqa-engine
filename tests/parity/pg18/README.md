@@ -38,6 +38,8 @@ The differential summary line reports `total/match/diff`, and any difference mak
 
 `run_routines_stateful.py` executes the 129 delimited cases in `routines_stateful.sql` against PostgreSQL 18.4 with Apache AGE and UQA, then compares both results with `routines_stateful.expected.json`. It covers polymorphic and variadic resolution, pseudo-type declaration validation, user `pg_proc` identity, ALTER lifecycle, persisted concrete bindings, routine ownership and security, session portals, transitive function and procedure `DROP CASCADE` effects, and exact SQLSTATEs.
 
+The same runner's `--suite roles` mode executes the 90 cases in `roles_stateful.sql` and compares them with `roles_stateful.expected.json`. It covers PostgreSQL 18 role-membership defaults and option changes, independent grantors, ADMIN dependency `RESTRICT` and `CASCADE`, cycles, CREATE ROLE membership clauses, legacy ALTER GROUP, transactions and reopen, `pg_auth_members`, CREATEROLE attribute-delegation limits, transitive SET and INHERIT behavior, membership-aware routine ownership and ACLs, unauthorized replacement and drop, SECURITY INVOKER role persistence, SECURITY DEFINER restrictions, role-drop dependencies, and exact SQLSTATEs.
+
 The same runner's `--suite constraints` mode executes `constraints_stateful.sql` and compares it with `constraints_stateful.expected.json`. The 162-case transcript covers named CHECK, foreign-key, and `NOT NULL` `NOT VALID` state, validation and enforcement failure atomicity, supported ALTER forms, inferred primary-key references, exact referenced-key and physical-partition event identity, directional and temporal cross-type keys, initially-deferred outer-commit and savepoint behavior, `SET CONSTRAINTS` name resolution and trigger recreation, dependency-aware drops and pending-event precedence, multi-action rollback, catalog flags, and exact SQLSTATEs.
 
 The `--suite type-temporal` mode executes `type_temporal_stateful.sql` and compares it with `type_temporal_stateful.expected.json`. It covers built-in range and multirange identity, canonical values and operators, polymorphic range routine resolution, failure-atomic type rewrites, `WITHOUT OVERLAPS`, aggregate `PERIOD` coverage, catalog persistence, and exact SQLSTATEs.
@@ -79,6 +81,7 @@ Build the current CLI before running the oracle:
 ```sh
 cargo build --release -p uqa-cli --bin usql
 python3 tests/parity/pg18/run_routines_stateful.py
+python3 tests/parity/pg18/run_routines_stateful.py --suite roles
 python3 tests/parity/pg18/run_routines_stateful.py --suite constraints
 python3 tests/parity/pg18/run_routines_stateful.py --suite type-temporal
 python3 tests/parity/pg18/run_routines_stateful.py --suite triggers
@@ -90,6 +93,7 @@ The runner executes PostgreSQL and UQA concurrently by default. `--backend postg
 
 ```sh
 python3 tests/parity/pg18/run_routines_stateful.py --backend postgres --update-expected
+python3 tests/parity/pg18/run_routines_stateful.py --suite roles --backend postgres --update-expected
 python3 tests/parity/pg18/run_routines_stateful.py --suite constraints --backend postgres --update-expected
 python3 tests/parity/pg18/run_routines_stateful.py --suite type-temporal --backend postgres --update-expected
 python3 tests/parity/pg18/run_routines_stateful.py --suite triggers --backend postgres --update-expected
@@ -97,7 +101,7 @@ python3 tests/parity/pg18/run_routines_stateful.py --suite rules --backend postg
 python3 tests/parity/pg18/run_routines_stateful.py --suite transactions --backend postgres --update-expected
 ```
 
-Every fixture case starts with `-- @case <name> <ok|rows|error>` and ends with `-- @end`; this explicit framing allows routine bodies to contain semicolons without making the runner guess SQL statement boundaries. The runner replaces `__UQA_STATEFUL_SCHEMA__` with an isolated generated schema name and rejects an expected transcript whose fixture SHA-256 or ordered case modes are stale.
+Every fixture case starts with `-- @case <name> <ok|rows|error>` and ends with `-- @end`; this explicit framing allows routine bodies to contain semicolons without making the runner guess SQL statement boundaries. The runner replaces `__UQA_STATEFUL_SCHEMA__` and the role-suite placeholders with isolated generated names and rejects an expected transcript whose fixture SHA-256 or ordered case modes are stale.
 
 ## Routine security and cursor oracle
 

@@ -42,6 +42,7 @@ pub(super) enum VirtualRelation {
     PgRange,
     PgProc,
     PgDatabase,
+    PgAuthMembers,
     PgRoles,
     PgUser,
     PgSettings,
@@ -115,6 +116,9 @@ pub(super) fn resolve_virtual_relation(engine: &Engine, name: &str) -> Option<Vi
         (_, true, "pg_database") | (false, false, "pg_database") => {
             Some(VirtualRelation::PgDatabase)
         }
+        (_, true, "pg_auth_members") | (false, false, "pg_auth_members") => {
+            Some(VirtualRelation::PgAuthMembers)
+        }
         (_, true, "pg_roles") | (false, false, "pg_roles") => Some(VirtualRelation::PgRoles),
         (_, true, "pg_user") | (false, false, "pg_user") => Some(VirtualRelation::PgUser),
         (_, true, "pg_settings") | (false, false, "pg_settings") => {
@@ -175,6 +179,7 @@ impl VirtualRelation {
                 | Self::PgType
                 | Self::PgProc
                 | Self::PgDatabase
+                | Self::PgAuthMembers
                 | Self::PgDescription
                 | Self::AgGraph
                 | Self::AgLabel
@@ -610,6 +615,15 @@ impl VirtualRelation {
                 "daticurules" => ColumnType::Text,
                 "datcollversion" => ColumnType::Text,
                 "datacl" => array(ColumnType::AclItem),
+            ],
+            Self::PgAuthMembers => columns![
+                "oid" => ColumnType::Oid,
+                "roleid" => ColumnType::Oid,
+                "member" => ColumnType::Oid,
+                "grantor" => ColumnType::Oid,
+                "admin_option" => ColumnType::Boolean,
+                "inherit_option" => ColumnType::Boolean,
+                "set_option" => ColumnType::Boolean,
             ],
             Self::PgRoles => columns![
                 "rolname" => ColumnType::Name,

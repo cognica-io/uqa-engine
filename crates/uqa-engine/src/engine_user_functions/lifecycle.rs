@@ -15,8 +15,8 @@ use uqa_sql::ast::{
 use uqa_sql::SQLError;
 
 use crate::{
-    Arc, CatalogFacade, Engine, RelationIdentity, StorageBackendError, StorageBackendResult,
-    FUNCTIONS_METADATA_KEY,
+    engine_roles::role_inherits, Arc, CatalogFacade, Engine, RelationIdentity, StorageBackendError,
+    StorageBackendResult, FUNCTIONS_METADATA_KEY,
 };
 
 use super::declaration::{
@@ -221,6 +221,7 @@ impl Engine {
         let current_user_is_superuser = roles
             .get(&current_user)
             .is_some_and(|role| role.has(RoleAttribute::Superuser));
+        let memberships = self.durable.role_memberships.read();
         if (def.security.leakproof || def.support.is_some()) && !current_user_is_superuser {
             return Err(SQLError::Routine {
                 sqlstate: "42501".into(),
@@ -248,6 +249,10 @@ impl Engine {
                         ),
                     });
                 }
+                Self::ensure_routine_owner_as(
+                    existing,
+                    role_inherits(&roles, &memberships, &current_user, &existing.owner),
+                )?;
                 if existing.is_procedure != def.is_procedure {
                     return Err(SQLError::Routine {
                         sqlstate: "42809".into(),
@@ -276,6 +281,7 @@ impl Engine {
         self.persist_sql_functions_snapshot(&next)?;
         *registry = next;
         drop(registry);
+        drop(memberships);
         drop(roles);
         self.note_catalog_registry_changed();
         Ok(())
@@ -290,6 +296,7 @@ impl Engine {
         let current_user_is_superuser = roles
             .get(&current_user)
             .is_some_and(|role| role.has(RoleAttribute::Superuser));
+        let memberships = self.durable.role_memberships.read();
         let mut registry = self.durable.sql_user_functions.write();
         let (name, position) = self.resolve_sql_routine_alter_target(
             &registry,
@@ -306,7 +313,10 @@ impl Engine {
                     "resolved ALTER routine target `{name}` disappeared before mutation"
                 ))
             })?;
-        Self::ensure_routine_owner_as(&existing.def, &current_user, current_user_is_superuser)?;
+        Self::ensure_routine_owner_as(
+            &existing.def,
+            role_inherits(&roles, &memberships, &current_user, &existing.def.owner),
+        )?;
         if existing.def.is_procedure
             && (stmt.volatility.is_some()
                 || stmt.strict.is_some()
@@ -361,6 +371,7 @@ impl Engine {
         self.persist_sql_functions_snapshot(&next)?;
         *registry = next;
         drop(registry);
+        drop(memberships);
         drop(roles);
         self.note_catalog_registry_changed();
         Ok(())
@@ -388,6 +399,7 @@ impl Engine {
         };
         let registry = self.durable.sql_user_functions.read().clone();
         let mut resolution = self.resolve_sql_function_drop_targets(stmt, &registry, kind)?;
+        self.ensure_routine_drop_owners(&registry, &resolution.targets)?;
         let cascaded_routines =
             Self::expand_sql_standard_drop_dependents(&registry, stmt.cascade, &mut resolution)?;
         let dependents = self.routine_object_dependents(&resolution.targets, stmt.cascade)?;
@@ -401,6 +413,39 @@ impl Engine {
             dependent_triggers: dependents.triggers,
             notices: resolution.notices,
         })
+    }
+
+    fn ensure_routine_drop_owners(
+        &self,
+        registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
+        targets: &[RoutineDropTarget],
+    ) -> Result<(), SQLError> {
+        let current_user = self.current_user_name();
+        let roles = self.durable.roles.read();
+        let memberships = self.durable.role_memberships.read();
+        for target in targets {
+            let definition = registry
+                .get(&target.name)
+                .and_then(|overloads| {
+                    overloads.iter().find(|function| {
+                        function.def.is_procedure == target.is_procedure
+                            && routine_signature_types(&function.def) == target.argument_types
+                    })
+                })
+                .map(|function| &function.def)
+                .ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "resolved {} {} disappeared before ownership validation",
+                        target.kind(),
+                        target.label()
+                    ))
+                })?;
+            Self::ensure_routine_owner_as(
+                definition,
+                role_inherits(&roles, &memberships, &current_user, &definition.owner),
+            )?;
+        }
+        Ok(())
     }
 
     fn resolve_sql_function_drop_targets(
