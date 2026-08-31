@@ -71,6 +71,15 @@ The Rust line checker loads `scripts/rust-file-line-policy.json`. Every hand-mai
 bash scripts/measure-rust-refactoring.sh
 ```
 
+Use the consolidated `uqa-engine` integration target as the fixed compile/link runner. An empty target directory measures a clean offline build and link; rerunning the same command in that directory records the warm no-op baseline without creating another test executable:
+
+```sh
+runner_target=$(mktemp -d /private/tmp/uqa-rust-fixed-runner.XXXXXX)
+env CARGO_TARGET_DIR="$runner_target" /usr/bin/time -p cargo test -p uqa-engine --test integration --no-run --locked --offline
+```
+
+The 2026-08-31 Phase 0 boundary on Rust and Cargo 1.90.0 for `aarch64-apple-darwin` measured 142.76 seconds clean and 0.30 seconds warm. Absolute time is machine-specific; the stable runner, locked dependency graph, offline mode, and empty-versus-warm target distinction make later measurements comparable on the same host.
+
 ## Exactness oracles
 
 WAND and Block-Max WAND output is compared with exhaustive BM25 over the same postings and parameters. Approximate vector indexes are compared with brute-force cosine top-K. Join algorithms are compared with a simpler semantic path or property-generated expected result. Graph codec round trips compare complete payload, not only support identities.
