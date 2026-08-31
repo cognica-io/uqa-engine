@@ -143,7 +143,7 @@
     },
     {
       "path": "crates/uqa-engine/src/sql/dml/constraints.rs",
-      "baseline_lines": 1470,
+      "baseline_lines": 1466,
       "owner": "uqa-engine DML constraint pipeline",
       "responsibility_groups": ["immediate checks", "key and foreign-key locking", "deferred checks", "referential actions and staging"],
       "target_modules": ["crates/uqa-engine/src/sql/dml/constraints/immediate.rs", "crates/uqa-engine/src/sql/dml/constraints/keys.rs", "crates/uqa-engine/src/sql/dml/constraints/deferred.rs", "crates/uqa-engine/src/sql/dml/constraints/referential_actions.rs", "crates/uqa-engine/src/sql/dml/constraints/staging.rs"],
@@ -311,10 +311,10 @@
     },
     {
       "path": "crates/uqa-engine/tests/engine_queries/sql_row_locks_recheck/writer_order.rs",
-      "baseline_lines": 1469,
+      "baseline_lines": 1427,
       "owner": "uqa-engine concurrent writer-order tests",
-      "responsibility_groups": ["INSERT SELECT progress", "UPDATE FROM source ordering", "wait and retry schedules", "publication order"],
-      "target_modules": ["crates/uqa-engine/tests/engine_queries/sql_row_locks_recheck/writer_order/insert_select_progress.rs", "crates/uqa-engine/tests/engine_queries/sql_row_locks_recheck/writer_order/update_from_source.rs", "crates/uqa-engine/tests/engine_queries/sql_row_locks_recheck/writer_order/wait_schedules.rs"],
+      "responsibility_groups": ["INSERT conflict snapshots", "INSERT SELECT progress", "UPDATE FROM source ordering", "wait and retry schedules", "publication order"],
+      "target_modules": ["crates/uqa-engine/tests/engine_queries/sql_row_locks_recheck/writer_order/insert_conflict.rs", "crates/uqa-engine/tests/engine_queries/sql_row_locks_recheck/writer_order/insert_select_progress.rs", "crates/uqa-engine/tests/engine_queries/sql_row_locks_recheck/writer_order/update_from_source.rs", "crates/uqa-engine/tests/engine_queries/sql_row_locks_recheck/writer_order/wait_schedules.rs"],
       "migration_state": "planned"
     },
     {

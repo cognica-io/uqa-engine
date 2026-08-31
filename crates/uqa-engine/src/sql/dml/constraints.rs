@@ -593,16 +593,11 @@ pub(in crate::sql) fn lock_document_key_dependencies(
         lock_keys.insert(digest);
     }
 
+    let has_reservations = !lock_keys.is_empty();
     let mut acquisitions = Vec::new();
-    let mut waited = false;
     for lock_key in lock_keys {
         match engine.lock_key_reservation(lock_key, table)? {
-            crate::row_locks::LockAcquire::Granted {
-                acquisition,
-                waited: lock_waited,
-                ..
-            } => {
-                waited |= lock_waited;
+            crate::row_locks::LockAcquire::Granted { acquisition, .. } => {
                 acquisitions.extend(acquisition);
             }
             crate::row_locks::LockAcquire::Skipped => {
@@ -612,7 +607,8 @@ pub(in crate::sql) fn lock_document_key_dependencies(
             }
         }
     }
-    if waited {
+    if has_reservations {
+        // A competing writer can publish and release this reservation after our initial snapshot but immediately before acquisition. That grant does not report a wait, so every reservation boundary must refresh the READ COMMITTED snapshot before conflict lookup.
         engine.refresh_explicit_statement_snapshot()?;
     }
     Ok(acquisitions)

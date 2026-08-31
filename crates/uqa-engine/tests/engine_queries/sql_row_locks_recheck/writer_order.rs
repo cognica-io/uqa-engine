@@ -6,6 +6,8 @@
 
 use super::*;
 
+#[path = "writer_order/insert_conflict.rs"]
+mod insert_conflict;
 #[path = "writer_order/insert_select_progress.rs"]
 mod insert_select_progress;
 #[path = "writer_order/update_from_source.rs"]
@@ -405,50 +407,6 @@ fn correlated_insert_returning_rechecks_with_the_same_outer_row_before_the_data_
     assert_eq!(result.rows.len(), 2);
     assert_eq!(result.rows[0]["locked_value"], Value::Int(10));
     assert_eq!(result.rows[1]["locked_value"], Value::Int(21));
-}
-
-#[test]
-fn insert_returning_rebuilds_after_a_concurrent_conflict_commits() {
-    let directory = tempfile::tempdir().unwrap();
-    let root = Engine::open(
-        &directory
-            .path()
-            .join("insert-returning-concurrent-conflict.db"),
-    )
-    .unwrap();
-    root.sql(
-        "CREATE TABLE concurrent_conflict_source (id INTEGER PRIMARY KEY, value INTEGER); CREATE TABLE concurrent_conflict_target (id INTEGER PRIMARY KEY, value INTEGER); INSERT INTO concurrent_conflict_source VALUES (1, 10), (101, 1010)",
-        &[],
-    )
-    .unwrap();
-    let writer = root.new_session().unwrap();
-    let inserter = root.new_session().unwrap();
-    writer.sql("BEGIN", &[]).unwrap();
-    writer
-        .sql(
-            "INSERT INTO concurrent_conflict_target VALUES (1, 100)",
-            &[],
-        )
-        .unwrap();
-
-    let (done_tx, done_rx) = mpsc::channel();
-    let insert_thread = std::thread::spawn(move || {
-        done_tx
-            .send(inserter.sql(
-                "INSERT INTO concurrent_conflict_target VALUES (1, 1) ON CONFLICT (id) DO UPDATE SET value = concurrent_conflict_target.value + 1 RETURNING value, (SELECT value FROM concurrent_conflict_source AS source WHERE source.id = concurrent_conflict_target.value FOR UPDATE) AS locked_value",
-                &[],
-            ))
-            .unwrap();
-    });
-    assert!(done_rx.recv_timeout(Duration::from_millis(150)).is_err());
-    writer.sql("COMMIT", &[]).unwrap();
-    let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
-        .unwrap()
-        .unwrap();
-    insert_thread.join().unwrap();
-    assert_eq!(result.rows[0]["value"], Value::Int(101));
-    assert_eq!(result.rows[0]["locked_value"], Value::Int(1010));
 }
 
 #[test]

@@ -129,12 +129,12 @@ The fixed runner is `cargo test -p uqa-engine --test integration --no-run --lock
 
 ### 3.2 Phase 1 boundary measurement
 
-The Phase 1 boundary was measured on 2026-08-31 with `bash scripts/measure-rust-refactoring.sh`. `cloc 2.08` reports 1,293 Rust files, 401,851 code lines, 18,910 comment lines, and 26,827 blank lines under `crates/`; the hand-maintained report excludes imported `uqa-pg-query` and reports 1,288 files, 432,297 physical lines, 66 inventoried files, and no file above 1,500 lines. The largest governed file remains `uqa-sql/src/expr.rs` at 1,493 physical lines.
+The Phase 1 boundary was measured on 2026-08-31 with `bash scripts/measure-rust-refactoring.sh`. `cloc 2.08` reports 1,294 Rust files, 401,863 code lines, 18,917 comment lines, and 26,829 blank lines under `crates/`; the hand-maintained report excludes imported `uqa-pg-query` and reports 1,289 files, 432,318 physical lines, 66 inventoried files, and no file above 1,500 lines. The largest governed file remains `uqa-sql/src/expr.rs` at 1,493 physical lines.
 
 | Boundary | Rust files | Physical lines or current size |
 | --- | ---: | ---: |
-| `uqa-engine` | 578 | 231,029 |
-| `uqa-engine/src/sql`, including `sql.rs` | 187 | 87,471 |
+| `uqa-engine` | 579 | 231,050 |
+| `uqa-engine/src/sql`, including `sql.rs` | 187 | 87,467 |
 | `uqa-engine/src/lib.rs` | 1 | 885 |
 | `uqa-engine/src/sql.rs` | 1 | 337 |
 | `UnifiedPlanExecutor` owner | 1 | 557 |
@@ -156,7 +156,7 @@ The current release `usql` was executed against the pinned Docker PostgreSQL 18.
 | Phase 3: mutation path | Preliminary boundary only; compatibility growth is not architectural completion | `MutationCoordinator` proves the transactional schema path, and shared carriers and lock helpers exist in `dml.rs`, but INSERT, MERGE, automatic-view rewriting, and view-trigger execution remain large command-oriented paths that accept `&Engine`; the complete shared mutation protocol has not reached its exit gate. |
 | Phase 4: transactions and locks | Preliminary decomposition only | `engine_transactions/` and `row_locks/` contain focused child modules, but their roots remain 1,469 and 1,429 physical lines and continue to own multiple transitions through broad facade methods. |
 | Phase 5: lower crates | Not complete | `uqa-sql/src/expr.rs`, `uqa-execution/src/scalar.rs`, and `uqa-scoring/src/wand.rs` remain between 1,455 and 1,493 physical lines, and the planned ownership moves have not passed their exit gates. |
-| Phase 6: tests and final ceiling | Broader phase not started; initial hotspot resolved | `uqa-engine/tests` contains 86,864 physical lines across 237 files and 236 nested module declarations, and the single integration executable discovers 2,069 tests. The 3,486-line automatic-view source is now seven behavior modules of at most 826 lines, but other inventoried test sources and the final 1,000-line hard ceiling remain Phase 6 work. |
+| Phase 6: tests and final ceiling | Broader phase not started; initial hotspot resolved | `uqa-engine/tests` contains 86,889 physical lines across 238 files and 237 nested module declarations, and the single integration executable discovers 2,069 tests. The 3,486-line automatic-view source is now seven behavior modules of at most 826 lines, but other inventoried test sources and the final 1,000-line hard ceiling remain Phase 6 work. |
 
 The implementation sequence now moves to Phase 2. The completed capability bundle leaves CI topology unchanged: the harness checker still reports 218 direct integration sources in 18 targets across 18 crates, `UnifiedPlanExecutor` remains the only dispatcher, and the full `uqa-engine` integration target plus focused catalog, schema, cache, cursor, TRUNCATE, and automatic-view tests pass.
 
@@ -200,7 +200,7 @@ Similarly, `uqa-execution/src/scalar.rs` combines the scalar physical IR, tree i
 
 ### 4.5 Test consolidation controls executables but not test complexity
 
-The one-target policy is working and must remain: the harness checker accounts for all 218 direct integration sources in 18 targets. `uqa-engine` now has 86,864 physical lines across 237 files under `tests/`, 236 nested module declarations, and 2,069 tests discovered by its single integration executable. The former 3,486-line automatic-view source is split into seven behavior modules without changing its two test entry points or 74-function body inventory; repeated setup, row decoding, reopen loops, SQLSTATE assertions, and parity fixtures elsewhere should still be consolidated under resource-domain support modules while distinct semantic branches remain explicit and discoverable.
+The one-target policy is working and must remain: the harness checker accounts for all 218 direct integration sources in 18 targets. `uqa-engine` now has 86,889 physical lines across 238 files under `tests/`, 237 nested module declarations, and 2,069 tests discovered by its single integration executable. The former 3,486-line automatic-view source is split into seven behavior modules without changing its two test entry points or 74-function body inventory; repeated setup, row decoding, reopen loops, SQLSTATE assertions, and parity fixtures elsewhere should still be consolidated under resource-domain support modules while distinct semantic branches remain explicit and discoverable.
 
 ## 5. Target architecture
 
