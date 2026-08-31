@@ -326,8 +326,8 @@ fn routine_acl_catalog_value(def: &uqa_sql::ast::CreateFunction) -> Result<Value
     let Some(acl) = def.execute_acl.as_ref() else {
         return Ok(Value::Null);
     };
-    let grantor = acl_identifier(&def.owner);
-    let mut entries = vec![str_value(format!("{grantor}=X/{grantor}"))];
+    let owner = acl_identifier(&def.owner);
+    let mut entries = vec![str_value(format!("{owner}=X/{owner}"))];
     entries.extend(
         acl.iter()
             .filter(|entry| entry.role != def.owner)
@@ -337,6 +337,7 @@ fn routine_acl_catalog_value(def: &uqa_sql::ast::CreateFunction) -> Result<Value
                 } else {
                     acl_identifier(&entry.role)
                 };
+                let grantor = acl_identifier(entry.grantor.as_deref().unwrap_or(&def.owner));
                 str_value(format!(
                     "{grantee}=X{}/{grantor}",
                     if entry.grant_option { "*" } else { "" }

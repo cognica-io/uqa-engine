@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, LazyLock};
 
 use uqa_core::Value;
-use uqa_sql::ast::{ColumnDef as SQLColumnDef, ColumnType, Expr};
+use uqa_sql::ast::{ColumnDef as SQLColumnDef, ColumnType, Expr, Statement};
 use uqa_sql::registry::registered_names;
 use uqa_sql::{ResultRow, SQLError};
 
@@ -225,6 +225,58 @@ pub(crate) fn resolve_regclass_oid(engine: &Engine, name: &str) -> Result<Option
     Ok(Some(helpers::relation_oid(relkind, &schema, &relation)))
 }
 
+pub(crate) fn resolve_regprocedure_oid(engine: &Engine, name: &str) -> Result<Option<i64>, String> {
+    let Ok(mut statements) = uqa_sql::compile(&format!("DROP FUNCTION {name}")) else {
+        return Ok(None);
+    };
+    if statements.len() != 1 {
+        return Ok(None);
+    }
+    let Statement::DropFunction(statement) = statements.remove(0) else {
+        return Ok(None);
+    };
+    let [item] = statement.items.as_slice() else {
+        return Ok(None);
+    };
+    let Some(argument_types) = item.arg_types.as_ref() else {
+        return Ok(None);
+    };
+    let Ok((schema, local)) = RelationIdentity::parse_reference(&item.name) else {
+        return Ok(None);
+    };
+    let argument_oids = argument_types
+        .iter()
+        .map(|type_name| {
+            resolve_catalog_column_type(engine, type_name).map_or_else(
+                || helpers::routine_type_oid(type_name),
+                |ty| helpers::pg_type_oid(&ty),
+            )
+        })
+        .collect::<Vec<_>>();
+    let catalog = regtype_output_catalog(engine).map_err(|error| error.to_string())?;
+    let find_in_schema = |schema: &str| {
+        let namespace_oid = helpers::schema_oid(schema);
+        catalog.procs.iter().find_map(|(oid, entry)| {
+            (entry.namespace_oid == namespace_oid
+                && entry.name == local
+                && entry.argument_types == argument_oids)
+                .then_some(*oid)
+        })
+    };
+    if let Some(schema) = schema {
+        return Ok(find_in_schema(&schema));
+    }
+    for schema in engine
+        .current_schema_names(true)
+        .map_err(|error| error.to_string())?
+    {
+        if let Some(oid) = find_in_schema(&schema) {
+            return Ok(Some(oid));
+        }
+    }
+    Ok(None)
+}
+
 const VIRTUAL_REGCLASSES: &[(&str, &str, i64)] = &[
     ("pg_catalog", "pg_namespace", 2615),
     ("pg_catalog", "pg_class", 1259),
@@ -298,6 +350,19 @@ fn catalog_int(row: &ResultRow, column: &str) -> Option<i64> {
     }
 }
 
+fn catalog_int_list(row: &ResultRow, column: &str) -> Option<Vec<i64>> {
+    let Some(Value::List(values)) = row.get(column) else {
+        return None;
+    };
+    values
+        .iter()
+        .map(|value| match value {
+            Value::Int(value) => Some(*value),
+            _ => None,
+        })
+        .collect()
+}
+
 fn catalog_str<'a>(row: &'a ResultRow, column: &str) -> Option<&'a str> {
     match row.get(column) {
         Some(Value::Str(value) | Value::FixedChar(value)) => Some(value),
@@ -310,6 +375,7 @@ struct RegtypeCatalogEntry {
     name: String,
     namespace_oid: i64,
     overloaded: bool,
+    argument_types: Vec<i64>,
 }
 
 /// One immutable catalog snapshot shared by every `reg*` value formatted until catalog state changes.
@@ -342,6 +408,7 @@ impl RegtypeOutputCatalog {
                         name: catalog_str(&row, "relname")?.to_string(),
                         namespace_oid: catalog_int(&row, "relnamespace")?,
                         overloaded: false,
+                        argument_types: Vec::new(),
                     },
                 ))
             })
@@ -373,6 +440,11 @@ impl RegtypeOutputCatalog {
                     name,
                     namespace_oid,
                     overloaded: false,
+                    argument_types: catalog_int_list(&row, "proargtypes").ok_or_else(|| {
+                        SQLError::Internal(format!(
+                            "pg_proc row {oid} has a malformed proargtypes value"
+                        ))
+                    })?,
                 },
             );
         }
@@ -391,6 +463,7 @@ impl RegtypeOutputCatalog {
                         name: catalog_str(&row, "typname")?.to_string(),
                         namespace_oid: catalog_int(&row, "typnamespace")?,
                         overloaded: false,
+                        argument_types: Vec::new(),
                     },
                 ))
             })
@@ -552,6 +625,45 @@ fn format_regproc(
     ))
 }
 
+fn format_regprocedure(
+    engine: &Engine,
+    catalog: &RegtypeOutputCatalog,
+    oid: i64,
+) -> Result<Option<String>, SQLError> {
+    let Some(entry) = catalog.procs.get(&oid) else {
+        return Ok(None);
+    };
+    let Some(schema) = namespace_name(catalog, entry.namespace_oid) else {
+        return Ok(None);
+    };
+    let visible_schema = engine
+        .current_schema_names(true)
+        .map_err(|error| SQLError::Internal(error.to_string()))?
+        .into_iter()
+        .find(|candidate_schema| {
+            let namespace_oid = helpers::schema_oid(candidate_schema);
+            catalog.procs.values().any(|candidate| {
+                candidate.namespace_oid == namespace_oid
+                    && candidate.name == entry.name
+                    && candidate.argument_types == entry.argument_types
+            })
+        });
+    let routine_name = if visible_schema.as_deref() == Some(schema) {
+        uqa_sql::expr::quote_ident(&entry.name)
+    } else {
+        qualified_name(schema, &entry.name)
+    };
+    let arguments = entry
+        .argument_types
+        .iter()
+        .map(|oid| {
+            format_regtype(engine, catalog, *oid)
+                .map(|name| name.unwrap_or_else(|| oid.to_string()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Some(format!("{routine_name}({})", arguments.join(","))))
+}
+
 fn pg_catalog_type_output(typname: &str) -> String {
     if let Some(element) = typname.strip_prefix('_') {
         return format!("{}[]", pg_catalog_type_output(element));
@@ -596,13 +708,18 @@ pub(crate) fn resolve_regtype_output(
 ) -> Result<Option<String>, String> {
     if !matches!(
         ty,
-        ColumnType::Regproc | ColumnType::Regclass | ColumnType::Regnamespace | ColumnType::Regtype
+        ColumnType::Regproc
+            | ColumnType::Regprocedure
+            | ColumnType::Regclass
+            | ColumnType::Regnamespace
+            | ColumnType::Regtype
     ) {
         return Ok(None);
     }
     let catalog = regtype_output_catalog(engine).map_err(|error| error.to_string())?;
     let output = match ty {
         ColumnType::Regproc => format_regproc(engine, &catalog, oid),
+        ColumnType::Regprocedure => format_regprocedure(engine, &catalog, oid),
         ColumnType::Regclass => format_regclass(engine, &catalog, oid),
         ColumnType::Regnamespace => {
             Ok(namespace_name(&catalog, oid).map(uqa_sql::expr::quote_ident))

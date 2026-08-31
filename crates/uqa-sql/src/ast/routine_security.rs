@@ -36,6 +36,9 @@ pub struct RoutineSecurityAttributes {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoutineAclEntry {
     pub role: String,
+    /// Grantor for this ACL path. Legacy persisted definitions omit the field and therefore use the routine owner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grantor: Option<String>,
     pub grant_option: bool,
 }
 
@@ -95,6 +98,13 @@ pub struct GrantRoutineItem {
     pub arg_types: Option<Vec<String>>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RoutineRevokeBehavior {
+    #[default]
+    Restrict,
+    Cascade,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GrantRoutineStmt {
     pub kind: AlterRoutineKind,
@@ -103,6 +113,10 @@ pub struct GrantRoutineStmt {
     pub grant_option_only: bool,
     pub items: Vec<GrantRoutineItem>,
     pub grantees: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grantor: Option<String>,
+    #[serde(default)]
+    pub revoke_behavior: RoutineRevokeBehavior,
 }
 
 /// `PostgreSQL` 18 options stored on one role-membership grant.

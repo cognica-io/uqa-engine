@@ -7,7 +7,7 @@
 use super::*;
 use crate::ast::{
     AlterRoutineKind, FromClause, FunctionParallel, FunctionParamMode, FunctionVolatility,
-    RoutineConfigAction,
+    RoutineConfigAction, RoutineRevokeBehavior,
 };
 
 fn variadic_value(expression: &Expr) -> &Expr {
@@ -230,6 +230,18 @@ fn routine_security_ownership_acl_role_and_refcursor_statements_compile() {
     assert!(grant.grant_option);
     assert_eq!(grant.grantees, ["routine_caller", "PUBLIC"]);
     assert_eq!(grant.items[0].arg_types.as_deref().unwrap(), ["refcursor"]);
+    assert_eq!(grant.grantor, None);
+    assert_eq!(grant.revoke_behavior, RoutineRevokeBehavior::Restrict);
+
+    let Statement::GrantRoutine(revoke) = first(
+        "REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION app.open_cursor(refcursor) FROM routine_caller GRANTED BY CURRENT_USER CASCADE",
+    ) else {
+        panic!("expected REVOKE EXECUTE");
+    };
+    assert!(!revoke.is_grant);
+    assert!(revoke.grant_option_only);
+    assert_eq!(revoke.grantor.as_deref(), Some("CURRENT_USER"));
+    assert_eq!(revoke.revoke_behavior, RoutineRevokeBehavior::Cascade);
 
     assert!(matches!(
         first("CREATE ROLE routine_caller LOGIN CREATEDB CONNECTION LIMIT 4"),

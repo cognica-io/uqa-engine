@@ -8,6 +8,7 @@
 
 use uqa_core::{ArrayValue, Value};
 use uqa_engine::{Engine, SQLResult};
+use uqa_sql::ColumnType;
 
 fn array(values: Vec<Value>) -> Value {
     Value::Array(ArrayValue::try_new(values).expect("rectangular catalog array"))
@@ -1249,4 +1250,156 @@ fn regtype_output_cache_invalidates_for_table_ddl_and_rollback() {
         after_rollback.rows[0]["name"],
         Value::Str(rolled_back_oid.to_string())
     );
+}
+
+#[test]
+fn postgresql_18_regprocedure_resolves_exact_routine_identities_and_catalog_metadata() {
+    let engine = Engine::new();
+    for sql in [
+        "CREATE SCHEMA regprocedure_app",
+        "CREATE FUNCTION regprocedure_app.identity_probe(value integer) RETURNS integer LANGUAGE SQL AS 'SELECT value'",
+        "CREATE FUNCTION regprocedure_app.identity_probe(value text) RETURNS text LANGUAGE SQL AS 'SELECT value'",
+        "CREATE FUNCTION public.identity_probe(value integer) RETURNS integer LANGUAGE SQL AS 'SELECT value + 1'",
+        "CREATE PROCEDURE regprocedure_app.procedure_probe(value integer) LANGUAGE SQL AS 'SELECT value'",
+        "SET search_path TO regprocedure_app, public, pg_catalog",
+    ] {
+        engine
+            .sql(sql, &[])
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+    }
+
+    let visible = engine
+        .sql(
+            "SELECT pg_typeof('identity_probe(integer)'::regprocedure)::text AS type_name, \
+                    'identity_probe(integer)'::regprocedure AS identity, \
+                    ('identity_probe(integer)'::regprocedure)::text AS rendered, \
+                    ('identity_probe(integer)'::regprocedure)::oid = \
+                        (SELECT oid FROM pg_catalog.pg_proc WHERE proname = 'identity_probe' AND pronamespace = \
+                            (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = 'regprocedure_app') AND proargtypes::text = '23') AS oid_matches, \
+                    ('regprocedure_app.procedure_probe(integer)'::regprocedure)::text AS procedure_rendered, \
+                    ('pg_catalog.md5(text)'::regprocedure)::oid AS builtin_oid, \
+                    ('pg_catalog.md5(text)'::regprocedure)::text AS builtin_rendered, \
+                    (0::regprocedure)::text AS zero_rendered",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(visible.column_types[1], Some(ColumnType::Regprocedure));
+    assert_eq!(
+        visible.rows[0]["type_name"],
+        Value::Str("regprocedure".into())
+    );
+    assert!(matches!(visible.rows[0]["identity"], Value::Int(_)));
+    assert_eq!(
+        visible.rows[0]["rendered"],
+        Value::Str("identity_probe(integer)".into())
+    );
+    assert_eq!(visible.rows[0]["oid_matches"], Value::Bool(true));
+    assert_eq!(
+        visible.rows[0]["procedure_rendered"],
+        Value::Str("procedure_probe(integer)".into())
+    );
+    assert_eq!(visible.rows[0]["builtin_oid"], Value::Int(2311));
+    assert_eq!(
+        visible.rows[0]["builtin_rendered"],
+        Value::Str("md5(text)".into())
+    );
+    assert_eq!(visible.rows[0]["zero_rendered"], Value::Str("-".into()));
+
+    engine
+        .sql(
+            "SET search_path TO public, regprocedure_app, pg_catalog",
+            &[],
+        )
+        .unwrap();
+    let shadowed = engine
+        .sql(
+            "SELECT ('identity_probe(integer)'::regprocedure)::oid = \
+                        (SELECT oid FROM pg_catalog.pg_proc WHERE proname = 'identity_probe' AND pronamespace = \
+                            (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = 'public') AND proargtypes::text = '23') AS public_selected, \
+                    ('regprocedure_app.identity_probe(integer)'::regprocedure)::text AS app_rendered",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(shadowed.rows[0]["public_selected"], Value::Bool(true));
+    assert_eq!(
+        shadowed.rows[0]["app_rendered"],
+        Value::Str("regprocedure_app.identity_probe(integer)".into())
+    );
+
+    let missing = engine
+        .sql(
+            "SELECT 'regprocedure_app.identity_probe(bigint)'::regprocedure",
+            &[],
+        )
+        .expect_err("missing overload must fail");
+    assert_eq!(missing.sqlstate(), Some("42883"));
+
+    assert_regprocedure_catalog_metadata(&engine);
+}
+
+fn assert_regprocedure_catalog_metadata(engine: &Engine) {
+    let types = engine
+        .sql(
+            "SELECT oid, typname, typlen, typbyval, typtype, typcategory, typispreferred, typdelim, \
+                    typrelid, typelem, typarray, typinput::oid AS typinput, typoutput::oid AS typoutput, \
+                    typreceive::oid AS typreceive, typsend::oid AS typsend, typalign, typstorage \
+             FROM pg_catalog.pg_type WHERE oid IN (2202, 2207) ORDER BY oid",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(types.rows.len(), 2);
+    assert_eq!(types.rows[0]["typname"], Value::Str("regprocedure".into()));
+    for (column, value) in [
+        ("oid", Value::Int(2202)),
+        ("typlen", Value::Int(4)),
+        ("typbyval", Value::Bool(true)),
+        ("typtype", Value::Str("b".into())),
+        ("typcategory", Value::Str("N".into())),
+        ("typispreferred", Value::Bool(false)),
+        ("typdelim", Value::Str(",".into())),
+        ("typrelid", Value::Int(0)),
+        ("typelem", Value::Int(0)),
+        ("typarray", Value::Int(2207)),
+        ("typinput", Value::Int(2212)),
+        ("typoutput", Value::Int(2213)),
+        ("typreceive", Value::Int(2446)),
+        ("typsend", Value::Int(2447)),
+        ("typalign", Value::Str("i".into())),
+        ("typstorage", Value::Str("p".into())),
+    ] {
+        assert_eq!(types.rows[0][column], value, "pg_type.{column}");
+    }
+    assert_eq!(types.rows[1]["oid"], Value::Int(2207));
+    assert_eq!(types.rows[1]["typname"], Value::Str("_regprocedure".into()));
+    assert_eq!(types.rows[1]["typelem"], Value::Int(2202));
+    assert_eq!(types.rows[1]["typarray"], Value::Int(0));
+    assert_eq!(types.rows[1]["typcategory"], Value::Str("A".into()));
+
+    let io_routines = engine
+        .sql(
+            "SELECT oid, proname, proisstrict, provolatile, proparallel, prorettype, proargtypes::text AS proargtypes, prosrc \
+             FROM pg_catalog.pg_proc WHERE oid IN (2212, 2213, 2446, 2447) ORDER BY oid",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(io_routines.rows.len(), 4);
+    for (index, (oid, name, volatility, return_type, arguments)) in [
+        (2212, "regprocedurein", "s", 2202, "2275"),
+        (2213, "regprocedureout", "s", 2275, "2202"),
+        (2446, "regprocedurerecv", "i", 2202, "2281"),
+        (2447, "regproceduresend", "i", 17, "2202"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let row = &io_routines.rows[index];
+        assert_eq!(row["oid"], Value::Int(oid));
+        assert_eq!(row["proname"], Value::Str(name.into()));
+        assert_eq!(row["proisstrict"], Value::Bool(true));
+        assert_eq!(row["provolatile"], Value::Str(volatility.into()));
+        assert_eq!(row["proparallel"], Value::Str("s".into()));
+        assert_eq!(row["prorettype"], Value::Int(return_type));
+        assert_eq!(row["proargtypes"], Value::Str(arguments.into()));
+        assert_eq!(row["prosrc"], Value::Str(name.into()));
+    }
 }

@@ -70,6 +70,10 @@ ROLE_PLACEHOLDERS = {
     "__UQA_ROLE_FORBIDDEN__": "forbidden",
     "__UQA_ROLE_FULL_CREATOR__": "full_creator",
     "__UQA_ROLE_FULL_CHILD__": "full_child",
+    "__UQA_ROLE_ACL_DELEGATE__": "acl_delegate",
+    "__UQA_ROLE_ACL_MEMBER__": "acl_member",
+    "__UQA_ROLE_ACL_LEAF__": "acl_leaf",
+    "__UQA_ROLE_ACL_TAIL__": "acl_tail",
 }
 ORACLE_SERVER_VERSION_NUM = "180004"
 CASE_START = re.compile(r"^-- @case ([a-z0-9_]+) (ok|rows|error)$")
@@ -140,7 +144,10 @@ def rendered_role_names(schema: str) -> dict[str, str]:
 
 
 def render_case_sql(case: Case, schema: str) -> str:
-    sql = case.sql.replace(SCHEMA_PLACEHOLDER, quote_identifier(schema))
+    sql = case.sql.replace(
+        quote_literal(SCHEMA_PLACEHOLDER), quote_literal(schema)
+    )
+    sql = sql.replace(SCHEMA_PLACEHOLDER, quote_identifier(schema))
     for placeholder, role in rendered_role_names(schema).items():
         sql = sql.replace(quote_literal(placeholder), quote_literal(role))
         sql = sql.replace(placeholder, quote_identifier(role))
@@ -339,6 +346,7 @@ def run_postgres(cases: list[Case]) -> tuple[dict[str, str], list[dict]]:
         )
         cleanup = pg_query(
             f"DROP FUNCTION IF EXISTS public.{quote_identifier(schema)}(), "
+            f"public.{quote_identifier(schema)}(integer), "
             f"public.{quote_identifier(schema)}(boolean), "
             f"public.{quote_identifier(schema)}(text); "
             f"DROP SCHEMA IF EXISTS {quote_identifier(schema)} CASCADE; "

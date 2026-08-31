@@ -529,11 +529,12 @@ impl Engine {
         for name in &names {
             if let Some(dependent) = routines.values().flatten().find_map(|function| {
                 let owns = function.def.owner == *name;
-                let has_acl = function
-                    .def
-                    .execute_acl
-                    .as_ref()
-                    .is_some_and(|acl| acl.iter().any(|entry| entry.role == *name));
+                let has_acl = function.def.execute_acl.as_ref().is_some_and(|acl| {
+                    acl.iter().any(|entry| {
+                        entry.role == *name
+                            || entry.grantor.as_deref().unwrap_or(&function.def.owner) == name
+                    })
+                });
                 (owns || has_acl).then(|| format!("routine {}", function.def.name))
             }) {
                 return Err(SQLError::Routine {

@@ -79,7 +79,7 @@ The TPC-H-derived fixture runs all 22 queries and compares exact columns, row or
 cargo test -p uqa-engine --test integration sql_tpch::
 ```
 
-The live compatibility runner validates the manifest and executes every side-effect-free probe against PostgreSQL 18.4 and the release `usql` binary. At this revision `probes.sql` contains 793 probes; result rows must match after the documented normalization, and rejected statements must have the same SQLSTATE:
+The live compatibility runner validates the manifest and executes every side-effect-free probe against PostgreSQL 18.4 and the release `usql` binary. At this revision `probes.sql` contains 797 probes; result rows must match after the documented normalization, and rejected statements must have the same SQLSTATE:
 
 ```sh
 cargo build --release -p uqa-cli
@@ -87,7 +87,7 @@ python3 tests/parity/pg18/run_diff.py --validate-manifest
 python3 tests/parity/pg18/run_diff.py
 ```
 
-Stateful compatibility suites keep one PostgreSQL schema while reopening the UQA database between cases. They cover 129 routine cases, 100 role and routine-security cases, 162 constraint cases, 49 type-and-temporal cases, 584 trigger cases, and 194 rewrite-rule cases:
+Stateful compatibility suites keep one PostgreSQL schema while reopening the UQA database between cases. They cover 129 routine cases, 136 role and routine-security cases, 162 constraint cases, 49 type-and-temporal cases, 584 trigger cases, and 194 rewrite-rule cases:
 
 The automatic-view cases include nested computed and nonautomatic rule-backed views, scalar, `EXISTS`, and `IN` subqueries in view projections and predicates, correlated and unqualified references, local-alias collisions, statement snapshots, `OLD` and `NEW` row images, check options, `MERGE`, rewrite-rule images, lazy rule input projection, `WITH CHECK OPTION` over non-updatable sources, `ONLY` partition-view insert routing, replication-independent catalog flags, no-relation star errors, and unqualified system-column rewrite cardinality.
 

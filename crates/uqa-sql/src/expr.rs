@@ -134,6 +134,11 @@ pub trait EngineHook {
         Ok(None)
     }
 
+    /// Resolve an exact routine signature to the OID carrier used by `regprocedure`.
+    fn resolve_regprocedure(&self, _name: &str) -> std::result::Result<Option<i64>, String> {
+        Ok(None)
+    }
+
     /// Resolve one OID-backed alias type to its `PostgreSQL` text output.
     fn resolve_regtype_output(
         &self,
@@ -219,6 +224,7 @@ pub fn format_regtype_value(
         if !matches!(
             element.as_ref(),
             ColumnType::Regproc
+                | ColumnType::Regprocedure
                 | ColumnType::Regclass
                 | ColumnType::Regnamespace
                 | ColumnType::Regtype
@@ -236,7 +242,11 @@ pub fn format_regtype_value(
     }
     if !matches!(
         ty,
-        ColumnType::Regproc | ColumnType::Regclass | ColumnType::Regnamespace | ColumnType::Regtype
+        ColumnType::Regproc
+            | ColumnType::Regprocedure
+            | ColumnType::Regclass
+            | ColumnType::Regnamespace
+            | ColumnType::Regtype
     ) {
         return Ok(None);
     }
@@ -313,6 +323,18 @@ pub fn cast_value_with_type_resolution(
                 .ok_or_else(|| SQLError::Routine {
                     sqlstate: "42P01".into(),
                     message: format!("relation \"{name}\" does not exist"),
+                });
+        }
+    }
+    if target_ty.eq_ignore_ascii_case("regprocedure") {
+        if let (Some(engine), Value::Str(name) | Value::FixedChar(name)) = (engine, value) {
+            return engine
+                .resolve_regprocedure(name)
+                .map_err(SQLError::Internal)?
+                .map(Value::Int)
+                .ok_or_else(|| SQLError::Routine {
+                    sqlstate: "42883".into(),
+                    message: format!("function {name} does not exist"),
                 });
         }
     }

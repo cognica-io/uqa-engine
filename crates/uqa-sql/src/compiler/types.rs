@@ -208,6 +208,7 @@ pub(super) fn compile_pg_type_name(
         "jsonb" => Ok(ColumnType::JsonB),
         "bytea" => Ok(ColumnType::Bytea),
         "regproc" => Ok(ColumnType::Regproc),
+        "regprocedure" => Ok(ColumnType::Regprocedure),
         "regclass" => Ok(ColumnType::Regclass),
         "regnamespace" => Ok(ColumnType::Regnamespace),
         "regtype" => Ok(ColumnType::Regtype),

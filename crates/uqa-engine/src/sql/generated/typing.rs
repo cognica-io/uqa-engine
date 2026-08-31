@@ -267,6 +267,7 @@ pub(super) fn column_generation_type(ty: &ColumnType) -> GenerationType {
         | ColumnType::Character(_)
         | ColumnType::InternalChar
         | ColumnType::Regproc
+        | ColumnType::Regprocedure
         | ColumnType::Regclass
         | ColumnType::Regnamespace
         | ColumnType::Regtype

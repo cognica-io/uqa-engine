@@ -230,6 +230,7 @@ pub(super) fn pg_type_oid(ty: &ColumnType) -> i64 {
         ColumnType::Bytea => 17,
         ColumnType::InternalChar => 18,
         ColumnType::Regproc => 24,
+        ColumnType::Regprocedure => 2202,
         ColumnType::Regclass => 2205,
         ColumnType::Regnamespace => 4089,
         ColumnType::Regtype => 2206,
@@ -276,6 +277,7 @@ pub(super) fn pg_type_oid(ty: &ColumnType) -> i64 {
             ColumnType::Bytea => 1001,
             ColumnType::InternalChar => 1002,
             ColumnType::Regproc => 1008,
+            ColumnType::Regprocedure => 2207,
             ColumnType::Regclass => 2210,
             ColumnType::Regnamespace => 4090,
             ColumnType::Regtype => 2211,
@@ -435,6 +437,7 @@ pub(super) fn pg_type_len(ty: &ColumnType) -> i64 {
         | ColumnType::Oid
         | ColumnType::Xid
         | ColumnType::Regproc
+        | ColumnType::Regprocedure
         | ColumnType::Regclass
         | ColumnType::Regnamespace
         | ColumnType::Regtype => 4,
@@ -463,6 +466,7 @@ pub(super) fn pg_type_by_value(ty: &ColumnType) -> bool {
             | ColumnType::Boolean
             | ColumnType::InternalChar
             | ColumnType::Regproc
+            | ColumnType::Regprocedure
             | ColumnType::Regclass
             | ColumnType::Regnamespace
             | ColumnType::Regtype
@@ -646,6 +650,7 @@ pub(super) fn pg_type_routine_oids(ty: &ColumnType) -> PgTypeRoutineOids {
         ColumnType::Int2Vector => PgTypeRoutineOids::new(40, 41, 2410, 2411),
         ColumnType::Integer => PgTypeRoutineOids::new(42, 43, 2406, 2407),
         ColumnType::Regproc => PgTypeRoutineOids::new(44, 45, 2444, 2445),
+        ColumnType::Regprocedure => PgTypeRoutineOids::new(2212, 2213, 2446, 2447),
         ColumnType::Regclass => PgTypeRoutineOids::new(2218, 2219, 2452, 2453),
         ColumnType::Regnamespace => PgTypeRoutineOids::new(4084, 4085, 4087, 4088),
         ColumnType::Text => PgTypeRoutineOids::new(46, 47, 2414, 2415),
@@ -780,6 +785,7 @@ pub(super) fn info_udt_name(ty: &ColumnType) -> String {
         ColumnType::Bytea => "bytea".into(),
         ColumnType::InternalChar => "char".into(),
         ColumnType::Regproc => "regproc".into(),
+        ColumnType::Regprocedure => "regprocedure".into(),
         ColumnType::Regclass => "regclass".into(),
         ColumnType::Regnamespace => "regnamespace".into(),
         ColumnType::Regtype => "regtype".into(),
@@ -812,6 +818,7 @@ pub(super) fn info_udt_name(ty: &ColumnType) -> String {
             ColumnType::Bytea => "_bytea".into(),
             ColumnType::InternalChar => "_char".into(),
             ColumnType::Regproc => "_regproc".into(),
+            ColumnType::Regprocedure => "_regprocedure".into(),
             ColumnType::Regclass => "_regclass".into(),
             ColumnType::Regnamespace => "_regnamespace".into(),
             ColumnType::Regtype => "_regtype".into(),

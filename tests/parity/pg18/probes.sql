@@ -673,6 +673,10 @@ SELECT 1574::regproc, 1598::regproc, 1259::regclass, 11::regnamespace, 23::regty
 SELECT (1598::regproc)::text, (1259::regclass)::text, (11::regnamespace)::text, (23::regtype)::text
 SELECT ARRAY[0::regproc,1598::regproc,999999::regproc], ARRAY[0::regclass,1259::regclass,999999::regclass], ARRAY[0::regnamespace,11::regnamespace,999999::regnamespace], ARRAY[0::regtype,23::regtype,999999::regtype], NULL::regproc::text
 SELECT 'pg_class'::regclass
+SELECT pg_typeof('pg_catalog.md5(text)'::regprocedure)::text, 'pg_catalog.md5(text)'::regprocedure::oid, ('pg_catalog.md5(text)'::regprocedure)::text, (0::regprocedure)::text
+SELECT 'pg_catalog.md5(bigint)'::regprocedure
+SELECT oid, typname, typlen, typbyval, typtype, typcategory, typispreferred, typdelim, typrelid, typelem, typarray, typinput::oid, typoutput::oid, typreceive::oid, typsend::oid, typalign, typstorage FROM pg_catalog.pg_type WHERE oid IN (2202, 2207) ORDER BY oid
+SELECT oid, proname, proisstrict, provolatile, proparallel, prorettype, proargtypes::text, prosrc FROM pg_catalog.pg_proc WHERE oid IN (2212, 2213, 2446, 2447) ORDER BY oid
 -- recursive CTE controls and materialization
 WITH RECURSIVE t(n) AS (VALUES (1) UNION ALL SELECT n+1 FROM t WHERE n<3) SEARCH DEPTH FIRST BY n SET ord SELECT n, pg_typeof(ord), cardinality(ord) FROM t ORDER BY ord
 WITH RECURSIVE t(n) AS (VALUES (1) UNION ALL SELECT n+1 FROM t WHERE n<3) SEARCH BREADTH FIRST BY n SET ord SELECT n, pg_typeof(ord) FROM t ORDER BY ord

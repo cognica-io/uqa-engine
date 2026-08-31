@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "bc784e27daf3a5b7bd411e843159554ee2a8e468e6b2b76ccfe203f8cfe9ba6d",
+  "fixture_sha256": "0a636ea959dd96e36bb6d632c9e53053a8364873f1d0e61c5cfc84c100ec0039",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -66,6 +66,22 @@
     },
     {
       "name": "create_full_creator",
+      "kind": "ok"
+    },
+    {
+      "name": "create_acl_delegate",
+      "kind": "ok"
+    },
+    {
+      "name": "create_acl_member",
+      "kind": "ok"
+    },
+    {
+      "name": "create_acl_leaf",
+      "kind": "ok"
+    },
+    {
+      "name": "create_acl_tail",
       "kind": "ok"
     },
     {
@@ -254,6 +270,177 @@
       "kind": "ok"
     },
     {
+      "name": "create_acl_chain_probe",
+      "kind": "ok"
+    },
+    {
+      "name": "restrict_acl_chain_probe",
+      "kind": "ok"
+    },
+    {
+      "name": "regprocedure_acl_probe_identity",
+      "kind": "rows",
+      "rows": [
+        [
+          "regprocedure",
+          "PROBE(integer)",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "regprocedure_missing_overload",
+      "kind": "error",
+      "sqlstate": "42883"
+    },
+    {
+      "name": "grant_acl_delegate_option",
+      "kind": "ok"
+    },
+    {
+      "name": "grant_acl_delegate_membership",
+      "kind": "ok"
+    },
+    {
+      "name": "inherited_acl_member_grants",
+      "kind": "ok"
+    },
+    {
+      "name": "inherited_acl_grantor_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "{OWNER=X/OWNER,DELEGATE=X*/OWNER,TAIL=X/DELEGATE}"
+        ]
+      ]
+    },
+    {
+      "name": "inherited_source_revokes_own_grant",
+      "kind": "ok"
+    },
+    {
+      "name": "acl_delegate_grants_leaf_option",
+      "kind": "ok"
+    },
+    {
+      "name": "acl_leaf_grants_tail_explicit_current",
+      "kind": "ok"
+    },
+    {
+      "name": "acl_chain_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "{OWNER=X/OWNER,DELEGATE=X*/OWNER,LEAF=X*/DELEGATE,TAIL=X/LEAF}"
+        ]
+      ]
+    },
+    {
+      "name": "noncurrent_routine_grantor_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "dependent_acl_revoke_restrict",
+      "kind": "error",
+      "sqlstate": "2BP01"
+    },
+    {
+      "name": "grant_acl_tail_independent_path",
+      "kind": "ok"
+    },
+    {
+      "name": "dependent_acl_revoke_cascade",
+      "kind": "ok"
+    },
+    {
+      "name": "acl_cascade_keeps_independent_path",
+      "kind": "rows",
+      "rows": [
+        [
+          "{OWNER=X/OWNER,DELEGATE=X/OWNER,TAIL=X/OWNER}"
+        ]
+      ]
+    },
+    {
+      "name": "cascaded_acl_leaf_cannot_execute",
+      "kind": "error",
+      "sqlstate": "42501"
+    },
+    {
+      "name": "independent_acl_tail_executes",
+      "kind": "ok"
+    },
+    {
+      "name": "restore_acl_delegate_option",
+      "kind": "ok"
+    },
+    {
+      "name": "restore_acl_leaf_delegated_option",
+      "kind": "ok"
+    },
+    {
+      "name": "grant_acl_leaf_independent_option",
+      "kind": "ok"
+    },
+    {
+      "name": "remove_acl_tail_owner_path",
+      "kind": "ok"
+    },
+    {
+      "name": "acl_leaf_regrants_tail",
+      "kind": "ok"
+    },
+    {
+      "name": "cascade_one_acl_option_path",
+      "kind": "ok"
+    },
+    {
+      "name": "alternate_acl_option_preserves_downstream",
+      "kind": "rows",
+      "rows": [
+        [
+          "{OWNER=X/OWNER,DELEGATE=X/OWNER,LEAF=X*/OWNER,TAIL=X/LEAF}"
+        ]
+      ]
+    },
+    {
+      "name": "alternate_acl_option_restrict",
+      "kind": "error",
+      "sqlstate": "2BP01"
+    },
+    {
+      "name": "alternate_acl_option_cascade",
+      "kind": "ok"
+    },
+    {
+      "name": "final_acl_chain_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "{OWNER=X/OWNER,DELEGATE=X/OWNER,LEAF=X/OWNER}"
+        ]
+      ]
+    },
+    {
+      "name": "acl_without_option_grant_is_noop",
+      "kind": "ok"
+    },
+    {
+      "name": "acl_without_option_keeps_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "{OWNER=X/OWNER,DELEGATE=X/OWNER,LEAF=X/OWNER}"
+        ]
+      ]
+    },
+    {
+      "name": "public_routine_grant_option_rejected",
+      "kind": "error",
+      "sqlstate": "0LP01"
+    },
+    {
       "name": "transfer_probe_to_role_owner",
       "kind": "ok"
     },
@@ -264,7 +451,13 @@
     {
       "name": "inherited_owner_changes_are_visible",
       "kind": "rows",
-      "rows": []
+      "rows": [
+        [
+          "18",
+          "i",
+          "t"
+        ]
+      ]
     },
     {
       "name": "granted_execute_role_invokes_probe",

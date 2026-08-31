@@ -9,10 +9,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Added
 
 - Implemented PostgreSQL 18 `MERGE` through automatically updatable nested single-source projection views and direct or nested `INSTEAD OF` view-trigger paths, including target predicates, writable-column mapping, `INSERT`, `UPDATE`, and `DELETE`, source, target, `OLD`, and `NEW` `RETURNING`, action-path selection, statement-trigger ordering, trigger suppression, repeated candidates, post-trigger check options, base defaults and triggers, exact relation-kind and updatability errors, and a 584-case stateful PostgreSQL 18.4 oracle.
-- Implemented durable PostgreSQL 18 role memberships with per-grantor `ADMIN`, `INHERIT`, and `SET` options, dependency-aware grant and revoke, transitive role assumption and privilege inheritance, `pg_auth_members`, CREATEROLE delegation limits, membership-aware routine ownership and ACLs, SECURITY INVOKER and DEFINER role context, all six name/OID `pg_has_role` overloads, and a 100-case stateful PostgreSQL 18.4 oracle.
+- Implemented durable PostgreSQL 18 role memberships with per-grantor `ADMIN`, `INHERIT`, and `SET` options, dependency-aware grant and revoke, transitive role assumption and privilege inheritance, `pg_auth_members`, CREATEROLE delegation limits, membership-aware routine ownership, non-owner routine ACL delegation with independent grantor paths and dependency-aware revoke, SECURITY INVOKER and DEFINER role context, all six name/OID `pg_has_role` overloads, and a 136-case stateful PostgreSQL 18.4 oracle.
+- Implemented scalar PostgreSQL 18 `regprocedure` exact-signature input and search-path-aware output for user functions, procedures, and built-ins, including the OID carrier, `pg_type` identities, four scalar I/O `pg_proc` rows, and exact missing-overload errors.
 
 ### Fixed
 
+- Corrected stateful PostgreSQL 18 oracle schema substitution inside string literals so catalog assertions inspect the intended schema instead of a quoted placeholder.
 - Rejected unauthorized routine replacement and explicit routine drops before mutation, required a SET-enabled path for ownership transfer, and prevented `SECURITY DEFINER` calls from changing the effective session role.
 - Kept null-accepting predicates on the null-extended side of an outer join above the join instead of pushing them into a source scan and manufacturing false unmatched rows.
 

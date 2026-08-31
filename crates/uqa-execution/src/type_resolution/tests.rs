@@ -71,6 +71,14 @@ fn regclass_cast_preserves_postgresql_type_identity() {
         scalar_type(&expression, &RowSchema::default(), &[]).unwrap(),
         Some(ColumnType::Regclass)
     );
+    let routine = ScalarExpr::Cast {
+        expr: Box::new(ScalarExpr::Literal(Value::Str("md5(text)".into()))),
+        ty: "pg_catalog.regprocedure".into(),
+    };
+    assert_eq!(
+        scalar_type(&routine, &RowSchema::default(), &[]).unwrap(),
+        Some(ColumnType::Regprocedure)
+    );
 }
 
 #[test]

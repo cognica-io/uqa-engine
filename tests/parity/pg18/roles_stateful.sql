@@ -61,6 +61,22 @@ CREATE ROLE __UQA_ROLE_LIMITED_CREATOR__ CREATEROLE;
 CREATE ROLE __UQA_ROLE_FULL_CREATOR__ CREATEROLE CREATEDB REPLICATION BYPASSRLS;
 -- @end
 
+-- @case create_acl_delegate ok
+CREATE ROLE __UQA_ROLE_ACL_DELEGATE__;
+-- @end
+
+-- @case create_acl_member ok
+CREATE ROLE __UQA_ROLE_ACL_MEMBER__;
+-- @end
+
+-- @case create_acl_leaf ok
+CREATE ROLE __UQA_ROLE_ACL_LEAF__;
+-- @end
+
+-- @case create_acl_tail ok
+CREATE ROLE __UQA_ROLE_ACL_TAIL__;
+-- @end
+
 -- A CREATEROLE user receives ADMIN on roles it creates, but may delegate only the global attributes it already holds.
 -- @case limited_creator_creates_managed_role ok
 SET ROLE __UQA_ROLE_LIMITED_CREATOR__; CREATE ROLE __UQA_ROLE_MANAGED__ CREATEROLE; RESET ROLE;
@@ -170,6 +186,141 @@ GRANT EXECUTE ON FUNCTION public.__UQA_STATEFUL_SCHEMA__() TO __UQA_ROLE_PARENT_
 SET ROLE __UQA_ROLE_LEAF__; DO $$ BEGIN PERFORM public.__UQA_STATEFUL_SCHEMA__(); END $$; RESET ROLE;
 -- @end
 
+-- Routine ACLs retain the grantor path used by a non-owner and recursively enforce grant-option dependencies.
+-- @case create_acl_chain_probe ok
+CREATE FUNCTION public.__UQA_STATEFUL_SCHEMA__(value integer) RETURNS integer LANGUAGE SQL AS 'SELECT value';
+-- @end
+
+-- @case restrict_acl_chain_probe ok
+REVOKE ALL ON FUNCTION public.__UQA_STATEFUL_SCHEMA__(integer) FROM PUBLIC;
+-- @end
+
+-- regprocedure resolves one exact routine identity, preserves its OID carrier, and renders with search-path-aware qualification.
+-- @case regprocedure_acl_probe_identity rows
+SELECT pg_typeof('public.__UQA_STATEFUL_SCHEMA__(integer)'::regprocedure)::text AS type_name, replace(('public.__UQA_STATEFUL_SCHEMA__(integer)'::regprocedure)::text, '__UQA_STATEFUL_SCHEMA__', 'PROBE') AS rendered, ('public.__UQA_STATEFUL_SCHEMA__(integer)'::regprocedure)::oid = (SELECT oid FROM pg_catalog.pg_proc WHERE proname = '__UQA_STATEFUL_SCHEMA__' AND proargtypes::text = '23') AS oid_matches;
+-- @end
+
+-- @case regprocedure_missing_overload error
+SELECT 'public.__UQA_STATEFUL_SCHEMA__(bigint)'::regprocedure;
+-- @end
+
+-- @case grant_acl_delegate_option ok
+GRANT EXECUTE ON FUNCTION public.__UQA_STATEFUL_SCHEMA__(integer) TO __UQA_ROLE_ACL_DELEGATE__ WITH GRANT OPTION;
+-- @end
+
+-- An inherited grant option records the role that actually owns that option as grantor.
+-- @case grant_acl_delegate_membership ok
+GRANT __UQA_ROLE_ACL_DELEGATE__ TO __UQA_ROLE_ACL_MEMBER__ WITH INHERIT TRUE, SET TRUE;
+-- @end
+
+-- @case inherited_acl_member_grants ok
+SET ROLE __UQA_ROLE_ACL_MEMBER__; GRANT EXECUTE ON FUNCTION public.__UQA_STATEFUL_SCHEMA__(integer) TO __UQA_ROLE_ACL_TAIL__; RESET ROLE;
+-- @end
+
+-- @case inherited_acl_grantor_catalog rows
+SELECT replace(replace(replace(proacl::text, '__UQA_ROLE_ACL_DELEGATE__', 'DELEGATE'), '__UQA_ROLE_ACL_TAIL__', 'TAIL'), current_user, 'OWNER') AS acl FROM pg_catalog.pg_proc WHERE oid = 'public.__UQA_STATEFUL_SCHEMA__(integer)'::regprocedure;
+-- @end
+
+-- @case inherited_source_revokes_own_grant ok
+SET ROLE __UQA_ROLE_ACL_DELEGATE__; REVOKE EXECUTE ON FUNCTION public.__UQA_STATEFUL_SCHEMA__(integer) FROM __UQA_ROLE_ACL_TAIL__; RESET ROLE;
+-- @end
+
+-- @case acl_delegate_grants_leaf_option ok
+SET ROLE __UQA_ROLE_ACL_DELEGATE__; GRANT EXECUTE ON FUNCTION public.__UQA_STATEFUL_SCHEMA__(integer) TO __UQA_ROLE_ACL_LEAF__ WITH GRANT OPTION; RESET ROLE;
+-- @end
+
+-- @case acl_leaf_grants_tail_explicit_current ok
+SET ROLE __UQA_ROLE_ACL_LEAF__; GRANT EXECUTE ON FUNCTION public.__UQA_STATEFUL_SCHEMA__(integer) TO __UQA_ROLE_ACL_TAIL__ GRANTED BY CURRENT_USER; RESET ROLE;
+-- @end
+
+-- @case acl_chain_catalog rows
+SELECT replace(replace(replace(replace(proacl::text, '__UQA_ROLE_ACL_DELEGATE__', 'DELEGATE'), '__UQA_ROLE_ACL_LEAF__', 'LEAF'), '__UQA_ROLE_ACL_TAIL__', 'TAIL'), current_user, 'OWNER') AS acl FROM pg_catalog.pg_proc WHERE oid = 'public.__UQA_STATEFUL_SCHEMA__(integer)'::regprocedure;
+-- @end
+
+-- Object-privilege GRANTED BY may name only the current user.
+-- @case noncurrent_routine_grantor_rejected error
+GRANT EXECUTE ON FUNCTION public.__UQA_STATEFUL_SCHEMA__(integer) TO __UQA_ROLE_ACL_TAIL__ GRANTED BY __UQA_ROLE_ACL_DELEGATE__;
+-- @end
+
+-- @case dependent_acl_revoke_restrict error
+REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION public.__UQA_STATEFUL_SCHEMA__(integer) FROM __UQA_ROLE_ACL_DELEGATE__ RESTRICT;
+-- @end
+
+-- A direct owner grant survives removal of the dependent grantor chain.
+-- @case grant_acl_tail_independent_path ok
+GRANT EXECUTE ON FUNCTION public.__UQA_STATEFUL_SCHEMA__(integer) TO __UQA_ROLE_ACL_TAIL__;
+-- @end
+
+-- @case dependent_acl_revoke_cascade ok
+REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION public.__UQA_STATEFUL_SCHEMA__(integer) FROM __UQA_ROLE_ACL_DELEGATE__ CASCADE;
+-- @end
+
+-- @case acl_cascade_keeps_independent_path rows
+SELECT replace(replace(replace(proacl::text, '__UQA_ROLE_ACL_DELEGATE__', 'DELEGATE'), '__UQA_ROLE_ACL_TAIL__', 'TAIL'), current_user, 'OWNER') AS acl FROM pg_catalog.pg_proc WHERE oid = 'public.__UQA_STATEFUL_SCHEMA__(integer)'::regprocedure;
+-- @end
+
+-- @case cascaded_acl_leaf_cannot_execute error
+SET ROLE __UQA_ROLE_ACL_LEAF__; SELECT public.__UQA_STATEFUL_SCHEMA__(18);
+-- @end
+
+-- @case independent_acl_tail_executes ok
+SET ROLE __UQA_ROLE_ACL_TAIL__; DO $$ BEGIN PERFORM public.__UQA_STATEFUL_SCHEMA__(18); END $$; RESET ROLE;
+-- @end
+
+-- An alternate grant-option path keeps grants issued by that role alive when one upstream path is cascaded.
+-- @case restore_acl_delegate_option ok
+GRANT EXECUTE ON FUNCTION public.__UQA_STATEFUL_SCHEMA__(integer) TO __UQA_ROLE_ACL_DELEGATE__ WITH GRANT OPTION;
+-- @end
+
+-- @case restore_acl_leaf_delegated_option ok
+SET ROLE __UQA_ROLE_ACL_DELEGATE__; GRANT EXECUTE ON FUNCTION public.__UQA_STATEFUL_SCHEMA__(integer) TO __UQA_ROLE_ACL_LEAF__ WITH GRANT OPTION; RESET ROLE;
+-- @end
+
+-- @case grant_acl_leaf_independent_option ok
+GRANT EXECUTE ON FUNCTION public.__UQA_STATEFUL_SCHEMA__(integer) TO __UQA_ROLE_ACL_LEAF__ WITH GRANT OPTION;
+-- @end
+
+-- @case remove_acl_tail_owner_path ok
+REVOKE EXECUTE ON FUNCTION public.__UQA_STATEFUL_SCHEMA__(integer) FROM __UQA_ROLE_ACL_TAIL__;
+-- @end
+
+-- @case acl_leaf_regrants_tail ok
+SET ROLE __UQA_ROLE_ACL_LEAF__; GRANT EXECUTE ON FUNCTION public.__UQA_STATEFUL_SCHEMA__(integer) TO __UQA_ROLE_ACL_TAIL__; RESET ROLE;
+-- @end
+
+-- @case cascade_one_acl_option_path ok
+REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION public.__UQA_STATEFUL_SCHEMA__(integer) FROM __UQA_ROLE_ACL_DELEGATE__ CASCADE;
+-- @end
+
+-- @case alternate_acl_option_preserves_downstream rows
+SELECT replace(replace(replace(replace(proacl::text, '__UQA_ROLE_ACL_DELEGATE__', 'DELEGATE'), '__UQA_ROLE_ACL_LEAF__', 'LEAF'), '__UQA_ROLE_ACL_TAIL__', 'TAIL'), current_user, 'OWNER') AS acl FROM pg_catalog.pg_proc WHERE oid = 'public.__UQA_STATEFUL_SCHEMA__(integer)'::regprocedure;
+-- @end
+
+-- @case alternate_acl_option_restrict error
+REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION public.__UQA_STATEFUL_SCHEMA__(integer) FROM __UQA_ROLE_ACL_LEAF__ RESTRICT;
+-- @end
+
+-- @case alternate_acl_option_cascade ok
+REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION public.__UQA_STATEFUL_SCHEMA__(integer) FROM __UQA_ROLE_ACL_LEAF__ CASCADE;
+-- @end
+
+-- @case final_acl_chain_catalog rows
+SELECT replace(replace(replace(proacl::text, '__UQA_ROLE_ACL_DELEGATE__', 'DELEGATE'), '__UQA_ROLE_ACL_LEAF__', 'LEAF'), current_user, 'OWNER') AS acl FROM pg_catalog.pg_proc WHERE oid = 'public.__UQA_STATEFUL_SCHEMA__(integer)'::regprocedure;
+-- @end
+
+-- A role without a grant option receives a warning and makes no ACL change.
+-- @case acl_without_option_grant_is_noop ok
+SET ROLE __UQA_ROLE_ACL_LEAF__; GRANT EXECUTE ON FUNCTION public.__UQA_STATEFUL_SCHEMA__(integer) TO __UQA_ROLE_ACL_TAIL__; RESET ROLE;
+-- @end
+
+-- @case acl_without_option_keeps_catalog rows
+SELECT replace(replace(replace(proacl::text, '__UQA_ROLE_ACL_DELEGATE__', 'DELEGATE'), '__UQA_ROLE_ACL_LEAF__', 'LEAF'), current_user, 'OWNER') AS acl FROM pg_catalog.pg_proc WHERE oid = 'public.__UQA_STATEFUL_SCHEMA__(integer)'::regprocedure;
+-- @end
+
+-- @case public_routine_grant_option_rejected error
+GRANT EXECUTE ON FUNCTION public.__UQA_STATEFUL_SCHEMA__(integer) TO PUBLIC WITH GRANT OPTION;
+-- @end
+
 -- Routine ownership follows inherited role privileges, while a SET-only membership does not confer owner privileges until the role is assumed.
 -- @case transfer_probe_to_role_owner ok
 ALTER FUNCTION public.__UQA_STATEFUL_SCHEMA__() OWNER TO __UQA_ROLE_PARENT__;
@@ -180,7 +331,7 @@ SET ROLE __UQA_ROLE_LEAF__; ALTER FUNCTION public.__UQA_STATEFUL_SCHEMA__() IMMU
 -- @end
 
 -- @case inherited_owner_changes_are_visible rows
-SELECT public.__UQA_STATEFUL_SCHEMA__() AS result, procedure.provolatile, owner.rolname = '__UQA_ROLE_PARENT__' AS owner_matches FROM pg_catalog.pg_proc AS procedure JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = procedure.pronamespace JOIN pg_catalog.pg_roles AS owner ON owner.oid = procedure.proowner WHERE namespace.nspname = 'public' AND procedure.proname = '__UQA_STATEFUL_SCHEMA__';
+SELECT public.__UQA_STATEFUL_SCHEMA__() AS result, procedure.provolatile, owner.rolname = '__UQA_ROLE_PARENT__' AS owner_matches FROM pg_catalog.pg_proc AS procedure JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = procedure.pronamespace JOIN pg_catalog.pg_roles AS owner ON owner.oid = procedure.proowner WHERE namespace.nspname = 'public' AND procedure.proname = '__UQA_STATEFUL_SCHEMA__' AND procedure.pronargs = 0;
 -- @end
 
 -- @case granted_execute_role_invokes_probe ok
@@ -413,5 +564,5 @@ SET ROLE __UQA_ROLE_LEAF__; DROP FUNCTION public.__UQA_STATEFUL_SCHEMA__(); RESE
 
 
 -- @case drop_role_context_probes ok
-DROP FUNCTION public.__UQA_STATEFUL_SCHEMA__(boolean), public.__UQA_STATEFUL_SCHEMA__(text);
+DROP FUNCTION public.__UQA_STATEFUL_SCHEMA__(integer), public.__UQA_STATEFUL_SCHEMA__(boolean), public.__UQA_STATEFUL_SCHEMA__(text);
 -- @end

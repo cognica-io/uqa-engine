@@ -86,6 +86,8 @@ pub enum ColumnType {
     /// `PostgreSQL`'s internal single-byte `"char"` catalog type.
     InternalChar,
     Regproc,
+    /// `PostgreSQL` routine-signature object identifier (`pg_catalog.regprocedure`).
+    Regprocedure,
     /// `PostgreSQL` relation object identifier (`pg_catalog.regclass`).
     Regclass,
     /// `PostgreSQL` namespace object identifier (`pg_catalog.regnamespace`).
@@ -147,6 +149,7 @@ pub(crate) fn builtin_array_element_name(type_name: &str) -> Option<&'static str
         "_int2vector" => "int2vector",
         "_int4" => "int4",
         "_regproc" => "regproc",
+        "_regprocedure" => "regprocedure",
         "_regclass" => "regclass",
         "_text" => "text",
         "_refcursor" => "refcursor",
@@ -300,6 +303,7 @@ impl ColumnType {
             "bytea" => Ok(Self::Bytea),
             "\"char\"" => Ok(Self::InternalChar),
             "regproc" => Ok(Self::Regproc),
+            "regprocedure" => Ok(Self::Regprocedure),
             "regclass" => Ok(Self::Regclass),
             "regnamespace" => Ok(Self::Regnamespace),
             "regtype" => Ok(Self::Regtype),
@@ -372,6 +376,7 @@ impl ColumnType {
             Self::Bytea => "bytea".into(),
             Self::InternalChar => "\"char\"".into(),
             Self::Regproc => "regproc".into(),
+            Self::Regprocedure => "regprocedure".into(),
             Self::Regclass => "regclass".into(),
             Self::Regnamespace => "regnamespace".into(),
             Self::Regtype => "regtype".into(),

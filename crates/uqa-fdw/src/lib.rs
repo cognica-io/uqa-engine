@@ -83,6 +83,7 @@ pub enum ColumnType {
     Bytes,
     InternalChar,
     Regproc,
+    Regprocedure,
     Regclass,
     Regnamespace,
     Regtype,

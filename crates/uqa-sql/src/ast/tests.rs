@@ -7,9 +7,9 @@
 use super::{
     AlterSequence, ColumnType, CreateFunction, CreateTrigger, FunctionBinding, FunctionBody,
     FunctionDispatch, FunctionParallel, FunctionParam, FunctionParamMode, FunctionReturns,
-    FunctionVolatility, RangeFunctionOperation, RangeSubtype, RoutineInvocationBinding,
-    RoutineSecurityAttributes, RoutineVariadicMode, SequenceRestart, Statement,
-    TriggerDeferrability,
+    FunctionVolatility, RangeFunctionOperation, RangeSubtype, RoutineAclEntry,
+    RoutineInvocationBinding, RoutineSecurityAttributes, RoutineVariadicMode, SequenceRestart,
+    Statement, TriggerDeferrability,
 };
 
 #[test]
@@ -23,6 +23,27 @@ fn regclass_scalar_and_array_names_preserve_type_identity() {
         ColumnType::Array(Box::new(ColumnType::Regclass))
     );
     assert_eq!(ColumnType::Regclass.sql_name(), "regclass");
+    assert_eq!(
+        ColumnType::from_sql_name("pg_catalog.regprocedure").unwrap(),
+        ColumnType::Regprocedure
+    );
+    assert_eq!(
+        ColumnType::from_sql_name("_regprocedure").unwrap(),
+        ColumnType::Array(Box::new(ColumnType::Regprocedure))
+    );
+    assert_eq!(ColumnType::Regprocedure.sql_name(), "regprocedure");
+}
+
+#[test]
+fn legacy_routine_acl_entries_default_the_grantor_to_the_owner() {
+    let entry: RoutineAclEntry = serde_json::from_value(serde_json::json!({
+        "role": "routine_caller",
+        "grant_option": true
+    }))
+    .unwrap();
+    assert_eq!(entry.role, "routine_caller");
+    assert_eq!(entry.grantor, None);
+    assert!(entry.grant_option);
 }
 
 #[test]

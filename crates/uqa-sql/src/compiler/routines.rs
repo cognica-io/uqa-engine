@@ -852,8 +852,8 @@ pub(super) fn compile_alter_routine_owner(
 pub(super) fn compile_grant_routine(
     statement: &pg_query::protobuf::GrantStmt,
 ) -> Result<Statement> {
-    use crate::ast::{AlterRoutineKind, GrantRoutineItem, GrantRoutineStmt};
-    use pg_query::protobuf::{GrantTargetType, ObjectType};
+    use crate::ast::{AlterRoutineKind, GrantRoutineItem, GrantRoutineStmt, RoutineRevokeBehavior};
+    use pg_query::protobuf::{DropBehavior, GrantTargetType, ObjectType};
     if statement.targtype() != GrantTargetType::AclTargetObject {
         return Err(SQLError::Unsupported(
             "routine privileges require explicit object targets".into(),
@@ -914,6 +914,11 @@ pub(super) fn compile_grant_routine(
             compile_role_spec(role, true, "GRANT/REVOKE")
         })
         .collect::<Result<Vec<_>>>()?;
+    let grantor = statement
+        .grantor
+        .as_ref()
+        .map(|role| compile_role_spec(role, false, "GRANTED BY"))
+        .transpose()?;
     Ok(Statement::GrantRoutine(GrantRoutineStmt {
         kind,
         is_grant: statement.is_grant,
@@ -921,6 +926,12 @@ pub(super) fn compile_grant_routine(
         grant_option_only: !statement.is_grant && statement.grant_option,
         items,
         grantees,
+        grantor,
+        revoke_behavior: if matches!(statement.behavior(), DropBehavior::DropCascade) {
+            RoutineRevokeBehavior::Cascade
+        } else {
+            RoutineRevokeBehavior::Restrict
+        },
     }))
 }
 

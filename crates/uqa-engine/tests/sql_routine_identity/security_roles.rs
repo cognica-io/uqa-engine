@@ -796,12 +796,18 @@ fn assert_noinherit_member_cannot_manage_owned_routines(engine: &Engine) {
         ),
         "42501"
     );
-    assert_eq!(
-        sqlstate(
-            engine,
+    engine
+        .sql(
             "GRANT EXECUTE ON FUNCTION owner_grant_probe() TO owner_acl_grantee",
-        ),
-        "42501"
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        engine.take_sql_notices(),
+        [(
+            "WARNING".into(),
+            "no privileges were granted for \"owner_grant_probe\"".into(),
+        )]
     );
     assert_eq!(
         sqlstate(engine, "DROP FUNCTION owner_drop_probe()"),
@@ -820,6 +826,257 @@ fn assert_noinherit_member_cannot_manage_owned_routines(engine: &Engine) {
         ),
         Value::Int(1),
         "a rejected DROP must leave the routine intact"
+    );
+}
+
+fn routine_acl_chain_engine() -> Engine {
+    let engine = Engine::new();
+    for sql in [
+        "CREATE ROLE acl_delegate",
+        "CREATE ROLE acl_member",
+        "CREATE ROLE acl_leaf",
+        "CREATE ROLE acl_tail",
+        "CREATE ROLE acl_new_owner",
+        "CREATE FUNCTION acl_chain_probe(value integer) RETURNS integer LANGUAGE SQL AS 'SELECT value'",
+        "REVOKE ALL ON FUNCTION acl_chain_probe(integer) FROM PUBLIC",
+        "GRANT EXECUTE ON FUNCTION acl_chain_probe(integer) TO acl_delegate WITH GRANT OPTION",
+        "GRANT acl_delegate TO acl_member WITH INHERIT TRUE, SET TRUE",
+        "SET ROLE acl_member",
+        "GRANT EXECUTE ON FUNCTION acl_chain_probe(integer) TO acl_tail",
+        "RESET ROLE",
+    ] {
+        engine
+            .sql(sql, &[])
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+    }
+    assert_eq!(
+        scalar(
+            &engine,
+            "SELECT proacl::text AS v FROM pg_catalog.pg_proc WHERE proname = 'acl_chain_probe'",
+        ),
+        Value::Str("{uqa=X/uqa,acl_delegate=X*/uqa,acl_tail=X/acl_delegate}".into())
+    );
+
+    engine
+}
+
+fn extend_routine_acl_grantor_chain(engine: &Engine) {
+    for sql in [
+        "SET ROLE acl_delegate",
+        "REVOKE EXECUTE ON FUNCTION acl_chain_probe(integer) FROM acl_tail",
+        "GRANT EXECUTE ON FUNCTION acl_chain_probe(integer) TO acl_leaf WITH GRANT OPTION",
+        "RESET ROLE",
+        "SET ROLE acl_leaf",
+        "GRANT EXECUTE ON FUNCTION acl_chain_probe(integer) TO acl_tail GRANTED BY CURRENT_USER",
+        "RESET ROLE",
+    ] {
+        engine
+            .sql(sql, &[])
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+    }
+    assert_eq!(
+        scalar(
+            engine,
+            "SELECT proacl::text AS v FROM pg_catalog.pg_proc WHERE proname = 'acl_chain_probe'",
+        ),
+        Value::Str(
+            "{uqa=X/uqa,acl_delegate=X*/uqa,acl_leaf=X*/acl_delegate,acl_tail=X/acl_leaf}".into(),
+        )
+    );
+    assert_eq!(
+        sqlstate(
+            engine,
+            "GRANT EXECUTE ON FUNCTION acl_chain_probe(integer) TO acl_tail GRANTED BY acl_delegate",
+        ),
+        "0A000"
+    );
+    assert_eq!(
+        sqlstate(
+            engine,
+            "REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION acl_chain_probe(integer) FROM acl_delegate RESTRICT",
+        ),
+        "2BP01"
+    );
+}
+
+fn cascade_routine_acl_without_removing_independent_path(engine: &Engine) {
+    for sql in [
+        "GRANT EXECUTE ON FUNCTION acl_chain_probe(integer) TO acl_tail",
+        "REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION acl_chain_probe(integer) FROM acl_delegate CASCADE",
+    ] {
+        engine
+            .sql(sql, &[])
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+    }
+    assert_eq!(
+        scalar(
+            engine,
+            "SELECT proacl::text AS v FROM pg_catalog.pg_proc WHERE proname = 'acl_chain_probe'",
+        ),
+        Value::Str("{uqa=X/uqa,acl_delegate=X/uqa,acl_tail=X/uqa}".into())
+    );
+    engine.sql("SET ROLE acl_leaf", &[]).unwrap();
+    assert_eq!(sqlstate(engine, "SELECT acl_chain_probe(18)"), "42501");
+    engine.sql("RESET ROLE", &[]).unwrap();
+    engine.sql("SET ROLE acl_tail", &[]).unwrap();
+    assert_eq!(
+        scalar(engine, "SELECT acl_chain_probe(18) AS v"),
+        Value::Int(18)
+    );
+    engine.sql("RESET ROLE", &[]).unwrap();
+}
+
+fn verify_routine_acl_alternate_paths_warnings_and_owner_transfer(engine: &Engine) {
+    for sql in [
+        "GRANT EXECUTE ON FUNCTION acl_chain_probe(integer) TO acl_delegate WITH GRANT OPTION",
+        "SET ROLE acl_delegate",
+        "GRANT EXECUTE ON FUNCTION acl_chain_probe(integer) TO acl_leaf WITH GRANT OPTION",
+        "RESET ROLE",
+        "GRANT EXECUTE ON FUNCTION acl_chain_probe(integer) TO acl_leaf WITH GRANT OPTION",
+        "REVOKE EXECUTE ON FUNCTION acl_chain_probe(integer) FROM acl_tail",
+        "SET ROLE acl_leaf",
+        "GRANT EXECUTE ON FUNCTION acl_chain_probe(integer) TO acl_tail",
+        "RESET ROLE",
+        "REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION acl_chain_probe(integer) FROM acl_delegate CASCADE",
+    ] {
+        engine
+            .sql(sql, &[])
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+    }
+    assert_eq!(
+        scalar(
+            engine,
+            "SELECT proacl::text AS v FROM pg_catalog.pg_proc WHERE proname = 'acl_chain_probe'",
+        ),
+        Value::Str("{uqa=X/uqa,acl_delegate=X/uqa,acl_leaf=X*/uqa,acl_tail=X/acl_leaf}".into(),)
+    );
+    assert_eq!(
+        sqlstate(
+            engine,
+            "REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION acl_chain_probe(integer) FROM acl_leaf RESTRICT",
+        ),
+        "2BP01"
+    );
+    engine
+        .sql(
+            "REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION acl_chain_probe(integer) FROM acl_leaf CASCADE",
+            &[],
+        )
+        .unwrap();
+    engine.sql("SET ROLE acl_leaf", &[]).unwrap();
+    engine
+        .sql(
+            "GRANT EXECUTE ON FUNCTION acl_chain_probe(integer) TO acl_tail",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        engine.take_sql_notices(),
+        [(
+            "WARNING".into(),
+            "no privileges were granted for \"acl_chain_probe\"".into(),
+        )]
+    );
+    engine.sql("RESET ROLE", &[]).unwrap();
+    assert_eq!(
+        sqlstate(
+            engine,
+            "GRANT EXECUTE ON FUNCTION acl_chain_probe(integer) TO PUBLIC WITH GRANT OPTION",
+        ),
+        "0LP01"
+    );
+    engine
+        .sql(
+            "ALTER FUNCTION acl_chain_probe(integer) OWNER TO acl_new_owner",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        scalar(
+            engine,
+            "SELECT proacl::text AS v FROM pg_catalog.pg_proc WHERE proname = 'acl_chain_probe'",
+        ),
+        Value::Str(
+            "{acl_new_owner=X/acl_new_owner,acl_delegate=X/acl_new_owner,acl_leaf=X/acl_new_owner}"
+                .into(),
+        )
+    );
+}
+
+#[test]
+fn pg18_non_owner_routine_acl_grantor_chains_and_cascades_match_catalog_state() {
+    let engine = routine_acl_chain_engine();
+    extend_routine_acl_grantor_chain(&engine);
+    cascade_routine_acl_without_removing_independent_path(&engine);
+    verify_routine_acl_alternate_paths_warnings_and_owner_transfer(&engine);
+}
+
+#[test]
+fn pg18_routine_acl_grantors_survive_reopen_and_transaction_rollback() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("routine-acl-grantors.db");
+    {
+        let engine = Engine::open(&path).unwrap();
+        for sql in [
+            "CREATE ROLE durable_acl_delegate",
+            "CREATE ROLE durable_acl_leaf",
+            "CREATE FUNCTION durable_acl_probe() RETURNS integer LANGUAGE SQL AS 'SELECT 18'",
+            "REVOKE ALL ON FUNCTION durable_acl_probe() FROM PUBLIC",
+            "GRANT EXECUTE ON FUNCTION durable_acl_probe() TO durable_acl_delegate WITH GRANT OPTION",
+            "BEGIN",
+            "SET ROLE durable_acl_delegate",
+            "GRANT EXECUTE ON FUNCTION durable_acl_probe() TO durable_acl_leaf",
+            "RESET ROLE",
+            "ROLLBACK",
+        ] {
+            engine
+                .sql(sql, &[])
+                .unwrap_or_else(|error| panic!("{sql}: {error}"));
+        }
+        engine.sql("SET ROLE durable_acl_leaf", &[]).unwrap();
+        assert_eq!(sqlstate(&engine, "SELECT durable_acl_probe()"), "42501");
+        engine.sql("RESET ROLE", &[]).unwrap();
+        for sql in [
+            "SET ROLE durable_acl_delegate",
+            "GRANT EXECUTE ON FUNCTION durable_acl_probe() TO durable_acl_leaf",
+            "RESET ROLE",
+        ] {
+            engine
+                .sql(sql, &[])
+                .unwrap_or_else(|error| panic!("{sql}: {error}"));
+        }
+    }
+
+    let reopened = Engine::open(&path).unwrap();
+    assert_eq!(
+        scalar(
+            &reopened,
+            "SELECT proacl::text AS v FROM pg_catalog.pg_proc WHERE proname = 'durable_acl_probe'",
+        ),
+        Value::Str(
+            "{uqa=X/uqa,durable_acl_delegate=X*/uqa,durable_acl_leaf=X/durable_acl_delegate}"
+                .into(),
+        )
+    );
+    reopened.sql("SET ROLE durable_acl_leaf", &[]).unwrap();
+    assert_eq!(
+        scalar(&reopened, "SELECT durable_acl_probe() AS v"),
+        Value::Int(18)
+    );
+    reopened.sql("RESET ROLE", &[]).unwrap();
+    for sql in [
+        "BEGIN",
+        "REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION durable_acl_probe() FROM durable_acl_delegate CASCADE",
+        "ROLLBACK",
+    ] {
+        reopened
+            .sql(sql, &[])
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+    }
+    reopened.sql("SET ROLE durable_acl_leaf", &[]).unwrap();
+    assert_eq!(
+        scalar(&reopened, "SELECT durable_acl_probe() AS v"),
+        Value::Int(18)
     );
 }
 
