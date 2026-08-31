@@ -312,6 +312,7 @@ pub(crate) fn builtin_function_dispatch_name(name: &str) -> String {
                         | "pg_get_partkeydef"
                         | "pg_get_triggerdef"
                         | "pg_get_ruledef"
+                        | "pg_has_role"
                 )
         }
         _ => false,

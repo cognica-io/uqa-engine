@@ -64,7 +64,7 @@ pub(in super::super) fn bind_call(
         *binding = Some(selected);
         return Ok(true);
     }
-    if resolved.builtin_volatile {
+    if resolved.builtin_non_immutable {
         return Err(non_immutable_function(call.name));
     }
     let positions = resolved.builtin_argument_positions.ok_or_else(|| {

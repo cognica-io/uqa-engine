@@ -32,7 +32,7 @@ pub fn is_function(name: &str) -> bool {
 pub struct ResolvedFixedBuiltinCall {
     pub selected: ResolvedFunctionOverload,
     pub builtin_argument_positions: Option<Vec<usize>>,
-    pub builtin_volatile: bool,
+    pub builtin_non_immutable: bool,
 }
 
 /// Resolve an implemented fixed-signature built-in together with visible SQL routine overloads. `None` means `name` is outside the fixed registry.
@@ -56,7 +56,7 @@ pub fn resolve_fixed_builtin_call(
         explicit_variadic,
         resolver,
     )?;
-    let (builtin_argument_positions, builtin_volatile) = if selected.binding.builtin {
+    let (builtin_argument_positions, builtin_non_immutable) = if selected.binding.builtin {
         let matched = builtins
             .iter()
             .find(|overload| builtin_binding_matches(overload, &selected.binding))
@@ -72,7 +72,7 @@ pub fn resolve_fixed_builtin_call(
             })?;
         (
             Some(matched.argument_positions),
-            builtin_binding_is_volatile(&selected.binding),
+            builtin_binding_is_non_immutable(&selected.binding),
         )
     } else {
         (None, false)
@@ -80,7 +80,7 @@ pub fn resolve_fixed_builtin_call(
     Ok(Some(ResolvedFixedBuiltinCall {
         selected,
         builtin_argument_positions,
-        builtin_volatile,
+        builtin_non_immutable,
     }))
 }
 
@@ -302,10 +302,20 @@ pub(crate) fn runtime_dispatch(binding: &FunctionBinding) -> Option<FunctionDisp
     })
 }
 
-fn builtin_binding_is_volatile(binding: &FunctionBinding) -> bool {
+fn builtin_binding_is_non_immutable(binding: &FunctionBinding) -> bool {
     matches!(
         binding.name.rsplit('.').next(),
-        Some("random" | "gen_random_uuid" | "uuidv4" | "uuidv7")
+        Some(
+            "random"
+                | "gen_random_uuid"
+                | "uuidv4"
+                | "uuidv7"
+                | "pg_get_expr"
+                | "pg_get_partkeydef"
+                | "pg_get_triggerdef"
+                | "pg_get_ruledef"
+                | "pg_has_role"
+        )
     )
 }
 
@@ -535,6 +545,38 @@ fn overloads(name: &str) -> Option<Vec<BuiltinFunctionOverload>> {
                 ColumnType::Text,
             ),
         ],
+        "pg_has_role" => vec![
+            overload(
+                &local,
+                &[ColumnType::Name, ColumnType::Name, ColumnType::Text],
+                ColumnType::Boolean,
+            ),
+            overload(
+                &local,
+                &[ColumnType::Name, ColumnType::Oid, ColumnType::Text],
+                ColumnType::Boolean,
+            ),
+            overload(
+                &local,
+                &[ColumnType::Oid, ColumnType::Name, ColumnType::Text],
+                ColumnType::Boolean,
+            ),
+            overload(
+                &local,
+                &[ColumnType::Oid, ColumnType::Oid, ColumnType::Text],
+                ColumnType::Boolean,
+            ),
+            overload(
+                &local,
+                &[ColumnType::Name, ColumnType::Text],
+                ColumnType::Boolean,
+            ),
+            overload(
+                &local,
+                &[ColumnType::Oid, ColumnType::Text],
+                ColumnType::Boolean,
+            ),
+        ],
         _ => return None,
     };
     Some(overloads)
@@ -575,6 +617,7 @@ fn local_name(name: &str) -> Option<String> {
             | "pg_get_partkeydef"
             | "pg_get_triggerdef"
             | "pg_get_ruledef"
+            | "pg_has_role"
     )
     .then(|| local.to_string())
 }
@@ -646,5 +689,29 @@ mod tests {
 
         assert!(!reorder_arguments(&mut args, &[1], 2, "pg_catalog.random"));
         assert_eq!(args, original);
+    }
+
+    #[test]
+    fn pg_has_role_registers_every_postgresql_name_and_oid_overload() {
+        let overloads = overloads("pg_has_role").unwrap();
+
+        assert_eq!(overloads.len(), 6);
+        assert!(overloads
+            .iter()
+            .all(|overload| overload.return_type == ColumnType::Boolean));
+        assert_eq!(
+            overloads
+                .iter()
+                .map(|overload| overload.argument_types.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                vec![ColumnType::Name, ColumnType::Name, ColumnType::Text],
+                vec![ColumnType::Name, ColumnType::Oid, ColumnType::Text],
+                vec![ColumnType::Oid, ColumnType::Name, ColumnType::Text],
+                vec![ColumnType::Oid, ColumnType::Oid, ColumnType::Text],
+                vec![ColumnType::Name, ColumnType::Text],
+                vec![ColumnType::Oid, ColumnType::Text],
+            ]
+        );
     }
 }

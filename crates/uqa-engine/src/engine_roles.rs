@@ -17,8 +17,8 @@ use uqa_sql::ast::{
 use uqa_sql::SQLError;
 
 use crate::{
-    Engine, SQLStatementCache, StorageBackendError, StorageBackendResult, ROLES_METADATA_KEY,
-    ROLE_MEMBERSHIPS_METADATA_KEY,
+    Engine, SQLStatementCache, StorageBackendError, StorageBackendResult, Value,
+    ROLES_METADATA_KEY, ROLE_MEMBERSHIPS_METADATA_KEY,
 };
 
 pub(crate) struct RoutineSessionStateGuard<'a> {
@@ -639,6 +639,42 @@ impl Engine {
         role_inherits(&roles, &memberships, &current, target)
     }
 
+    pub(crate) fn pg_has_role_value(&self, arguments: &[Value]) -> Result<Value, SQLError> {
+        if arguments.iter().any(|argument| argument == &Value::Null) {
+            return Ok(Value::Null);
+        }
+        let (subject_value, target_value, privilege_value) = match arguments {
+            [target, privilege] => (None, target, privilege),
+            [subject, target, privilege] => (Some(subject), target, privilege),
+            _ => {
+                return Err(SQLError::BadArity {
+                    name: "pg_has_role".into(),
+                    expected: "2 or 3".into(),
+                    actual: arguments.len(),
+                });
+            }
+        };
+        let current_user = subject_value.is_none().then(|| self.current_user_name());
+        let roles = self.durable.roles.read();
+        let subject = subject_value.map_or_else(
+            || Ok(current_user),
+            |value| resolve_pg_has_role_identifier(value, &roles),
+        )?;
+        let target = resolve_pg_has_role_identifier(target_value, &roles)?;
+        let privileges = parse_pg_has_role_privileges(role_privilege_text(privilege_value)?)?;
+        let memberships = self.durable.role_memberships.read();
+        let allowed = privileges.into_iter().any(|privilege| {
+            pg_has_role_privilege(
+                &roles,
+                &memberships,
+                subject.as_deref(),
+                target.as_deref(),
+                privilege,
+            )
+        });
+        Ok(Value::Bool(allowed))
+    }
+
     fn persist_roles_snapshot(
         &self,
         roles: &BTreeMap<String, RoleDefinition>,
@@ -800,6 +836,126 @@ fn role_has_admin(
     memberships.values().any(|membership| {
         membership.member == member && membership.role == role && membership.admin_option
     })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RolePrivilegeCheck {
+    Member,
+    Usage,
+    Set,
+    Admin,
+}
+
+fn resolve_pg_has_role_identifier(
+    value: &Value,
+    roles: &BTreeMap<String, RoleDefinition>,
+) -> Result<Option<String>, SQLError> {
+    match value {
+        Value::Str(name) | Value::FixedChar(name) => {
+            if roles.contains_key(name) {
+                Ok(Some(name.clone()))
+            } else {
+                Err(undefined_role(name))
+            }
+        }
+        Value::Int(oid) => Ok(roles
+            .values()
+            .find(|role| role.oid == *oid)
+            .map(|role| role.name.clone())),
+        _ => Err(SQLError::TypeMismatch(
+            "pg_has_role role arguments must be name or oid".into(),
+        )),
+    }
+}
+
+fn role_privilege_text(value: &Value) -> Result<&str, SQLError> {
+    match value {
+        Value::Str(privilege) | Value::FixedChar(privilege) => Ok(privilege),
+        _ => Err(SQLError::TypeMismatch(
+            "pg_has_role privilege argument must be text".into(),
+        )),
+    }
+}
+
+fn parse_pg_has_role_privileges(privileges: &str) -> Result<Vec<RolePrivilegeCheck>, SQLError> {
+    privileges
+        .split(',')
+        .map(|privilege| {
+            let privilege = privilege.trim();
+            if [
+                "MEMBER WITH ADMIN OPTION",
+                "MEMBER WITH GRANT OPTION",
+                "USAGE WITH ADMIN OPTION",
+                "USAGE WITH GRANT OPTION",
+                "SET WITH ADMIN OPTION",
+                "SET WITH GRANT OPTION",
+            ]
+            .iter()
+            .any(|candidate| privilege.eq_ignore_ascii_case(candidate))
+            {
+                return Ok(RolePrivilegeCheck::Admin);
+            }
+            if privilege.eq_ignore_ascii_case("MEMBER") {
+                Ok(RolePrivilegeCheck::Member)
+            } else if privilege.eq_ignore_ascii_case("USAGE") {
+                Ok(RolePrivilegeCheck::Usage)
+            } else if privilege.eq_ignore_ascii_case("SET") {
+                Ok(RolePrivilegeCheck::Set)
+            } else {
+                Err(SQLError::Routine {
+                    sqlstate: "22023".into(),
+                    message: format!("unrecognized privilege type: \"{privilege}\""),
+                })
+            }
+        })
+        .collect()
+}
+
+fn pg_has_role_privilege(
+    roles: &BTreeMap<String, RoleDefinition>,
+    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    subject: Option<&str>,
+    target: Option<&str>,
+    privilege: RolePrivilegeCheck,
+) -> bool {
+    let Some(subject) = subject else {
+        return false;
+    };
+    if role_is_superuser(roles, subject) {
+        return true;
+    }
+    let Some(target) = target else {
+        return false;
+    };
+    match privilege {
+        RolePrivilegeCheck::Member => role_reaches(memberships, subject, target, |_| true),
+        RolePrivilegeCheck::Usage => role_inherits(roles, memberships, subject, target),
+        RolePrivilegeCheck::Set => role_can_set(roles, memberships, subject, target),
+        RolePrivilegeCheck::Admin => role_has_transitive_admin(memberships, subject, target),
+    }
+}
+
+fn role_has_transitive_admin(
+    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    member: &str,
+    role: &str,
+) -> bool {
+    let mut queue = VecDeque::from([member.to_string()]);
+    let mut visited = BTreeSet::from([member.to_string()]);
+    while let Some(current) = queue.pop_front() {
+        for membership in memberships
+            .values()
+            .filter(|membership| membership.member == current)
+        {
+            if membership.role == role && membership.admin_option {
+                return true;
+            }
+            if visited.insert(membership.role.clone()) {
+                queue.push_back(membership.role.clone());
+            }
+        }
+    }
+    false
 }
 
 fn role_reaches(
@@ -1067,5 +1223,153 @@ fn insufficient_privilege(message: &str) -> SQLError {
     SQLError::Routine {
         sqlstate: "42501".into(),
         message: message.into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn role(name: &str) -> RoleDefinition {
+        RoleDefinition {
+            oid: role_oid(name),
+            name: name.into(),
+            attributes: BTreeSet::new(),
+            connection_limit: -1,
+        }
+    }
+
+    fn membership(
+        memberships: &mut BTreeMap<RoleMembershipKey, RoleMembership>,
+        role: &str,
+        member: &str,
+        admin: bool,
+        inherit: bool,
+        set: bool,
+    ) {
+        let key = RoleMembershipKey {
+            role: role.into(),
+            member: member.into(),
+            grantor: "uqa".into(),
+        };
+        memberships.insert(
+            key.clone(),
+            RoleMembership {
+                oid: role_oid(&format!("{role}/{member}")),
+                role: key.role,
+                member: key.member,
+                grantor: key.grantor,
+                admin_option: admin,
+                inherit_option: inherit,
+                set_option: set,
+            },
+        );
+    }
+
+    #[test]
+    fn pg_has_role_privilege_names_include_lists_and_admin_aliases() {
+        assert_eq!(
+            parse_pg_has_role_privileges(" member, USAGE , set ").unwrap(),
+            vec![
+                RolePrivilegeCheck::Member,
+                RolePrivilegeCheck::Usage,
+                RolePrivilegeCheck::Set,
+            ]
+        );
+        for privilege in [
+            "MEMBER WITH ADMIN OPTION",
+            "USAGE WITH GRANT OPTION",
+            "SET WITH ADMIN OPTION",
+        ] {
+            assert_eq!(
+                parse_pg_has_role_privileges(privilege).unwrap(),
+                vec![RolePrivilegeCheck::Admin]
+            );
+        }
+        assert_eq!(
+            parse_pg_has_role_privileges("ADMIN")
+                .unwrap_err()
+                .sqlstate(),
+            Some("22023")
+        );
+    }
+
+    #[test]
+    fn pg_has_role_checks_member_usage_set_and_transitive_admin_independently() {
+        let roles = [
+            "parent",
+            "middle",
+            "leaf",
+            "noinherit",
+            "admin",
+            "admin_leaf",
+        ]
+        .into_iter()
+        .map(|name| (name.into(), role(name)))
+        .chain([("uqa".into(), RoleDefinition::bootstrap())])
+        .collect::<BTreeMap<_, _>>();
+        let mut memberships = BTreeMap::new();
+        membership(&mut memberships, "parent", "middle", false, true, false);
+        membership(&mut memberships, "middle", "leaf", false, true, true);
+        membership(&mut memberships, "parent", "noinherit", false, false, true);
+        membership(&mut memberships, "parent", "admin", true, false, false);
+        membership(&mut memberships, "admin", "admin_leaf", false, false, false);
+
+        assert!(pg_has_role_privilege(
+            &roles,
+            &memberships,
+            Some("leaf"),
+            Some("parent"),
+            RolePrivilegeCheck::Member
+        ));
+        assert!(pg_has_role_privilege(
+            &roles,
+            &memberships,
+            Some("leaf"),
+            Some("parent"),
+            RolePrivilegeCheck::Usage
+        ));
+        assert!(!pg_has_role_privilege(
+            &roles,
+            &memberships,
+            Some("leaf"),
+            Some("parent"),
+            RolePrivilegeCheck::Set
+        ));
+        assert!(!pg_has_role_privilege(
+            &roles,
+            &memberships,
+            Some("noinherit"),
+            Some("parent"),
+            RolePrivilegeCheck::Usage
+        ));
+        assert!(pg_has_role_privilege(
+            &roles,
+            &memberships,
+            Some("noinherit"),
+            Some("parent"),
+            RolePrivilegeCheck::Set
+        ));
+        assert!(pg_has_role_privilege(
+            &roles,
+            &memberships,
+            Some("admin_leaf"),
+            Some("parent"),
+            RolePrivilegeCheck::Admin
+        ));
+        assert!(!pg_has_role_privilege(
+            &roles,
+            &memberships,
+            Some("parent"),
+            Some("parent"),
+            RolePrivilegeCheck::Admin
+        ));
+        assert!(pg_has_role_privilege(
+            &roles,
+            &memberships,
+            Some("uqa"),
+            None,
+            RolePrivilegeCheck::Member
+        ));
     }
 }

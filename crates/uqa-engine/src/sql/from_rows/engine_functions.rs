@@ -26,7 +26,11 @@ pub(in crate::sql) fn engine_func_intercept(
     let lower = crate::sql::builtin_function_dispatch_name(name);
     if matches!(
         lower.as_str(),
-        "pg_get_expr" | "pg_get_partkeydef" | "pg_get_triggerdef" | "pg_get_ruledef"
+        "pg_get_expr"
+            | "pg_get_partkeydef"
+            | "pg_get_triggerdef"
+            | "pg_get_ruledef"
+            | "pg_has_role"
     ) {
         let values = args
             .iter()
@@ -132,6 +136,7 @@ pub(in crate::sql) fn engine_catalog_scalar_value(
         "pg_get_partkeydef" => crate::sql::catalog::pg_get_partkeydef_value(engine, arguments),
         "pg_get_triggerdef" => crate::sql::catalog::pg_get_triggerdef_value(engine, arguments),
         "pg_get_ruledef" => crate::sql::catalog::pg_get_ruledef_value(engine, arguments),
+        "pg_has_role" => engine.pg_has_role_value(arguments),
         _ => return None,
     })
 }

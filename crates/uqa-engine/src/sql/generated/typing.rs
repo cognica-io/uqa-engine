@@ -1299,9 +1299,12 @@ fn function_type_error(name: &str, actual: &GenerationType, expected: &str) -> S
 }
 
 fn non_immutable_function(name: &str) -> SQLError {
-    SQLError::TypeMismatch(format!(
-        "generation expression function `{name}` is not immutable for these argument types"
-    ))
+    SQLError::Routine {
+        sqlstate: "42P17".into(),
+        message: format!(
+            "generation expression function `{name}` is not immutable for these argument types"
+        ),
+    }
 }
 
 #[cfg(test)]

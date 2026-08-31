@@ -124,6 +124,36 @@ GRANT __UQA_ROLE_MIDDLE__ TO __UQA_ROLE_LEAF__;
 SELECT granted.rolname = '__UQA_ROLE_PARENT__' AS parent_edge, membership.admin_option, membership.inherit_option, membership.set_option FROM pg_catalog.pg_auth_members AS membership JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member WHERE (granted.rolname = '__UQA_ROLE_PARENT__' AND member.rolname = '__UQA_ROLE_MIDDLE__') OR (granted.rolname = '__UQA_ROLE_MIDDLE__' AND member.rolname = '__UQA_ROLE_LEAF__') ORDER BY parent_edge DESC;
 -- @end
 
+-- pg_has_role distinguishes unconditional membership, immediately inherited privileges, and SET-enabled assumption paths.
+-- @case pg_has_role_name_privileges rows
+SELECT pg_has_role('__UQA_ROLE_LEAF__', '__UQA_ROLE_PARENT__', 'MEMBER') AS transitive_member, pg_has_role('__UQA_ROLE_LEAF__', '__UQA_ROLE_PARENT__', 'USAGE') AS transitive_usage, pg_has_role('__UQA_ROLE_LEAF__', '__UQA_ROLE_PARENT__', 'SET') AS transitive_set, pg_has_role('__UQA_ROLE_NOINHERIT__', '__UQA_ROLE_PARENT__', 'MEMBER') AS noinherit_member, pg_has_role('__UQA_ROLE_NOINHERIT__', '__UQA_ROLE_PARENT__', 'USAGE') AS noinherit_usage, pg_has_role('__UQA_ROLE_NOINHERIT__', '__UQA_ROLE_PARENT__', 'SET') AS noinherit_set, pg_has_role('__UQA_ROLE_PARENT__', '__UQA_ROLE_PARENT__', 'MEMBER') AS self_member;
+-- @end
+
+-- @case pg_has_role_oid_overloads rows
+SELECT pg_has_role('__UQA_ROLE_LEAF__', (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = '__UQA_ROLE_PARENT__'), 'MEMBER') AS name_oid, pg_has_role((SELECT oid FROM pg_catalog.pg_roles WHERE rolname = '__UQA_ROLE_LEAF__'), '__UQA_ROLE_PARENT__', 'MEMBER') AS oid_name, pg_has_role((SELECT oid FROM pg_catalog.pg_roles WHERE rolname = '__UQA_ROLE_LEAF__'), (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = '__UQA_ROLE_PARENT__'), 'MEMBER') AS oid_oid, pg_has_role('__UQA_ROLE_PARENT__', 'MEMBER') AS current_name, pg_has_role((SELECT oid FROM pg_catalog.pg_roles WHERE rolname = '__UQA_ROLE_PARENT__'), 'MEMBER') AS current_oid, pg_has_role(4294967294::oid, '__UQA_ROLE_PARENT__', 'MEMBER') AS missing_subject_oid, pg_has_role('__UQA_ROLE_LEAF__', 4294967294::oid, 'MEMBER') AS missing_target_oid, pg_has_role(4294967294::oid, 'MEMBER') AS superuser_missing_target_oid;
+-- @end
+
+-- @case pg_has_role_current_user_overloads ok
+SET ROLE __UQA_ROLE_LEAF__; DO $$ BEGIN IF NOT pg_has_role('__UQA_ROLE_PARENT__', 'MEMBER') OR NOT pg_has_role('__UQA_ROLE_PARENT__', 'USAGE') OR NOT pg_has_role('__UQA_ROLE_PARENT__', 'SET') THEN RAISE EXCEPTION 'current-user pg_has_role overload mismatch'; END IF; END $$; RESET ROLE;
+-- @end
+
+-- @case pg_has_role_comma_any_and_null rows
+SELECT pg_has_role('__UQA_ROLE_NOINHERIT__', '__UQA_ROLE_PARENT__', 'USAGE, SET') AS any_privilege, pg_has_role('__UQA_ROLE_LEAF__', '__UQA_ROLE_PARENT__', NULL) IS NULL AS strict_null;
+-- @end
+
+-- @case pg_has_role_missing_name error
+SELECT pg_has_role('__UQA_ROLE_LEAF__', '__UQA_ROLE_FORBIDDEN__', 'MEMBER');
+-- @end
+
+-- @case pg_has_role_invalid_privilege error
+SELECT pg_has_role('__UQA_ROLE_LEAF__', '__UQA_ROLE_PARENT__', 'ADMIN');
+-- @end
+
+-- pg_has_role is stable rather than immutable and therefore cannot be stored in a generated column.
+-- @case pg_has_role_generated_column_rejected error
+CREATE TABLE __UQA_STATEFUL_SCHEMA__.role_privilege_generated(value integer, allowed boolean GENERATED ALWAYS AS (pg_has_role('__UQA_ROLE_PARENT__', 'MEMBER')) STORED);
+-- @end
+
 -- @case create_transitive_acl_probe ok
 CREATE FUNCTION public.__UQA_STATEFUL_SCHEMA__() RETURNS integer LANGUAGE SQL AS 'SELECT 18';
 -- @end
@@ -196,6 +226,19 @@ GRANT __UQA_ROLE_PARENT__ TO __UQA_ROLE_ADMIN__ WITH ADMIN OPTION, INHERIT FALSE
 
 -- @case explicit_admin_options rows
 SELECT membership.admin_option, membership.inherit_option, membership.set_option FROM pg_catalog.pg_auth_members AS membership JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member WHERE granted.rolname = '__UQA_ROLE_PARENT__' AND member.rolname = '__UQA_ROLE_ADMIN__';
+-- @end
+
+-- @case pg_has_role_admin_option_aliases rows
+SELECT pg_has_role('__UQA_ROLE_ADMIN__', '__UQA_ROLE_PARENT__', 'MEMBER') AS member, pg_has_role('__UQA_ROLE_ADMIN__', '__UQA_ROLE_PARENT__', 'USAGE') AS usage, pg_has_role('__UQA_ROLE_ADMIN__', '__UQA_ROLE_PARENT__', 'SET') AS can_set, pg_has_role('__UQA_ROLE_ADMIN__', '__UQA_ROLE_PARENT__', 'MEMBER WITH ADMIN OPTION') AS member_admin, pg_has_role('__UQA_ROLE_ADMIN__', '__UQA_ROLE_PARENT__', 'USAGE WITH GRANT OPTION') AS usage_admin, pg_has_role('__UQA_ROLE_ADMIN__', '__UQA_ROLE_PARENT__', 'SET WITH ADMIN OPTION') AS set_admin;
+-- @end
+
+-- ADMIN privilege remains visible through an intermediate membership even when that edge grants neither INHERIT nor SET.
+-- @case grant_admin_role_to_leaf_without_usage_or_set ok
+GRANT __UQA_ROLE_ADMIN__ TO __UQA_ROLE_LEAF__ WITH INHERIT FALSE, SET FALSE;
+-- @end
+
+-- @case pg_has_role_transitive_admin rows
+SELECT pg_has_role('__UQA_ROLE_LEAF__', '__UQA_ROLE_PARENT__', 'MEMBER WITH ADMIN OPTION') AS member_admin, pg_has_role('__UQA_ROLE_LEAF__', '__UQA_ROLE_PARENT__', 'USAGE WITH GRANT OPTION') AS usage_admin, pg_has_role('__UQA_ROLE_LEAF__', '__UQA_ROLE_PARENT__', 'SET WITH ADMIN OPTION') AS set_admin;
 -- @end
 
 -- @case delegated_grant ok

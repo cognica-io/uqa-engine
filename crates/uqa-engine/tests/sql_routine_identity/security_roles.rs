@@ -441,6 +441,148 @@ fn pg18_createrole_cannot_delegate_role_attributes_it_does_not_hold() {
     engine.sql("RESET ROLE", &[]).unwrap();
 }
 
+fn create_pg_has_role_graph(engine: &Engine) {
+    for sql in [
+        "CREATE ROLE has_role_parent",
+        "CREATE ROLE has_role_middle",
+        "CREATE ROLE has_role_leaf",
+        "CREATE ROLE has_role_noinherit NOINHERIT",
+        "CREATE ROLE has_role_admin",
+        "GRANT has_role_parent TO has_role_middle WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
+        "GRANT has_role_middle TO has_role_leaf WITH ADMIN FALSE, INHERIT TRUE, SET TRUE",
+        "GRANT has_role_parent TO has_role_noinherit WITH ADMIN FALSE, INHERIT FALSE, SET TRUE",
+        "GRANT has_role_parent TO has_role_admin WITH ADMIN TRUE, INHERIT FALSE, SET FALSE",
+    ] {
+        engine
+            .sql(sql, &[])
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+    }
+}
+
+#[test]
+fn pg18_pg_has_role_distinguishes_member_usage_set_and_admin_privileges() {
+    let engine = Engine::new();
+    create_pg_has_role_graph(&engine);
+
+    let row = engine
+        .sql(
+            "SELECT pg_has_role('has_role_leaf', 'has_role_parent', 'MEMBER') AS leaf_member, pg_has_role('has_role_leaf', 'has_role_parent', 'USAGE') AS leaf_usage, pg_has_role('has_role_leaf', 'has_role_parent', 'SET') AS leaf_set, pg_has_role('has_role_noinherit', 'has_role_parent', 'MEMBER') AS noinherit_member, pg_has_role('has_role_noinherit', 'has_role_parent', 'USAGE') AS noinherit_usage, pg_has_role('has_role_noinherit', 'has_role_parent', 'SET') AS noinherit_set, pg_has_role('has_role_noinherit', 'has_role_parent', 'USAGE, SET') AS any_privilege",
+            &[],
+        )
+        .unwrap()
+        .rows
+        .remove(0);
+    assert_eq!(row["leaf_member"], Value::Bool(true));
+    assert_eq!(row["leaf_usage"], Value::Bool(true));
+    assert_eq!(row["leaf_set"], Value::Bool(false));
+    assert_eq!(row["noinherit_member"], Value::Bool(true));
+    assert_eq!(row["noinherit_usage"], Value::Bool(false));
+    assert_eq!(row["noinherit_set"], Value::Bool(true));
+    assert_eq!(row["any_privilege"], Value::Bool(true));
+
+    let admin = engine
+        .sql(
+            "SELECT pg_has_role('has_role_admin', 'has_role_parent', 'MEMBER') AS member, pg_has_role('has_role_admin', 'has_role_parent', 'USAGE') AS usage, pg_has_role('has_role_admin', 'has_role_parent', 'SET') AS can_set, pg_has_role('has_role_admin', 'has_role_parent', 'MEMBER WITH ADMIN OPTION') AS member_admin, pg_has_role('has_role_admin', 'has_role_parent', 'USAGE WITH GRANT OPTION') AS usage_admin, pg_has_role('has_role_admin', 'has_role_parent', 'SET WITH ADMIN OPTION') AS set_admin",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(admin.rows.len(), 1);
+    assert_eq!(admin.rows[0]["member"], Value::Bool(true));
+    assert_eq!(admin.rows[0]["usage"], Value::Bool(false));
+    assert_eq!(admin.rows[0]["can_set"], Value::Bool(false));
+    for name in ["member_admin", "usage_admin", "set_admin"] {
+        assert_eq!(admin.rows[0][name], Value::Bool(true));
+    }
+
+    engine.sql("SET ROLE has_role_leaf", &[]).unwrap();
+    let current = engine
+        .sql(
+            "SELECT pg_has_role('has_role_parent', 'MEMBER') AS member, pg_has_role('has_role_parent', 'USAGE') AS usage, pg_has_role('has_role_parent', 'SET') AS can_set",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(current.rows[0]["member"], Value::Bool(true));
+    assert_eq!(current.rows[0]["usage"], Value::Bool(true));
+    assert_eq!(current.rows[0]["can_set"], Value::Bool(false));
+    engine.sql("RESET ROLE", &[]).unwrap();
+}
+
+#[test]
+fn pg18_pg_has_role_name_oid_overloads_errors_strictness_and_catalog_match() {
+    let engine = Engine::new();
+    create_pg_has_role_graph(&engine);
+
+    let overloads = engine
+        .sql(
+            "SELECT pg_has_role('has_role_leaf', (SELECT oid FROM pg_roles WHERE rolname = 'has_role_parent'), 'MEMBER') AS name_oid, pg_has_role((SELECT oid FROM pg_roles WHERE rolname = 'has_role_leaf'), 'has_role_parent', 'MEMBER') AS oid_name, pg_has_role((SELECT oid FROM pg_roles WHERE rolname = 'has_role_leaf'), (SELECT oid FROM pg_roles WHERE rolname = 'has_role_parent'), 'MEMBER') AS oid_oid, pg_has_role('has_role_parent', 'MEMBER') AS current_name, pg_has_role((SELECT oid FROM pg_roles WHERE rolname = 'has_role_parent'), 'MEMBER') AS current_oid, pg_has_role('has_role_leaf', 4294967294::oid, 'MEMBER') AS missing_target, pg_has_role(4294967294::oid, 'MEMBER') AS superuser_missing_target",
+            &[],
+        )
+        .unwrap();
+    for name in [
+        "name_oid",
+        "oid_name",
+        "oid_oid",
+        "current_name",
+        "current_oid",
+        "superuser_missing_target",
+    ] {
+        assert_eq!(overloads.rows[0][name], Value::Bool(true));
+    }
+    assert_eq!(overloads.rows[0]["missing_target"], Value::Bool(false));
+    assert_eq!(
+        scalar(
+            &engine,
+            "SELECT pg_has_role('has_role_leaf', 'has_role_parent', NULL) AS v",
+        ),
+        Value::Null
+    );
+    assert_eq!(
+        sqlstate(
+            &engine,
+            "SELECT pg_has_role('has_role_leaf', 'missing_role', 'MEMBER')",
+        ),
+        "42704"
+    );
+    assert_eq!(
+        sqlstate(
+            &engine,
+            "SELECT pg_has_role('has_role_leaf', 'has_role_parent', 'ADMIN')",
+        ),
+        "22023"
+    );
+    assert_eq!(
+        sqlstate(
+            &engine,
+            "CREATE TABLE generated_role_check(value integer, allowed boolean GENERATED ALWAYS AS (pg_has_role('has_role_parent', 'MEMBER')) STORED)",
+        ),
+        "42P17"
+    );
+
+    let catalog = engine
+        .sql(
+            "SELECT oid, proisstrict, provolatile, proparallel, prorettype, prosrc FROM pg_catalog.pg_proc WHERE proname = 'pg_has_role' ORDER BY oid",
+            &[],
+        )
+        .unwrap();
+    let sources = [
+        "pg_has_role_name_name",
+        "pg_has_role_name_id",
+        "pg_has_role_id_name",
+        "pg_has_role_id_id",
+        "pg_has_role_name",
+        "pg_has_role_id",
+    ];
+    assert_eq!(catalog.rows.len(), sources.len());
+    for (index, (row, source)) in catalog.rows.iter().zip(sources).enumerate() {
+        assert_eq!(row["oid"], Value::Int(2705 + index as i64));
+        assert_eq!(row["proisstrict"], Value::Bool(true));
+        assert_eq!(row["provolatile"], Value::Str("s".into()));
+        assert_eq!(row["proparallel"], Value::Str("s".into()));
+        assert_eq!(row["prorettype"], Value::Int(16));
+        assert_eq!(row["prosrc"], Value::Str(source.into()));
+    }
+}
+
 fn assert_membership_catalog_and_delegation(engine: &Engine) {
     let memberships = engine
         .sql(

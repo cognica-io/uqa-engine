@@ -98,6 +98,7 @@ fn generated_fixed_builtin_resolution_reports_signatures_before_volatility() {
             "CREATE TABLE volatile_fixed_builtin_{index} (value TEXT GENERATED ALWAYS AS ({expression}) STORED)"
         );
         let error = engine.sql(&sql, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42P17"), "{expression}: {error}");
         assert!(
             error.to_string().contains("not immutable"),
             "{expression}: {error}"
@@ -139,6 +140,7 @@ fn generated_fixed_builtin_binding_rejects_invalid_names_and_user_volatility() {
             &[],
         )
         .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42P17"));
     assert!(error.to_string().contains("not immutable"), "{error}");
 }
 

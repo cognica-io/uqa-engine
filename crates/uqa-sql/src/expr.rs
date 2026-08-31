@@ -852,6 +852,7 @@ pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> 
         "array_fill" if matches!(argument_count, 2 | 3) => Some(false),
         "array_to_string" if argument_count == 3 => Some(false),
         "string_to_array" | "string_to_table" if matches!(argument_count, 2 | 3) => Some(false),
+        "pg_has_role" if matches!(argument_count, 2 | 3) => Some(true),
         "overlaps" if argument_count == 4 => Some(false),
         "abs"
         | "acos"

@@ -9,7 +9,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Added
 
 - Implemented PostgreSQL 18 `MERGE` through automatically updatable nested single-source projection views and direct or nested `INSTEAD OF` view-trigger paths, including target predicates, writable-column mapping, `INSERT`, `UPDATE`, and `DELETE`, source, target, `OLD`, and `NEW` `RETURNING`, action-path selection, statement-trigger ordering, trigger suppression, repeated candidates, post-trigger check options, base defaults and triggers, exact relation-kind and updatability errors, and a 584-case stateful PostgreSQL 18.4 oracle.
-- Implemented durable PostgreSQL 18 role memberships with per-grantor `ADMIN`, `INHERIT`, and `SET` options, dependency-aware grant and revoke, transitive role assumption and privilege inheritance, `pg_auth_members`, CREATEROLE delegation limits, membership-aware routine ownership and ACLs, SECURITY INVOKER and DEFINER role context, and a 90-case stateful PostgreSQL 18.4 oracle.
+- Implemented durable PostgreSQL 18 role memberships with per-grantor `ADMIN`, `INHERIT`, and `SET` options, dependency-aware grant and revoke, transitive role assumption and privilege inheritance, `pg_auth_members`, CREATEROLE delegation limits, membership-aware routine ownership and ACLs, SECURITY INVOKER and DEFINER role context, all six name/OID `pg_has_role` overloads, and a 100-case stateful PostgreSQL 18.4 oracle.
 
 ### Fixed
 
