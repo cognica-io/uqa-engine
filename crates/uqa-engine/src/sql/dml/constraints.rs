@@ -23,7 +23,7 @@ use uqa_sql::ast::TableKeyConstraint;
 
 pub(in crate::sql) use period::period_foreign_key_coverage;
 use period::period_ranges;
-use referential_actions::prepare_referenced_key_update_actions;
+pub(in crate::sql) use referential_actions::prepare_referenced_key_delete_actions;
 pub(in crate::sql) use staging::{
     stage_prepared_document_rewrite, stage_prepared_document_rewrite_with_parent,
 };
@@ -898,7 +898,7 @@ pub(in crate::sql) fn prepare_document_rewrite(
         &new_document,
     )?;
     referential_actions.rewrite_stack.push(key);
-    let actions = prepare_referenced_key_update_actions(
+    let actions = referential_actions::prepare_referenced_key_update_actions(
         engine,
         table,
         doc_id,

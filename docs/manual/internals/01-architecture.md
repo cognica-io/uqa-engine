@@ -150,6 +150,8 @@ flowchart TD
 
 `UnifiedPlan` is the shared executable boundary. It can own query blocks, command plans, CTEs, mutations, prepared bodies, and explained bodies. `OperatorTree` remains a specialized child algebra for posting, graph, scoring, fusion, model access, and tuple-producing operator joins; it does not absorb arbitrary SQL row semantics. A joined query can use an optimized `OperatorTree` as a table relation's local access path or use an aliased operator join as a costed relation source, so these are nested planning domains rather than mutually exclusive top-level planners.
 
+All INSERT, UPDATE, DELETE, and MERGE entry points use one mutation-command boundary for implicit transaction selection and one scoped command overlay for statement-visible staged rows. The shared DML protocol owns typed candidates, physical identities, lock outcomes, row images, deferred checks, prepared insert/rewrite/delete actions, trigger and referential event state, and publication batches; command modules retain SQL-specific selection and policy, while spill codecs are versioned at the command boundary and reject malformed or unknown layouts.
+
 ## Source entry points
 
 | Area | Entry point |
@@ -164,6 +166,7 @@ flowchart TD
 | Engine capability adapters | [`crates/uqa-engine/src/engine_capabilities.rs`](../../../crates/uqa-engine/src/engine_capabilities.rs) |
 | Statement catalog snapshot | [`crates/uqa-engine/src/engine_capabilities/catalog.rs`](../../../crates/uqa-engine/src/engine_capabilities/catalog.rs) |
 | Unified plan dispatcher | [`crates/uqa-engine/src/sql/plan_executor.rs`](../../../crates/uqa-engine/src/sql/plan_executor.rs) |
+| Shared mutation protocol | [`crates/uqa-engine/src/sql/dml/protocol.rs`](../../../crates/uqa-engine/src/sql/dml/protocol.rs) |
 | Session portal workflow | [`crates/uqa-engine/src/sql/session_portal_worker.rs`](../../../crates/uqa-engine/src/sql/session_portal_worker.rs) |
 | Catalog projection | [`crates/uqa-engine/src/sql/catalog.rs`](../../../crates/uqa-engine/src/sql/catalog.rs) |
 | Catalog relation families | [`crates/uqa-engine/src/sql/catalog/pg_catalog.rs`](../../../crates/uqa-engine/src/sql/catalog/pg_catalog.rs) |

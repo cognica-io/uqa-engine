@@ -7,17 +7,18 @@
 //! UPDATE execution, point-update fast paths, and patch eligibility.
 
 use super::{
-    apply_validated_prepared_document_rewrite, build_returning_row, coerce_to_column_type,
-    dml_returning_result, dml_storage_error, dml_target_row_for_storage, eval_mutation_assignment,
-    eval_mutation_expr, eval_view_rule_update_assignment, index_vectors_for_type,
+    build_returning_row, coerce_to_column_type, dml_returning_result, dml_storage_error,
+    dml_target_row_for_storage, eval_mutation_assignment, eval_mutation_expr,
+    eval_view_rule_update_assignment, finish_mutation_publication, index_vectors_for_type,
     lock_mutation_target, lock_physical_mutation_target, prepare_partition_update_route,
     prepare_routed_document_rewrite, referrers_to_for_actions, run_update_from,
     stage_prepared_document_rewrite, update_lock_strength, validate_dml_expression_qualifiers,
     validate_mutation_columns, validate_returning_alias_relations, validate_view_checks, BTreeMap,
-    BTreeSet, BinaryOp, ColumnType, CteScope, DmlCommandMutationOverlay, DmlReturningShape, Engine,
-    MutationAssignmentTarget, MutationLockTarget, PhysicalMutationLockTarget,
-    ReturningProjectionRow, ReturningRowImage, ReturningRowImages, RowIndependentUpdateValues,
-    SQLError, SQLParam, SQLResult, ScalarExpr, UpdatePlan, Value, ViewCheckContext,
+    BTreeSet, BinaryOp, ColumnType, CteScope, DmlReturningShape, Engine, MutationAssignmentTarget,
+    MutationLockTarget, MutationOverlayScope, MutationPublicationBatch, MutationRewriteCandidate,
+    MutationRowImage, MutationRowImages, PhysicalDocumentIdentity, PhysicalMutationLockTarget,
+    PreparedMutationAction, ReturningProjectionRow, RowIndependentUpdateValues, SQLError, SQLParam,
+    SQLResult, ScalarExpr, UpdatePlan, Value, ViewCheckContext,
 };
 
 pub(in crate::sql) fn run_update(
@@ -25,11 +26,9 @@ pub(in crate::sql) fn run_update(
     stmt: UpdatePlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    if engine.transaction_depth() != 0 {
+    super::run_mutation_command(engine, move |engine| {
         run_update_inner(engine, &stmt, params)
-    } else {
-        engine.transaction(move |engine| run_update_inner(engine, &stmt, params))
-    }
+    })
 }
 
 pub(in crate::sql) fn run_update_inner(
@@ -242,10 +241,10 @@ pub(in crate::sql) fn run_update_inner(
         candidates
     };
     let snapshot_ctes = ctes.returning_statement_snapshot_scope();
-    let overlay = DmlCommandMutationOverlay::new(engine);
+    let overlay = MutationOverlayScope::new(engine);
     let mut pending_updates = Vec::new();
     let mut prepared_updates = Vec::new();
-    let mut referential_actions = super::ReferentialActionContext::default();
+    let mut events = super::MutationEventQueue::default();
     let mut locked_ids = BTreeSet::new();
     for (storage_table, doc_id) in candidates {
         cancel.check()?;
@@ -350,7 +349,15 @@ pub(in crate::sql) fn run_update_inner(
             }
         }
         if has_any_update_rules {
-            pending_updates.push((storage_table, doc_id, original_doc, doc));
+            pending_updates.push(MutationRewriteCandidate {
+                identity: PhysicalDocumentIdentity {
+                    table: storage_table,
+                    doc_id,
+                },
+                old_document: original_doc,
+                proposed_document: doc,
+                context: (),
+            });
         } else if let Some(prepared) = prepare_update_row(
             engine,
             stmt,
@@ -361,30 +368,31 @@ pub(in crate::sql) fn run_update_inner(
             doc_id,
             original_doc,
             doc,
-            &mut referential_actions,
+            events.referential_actions_mut(),
         )? {
             if let Some(returning) = prepared.returning {
                 returning_rows.push(returning);
             }
             affected += u64::from(prepared.affected);
-            prepared_updates.push((prepared.rewrite, prepared.after_row_events));
+            prepared_updates.push((
+                PreparedMutationAction::Rewrite(prepared.rewrite),
+                prepared.after_row_events,
+            ));
         }
     }
     drop(overlay);
     let (view_rule_returning, rule_returning) = if has_any_update_rules {
         let rule_rows = pending_updates
             .iter()
-            .map(
-                |(storage_table, doc_id, old, new)| crate::sql::rules::RuleRowImage {
-                    old_storage_table: Some(storage_table.clone()),
-                    old_doc_id: Some(*doc_id),
-                    old: Some(old.clone()),
-                    new_storage_table: Some(storage_table.clone()),
-                    new_doc_id: Some(*doc_id),
-                    new: Some(new.clone()),
-                    context: None,
-                },
-            )
+            .map(|candidate| crate::sql::rules::RuleRowImage {
+                old_storage_table: Some(candidate.identity.table.clone()),
+                old_doc_id: Some(candidate.identity.doc_id),
+                old: Some(candidate.old_document.clone()),
+                new_storage_table: Some(candidate.identity.table.clone()),
+                new_doc_id: Some(candidate.identity.doc_id),
+                new: Some(candidate.proposed_document.clone()),
+                context: None,
+            })
             .collect::<Vec<_>>();
         let mut view_rule_batches =
             super::prepare_view_rule_batches(super::ViewRuleBatchRequest {
@@ -457,10 +465,8 @@ pub(in crate::sql) fn run_update_inner(
                 &assigned_columns,
             )?;
         }
-        let overlay = DmlCommandMutationOverlay::new(engine);
-        for (index, (storage_table, doc_id, original_doc, doc)) in
-            pending_updates.into_iter().enumerate()
-        {
+        let overlay = MutationOverlayScope::new(engine);
+        for (index, candidate) in pending_updates.into_iter().enumerate() {
             if view_rule_batches.suppresses(index) || base_rule_suppressed[index] {
                 continue;
             }
@@ -470,17 +476,20 @@ pub(in crate::sql) fn run_update_inner(
                 params,
                 &snapshot_ctes,
                 &assigned_columns,
-                &storage_table,
-                doc_id,
-                original_doc,
-                doc,
-                &mut referential_actions,
+                &candidate.identity.table,
+                candidate.identity.doc_id,
+                candidate.old_document,
+                candidate.proposed_document,
+                events.referential_actions_mut(),
             )? {
                 if let Some(returning) = prepared.returning {
                     returning_rows.push(returning);
                 }
                 affected += u64::from(prepared.affected);
-                prepared_updates.push((prepared.rewrite, prepared.after_row_events));
+                prepared_updates.push((
+                    PreparedMutationAction::Rewrite(prepared.rewrite),
+                    prepared.after_row_events,
+                ));
             }
         }
         drop(overlay);
@@ -491,27 +500,25 @@ pub(in crate::sql) fn run_update_inner(
     };
     if !prepared_updates.is_empty() {
         engine.prepare_explicit_transaction_writer()?;
-        for (prepared, _) in &mut prepared_updates {
-            apply_validated_prepared_document_rewrite(engine, prepared)?;
+        let mut publication = MutationPublicationBatch::default();
+        for (action, after_rows) in prepared_updates {
+            super::publish_prepared_mutation_action(engine, action, false, &mut publication)?;
+            events.append_after_rows(after_rows);
         }
+        finish_mutation_publication(engine, &mut publication)?;
     }
-    let after_row_events = prepared_updates
-        .into_iter()
-        .flat_map(|(_, events)| events)
-        .collect::<Vec<_>>();
     let transition_tables = if update_original_query {
         crate::sql::triggers::build_transition_tables(
             engine,
             &stmt.table,
             uqa_sql::ast::TriggerEvent::Update,
             &assigned_columns,
-            &after_row_events,
+            events.after_rows(),
         )?
     } else {
         Vec::new()
     };
-    let referential_transition =
-        referential_actions.transition_tables(engine, &after_row_events)?;
+    let referential_transition = events.referential_transition_tables(engine)?;
     let mut transition_refs = transition_tables.iter().collect::<Vec<_>>();
     transition_refs.extend(referential_transition.iter());
     let root_events = update_original_query
@@ -521,11 +528,11 @@ pub(in crate::sql) fn run_update_inner(
     for generation in crate::sql::triggers::after_trigger_generations(&transition_refs) {
         crate::sql::triggers::fire_after_row_trigger_events_for_generation(
             engine,
-            &after_row_events,
+            events.after_rows(),
             &transition_refs,
             generation,
         )?;
-        referential_actions.fire_after_statement_triggers(
+        events.fire_referential_after_statement_triggers(
             engine,
             &referential_transition,
             &stmt.table,
@@ -667,13 +674,13 @@ fn prepare_update_row(
             ReturningProjectionRow {
                 table: &stmt.table,
                 target_qualifier: &stmt.target_qualifier,
-                images: ReturningRowImages {
-                    old: Some(ReturningRowImage {
+                images: MutationRowImages {
+                    old: Some(MutationRowImage {
                         storage_table: rewrite.table.clone(),
                         doc_id: rewrite.doc_id,
                         document: &rewrite.old_document,
                     }),
-                    new: Some(ReturningRowImage {
+                    new: Some(MutationRowImage {
                         storage_table: rewritten_storage_table,
                         doc_id: rewritten_doc_id,
                         document: &rewrite.new_document,

@@ -6,33 +6,37 @@
 
 //! INSERT execution, defaults, constraint checks, and vector collection.
 
+use crate::sql::select::physical_work_mem_bytes;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
-use uqa_sql::expr::RowLookup;
-
-use crate::sql::select::physical_work_mem_bytes;
 
 use super::{
-    apply_validated_prepared_document_rewrite, build_returning_row, coerce_to_column_type,
-    decode_prepared_insert_conflict, dml_returning_result, dml_storage_error, document_supplied_id,
-    encode_prepared_insert_conflict, eval_lowered_expression, eval_mutation_assignment,
-    eval_mutation_expr, index_vectors_for_type, insert_identity_columns,
-    lock_document_key_dependencies, lock_existing_document_foreign_key_dependencies,
-    partition_insert_target, persist_auto_increment_identity, prepare_auto_increment_identity,
-    prepare_insert_identity, stage_prepared_document_rewrite,
+    build_returning_row, coerce_to_column_type, dml_returning_result, dml_storage_error,
+    document_supplied_id, eval_lowered_expression, eval_mutation_assignment, eval_mutation_expr,
+    finish_mutation_publication, insert_identity_columns, lock_document_key_dependencies,
+    lock_existing_document_foreign_key_dependencies, partition_insert_target,
+    persist_auto_increment_identity, prepare_auto_increment_identity, prepare_insert_identity,
+    publish_prepared_mutation_action, stage_prepared_document_rewrite,
     validate_document_non_key_constraints, validate_key_constraints, validate_mutation_columns,
-    validate_returning_alias_relations, validate_view_checks, BTreeMap, BTreeSet, ColumnType,
-    ConflictActionPlan, ConflictPlan, CteScope, DmlCommandMutationOverlay, DmlReturningShape,
-    DocId, Document, Engine, InsertConflictLocks, InsertConflictPreparation, InsertPlan,
-    MutationAssignmentTarget, PreparedInsertConflict, ReturningProjectionRow, ReturningRowImage,
-    ReturningRowImages, SQLError, SQLParam, SQLResult, ViewCheckContext,
+    validate_returning_alias_relations, validate_view_checks, BTreeSet, ColumnType,
+    ConflictActionPlan, ConflictPlan, CteScope, DmlReturningShape, DocId, Document, Engine,
+    InsertConflictLocks, InsertConflictPreparation, InsertPlan, MutationAssignmentTarget,
+    MutationOverlayScope, MutationPublicationBatch, MutationRowImage, MutationRowImages,
+    PreparedDocumentInsert, PreparedInsertConflict, PreparedMutationAction, ReturningProjectionRow,
+    SQLError, SQLParam, SQLResult, ViewCheckContext,
 };
 
+mod codec;
 mod staging;
 
+use codec::{
+    decode_prepared_insert_spill_row, encode_prepared_insert_spill_row,
+    prepared_insert_spill_schema, PreparedInsertSpillRow,
+};
+
 pub(in crate::sql) use staging::{
-    apply_missing_column_defaults, document_vectors, refresh_insert_identity_after_trigger,
+    apply_missing_column_defaults, refresh_insert_identity_after_trigger,
 };
 use staging::{
     apply_validated_prepared_insert, attach_prepared_insert_identity, prepare_values_insert_row,
@@ -60,25 +64,21 @@ struct InsertSelectConsumerState {
     columns: Option<Vec<String>>,
     result_width: Option<usize>,
     prepared_schema: uqa_execution::RowSchema,
-    prepared_columns: [uqa_sql::ast::InternalColumnRef; 3],
     prepared_buffer: Option<uqa_execution::SpillBuffer>,
     conflict_locks: Option<InsertConflictLocks>,
     affected: u64,
     returning_rows: Vec<uqa_execution::OwnedPhysicalRow>,
-    after_row_events: Vec<crate::sql::triggers::AfterRowTriggerEvent>,
-    referential_actions: super::ReferentialActionContext,
+    events: super::MutationEventQueue,
     has_prepared_effect: bool,
     has_prepared_auto_identity: bool,
 }
 
 struct PreparedInsertSelect {
     rows: uqa_execution::SharedSpill,
-    columns: [uqa_sql::ast::InternalColumnRef; 3],
     conflict_locks: InsertConflictLocks,
     affected: u64,
     returning_rows: Vec<uqa_execution::OwnedPhysicalRow>,
-    after_row_events: Vec<crate::sql::triggers::AfterRowTriggerEvent>,
-    referential_actions: super::ReferentialActionContext,
+    events: super::MutationEventQueue,
     has_prepared_effect: bool,
     has_prepared_auto_identity: bool,
 }
@@ -92,36 +92,6 @@ struct PreparedInsertRowContext<'a> {
     conflict_update_columns: &'a [String],
     params: &'a [SQLParam],
     scope: &'a CteScope,
-}
-
-const PREPARED_FTS_BATCH_DOCUMENTS: usize = 4_096;
-type PreparedFtsDocuments = Vec<(DocId, BTreeMap<String, String>)>;
-type PreparedFtsTables = BTreeMap<String, PreparedFtsDocuments>;
-
-#[derive(Default)]
-struct PreparedFtsBatch {
-    tables: PreparedFtsTables,
-    document_count: usize,
-}
-
-impl PreparedFtsBatch {
-    fn push(&mut self, table: String, doc_id: DocId, fields: BTreeMap<String, String>) {
-        self.tables.entry(table).or_default().push((doc_id, fields));
-        self.document_count += 1;
-    }
-
-    fn is_full(&self) -> bool {
-        self.document_count >= PREPARED_FTS_BATCH_DOCUMENTS
-    }
-}
-
-fn flush_prepared_fts_batch(engine: &Engine, batch: &mut PreparedFtsBatch) -> Result<(), SQLError> {
-    let tables = std::mem::take(&mut batch.tables);
-    batch.document_count = 0;
-    for (table, documents) in tables {
-        engine.add_prepared_fts_documents(&table, documents)?;
-    }
-    Ok(())
 }
 
 impl InsertSelectConsumer {
@@ -138,16 +108,7 @@ impl InsertSelectConsumer {
             id_column,
             accepts_supplied_identity,
         } = identity;
-        let prepared_relation = uqa_sql::ast::InternalRelationId::allocate();
-        let prepared_columns = [
-            prepared_relation.column(0),
-            prepared_relation.column(1),
-            prepared_relation.column(2),
-        ];
-        let prepared_schema = uqa_execution::RowSchema::with_internal_relation_types(
-            prepared_relation,
-            vec![Some(ColumnType::Text), None, None],
-        );
+        let prepared_schema = prepared_insert_spill_schema();
         Ok(Self {
             state: RefCell::new(InsertSelectConsumerState {
                 stmt: stmt.clone(),
@@ -160,15 +121,13 @@ impl InsertSelectConsumer {
                 columns: None,
                 result_width: None,
                 prepared_schema,
-                prepared_columns,
                 prepared_buffer: Some(uqa_execution::SpillBuffer::new(
                     physical_work_mem_bytes(engine.query_runtime_view())?.max(1),
                 )),
                 conflict_locks: Some(InsertConflictLocks::new(engine)),
                 affected: 0,
                 returning_rows: Vec::new(),
-                after_row_events: Vec::new(),
-                referential_actions: super::ReferentialActionContext::default(),
+                events: super::MutationEventQueue::default(),
                 has_prepared_effect: false,
                 has_prepared_auto_identity: false,
             }),
@@ -188,12 +147,10 @@ impl InsertSelectConsumer {
         })?;
         Ok(PreparedInsertSelect {
             rows,
-            columns: state.prepared_columns,
             conflict_locks,
             affected: state.affected,
             returning_rows: std::mem::take(&mut state.returning_rows),
-            after_row_events: std::mem::take(&mut state.after_row_events),
-            referential_actions: std::mem::take(&mut state.referential_actions),
+            events: std::mem::take(&mut state.events),
             has_prepared_effect: state.has_prepared_effect,
             has_prepared_auto_identity: state.has_prepared_auto_identity,
         })
@@ -267,13 +224,11 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
             columns,
             result_width,
             prepared_schema,
-            prepared_columns: _,
             prepared_buffer,
             conflict_locks,
             affected,
             returning_rows,
-            after_row_events,
-            referential_actions,
+            events,
             has_prepared_effect,
             has_prepared_auto_identity,
         } = &mut *state;
@@ -392,7 +347,7 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
                         params,
                         scope: snapshot_scope,
                     },
-                    referential_actions,
+                    events.referential_actions_mut(),
                 )?
         } else {
             let _key_locks =
@@ -418,7 +373,7 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
         if let Some(row) = returning {
             returning_rows.push(row);
         }
-        crate::sql::triggers::AfterRowTriggerEvent::append(after_row_events, row_after_events);
+        events.append_after_rows(row_after_events);
         prepared_buffer
             .as_mut()
             .ok_or_else(|| {
@@ -426,11 +381,11 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
             })?
             .push(uqa_execution::Batch::from_physical_rows(
                 prepared_schema.clone(),
-                vec![uqa_execution::PhysicalRow::from_values(vec![
-                    super::Value::Str(target_table),
-                    super::Value::Map(document),
-                    encode_prepared_insert_conflict(prepared_conflict),
-                ])],
+                vec![encode_prepared_insert_spill_row(PreparedInsertSpillRow {
+                    target_table,
+                    document,
+                    conflict: prepared_conflict,
+                })],
             ))
             .map_err(crate::sql::select::physical_exec_error)?;
         if prepared_effect {
@@ -446,11 +401,9 @@ pub(in crate::sql) fn run_insert(
     stmt: InsertPlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    if engine.transaction_depth() != 0 {
+    super::run_mutation_command(engine, move |engine| {
         run_insert_inner(engine, &stmt, params)
-    } else {
-        engine.transaction(move |engine| run_insert_inner(engine, &stmt, params))
-    }
+    })
 }
 
 fn insert_source_expression_rows(
@@ -661,7 +614,7 @@ pub(in crate::sql) fn run_insert_inner(
                 },
                 conflict_update_columns.clone().unwrap_or_default(),
             )?);
-            let overlay = DmlCommandMutationOverlay::new(engine);
+            let overlay = MutationOverlayScope::new(engine);
             crate::sql::select::execute_query_plan_output(
                 read_engine,
                 source,
@@ -671,12 +624,10 @@ pub(in crate::sql) fn run_insert_inner(
             )?;
             let PreparedInsertSelect {
                 rows: prepared_rows,
-                columns: prepared_columns,
                 conflict_locks,
                 affected,
                 returning_rows,
-                after_row_events,
-                referential_actions,
+                events,
                 has_prepared_effect,
                 has_prepared_auto_identity,
             } = consumer.take_prepared()?;
@@ -695,52 +646,31 @@ pub(in crate::sql) fn run_insert_inner(
             let apply_reader = prepared_rows
                 .read_rows()
                 .map_err(crate::sql::select::physical_exec_error)?;
-            let mut fts_batch = PreparedFtsBatch::default();
+            let mut publication = MutationPublicationBatch::default();
             for prepared_row in apply_reader {
                 cancel.check()?;
                 let prepared_row = prepared_row.map_err(crate::sql::select::physical_exec_error)?;
-                let prepared_row = prepared_row.view();
-                let Some(super::Value::Str(target_table)) =
-                    prepared_row.internal_column(prepared_columns[0]).cloned()
-                else {
-                    return Err(SQLError::Internal(
-                        "INSERT SELECT prepared spill lost its table payload".into(),
-                    ));
-                };
-                let Some(super::Value::Map(document)) =
-                    prepared_row.internal_column(prepared_columns[1]).cloned()
-                else {
-                    return Err(SQLError::Internal(
-                        "INSERT SELECT prepared spill lost its document payload".into(),
-                    ));
-                };
-                let mut prepared = decode_prepared_insert_conflict(
-                    prepared_row
-                        .internal_column(prepared_columns[2])
-                        .cloned()
-                        .ok_or_else(|| {
-                            SQLError::Internal(
-                                "INSERT SELECT prepared spill lost its conflict payload".into(),
-                            )
-                        })?,
-                )?;
+                let PreparedInsertSpillRow {
+                    target_table,
+                    document,
+                    conflict: prepared,
+                } = decode_prepared_insert_spill_row(prepared_row)?;
                 apply_validated_prepared_insert(
                     engine,
                     &target_table,
                     document,
-                    &mut prepared,
+                    prepared,
                     false,
-                    &mut fts_batch,
+                    &mut publication,
                 )?;
             }
-            flush_prepared_fts_batch(engine, &mut fts_batch)?;
+            finish_mutation_publication(engine, &mut publication)?;
             fire_insert_after_triggers(
                 engine,
                 &stmt.table,
                 insert_original_query,
                 conflict_update_columns.as_deref(),
-                &after_row_events,
-                &referential_actions,
+                &events,
             )?;
             if !stmt.returning.is_empty() {
                 return dml_returning_result(
@@ -816,14 +746,13 @@ pub(in crate::sql) fn run_insert_inner(
     let cancel = engine.cancellation_token();
     // Evaluate, validate, and stage every VALUES row before writer promotion. A scalar subquery inside VALUES may carry FOR UPDATE, so holding the backend writer during that wait would fabricate a deadlock. Ordinary subqueries retain the statement snapshot while VOLATILE functions read the logical overlay left by preceding rows, matching PostgreSQL 18 command visibility.
     let snapshot_scope = scope.returning_statement_snapshot_scope();
-    let overlay = DmlCommandMutationOverlay::new(engine);
+    let overlay = MutationOverlayScope::new(engine);
     let mut conflict_locks = InsertConflictLocks::new(engine);
     let input_rows = rule_source_rows.as_deref().unwrap_or(&stmt.rows);
     let mut documents = Vec::with_capacity(input_rows.len());
     let mut target_tables = Vec::with_capacity(input_rows.len());
     let mut prepared_conflicts = Vec::with_capacity(input_rows.len());
-    let mut after_row_events = Vec::with_capacity(input_rows.len());
-    let mut referential_actions = super::ReferentialActionContext::default();
+    let mut events = super::MutationEventQueue::default();
     let mut has_prepared_effect = false;
     let mut has_prepared_auto_identity = false;
     let mut pending_rule_rows = Vec::with_capacity(input_rows.len());
@@ -925,15 +854,12 @@ pub(in crate::sql) fn run_insert_inner(
             document,
             insert_identity,
             &mut conflict_locks,
-            &mut referential_actions,
+            events.referential_actions_mut(),
         )? {
             if let Some(returning) = staged.returning {
                 returning_rows.push(returning);
             }
-            crate::sql::triggers::AfterRowTriggerEvent::append(
-                &mut after_row_events,
-                staged.after_row_events,
-            );
+            events.append_after_rows(staged.after_row_events);
             if staged.prepared_effect {
                 affected += 1;
                 has_prepared_effect = true;
@@ -1069,7 +995,7 @@ pub(in crate::sql) fn run_insert_inner(
                 document,
                 insert_identity,
                 &mut conflict_locks,
-                &mut referential_actions,
+                events.referential_actions_mut(),
             )?
             else {
                 continue;
@@ -1077,10 +1003,7 @@ pub(in crate::sql) fn run_insert_inner(
             if let Some(returning) = staged.returning {
                 returning_rows.push(returning);
             }
-            crate::sql::triggers::AfterRowTriggerEvent::append(
-                &mut after_row_events,
-                staged.after_row_events,
-            );
+            events.append_after_rows(staged.after_row_events);
             if staged.prepared_effect {
                 affected += 1;
                 has_prepared_effect = true;
@@ -1101,15 +1024,15 @@ pub(in crate::sql) fn run_insert_inner(
         )?;
     }
     drop(conflict_locks);
-    let mut fts_batch = PreparedFtsBatch::default();
+    let mut publication = MutationPublicationBatch::default();
     for ((target_table, document), prepared) in target_tables
         .into_iter()
         .zip(documents)
-        .zip(&mut prepared_conflicts)
+        .zip(prepared_conflicts)
     {
         cancel.check()?;
         let supplied = matches!(
-            prepared,
+            &prepared,
             PreparedInsertConflict::Insert { supplied: true, .. }
         );
         let id_column_is_unique_key = engine
@@ -1126,17 +1049,16 @@ pub(in crate::sql) fn run_insert_inner(
             document,
             prepared,
             known_new,
-            &mut fts_batch,
+            &mut publication,
         )?;
     }
-    flush_prepared_fts_batch(engine, &mut fts_batch)?;
+    finish_mutation_publication(engine, &mut publication)?;
     fire_insert_after_triggers(
         engine,
         &stmt.table,
         insert_original_query,
         conflict_update_columns.as_deref(),
-        &after_row_events,
-        &referential_actions,
+        &events,
     )?;
     let (rule_returning, rule_affected, rule_executed) =
         if let Some(rule_batch) = rule_batch.as_ref() {
@@ -1268,8 +1190,7 @@ fn fire_insert_after_triggers(
     table: &str,
     insert_original_query: bool,
     conflict_update_columns: Option<&[String]>,
-    after_row_events: &[crate::sql::triggers::AfterRowTriggerEvent],
-    referential_actions: &super::ReferentialActionContext,
+    events: &super::MutationEventQueue,
 ) -> Result<(), SQLError> {
     let insert_transition = if insert_original_query {
         crate::sql::triggers::build_transition_tables(
@@ -1277,7 +1198,7 @@ fn fire_insert_after_triggers(
             table,
             uqa_sql::ast::TriggerEvent::Insert,
             &[],
-            after_row_events,
+            events.after_rows(),
         )?
     } else {
         Vec::new()
@@ -1288,12 +1209,12 @@ fn fire_insert_after_triggers(
             table,
             uqa_sql::ast::TriggerEvent::Update,
             columns,
-            after_row_events,
+            events.after_rows(),
         )?
     } else {
         Vec::new()
     };
-    let referential_transition = referential_actions.transition_tables(engine, after_row_events)?;
+    let referential_transition = events.referential_transition_tables(engine)?;
     let mut transition_tables = insert_transition
         .iter()
         .chain(update_transition.iter())
@@ -1309,11 +1230,11 @@ fn fire_insert_after_triggers(
     for generation in crate::sql::triggers::after_trigger_generations(&transition_tables) {
         crate::sql::triggers::fire_after_row_trigger_events_for_generation(
             engine,
-            after_row_events,
+            events.after_rows(),
             &transition_tables,
             generation,
         )?;
-        referential_actions.fire_after_statement_triggers(
+        events.fire_referential_after_statement_triggers(
             engine,
             &referential_transition,
             table,

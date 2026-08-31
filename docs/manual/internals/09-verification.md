@@ -81,17 +81,21 @@ env CARGO_TARGET_DIR="$runner_target" /usr/bin/time -p cargo test -p uqa-engine 
 
 The 2026-08-31 structural baseline on Rust and Cargo 1.90.0 for `aarch64-apple-darwin` measured 142.76 seconds clean and 0.30 seconds warm. Absolute time is machine-specific; the stable runner, locked dependency graph, offline mode, and empty-versus-warm target distinction make later measurements comparable on the same host.
 
-The capability and read-path boundaries have focused executable evidence inside the existing library targets and the crate's single integration target:
+The capability, read-path, and mutation-protocol boundaries have focused executable evidence inside the existing library targets and the crate's single integration target:
 
 ```sh
 cargo test -p uqa-engine --lib engine_capabilities::tests::
 cargo test -p uqa-engine --lib sql::select::schema_binding::tests::
 cargo test -p uqa-engine --lib sql::select::physical_plan::tests::
+cargo test -p uqa-engine --lib sql::dml::protocol::
+cargo test -p uqa-engine --lib sql::dml::insert::codec::tests::
+cargo test -p uqa-engine --lib sql::dml::merge::codec::tests::
+cargo test -p uqa-engine --lib sql::dml::view_triggers::merge::codec::tests::
 cargo test -p uqa-execution --lib scalar::traversal::tests::
 cargo test -p uqa-engine --test integration engine_catalog::capability_boundaries::
 ```
 
-The library filters exercise immutable catalog snapshots, relation-name resolution, a deterministic complete-query binder fixture without `Engine`, physical construction from a bound plan and explicit runtime capabilities, and complete physical-scalar traversal. The integration filter executes virtual catalog reads against session state and a persistent `CREATE SCHEMA` lifecycle covering sibling isolation, rollback, commit, and reopen; none is a compile-only check.
+The library filters exercise immutable catalog snapshots, relation-name resolution, a deterministic complete-query binder fixture without `Engine`, physical construction from a bound plan and explicit runtime capabilities, complete physical-scalar traversal, exactly-one transaction-frame selection, overlay cleanup, and strict round trips and malformed-input rejection for prepared mutation spill rows. The integration filter executes virtual catalog reads against session state and a persistent `CREATE SCHEMA` lifecycle covering sibling isolation, rollback, commit, and reopen; DML integration filters cover every command and action family through the same protocol, so none of this evidence is compile-only.
 
 ## Exactness oracles
 

@@ -106,6 +106,10 @@ mod engine_user_functions;
 mod row_locks;
 mod value_index;
 
+pub(crate) use sql::dml::{
+    CommandExactIndex, CommandMutationOverlay, DeferredForeignKeyCheck, TransactionRowChange,
+};
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -353,21 +357,6 @@ pub(crate) struct ConstraintModeState {
     named: BTreeMap<ConstraintIdentity, bool>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DeferredForeignKeyCheck {
-    pub(crate) constraint: ConstraintIdentity,
-    pub(crate) firing_relation: RelationIdentity,
-    pub(crate) row: Option<row_locks::RowLockKey>,
-}
-
-#[derive(Clone, Copy)]
-struct TransactionRowChange {
-    pending: row_locks::PendingRowChange,
-    source_generation: [u8; 16],
-    successor_generation: Option<[u8; 16]>,
-    query_origin: Option<u64>,
-}
-
 struct TransactionFrame {
     /// Whether this outer frame is an implicit SQL-driver boundary rather than a user-visible `BEGIN` block. A simple-query batch promotes it when the batch reaches `BEGIN`.
     implicit_statement: bool,
@@ -456,17 +445,6 @@ struct TransactionSavepoint {
     deferred_foreign_key_checks: Vec<DeferredForeignKeyCheck>,
     deferred_constraint_trigger_events: Vec<sql::DeferredConstraintTriggerEvent>,
     constraint_modes: ConstraintModeState,
-}
-
-#[derive(Clone, Default)]
-struct CommandMutationOverlay {
-    documents: BTreeMap<String, BTreeMap<DocId, Option<Arc<Document>>>>,
-    exact_indexes: BTreeMap<String, BTreeMap<Vec<String>, CommandExactIndex>>,
-}
-
-#[derive(Clone, Default)]
-struct CommandExactIndex {
-    doc_ids_by_key: BTreeMap<Vec<u8>, BTreeSet<DocId>>,
 }
 
 /// Lightweight SQL-session state that follows transaction/savepoint rollback

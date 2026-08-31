@@ -7,8 +7,8 @@
 //! VECTOR and TENSOR value normalization for indexes.
 
 use super::{
-    column_type_name, validate_vector_dimensions, value_to_tensor, value_to_vector, ColumnType,
-    SQLError, Value,
+    column_type_name, dml_storage_error, validate_vector_dimensions, value_to_tensor,
+    value_to_vector, ColumnType, Document, Engine, SQLError, Value,
 };
 
 pub(in crate::sql) fn index_vectors_for_type(
@@ -41,4 +41,24 @@ pub(in crate::sql) fn index_vectors_for_type(
             column_type_name(ty)
         ))),
     }
+}
+
+pub(in crate::sql) fn document_vectors(
+    engine: &Engine,
+    table: &str,
+    document: &Document,
+) -> Result<std::collections::BTreeMap<uqa_core::FieldName, Vec<Vec<f32>>>, SQLError> {
+    let mut vectors = std::collections::BTreeMap::new();
+    for (field, value) in document {
+        let Some(ty) = engine
+            .column_type(table, field)
+            .map_err(|err| dml_storage_error("vector extraction", err))?
+        else {
+            continue;
+        };
+        if matches!(ty, ColumnType::Vector(_) | ColumnType::Tensor(_)) {
+            vectors.insert(field.clone(), index_vectors_for_type(value, &ty)?);
+        }
+    }
+    Ok(vectors)
 }

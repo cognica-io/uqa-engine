@@ -9,15 +9,15 @@
 use std::sync::Arc;
 
 use super::{
-    apply_validated_prepared_document_rewrite, build_returning_row, coerce_to_column_type,
-    dml_storage_error, document_supplied_id, eval_lowered_expression, flush_prepared_fts_batch,
-    index_vectors_for_type, lock_document_key_dependencies,
+    build_returning_row, coerce_to_column_type, dml_storage_error, document_supplied_id,
+    eval_lowered_expression, lock_document_key_dependencies,
     lock_existing_document_foreign_key_dependencies, partition_insert_target,
     stage_prepared_document_rewrite, validate_document_non_key_constraints,
-    validate_key_constraints, validate_view_checks, BTreeMap, ColumnType, CteScope, DocId,
-    Document, Engine, InsertConflictLocks, InsertConflictPreparation, InsertPlan, PreparedFtsBatch,
-    PreparedInsertConflict, PreparedInsertRowContext, ReturningProjectionRow, ReturningRowImage,
-    ReturningRowImages, SQLError, SQLParam, ViewCheckContext,
+    validate_key_constraints, validate_view_checks, CteScope, DocId, Document, Engine,
+    InsertConflictLocks, InsertConflictPreparation, InsertPlan, MutationPublicationBatch,
+    MutationRowImage, MutationRowImages, PreparedDocumentInsert, PreparedInsertConflict,
+    PreparedInsertRowContext, PreparedMutationAction, ReturningProjectionRow, SQLError, SQLParam,
+    ViewCheckContext,
 };
 
 pub(super) struct StagedValuesInsertRow {
@@ -197,9 +197,9 @@ pub(super) fn stage_prepared_insert_row(
                 crate::sql::triggers::AfterRowTriggerEvent::push(&mut after_row_events, event);
             }
             (
-                ReturningRowImages {
+                MutationRowImages {
                     old: None,
-                    new: Some(ReturningRowImage {
+                    new: Some(MutationRowImage {
                         storage_table: storage_table.to_string(),
                         doc_id: *doc_id,
                         document,
@@ -252,13 +252,13 @@ pub(super) fn stage_prepared_insert_row(
                 &mut after_row_events,
             )?;
             (
-                ReturningRowImages {
-                    old: Some(ReturningRowImage {
+                MutationRowImages {
+                    old: Some(MutationRowImage {
                         storage_table: old_storage_table,
                         doc_id: old_doc_id,
                         document: &prepared.old_document,
                     }),
-                    new: Some(ReturningRowImage {
+                    new: Some(MutationRowImage {
                         storage_table: new_storage_table,
                         doc_id,
                         document: &prepared.new_document,
@@ -298,28 +298,32 @@ pub(super) fn apply_validated_prepared_insert(
     engine: &Engine,
     table: &str,
     document: Document,
-    prepared: &mut PreparedInsertConflict,
+    prepared: PreparedInsertConflict,
     known_new: bool,
-    fts_batch: &mut PreparedFtsBatch,
+    publication: &mut MutationPublicationBatch,
 ) -> Result<bool, SQLError> {
     match prepared {
         PreparedInsertConflict::Skip => Ok(false),
-        PreparedInsertConflict::Updated(prepared) => {
-            flush_prepared_fts_batch(engine, fts_batch)?;
-            apply_validated_prepared_document_rewrite(engine, prepared)?;
+        PreparedInsertConflict::Updated(rewrite) => {
+            super::publish_prepared_mutation_action(
+                engine,
+                PreparedMutationAction::Rewrite(rewrite),
+                false,
+                publication,
+            )?;
             Ok(true)
         }
         PreparedInsertConflict::Insert { doc_id, .. } => {
-            let text_fields = engine.prepared_document_text_fields(table, &document)?;
-            let vectors = document_vectors(engine, table, &document)?;
-            engine.add_prepared_document_with_vector_values_deferred_fts(
-                table, *doc_id, document, vectors, known_new,
+            super::publish_prepared_mutation_action(
+                engine,
+                PreparedMutationAction::Insert(PreparedDocumentInsert {
+                    table: table.to_string(),
+                    doc_id,
+                    document,
+                }),
+                known_new,
+                publication,
             )?;
-            engine.defer_inserted_foreign_key_checks(table, *doc_id)?;
-            fts_batch.push(table.to_string(), *doc_id, text_fields);
-            if fts_batch.is_full() {
-                flush_prepared_fts_batch(engine, fts_batch)?;
-            }
             Ok(true)
         }
         PreparedInsertConflict::Unresolved => Err(SQLError::Internal(
@@ -392,24 +396,4 @@ pub(in crate::sql) fn apply_missing_column_defaults(
         }
     }
     Ok(())
-}
-
-pub(in crate::sql) fn document_vectors(
-    engine: &Engine,
-    table: &str,
-    document: &Document,
-) -> Result<BTreeMap<uqa_core::FieldName, Vec<Vec<f32>>>, SQLError> {
-    let mut vectors = BTreeMap::new();
-    for (field, value) in document {
-        let Some(ty) = engine
-            .column_type(table, field)
-            .map_err(|err| dml_storage_error("vector extraction", err))?
-        else {
-            continue;
-        };
-        if matches!(ty, ColumnType::Vector(_) | ColumnType::Tensor(_)) {
-            vectors.insert(field.clone(), index_vectors_for_type(value, &ty)?);
-        }
-    }
-    Ok(vectors)
 }

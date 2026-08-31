@@ -7,30 +7,33 @@
 //! MERGE matching, action execution, and RETURNING projection.
 
 use super::{
-    apply_missing_column_defaults, apply_validated_prepared_document_delete,
-    apply_validated_prepared_document_rewrite, build_join_spill_with_ctes,
-    build_projection_physical_row_with_ctes, decode_merge_pair, decode_prepared_doc_id,
-    decode_prepared_document_delete, decode_prepared_document_rewrite, dml_join_rows,
-    dml_null_target_row, dml_returning_result_with_projections, dml_storage_error,
-    dml_target_row_for_storage, document_vectors, encode_merge_pair, encode_prepared_doc_id,
-    encode_prepared_document_delete, encode_prepared_document_rewrite, eval_mutation_assignment,
-    eval_mutation_expr, expanded_returning_projections, insert_identity_columns,
-    lock_document_key_dependencies, lock_existing_document_foreign_key_dependencies,
-    lock_physical_mutation_target, merge_pair_schema, merge_source_index_value,
+    apply_missing_column_defaults, build_join_spill_with_ctes,
+    build_projection_physical_row_with_ctes, dml_join_rows, dml_null_target_row,
+    dml_returning_result_with_projections, dml_storage_error, dml_target_row_for_storage,
+    eval_mutation_assignment, eval_mutation_expr, expanded_returning_projections,
+    finish_mutation_publication, insert_identity_columns, lock_document_key_dependencies,
+    lock_existing_document_foreign_key_dependencies, lock_physical_mutation_target,
     missing_document_error, partition_insert_target, persist_auto_increment_identity,
     prepare_auto_increment_identity, prepare_document_delete, prepare_insert_identity,
     prepare_partition_update_route, prepare_routed_document_rewrite,
     refresh_insert_identity_after_trigger, returning_row_context, returning_value_context,
     stage_prepared_document_delete, stage_prepared_document_rewrite, update_lock_strength,
     validate_document_constraints, validate_mutation_columns, validate_returning_alias_relations,
-    validate_view_checks, BTreeMap, BTreeSet, CteScope, DmlCommandMutationOverlay,
-    DmlReturningShape, Document, Engine, MergePlan, MergeWhenPlan, MutationAssignmentTarget,
-    PhysicalMutationLockTarget, ProjectionPlan, ReturningRowImage, ReturningRowImages,
-    ReturningValueProjectionRow, SQLError, SQLParam, SQLResult, Value, ViewCheckContext,
+    validate_view_checks, BTreeMap, BTreeSet, CteScope, DmlReturningShape, Document, Engine,
+    MergePlan, MergeWhenPlan, MutationAssignmentTarget, MutationOverlayScope,
+    MutationPublicationBatch, MutationRowImage, MutationRowImages, PhysicalMutationLockTarget,
+    PreparedDocumentInsert, PreparedMutationAction, ProjectionPlan, ReturningValueProjectionRow,
+    SQLError, SQLParam, SQLResult, Value, ViewCheckContext,
 };
 
+mod codec;
 mod returning;
 
+use codec::{
+    decode_merge_pair, decode_prepared_mutation_action_row, encode_merge_pair, merge_pair_schema,
+    prepared_mutation_action_schema, push_prepared_mutation_action,
+};
+pub(in crate::sql) use codec::{merge_source_index_value, MergePairKind};
 use returning::{
     build_merge_returning_row, expanded_merge_returning_projections, merge_returning_source_schema,
     MergeReturningRow,
@@ -40,9 +43,6 @@ pub(in crate::sql) use returning::{
     ViewMergeReturningRow,
 };
 
-const MERGE_PREPARED_UPDATE: i64 = 1;
-const MERGE_PREPARED_DELETE: i64 = 2;
-const MERGE_PREPARED_INSERT: i64 = 3;
 type MergeTargetIdentity = (String, uqa_core::DocId);
 
 enum SelectedMergeAction {
@@ -67,11 +67,7 @@ pub(in crate::sql) fn run_merge(
     stmt: MergePlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    if engine.transaction_depth() != 0 {
-        run_merge_inner(engine, &stmt, params)
-    } else {
-        engine.transaction(move |engine| run_merge_inner(engine, &stmt, params))
-    }
+    super::run_mutation_command(engine, move |engine| run_merge_inner(engine, &stmt, params))
 }
 
 #[allow(clippy::too_many_lines)]
@@ -297,7 +293,7 @@ pub(in crate::sql) fn run_merge_inner(
                         .push(uqa_execution::Batch::from_physical_rows(
                             pair_schema.clone(),
                             vec![encode_merge_pair(
-                                super::MergePairKind::Matched,
+                                MergePairKind::Matched,
                                 Some(storage_table),
                                 Some(*doc_id),
                                 Some(&doc),
@@ -317,7 +313,7 @@ pub(in crate::sql) fn run_merge_inner(
                     .push(uqa_execution::Batch::from_physical_rows(
                         pair_schema.clone(),
                         vec![encode_merge_pair(
-                            super::MergePairKind::NotMatchedBySource,
+                            MergePairKind::NotMatchedBySource,
                             Some(storage_table),
                             Some(*doc_id),
                             Some(&doc),
@@ -344,7 +340,7 @@ pub(in crate::sql) fn run_merge_inner(
             .push(uqa_execution::Batch::from_physical_rows(
                 pair_schema.clone(),
                 vec![encode_merge_pair(
-                    super::MergePairKind::NotMatchedByTarget,
+                    MergePairKind::NotMatchedByTarget,
                     None,
                     None,
                     None,
@@ -403,15 +399,14 @@ pub(in crate::sql) fn run_merge_inner(
             deleted_targets.insert(original_identity);
         }
     }
-    let action_schema = merge_prepared_action_schema();
+    let action_schema = prepared_mutation_action_schema();
     let mut prepared_actions = uqa_execution::SpillBuffer::new(work_mem);
-    let mut after_row_events = Vec::new();
+    let mut events = super::MutationEventQueue::default();
     let mut root_deletes = BTreeSet::new();
     let mut has_mutation = false;
     let mut mutated_target_ids = BTreeSet::new();
-    let mut referential_actions = super::ReferentialActionContext::default();
     let snapshot_ctes = ctes.returning_statement_snapshot_scope();
-    let overlay = DmlCommandMutationOverlay::new(engine);
+    let overlay = MutationOverlayScope::new(engine);
     let pairing_reader = pairings
         .read_rows()
         .map_err(crate::sql::select::physical_exec_error)?;
@@ -428,14 +423,14 @@ pub(in crate::sql) fn run_merge_inner(
             .is_some_and(|identity| deleted_targets.contains(identity))
         {
             match pair.kind {
-                super::MergePairKind::Matched => {
-                    pair.kind = super::MergePairKind::NotMatchedByTarget;
+                MergePairKind::Matched => {
+                    pair.kind = MergePairKind::NotMatchedByTarget;
                     pair.storage_table = None;
                     pair.doc_id = None;
                     pair.target_document = None;
                 }
-                super::MergePairKind::NotMatchedBySource => continue,
-                super::MergePairKind::NotMatchedByTarget => {}
+                MergePairKind::NotMatchedBySource => continue,
+                MergePairKind::NotMatchedByTarget => {}
             }
         } else if let Some(((successor_table, successor_doc_id), document)) = original_identity
             .as_ref()
@@ -472,20 +467,20 @@ pub(in crate::sql) fn run_merge_inner(
             };
             if !target_visible {
                 match pair.kind {
-                    super::MergePairKind::Matched => {
-                        pair.kind = super::MergePairKind::NotMatchedByTarget;
+                    MergePairKind::Matched => {
+                        pair.kind = MergePairKind::NotMatchedByTarget;
                         pair.storage_table = None;
                         pair.doc_id = None;
                         pair.target_document = None;
                         target_row = dml_null_target_row(engine, &target_table, &target_qual)?;
                         joined = dml_join_rows(&target_row, &pair.source_row);
                     }
-                    super::MergePairKind::NotMatchedBySource => continue,
-                    super::MergePairKind::NotMatchedByTarget => {}
+                    MergePairKind::NotMatchedBySource => continue,
+                    MergePairKind::NotMatchedByTarget => {}
                 }
             }
         }
-        if matches!(pair.kind, super::MergePairKind::Matched)
+        if matches!(pair.kind, MergePairKind::Matched)
             && recheck_matches
             && !uqa_sql::expr::truthy(&eval_mutation_expr(
                 engine,
@@ -495,7 +490,7 @@ pub(in crate::sql) fn run_merge_inner(
                 params,
             )?)
         {
-            pair.kind = super::MergePairKind::NotMatchedByTarget;
+            pair.kind = MergePairKind::NotMatchedByTarget;
             pair.storage_table = None;
             pair.doc_id = None;
             pair.target_document = None;
@@ -503,9 +498,9 @@ pub(in crate::sql) fn run_merge_inner(
             joined = dml_join_rows(&target_row, &pair.source_row);
         }
         let action_row = match pair.kind {
-            super::MergePairKind::Matched => &joined,
-            super::MergePairKind::NotMatchedBySource => &target_row,
-            super::MergePairKind::NotMatchedByTarget => &pair.source_row,
+            MergePairKind::Matched => &joined,
+            MergePairKind::NotMatchedBySource => &target_row,
+            MergePairKind::NotMatchedByTarget => &pair.source_row,
         };
         match select_merge_action(
             engine,
@@ -565,7 +560,7 @@ pub(in crate::sql) fn run_merge_inner(
                     old_document,
                     route,
                     params,
-                    &mut referential_actions,
+                    events.referential_actions_mut(),
                 )?
                 .ok_or_else(|| {
                     SQLError::Internal(
@@ -606,7 +601,7 @@ pub(in crate::sql) fn run_merge_inner(
                     &mut prepared,
                     params,
                     Some(&updated_columns),
-                    &mut after_row_events,
+                    events.after_rows_mut(),
                 )?;
                 if row_affected && !stmt.returning.is_empty() {
                     returning_rows.push(build_merge_returning_row(
@@ -614,13 +609,13 @@ pub(in crate::sql) fn run_merge_inner(
                         MergeReturningRow {
                             target_table: &target_table,
                             target_qual: &target_qual,
-                            images: ReturningRowImages {
-                                old: Some(ReturningRowImage {
+                            images: MutationRowImages {
+                                old: Some(MutationRowImage {
                                     storage_table: old_storage_table,
                                     doc_id: prepared.doc_id,
                                     document: &prepared.old_document,
                                 }),
-                                new: Some(ReturningRowImage {
+                                new: Some(MutationRowImage {
                                     storage_table: new_storage_table,
                                     doc_id: rewritten_doc_id,
                                     document: &prepared.new_document,
@@ -639,11 +634,10 @@ pub(in crate::sql) fn run_merge_inner(
                 }
                 affected += u64::from(row_affected);
                 has_mutation = true;
-                push_merge_prepared_action(
+                push_prepared_mutation_action(
                     &mut prepared_actions,
                     &action_schema,
-                    MERGE_PREPARED_UPDATE,
-                    encode_prepared_document_rewrite(prepared),
+                    PreparedMutationAction::Rewrite(prepared),
                 )?;
             }
             SelectedMergeAction::Delete { doc_id } => {
@@ -679,7 +673,7 @@ pub(in crate::sql) fn run_merge_inner(
                     doc_id,
                     params,
                     &root_deletes,
-                    &mut referential_actions,
+                    events.referential_actions_mut(),
                     false,
                 )?
                 .ok_or_else(|| {
@@ -689,7 +683,7 @@ pub(in crate::sql) fn run_merge_inner(
                     engine,
                     &mut prepared,
                     params,
-                    &mut after_row_events,
+                    events.after_rows_mut(),
                 )?;
                 if !stmt.returning.is_empty() {
                     returning_rows.push(build_merge_returning_row(
@@ -697,8 +691,8 @@ pub(in crate::sql) fn run_merge_inner(
                         MergeReturningRow {
                             target_table: &target_table,
                             target_qual: &target_qual,
-                            images: ReturningRowImages {
-                                old: Some(ReturningRowImage {
+                            images: MutationRowImages {
+                                old: Some(MutationRowImage {
                                     storage_table: prepared.table.clone(),
                                     doc_id: prepared.doc_id,
                                     document: &prepared.document,
@@ -718,11 +712,10 @@ pub(in crate::sql) fn run_merge_inner(
                 }
                 affected += 1;
                 has_mutation = true;
-                push_merge_prepared_action(
+                push_prepared_mutation_action(
                     &mut prepared_actions,
                     &action_schema,
-                    MERGE_PREPARED_DELETE,
-                    encode_prepared_document_delete(prepared),
+                    PreparedMutationAction::Delete(prepared),
                 )?;
             }
             SelectedMergeAction::Insert { mut document } => {
@@ -822,7 +815,10 @@ pub(in crate::sql) fn run_merge_inner(
                         cascade_parent: None,
                     },
                 )? {
-                    crate::sql::triggers::AfterRowTriggerEvent::push(&mut after_row_events, event);
+                    crate::sql::triggers::AfterRowTriggerEvent::push(
+                        events.after_rows_mut(),
+                        event,
+                    );
                 }
                 if !stmt.returning.is_empty() {
                     returning_rows.push(build_merge_returning_row(
@@ -830,9 +826,9 @@ pub(in crate::sql) fn run_merge_inner(
                         MergeReturningRow {
                             target_table: &target_table,
                             target_qual: &target_qual,
-                            images: ReturningRowImages {
+                            images: MutationRowImages {
                                 old: None,
-                                new: Some(ReturningRowImage {
+                                new: Some(MutationRowImage {
                                     storage_table: storage_table.clone(),
                                     doc_id,
                                     document: &document,
@@ -851,11 +847,14 @@ pub(in crate::sql) fn run_merge_inner(
                 }
                 affected += 1;
                 has_mutation = true;
-                push_merge_prepared_action(
+                push_prepared_mutation_action(
                     &mut prepared_actions,
                     &action_schema,
-                    MERGE_PREPARED_INSERT,
-                    encode_merge_prepared_insert(storage_table, doc_id, document),
+                    PreparedMutationAction::Insert(PreparedDocumentInsert {
+                        table: storage_table,
+                        doc_id,
+                        document,
+                    }),
                 )?;
             }
         }
@@ -879,43 +878,20 @@ pub(in crate::sql) fn run_merge_inner(
     let prepared_reader = prepared_actions
         .read_rows()
         .map_err(crate::sql::select::physical_exec_error)?;
+    let mut publication = MutationPublicationBatch::default();
     for prepared in prepared_reader {
         let prepared = prepared.map_err(crate::sql::select::physical_exec_error)?;
-        let (action, payload) = decode_merge_prepared_action(prepared)?;
-        match action {
-            MERGE_PREPARED_UPDATE => {
-                let mut prepared = decode_prepared_document_rewrite(payload)?;
-                apply_validated_prepared_document_rewrite(engine, &mut prepared)?;
-            }
-            MERGE_PREPARED_DELETE => {
-                let mut prepared = decode_prepared_document_delete(payload)?;
-                apply_validated_prepared_document_delete(engine, &mut prepared)?;
-            }
-            MERGE_PREPARED_INSERT => {
-                let (storage_table, doc_id, document) = decode_merge_prepared_insert(payload)?;
-                engine.add_prepared_document_with_vector_values(
-                    &storage_table,
-                    doc_id,
-                    document.clone(),
-                    document_vectors(engine, &storage_table, &document)?,
-                    false,
-                )?;
-                engine.defer_inserted_foreign_key_checks(&storage_table, doc_id)?;
-            }
-            _ => {
-                return Err(SQLError::Internal(format!(
-                    "MERGE prepared action spill has unknown kind {action}"
-                )))
-            }
-        }
+        let action = decode_prepared_mutation_action_row(prepared)?;
+        super::publish_prepared_mutation_action(engine, action, false, &mut publication)?;
     }
+    finish_mutation_publication(engine, &mut publication)?;
     let delete_transition = if has_delete_action {
         crate::sql::triggers::build_transition_tables(
             engine,
             &target_table,
             uqa_sql::ast::TriggerEvent::Delete,
             &[],
-            &after_row_events,
+            events.after_rows(),
         )?
     } else {
         Vec::new()
@@ -926,7 +902,7 @@ pub(in crate::sql) fn run_merge_inner(
             &target_table,
             uqa_sql::ast::TriggerEvent::Update,
             &update_statement_columns,
-            &after_row_events,
+            events.after_rows(),
         )?
     } else {
         Vec::new()
@@ -937,13 +913,12 @@ pub(in crate::sql) fn run_merge_inner(
             &target_table,
             uqa_sql::ast::TriggerEvent::Insert,
             &[],
-            &after_row_events,
+            events.after_rows(),
         )?
     } else {
         Vec::new()
     };
-    let referential_transition =
-        referential_actions.transition_tables(engine, &after_row_events)?;
+    let referential_transition = events.referential_transition_tables(engine)?;
     let mut transition_tables = delete_transition
         .iter()
         .chain(update_transition.iter())
@@ -961,11 +936,11 @@ pub(in crate::sql) fn run_merge_inner(
     for generation in crate::sql::triggers::after_trigger_generations(&transition_tables) {
         crate::sql::triggers::fire_after_row_trigger_events_for_generation(
             engine,
-            &after_row_events,
+            events.after_rows(),
             &transition_tables,
             generation,
         )?;
-        referential_actions.fire_after_statement_triggers(
+        events.fire_referential_after_statement_triggers(
             engine,
             &referential_transition,
             &target_table,
@@ -1193,7 +1168,7 @@ fn select_merge_action(
     engine: &Engine,
     stmt: &MergePlan,
     target_table: &str,
-    match_kind: super::MergePairKind,
+    match_kind: MergePairKind,
     doc_id: Option<uqa_core::DocId>,
     target_document: Option<&Document>,
     action_row: &uqa_execution::OwnedPhysicalRow,
@@ -1205,20 +1180,20 @@ fn select_merge_action(
             MergeWhenPlan::UpdateMatched { condition, .. }
             | MergeWhenPlan::DeleteMatched { condition }
             | MergeWhenPlan::NothingMatched { condition }
-                if matches!(match_kind, super::MergePairKind::Matched) =>
+                if matches!(match_kind, MergePairKind::Matched) =>
             {
                 (condition.as_ref(), true)
             }
             MergeWhenPlan::InsertNotMatched { condition, .. }
             | MergeWhenPlan::NothingNotMatched { condition }
-                if matches!(match_kind, super::MergePairKind::NotMatchedByTarget) =>
+                if matches!(match_kind, MergePairKind::NotMatchedByTarget) =>
             {
                 (condition.as_ref(), true)
             }
             MergeWhenPlan::UpdateNotMatchedBySource { condition, .. }
             | MergeWhenPlan::DeleteNotMatchedBySource { condition }
             | MergeWhenPlan::NothingNotMatchedBySource { condition }
-                if matches!(match_kind, super::MergePairKind::NotMatchedBySource) =>
+                if matches!(match_kind, MergePairKind::NotMatchedBySource) =>
             {
                 (condition.as_ref(), true)
             }
@@ -1331,96 +1306,6 @@ fn select_merge_action(
         };
     }
     Ok(SelectedMergeAction::Nothing)
-}
-
-fn merge_prepared_action_schema() -> uqa_execution::RowSchema {
-    uqa_execution::RowSchema::with_internal_relation_types(
-        uqa_sql::ast::InternalRelationId::allocate(),
-        vec![Some(uqa_sql::ast::ColumnType::BigInteger), None],
-    )
-}
-
-fn push_merge_prepared_action(
-    buffer: &mut uqa_execution::SpillBuffer,
-    schema: &uqa_execution::RowSchema,
-    action: i64,
-    payload: Value,
-) -> Result<(), SQLError> {
-    buffer
-        .push(uqa_execution::Batch::from_physical_rows(
-            schema.clone(),
-            vec![uqa_execution::PhysicalRow::from_values(vec![
-                Value::Int(action),
-                payload,
-            ])],
-        ))
-        .map_err(crate::sql::select::physical_exec_error)?;
-    Ok(())
-}
-
-fn decode_merge_prepared_action(
-    row: uqa_execution::OwnedPhysicalRow,
-) -> Result<(i64, Value), SQLError> {
-    let action = match row.physical_value_at(0) {
-        Some(Value::Int(action)) => *action,
-        _ => {
-            return Err(SQLError::Internal(
-                "MERGE prepared action spill lost its action kind".into(),
-            ))
-        }
-    };
-    let payload = row
-        .physical_value_at(1)
-        .cloned()
-        .ok_or_else(|| SQLError::Internal("MERGE prepared action spill lost its payload".into()))?;
-    Ok((action, payload))
-}
-
-fn encode_merge_prepared_insert(
-    storage_table: String,
-    doc_id: uqa_core::DocId,
-    document: Document,
-) -> Value {
-    Value::List(vec![
-        Value::Str(storage_table),
-        encode_prepared_doc_id(doc_id),
-        Value::Map(document),
-    ])
-}
-
-fn decode_merge_prepared_insert(
-    value: Value,
-) -> Result<(String, uqa_core::DocId, Document), SQLError> {
-    let Value::List(fields) = value else {
-        return Err(SQLError::Internal(
-            "MERGE prepared insert payload is not a record".into(),
-        ));
-    };
-    let [storage_table, doc_id, document]: [Value; 3] =
-        fields.try_into().map_err(|fields: Vec<Value>| {
-            SQLError::Internal(format!(
-                "MERGE prepared insert payload has {} fields, expected 3",
-                fields.len()
-            ))
-        })?;
-    let storage_table = match storage_table {
-        Value::Str(table) => table,
-        _ => {
-            return Err(SQLError::Internal(
-                "MERGE prepared insert payload has no storage table".into(),
-            ))
-        }
-    };
-    let doc_id = decode_prepared_doc_id(doc_id, "MERGE prepared insert")?;
-    let document = match document {
-        Value::Map(document) => document,
-        _ => {
-            return Err(SQLError::Internal(
-                "MERGE prepared insert payload has no document".into(),
-            ))
-        }
-    };
-    Ok((storage_table, doc_id, document))
 }
 
 fn merge_target_lock_strength(

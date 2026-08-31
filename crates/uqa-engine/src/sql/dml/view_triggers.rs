@@ -16,7 +16,6 @@ use super::{
 
 #[path = "view_triggers/insert.rs"]
 mod insert;
-#[path = "view_triggers/merge.rs"]
 mod merge;
 
 pub(super) use insert::run_view_insert_inner;

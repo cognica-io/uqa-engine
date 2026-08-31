@@ -266,6 +266,21 @@ pub(crate) struct MutationCoordinator<'a> {
 }
 
 impl MutationCoordinator<'_> {
+    pub(crate) fn begin_command_mutation_overlay(&self) {
+        self.session
+            .command_mutation_overlays
+            .lock()
+            .push(super::CommandMutationOverlay::default());
+    }
+
+    pub(crate) fn end_command_mutation_overlay(&self) {
+        let removed = self.session.command_mutation_overlays.lock().pop();
+        debug_assert!(
+            removed.is_some(),
+            "command mutation overlay stack underflow"
+        );
+    }
+
     pub(crate) fn register_schema(
         &self,
         name: &str,

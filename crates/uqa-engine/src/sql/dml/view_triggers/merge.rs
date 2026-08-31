@@ -17,6 +17,10 @@ use super::{
     ViewDmlTarget,
 };
 
+mod codec;
+
+use codec::{decode_view_merge_pair, push_view_merge_pair, view_merge_pair_schema, ViewMergePair};
+
 struct ViewMergeEvents {
     insert: bool,
     update: bool,
@@ -133,63 +137,6 @@ impl ViewMergeEvents {
             (self.delete, uqa_sql::ast::TriggerEvent::Delete, &[][..]),
         ]
     }
-}
-
-struct ViewMergePair {
-    kind: MergePairKind,
-    target: Option<Vec<Value>>,
-    source: OwnedPhysicalRow,
-}
-
-fn view_merge_pair_schema(source: &RowSchema) -> RowSchema {
-    let header = RowSchema::with_internal_relation_types(
-        uqa_sql::ast::InternalRelationId::allocate(),
-        vec![Some(uqa_sql::ast::ColumnType::BigInteger), None],
-    );
-    RowSchema::join(&header, source, std::iter::empty())
-}
-
-fn encode_view_merge_pair(
-    kind: MergePairKind,
-    target: Option<&[Value]>,
-    source: &OwnedPhysicalRow,
-) -> PhysicalRow {
-    let header = PhysicalRow::from_values(vec![
-        Value::Int(kind.encode()),
-        target.map_or(Value::Null, |values| Value::List(values.to_vec())),
-    ]);
-    PhysicalRow::concat(&header, &source.row)
-}
-
-fn decode_view_merge_pair(encoded: OwnedPhysicalRow) -> Result<ViewMergePair, SQLError> {
-    let kind = MergePairKind::decode(
-        encoded
-            .physical_value_at(0)
-            .ok_or_else(|| SQLError::Internal("view MERGE pair lost its kind".into()))?,
-    )?;
-    let target = match encoded.physical_value_at(1) {
-        Some(Value::List(values)) => Some(values.clone()),
-        Some(Value::Null) | None => None,
-        Some(value) => {
-            return Err(SQLError::Internal(format!(
-                "view MERGE pair has invalid target row {value:?}"
-            )))
-        }
-    };
-    if matches!(
-        kind,
-        MergePairKind::Matched | MergePairKind::NotMatchedBySource
-    ) != target.is_some()
-    {
-        return Err(SQLError::Internal(
-            "view MERGE pair target presence does not match its kind".into(),
-        ));
-    }
-    Ok(ViewMergePair {
-        kind,
-        target,
-        source: encoded,
-    })
 }
 
 fn validate_view_merge_targets(target: &ViewDmlTarget, plan: &MergePlan) -> Result<(), SQLError> {
@@ -326,22 +273,6 @@ fn build_view_merge_pairings(
     }
     pairings
         .into_shared(schema)
-        .map_err(crate::sql::select::physical_exec_error)
-}
-
-fn push_view_merge_pair(
-    pairings: &mut uqa_execution::SpillBuffer,
-    schema: &RowSchema,
-    kind: MergePairKind,
-    target: Option<&[Value]>,
-    source: &OwnedPhysicalRow,
-) -> Result<(), SQLError> {
-    pairings
-        .push(uqa_execution::Batch::from_physical_rows(
-            schema.clone(),
-            vec![encode_view_merge_pair(kind, target, source)],
-        ))
-        .map(|_| ())
         .map_err(crate::sql::select::physical_exec_error)
 }
 

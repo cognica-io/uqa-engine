@@ -7,15 +7,16 @@
 //! UPDATE FROM join-source execution.
 
 use super::{
-    apply_validated_prepared_document_rewrite, build_join_spill_with_ctes, build_returning_row,
-    dml_join_rows, dml_returning_result, dml_target_row_for_storage, eval_mutation_assignment,
-    eval_mutation_expr, eval_view_rule_update_assignment, lock_physical_mutation_target,
+    build_join_spill_with_ctes, build_returning_row, dml_join_rows, dml_returning_result,
+    dml_target_row_for_storage, eval_mutation_assignment, eval_mutation_expr,
+    eval_view_rule_update_assignment, finish_mutation_publication, lock_physical_mutation_target,
     prepare_partition_update_route, prepare_routed_document_rewrite,
     stage_prepared_document_rewrite, update_lock_strength, validate_returning_alias_relations,
-    validate_view_checks, CteScope, DmlCommandMutationOverlay, DmlReturningShape, Engine,
-    MutationAssignmentTarget, PhysicalMutationLockTarget, ReturningProjectionRow,
-    ReturningRowImage, ReturningRowImages, SQLError, SQLParam, SQLResult, SourcePlan, UpdatePlan,
-    ViewCheckContext,
+    validate_view_checks, CteScope, DmlReturningShape, Engine, MutationAssignmentTarget,
+    MutationOverlayScope, MutationPublicationBatch, MutationRewriteCandidate, MutationRowImage,
+    MutationRowImages, PhysicalDocumentIdentity, PhysicalMutationLockTarget,
+    PreparedMutationAction, ReturningProjectionRow, SQLError, SQLParam, SQLResult, SourcePlan,
+    UpdatePlan, ViewCheckContext,
 };
 
 pub(in crate::sql) fn run_update_from(
@@ -81,7 +82,7 @@ pub(in crate::sql) fn run_update_from(
     } else {
         count_source_qualifications(read_engine, stmt, &snapshot_ctes, &from_rows, params)?
     };
-    let overlay = DmlCommandMutationOverlay::new(engine);
+    let overlay = MutationOverlayScope::new(engine);
     let mut pending_updates = Vec::new();
     let mut locked_ids = std::collections::BTreeSet::new();
     for (storage_table, doc_id) in target_rows {
@@ -193,22 +194,28 @@ pub(in crate::sql) fn run_update_from(
                 }
             }
         }
-        pending_updates.push((storage_table, doc_id, original_doc, doc, source_context));
+        pending_updates.push(MutationRewriteCandidate {
+            identity: PhysicalDocumentIdentity {
+                table: storage_table,
+                doc_id,
+            },
+            old_document: original_doc,
+            proposed_document: doc,
+            context: source_context,
+        });
     }
     drop(overlay);
     let rule_rows = pending_updates
         .iter()
-        .map(
-            |(storage_table, doc_id, old, new, source_context)| crate::sql::rules::RuleRowImage {
-                old_storage_table: Some(storage_table.clone()),
-                old_doc_id: Some(*doc_id),
-                old: Some(old.clone()),
-                new_storage_table: Some(storage_table.clone()),
-                new_doc_id: Some(*doc_id),
-                new: Some(new.clone()),
-                context: Some(source_context.clone()),
-            },
-        )
+        .map(|candidate| crate::sql::rules::RuleRowImage {
+            old_storage_table: Some(candidate.identity.table.clone()),
+            old_doc_id: Some(candidate.identity.doc_id),
+            old: Some(candidate.old_document.clone()),
+            new_storage_table: Some(candidate.identity.table.clone()),
+            new_doc_id: Some(candidate.identity.doc_id),
+            new: Some(candidate.proposed_document.clone()),
+            context: Some(candidate.context.clone()),
+        })
         .collect::<Vec<_>>();
     let mut view_rule_batches = super::prepare_view_rule_batches(super::ViewRuleBatchRequest {
         engine,
@@ -278,22 +285,20 @@ pub(in crate::sql) fn run_update_from(
             &assigned_columns,
         )?;
     }
-    let overlay = DmlCommandMutationOverlay::new(engine);
+    let overlay = MutationOverlayScope::new(engine);
     let mut prepared_updates = Vec::new();
-    let mut referential_actions = super::ReferentialActionContext::default();
-    for (index, (storage_table, doc_id, original_doc, doc, source_context)) in
-        pending_updates.into_iter().enumerate()
-    {
+    let mut events = super::MutationEventQueue::default();
+    for (index, candidate) in pending_updates.into_iter().enumerate() {
         if view_rule_batches.suppresses(index) || base_rule_suppressed[index] {
             continue;
         }
         let Some(triggered_document) = crate::sql::triggers::fire_before_row_triggers(
             engine,
-            &storage_table,
+            &candidate.identity.table,
             uqa_sql::ast::TriggerEvent::Update,
-            doc_id,
-            Some(&original_doc),
-            Some(&doc),
+            candidate.identity.doc_id,
+            Some(&candidate.old_document),
+            Some(&candidate.proposed_document),
             &assigned_columns,
         )?
         else {
@@ -301,9 +306,9 @@ pub(in crate::sql) fn run_update_from(
         };
         let Some(route) = prepare_partition_update_route(
             engine,
-            &storage_table,
-            doc_id,
-            &original_doc,
+            &candidate.identity.table,
+            candidate.identity.doc_id,
+            &candidate.old_document,
             triggered_document,
             &target,
             params,
@@ -314,12 +319,12 @@ pub(in crate::sql) fn run_update_from(
         };
         if let Some(mut prepared) = prepare_routed_document_rewrite(
             engine,
-            &storage_table,
-            doc_id,
-            original_doc,
+            &candidate.identity.table,
+            candidate.identity.doc_id,
+            candidate.old_document,
             route,
             params,
-            &mut referential_actions,
+            events.referential_actions_mut(),
         )? {
             let row_affected = !prepared.is_partition_move_delete();
             let primary_key_doc_id =
@@ -365,20 +370,20 @@ pub(in crate::sql) fn run_update_from(
                     ReturningProjectionRow {
                         table: &target,
                         target_qualifier: &stmt.target_qualifier,
-                        images: ReturningRowImages {
-                            old: Some(ReturningRowImage {
+                        images: MutationRowImages {
+                            old: Some(MutationRowImage {
                                 storage_table: prepared.table.clone(),
                                 doc_id: prepared.doc_id,
                                 document: &prepared.old_document,
                             }),
-                            new: Some(ReturningRowImage {
+                            new: Some(MutationRowImage {
                                 storage_table: rewritten_storage_table,
                                 doc_id: rewritten_doc_id,
                                 document: &prepared.new_document,
                             }),
                         },
                         aliases: &stmt.returning_aliases,
-                        context: Some(&source_context),
+                        context: Some(&candidate.context),
                     },
                     &stmt.returning,
                     params,
@@ -386,33 +391,31 @@ pub(in crate::sql) fn run_update_from(
                 )?);
             }
             affected += u64::from(row_affected);
-            prepared_updates.push((prepared, source_context, after_row_events));
+            prepared_updates.push((PreparedMutationAction::Rewrite(prepared), after_row_events));
         }
     }
     drop(overlay);
     if !prepared_updates.is_empty() {
         engine.prepare_explicit_transaction_writer()?;
-        for (prepared, _, _) in &mut prepared_updates {
-            apply_validated_prepared_document_rewrite(engine, prepared)?;
+        let mut publication = MutationPublicationBatch::default();
+        for (action, after_rows) in prepared_updates {
+            super::publish_prepared_mutation_action(engine, action, false, &mut publication)?;
+            events.append_after_rows(after_rows);
         }
+        finish_mutation_publication(engine, &mut publication)?;
     }
-    let after_row_events = prepared_updates
-        .into_iter()
-        .flat_map(|(_, _, events)| events)
-        .collect::<Vec<_>>();
     let transition_tables = if update_original_query {
         crate::sql::triggers::build_transition_tables(
             engine,
             &target,
             uqa_sql::ast::TriggerEvent::Update,
             &assigned_columns,
-            &after_row_events,
+            events.after_rows(),
         )?
     } else {
         Vec::new()
     };
-    let referential_transition =
-        referential_actions.transition_tables(engine, &after_row_events)?;
+    let referential_transition = events.referential_transition_tables(engine)?;
     let mut transition_refs = transition_tables.iter().collect::<Vec<_>>();
     transition_refs.extend(referential_transition.iter());
     let root_events = update_original_query
@@ -422,11 +425,11 @@ pub(in crate::sql) fn run_update_from(
     for generation in crate::sql::triggers::after_trigger_generations(&transition_refs) {
         crate::sql::triggers::fire_after_row_trigger_events_for_generation(
             engine,
-            &after_row_events,
+            events.after_rows(),
             &transition_refs,
             generation,
         )?;
-        referential_actions.fire_after_statement_triggers(
+        events.fire_referential_after_statement_triggers(
             engine,
             &referential_transition,
             &target,

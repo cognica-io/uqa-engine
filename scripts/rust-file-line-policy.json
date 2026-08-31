@@ -47,7 +47,7 @@
     },
     {
       "path": "crates/uqa-engine/src/engine_table_storage/documents.rs",
-      "baseline_lines": 1290,
+      "baseline_lines": 1281,
       "owner": "uqa-engine document row storage",
       "responsibility_groups": ["document reads", "document writes", "index side effects", "hierarchy and persistence effects"],
       "target_modules": ["crates/uqa-engine/src/engine_table_storage/documents/read.rs", "crates/uqa-engine/src/engine_table_storage/documents/write.rs", "crates/uqa-engine/src/engine_table_storage/documents/indexes.rs", "crates/uqa-engine/src/engine_table_storage/documents/hierarchy.rs"],
@@ -110,16 +110,8 @@
       "migration_state": "planned"
     },
     {
-      "path": "crates/uqa-engine/src/sql/dml.rs",
-      "baseline_lines": 1428,
-      "owner": "uqa-engine shared DML support",
-      "responsibility_groups": ["view-rule batching", "mutation locking", "prepared rewrite codecs", "row images and identities", "MERGE pairing"],
-      "target_modules": ["crates/uqa-engine/src/sql/dml/view_rules.rs", "crates/uqa-engine/src/sql/dml/mutation_locking.rs", "crates/uqa-engine/src/sql/dml/prepared_codec.rs", "crates/uqa-engine/src/sql/dml/row_images.rs", "crates/uqa-engine/src/sql/dml/merge_pairing.rs"],
-      "migration_state": "planned"
-    },
-    {
       "path": "crates/uqa-engine/src/sql/dml/conflict.rs",
-      "baseline_lines": 1283,
+      "baseline_lines": 1145,
       "owner": "uqa-engine INSERT conflict execution",
       "responsibility_groups": ["conflict target resolution", "conflict locking", "DO UPDATE preparation", "conflict result publication"],
       "target_modules": ["crates/uqa-engine/src/sql/dml/conflict/target.rs", "crates/uqa-engine/src/sql/dml/conflict/locking.rs", "crates/uqa-engine/src/sql/dml/conflict/update.rs", "crates/uqa-engine/src/sql/dml/conflict/result.rs"],
@@ -134,16 +126,8 @@
       "migration_state": "planned"
     },
     {
-      "path": "crates/uqa-engine/src/sql/dml/delete.rs",
-      "baseline_lines": 1124,
-      "owner": "uqa-engine DELETE execution",
-      "responsibility_groups": ["candidate selection", "lock and recheck", "trigger and rule behavior", "delete staging and RETURNING"],
-      "target_modules": ["crates/uqa-engine/src/sql/dml/delete/candidates.rs", "crates/uqa-engine/src/sql/dml/delete/locking.rs", "crates/uqa-engine/src/sql/dml/delete/events.rs", "crates/uqa-engine/src/sql/dml/delete/staging.rs"],
-      "migration_state": "planned"
-    },
-    {
       "path": "crates/uqa-engine/src/sql/dml/insert.rs",
-      "baseline_lines": 1345,
+      "baseline_lines": 1266,
       "owner": "uqa-engine INSERT execution",
       "responsibility_groups": ["streaming source consumption", "identity and defaults", "trigger and rule behavior", "constraint and mutation staging", "FTS side effects"],
       "target_modules": ["crates/uqa-engine/src/sql/dml/insert/source.rs", "crates/uqa-engine/src/sql/dml/insert/identity.rs", "crates/uqa-engine/src/sql/dml/insert/events.rs", "crates/uqa-engine/src/sql/dml/insert/staging.rs", "crates/uqa-engine/src/sql/dml/insert/fts.rs"],
@@ -151,7 +135,7 @@
     },
     {
       "path": "crates/uqa-engine/src/sql/dml/merge.rs",
-      "baseline_lines": 1455,
+      "baseline_lines": 1340,
       "owner": "uqa-engine MERGE execution",
       "responsibility_groups": ["source and target matching", "action selection and validation", "prepared action codec", "mutation application", "RETURNING"],
       "target_modules": ["crates/uqa-engine/src/sql/dml/merge/matching.rs", "crates/uqa-engine/src/sql/dml/merge/actions.rs", "crates/uqa-engine/src/sql/dml/merge/prepared.rs", "crates/uqa-engine/src/sql/dml/merge/execution.rs", "crates/uqa-engine/src/sql/dml/merge/returning.rs"],
@@ -167,7 +151,7 @@
     },
     {
       "path": "crates/uqa-engine/src/sql/dml/view_triggers.rs",
-      "baseline_lines": 1432,
+      "baseline_lines": 1431,
       "owner": "uqa-engine INSTEAD OF view-trigger DML",
       "responsibility_groups": ["view target resolution", "view row materialization", "rule suppression", "INSERT execution", "UPDATE and DELETE execution"],
       "target_modules": ["crates/uqa-engine/src/sql/dml/view_triggers/target.rs", "crates/uqa-engine/src/sql/dml/view_triggers/materialize.rs", "crates/uqa-engine/src/sql/dml/view_triggers/rules.rs", "crates/uqa-engine/src/sql/dml/view_triggers/insert.rs", "crates/uqa-engine/src/sql/dml/view_triggers/update.rs", "crates/uqa-engine/src/sql/dml/view_triggers/delete.rs"],
@@ -187,14 +171,6 @@
       "owner": "uqa-engine statement mutability analysis",
       "responsibility_groups": ["statement classification", "query recursion", "routine mutability", "transaction-control classification"],
       "target_modules": ["crates/uqa-engine/src/sql/mutability/statements.rs", "crates/uqa-engine/src/sql/mutability/queries.rs", "crates/uqa-engine/src/sql/mutability/routines.rs"],
-      "migration_state": "planned"
-    },
-    {
-      "path": "crates/uqa-engine/src/sql/rules.rs",
-      "baseline_lines": 1032,
-      "owner": "uqa-engine SQL rewrite-rule execution",
-      "responsibility_groups": ["rule matching", "qualification", "action planning", "execution and recursion control"],
-      "target_modules": ["crates/uqa-engine/src/sql/rules/matching.rs", "crates/uqa-engine/src/sql/rules/qualification.rs", "crates/uqa-engine/src/sql/rules/actions.rs", "crates/uqa-engine/src/sql/rules/execution.rs"],
       "migration_state": "planned"
     },
     {

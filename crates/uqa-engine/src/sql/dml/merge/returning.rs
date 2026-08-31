@@ -9,7 +9,7 @@
 use super::{
     build_projection_physical_row_with_ctes, dml_returning_result_with_projections,
     expanded_returning_projections, returning_row_context, returning_value_context, CteScope,
-    DmlReturningShape, Engine, MergePlan, ProjectionPlan, ReturningRowImages,
+    DmlReturningShape, Engine, MergePlan, MutationRowImages, ProjectionPlan,
     ReturningValueProjectionRow, SQLError, SQLParam, SQLResult, Value,
 };
 
@@ -17,7 +17,7 @@ use super::{
 pub(super) struct MergeReturningRow<'a> {
     pub(super) target_table: &'a str,
     pub(super) target_qual: &'a str,
-    pub(super) images: ReturningRowImages<'a>,
+    pub(super) images: MutationRowImages<'a>,
     pub(super) returning_aliases: &'a uqa_sql::ast::ReturningAliases,
     pub(super) source_row: &'a uqa_execution::OwnedPhysicalRow,
     pub(super) source_schema: &'a uqa_execution::RowSchema,

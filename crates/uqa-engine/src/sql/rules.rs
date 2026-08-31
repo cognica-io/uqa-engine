@@ -13,7 +13,6 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_core::{DocId, Value};
-use uqa_execution::OwnedPhysicalRow;
 use uqa_sql::ast::{BinaryOp, Expr, RuleEvent, Statement};
 use uqa_sql::plpgsql::{bind_expr, ResolvedVariable, VariableResolver};
 use uqa_sql::SQLError;
@@ -21,6 +20,7 @@ use uqa_storage::document_store::Document;
 
 use crate::{Engine, RelationIdentity};
 
+pub(in crate::sql) use super::dml::RuleRowImage;
 use actions::{bind_insert_values_action, bind_set_oriented_action};
 pub(in crate::sql) use returning::RuleReturningRequest;
 use returning::{
@@ -33,17 +33,6 @@ use super::scalar::eval_lowered_expression;
 
 thread_local! {
     static RULE_EXECUTION_STACK: RefCell<Vec<(String, RuleEvent)>> = const { RefCell::new(Vec::new()) };
-}
-
-#[derive(Clone)]
-pub(in crate::sql) struct RuleRowImage {
-    pub(in crate::sql) old_storage_table: Option<String>,
-    pub(in crate::sql) old_doc_id: Option<DocId>,
-    pub(in crate::sql) old: Option<Document>,
-    pub(in crate::sql) new_storage_table: Option<String>,
-    pub(in crate::sql) new_doc_id: Option<DocId>,
-    pub(in crate::sql) new: Option<Document>,
-    pub(in crate::sql) context: Option<OwnedPhysicalRow>,
 }
 
 struct PreparedRule {
@@ -142,8 +131,7 @@ impl PreparedRuleBatch {
             ));
         }
         for (target, supplemental) in self.rows.iter_mut().zip(rows) {
-            supplement_rule_document(&mut target.old, supplemental.old);
-            supplement_rule_document(&mut target.new, supplemental.new);
+            target.supplement_documents(supplemental);
         }
         Ok(())
     }
@@ -223,7 +211,7 @@ impl PreparedRuleBatch {
                     let count = self.action_qualification_count.unwrap_or_default();
                     let mut matched = Vec::with_capacity(count);
                     for qualification_index in 0..count {
-                        let mut row = empty_rule_row_image();
+                        let mut row = RuleRowImage::empty();
                         if rule_condition_matches(
                             engine,
                             prepared.rule.definition.condition.as_ref(),
@@ -431,18 +419,6 @@ where
     })
 }
 
-fn empty_rule_row_image() -> RuleRowImage {
-    RuleRowImage {
-        old_storage_table: None,
-        old_doc_id: None,
-        old: None,
-        new_storage_table: None,
-        new_doc_id: None,
-        new: None,
-        context: None,
-    }
-}
-
 pub(in crate::sql) fn relation_has_returning_provider(
     engine: &Engine,
     table: &str,
@@ -570,17 +546,6 @@ pub(in crate::sql) fn relation_rule_row_columns(
         Ok(None)
     } else {
         Ok(Some(columns))
-    }
-}
-
-fn supplement_rule_document(target: &mut Option<Document>, supplemental: Option<Document>) {
-    let Some(supplemental) = supplemental else {
-        return;
-    };
-    if let Some(target) = target {
-        target.extend(supplemental);
-    } else {
-        *target = Some(supplemental);
     }
 }
 

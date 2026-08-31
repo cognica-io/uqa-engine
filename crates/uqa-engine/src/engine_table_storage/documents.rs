@@ -57,21 +57,6 @@ impl Engine {
             .map(|resolved| resolved.unwrap_or_else(|| table.to_string()))
     }
 
-    pub(crate) fn begin_command_mutation_overlay(&self) {
-        self.session
-            .command_mutation_overlays
-            .lock()
-            .push(super::CommandMutationOverlay::default());
-    }
-
-    pub(crate) fn end_command_mutation_overlay(&self) {
-        let removed = self.session.command_mutation_overlays.lock().pop();
-        debug_assert!(
-            removed.is_some(),
-            "command mutation overlay stack underflow"
-        );
-    }
-
     pub(crate) fn command_mutation_overlay_active(&self) -> bool {
         if !self.session.command_mutation_overlays.lock().is_empty() {
             return true;
@@ -1152,7 +1137,9 @@ mod tests {
                 &[],
             )
             .unwrap();
-        engine.begin_command_mutation_overlay();
+        engine
+            .mutation_coordinator()
+            .begin_command_mutation_overlay();
         engine
             .stage_command_document("command_scan", 2, Some(document(2, 200)))
             .unwrap();
@@ -1177,7 +1164,7 @@ mod tests {
         assert_eq!(result.value_at(1, 1), Some(&Value::Int(200)));
         assert_eq!(result.value_at(2, 1), Some(&Value::Int(300)));
         assert_eq!(result.value_at(3, 1), Some(&Value::Int(500)));
-        engine.end_command_mutation_overlay();
+        engine.mutation_coordinator().end_command_mutation_overlay();
     }
 
     #[test]
@@ -1200,7 +1187,9 @@ mod tests {
             }
         }
         table.doc_count_dirty.store(true, Ordering::Release);
-        engine.begin_command_mutation_overlay();
+        engine
+            .mutation_coordinator()
+            .begin_command_mutation_overlay();
         engine
             .stage_command_document("paged_command_scan", 2, Some(document(2, 9002)))
             .unwrap();
@@ -1229,7 +1218,7 @@ mod tests {
             ids,
             [2, 1025, 2047, 2049, 2050, 4096].map(Value::Int).to_vec()
         );
-        engine.end_command_mutation_overlay();
+        engine.mutation_coordinator().end_command_mutation_overlay();
     }
 
     #[test]
@@ -1241,7 +1230,9 @@ mod tests {
                 &[],
             )
             .unwrap();
-        engine.begin_command_mutation_overlay();
+        engine
+            .mutation_coordinator()
+            .begin_command_mutation_overlay();
         engine
             .stage_command_document(
                 "overlay_virtual",
@@ -1285,6 +1276,6 @@ mod tests {
         assert!(engine
             .get_documents_with_virtual_projection("overlay_virtual", &[1], &["derived".into()],)
             .is_err());
-        engine.end_command_mutation_overlay();
+        engine.mutation_coordinator().end_command_mutation_overlay();
     }
 }

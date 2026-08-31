@@ -6,18 +6,16 @@
 
 //! INSERT conflict resolution, identity extraction, and RETURNING assembly.
 
-use std::sync::Arc;
-
 use super::{
-    bind_projection_output_schema, build_projection_physical_row_with_ctes, decode_prepared_doc_id,
-    decode_prepared_document_rewrite, dml_append_hidden_qualified_row, dml_storage_error,
-    dml_target_row, doc_id_value, encode_prepared_doc_id, encode_prepared_document_rewrite,
+    bind_projection_output_schema, build_projection_physical_row_with_ctes,
+    dml_append_hidden_qualified_row, dml_storage_error, dml_target_row, doc_id_value,
     eval_mutation_assignment, eval_mutation_expr, key_constraint_values,
     lock_document_key_dependencies, lock_mutation_target, missing_document_error,
-    prepare_document_rewrite, reject_partition_rewrite, update_lock_strength, BTreeMap, BTreeSet,
+    prepare_document_rewrite, reject_partition_rewrite, update_lock_strength, BTreeSet,
     ConflictActionPlan, ConflictPlan, CteScope, DocId, Document, Engine, MutationAssignmentTarget,
-    MutationLockTarget, PhysicalDocumentIdentity, PreparedDocumentRewrite, ProjectionPlan,
-    SQLError, SQLParam, SQLResult, Value, DOC_ID_COLUMN, TABLE_OID_COLUMN,
+    MutationLockCleanup, MutationLockTarget, MutationRowImage, MutationRowImages,
+    PhysicalDocumentIdentity, PreparedInsertConflict, ProjectionPlan, SQLError, SQLParam,
+    SQLResult, Value, DOC_ID_COLUMN, TABLE_OID_COLUMN,
 };
 use rusqlite::OptionalExtension;
 use uqa_execution::{ColumnIdentity, OwnedPhysicalRow, PhysicalRow, RowSchema};
@@ -299,71 +297,6 @@ pub(in crate::sql) fn find_insert_conflict(
     Ok(None)
 }
 
-pub(in crate::sql) enum PreparedInsertConflict {
-    Unresolved,
-    Insert { doc_id: DocId, supplied: bool },
-    Skip,
-    Updated(PreparedDocumentRewrite),
-}
-
-pub(in crate::sql) fn encode_prepared_insert_conflict(prepared: PreparedInsertConflict) -> Value {
-    match prepared {
-        PreparedInsertConflict::Unresolved => Value::Str("unresolved".into()),
-        PreparedInsertConflict::Insert { doc_id, supplied } => Value::Map(BTreeMap::from([
-            ("kind".into(), Value::Str("insert".into())),
-            ("doc_id".into(), encode_prepared_doc_id(doc_id)),
-            ("supplied".into(), Value::Bool(supplied)),
-        ])),
-        PreparedInsertConflict::Skip => Value::Str("skip".into()),
-        PreparedInsertConflict::Updated(rewrite) => Value::Map(BTreeMap::from([
-            ("kind".into(), Value::Str("updated".into())),
-            ("rewrite".into(), encode_prepared_document_rewrite(rewrite)),
-        ])),
-    }
-}
-
-pub(in crate::sql) fn decode_prepared_insert_conflict(
-    value: Value,
-) -> Result<PreparedInsertConflict, SQLError> {
-    match value {
-        Value::Str(kind) if kind == "unresolved" => Ok(PreparedInsertConflict::Unresolved),
-        Value::Str(kind) if kind == "skip" => Ok(PreparedInsertConflict::Skip),
-        Value::Map(mut fields) => match fields.remove("kind") {
-            Some(Value::Str(kind)) if kind == "insert" => Ok(PreparedInsertConflict::Insert {
-                doc_id: decode_prepared_doc_id(
-                    fields.remove("doc_id").ok_or_else(|| {
-                        SQLError::Internal(
-                            "prepared INSERT payload has no document identity".into(),
-                        )
-                    })?,
-                    "prepared INSERT action",
-                )?,
-                supplied: match fields.remove("supplied") {
-                    Some(Value::Bool(supplied)) => supplied,
-                    _ => {
-                        return Err(SQLError::Internal(
-                            "prepared INSERT payload has no supplied-id flag".into(),
-                        ))
-                    }
-                },
-            }),
-            Some(Value::Str(kind)) if kind == "updated" => Ok(PreparedInsertConflict::Updated(
-                decode_prepared_document_rewrite(fields.remove("rewrite").ok_or_else(|| {
-                    SQLError::Internal(
-                        "prepared INSERT conflict payload has no rewrite plan".into(),
-                    )
-                })?)?,
-            )),
-            _ => Err(SQLError::Internal(
-                "prepared INSERT conflict payload has an unknown kind".into(),
-            )),
-        },
-        _ => Err(SQLError::Internal(
-            "prepared INSERT conflict payload has an invalid representation".into(),
-        )),
-    }
-}
-
 enum BuiltConflictUpdate {
     Skip,
     Update {
@@ -469,58 +402,16 @@ fn build_conflict_update(
     })
 }
 
-struct TransientConflictLocks {
-    manager: Arc<crate::row_locks::RowLockManager>,
-    acquisitions: Vec<crate::row_locks::RowLockAcquisition>,
-}
-
-impl TransientConflictLocks {
-    fn new(engine: &Engine) -> Self {
-        Self {
-            manager: Arc::clone(&engine.row_locks),
-            acquisitions: Vec::new(),
-        }
-    }
-
-    fn lock(
-        &mut self,
-        engine: &Engine,
-        table: &str,
-        display_name: &str,
-        doc_id: DocId,
-    ) -> Result<bool, SQLError> {
-        match engine.lock_row(
-            table,
-            doc_id,
-            uqa_sql::ast::LockStrength::ForKeyShare,
-            uqa_sql::ast::LockWait::Block,
-            display_name,
-        )? {
-            crate::row_locks::LockAcquire::Granted {
-                acquisition,
-                waited,
-                ..
-            } => {
-                self.acquisitions.extend(acquisition);
-                Ok(waited)
-            }
-            crate::row_locks::LockAcquire::Skipped => Err(SQLError::Internal(
-                "blocking INSERT conflict wait unexpectedly skipped a row".into(),
-            )),
-        }
-    }
-}
-
 /// Locks every currently visible ON CONFLICT dependency for an INSERT input set while the storage transaction is still a reader. DO NOTHING locks are retained only until writer promotion; DO UPDATE target locks keep their normal transaction lifetime. Once the single backend writer is held no concurrent transaction can create a new physical conflict and make the execution phase wait behind a tuple owner.
 pub(in crate::sql) struct InsertConflictLocks {
-    transient: TransientConflictLocks,
+    transient: MutationLockCleanup,
     overlay: Option<InsertConflictOverlay>,
 }
 
 impl InsertConflictLocks {
     pub(in crate::sql) fn new(engine: &Engine) -> Self {
         Self {
-            transient: TransientConflictLocks::new(engine),
+            transient: MutationLockCleanup::new(engine),
             overlay: None,
         }
     }
@@ -540,11 +431,12 @@ impl InsertConflictLocks {
             let (locked, recheck) = match &on_conflict.action {
                 ConflictActionPlan::Nothing => (
                     existing.clone(),
-                    self.transient.lock(
+                    self.transient.acquire(
                         engine,
                         &existing.table,
                         target_qualifier,
                         existing.doc_id,
+                        uqa_sql::ast::LockStrength::ForKeyShare,
                     )?,
                 ),
                 ConflictActionPlan::Update { assignments, .. } => {
@@ -620,7 +512,7 @@ impl InsertConflictLocks {
                 return Ok(PreparedInsertConflict::Unresolved);
             }
             Some(CurrentInsertConflict::Overlay) => {
-                rollback_lock_acquisitions(engine, key_acquisitions);
+                self.transient.rollback(key_acquisitions);
                 return match &on_conflict.action {
                     ConflictActionPlan::Nothing => Ok(PreparedInsertConflict::Skip),
                     ConflictActionPlan::Update { .. } => Err(on_conflict_cardinality_violation()),
@@ -643,7 +535,7 @@ impl InsertConflictLocks {
                 return Ok(PreparedInsertConflict::Unresolved);
             }
             Some(CurrentInsertConflict::Overlay) => {
-                rollback_lock_acquisitions(engine, key_acquisitions);
+                self.transient.rollback(key_acquisitions);
                 return match &on_conflict.action {
                     ConflictActionPlan::Nothing => Ok(PreparedInsertConflict::Skip),
                     ConflictActionPlan::Update { .. } => Err(on_conflict_cardinality_violation()),
@@ -651,7 +543,7 @@ impl InsertConflictLocks {
             }
             Some(CurrentInsertConflict::Base(identity)) => identity,
         };
-        self.transient.acquisitions.extend(key_acquisitions);
+        self.transient.retain(key_acquisitions);
         let ConflictActionPlan::Update {
             assignments,
             predicate,
@@ -719,36 +611,6 @@ impl InsertConflictLocks {
     }
 }
 
-impl Drop for TransientConflictLocks {
-    fn drop(&mut self) {
-        for acquisition in self.acquisitions.drain(..).rev() {
-            self.manager.rollback_acquisition(acquisition);
-        }
-    }
-}
-
-fn rollback_lock_acquisitions(
-    engine: &Engine,
-    acquisitions: Vec<crate::row_locks::RowLockAcquisition>,
-) {
-    for acquisition in acquisitions.into_iter().rev() {
-        engine.rollback_row_lock_acquisition(acquisition);
-    }
-}
-
-#[derive(Clone)]
-pub(in crate::sql) struct ReturningRowImage<'a> {
-    pub storage_table: String,
-    pub doc_id: DocId,
-    pub document: &'a Document,
-}
-
-#[derive(Clone)]
-pub(in crate::sql) struct ReturningRowImages<'a> {
-    pub old: Option<ReturningRowImage<'a>>,
-    pub new: Option<ReturningRowImage<'a>>,
-}
-
 pub(in crate::sql) fn validate_returning_alias_relations(
     target_qualifier: &str,
     aliases: &ReturningAliases,
@@ -779,7 +641,7 @@ pub(in crate::sql) fn returning_row_context(
     engine: &Engine,
     table: &str,
     target_qualifier: &str,
-    images: ReturningRowImages<'_>,
+    images: MutationRowImages<'_>,
     aliases: &ReturningAliases,
 ) -> Result<OwnedPhysicalRow, SQLError> {
     let current = images.new.as_ref().or(images.old.as_ref()).ok_or_else(|| {
@@ -819,7 +681,7 @@ pub(in crate::sql) fn returning_row_context(
 
 fn returning_image_values(
     engine: &Engine,
-    image: Option<&ReturningRowImage<'_>>,
+    image: Option<&MutationRowImage<'_>>,
     columns: &[String],
     definitions: &[uqa_sql::ast::ColumnDef],
 ) -> Result<Vec<Value>, SQLError> {
@@ -891,7 +753,7 @@ fn returning_context_schema(
 pub(in crate::sql) struct ReturningProjectionRow<'a> {
     pub table: &'a str,
     pub target_qualifier: &'a str,
-    pub images: ReturningRowImages<'a>,
+    pub images: MutationRowImages<'a>,
     pub aliases: &'a ReturningAliases,
     pub context: Option<&'a OwnedPhysicalRow>,
 }

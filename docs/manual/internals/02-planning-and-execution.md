@@ -52,11 +52,13 @@ flowchart LR
     Session --> Settings[SHOW and pg_settings]
     Runtime --> Physical[Physical construction and execution]
     Mutation --> Schema[CREATE SCHEMA]
+    Engine --> DML[Shared DML protocol]
+    DML --> Mutation
 ```
 
 The engine facade constructs narrow capability values at execution boundaries instead of passing its full state surface into migrated leaves. `CatalogReadView` owns an immutable statement snapshot, `RelationNameResolution` owns the matching search path and temporary namespace, and the remaining views borrow only their existing state owners; none contains an `Engine` reference or recovery mechanism. `UnifiedPlanExecutor` stores the statement's session, runtime, and mutation capabilities while remaining the only exhaustive `UnifiedPlan` and `CommandPlan` dispatcher.
 
-`CteScope` captures the catalog and name-resolution pair once and passes it through schema binding, filter pushdown, virtual catalog scans, table access, row-lock planning, evaluation, and physical construction. Static catalog metadata and pure row builders are engine-free leaves; live builders consume only the snapshot and the session values they require. The `CREATE SCHEMA` command arm delegates to `MutationCoordinator`, which owns schema persistence and registry publication; the former direct inner implementation is absent. Command families not yet moved retain one established owner and do not gain a fallback path.
+`CteScope` captures the catalog and name-resolution pair once and passes it through schema binding, filter pushdown, virtual catalog scans, table access, row-lock planning, evaluation, and physical construction. Static catalog metadata and pure row builders are engine-free leaves; live builders consume only the snapshot and the session values they require. The `CREATE SCHEMA` command arm delegates to `MutationCoordinator`, which owns schema persistence and registry publication; the former direct inner implementation is absent. INSERT, UPDATE, DELETE, and MERGE share the same implicit-or-existing transaction entry, command overlay, candidate and lock carriers, prepared action family, row-image and event state, and publication pipeline across base tables, automatic views, trigger-backed views, rules, conflicts, referential actions, and partition movement. Their command modules remain explicit engine adapters for SQL-specific orchestration, while typed carriers and spill codecs are enforced engine-free leaves.
 
 ## Read-path ownership
 
