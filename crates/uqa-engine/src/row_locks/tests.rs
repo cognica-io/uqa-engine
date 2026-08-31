@@ -278,6 +278,75 @@ fn cancellation_removes_the_registered_wait_edge() {
 }
 
 #[test]
+fn repeated_cancelled_waits_leave_no_grants_or_wait_edges() {
+    let manager = RowLockManager::new();
+    let holder = manager.allocate_session();
+    let waiter = manager.allocate_session();
+    let key = RowLockKey {
+        table: manager.table_key("public.accounts"),
+        doc_id: 1,
+    };
+    let holder_cancel = uqa_core::CancellationToken::new();
+    assert_granted(manager.acquire(&LockRequest {
+        session_id: holder,
+        key,
+        strength: LockStrength::ForUpdate,
+        mark: 0,
+        wait: uqa_sql::ast::LockWait::Block,
+        cancel: &holder_cancel,
+        relation: "accounts",
+    }));
+
+    for _ in 0..32 {
+        let waiter_cancel = uqa_core::CancellationToken::new();
+        std::thread::scope(|scope| {
+            let waiting = scope.spawn(|| {
+                manager.acquire(&LockRequest {
+                    session_id: waiter,
+                    key,
+                    strength: LockStrength::ForUpdate,
+                    mark: 0,
+                    wait: uqa_sql::ast::LockWait::Block,
+                    cancel: &waiter_cancel,
+                    relation: "accounts",
+                })
+            });
+            wait_until_registered(&manager, waiter);
+            waiter_cancel.cancel();
+            assert_eq!(
+                waiting.join().unwrap().unwrap_err().sqlstate(),
+                Some("57014")
+            );
+        });
+        let state = manager.state.lock();
+        assert!(!state.waiting.contains_key(&waiter));
+        assert!(!state.waiting_relations.contains_key(&waiter));
+        assert!(!state.advertised_waits.contains_key(&waiter));
+        assert!(state
+            .rows
+            .get(&key)
+            .is_some_and(|grants| grants.iter().all(|grant| grant.session_id == holder)));
+    }
+
+    manager.release_session(holder);
+    assert_granted(manager.acquire(&LockRequest {
+        session_id: waiter,
+        key,
+        strength: LockStrength::ForUpdate,
+        mark: 0,
+        wait: uqa_sql::ast::LockWait::NoWait,
+        cancel: &holder_cancel,
+        relation: "accounts",
+    }));
+    manager.release_session(waiter);
+    let state = manager.state.lock();
+    assert!(state.rows.is_empty());
+    assert!(state.waiting.is_empty());
+    assert!(state.waiting_relations.is_empty());
+    assert!(state.advertised_waits.is_empty());
+}
+
+#[test]
 fn changed_row_versions_are_dropped_with_the_last_lock() {
     let manager = RowLockManager::new();
     let holder = manager.allocate_session();

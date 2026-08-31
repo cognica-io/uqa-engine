@@ -6,7 +6,7 @@
 
 //! Transaction data snapshots and rollback restoration.
 
-use super::{Engine, EngineDataSnapshot, SQLError};
+use super::{Engine, EngineDataSnapshot, SQLError, SessionStateSnapshot};
 use crate::TableDataSnapshot;
 use std::collections::BTreeMap;
 
@@ -168,5 +168,21 @@ impl Engine {
         self.clear_regtype_output_cache();
         *self.extensions.foreign_memory_tables.write() = snapshot.foreign_memory_tables.clone();
         Ok(())
+    }
+}
+
+impl Engine {
+    pub(super) fn snapshot_session_state(&self) -> SessionStateSnapshot {
+        let mut snapshot = self.session.state.read().clone();
+        snapshot.portal_names = self.session.portals.lock().keys().cloned().collect();
+        snapshot
+    }
+
+    pub(super) fn restore_session_state(&self, snapshot: &SessionStateSnapshot) {
+        *self.session.state.write() = snapshot.clone();
+        self.session
+            .portals
+            .lock()
+            .retain(|name, _| snapshot.portal_names.contains(name));
     }
 }

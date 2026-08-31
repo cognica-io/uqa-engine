@@ -177,9 +177,7 @@ impl DurableCatalogState {
         }
     }
 
-    /// Capture durable registries in the canonical lock order used by memory
-    /// transactions. The engine statement gate excludes concurrent mutation
-    /// while this multi-registry snapshot is assembled.
+    /// Capture durable registries in the transaction coordinator's canonical lock order.
     pub(super) fn snapshot(&self) -> DurableCatalogSnapshot {
         DurableCatalogSnapshot {
             graphs: self.graphs.read().clone(),
@@ -203,7 +201,7 @@ impl DurableCatalogState {
         }
     }
 
-    /// Restore in the same canonical lock order as [`Self::snapshot`].
+    /// Restore in the transaction coordinator's canonical lock order.
     pub(super) fn restore(&self, snapshot: &DurableCatalogSnapshot) {
         *self.graphs.write() = snapshot.graphs.clone();
         *self.models.write() = snapshot.models.clone();

@@ -61,13 +61,13 @@ stateDiagram-v2
 
 An implicit statement transaction performs the same candidate, persistence, and publication ordering within one statement. An explicit transaction retains staged state across statements until commit or rollback.
 
-`Engine::transaction` catches both returned errors and panics, rolls back, and then propagates the failure. `sql_batch` commits its complete statement list or rolls the list back.
+`Engine::transaction` gives one scoped owner the frame depth it opened. The owner commits on success, rolls back returned errors and panics, and performs a final rollback if it is dropped before either transition completes. `sql_batch` uses the same owner and commits its complete statement list or rolls the list back.
 
 ## Snapshot and restore
 
 Transactional session fields live behind one `SessionContext.state` lock, so a snapshot cannot combine an old search path with a new prepared cache, PRNG state, or sequence map.
 
-Memory transactions snapshot durable registries through one `DurableCatalogState` method and restore them through its matching method. Those methods define the canonical registry lock order. Adding a registry requires updating both directions and the lock-order contract.
+Memory transaction snapshot order is statement gate, table registry and per-table state, durable registries in the coordinator-declared order, then in-memory FDW rows. Restore uses the same durable-registry order through the matching `DurableCatalogState` method. Adding a registry requires updating both directions and the coordinator's lock-order contract.
 
 Runtime extension registrations are outside SQL catalog rollback by design. In-memory FDW row data is the exception with an explicit transaction snapshot because rows are mutable query-visible data.
 
@@ -96,6 +96,8 @@ Epochs are invalidation signals, not data. A refresh still reads and validates a
 Avoid holding a registry lock across provider I/O, callback execution, or another subsystem's unbounded work. Prepare data outside the lock, acquire locks in the documented canonical order, publish quickly, and release before calling external code.
 
 One logical operation that needs several registries should use the domain snapshot or publication method rather than acquiring individual locks in an ad hoc order.
+
+The lock manager separates stable identities, in-process grants, relation locks, wait-graph and deadlock traversal, committed row-change publication, shared manager registration, and the durable cross-process adapter. Scoped snapshot, publication, wait-advertisement, row-observation, statement, and transaction owners release their claims on every ordinary return and on drop; timeout and cancellation paths remove the same wait edges before they return an error.
 
 ## Cancellation and notices
 

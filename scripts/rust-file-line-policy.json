@@ -54,14 +54,6 @@
       "migration_state": "planned"
     },
     {
-      "path": "crates/uqa-engine/src/engine_transactions.rs",
-      "baseline_lines": 1469,
-      "owner": "uqa-engine transaction coordinator",
-      "responsibility_groups": ["implicit statement lifecycle", "explicit transaction control", "savepoints and snapshots", "failure cleanup and publication"],
-      "target_modules": ["crates/uqa-engine/src/engine_transactions/control.rs", "crates/uqa-engine/src/engine_transactions/snapshots.rs", "crates/uqa-engine/src/engine_transactions/completion.rs", "crates/uqa-engine/src/engine_transactions/frame_finish.rs"],
-      "migration_state": "planned"
-    },
-    {
       "path": "crates/uqa-engine/src/engine_user_functions/lifecycle.rs",
       "baseline_lines": 1325,
       "owner": "uqa-engine user-function lifecycle",
@@ -75,22 +67,6 @@
       "owner": "uqa-engine operator-tree bridge",
       "responsibility_groups": ["logical lowering", "retrieval lowering", "schema translation", "execution adaptation"],
       "target_modules": ["crates/uqa-engine/src/operator_tree_bridge/lowering.rs", "crates/uqa-engine/src/operator_tree_bridge/lowering_retrieval.rs", "crates/uqa-engine/src/operator_tree_bridge/schema.rs", "crates/uqa-engine/src/operator_tree_bridge/execution.rs"],
-      "migration_state": "planned"
-    },
-    {
-      "path": "crates/uqa-engine/src/row_locks.rs",
-      "baseline_lines": 1429,
-      "owner": "uqa-engine row and relation lock manager",
-      "responsibility_groups": ["grant tables", "relation locks", "wait graph and deadlocks", "row-change observation and publication"],
-      "target_modules": ["crates/uqa-engine/src/row_locks/grants.rs", "crates/uqa-engine/src/row_locks/relation.rs", "crates/uqa-engine/src/row_locks/deadlock.rs", "crates/uqa-engine/src/row_locks/change_resolution.rs", "crates/uqa-engine/src/row_locks/physical_changes.rs"],
-      "migration_state": "planned"
-    },
-    {
-      "path": "crates/uqa-engine/src/row_locks/cross_process.rs",
-      "baseline_lines": 1356,
-      "owner": "uqa-engine cross-process lock adapter",
-      "responsibility_groups": ["file-lock claims", "claim serialization", "cross-process wait state", "cleanup and recovery"],
-      "target_modules": ["crates/uqa-engine/src/row_locks/cross_process/claims.rs", "crates/uqa-engine/src/row_locks/cross_process/codec.rs", "crates/uqa-engine/src/row_locks/cross_process/waits.rs", "crates/uqa-engine/src/row_locks/cross_process/cleanup.rs"],
       "migration_state": "planned"
     },
     {

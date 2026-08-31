@@ -91,11 +91,17 @@ cargo test -p uqa-engine --lib sql::dml::protocol::
 cargo test -p uqa-engine --lib sql::dml::insert::codec::tests::
 cargo test -p uqa-engine --lib sql::dml::merge::codec::tests::
 cargo test -p uqa-engine --lib sql::dml::view_triggers::merge::codec::tests::
+cargo test -p uqa-engine --lib engine_transactions::tests::
+cargo test -p uqa-engine --lib row_locks::tests::
+cargo test -p uqa-engine --lib row_locks::cross_process::file::tests::
 cargo test -p uqa-execution --lib scalar::traversal::tests::
 cargo test -p uqa-engine --test integration engine_catalog::capability_boundaries::
+cargo test -p uqa-engine --test integration transaction_lifecycle::
+cargo test -p uqa-engine --test integration engine_queries::sql_row_locks::
+cargo test -p uqa-engine --test integration engine_queries::sql_row_locks_recheck::
 ```
 
-The library filters exercise immutable catalog snapshots, relation-name resolution, a deterministic complete-query binder fixture without `Engine`, physical construction from a bound plan and explicit runtime capabilities, complete physical-scalar traversal, exactly-one transaction-frame selection, overlay cleanup, and strict round trips and malformed-input rejection for prepared mutation spill rows. The integration filter executes virtual catalog reads against session state and a persistent `CREATE SCHEMA` lifecycle covering sibling isolation, rollback, commit, and reopen; DML integration filters cover every command and action family through the same protocol, so none of this evidence is compile-only.
+The library filters exercise immutable catalog snapshots, relation-name resolution, a deterministic complete-query binder fixture without `Engine`, physical construction from a bound plan and explicit runtime capabilities, complete physical-scalar traversal, exactly-one transaction-frame selection, transaction-scope and lock-guard cleanup, wait cancellation, deadlock detection, change epochs and update chains, overlay cleanup, and strict round trips and malformed-input rejection for prepared mutation spill rows. The integration filters execute virtual catalog reads against session state, persistent schema lifecycle, memory and persistent transactions, savepoints, failed transaction state, sibling writer waits, independent-process locks and deadlocks, and every DML command family through the same protocol, so none of this evidence is compile-only.
 
 ## Exactness oracles
 

@@ -36,6 +36,80 @@ fn assert_combined_panic_and_rollback_error(error: &str) {
 }
 
 #[test]
+fn dropped_transaction_scope_rolls_back_data_and_releases_writer_ownership() {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = Engine::open(&directory.path().join("scope-cleanup.db")).unwrap();
+    engine
+        .sql(
+            "CREATE TABLE items (id INTEGER PRIMARY KEY, value INTEGER)",
+            &[],
+        )
+        .unwrap();
+    engine.sql("INSERT INTO items VALUES (1, 10)", &[]).unwrap();
+    let sibling = engine.new_session().unwrap();
+
+    {
+        let _scope = TransactionScope::begin(&engine).unwrap();
+        engine
+            .sql("UPDATE items SET value = 20 WHERE id = 1", &[])
+            .unwrap();
+        assert_eq!(engine.transaction_depth(), 1);
+    }
+
+    assert_eq!(engine.transaction_depth(), 0);
+    sibling
+        .sql("UPDATE items SET value = value + 1 WHERE id = 1", &[])
+        .unwrap();
+    assert_eq!(
+        integer_column(
+            &engine
+                .sql("SELECT value FROM items WHERE id = 1", &[])
+                .unwrap(),
+            "value",
+        ),
+        [11]
+    );
+}
+
+#[test]
+fn unclosed_nested_callback_frames_are_rejected_and_rolled_back() {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = Engine::open(&directory.path().join("unbalanced-scope.db")).unwrap();
+    engine
+        .sql(
+            "CREATE TABLE items (id INTEGER PRIMARY KEY, value INTEGER)",
+            &[],
+        )
+        .unwrap();
+    engine.sql("INSERT INTO items VALUES (1, 10)", &[]).unwrap();
+
+    let error = engine
+        .transaction(|engine| {
+            engine
+                .sql("UPDATE items SET value = 20 WHERE id = 1", &[])
+                .unwrap();
+            engine.begin()?;
+            engine
+                .sql("UPDATE items SET value = 30 WHERE id = 1", &[])
+                .unwrap();
+            Ok(())
+        })
+        .unwrap_err();
+
+    assert!(error.to_string().contains("changed scoped frame depth"));
+    assert_eq!(engine.transaction_depth(), 0);
+    assert_eq!(
+        integer_column(
+            &engine
+                .sql("SELECT value FROM items WHERE id = 1", &[])
+                .unwrap(),
+            "value",
+        ),
+        [10]
+    );
+}
+
+#[test]
 fn implicit_read_transaction_rolls_back_an_unclassified_storage_write() {
     let directory = tempfile::tempdir().unwrap();
     let engine = Engine::open(&directory.path().join("read-only-guard.db")).unwrap();
