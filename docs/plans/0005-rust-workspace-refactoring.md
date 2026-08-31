@@ -2,7 +2,7 @@
 
 Status: Active architecture refactoring plan
 
-Current implementation position: Phase 0 is incomplete as of the 2026-08-31 audit; the existing 1,500-line policy fails and must be replaced by the checked-in transition ratchet before capability migration begins.
+Current implementation position: Phase 0 is in progress. The checked-in 69-file transition ratchet is installed; the six files inherited above the former 1,500-line emergency ceiling still require responsibility-based decomposition before capability migration begins.
 
 Update rule: Update this plan whenever a listed structural hotspot, capability boundary, crate responsibility, line-budget gate, test ownership rule, rollout phase, or completion metric changes. A file move or line-count reduction is not complete evidence unless the resulting owner, dependency direction, behavior contract, and focused tests satisfy this plan.
 
@@ -37,7 +37,7 @@ The following are non-goals:
 
 ## 3. Audited current boundary
 
-The current implementation audit was performed on 2026-08-31 at commit `7571d18b2e7d8efeb5635e4bd2c276bc5adb1c20`. The worktree was clean. `python3 scripts/check-workspace-dependencies.py` passed with 94 runtime edges across 30 crates, and `python3 scripts/check-integration-test-harnesses.py` passed with 218 registered sources in 18 targets across 18 crates. `bash scripts/check-rust-file-lines.sh` failed on six files, so the repository no longer satisfies even the 1,500-physical-line emergency ceiling.
+The implementation baseline audit was performed on 2026-08-31 at commit `7571d18b2e7d8efeb5635e4bd2c276bc5adb1c20`. The worktree was clean. `python3 scripts/check-workspace-dependencies.py` passed with 94 runtime edges across 30 crates, and `python3 scripts/check-integration-test-harnesses.py` passed with 218 registered sources in 18 targets across 18 crates. The former all-or-nothing 1,500-line script failed on six files at that audit. Phase 0 has since replaced it with the checked-in exact-baseline transition ratchet, while retaining those six files as urgent inventory entries rather than waiving them.
 
 The `cloc 2.08` totals below come from `cloc --include-lang=Rust crates`. This scope excludes build output and includes tests, benches, examples, build scripts, imported parser code, and generated Rust. The previous-plan column preserves the 2026-08-27 audit so growth is explicit rather than silently replacing the baseline.
 
@@ -98,7 +98,7 @@ The three broad lint boundaries also remain. `uqa-engine/src/sql.rs`, `uqa-execu
 
 | Phase | Status | Current evidence |
 | --- | --- | --- |
-| Phase 0: structural ratchet | Not installed; current policy is red | There is no checked-in oversized-file inventory or growth ratchet, the script is still a single 1,500-line check, and that check fails on six files. |
+| Phase 0: structural ratchet | In progress; ratchet installed, urgent splits remain | The 69-file inventory, exact growth ratchet, reproducible measurement command, and policy tests are installed. Six inherited files remain above 1,500 lines and the lint and timing tasks are not complete. |
 | Phase 1: capability boundaries and facade roots | Foundation only | State-domain structs exist, but broad `Engine` use increased, `sql.rs` is 1,115 physical lines, and `UnifiedPlanExecutor` still owns the only dispatcher without the planned narrow capability inputs. |
 | Phase 2: catalog and read path | Preliminary decomposition only | Catalog, schema-binding, evaluation, and physical-plan child modules exist, but their roots remain broad and oversized or near the ceiling; binding still requires engine-backed resolution rather than a deterministic catalog capability. |
 | Phase 3: mutation path | Foundation only; compatibility growth is not architectural completion | Shared carriers and lock helpers exist in `dml.rs`, but INSERT, MERGE, automatic-view rewriting, and view-trigger execution remain large command-oriented paths that accept `&Engine`; there is no common typed mutation coordinator satisfying the exit gate. |
@@ -106,7 +106,7 @@ The three broad lint boundaries also remain. `uqa-engine/src/sql.rs`, `uqa-execu
 | Phase 5: lower crates | Not complete | `uqa-sql/src/expr.rs`, `uqa-execution/src/scalar.rs`, and `uqa-scoring/src/wand.rs` remain between 1,455 and 1,493 physical lines, and the planned ownership moves have not passed their exit gates. |
 | Phase 6: tests and final ceiling | Not started; test debt increased | `uqa-engine/tests` now contains 86,701 physical lines, 2,067 test attributes, and 228 nested module declarations; the largest test source is 3,486 lines while the final 1,000-line policy is not installed. |
 
-The implementation sequence therefore resumes at Phase 0, not Phase 1. First record all 69 current oversized files in the checked-in inventory and replace the red all-or-nothing check with the transition growth ratchet; then split the six files above the emergency ceiling by behavior ownership, preserving every PostgreSQL 18 view test under the existing single integration target. Only after the structural policy is green should capability migration become the active architectural slice.
+The implementation sequence remains in Phase 0, not Phase 1. The inventory and transition growth ratchet are installed and green; next split the six inherited files above the emergency ceiling by behavior ownership, preserving every PostgreSQL 18 view test under the existing single integration target, then complete lint and timing evidence. Only after every Phase 0 exit condition is green should capability migration become the active architectural slice.
 
 ## 4. Findings and root problems
 

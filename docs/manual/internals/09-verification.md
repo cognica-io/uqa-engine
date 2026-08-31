@@ -65,6 +65,12 @@ bash scripts/check-public-repository-hygiene.sh
 
 The dependency checker enforces crate layering. The harness checker prevents uncontrolled integration-test process growth. Benchmark coverage ensures workload entry points and semantic evidence remain represented. Header, line, and hygiene scripts enforce repository publication rules.
 
+The Rust line checker loads `scripts/rust-file-line-policy.json`. Every hand-maintained file at or above 1,000 physical lines must have an exact checked-in baseline, any shrink must lower or remove that baseline in the same change, and an unlisted file cannot reach 1,000 lines. Imported `uqa-pg-query` sources and build output under `target` remain excluded. Reproduce the `cloc`, physical-line, per-crate, SQL concentration, `Engine` coupling, and root-lint baseline together with:
+
+```sh
+bash scripts/measure-rust-refactoring.sh
+```
+
 ## Exactness oracles
 
 WAND and Block-Max WAND output is compared with exhaustive BM25 over the same postings and parameters. Approximate vector indexes are compared with brute-force cosine top-K. Join algorithms are compared with a simpler semantic path or property-generated expected result. Graph codec round trips compare complete payload, not only support identities.
