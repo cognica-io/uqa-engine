@@ -216,10 +216,12 @@ fn project_view_rule_document(
     storage_table: Option<&str>,
     doc_id: Option<DocId>,
     document: Option<&Document>,
+    input_document: Option<&Document>,
 ) -> Result<Option<Document>, SQLError> {
     document
         .map(|document| {
             if let Some(insert_plan) = projection.insert_plan {
+                let input_document = input_document.unwrap_or(document);
                 let mut projected = Document::new();
                 for column in projection.required_columns {
                     let value = insert_plan
@@ -227,7 +229,7 @@ fn project_view_rule_document(
                         .iter()
                         .position(|supplied| supplied == column)
                         .and_then(|position| insert_plan.input_columns.get(position))
-                        .and_then(|input| document.get(input))
+                        .and_then(|input| input_document.get(input))
                         .cloned()
                         .unwrap_or(Value::Null);
                     projected.insert(column.clone(), value);
@@ -249,6 +251,7 @@ fn project_view_rule_document(
             )?;
             if matches!(side, crate::sql::rules::RuleRowSide::New) {
                 if let Some(update_plan) = projection.update_plan {
+                    let input_document = input_document.unwrap_or(document);
                     for column in projection.required_columns {
                         let Some(position) = update_plan
                             .assigned_columns
@@ -260,7 +263,7 @@ fn project_view_rule_document(
                         let Some(input) = update_plan.input_columns.get(position) else {
                             continue;
                         };
-                        if let Some(value) = document.get(input) {
+                        if let Some(value) = input_document.get(input) {
                             projected.insert(column.clone(), value.clone());
                         }
                     }
@@ -284,14 +287,28 @@ fn project_view_rule_row(
             row.old_storage_table.as_deref(),
             row.old_doc_id,
             row.old.as_ref(),
+            row.old.as_ref(),
         )?,
         new_storage_table: row.new_storage_table.clone(),
         new_doc_id: row.new_doc_id,
         new: project_view_rule_document(
             projection,
             crate::sql::rules::RuleRowSide::New,
-            row.new_storage_table.as_deref(),
-            row.new_doc_id,
+            if projection.update_plan.is_some() {
+                row.old_storage_table.as_deref()
+            } else {
+                row.new_storage_table.as_deref()
+            },
+            if projection.update_plan.is_some() {
+                row.old_doc_id
+            } else {
+                row.new_doc_id
+            },
+            if projection.update_plan.is_some() {
+                row.old.as_ref()
+            } else {
+                row.new.as_ref()
+            },
             row.new.as_ref(),
         )?,
         context: row.context.clone(),
@@ -321,14 +338,28 @@ fn project_view_rule_row_sides(
             row.old_storage_table.as_deref(),
             row.old_doc_id,
             row.old.as_ref(),
+            row.old.as_ref(),
         )?,
         new_storage_table: row.new_storage_table.clone(),
         new_doc_id: row.new_doc_id,
         new: project_view_rule_document(
             &new_projection,
             crate::sql::rules::RuleRowSide::New,
-            row.new_storage_table.as_deref(),
-            row.new_doc_id,
+            if new_projection.update_plan.is_some() {
+                row.old_storage_table.as_deref()
+            } else {
+                row.new_storage_table.as_deref()
+            },
+            if new_projection.update_plan.is_some() {
+                row.old_doc_id
+            } else {
+                row.new_doc_id
+            },
+            if new_projection.update_plan.is_some() {
+                row.old.as_ref()
+            } else {
+                row.new.as_ref()
+            },
             row.new.as_ref(),
         )?,
         context: row.context.clone(),
@@ -391,15 +422,23 @@ fn prepare_view_rule_batches(
                 let row = rows.get(row_index).ok_or_else(|| {
                     SQLError::Internal("automatic-view rule lost its event row".into())
                 })?;
-                let (storage_table, doc_id, document) = match side {
+                let (storage_table, doc_id, document, input_document) = match side {
                     crate::sql::rules::RuleRowSide::Old => (
                         row.old_storage_table.as_deref(),
                         row.old_doc_id,
                         row.old.as_ref(),
+                        row.old.as_ref(),
+                    ),
+                    crate::sql::rules::RuleRowSide::New if projection.update_plan.is_some() => (
+                        row.old_storage_table.as_deref(),
+                        row.old_doc_id,
+                        row.old.as_ref(),
+                        row.new.as_ref(),
                     ),
                     crate::sql::rules::RuleRowSide::New => (
                         row.new_storage_table.as_deref(),
                         row.new_doc_id,
+                        row.new.as_ref(),
                         row.new.as_ref(),
                     ),
                 };
@@ -417,6 +456,7 @@ fn prepare_view_rule_batches(
                     storage_table,
                     doc_id,
                     Some(document),
+                    input_document,
                 )?
                 .ok_or_else(|| {
                     SQLError::Internal("automatic-view rule projection lost its row".into())

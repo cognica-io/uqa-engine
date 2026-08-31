@@ -2266,3 +2266,119 @@ MERGE INTO trigger_view_merge_action_snapshot_target AS target USING trigger_vie
 -- @case trigger_view_merge_action_snapshot_state rows
 SELECT id, value FROM trigger_view_merge_action_snapshot_base ORDER BY id;
 -- @end
+
+-- @case create_automatic_scalar_subquery_view_fixture ok
+CREATE TABLE automatic_scalar_base (id integer PRIMARY KEY, value integer); INSERT INTO automatic_scalar_base VALUES (1, 10), (2, 20), (3, 30); CREATE TABLE automatic_scalar_config (cutoff integer); INSERT INTO automatic_scalar_config VALUES (15); CREATE TABLE automatic_scalar_detail (id integer, score integer); INSERT INTO automatic_scalar_detail VALUES (1, 3), (1, 4), (2, 8); CREATE TABLE automatic_scalar_image_base (id integer PRIMARY KEY, value integer); INSERT INTO automatic_scalar_image_base VALUES (1, 4); CREATE TABLE automatic_scalar_image_detail (score integer); INSERT INTO automatic_scalar_image_detail VALUES (3), (5), (8); CREATE VIEW automatic_scalar_projection AS SELECT base.id, base.value, (SELECT max(cutoff) FROM automatic_scalar_config) AS ceiling FROM automatic_scalar_base AS base; CREATE VIEW automatic_scalar_correlated AS SELECT base.id, base.value, (SELECT max(detail.score) FROM automatic_scalar_detail AS detail WHERE detail.id = base.id) AS best FROM automatic_scalar_base AS base; CREATE VIEW automatic_scalar_predicate AS SELECT base.id, base.value FROM automatic_scalar_base AS base WHERE base.value > (SELECT max(cutoff) FROM automatic_scalar_config); CREATE VIEW automatic_scalar_nested AS SELECT id, value, best FROM automatic_scalar_correlated WHERE best IS NOT NULL; CREATE VIEW automatic_scalar_collision AS SELECT base.id, base.value, (SELECT max(target.score) FROM automatic_scalar_detail AS target WHERE target.id = base.id) AS best FROM automatic_scalar_base AS base; CREATE VIEW automatic_scalar_image AS SELECT base.id, base.value, (SELECT count(*) FROM automatic_scalar_image_detail AS detail WHERE detail.score <= base.value) AS eligible FROM automatic_scalar_image_base AS base; CREATE VIEW automatic_scalar_checked AS SELECT base.id, base.value FROM automatic_scalar_base AS base WHERE base.value > (SELECT max(cutoff) FROM automatic_scalar_config) WITH LOCAL CHECK OPTION; CREATE VIEW automatic_scalar_with AS WITH marker AS (SELECT 1 AS value) SELECT base.id, base.value FROM automatic_scalar_base AS base;
+-- @end
+
+-- @case automatic_scalar_view_catalog_flags rows
+SELECT table_name, is_updatable, is_insertable_into FROM information_schema.views WHERE table_schema = current_schema() AND table_name IN ('automatic_scalar_projection', 'automatic_scalar_correlated', 'automatic_scalar_predicate', 'automatic_scalar_nested', 'automatic_scalar_with') ORDER BY table_name;
+-- @end
+
+-- @case automatic_scalar_view_column_flags rows
+SELECT column_name, is_updatable FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'automatic_scalar_projection' ORDER BY ordinal_position;
+-- @end
+
+-- @case automatic_scalar_projection_insert rows
+INSERT INTO automatic_scalar_projection (id, value) VALUES (5, 40) RETURNING id, value, ceiling;
+-- @end
+
+-- @case automatic_scalar_projection_update rows
+UPDATE automatic_scalar_projection SET value = 41 WHERE id = 5 RETURNING id, value, ceiling;
+-- @end
+
+-- @case automatic_scalar_projection_delete rows
+DELETE FROM automatic_scalar_projection WHERE id = 5 RETURNING id, value, ceiling;
+-- @end
+
+-- @case automatic_scalar_correlated_update rows
+UPDATE automatic_scalar_correlated SET value = 11 WHERE id = 1 RETURNING id, value, best;
+-- @end
+
+-- @case automatic_scalar_nested_update rows
+UPDATE automatic_scalar_nested SET value = 12 WHERE id = 1 RETURNING id, value, best;
+-- @end
+
+-- @case automatic_scalar_nested_dml_subquery rows
+UPDATE automatic_scalar_correlated AS target SET value = 13 WHERE (SELECT target.best) = 4 RETURNING id, value, best;
+-- @end
+
+-- @case automatic_scalar_local_alias_collision rows
+UPDATE automatic_scalar_collision AS target SET value = 14 WHERE id = 1 RETURNING id, value, best;
+-- @end
+
+-- @case create_automatic_scalar_extended_fixture ok
+CREATE TABLE automatic_scalar_snapshot_base (id integer PRIMARY KEY, value integer); INSERT INTO automatic_scalar_snapshot_base VALUES (1, 10), (2, 20); CREATE VIEW automatic_scalar_exists AS SELECT base.id, base.value FROM automatic_scalar_base AS base WHERE EXISTS (SELECT 1 FROM automatic_scalar_detail AS detail WHERE detail.id = base.id); CREATE VIEW automatic_scalar_in AS SELECT base.id, base.value FROM automatic_scalar_base AS base WHERE base.id IN (SELECT detail.id FROM automatic_scalar_detail AS detail); CREATE VIEW automatic_scalar_unqualified AS SELECT base.id, base.value, (SELECT value + 1) AS next_value FROM automatic_scalar_base AS base; CREATE VIEW automatic_scalar_cte_expression AS SELECT base.id, base.value, (WITH cutoff_row AS (SELECT max(cutoff) AS cutoff FROM automatic_scalar_config) SELECT cutoff FROM cutoff_row) AS ceiling FROM automatic_scalar_base AS base; CREATE VIEW automatic_scalar_snapshot AS SELECT base.id, base.value, (SELECT max(value) FROM automatic_scalar_snapshot_base) AS peak FROM automatic_scalar_snapshot_base AS base;
+-- @end
+
+-- @case automatic_scalar_exists_predicate rows
+UPDATE automatic_scalar_exists SET value = value + 1 WHERE id = 2 RETURNING id, value;
+-- @end
+
+-- @case automatic_scalar_in_predicate rows
+UPDATE automatic_scalar_in SET value = value WHERE id = 2 RETURNING id, value;
+-- @end
+
+-- @case automatic_scalar_unqualified_correlation rows
+UPDATE automatic_scalar_unqualified SET value = value WHERE id = 1 RETURNING next_value;
+-- @end
+
+-- @case automatic_scalar_cte_expression rows
+UPDATE automatic_scalar_cte_expression SET value = value WHERE id = 1 RETURNING ceiling;
+-- @end
+
+-- @case automatic_scalar_statement_snapshot rows
+UPDATE automatic_scalar_snapshot SET value = value + 100 RETURNING id, value, peak;
+-- @end
+
+-- @case automatic_scalar_row_images rows
+UPDATE automatic_scalar_image SET value = 8 WHERE id = 1 RETURNING WITH (OLD AS before, NEW AS after) before.value AS old_value, after.value AS new_value, before.eligible AS old_eligible, after.eligible AS new_eligible, eligible AS current_eligible;
+-- @end
+
+-- @case automatic_scalar_predicate_insert_outside rows
+INSERT INTO automatic_scalar_predicate VALUES (4, 12) RETURNING id, value;
+-- @end
+
+-- @case automatic_scalar_predicate_update_outside rows
+UPDATE automatic_scalar_predicate SET value = 12 WHERE id = 2 RETURNING id, value;
+-- @end
+
+-- @case automatic_scalar_predicate_delete rows
+DELETE FROM automatic_scalar_predicate WHERE id = 3 RETURNING id, value;
+-- @end
+
+-- @case automatic_scalar_check_insert ok
+INSERT INTO automatic_scalar_checked VALUES (6, 20);
+-- @end
+
+-- @case automatic_scalar_check_failure error
+UPDATE automatic_scalar_checked SET value = 14 WHERE id = 6;
+-- @end
+
+-- @case automatic_scalar_check_failure_atomic rows
+SELECT id, value FROM automatic_scalar_base WHERE id = 6;
+-- @end
+
+-- @case create_automatic_scalar_merge_source ok
+CREATE TABLE automatic_scalar_merge_source (id integer, value integer); INSERT INTO automatic_scalar_merge_source VALUES (1, 7);
+-- @end
+
+-- @case automatic_scalar_merge_row_images rows
+MERGE INTO automatic_scalar_image AS target USING automatic_scalar_merge_source AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET value = source.value RETURNING WITH (OLD AS before, NEW AS after) merge_action() AS action, target.id, before.eligible AS old_eligible, after.eligible AS new_eligible, target.eligible AS current_eligible;
+-- @end
+
+-- @case create_automatic_scalar_view_rule ok
+CREATE TABLE automatic_scalar_rule_log (old_eligible integer, new_eligible integer); CREATE RULE automatic_scalar_image_update_rule AS ON UPDATE TO automatic_scalar_image DO ALSO INSERT INTO automatic_scalar_rule_log VALUES (OLD.eligible, NEW.eligible);
+-- @end
+
+-- @case automatic_scalar_view_rule_update ok
+UPDATE automatic_scalar_image SET value = 4 WHERE id = 1;
+-- @end
+
+-- @case automatic_scalar_view_rule_state rows
+SELECT old_eligible, new_eligible FROM automatic_scalar_rule_log;
+-- @end
+
+-- @case automatic_scalar_with_view_rejected error
+UPDATE automatic_scalar_with SET value = 99 WHERE id = 1;
+-- @end

@@ -65,8 +65,10 @@ struct AutomaticViewLayer {
     source_name: String,
     source_qualifier: String,
     source_include_descendants: bool,
+    source_schema: RowSchema,
     columns: Vec<ViewColumn>,
     predicate: Option<ScalarExpr>,
+    subqueries: Vec<QueryPlan>,
     check_option: ViewCheckOption,
 }
 
@@ -213,7 +215,6 @@ fn automatic_view_layer_from_definition(
         || block.offset.is_some()
         || block.distinct
         || !block.distinct_on.is_empty()
-        || !block.subqueries.is_empty()
         || !block.locking.is_empty()
     {
         return Ok(None);
@@ -304,10 +305,617 @@ fn automatic_view_layer_from_definition(
         source_name: source_name.clone(),
         source_qualifier,
         source_include_descendants: *include_descendants,
+        source_schema,
         columns,
         predicate: block.r#where.clone(),
+        subqueries: block.subqueries.clone(),
         check_option: ViewCheckOption::from_options(&definition.options),
     }))
+}
+
+fn offset_expression_subquery_ids(expression: &mut ScalarExpr, offset: usize) {
+    if offset == 0 {
+        return;
+    }
+    uqa_planner::rewrite_scalar_expression(expression, &mut |node| match node {
+        ScalarExpr::ScalarSubquery(id)
+        | ScalarExpr::Exists { subquery: id, .. }
+        | ScalarExpr::InSubquery { subquery: id, .. } => *id += offset,
+        _ => {}
+    });
+}
+
+fn rewrite_layer_source_scalar(
+    expression: &mut ScalarExpr,
+    layer: &AutomaticViewLayer,
+    target_qualifier: &str,
+    shadowed_qualifiers: &BTreeSet<String>,
+    shadowed_columns: &BTreeSet<String>,
+) {
+    uqa_planner::rewrite_scalar_expression(expression, &mut |node| {
+        let replacement = match node {
+            ScalarExpr::Column(column)
+                if !shadowed_columns.contains(column)
+                    && layer.source_schema.has_unqualified_column(column) =>
+            {
+                Some(ScalarExpr::QualifiedColumn {
+                    qualifier: target_qualifier.to_string(),
+                    column: column.clone(),
+                })
+            }
+            ScalarExpr::QualifiedColumn { qualifier, column }
+                if !shadowed_qualifiers.contains(qualifier)
+                    && source_qualifier_matches(
+                        qualifier,
+                        &layer.source_qualifier,
+                        &layer.source_name,
+                    ) =>
+            {
+                Some(ScalarExpr::QualifiedColumn {
+                    qualifier: target_qualifier.to_string(),
+                    column: column.clone(),
+                })
+            }
+            _ => None,
+        };
+        if let Some(replacement) = replacement {
+            *node = replacement;
+        }
+    });
+}
+
+fn source_plan_declares_qualifier(source: &SourcePlan, qualifier: &str) -> bool {
+    match source {
+        SourcePlan::Table {
+            qualifier: source_qualifier,
+            alias,
+            ..
+        } => alias.as_deref().unwrap_or(source_qualifier) == qualifier,
+        SourcePlan::Join {
+            left, right, alias, ..
+        } => {
+            alias.as_deref() == Some(qualifier)
+                || source_plan_declares_qualifier(left, qualifier)
+                || source_plan_declares_qualifier(right, qualifier)
+        }
+        SourcePlan::Values { alias, .. } | SourcePlan::Subquery { alias, .. } => {
+            alias.as_deref() == Some(qualifier)
+        }
+        SourcePlan::Function {
+            output_name, alias, ..
+        } => alias.as_deref().unwrap_or(output_name) == qualifier,
+        SourcePlan::FunctionGroup {
+            functions, alias, ..
+        } => {
+            alias.as_deref().or_else(|| {
+                functions
+                    .first()
+                    .map(|function| function.output_name.as_str())
+            }) == Some(qualifier)
+        }
+    }
+}
+
+fn rename_source_plan_qualifier(source: &mut SourcePlan, qualifier: &str, replacement: &str) {
+    match source {
+        SourcePlan::Table {
+            qualifier: source_qualifier,
+            alias,
+            ..
+        } => {
+            if alias.as_deref() == Some(qualifier) {
+                *alias = Some(replacement.to_string());
+            } else if alias.is_none() && source_qualifier == qualifier {
+                *source_qualifier = replacement.to_string();
+            }
+        }
+        SourcePlan::Join {
+            left, right, alias, ..
+        } => {
+            rename_source_plan_qualifier(left, qualifier, replacement);
+            rename_source_plan_qualifier(right, qualifier, replacement);
+            if alias.as_deref() == Some(qualifier) {
+                *alias = Some(replacement.to_string());
+            }
+        }
+        SourcePlan::Values { alias, .. } | SourcePlan::Subquery { alias, .. } => {
+            if alias.as_deref() == Some(qualifier) {
+                *alias = Some(replacement.to_string());
+            }
+        }
+        SourcePlan::Function {
+            output_name, alias, ..
+        } => {
+            if alias.as_deref() == Some(qualifier) || alias.is_none() && output_name == qualifier {
+                *alias = Some(replacement.to_string());
+            }
+        }
+        SourcePlan::FunctionGroup {
+            functions, alias, ..
+        } => {
+            let default_matches = alias.is_none()
+                && functions
+                    .first()
+                    .is_some_and(|function| function.output_name == qualifier);
+            if alias.as_deref() == Some(qualifier) || default_matches {
+                *alias = Some(replacement.to_string());
+            }
+        }
+    }
+}
+
+fn rename_qualified_scalar(expression: &mut ScalarExpr, qualifier: &str, replacement: &str) {
+    uqa_planner::rewrite_scalar_expression(expression, &mut |node| match node {
+        ScalarExpr::QualifiedColumn {
+            qualifier: current, ..
+        }
+        | ScalarExpr::QualifiedStar(current)
+            if current == qualifier =>
+        {
+            *current = replacement.to_string();
+        }
+        _ => {}
+    });
+}
+
+fn rename_source_plan_scalar_qualifiers(
+    source: &mut SourcePlan,
+    qualifier: &str,
+    replacement: &str,
+) {
+    match source {
+        SourcePlan::Table { .. } | SourcePlan::Subquery { .. } => {}
+        SourcePlan::Join {
+            left, right, on, ..
+        } => {
+            rename_source_plan_scalar_qualifiers(left, qualifier, replacement);
+            rename_source_plan_scalar_qualifiers(right, qualifier, replacement);
+            if let Some(on) = on {
+                rename_qualified_scalar(on, qualifier, replacement);
+            }
+        }
+        SourcePlan::Values { rows, .. } => {
+            for expression in rows.iter_mut().flatten() {
+                rename_qualified_scalar(expression, qualifier, replacement);
+            }
+        }
+        SourcePlan::Function { args, .. } => {
+            for expression in args {
+                rename_qualified_scalar(expression, qualifier, replacement);
+            }
+        }
+        SourcePlan::FunctionGroup { functions, .. } => {
+            for expression in functions
+                .iter_mut()
+                .flat_map(|function| function.args.iter_mut())
+            {
+                rename_qualified_scalar(expression, qualifier, replacement);
+            }
+        }
+    }
+}
+
+fn rename_source_plan_subqueries(
+    source: &mut SourcePlan,
+    qualifier: &str,
+    replacement: &str,
+    inherited: bool,
+) {
+    match source {
+        SourcePlan::Join { left, right, .. } => {
+            rename_source_plan_subqueries(left, qualifier, replacement, inherited);
+            rename_source_plan_subqueries(right, qualifier, replacement, inherited);
+        }
+        SourcePlan::Subquery { body, .. } => {
+            rename_shadowing_query_qualifier(body, qualifier, replacement, inherited);
+        }
+        SourcePlan::Table { .. }
+        | SourcePlan::Values { .. }
+        | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. } => {}
+    }
+}
+
+fn rename_shadowing_query_qualifier(
+    query: &mut QueryPlan,
+    qualifier: &str,
+    replacement: &str,
+    inherited: bool,
+) {
+    for cte in &mut query.ctes {
+        rename_shadowing_query_qualifier(&mut cte.query, qualifier, replacement, inherited);
+    }
+    match &mut query.root {
+        RelationalPlan::QueryBlock(block) => {
+            if let Some(source) = &mut block.from {
+                rename_source_plan_subqueries(source, qualifier, replacement, inherited);
+            }
+            let declared = block
+                .from
+                .as_ref()
+                .is_some_and(|source| source_plan_declares_qualifier(source, qualifier));
+            let active = inherited || declared;
+            if declared {
+                rename_source_plan_qualifier(
+                    block.from.as_mut().expect("view subquery source exists"),
+                    qualifier,
+                    replacement,
+                );
+            }
+            if active {
+                if let Some(source) = &mut block.from {
+                    rename_source_plan_scalar_qualifiers(source, qualifier, replacement);
+                }
+                for projection in &mut block.projections {
+                    rename_qualified_scalar(&mut projection.expr, qualifier, replacement);
+                }
+                for expression in block
+                    .r#where
+                    .iter_mut()
+                    .chain(block.group_by.iter_mut())
+                    .chain(block.having.iter_mut())
+                    .chain(block.limit.iter_mut())
+                    .chain(block.offset.iter_mut())
+                    .chain(block.distinct_on.iter_mut())
+                {
+                    rename_qualified_scalar(expression, qualifier, replacement);
+                }
+                for set in &mut block.grouping_sets {
+                    for expression in set {
+                        rename_qualified_scalar(expression, qualifier, replacement);
+                    }
+                }
+                for order in &mut block.order_by {
+                    rename_qualified_scalar(&mut order.expr, qualifier, replacement);
+                }
+            }
+            for subquery in &mut block.subqueries {
+                rename_shadowing_query_qualifier(subquery, qualifier, replacement, active);
+            }
+        }
+        RelationalPlan::SetOp {
+            left,
+            right,
+            order_by,
+            limit,
+            offset,
+            subqueries,
+            ..
+        } => {
+            rename_shadowing_query_qualifier(left, qualifier, replacement, inherited);
+            rename_shadowing_query_qualifier(right, qualifier, replacement, inherited);
+            if inherited {
+                for order in order_by {
+                    rename_qualified_scalar(&mut order.expr, qualifier, replacement);
+                }
+                for expression in [limit.as_deref_mut(), offset.as_deref_mut()]
+                    .into_iter()
+                    .flatten()
+                {
+                    rename_qualified_scalar(expression, qualifier, replacement);
+                }
+            }
+            for subquery in subqueries {
+                rename_shadowing_query_qualifier(subquery, qualifier, replacement, inherited);
+            }
+        }
+        RelationalPlan::Values { rows, subqueries } => {
+            if inherited {
+                for expression in rows.iter_mut().flatten() {
+                    rename_qualified_scalar(expression, qualifier, replacement);
+                }
+            }
+            for subquery in subqueries {
+                rename_shadowing_query_qualifier(subquery, qualifier, replacement, inherited);
+            }
+        }
+    }
+}
+
+struct LayerSubqueryRewriteContext<'a> {
+    engine: &'a Engine,
+    layer: &'a AutomaticViewLayer,
+    target_qualifier: &'a str,
+}
+
+fn rewrite_layer_source_plan(
+    context: &LayerSubqueryRewriteContext<'_>,
+    source: &mut SourcePlan,
+    scope: &CteScope,
+    shadowed_qualifiers: &BTreeSet<String>,
+    shadowed_columns: &BTreeSet<String>,
+) -> Result<(), SQLError> {
+    let rewrite = |expression: &mut ScalarExpr| {
+        rewrite_layer_source_scalar(
+            expression,
+            context.layer,
+            context.target_qualifier,
+            shadowed_qualifiers,
+            shadowed_columns,
+        );
+    };
+    match source {
+        SourcePlan::Table { .. } => {}
+        SourcePlan::Join {
+            left, right, on, ..
+        } => {
+            rewrite_layer_source_plan(context, left, scope, shadowed_qualifiers, shadowed_columns)?;
+            rewrite_layer_source_plan(
+                context,
+                right,
+                scope,
+                shadowed_qualifiers,
+                shadowed_columns,
+            )?;
+            if let Some(on) = on {
+                rewrite(on);
+            }
+        }
+        SourcePlan::Values { rows, .. } => {
+            for expression in rows.iter_mut().flatten() {
+                rewrite(expression);
+            }
+        }
+        SourcePlan::Function { args, .. } => {
+            for expression in args {
+                rewrite(expression);
+            }
+        }
+        SourcePlan::FunctionGroup { functions, .. } => {
+            for expression in functions
+                .iter_mut()
+                .flat_map(|function| function.args.iter_mut())
+            {
+                rewrite(expression);
+            }
+        }
+        SourcePlan::Subquery { body, .. } => {
+            rewrite_layer_source_query(
+                context,
+                body,
+                scope,
+                shadowed_qualifiers,
+                shadowed_columns,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn rewrite_layer_source_query(
+    context: &LayerSubqueryRewriteContext<'_>,
+    query: &mut QueryPlan,
+    scope: &CteScope,
+    inherited_qualifier_shadows: &BTreeSet<String>,
+    inherited_column_shadows: &BTreeSet<String>,
+) -> Result<(), SQLError> {
+    let mut query_scope = scope.clone();
+    for cte in &query.ctes {
+        query_scope.insert_deferred(cte.clone());
+    }
+    for cte in &mut query.ctes {
+        rewrite_layer_source_query(
+            context,
+            &mut cte.query,
+            &query_scope,
+            inherited_qualifier_shadows,
+            inherited_column_shadows,
+        )?;
+    }
+    match &mut query.root {
+        RelationalPlan::QueryBlock(block) => {
+            let local_schema = block
+                .from
+                .as_ref()
+                .map(|source| {
+                    crate::sql::select::analyze_source_plan_schema(
+                        context.engine,
+                        source,
+                        &[],
+                        &query_scope,
+                        Some(&context.layer.source_schema),
+                    )
+                })
+                .transpose()?;
+            let mut qualifier_shadows = inherited_qualifier_shadows.clone();
+            if let Some(schema) = local_schema.as_ref() {
+                for qualifier in [
+                    context.layer.source_qualifier.as_str(),
+                    context.layer.source_name.as_str(),
+                    display_relation(&context.layer.source_name).as_str(),
+                ] {
+                    if schema.has_qualifier(qualifier) {
+                        qualifier_shadows.insert(qualifier.to_string());
+                    }
+                }
+            }
+            let mut column_shadows = inherited_column_shadows.clone();
+            if let Some(schema) = local_schema.as_ref() {
+                column_shadows.extend(schema_public_columns(schema));
+            }
+            if let Some(source) = &mut block.from {
+                rewrite_layer_source_plan(
+                    context,
+                    source,
+                    &query_scope,
+                    &qualifier_shadows,
+                    &column_shadows,
+                )?;
+            }
+            let rewrite = |expression: &mut ScalarExpr| {
+                rewrite_layer_source_scalar(
+                    expression,
+                    context.layer,
+                    context.target_qualifier,
+                    &qualifier_shadows,
+                    &column_shadows,
+                );
+            };
+            for projection in &mut block.projections {
+                rewrite(&mut projection.expr);
+            }
+            if let Some(predicate) = &mut block.r#where {
+                rewrite(predicate);
+            }
+            for expression in &mut block.group_by {
+                rewrite(expression);
+            }
+            for set in &mut block.grouping_sets {
+                for expression in set {
+                    rewrite(expression);
+                }
+            }
+            if let Some(having) = &mut block.having {
+                rewrite(having);
+            }
+            for order in &mut block.order_by {
+                rewrite(&mut order.expr);
+            }
+            for expression in [block.limit.as_mut(), block.offset.as_mut()]
+                .into_iter()
+                .flatten()
+            {
+                rewrite(expression);
+            }
+            for expression in &mut block.distinct_on {
+                rewrite(expression);
+            }
+            for subquery in &mut block.subqueries {
+                rewrite_layer_source_query(
+                    context,
+                    subquery,
+                    &query_scope,
+                    &qualifier_shadows,
+                    &column_shadows,
+                )?;
+            }
+        }
+        RelationalPlan::SetOp {
+            left,
+            right,
+            order_by,
+            limit,
+            offset,
+            subqueries,
+            ..
+        } => {
+            rewrite_layer_source_query(
+                context,
+                left,
+                &query_scope,
+                inherited_qualifier_shadows,
+                inherited_column_shadows,
+            )?;
+            rewrite_layer_source_query(
+                context,
+                right,
+                &query_scope,
+                inherited_qualifier_shadows,
+                inherited_column_shadows,
+            )?;
+            for order in order_by {
+                rewrite_layer_source_scalar(
+                    &mut order.expr,
+                    context.layer,
+                    context.target_qualifier,
+                    inherited_qualifier_shadows,
+                    inherited_column_shadows,
+                );
+            }
+            for expression in [limit.as_deref_mut(), offset.as_deref_mut()]
+                .into_iter()
+                .flatten()
+            {
+                rewrite_layer_source_scalar(
+                    expression,
+                    context.layer,
+                    context.target_qualifier,
+                    inherited_qualifier_shadows,
+                    inherited_column_shadows,
+                );
+            }
+            for subquery in subqueries {
+                rewrite_layer_source_query(
+                    context,
+                    subquery,
+                    &query_scope,
+                    inherited_qualifier_shadows,
+                    inherited_column_shadows,
+                )?;
+            }
+        }
+        RelationalPlan::Values { rows, subqueries } => {
+            for expression in rows.iter_mut().flatten() {
+                rewrite_layer_source_scalar(
+                    expression,
+                    context.layer,
+                    context.target_qualifier,
+                    inherited_qualifier_shadows,
+                    inherited_column_shadows,
+                );
+            }
+            for subquery in subqueries {
+                rewrite_layer_source_query(
+                    context,
+                    subquery,
+                    &query_scope,
+                    inherited_qualifier_shadows,
+                    inherited_column_shadows,
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn embed_layer_expression(
+    engine: &Engine,
+    expression: &ScalarExpr,
+    layer: &AutomaticViewLayer,
+    target_qualifier: &str,
+    target_subqueries: &mut Vec<QueryPlan>,
+) -> Result<ScalarExpr, SQLError> {
+    let mut expression = retarget_source_expression(expression, layer, target_qualifier);
+    let ids = collect_expression_subquery_ids(std::iter::once(&expression));
+    if ids.is_empty() {
+        return Ok(expression);
+    }
+    if ids
+        .iter()
+        .next_back()
+        .is_some_and(|id| *id >= layer.subqueries.len())
+    {
+        return Err(SQLError::Internal(format!(
+            "view `{}` expression has an out-of-bounds scalar subquery slot",
+            layer.canonical_name
+        )));
+    }
+    let mut subqueries = layer.subqueries.clone();
+    let scope = CteScope::new_for_current_routine();
+    let context = LayerSubqueryRewriteContext {
+        engine,
+        layer,
+        target_qualifier,
+    };
+    for subquery in &mut subqueries {
+        rename_shadowing_query_qualifier(
+            subquery,
+            target_qualifier,
+            "\0uqa_view_subquery_local",
+            false,
+        );
+        rewrite_layer_source_query(
+            &context,
+            subquery,
+            &scope,
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+        )?;
+    }
+    let offset = target_subqueries.len();
+    offset_expression_subquery_ids(&mut expression, offset);
+    target_subqueries.extend(subqueries);
+    Ok(expression)
 }
 
 fn layer_column<'a>(layer: &'a AutomaticViewLayer, name: &str) -> Option<&'a ViewColumn> {
@@ -1025,49 +1633,63 @@ fn validate_correlated_subquery_ids(
 }
 
 fn rewrite_correlated_scalar(
+    context: &CorrelatedRewriteContext<'_>,
     expression: &mut ScalarExpr,
-    layer: &AutomaticViewLayer,
-    source: Option<&RowSchema>,
-    default_target_qualifier: &str,
-    target_qualifiers: &BTreeSet<String>,
     shadowed_qualifiers: &BTreeSet<String>,
     shadowed_columns: &BTreeSet<String>,
-) {
+    subqueries: &mut Vec<QueryPlan>,
+) -> Result<(), SQLError> {
+    let mut error = None;
     uqa_planner::rewrite_scalar_expression(expression, &mut |node| {
+        if error.is_some() {
+            return;
+        }
         let replacement = match node {
             ScalarExpr::Column(column) if !shadowed_columns.contains(column) => {
-                layer_column(layer, column)
+                layer_column(context.layer, column)
                     .map(|mapping| {
-                        retarget_source_expression(
+                        embed_layer_expression(
+                            context.engine,
                             &mapping.expression,
-                            layer,
-                            default_target_qualifier,
+                            context.layer,
+                            context.default_target_qualifier,
+                            subqueries,
                         )
                     })
                     .or_else(|| {
-                        let source = source?;
+                        let source = context.source?;
                         let position = source.unqualified_position(column)?;
                         let qualifier = source.identity(position)?.qualifier()?;
-                        Some(ScalarExpr::QualifiedColumn {
+                        Some(Ok(ScalarExpr::QualifiedColumn {
                             qualifier: qualifier.to_string(),
                             column: column.clone(),
-                        })
+                        }))
                     })
             }
             ScalarExpr::QualifiedColumn { qualifier, column }
-                if target_qualifiers.contains(qualifier)
+                if context.target_qualifiers.contains(qualifier)
                     && !shadowed_qualifiers.contains(qualifier) =>
             {
-                layer_column(layer, column).map(|mapping| {
-                    retarget_source_expression(&mapping.expression, layer, qualifier)
+                layer_column(context.layer, column).map(|mapping| {
+                    embed_layer_expression(
+                        context.engine,
+                        &mapping.expression,
+                        context.layer,
+                        qualifier,
+                        subqueries,
+                    )
                 })
             }
             _ => None,
         };
         if let Some(replacement) = replacement {
-            *node = replacement;
+            match replacement {
+                Ok(replacement) => *node = replacement,
+                Err(rewrite_error) => error = Some(rewrite_error),
+            }
         }
     });
+    error.map_or(Ok(()), Err)
 }
 
 fn schema_public_columns(schema: &RowSchema) -> BTreeSet<String> {
@@ -1100,6 +1722,15 @@ fn rewrite_correlated_query(
     for cte in &query.ctes {
         query_scope.insert_deferred(cte.clone());
     }
+    for cte in &mut query.ctes {
+        rewrite_correlated_query(
+            context,
+            &mut cte.query,
+            &query_scope,
+            inherited_qualifier_shadows,
+            inherited_column_shadows,
+        )?;
+    }
     match &mut query.root {
         RelationalPlan::QueryBlock(block) => {
             let local_schema = block
@@ -1129,47 +1760,8 @@ fn rewrite_correlated_query(
             if let Some(schema) = local_schema.as_ref() {
                 column_shadows.extend(schema_public_columns(schema));
             }
-            let rewrite = |expression: &mut ScalarExpr| {
-                rewrite_correlated_scalar(
-                    expression,
-                    context.layer,
-                    context.source,
-                    context.default_target_qualifier,
-                    context.target_qualifiers,
-                    &qualifier_shadows,
-                    &column_shadows,
-                );
-            };
-            for projection in &mut block.projections {
-                rewrite(&mut projection.expr);
-            }
-            if let Some(predicate) = &mut block.r#where {
-                rewrite(predicate);
-            }
-            for expression in &mut block.group_by {
-                rewrite(expression);
-            }
-            for set in &mut block.grouping_sets {
-                for expression in set {
-                    rewrite(expression);
-                }
-            }
-            if let Some(having) = &mut block.having {
-                rewrite(having);
-            }
-            for order in &mut block.order_by {
-                rewrite(&mut order.expr);
-            }
-            if let Some(limit) = &mut block.limit {
-                rewrite(limit);
-            }
-            if let Some(offset) = &mut block.offset {
-                rewrite(offset);
-            }
-            for expression in &mut block.distinct_on {
-                rewrite(expression);
-            }
-            for subquery in &mut block.subqueries {
+            let original_subquery_count = block.subqueries.len();
+            for subquery in &mut block.subqueries[..original_subquery_count] {
                 rewrite_correlated_query(
                     context,
                     subquery,
@@ -1177,6 +1769,44 @@ fn rewrite_correlated_query(
                     &qualifier_shadows,
                     &column_shadows,
                 )?;
+            }
+            let mut rewrite = |expression: &mut ScalarExpr| {
+                rewrite_correlated_scalar(
+                    context,
+                    expression,
+                    &qualifier_shadows,
+                    &column_shadows,
+                    &mut block.subqueries,
+                )
+            };
+            for projection in &mut block.projections {
+                rewrite(&mut projection.expr)?;
+            }
+            if let Some(predicate) = &mut block.r#where {
+                rewrite(predicate)?;
+            }
+            for expression in &mut block.group_by {
+                rewrite(expression)?;
+            }
+            for set in &mut block.grouping_sets {
+                for expression in set {
+                    rewrite(expression)?;
+                }
+            }
+            if let Some(having) = &mut block.having {
+                rewrite(having)?;
+            }
+            for order in &mut block.order_by {
+                rewrite(&mut order.expr)?;
+            }
+            if let Some(limit) = &mut block.limit {
+                rewrite(limit)?;
+            }
+            if let Some(offset) = &mut block.offset {
+                rewrite(offset)?;
+            }
+            for expression in &mut block.distinct_on {
+                rewrite(expression)?;
             }
         }
         RelationalPlan::SetOp {
@@ -1202,32 +1832,8 @@ fn rewrite_correlated_query(
                 inherited_qualifier_shadows,
                 inherited_column_shadows,
             )?;
-            for order in order_by {
-                rewrite_correlated_scalar(
-                    &mut order.expr,
-                    context.layer,
-                    context.source,
-                    context.default_target_qualifier,
-                    context.target_qualifiers,
-                    inherited_qualifier_shadows,
-                    inherited_column_shadows,
-                );
-            }
-            for expression in [limit.as_deref_mut(), offset.as_deref_mut()]
-                .into_iter()
-                .flatten()
-            {
-                rewrite_correlated_scalar(
-                    expression,
-                    context.layer,
-                    context.source,
-                    context.default_target_qualifier,
-                    context.target_qualifiers,
-                    inherited_qualifier_shadows,
-                    inherited_column_shadows,
-                );
-            }
-            for subquery in subqueries {
+            let original_subquery_count = subqueries.len();
+            for subquery in &mut subqueries[..original_subquery_count] {
                 rewrite_correlated_query(
                     context,
                     subquery,
@@ -1236,26 +1842,46 @@ fn rewrite_correlated_query(
                     inherited_column_shadows,
                 )?;
             }
-        }
-        RelationalPlan::Values { rows, subqueries } => {
-            for expression in rows.iter_mut().flatten() {
+            for order in order_by {
                 rewrite_correlated_scalar(
-                    expression,
-                    context.layer,
-                    context.source,
-                    context.default_target_qualifier,
-                    context.target_qualifiers,
+                    context,
+                    &mut order.expr,
                     inherited_qualifier_shadows,
                     inherited_column_shadows,
-                );
+                    subqueries,
+                )?;
             }
-            for subquery in subqueries {
+            for expression in [limit.as_deref_mut(), offset.as_deref_mut()]
+                .into_iter()
+                .flatten()
+            {
+                rewrite_correlated_scalar(
+                    context,
+                    expression,
+                    inherited_qualifier_shadows,
+                    inherited_column_shadows,
+                    subqueries,
+                )?;
+            }
+        }
+        RelationalPlan::Values { rows, subqueries } => {
+            let original_subquery_count = subqueries.len();
+            for subquery in &mut subqueries[..original_subquery_count] {
                 rewrite_correlated_query(
                     context,
                     subquery,
                     &query_scope,
                     inherited_qualifier_shadows,
                     inherited_column_shadows,
+                )?;
+            }
+            for expression in rows.iter_mut().flatten() {
+                rewrite_correlated_scalar(
+                    context,
+                    expression,
+                    inherited_qualifier_shadows,
+                    inherited_column_shadows,
+                    subqueries,
                 )?;
             }
         }
@@ -1760,40 +2386,62 @@ fn retarget_source_expression(
 }
 
 fn rewrite_target_expression(
+    engine: &Engine,
     expression: &mut ScalarExpr,
     layer: &AutomaticViewLayer,
     scope: ExpressionScope<'_>,
-) {
+    subqueries: &mut Vec<QueryPlan>,
+) -> Result<(), SQLError> {
+    let mut error = None;
     uqa_planner::rewrite_scalar_expression(expression, &mut |node| {
+        if error.is_some() {
+            return;
+        }
         let replacement = match node {
             ScalarExpr::Column(column) => layer_column(layer, column)
                 .map(|mapping| {
-                    retarget_source_expression(&mapping.expression, layer, scope.target_qualifier)
+                    embed_layer_expression(
+                        engine,
+                        &mapping.expression,
+                        layer,
+                        scope.target_qualifier,
+                        subqueries,
+                    )
                 })
                 .or_else(|| {
                     let source = scope.source?;
                     let position = source.unqualified_position(column)?;
                     let identity = source.identity(position)?;
-                    identity
-                        .qualifier()
-                        .map(|qualifier| ScalarExpr::QualifiedColumn {
+                    identity.qualifier().map(|qualifier| {
+                        Ok(ScalarExpr::QualifiedColumn {
                             qualifier: qualifier.to_string(),
                             column: column.clone(),
                         })
+                    })
                 }),
             ScalarExpr::QualifiedColumn { qualifier, column }
                 if scope.target_qualifier(qualifier) =>
             {
                 layer_column(layer, column).map(|mapping| {
-                    retarget_source_expression(&mapping.expression, layer, qualifier)
+                    embed_layer_expression(
+                        engine,
+                        &mapping.expression,
+                        layer,
+                        qualifier,
+                        subqueries,
+                    )
                 })
             }
             _ => None,
         };
         if let Some(replacement) = replacement {
-            *node = replacement;
+            match replacement {
+                Ok(replacement) => *node = replacement,
+                Err(rewrite_error) => error = Some(rewrite_error),
+            }
         }
     });
+    error.map_or(Ok(()), Err)
 }
 
 fn top_level_view_column(
@@ -1813,12 +2461,14 @@ fn top_level_view_column(
 }
 
 fn rewrite_returning(
+    engine: &Engine,
     returning: Vec<ProjectionPlan>,
     layer: &AutomaticViewLayer,
     target_qualifier: &str,
     returning_aliases: &ReturningAliases,
     source: Option<&RowSchema>,
-) -> (Vec<ProjectionPlan>, Vec<usize>) {
+    subqueries: &mut Vec<QueryPlan>,
+) -> Result<(Vec<ProjectionPlan>, Vec<usize>), SQLError> {
     let scope = ExpressionScope {
         target_qualifier,
         returning_aliases: Some(returning_aliases),
@@ -1837,10 +2487,18 @@ fn rewrite_returning(
             _ => None,
         };
         if let Some(qualifier) = star_qualifier {
-            rewritten.extend(layer.columns.iter().map(|column| ProjectionPlan {
-                expr: retarget_source_expression(&column.expression, layer, qualifier),
-                alias: Some(column.name.clone()),
-            }));
+            for column in &layer.columns {
+                rewritten.push(ProjectionPlan {
+                    expr: embed_layer_expression(
+                        engine,
+                        &column.expression,
+                        layer,
+                        qualifier,
+                        subqueries,
+                    )?,
+                    alias: Some(column.name.clone()),
+                });
+            }
             if bare_star && source.is_some() {
                 source_star_boundaries.push(rewritten.len());
             }
@@ -1851,22 +2509,24 @@ fn rewrite_returning(
             .clone()
             .or_else(|| top_level_view_column(&projection.expr, layer, scope));
         let mut expression = projection.expr;
-        rewrite_target_expression(&mut expression, layer, scope);
+        rewrite_target_expression(engine, &mut expression, layer, scope, subqueries)?;
         rewritten.push(ProjectionPlan {
             expr: expression,
             alias: derived_alias,
         });
     }
-    (rewritten, source_star_boundaries)
+    Ok((rewritten, source_star_boundaries))
 }
 
 fn rewrite_merge_returning(
+    engine: &Engine,
     returning: Vec<ProjectionPlan>,
     layer: &AutomaticViewLayer,
     target_qualifier: &str,
     returning_aliases: &ReturningAliases,
     source: &RowSchema,
-) -> (Vec<ProjectionPlan>, Vec<usize>) {
+    subqueries: &mut Vec<QueryPlan>,
+) -> Result<(Vec<ProjectionPlan>, Vec<usize>), SQLError> {
     let scope = ExpressionScope {
         target_qualifier,
         returning_aliases: Some(returning_aliases),
@@ -1888,10 +2548,18 @@ fn rewrite_merge_returning(
             if bare_star {
                 source_star_boundaries.push(rewritten.len());
             }
-            rewritten.extend(layer.columns.iter().map(|column| ProjectionPlan {
-                expr: retarget_source_expression(&column.expression, layer, qualifier),
-                alias: Some(column.name.clone()),
-            }));
+            for column in &layer.columns {
+                rewritten.push(ProjectionPlan {
+                    expr: embed_layer_expression(
+                        engine,
+                        &column.expression,
+                        layer,
+                        qualifier,
+                        subqueries,
+                    )?,
+                    alias: Some(column.name.clone()),
+                });
+            }
             continue;
         }
         let derived_alias = projection
@@ -1899,13 +2567,13 @@ fn rewrite_merge_returning(
             .clone()
             .or_else(|| top_level_view_column(&projection.expr, layer, scope));
         let mut expression = projection.expr;
-        rewrite_target_expression(&mut expression, layer, scope);
+        rewrite_target_expression(engine, &mut expression, layer, scope, subqueries)?;
         rewritten.push(ProjectionPlan {
             expr: expression,
             alias: derived_alias,
         });
     }
-    (rewritten, source_star_boundaries)
+    Ok((rewritten, source_star_boundaries))
 }
 
 fn source_star_projections(source: &RowSchema, target_width: usize) -> Vec<ProjectionPlan> {
@@ -2010,10 +2678,12 @@ fn finalize_source_returning(
 }
 
 fn rewrite_existing_view_checks(
+    engine: &Engine,
     checks: &mut [ViewCheckPlan],
     layer: &AutomaticViewLayer,
     target_qualifier: &str,
-) {
+    subqueries: &mut Vec<QueryPlan>,
+) -> Result<(), SQLError> {
     let scope = ExpressionScope {
         target_qualifier,
         returning_aliases: None,
@@ -2021,16 +2691,19 @@ fn rewrite_existing_view_checks(
         include_excluded: false,
     };
     for check in checks {
-        rewrite_target_expression(&mut check.predicate, layer, scope);
+        rewrite_target_expression(engine, &mut check.predicate, layer, scope, subqueries)?;
     }
+    Ok(())
 }
 
 fn add_check_option(
+    engine: &Engine,
     checks: &mut Vec<ViewCheckPlan>,
     layer: &AutomaticViewLayer,
     target_qualifier: &str,
     cascaded: &mut bool,
-) {
+    subqueries: &mut Vec<QueryPlan>,
+) -> Result<(), SQLError> {
     let check_current = *cascaded || layer.check_option != ViewCheckOption::None;
     *cascaded |= layer.check_option == ViewCheckOption::Cascaded;
     if check_current {
@@ -2039,27 +2712,39 @@ fn add_check_option(
                 0,
                 ViewCheckPlan {
                     view: layer.canonical_name.clone(),
-                    predicate: retarget_source_expression(predicate, layer, target_qualifier),
+                    predicate: embed_layer_expression(
+                        engine,
+                        predicate,
+                        layer,
+                        target_qualifier,
+                        subqueries,
+                    )?,
                 },
             );
         }
     }
+    Ok(())
 }
 
 fn combine_view_predicate(
+    engine: &Engine,
     current: Option<ScalarExpr>,
     layer: &AutomaticViewLayer,
     target_qualifier: &str,
-) -> Option<ScalarExpr> {
+    subqueries: &mut Vec<QueryPlan>,
+) -> Result<Option<ScalarExpr>, SQLError> {
     let view = layer
         .predicate
         .as_ref()
-        .map(|predicate| retarget_source_expression(predicate, layer, target_qualifier));
-    match (view, current) {
+        .map(|predicate| {
+            embed_layer_expression(engine, predicate, layer, target_qualifier, subqueries)
+        })
+        .transpose()?;
+    Ok(match (view, current) {
         (Some(view), Some(current)) => Some(ScalarExpr::And(vec![view, current])),
         (Some(view), None) => Some(view),
         (None, current) => current,
-    }
+    })
 }
 
 fn instead_of_trigger_definition(
@@ -2164,6 +2849,9 @@ fn automatic_view_rule_document_inner(
     let mut source_dependencies = BTreeSet::new();
     for column in &selected_columns {
         let mut expression = column.expression.clone();
+        if !collect_expression_subquery_ids(std::iter::once(&expression)).is_empty() {
+            source_dependencies.extend(relation_columns(projection.engine, &layer.source_name)?);
+        }
         uqa_planner::rewrite_scalar_expression(&mut expression, &mut |node| match node {
             ScalarExpr::Column(column) => {
                 source_dependencies.insert(column.clone());
@@ -2214,10 +2902,12 @@ fn automatic_view_rule_document_inner(
         )?
     };
     let mut projected = Document::new();
+    let mut layer_scope = projection.scope.clone();
+    let layer_scope = layer_scope.enter_scalar_subqueries(&layer.subqueries);
     for column in selected_columns {
         let value = super::eval_mutation_expr(
             projection.engine,
-            projection.scope,
+            &layer_scope,
             &column.expression,
             Some(&source_row),
             projection.params,
@@ -2452,7 +3142,13 @@ pub(super) fn rewrite_insert_to_base(
                 };
                 for assignment in assignments.iter_mut() {
                     assignment.column = writable_column(&layer, &assignment.column, "UPDATE")?;
-                    rewrite_target_expression(&mut assignment.value, &layer, scope);
+                    rewrite_target_expression(
+                        engine,
+                        &mut assignment.value,
+                        &layer,
+                        scope,
+                        &mut plan.subqueries,
+                    )?;
                 }
                 let mapped = assignments
                     .iter()
@@ -2460,25 +3156,41 @@ pub(super) fn rewrite_insert_to_base(
                     .collect::<Vec<_>>();
                 validate_mapped_columns(&mapped, duplicate_assignment)?;
                 if let Some(predicate) = predicate {
-                    rewrite_target_expression(predicate, &layer, scope);
+                    rewrite_target_expression(
+                        engine,
+                        predicate,
+                        &layer,
+                        scope,
+                        &mut plan.subqueries,
+                    )?;
                 }
             }
         }
-        rewrite_existing_view_checks(&mut plan.view_checks, &layer, &target_qualifier);
+        rewrite_existing_view_checks(
+            engine,
+            &mut plan.view_checks,
+            &layer,
+            &target_qualifier,
+            &mut plan.subqueries,
+        )?;
         let (returning, _) = rewrite_returning(
+            engine,
             plan.returning,
             &layer,
             &target_qualifier,
             &plan.returning_aliases,
             None,
-        );
+            &mut plan.subqueries,
+        )?;
         plan.returning = returning;
         add_check_option(
+            engine,
             &mut plan.view_checks,
             &layer,
             &target_qualifier,
             &mut cascaded,
-        );
+            &mut plan.subqueries,
+        )?;
         plan.columns = columns;
         plan.table = layer.source_name;
         plan.include_descendants = true;
@@ -2609,10 +3321,10 @@ pub(super) fn rewrite_update_to_base(
                 input_columns: Vec::new(),
             });
         }
+        let target_qualifier = plan.target_qualifier.clone();
         if visited.len() == 1 {
             validate_update_expressions(engine, &plan, &layer, source_schema.as_ref(), params)?;
         }
-        let target_qualifier = plan.target_qualifier.clone();
         let ordinary_subquery_ids = update_ordinary_subquery_ids(&plan);
         rewrite_correlated_dml_context(
             CorrelatedDmlContext {
@@ -2651,7 +3363,7 @@ pub(super) fn rewrite_update_to_base(
         };
         for (position, AssignmentPlan { column, value }) in plan.assignments.iter_mut().enumerate()
         {
-            rewrite_target_expression(value, &layer, ordinary_scope);
+            rewrite_target_expression(engine, value, &layer, ordinary_scope, &mut plan.subqueries)?;
             if layer_suppresses {
                 *column = format!("\0uqa_view_rule_update_{position}");
             } else if !rewrite_suppressed {
@@ -2665,27 +3377,49 @@ pub(super) fn rewrite_update_to_base(
             .collect::<Vec<_>>();
         validate_mapped_columns(&mapped, duplicate_assignment)?;
         if let Some(predicate) = &mut plan.predicate {
-            rewrite_target_expression(predicate, &layer, ordinary_scope);
+            rewrite_target_expression(
+                engine,
+                predicate,
+                &layer,
+                ordinary_scope,
+                &mut plan.subqueries,
+            )?;
         }
-        rewrite_existing_view_checks(&mut plan.view_checks, &layer, &target_qualifier);
+        rewrite_existing_view_checks(
+            engine,
+            &mut plan.view_checks,
+            &layer,
+            &target_qualifier,
+            &mut plan.subqueries,
+        )?;
         let (returning, boundaries) = rewrite_returning(
+            engine,
             plan.returning,
             &layer,
             &target_qualifier,
             &plan.returning_aliases,
             source_schema.as_ref(),
-        );
+            &mut plan.subqueries,
+        )?;
         plan.returning = returning;
         if visited.len() == 1 {
             source_star_boundaries = boundaries;
         }
-        plan.predicate = combine_view_predicate(plan.predicate, &layer, &target_qualifier);
+        plan.predicate = combine_view_predicate(
+            engine,
+            plan.predicate,
+            &layer,
+            &target_qualifier,
+            &mut plan.subqueries,
+        )?;
         add_check_option(
+            engine,
             &mut plan.view_checks,
             &layer,
             &target_qualifier,
             &mut cascaded,
-        );
+            &mut plan.subqueries,
+        )?;
         plan.table = layer.source_name;
         plan.include_descendants = layer.source_include_descendants;
         rewrite_suppressed |= layer_suppresses;
@@ -2792,10 +3526,10 @@ pub(super) fn rewrite_delete_to_base(
                 &plan.subqueries,
             );
         }
+        let target_qualifier = plan.target_qualifier.clone();
         if visited.len() == 1 {
             validate_delete_expressions(engine, &plan, &layer, source_schema.as_ref(), params)?;
         }
-        let target_qualifier = plan.target_qualifier.clone();
         let ordinary_subquery_ids = delete_ordinary_subquery_ids(&plan);
         rewrite_correlated_dml_context(
             CorrelatedDmlContext {
@@ -2833,20 +3567,34 @@ pub(super) fn rewrite_delete_to_base(
             include_excluded: false,
         };
         if let Some(predicate) = &mut plan.predicate {
-            rewrite_target_expression(predicate, &layer, ordinary_scope);
+            rewrite_target_expression(
+                engine,
+                predicate,
+                &layer,
+                ordinary_scope,
+                &mut plan.subqueries,
+            )?;
         }
         let (returning, boundaries) = rewrite_returning(
+            engine,
             plan.returning,
             &layer,
             &target_qualifier,
             &plan.returning_aliases,
             source_schema.as_ref(),
-        );
+            &mut plan.subqueries,
+        )?;
         plan.returning = returning;
         if visited.len() == 1 {
             source_star_boundaries = boundaries;
         }
-        plan.predicate = combine_view_predicate(plan.predicate, &layer, &target_qualifier);
+        plan.predicate = combine_view_predicate(
+            engine,
+            plan.predicate,
+            &layer,
+            &target_qualifier,
+            &mut plan.subqueries,
+        )?;
         plan.table = layer.source_name;
         plan.include_descendants = layer.source_include_descendants;
         if !super::view_triggers::target_is_view(engine, &plan.table)? {
@@ -2992,7 +3740,6 @@ pub(super) fn rewrite_merge_to_base(
             },
             &mut plan.subqueries,
         )?;
-
         let matched_scope = ExpressionScope {
             target_qualifier: &plan.target_qualifier,
             returning_aliases: None,
@@ -3003,9 +3750,21 @@ pub(super) fn rewrite_merge_to_base(
             source: None,
             ..matched_scope
         };
-        rewrite_target_expression(&mut plan.join_condition, &layer, matched_scope);
+        rewrite_target_expression(
+            engine,
+            &mut plan.join_condition,
+            &layer,
+            matched_scope,
+            &mut plan.subqueries,
+        )?;
         if let Some(predicate) = &mut plan.target_predicate {
-            rewrite_target_expression(predicate, &layer, target_only_scope);
+            rewrite_target_expression(
+                engine,
+                predicate,
+                &layer,
+                target_only_scope,
+                &mut plan.subqueries,
+            )?;
         }
         for clause in &mut plan.when_clauses {
             match clause {
@@ -3014,10 +3773,22 @@ pub(super) fn rewrite_merge_to_base(
                     assignments,
                 } => {
                     if let Some(condition) = condition {
-                        rewrite_target_expression(condition, &layer, matched_scope);
+                        rewrite_target_expression(
+                            engine,
+                            condition,
+                            &layer,
+                            matched_scope,
+                            &mut plan.subqueries,
+                        )?;
                     }
                     for assignment in assignments.iter_mut() {
-                        rewrite_target_expression(&mut assignment.value, &layer, matched_scope);
+                        rewrite_target_expression(
+                            engine,
+                            &mut assignment.value,
+                            &layer,
+                            matched_scope,
+                            &mut plan.subqueries,
+                        )?;
                         assignment.column =
                             writable_column(&layer, &assignment.column, "MERGE INTO")?;
                     }
@@ -3032,7 +3803,13 @@ pub(super) fn rewrite_merge_to_base(
                 MergeWhenPlan::DeleteMatched { condition }
                 | MergeWhenPlan::NothingMatched { condition } => {
                     if let Some(condition) = condition {
-                        rewrite_target_expression(condition, &layer, matched_scope);
+                        rewrite_target_expression(
+                            engine,
+                            condition,
+                            &layer,
+                            matched_scope,
+                            &mut plan.subqueries,
+                        )?;
                     }
                 }
                 MergeWhenPlan::UpdateNotMatchedBySource {
@@ -3040,10 +3817,22 @@ pub(super) fn rewrite_merge_to_base(
                     assignments,
                 } => {
                     if let Some(condition) = condition {
-                        rewrite_target_expression(condition, &layer, target_only_scope);
+                        rewrite_target_expression(
+                            engine,
+                            condition,
+                            &layer,
+                            target_only_scope,
+                            &mut plan.subqueries,
+                        )?;
                     }
                     for assignment in assignments.iter_mut() {
-                        rewrite_target_expression(&mut assignment.value, &layer, target_only_scope);
+                        rewrite_target_expression(
+                            engine,
+                            &mut assignment.value,
+                            &layer,
+                            target_only_scope,
+                            &mut plan.subqueries,
+                        )?;
                         assignment.column =
                             writable_column(&layer, &assignment.column, "MERGE INTO")?;
                     }
@@ -3058,7 +3847,13 @@ pub(super) fn rewrite_merge_to_base(
                 MergeWhenPlan::DeleteNotMatchedBySource { condition }
                 | MergeWhenPlan::NothingNotMatchedBySource { condition } => {
                     if let Some(condition) = condition {
-                        rewrite_target_expression(condition, &layer, target_only_scope);
+                        rewrite_target_expression(
+                            engine,
+                            condition,
+                            &layer,
+                            target_only_scope,
+                            &mut plan.subqueries,
+                        )?;
                     }
                 }
                 MergeWhenPlan::InsertNotMatched {
@@ -3083,26 +3878,41 @@ pub(super) fn rewrite_merge_to_base(
                 MergeWhenPlan::NothingNotMatched { .. } => {}
             }
         }
-        rewrite_existing_view_checks(&mut plan.view_checks, &layer, &plan.target_qualifier);
+        rewrite_existing_view_checks(
+            engine,
+            &mut plan.view_checks,
+            &layer,
+            &plan.target_qualifier,
+            &mut plan.subqueries,
+        )?;
         let (returning, boundaries) = rewrite_merge_returning(
+            engine,
             plan.returning,
             &layer,
             &plan.target_qualifier,
             &plan.returning_aliases,
             &source_schema,
-        );
+            &mut plan.subqueries,
+        )?;
         plan.returning = returning;
         if visited.len() == 1 {
             source_star_boundaries = boundaries;
         }
-        plan.target_predicate =
-            combine_view_predicate(plan.target_predicate, &layer, &plan.target_qualifier);
+        plan.target_predicate = combine_view_predicate(
+            engine,
+            plan.target_predicate,
+            &layer,
+            &plan.target_qualifier,
+            &mut plan.subqueries,
+        )?;
         add_check_option(
+            engine,
             &mut plan.view_checks,
             &layer,
             &plan.target_qualifier,
             &mut cascaded,
-        );
+            &mut plan.subqueries,
+        )?;
         plan.target = layer.source_name;
         plan.include_descendants = layer.source_include_descendants;
         if !super::view_triggers::target_is_view(engine, &plan.target)? {

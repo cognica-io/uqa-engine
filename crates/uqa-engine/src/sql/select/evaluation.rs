@@ -1024,13 +1024,14 @@ impl PhysicalSubqueryRunner for ScopedEngineHook<'_> {
         params: &[SQLParam],
     ) -> Result<uqa_execution::SubqueryResult, SQLError> {
         let cache_key = (self.ctes.scalar_subquery_arena, subquery);
-        if let Some(entry) = self
-            .ctes
-            .scalar_subquery_cache
-            .lock()
-            .get(&cache_key)
-            .cloned()
-        {
+        let cached = {
+            self.ctes
+                .scalar_subquery_cache
+                .lock()
+                .get(&cache_key)
+                .cloned()
+        };
+        if let Some(entry) = cached {
             match entry {
                 ScalarSubqueryCacheEntry::Correlated => {
                     return self.execute_correlated_subquery(plan, outer_row, params);
@@ -1071,13 +1072,14 @@ impl PhysicalSubqueryRunner for ScopedEngineHook<'_> {
         params: &[SQLParam],
     ) -> Result<Value, SQLError> {
         let cache_key = (self.ctes.scalar_subquery_arena, subquery);
-        if let Some(entry) = self
-            .ctes
-            .scalar_subquery_cache
-            .lock()
-            .get(&cache_key)
-            .cloned()
-        {
+        let cached = {
+            self.ctes
+                .scalar_subquery_cache
+                .lock()
+                .get(&cache_key)
+                .cloned()
+        };
+        if let Some(entry) = cached {
             return match entry {
                 ScalarSubqueryCacheEntry::Correlated => self
                     .execute_correlated_subquery(plan, outer_row, params)?
@@ -1121,13 +1123,14 @@ impl PhysicalSubqueryRunner for ScopedEngineHook<'_> {
         params: &[SQLParam],
     ) -> Result<bool, SQLError> {
         let cache_key = (self.ctes.scalar_subquery_arena, subquery);
-        if let Some(entry) = self
-            .ctes
-            .scalar_subquery_cache
-            .lock()
-            .get(&cache_key)
-            .cloned()
-        {
+        let cached = {
+            self.ctes
+                .scalar_subquery_cache
+                .lock()
+                .get(&cache_key)
+                .cloned()
+        };
+        if let Some(entry) = cached {
             return match entry {
                 ScalarSubqueryCacheEntry::Correlated => self
                     .execute_correlated_subquery(plan, outer_row, params)?
@@ -1184,13 +1187,14 @@ impl PhysicalSubqueryRunner for ScopedEngineHook<'_> {
         params: &[SQLParam],
     ) -> Result<Option<bool>, SQLError> {
         let cache_key = (self.ctes.scalar_subquery_arena, subquery);
-        if let Some(entry) = self
-            .ctes
-            .scalar_subquery_cache
-            .lock()
-            .get(&cache_key)
-            .cloned()
-        {
+        let cached = {
+            self.ctes
+                .scalar_subquery_cache
+                .lock()
+                .get(&cache_key)
+                .cloned()
+        };
+        if let Some(entry) = cached {
             return match entry {
                 ScalarSubqueryCacheEntry::Correlated => self
                     .execute_correlated_subquery(plan, outer_row, params)?
