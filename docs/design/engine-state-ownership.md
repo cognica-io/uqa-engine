@@ -26,6 +26,8 @@ Statement and catalog workflows borrow only the state domains they need through 
 
 These capabilities do not contain an `Engine` reference, implement an engine-recovering dereference, or expose unrelated state owners. `Engine` remains the composition facade that constructs the borrowed views, while SQL leaf modules receive the views directly. `UnifiedPlanExecutor` retains the single exhaustive plan match and captures the session, runtime, and mutation capabilities once at construction; catalog scans receive catalog and session views at their scan boundary.
 
+The checked-in ownership policy enumerates the four capability types and their `CatalogEpochs` support type, rejects undeclared data types and service traits in the capability module, and rejects any capability data declaration, type alias, or function signature that retains, accepts, or returns `Engine`. Declared orchestration adapters remain explicit, while migrated catalog leaves fail the policy check on any `Engine` reference.
+
 `pg_namespace` and `pg_settings` row synthesis are engine-free leaves. `CREATE SCHEMA` delegates from the public facade or unified command arm to `MutationCoordinator`; there is no parallel direct schema-registration implementation. Other catalog and mutation families keep their established owners until their own complete dependency bundle moves, so a partially migrated command never falls back between two implementations.
 
 ## Atomicity and locking

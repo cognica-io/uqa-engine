@@ -38,11 +38,22 @@ def write_policy(
 ) -> pathlib.Path:
     policy = root / "scripts" / "engine-capability-policy.json"
     policy.parent.mkdir(parents=True, exist_ok=True)
+    adapter_path = root / adapter_source
+    adapter_text = adapter_path.read_text(encoding="utf-8") if adapter_path.is_file() else ""
+    declared_types = sorted(
+        {
+            name
+            for _, name, _ in CHECKER.data_type_declarations(
+                CHECKER.mask_rust_non_code(adapter_text)
+            )
+        }
+    )
     policy.write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "capability_module": adapter_source,
+                "declared_types": declared_types,
                 "scopes": [
                     {
                         "name": "migrated leaves",
@@ -105,7 +116,47 @@ class EngineCapabilityPolicyTest(unittest.TestCase):
             with self.assertRaisesRegex(CHECKER.PolicyError, "stale Engine allowlist"):
                 CHECKER.verify(root, policy)
 
+    def test_comments_and_literals_do_not_satisfy_engine_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            leaf = "crates/example/src/leaf.rs"
+            adapter = "crates/example/src/capabilities.rs"
+            (root / leaf).parent.mkdir(parents=True)
+            (root / leaf).write_text(
+                "//! Engine is deliberately absent from code.\n"
+                'fn read() { let _ = r#"Engine"#; }\n',
+                encoding="utf-8",
+            )
+            (root / adapter).write_text(
+                '// Engine is deliberately absent from code.\nfn build() { let _ = "Engine"; }\n',
+                encoding="utf-8",
+            )
+            policy = write_policy(root, leaf, adapter)
+
+            with self.assertRaisesRegex(CHECKER.PolicyError, "stale Engine allowlist"):
+                CHECKER.verify(root, policy)
+
     def test_rejects_engine_reference_field_in_capability_module(self) -> None:
+        cases = (
+            "struct CatalogView<'a> { engine: &'a Engine }\n",
+            "struct CatalogView<'a> { inner: &'a Engine }\n",
+            "struct CatalogView(std::sync::Arc<Engine>);\n",
+        )
+        for adapter_source in cases:
+            with self.subTest(adapter_source=adapter_source):
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = pathlib.Path(temporary)
+                    leaf = "crates/example/src/leaf.rs"
+                    adapter = "crates/example/src/capabilities.rs"
+                    (root / leaf).parent.mkdir(parents=True)
+                    (root / leaf).write_text("fn read_catalog() {}\n", encoding="utf-8")
+                    (root / adapter).write_text(adapter_source, encoding="utf-8")
+                    policy = write_policy(root, leaf, adapter)
+
+                    with self.assertRaisesRegex(CHECKER.PolicyError, "must not retain an Engine"):
+                        CHECKER.verify(root, policy)
+
+    def test_rejects_engine_in_any_capability_function_signature(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             leaf = "crates/example/src/leaf.rs"
@@ -113,11 +164,59 @@ class EngineCapabilityPolicyTest(unittest.TestCase):
             (root / leaf).parent.mkdir(parents=True)
             (root / leaf).write_text("fn read_catalog() {}\n", encoding="utf-8")
             (root / adapter).write_text(
-                "struct CatalogView<'a> { engine: &'a Engine }\n", encoding="utf-8"
+                "struct CatalogView; impl CatalogView { fn whole(&self) -> &Engine { todo!() } }\n",
+                encoding="utf-8",
             )
             policy = write_policy(root, leaf, adapter)
 
-            with self.assertRaisesRegex(CHECKER.PolicyError, "must not retain an engine"):
+            with self.assertRaisesRegex(CHECKER.PolicyError, "must not accept or return Engine"):
+                CHECKER.verify(root, policy)
+
+    def test_rejects_import_aliases_that_can_hide_engine_types(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            leaf = "crates/example/src/leaf.rs"
+            adapter = "crates/example/src/capabilities.rs"
+            (root / leaf).parent.mkdir(parents=True)
+            (root / leaf).write_text("fn read_catalog() {}\n", encoding="utf-8")
+            (root / adapter).write_text(
+                "use super::Engine as Whole; struct CatalogView<'a> { inner: &'a Whole }\n",
+                encoding="utf-8",
+            )
+            policy = write_policy(root, leaf, adapter)
+
+            with self.assertRaisesRegex(CHECKER.PolicyError, "must not rename imports"):
+                CHECKER.verify(root, policy)
+
+    def test_rejects_service_traits_regardless_of_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            leaf = "crates/example/src/leaf.rs"
+            adapter = "crates/example/src/capabilities.rs"
+            (root / leaf).parent.mkdir(parents=True)
+            (root / leaf).write_text("fn read_catalog() {}\n", encoding="utf-8")
+            (root / adapter).write_text("trait RuntimeAccess {}\n", encoding="utf-8")
+            policy = write_policy(root, leaf, adapter)
+
+            with self.assertRaisesRegex(CHECKER.PolicyError, "must not define service traits"):
+                CHECKER.verify(root, policy)
+
+    def test_rejects_data_types_not_declared_in_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            leaf = "crates/example/src/leaf.rs"
+            adapter = "crates/example/src/capabilities.rs"
+            (root / leaf).parent.mkdir(parents=True)
+            (root / leaf).write_text("fn read_catalog() {}\n", encoding="utf-8")
+            (root / adapter).write_text(
+                "struct CatalogView; struct Everything;\n", encoding="utf-8"
+            )
+            policy = write_policy(root, leaf, adapter)
+            document = json.loads(policy.read_text(encoding="utf-8"))
+            document["declared_types"] = ["CatalogView"]
+            policy.write_text(json.dumps(document), encoding="utf-8")
+
+            with self.assertRaisesRegex(CHECKER.PolicyError, "must match policy"):
                 CHECKER.verify(root, policy)
 
     def test_rejects_other_capability_escape_hatches(self) -> None:
