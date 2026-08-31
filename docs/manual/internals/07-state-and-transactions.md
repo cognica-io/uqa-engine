@@ -15,6 +15,12 @@
 
 The detailed normative record is [Engine state ownership](../../design/engine-state-ownership.md).
 
+## Borrowed execution capabilities
+
+The composition facade constructs four narrow borrowed capabilities over these owners: `CatalogReadView` for immutable catalog projection and stable epochs, `SessionExecutionView` for search path, users, variables, and transaction-visible identity, `QueryRuntimeView` for cancellation, `work_mem`, callbacks, and diagnostics, and `MutationCoordinator` for command-specific durable transitions and publication. None can dereference or otherwise recover the enclosing `Engine`.
+
+`UnifiedPlanExecutor` captures the session, query-runtime, and mutation capabilities at statement construction while retaining one exhaustive top-level plan match. Virtual catalog scans receive catalog and session views explicitly; the `pg_namespace` and `pg_settings` row builders therefore cannot access transaction mutation, locks, storage publication, or unrelated registries. SQL `CREATE SCHEMA` and the public schema facade share the same `MutationCoordinator` implementation, including persistence-before-publication and rollback behavior.
+
 ## Session derivation
 
 ```mermaid

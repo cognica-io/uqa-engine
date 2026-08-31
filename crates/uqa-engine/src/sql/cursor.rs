@@ -145,7 +145,6 @@ fn execute_uncached_or_snapshot_scoped(
         .map_err(|error| abort_explicit_statement_error(engine, error))?;
     let has_row_locks = query_has_row_locks(query);
     let _row_lock_statement = has_row_locks.then(|| engine.begin_row_lock_statement());
-    let executor = UnifiedPlanExecutor::new(engine, params);
 
     if engine.transaction_depth() != 0 {
         engine.ensure_transaction_usable()?;
@@ -183,6 +182,7 @@ fn execute_uncached_or_snapshot_scoped(
         }
         let optimized = optimize_engine_plan(engine, plan)
             .map_err(|error| engine.abort_sql_transaction_after_error(error))?;
+        let executor = UnifiedPlanExecutor::new(engine, params);
         return execute_spilled(&executor, &optimized)
             .map_err(|error| engine.abort_sql_transaction_after_error(error));
     }
@@ -200,6 +200,7 @@ fn execute_uncached_or_snapshot_scoped(
             engine.cache_optimized_sql_plan(sql, Arc::clone(&plan));
             plan
         };
+        let executor = UnifiedPlanExecutor::new(engine, params);
         return execute_spilled(&executor, optimized.as_ref());
     }
 
@@ -261,6 +262,7 @@ fn execute_uncached_or_snapshot_scoped(
         Ok(plan) => plan,
         Err(error) => return rollback_after_statement_error(engine, error),
     };
+    let executor = UnifiedPlanExecutor::new(engine, params);
     let cursor = match execute_spilled(&executor, &optimized) {
         Ok(cursor) => cursor,
         Err(error) => return rollback_after_statement_error(engine, error),

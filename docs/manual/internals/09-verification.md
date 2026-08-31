@@ -58,12 +58,13 @@ Choose the narrow command during iteration, then run every affected crate and cr
 python3 scripts/check-workspace-dependencies.py
 python3 scripts/check-integration-test-harnesses.py
 python3 scripts/check-benchmark-coverage.py
+python3 scripts/check-engine-capabilities.py
 bash scripts/check-rust-file-headers.sh
 bash scripts/check-rust-file-lines.sh
 bash scripts/check-public-repository-hygiene.sh
 ```
 
-The dependency checker enforces crate layering. The harness checker prevents uncontrolled integration-test process growth. Benchmark coverage ensures workload entry points and semantic evidence remain represented. Header, line, and hygiene scripts enforce repository publication rules.
+The dependency checker enforces crate layering. The harness checker prevents uncontrolled integration-test process growth. Benchmark coverage ensures workload entry points and semantic evidence remain represented. The capability checker loads `scripts/engine-capability-policy.json`, rejects `Engine` access in declared leaf modules, rejects undeclared or stale adapter exceptions, and prevents an engine reference, dereference, catch-all service type, or recovery method from escaping through the capability module. Header, line, and hygiene scripts enforce repository publication rules.
 
 The Rust line checker loads `scripts/rust-file-line-policy.json`. Every hand-maintained file at or above 1,000 physical lines must have an exact checked-in baseline, any shrink must lower or remove that baseline in the same change, and an unlisted file cannot reach 1,000 lines. Imported `uqa-pg-query` sources and build output under `target` remain excluded. Reproduce the `cloc`, physical-line, per-crate, SQL concentration, `Engine` coupling, and root-lint baseline together with:
 
@@ -78,7 +79,15 @@ runner_target=$(mktemp -d /private/tmp/uqa-rust-fixed-runner.XXXXXX)
 env CARGO_TARGET_DIR="$runner_target" /usr/bin/time -p cargo test -p uqa-engine --test integration --no-run --locked --offline
 ```
 
-The 2026-08-31 Phase 0 boundary on Rust and Cargo 1.90.0 for `aarch64-apple-darwin` measured 142.76 seconds clean and 0.30 seconds warm. Absolute time is machine-specific; the stable runner, locked dependency graph, offline mode, and empty-versus-warm target distinction make later measurements comparable on the same host.
+The 2026-08-31 structural baseline on Rust and Cargo 1.90.0 for `aarch64-apple-darwin` measured 142.76 seconds clean and 0.30 seconds warm. Absolute time is machine-specific; the stable runner, locked dependency graph, offline mode, and empty-versus-warm target distinction make later measurements comparable on the same host.
+
+The capability boundary has focused executable evidence inside the crate's existing single integration target:
+
+```sh
+cargo test -p uqa-engine --test integration engine_catalog::capability_boundaries::
+```
+
+That filter executes virtual catalog reads against session state and a persistent `CREATE SCHEMA` lifecycle covering sibling isolation, rollback, commit, and reopen; it is not a compile-only check.
 
 ## Exactness oracles
 

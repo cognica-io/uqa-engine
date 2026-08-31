@@ -8,6 +8,7 @@
 
 use uqa_sql::ast::ColumnType;
 
+use crate::engine_capabilities::SessionExecutionView;
 use crate::Engine;
 
 /// Namespace of the Apache AGE catalog relations, types, and functions.
@@ -58,12 +59,15 @@ pub(super) enum VirtualRelation {
 /// qualified or bare because `PostgreSQL` always searches `pg_catalog`;
 /// the AGE relations resolve bare only while `ag_catalog` is on the
 /// session `search_path`, exactly like the extension's schema.
-pub(super) fn resolve_virtual_relation(engine: &Engine, name: &str) -> Option<VirtualRelation> {
+pub(super) fn resolve_virtual_relation(
+    session: SessionExecutionView<'_>,
+    name: &str,
+) -> Option<VirtualRelation> {
     let lower = name.to_ascii_lowercase();
     if let Some(local) = lower.strip_prefix("ag_catalog.") {
         return resolve_ag_catalog_relation(local);
     }
-    if !lower.contains('.') && engine.search_path_contains(AG_CATALOG_SCHEMA) {
+    if !lower.contains('.') && session.search_path_contains(AG_CATALOG_SCHEMA) {
         if let Some(relation) = resolve_ag_catalog_relation(&lower) {
             return Some(relation);
         }
@@ -149,7 +153,7 @@ pub(in crate::sql) fn virtual_relation_schema(
     engine: &Engine,
     name: &str,
 ) -> Result<Option<Vec<(String, ColumnType)>>, uqa_sql::SQLError> {
-    if let Some(relation) = resolve_virtual_relation(engine, name) {
+    if let Some(relation) = resolve_virtual_relation(engine.session_execution_view(), name) {
         return Ok(Some(relation.schema()));
     }
     super::ag_catalog::age_label_relation_schema(engine, name)
@@ -159,7 +163,8 @@ pub(in crate::sql) fn virtual_relation_accepts_row_lock(
     engine: &Engine,
     name: &str,
 ) -> Option<bool> {
-    resolve_virtual_relation(engine, name).map(VirtualRelation::accepts_row_lock)
+    resolve_virtual_relation(engine.session_execution_view(), name)
+        .map(VirtualRelation::accepts_row_lock)
 }
 
 impl VirtualRelation {
@@ -937,26 +942,32 @@ mod tests {
     fn ag_catalog_relations_resolve_qualified_or_through_the_search_path() {
         let engine = Engine::new();
         assert_eq!(
-            resolve_virtual_relation(&engine, "ag_catalog.ag_graph"),
+            resolve_virtual_relation(engine.session_execution_view(), "ag_catalog.ag_graph"),
             Some(VirtualRelation::AgGraph)
         );
         assert_eq!(
-            resolve_virtual_relation(&engine, "AG_CATALOG.AG_LABEL"),
+            resolve_virtual_relation(engine.session_execution_view(), "AG_CATALOG.AG_LABEL"),
             Some(VirtualRelation::AgLabel)
         );
-        assert_eq!(resolve_virtual_relation(&engine, "ag_graph"), None);
+        assert_eq!(
+            resolve_virtual_relation(engine.session_execution_view(), "ag_graph"),
+            None
+        );
         engine
             .set_variable("search_path", "ag_catalog, \"$user\", public")
             .unwrap();
         assert_eq!(
-            resolve_virtual_relation(&engine, "ag_graph"),
+            resolve_virtual_relation(engine.session_execution_view(), "ag_graph"),
             Some(VirtualRelation::AgGraph)
         );
         assert_eq!(
-            resolve_virtual_relation(&engine, "ag_label"),
+            resolve_virtual_relation(engine.session_execution_view(), "ag_label"),
             Some(VirtualRelation::AgLabel)
         );
-        assert_eq!(resolve_virtual_relation(&engine, "public.ag_graph"), None);
+        assert_eq!(
+            resolve_virtual_relation(engine.session_execution_view(), "public.ag_graph"),
+            None
+        );
 
         let graph = virtual_relation_schema(&engine, "ag_catalog.ag_graph")
             .unwrap()

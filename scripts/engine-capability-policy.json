@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "capability_module": "crates/uqa-engine/src/engine_capabilities.rs",
+  "scopes": [
+    {
+      "name": "catalog and session read leaves",
+      "files": [
+        "crates/uqa-engine/src/sql/catalog/pg_namespace.rs",
+        "crates/uqa-engine/src/sql/catalog/pg_settings.rs"
+      ],
+      "engine_allowlist": []
+    },
+    {
+      "name": "catalog scan adapters",
+      "files": [
+        "crates/uqa-engine/src/sql/catalog.rs",
+        "crates/uqa-engine/src/sql/catalog/schema.rs",
+        "crates/uqa-engine/src/sql/from_rows/local_table/table_source.rs"
+      ],
+      "engine_allowlist": [
+        "crates/uqa-engine/src/sql/catalog.rs",
+        "crates/uqa-engine/src/sql/catalog/schema.rs",
+        "crates/uqa-engine/src/sql/from_rows/local_table/table_source.rs"
+      ]
+    },
+    {
+      "name": "mutation adapters",
+      "files": [
+        "crates/uqa-engine/src/engine_capabilities.rs",
+        "crates/uqa-engine/src/engine_session/schemas.rs",
+        "crates/uqa-engine/src/sql/plan_executor.rs"
+      ],
+      "engine_allowlist": [
+        "crates/uqa-engine/src/engine_capabilities.rs",
+        "crates/uqa-engine/src/engine_session/schemas.rs",
+        "crates/uqa-engine/src/sql/plan_executor.rs"
+      ]
+    },
+    {
+      "name": "engine facade and workflow adapters",
+      "files": [
+        "crates/uqa-engine/src/engine_hook.rs",
+        "crates/uqa-engine/src/engine_statement_cache.rs",
+        "crates/uqa-engine/src/engine_truncate.rs",
+        "crates/uqa-engine/src/sql/cursor.rs",
+        "crates/uqa-engine/src/sql/driver.rs",
+        "crates/uqa-engine/src/sql/session_portal_worker.rs"
+      ],
+      "engine_allowlist": [
+        "crates/uqa-engine/src/engine_hook.rs",
+        "crates/uqa-engine/src/engine_statement_cache.rs",
+        "crates/uqa-engine/src/engine_truncate.rs",
+        "crates/uqa-engine/src/sql/cursor.rs",
+        "crates/uqa-engine/src/sql/driver.rs",
+        "crates/uqa-engine/src/sql/session_portal_worker.rs"
+      ]
+    }
+  ]
+}

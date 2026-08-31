@@ -51,6 +51,7 @@ USQL = os.environ.get("UQA_USQL", str(REPO_ROOT / "target" / "release" / "usql")
 PG_CONTAINER = os.environ.get("UQA_PG_CONTAINER", "uqa-pg18-age")
 PG_DATABASE = os.environ.get("UQA_PG_DATABASE", "postgres")
 SCHEMA_PLACEHOLDER = "__UQA_STATEFUL_SCHEMA__"
+SCHEMA_PROBE_PLACEHOLDER = "__UQA_SCHEMA_PROBE__"
 ROLE_PLACEHOLDERS = {
     "__UQA_ROLE_PARENT__": "parent",
     "__UQA_ROLE_MEMBER__": "member",
@@ -148,6 +149,11 @@ def render_case_sql(case: Case, schema: str) -> str:
         quote_literal(SCHEMA_PLACEHOLDER), quote_literal(schema)
     )
     sql = sql.replace(SCHEMA_PLACEHOLDER, quote_identifier(schema))
+    schema_probe = f"{schema}_schema_probe"
+    sql = sql.replace(
+        quote_literal(SCHEMA_PROBE_PLACEHOLDER), quote_literal(schema_probe)
+    )
+    sql = sql.replace(SCHEMA_PROBE_PLACEHOLDER, quote_identifier(schema_probe))
     for placeholder, role in rendered_role_names(schema).items():
         sql = sql.replace(quote_literal(placeholder), quote_literal(role))
         sql = sql.replace(placeholder, quote_identifier(role))
@@ -326,6 +332,7 @@ def run_postgres(cases: list[Case]) -> tuple[dict[str, str], list[dict]]:
     extension = pg_query("CREATE EXTENSION IF NOT EXISTS btree_gist")
     require_success("PostgreSQL btree_gist setup", extension)
     schema = f"uqa_pg18_stateful_{os.getpid()}_{secrets.token_hex(4)}"
+    schema_probe = f"{schema}_schema_probe"
     entries: list[dict] = []
     try:
         for case in cases:
@@ -349,6 +356,7 @@ def run_postgres(cases: list[Case]) -> tuple[dict[str, str], list[dict]]:
             f"public.{quote_identifier(schema)}(integer), "
             f"public.{quote_identifier(schema)}(boolean), "
             f"public.{quote_identifier(schema)}(text); "
+            f"DROP SCHEMA IF EXISTS {quote_identifier(schema_probe)} CASCADE; "
             f"DROP SCHEMA IF EXISTS {quote_identifier(schema)} CASCADE; "
             + drop_roles,
             timeout=60,

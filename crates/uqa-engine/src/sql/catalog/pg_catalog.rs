@@ -7,13 +7,13 @@
 //! Virtual `pg_catalog` relation builders.
 
 use super::helpers::{
-    all_schema_names, array_dimension_count, bool_value, catalog_array, catalog_name,
-    catalog_ordinal, catalog_usize, constraint_catalog_rows, current_user_name, current_user_oid,
-    default_expr_text, index_columns, indexdef, int_value, pg_type_align, pg_type_array_oid,
-    pg_type_by_value, pg_type_collation_oid, pg_type_element_oid, pg_type_len, pg_type_modifier,
-    pg_type_oid, pg_type_routine_oids, pg_type_storage, pg_type_subscript_handler, relation_oid,
-    row, schema_oid, split_index_name, split_schema_name, stable_object_oid, stable_oid, str_value,
-    table_columns_for, view_columns_for, PgTypeRoutineOids,
+    array_dimension_count, bool_value, catalog_array, catalog_name, catalog_ordinal, catalog_usize,
+    constraint_catalog_rows, current_user_name, current_user_oid, default_expr_text, index_columns,
+    indexdef, int_value, pg_type_align, pg_type_array_oid, pg_type_by_value, pg_type_collation_oid,
+    pg_type_element_oid, pg_type_len, pg_type_modifier, pg_type_oid, pg_type_routine_oids,
+    pg_type_storage, pg_type_subscript_handler, relation_oid, row, schema_oid, split_index_name,
+    split_schema_name, stable_object_oid, stable_oid, str_value, table_columns_for,
+    view_columns_for, PgTypeRoutineOids,
 };
 use super::{value_to_text, ColumnType, Engine, ResultRow, SQLColumnDef, SQLError, Value};
 use uqa_core::ArrayValue;
@@ -60,20 +60,6 @@ pub(super) fn build_pg_tables(engine: &Engine) -> Result<Vec<ResultRow>, SQLErro
         ]));
     }
     Ok(out)
-}
-
-pub(super) fn build_pg_namespace(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
-    Ok(all_schema_names(engine)?
-        .into_iter()
-        .map(|schema| {
-            row([
-                ("oid", int_value(schema_oid(&schema))),
-                ("nspname", str_value(schema)),
-                ("nspowner", int_value(current_user_oid())),
-                ("nspacl", Value::Null),
-            ])
-        })
-        .collect())
 }
 
 pub(in crate::sql) fn table_relation_oid(engine: &Engine, table: &str) -> Result<i64, SQLError> {

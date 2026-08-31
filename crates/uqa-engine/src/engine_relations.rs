@@ -5,9 +5,67 @@
 //
 
 use super::{
-    value_to_f64_vec, value_to_usize, Arc, Engine, RelationIdentity, SQLError, StorageBackendError,
-    StorageBackendResult, TableState, TrainingExample, TrainingSet,
+    Arc, Engine, RelationIdentity, SQLError, StorageBackendError, StorageBackendResult, TableState,
+    TrainingExample, TrainingSet,
 };
+
+pub(super) fn value_to_f64_vec(value: &super::Value) -> Result<Vec<f64>, String> {
+    match value {
+        super::Value::List(items) => items
+            .iter()
+            .map(|item| match item {
+                super::Value::Float(value) => Ok(*value),
+                super::Value::Int(value) => Ok(*value as f64),
+                super::Value::Decimal(value) => value
+                    .to_f64()
+                    .ok_or_else(|| "decimal feature is outside f64 range".to_string()),
+                other => Err(format!("expected numeric feature, got {other:?}")),
+            })
+            .collect(),
+        super::Value::Array(array) if array.dimensions().len() <= 1 => array
+            .elements()
+            .iter()
+            .map(|item| match item {
+                super::Value::Float(value) => Ok(*value),
+                super::Value::Int(value) => Ok(*value as f64),
+                super::Value::Decimal(value) => value
+                    .to_f64()
+                    .ok_or_else(|| "decimal feature is outside f64 range".to_string()),
+                other => Err(format!("expected numeric feature, got {other:?}")),
+            })
+            .collect(),
+        super::Value::Array(array) => Err(format!(
+            "expected one-dimensional feature array, got {} dimensions",
+            array.dimensions().len()
+        )),
+        other => Err(format!("expected feature array, got {other:?}")),
+    }
+}
+
+pub(super) fn value_to_usize(value: &super::Value) -> Result<usize, String> {
+    match value {
+        super::Value::Int(value) if *value >= 0 => usize::try_from(*value)
+            .map_err(|_| format!("integer label {value} exceeds the platform usize range")),
+        super::Value::Float(value) => {
+            let exponent = i32::try_from(usize::BITS)
+                .map_err(|_| "platform usize width exceeds f64 exponent range".to_string())?;
+            let upper_exclusive = 2.0_f64.powi(exponent);
+            if !value.is_finite()
+                || *value < 0.0
+                || value.fract() != 0.0
+                || *value >= upper_exclusive
+            {
+                return Err(format!(
+                    "expected finite non-negative integer label within usize range, got {value}"
+                ));
+            }
+            Ok(*value as usize)
+        }
+        other => Err(format!(
+            "expected non-negative integer label, got {other:?}"
+        )),
+    }
+}
 
 impl Engine {
     pub(crate) fn relation_lookup_candidates(
@@ -371,26 +429,6 @@ impl Engine {
         name: &str,
     ) -> StorageBackendResult<Option<uqa_sql::ast::RelationPersistence>> {
         Ok(self.try_query_table(name)?.map(|table| table.persistence))
-    }
-
-    pub(crate) fn has_temporary_relations(&self) -> bool {
-        self.storage
-            .tables
-            .read()
-            .values()
-            .any(|table| table.persistence == uqa_sql::ast::RelationPersistence::Temporary)
-            || self
-                .durable
-                .views
-                .read()
-                .values()
-                .any(|view| view.persistence == uqa_sql::ast::RelationPersistence::Temporary)
-            || self
-                .durable
-                .sequence_persistence
-                .read()
-                .values()
-                .any(|persistence| *persistence == uqa_sql::ast::RelationPersistence::Temporary)
     }
 
     pub(crate) fn sequence_persistence(

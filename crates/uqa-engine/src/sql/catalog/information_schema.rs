@@ -24,20 +24,22 @@ pub(super) fn build_info_catalog_name() -> Vec<ResultRow> {
 }
 
 pub(super) fn build_info_schemata(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
-    Ok(all_schema_names(engine)?
-        .into_iter()
-        .map(|schema| {
-            row([
-                ("catalog_name", catalog_name()),
-                ("schema_name", str_value(schema)),
-                ("schema_owner", str_value(current_user_name())),
-                ("default_character_set_catalog", catalog_name()),
-                ("default_character_set_schema", str_value("pg_catalog")),
-                ("default_character_set_name", str_value("UTF8")),
-                ("sql_path", Value::Null),
-            ])
-        })
-        .collect())
+    Ok(
+        all_schema_names(engine.catalog_read_view(), engine.session_execution_view())?
+            .into_iter()
+            .map(|schema| {
+                row([
+                    ("catalog_name", catalog_name()),
+                    ("schema_name", str_value(schema)),
+                    ("schema_owner", str_value(current_user_name())),
+                    ("default_character_set_catalog", catalog_name()),
+                    ("default_character_set_schema", str_value("pg_catalog")),
+                    ("default_character_set_name", str_value("UTF8")),
+                    ("sql_path", Value::Null),
+                ])
+            })
+            .collect(),
+    )
 }
 
 pub(super) fn build_info_tables(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {

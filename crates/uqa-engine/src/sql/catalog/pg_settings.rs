@@ -7,9 +7,12 @@
 //! Virtual `pg_settings` row synthesis.
 
 use super::helpers::{bool_value, catalog_array, row, str_value};
-use super::{Engine, ResultRow, SQLError, Value};
+use super::{ResultRow, SQLError, Value};
+use crate::engine_capabilities::SessionExecutionView;
 
-pub(super) fn build_pg_settings(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
+pub(super) fn build_pg_settings(
+    session: SessionExecutionView<'_>,
+) -> Result<Vec<ResultRow>, SQLError> {
     let settings = [
         ("server_version", "Version and compatibility"),
         ("server_encoding", "Client connection defaults"),
@@ -38,7 +41,7 @@ pub(super) fn build_pg_settings(engine: &Engine) -> Result<Vec<ResultRow>, SQLEr
     settings
         .into_iter()
         .map(|(name, category)| {
-            let setting = engine.show_variable(name)?;
+            let setting = session.show_variable(name)?;
             let replication_role = name == "session_replication_role";
             let enumvals = if replication_role {
                 catalog_array(

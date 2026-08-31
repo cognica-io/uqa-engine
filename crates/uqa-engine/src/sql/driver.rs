@@ -139,11 +139,6 @@ fn execute_uncached_or_snapshot_scoped(
                 engine.begin_implicit_transaction_block()?;
                 implicit_segment_open = true;
             }
-            let mut executor = UnifiedPlanExecutor::with_nested_statement(
-                engine,
-                params,
-                nested_statement || simple_query_batch,
-            );
             let (initial_plan, cached_optimized_plan) = if is_single_statement {
                 if let Some(cached) = cached_entry.take() {
                     (cached.logical_plan, cached.optimized_plan)
@@ -186,7 +181,12 @@ fn execute_uncached_or_snapshot_scoped(
                 {
                     engine.push_sql_notice("WARNING", "there is no transaction in progress");
                 }
-                last = executor.execute(initial_plan.as_ref())?;
+                last = UnifiedPlanExecutor::with_nested_statement(
+                    engine,
+                    params,
+                    nested_statement || simple_query_batch,
+                )
+                .execute(initial_plan.as_ref())?;
                 if simple_query_batch
                     && transaction.as_ref().is_some_and(|transaction| {
                         matches!(
@@ -260,6 +260,11 @@ fn execute_uncached_or_snapshot_scoped(
                         return Err(engine.abort_sql_transaction_after_error(error));
                     }
                 };
+                let mut executor = UnifiedPlanExecutor::with_nested_statement(
+                    engine,
+                    params,
+                    nested_statement || simple_query_batch,
+                );
                 match executor.execute(&optimized) {
                     Ok(result) => last = result,
                     Err(error) => return Err(engine.abort_sql_transaction_after_error(error)),
@@ -373,6 +378,11 @@ fn execute_uncached_or_snapshot_scoped(
                     Ok(plan) => plan,
                     Err(error) => return rollback_after_statement_error(engine, error),
                 };
+                let mut executor = UnifiedPlanExecutor::with_nested_statement(
+                    engine,
+                    params,
+                    nested_statement || simple_query_batch,
+                );
                 match executor.execute(&optimized) {
                     Ok(result) => {
                         // Commit failure cleanup is owned by the transaction
@@ -399,7 +409,12 @@ fn execute_uncached_or_snapshot_scoped(
                     }
                     plan
                 };
-                last = executor.execute(optimized.as_ref())?;
+                last = UnifiedPlanExecutor::with_nested_statement(
+                    engine,
+                    params,
+                    nested_statement || simple_query_batch,
+                )
+                .execute(optimized.as_ref())?;
             }
         }
         Ok(last)

@@ -868,7 +868,7 @@ pub(super) fn fire_instead_of_row_triggers(
     normalize_instead_of_trigger_record(&columns, final_record)
 }
 
-pub(super) fn fire_statement_triggers(
+pub(crate) fn fire_statement_triggers(
     engine: &Engine,
     table: &str,
     timing: TriggerTiming,

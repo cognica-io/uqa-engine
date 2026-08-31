@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "b7f259b91f6c7f92f97f2c51ac9a3f8f4885333b06dd13faa0d2fb757b0db161",
+  "fixture_sha256": "cab139befebbf4915cae85b829d9352ba8150ab6147311a063c4a98addb52231",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -10,6 +10,46 @@
   "cases": [
     {
       "name": "create_schema",
+      "kind": "ok"
+    },
+    {
+      "name": "catalog_session_views",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "schema_create_rollback",
+      "kind": "ok"
+    },
+    {
+      "name": "schema_create_rollback_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "schema_create_commit",
+      "kind": "ok"
+    },
+    {
+      "name": "schema_create_commit_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "schema_create_commit_cleanup",
       "kind": "ok"
     },
     {

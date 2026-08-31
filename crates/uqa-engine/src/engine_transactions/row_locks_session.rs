@@ -319,7 +319,9 @@ impl Engine {
                 pending,
                 source_generation,
                 successor_generation: None,
-                query_origin: self.query_transaction_origin,
+                query_origin: self
+                    .session_execution_view()
+                    .transaction_snapshot_identity(),
             });
             Ok(())
         } else {
@@ -515,7 +517,9 @@ impl Engine {
                 pending,
                 source_generation,
                 successor_generation: Some(successor_generation),
-                query_origin: self.query_transaction_origin,
+                query_origin: self
+                    .session_execution_view()
+                    .transaction_snapshot_identity(),
             });
             Ok(())
         } else {

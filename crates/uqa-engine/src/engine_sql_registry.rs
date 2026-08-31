@@ -177,24 +177,16 @@ impl Engine {
         name: &str,
         args: &[Value],
     ) -> Option<std::result::Result<Value, SQLError>> {
-        let registration = self
-            .extensions
-            .scalar_functions
-            .read()
-            .get(&name.to_ascii_lowercase())
-            .cloned()?;
+        let registration = self.query_runtime_view().lookup_scalar_function(name)?;
         Some(registration.function.call(args))
     }
 
     pub(crate) fn has_registered_scalar_functions(&self) -> bool {
-        !self.extensions.scalar_functions.read().is_empty()
+        self.query_runtime_view().has_scalar_functions()
     }
 
     pub(crate) fn has_registered_scalar_function(&self, name: &str) -> bool {
-        self.extensions
-            .scalar_functions
-            .read()
-            .contains_key(&name.to_ascii_lowercase())
+        self.query_runtime_view().has_scalar_function(name)
     }
 
     pub(crate) fn call_registered_table_function(
@@ -202,20 +194,12 @@ impl Engine {
         name: &str,
         args: &[Value],
     ) -> Option<std::result::Result<SQLTableFunctionResult, SQLError>> {
-        let registration = self
-            .extensions
-            .table_functions
-            .read()
-            .get(&name.to_ascii_lowercase())
-            .cloned()?;
+        let registration = self.query_runtime_view().lookup_table_function(name)?;
         Some(registration.function.call(args))
     }
 
     pub(crate) fn has_registered_table_function(&self, name: &str) -> bool {
-        self.extensions
-            .table_functions
-            .read()
-            .contains_key(&name.to_ascii_lowercase())
+        self.query_runtime_view().has_table_function(name)
     }
 
     pub(crate) fn call_registered_table_function_stream(
@@ -223,31 +207,21 @@ impl Engine {
         name: &str,
         args: &[Value],
     ) -> Option<std::result::Result<crate::SQLTableFunctionStream, SQLError>> {
-        let registration = self
-            .extensions
-            .table_functions
-            .read()
-            .get(&name.to_ascii_lowercase())
-            .cloned()?;
+        let registration = self.query_runtime_view().lookup_table_function(name)?;
         Some(registration.function.call_stream(args))
     }
 
     pub(crate) fn has_registered_aggregate_function(&self, name: &str) -> bool {
-        self.extensions
-            .aggregate_functions
-            .read()
-            .contains_key(&name.to_ascii_lowercase())
+        self.query_runtime_view().has_aggregate_function(name)
     }
 
     pub(crate) fn registered_aggregate_function(
         &self,
         name: &str,
     ) -> Option<Arc<dyn SQLAggregateFunction>> {
-        self.extensions
-            .aggregate_functions
-            .read()
-            .get(&name.to_ascii_lowercase())
-            .map(|registration| registration.function.clone())
+        self.query_runtime_view()
+            .lookup_aggregate_function(name)
+            .map(|registration| registration.function)
     }
 
     pub(crate) fn registered_runtime_function_may_mutate_engine(&self, name: &str) -> bool {
@@ -280,23 +254,6 @@ impl Engine {
     }
 
     fn registered_runtime_function_options(&self, name: &str) -> [Option<SQLFunctionOptions>; 3] {
-        let name = name.to_ascii_lowercase();
-        [
-            self.extensions
-                .scalar_functions
-                .read()
-                .get(&name)
-                .map(|registration| registration.options),
-            self.extensions
-                .table_functions
-                .read()
-                .get(&name)
-                .map(|registration| registration.options),
-            self.extensions
-                .aggregate_functions
-                .read()
-                .get(&name)
-                .map(|registration| registration.options),
-        ]
+        self.query_runtime_view().registered_function_options(name)
     }
 }

@@ -10,6 +10,8 @@ Keep each prose paragraph on one physical line. Do not insert line breaks inside
 
 Preserve the established `CPU`, `MLX`, and `UQA` initialisms in Rust identifiers and design pseudocode; do not apply mixed-case acronym normalization to them.
 
+Do not put rollout phase identifiers in source comments, documentation comments, test names, or permanent policy labels; describe enduring ownership or behavior instead.
+
 Name feature branches with the `feature/` prefix and bug-fix branches with the `fix/` prefix. Do not use any other branch prefix.
 
 Do not prefix commit messages or pull request titles with labels such as `feat:`, `fix:`, `chore:`, `doc:`, or `docs:`.

@@ -1029,10 +1029,7 @@ impl Engine {
 
     /// Queue a notice (`RAISE NOTICE` / `WARNING` / ...).
     pub(crate) fn push_sql_notice(&self, level: &str, message: &str) {
-        self.runtime
-            .notices
-            .lock()
-            .push((level.to_string(), message.to_string()));
+        self.query_runtime_view().push_diagnostic(level, message);
     }
 
     /// Drain queued notices as `(level, message)` pairs in emission

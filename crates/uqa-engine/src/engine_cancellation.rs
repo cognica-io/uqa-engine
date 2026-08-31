@@ -19,7 +19,7 @@ impl Engine {
     }
 
     pub fn cancellation_token(&self) -> uqa_core::CancellationToken {
-        self.runtime.cancellation.clone()
+        self.query_runtime_view().cancellation_token()
     }
 
     /// compatibility alias for [`Engine::cancellation_token`].

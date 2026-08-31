@@ -79,6 +79,7 @@ pub mod sql;
 mod async_sql_engine;
 mod engine_analyzers;
 mod engine_cancellation;
+mod engine_capabilities;
 mod engine_catalog_indexes;
 mod engine_events;
 mod engine_fdw;
@@ -86,6 +87,7 @@ mod engine_fts;
 mod engine_generated;
 mod engine_graphs;
 mod engine_hierarchy;
+mod engine_hook;
 mod engine_models;
 mod engine_open;
 mod engine_relations;
@@ -95,6 +97,7 @@ mod engine_sequences;
 mod engine_session;
 mod engine_sql_registry;
 mod engine_state;
+mod engine_statement_cache;
 mod engine_table_storage;
 mod engine_tables;
 mod engine_transactions;
@@ -103,7 +106,7 @@ mod engine_user_functions;
 mod row_locks;
 mod value_index;
 
-use std::collections::{btree_map::Entry, BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -141,6 +144,7 @@ use engine_state::{
     DurableCatalogSnapshot, DurableCatalogState, EpochCoordinator, QueryRuntime, RuntimeExtensions,
     SessionContext, StorageContext, StoredView, StoredViewKind,
 };
+use engine_statement_cache::{PreparedStatementPlan, SQLStatementCache};
 use functions::RegisteredSQLFunction;
 pub use functions::{
     SQLAggregateFunction, SQLAggregateState, SQLFunctionOptions, SQLFunctionVolatility,
@@ -156,7 +160,6 @@ const ROLES_METADATA_KEY: &str = "sql_roles_json";
 const ROLE_MEMBERSHIPS_METADATA_KEY: &str = "sql_role_memberships_json";
 const TRIGGERS_METADATA_KEY: &str = "sql_triggers_json";
 const RULES_METADATA_KEY: &str = "sql_rules_json";
-const SQL_STATEMENT_CACHE_LIMIT: usize = 256;
 /// Default nesting cap for user-defined function calls. Exceeding it
 /// raises `stack depth limit exceeded`, mirroring the `PostgreSQL`
 /// `max_stack_depth` guard.
@@ -274,77 +277,6 @@ pub struct Engine {
     query_catalog_snapshot: Option<SessionPortalCatalogSnapshot>,
     query_transaction_overlay: Option<SessionPortalTransactionOverlay>,
     query_transaction_origin: Option<u64>,
-}
-
-#[derive(Clone, Default)]
-struct SQLStatementCache {
-    entries: BTreeMap<String, CachedSQLStatement>,
-    insertion_order: VecDeque<String>,
-}
-
-#[derive(Clone)]
-pub(crate) struct CachedSQLStatement {
-    pub(crate) statement: Arc<uqa_sql::ast::Statement>,
-    pub(crate) logical_plan: Arc<uqa_planner::UnifiedPlan>,
-    pub(crate) optimized_plan: Option<Arc<uqa_planner::UnifiedPlan>>,
-}
-
-#[derive(Clone)]
-struct PreparedStatementPlan {
-    logical_plan: uqa_planner::UnifiedPlan,
-    plan: uqa_planner::UnifiedPlan,
-}
-
-impl SQLStatementCache {
-    fn get(&self, sql: &str) -> Option<CachedSQLStatement> {
-        self.entries.get(sql).cloned()
-    }
-
-    fn get_optimized(&self, sql: &str) -> Option<Arc<uqa_planner::UnifiedPlan>> {
-        self.entries
-            .get(sql)
-            .and_then(|cached| cached.optimized_plan.as_ref())
-            .cloned()
-    }
-
-    fn insert(
-        &mut self,
-        sql: String,
-        statement: Arc<uqa_sql::ast::Statement>,
-        logical_plan: Arc<uqa_planner::UnifiedPlan>,
-    ) {
-        let cached = CachedSQLStatement {
-            statement,
-            logical_plan,
-            optimized_plan: None,
-        };
-        if let Entry::Occupied(mut entry) = self.entries.entry(sql.clone()) {
-            entry.insert(cached);
-            return;
-        }
-        while self.entries.len() >= SQL_STATEMENT_CACHE_LIMIT {
-            let Some(oldest) = self.insertion_order.pop_front() else {
-                self.entries.clear();
-                break;
-            };
-            if self.entries.remove(&oldest).is_some() {
-                break;
-            }
-        }
-        self.insertion_order.push_back(sql.clone());
-        self.entries.insert(sql, cached);
-    }
-
-    fn set_optimized(&mut self, sql: &str, optimized_plan: Arc<uqa_planner::UnifiedPlan>) {
-        if let Some(entry) = self.entries.get_mut(sql) {
-            entry.optimized_plan = Some(optimized_plan);
-        }
-    }
-
-    fn clear(&mut self) {
-        self.entries.clear();
-        self.insertion_order.clear();
-    }
 }
 
 /// Mutable state of a single SQL sequence.
@@ -885,115 +817,6 @@ impl Engine {
             query_transaction_origin: None,
         }
     }
-
-    pub(crate) fn cached_sql_statement(&self, sql: &str) -> Option<CachedSQLStatement> {
-        self.session.state.read().sql_statement_cache.get(sql)
-    }
-
-    pub(crate) fn cached_optimized_sql_plan(
-        &self,
-        sql: &str,
-    ) -> Option<Arc<uqa_planner::UnifiedPlan>> {
-        self.session
-            .state
-            .read()
-            .sql_statement_cache
-            .get_optimized(sql)
-    }
-
-    pub(crate) fn cache_sql_statement(
-        &self,
-        sql: String,
-        statement: Arc<uqa_sql::ast::Statement>,
-        logical_plan: Arc<uqa_planner::UnifiedPlan>,
-    ) {
-        self.session
-            .state
-            .write()
-            .sql_statement_cache
-            .insert(sql, statement, logical_plan);
-    }
-
-    pub(crate) fn cache_optimized_sql_plan(
-        &self,
-        sql: &str,
-        optimized_plan: Arc<uqa_planner::UnifiedPlan>,
-    ) {
-        self.session
-            .state
-            .write()
-            .sql_statement_cache
-            .set_optimized(sql, optimized_plan);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn cached_sql_plans(&self, sql: &str) -> Option<Vec<uqa_planner::UnifiedPlan>> {
-        self.cached_sql_statement(sql)
-            .map(|cached| vec![cached.logical_plan.as_ref().clone()])
-    }
-
-    pub(crate) fn clear_sql_statement_cache(&self) {
-        self.session.state.write().sql_statement_cache.clear();
-    }
-
-    // -----------------------------------------------------------------
-    // Rust SQL function registry. Registered functions are engine-local
-    // runtime objects; they are not persisted to the catalog.
-    // -----------------------------------------------------------------
-}
-
-fn default_runtime_parameter(name: &str) -> Option<&'static str> {
-    if name.eq_ignore_ascii_case("server_version") {
-        return Some("18.0-uqa");
-    }
-    if name.eq_ignore_ascii_case("server_encoding") || name.eq_ignore_ascii_case("client_encoding")
-    {
-        return Some("UTF8");
-    }
-    if name.eq_ignore_ascii_case("datestyle") {
-        return Some("ISO, MDY");
-    }
-    if name.eq_ignore_ascii_case("timezone") {
-        return Some("UTC");
-    }
-    if name.eq_ignore_ascii_case("work_mem") {
-        return Some("64MB");
-    }
-    if name.eq_ignore_ascii_case("session_replication_role") {
-        return Some("origin");
-    }
-    if name.eq_ignore_ascii_case("default_transaction_isolation")
-        || name.eq_ignore_ascii_case("transaction_isolation")
-    {
-        return Some("read committed");
-    }
-    if name.eq_ignore_ascii_case("default_transaction_read_only")
-        || name.eq_ignore_ascii_case("default_transaction_deferrable")
-        || name.eq_ignore_ascii_case("transaction_read_only")
-        || name.eq_ignore_ascii_case("transaction_deferrable")
-    {
-        return Some("off");
-    }
-    None
-}
-
-fn is_known_runtime_parameter(name: &str) -> bool {
-    name.eq_ignore_ascii_case("search_path") || default_runtime_parameter(name).is_some()
-}
-
-fn is_mutable_runtime_parameter(name: &str) -> bool {
-    name.eq_ignore_ascii_case("search_path")
-        || name.eq_ignore_ascii_case("client_encoding")
-        || name.eq_ignore_ascii_case("datestyle")
-        || name.eq_ignore_ascii_case("timezone")
-        || name.eq_ignore_ascii_case("work_mem")
-        || name.eq_ignore_ascii_case("session_replication_role")
-        || name.eq_ignore_ascii_case("default_transaction_isolation")
-        || name.eq_ignore_ascii_case("default_transaction_read_only")
-        || name.eq_ignore_ascii_case("default_transaction_deferrable")
-        || name.eq_ignore_ascii_case("transaction_isolation")
-        || name.eq_ignore_ascii_case("transaction_read_only")
-        || name.eq_ignore_ascii_case("transaction_deferrable")
 }
 
 fn initial_random_state() -> SessionRandomState {
@@ -1019,93 +842,6 @@ fn random_state_from_seed(mut seed: u64) -> SessionRandomState {
         SessionRandomState::default()
     } else {
         state
-    }
-}
-
-impl uqa_sql::expr::EngineHook for Engine {
-    fn resolve_type_name(
-        &self,
-        name: &str,
-    ) -> std::result::Result<Option<uqa_sql::ast::ColumnType>, String> {
-        Ok(crate::sql::resolve_catalog_column_type(self, name))
-    }
-
-    fn resolve_regclass(&self, name: &str) -> std::result::Result<Option<i64>, String> {
-        crate::sql::resolve_regclass_oid(self, name)
-    }
-
-    fn resolve_regprocedure(&self, name: &str) -> std::result::Result<Option<i64>, String> {
-        crate::sql::resolve_regprocedure_oid(self, name)
-    }
-
-    fn resolve_regtype_output(
-        &self,
-        ty: &uqa_sql::ast::ColumnType,
-        oid: i64,
-    ) -> std::result::Result<Option<String>, String> {
-        crate::sql::resolve_regtype_output(self, ty, oid)
-    }
-
-    fn nextval(&self, name: &str) -> std::result::Result<i64, SQLError> {
-        self.nextval_sql(name)
-    }
-    fn currval(&self, name: &str) -> std::result::Result<i64, SQLError> {
-        self.currval_sql(name)
-    }
-    fn setval(&self, name: &str, value: i64) -> std::result::Result<i64, SQLError> {
-        self.setval_sql(name, value)
-    }
-    fn call_scalar_function(
-        &self,
-        name: &str,
-        args: &[Value],
-    ) -> Option<std::result::Result<Value, SQLError>> {
-        self.call_registered_scalar_function(name, args)
-    }
-    fn call_bound_builtin_function(
-        &self,
-        binding: &uqa_sql::ast::FunctionBinding,
-        args: &[(Option<String>, Value)],
-    ) -> Option<std::result::Result<Value, SQLError>> {
-        crate::sql::call_bound_engine_builtin(self, binding, args)
-    }
-    fn has_scalar_functions(&self) -> bool {
-        self.has_registered_scalar_functions()
-    }
-    fn current_schema(&self) -> std::result::Result<Option<String>, String> {
-        self.current_schema_name()
-            .map_err(|error| error.to_string())
-    }
-    fn current_user(&self) -> std::result::Result<Option<String>, String> {
-        Ok(Some(self.current_user_name()))
-    }
-    fn session_user(&self) -> std::result::Result<Option<String>, String> {
-        Ok(Some(self.session_user_name()))
-    }
-    fn current_schemas(
-        &self,
-        include_implicit: bool,
-    ) -> std::result::Result<Option<Vec<String>>, String> {
-        self.current_schema_names(include_implicit)
-            .map(Some)
-            .map_err(|error| error.to_string())
-    }
-    fn random_value(&self) -> std::result::Result<Option<f64>, String> {
-        Ok(Some(self.next_random_value()))
-    }
-    fn random_u64(&self) -> std::result::Result<Option<u64>, String> {
-        Ok(Some(self.next_random_u64()))
-    }
-    fn set_random_seed(&self, seed: f64) -> std::result::Result<bool, String> {
-        Engine::set_random_seed(self, seed)?;
-        Ok(true)
-    }
-    fn call_user_function(
-        &self,
-        name: &str,
-        args: &[(Option<String>, Value)],
-    ) -> Option<std::result::Result<Value, SQLError>> {
-        crate::sql::call_user_scalar_function(self, name, args)
     }
 }
 
@@ -1142,134 +878,6 @@ pub struct RobustHybridSearchParams<'a> {
     /// Must be finite and in `[0, 1]`.
     pub alpha: f64,
     pub top_k: usize,
-}
-
-fn value_to_f64_vec(value: &Value) -> Result<Vec<f64>, String> {
-    match value {
-        Value::List(items) => items
-            .iter()
-            .map(|item| match item {
-                Value::Float(value) => Ok(*value),
-                Value::Int(value) => Ok(*value as f64),
-                Value::Decimal(value) => value
-                    .to_f64()
-                    .ok_or_else(|| "decimal feature is outside f64 range".to_string()),
-                other => Err(format!("expected numeric feature, got {other:?}")),
-            })
-            .collect(),
-        Value::Array(array) if array.dimensions().len() <= 1 => array
-            .elements()
-            .iter()
-            .map(|item| match item {
-                Value::Float(value) => Ok(*value),
-                Value::Int(value) => Ok(*value as f64),
-                Value::Decimal(value) => value
-                    .to_f64()
-                    .ok_or_else(|| "decimal feature is outside f64 range".to_string()),
-                other => Err(format!("expected numeric feature, got {other:?}")),
-            })
-            .collect(),
-        Value::Array(array) => Err(format!(
-            "expected one-dimensional feature array, got {} dimensions",
-            array.dimensions().len()
-        )),
-        other => Err(format!("expected feature array, got {other:?}")),
-    }
-}
-
-fn value_to_usize(value: &Value) -> Result<usize, String> {
-    match value {
-        Value::Int(value) if *value >= 0 => usize::try_from(*value)
-            .map_err(|_| format!("integer label {value} exceeds the platform usize range")),
-        Value::Float(value) => {
-            let exponent = i32::try_from(usize::BITS)
-                .map_err(|_| "platform usize width exceeds f64 exponent range".to_string())?;
-            let upper_exclusive = 2.0_f64.powi(exponent);
-            if !value.is_finite()
-                || *value < 0.0
-                || value.fract() != 0.0
-                || *value >= upper_exclusive
-            {
-                return Err(format!(
-                    "expected finite non-negative integer label within usize range, got {value}"
-                ));
-            }
-            Ok(*value as usize)
-        }
-        other => Err(format!(
-            "expected non-negative integer label, got {other:?}"
-        )),
-    }
-}
-
-// -----------------------------------------------------------------
-// ANALYZE histogram and most-common-value helpers.
-// -----------------------------------------------------------------
-
-const HISTOGRAM_BUCKETS: usize = 100;
-const MCV_COUNT: usize = 10;
-
-fn distinct_count(values: &[Value]) -> StorageBackendResult<u64> {
-    use std::collections::BTreeSet;
-    let mut set: BTreeSet<&Value> = BTreeSet::new();
-    for v in values {
-        set.insert(v);
-    }
-    u64::try_from(set.len())
-        .map_err(|_| StorageBackendError::Other("ANALYZE distinct count exceeds u64".into()))
-}
-
-fn build_histogram(values: &[&Value]) -> Vec<Value> {
-    if values.is_empty() {
-        return Vec::new();
-    }
-    let mut sorted: Vec<Value> = values.iter().map(|v| (*v).clone()).collect();
-    sorted.sort();
-    let n = sorted.len();
-    let num_buckets = HISTOGRAM_BUCKETS.min(n);
-    if num_buckets <= 1 {
-        return vec![sorted[0].clone(), sorted[n - 1].clone()];
-    }
-    let mut boundaries: Vec<Value> = vec![sorted[0].clone()];
-    for i in 1..num_buckets {
-        let idx = (i * n) / num_buckets;
-        let val = &sorted[idx];
-        if Some(val) != boundaries.last() {
-            boundaries.push(val.clone());
-        }
-    }
-    if boundaries.last() != Some(&sorted[n - 1]) {
-        boundaries.push(sorted[n - 1].clone());
-    }
-    boundaries
-}
-
-fn build_mcv(values: &[Value], total: u64) -> (Vec<Value>, Vec<f64>) {
-    if values.is_empty() || total == 0 {
-        return (Vec::new(), Vec::new());
-    }
-    let mut counts: BTreeMap<&Value, u64> = BTreeMap::new();
-    for v in values {
-        *counts.entry(v).or_insert(0) += 1;
-    }
-    let ndv = counts.len();
-    if ndv == 0 {
-        return (Vec::new(), Vec::new());
-    }
-    let avg_freq = 1.0 / ndv as f64;
-    let mut sorted: Vec<(&Value, u64)> = counts.into_iter().collect();
-    sorted.sort_by_key(|entry| std::cmp::Reverse(entry.1));
-    let total_f = total as f64;
-    let mut mcv_values: Vec<Value> = Vec::new();
-    let mut mcv_freqs: Vec<f64> = Vec::new();
-    for (val, cnt) in sorted.into_iter().take(MCV_COUNT) {
-        let freq = cnt as f64 / total_f;
-        if freq > avg_freq {
-            mcv_values.push(val.clone());
-            mcv_freqs.push(freq);
-        }
-    }
-    (mcv_values, mcv_freqs)
 }
 
 #[cfg(test)]

@@ -326,29 +326,12 @@ impl Engine {
     /// the generation private until their outer COMMIT; autocommit operations
     /// publish immediately.
     pub(crate) fn note_catalog_registry_changed(&self) {
-        self.clear_regtype_output_cache();
-        self.clear_bayesian_params_cache();
-        if !self.session.transactions.lock().is_empty() {
-            self.epochs
-                .catalog_registry
-                .dirty
-                .store(true, std::sync::atomic::Ordering::Release);
-            return;
-        }
-        self.publish_catalog_registry_changes();
+        self.mutation_coordinator().note_catalog_registry_changed();
     }
 
     pub(crate) fn publish_catalog_registry_changes(&self) {
-        self.clear_bayesian_params_cache();
-        self.epochs
-            .catalog_registry
-            .published
-            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
-        self.epochs
-            .catalog_registry
-            .dirty
-            .store(false, std::sync::atomic::Ordering::Release);
-        self.clear_sql_statement_cache();
+        self.mutation_coordinator()
+            .publish_catalog_registry_changes();
     }
 
     /// Rebind this session's physical table handles when another session has

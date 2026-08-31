@@ -213,18 +213,6 @@ pub(super) fn label_sequence_name(label: &str) -> String {
     format!("{label}_id_seq")
 }
 
-/// Every namespace AGE adds to the database: `ag_catalog` plus one
-/// schema per graph.
-pub(super) fn age_namespace_names(engine: &Engine) -> Result<Vec<String>, SQLError> {
-    let mut names = vec![AG_CATALOG_SCHEMA.to_string()];
-    names.extend(
-        engine
-            .list_graphs()
-            .map_err(|err| SQLError::Internal(format!("read graph catalog: {err}")))?,
-    );
-    Ok(names)
-}
-
 pub(super) fn build_ag_graph(engine: &Engine) -> Result<Vec<ResultRow>, SQLError> {
     Ok(graph_catalog_entries(engine)?
         .into_iter()

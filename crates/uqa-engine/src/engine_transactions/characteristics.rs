@@ -247,23 +247,6 @@ impl Engine {
         Ok(value.to_string())
     }
 
-    pub(crate) fn transaction_parameter_value(&self, name: &str) -> Option<String> {
-        let current = self.session.transactions.lock().last().map_or_else(
-            || self.default_transaction_characteristics(),
-            |frame| frame.characteristics,
-        );
-        if name.eq_ignore_ascii_case("transaction_isolation") {
-            return Some(current.isolation.as_str().into());
-        }
-        if name.eq_ignore_ascii_case("transaction_read_only") {
-            return Some(if current.read_only { "on" } else { "off" }.into());
-        }
-        if name.eq_ignore_ascii_case("transaction_deferrable") {
-            return Some(if current.deferrable { "on" } else { "off" }.into());
-        }
-        None
-    }
-
     pub(crate) fn current_transaction_is_read_only(&self) -> bool {
         self.session.transactions.lock().last().map_or_else(
             || self.default_transaction_characteristics().read_only,

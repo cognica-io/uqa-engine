@@ -199,11 +199,11 @@ pub(crate) fn role_oid(name: &str) -> i64 {
 
 impl Engine {
     pub(crate) fn current_user_name(&self) -> String {
-        self.session.state.read().current_user.clone()
+        self.session_execution_view().current_user()
     }
 
     pub(crate) fn session_user_name(&self) -> String {
-        self.session.state.read().session_user.clone()
+        self.session_execution_view().session_user()
     }
 
     pub(crate) fn roles_for_catalog(&self) -> Vec<RoleDefinition> {

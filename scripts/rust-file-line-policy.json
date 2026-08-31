@@ -63,18 +63,10 @@
     },
     {
       "path": "crates/uqa-engine/src/engine_user_functions/lifecycle.rs",
-      "baseline_lines": 1351,
+      "baseline_lines": 1348,
       "owner": "uqa-engine user-function lifecycle",
       "responsibility_groups": ["routine creation", "routine alteration", "routine deletion", "catalog and dependency publication"],
       "target_modules": ["crates/uqa-engine/src/engine_user_functions/lifecycle/create.rs", "crates/uqa-engine/src/engine_user_functions/lifecycle/alter.rs", "crates/uqa-engine/src/engine_user_functions/lifecycle/drop.rs", "crates/uqa-engine/src/engine_user_functions/lifecycle/publication.rs"],
-      "migration_state": "planned"
-    },
-    {
-      "path": "crates/uqa-engine/src/lib.rs",
-      "baseline_lines": 1277,
-      "owner": "uqa-engine public facade and composition root",
-      "responsibility_groups": ["public types and exports", "engine state ownership", "constructors", "facade delegation"],
-      "target_modules": ["crates/uqa-engine/src/engine_state.rs", "crates/uqa-engine/src/engine_open.rs", "crates/uqa-engine/src/engine_api.rs"],
       "migration_state": "planned"
     },
     {
@@ -102,14 +94,6 @@
       "migration_state": "planned"
     },
     {
-      "path": "crates/uqa-engine/src/sql.rs",
-      "baseline_lines": 1115,
-      "owner": "uqa-engine SQL facade root",
-      "responsibility_groups": ["module declarations", "SQL entry points", "cursor exports", "ambient helpers and imports"],
-      "target_modules": ["crates/uqa-engine/src/sql/driver.rs", "crates/uqa-engine/src/sql/engine_api.rs", "crates/uqa-engine/src/sql/shared.rs"],
-      "migration_state": "planned"
-    },
-    {
       "path": "crates/uqa-engine/src/sql/catalog/builtin_routines.rs",
       "baseline_lines": 1438,
       "owner": "uqa-engine builtin routine catalog projection",
@@ -119,7 +103,7 @@
     },
     {
       "path": "crates/uqa-engine/src/sql/catalog/helpers.rs",
-      "baseline_lines": 1442,
+      "baseline_lines": 1433,
       "owner": "uqa-engine virtual catalog helpers",
       "responsibility_groups": ["row construction", "stable OID policy", "PostgreSQL type metadata", "constraint and dependency projection"],
       "target_modules": ["crates/uqa-engine/src/sql/catalog/helpers/rows.rs", "crates/uqa-engine/src/sql/catalog/helpers/oids.rs", "crates/uqa-engine/src/sql/catalog/helpers/types.rs", "crates/uqa-engine/src/sql/catalog/helpers/constraints.rs", "crates/uqa-engine/src/sql/catalog/helpers/dependencies.rs"],
@@ -127,7 +111,7 @@
     },
     {
       "path": "crates/uqa-engine/src/sql/catalog/pg_catalog.rs",
-      "baseline_lines": 1438,
+      "baseline_lines": 1424,
       "owner": "uqa-engine pg_catalog virtual relations",
       "responsibility_groups": ["relation and namespace rows", "attribute and default rows", "constraint and index rows", "type role and sequence rows"],
       "target_modules": ["crates/uqa-engine/src/sql/catalog/pg_catalog/relations.rs", "crates/uqa-engine/src/sql/catalog/pg_catalog/attributes.rs", "crates/uqa-engine/src/sql/catalog/pg_catalog/constraints.rs", "crates/uqa-engine/src/sql/catalog/pg_catalog/types.rs", "crates/uqa-engine/src/sql/catalog/pg_catalog/roles.rs"],

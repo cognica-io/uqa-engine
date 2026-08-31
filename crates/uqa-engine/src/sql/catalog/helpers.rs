@@ -143,20 +143,11 @@ pub(super) fn current_user_name() -> &'static str {
     "uqa"
 }
 
-pub(super) fn all_schema_names(engine: &Engine) -> Result<Vec<String>, SQLError> {
-    let mut schemas = vec!["pg_catalog".to_string(), "information_schema".to_string()];
-    schemas.extend(
-        engine
-            .list_schemas()
-            .map_err(|err| SQLError::Internal(format!("read schema catalog: {err}")))?,
-    );
-    schemas.extend(super::ag_catalog::age_namespace_names(engine)?);
-    if engine.has_temporary_relations() {
-        schemas.push(engine.temporary_schema_name());
-    }
-    schemas.sort();
-    schemas.dedup();
-    Ok(schemas)
+pub(super) fn all_schema_names(
+    catalog: crate::engine_capabilities::CatalogReadView<'_>,
+    session: crate::engine_capabilities::SessionExecutionView<'_>,
+) -> Result<Vec<String>, SQLError> {
+    Ok(catalog.all_schema_names(session))
 }
 
 pub(super) fn table_columns_for(

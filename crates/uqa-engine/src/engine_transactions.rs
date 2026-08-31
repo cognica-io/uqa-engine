@@ -468,7 +468,7 @@ impl Engine {
     /// minus `COMMIT/ROLLBACK` count). Useful for assertions in tests
     /// and for status displays in the CLI.
     pub fn transaction_depth(&self) -> usize {
-        self.session.transactions.lock().len()
+        self.session_execution_view().transaction_depth()
     }
 
     pub(crate) fn in_transaction_block(&self) -> bool {

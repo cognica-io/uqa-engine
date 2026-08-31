@@ -5,6 +5,38 @@
 CREATE SCHEMA __UQA_STATEFUL_SCHEMA__;
 -- @end
 
+-- @case catalog_session_views rows
+SELECT namespace.nspname = current_schema() AS namespace_matches,
+       replace(setting.setting, ' ', '') = current_schema() || ',pg_catalog' AS search_path_matches
+FROM pg_catalog.pg_namespace AS namespace
+CROSS JOIN pg_catalog.pg_settings AS setting
+WHERE namespace.nspname = current_schema() AND setting.name = 'search_path';
+-- @end
+
+-- @case schema_create_rollback ok
+BEGIN;
+CREATE SCHEMA __UQA_SCHEMA_PROBE__;
+ROLLBACK;
+-- @end
+
+-- @case schema_create_rollback_result rows
+SELECT count(*) FROM pg_catalog.pg_namespace WHERE nspname = '__UQA_SCHEMA_PROBE__';
+-- @end
+
+-- @case schema_create_commit ok
+BEGIN;
+CREATE SCHEMA __UQA_SCHEMA_PROBE__;
+COMMIT;
+-- @end
+
+-- @case schema_create_commit_result rows
+SELECT count(*) FROM pg_catalog.pg_namespace WHERE nspname = '__UQA_SCHEMA_PROBE__';
+-- @end
+
+-- @case schema_create_commit_cleanup ok
+DROP SCHEMA __UQA_SCHEMA_PROBE__;
+-- @end
+
 -- @case create_cursor_fixture ok
 CREATE TABLE cursor_source(id integer PRIMARY KEY);
 INSERT INTO cursor_source VALUES (1);

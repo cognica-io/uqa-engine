@@ -14,6 +14,7 @@ use uqa_sql::ast::{ColumnDef as SQLColumnDef, ColumnType, Expr, Statement};
 use uqa_sql::registry::registered_names;
 use uqa_sql::{ResultRow, SQLError};
 
+use crate::engine_capabilities::{CatalogReadView, SessionExecutionView};
 use crate::engine_user_functions::{canonical_routine_type_name, routine_signature_types};
 use crate::{ConstraintIdentity, Engine, RelationIdentity};
 
@@ -21,9 +22,11 @@ use super::{column_type_name, value_to_text};
 
 pub(super) fn build_info_schema_rows(
     engine: &Engine,
+    catalog: CatalogReadView<'_>,
+    session: SessionExecutionView<'_>,
     name: &str,
 ) -> Result<Option<Vec<ResultRow>>, SQLError> {
-    let Some(relation) = resolve_virtual_relation(engine, name) else {
+    let Some(relation) = resolve_virtual_relation(session, name) else {
         return ag_catalog::build_age_label_relation_rows(engine, name);
     };
     Ok(Some(match relation {
@@ -36,7 +39,7 @@ pub(super) fn build_info_schema_rows(
         VirtualRelation::InformationSequences => build_info_sequences(engine)?,
         VirtualRelation::InformationTableConstraints => build_info_table_constraints(engine)?,
         VirtualRelation::InformationKeyColumnUsage => build_info_key_column_usage(engine)?,
-        VirtualRelation::PgNamespace => build_pg_namespace(engine)?,
+        VirtualRelation::PgNamespace => build_pg_namespace(catalog, session)?,
         VirtualRelation::PgClass => build_pg_class(engine)?,
         VirtualRelation::PgInherits => build_pg_inherits(engine)?,
         VirtualRelation::PgPartitionedTable => build_pg_partitioned_table(engine)?,
@@ -57,7 +60,7 @@ pub(super) fn build_info_schema_rows(
         VirtualRelation::PgAuthMembers => build_pg_auth_members(engine),
         VirtualRelation::PgRoles => build_pg_roles(engine),
         VirtualRelation::PgUser => build_pg_user(engine),
-        VirtualRelation::PgSettings => build_pg_settings(engine)?,
+        VirtualRelation::PgSettings => build_pg_settings(session)?,
         VirtualRelation::PgDescription => Vec::new(),
         VirtualRelation::PgMatviews => build_pg_matviews(engine)?,
         VirtualRelation::PgSequences => build_pg_sequences(engine)?,
@@ -74,6 +77,7 @@ mod helpers;
 mod information_schema;
 mod partitioning;
 mod pg_catalog;
+mod pg_namespace;
 mod pg_proc;
 mod pg_settings;
 mod relation_catalog;
@@ -141,10 +145,11 @@ pub(in crate::sql) use partitioning::{pg_get_expr_value, pg_get_partkeydef_value
 pub(in crate::sql) use pg_catalog::table_relation_oid;
 use pg_catalog::{
     build_pg_attrdef, build_pg_attribute, build_pg_auth_members, build_pg_constraint,
-    build_pg_database, build_pg_index, build_pg_indexes, build_pg_matviews, build_pg_namespace,
-    build_pg_range, build_pg_roles, build_pg_sequences, build_pg_tables, build_pg_type,
-    build_pg_user, build_pg_views,
+    build_pg_database, build_pg_index, build_pg_indexes, build_pg_matviews, build_pg_range,
+    build_pg_roles, build_pg_sequences, build_pg_tables, build_pg_type, build_pg_user,
+    build_pg_views,
 };
+use pg_namespace::build_pg_namespace;
 use pg_proc::build_pg_proc;
 use pg_settings::build_pg_settings;
 use relation_catalog::{build_pg_class, build_pg_inherits};
@@ -390,15 +395,16 @@ pub(crate) struct RegtypeOutputCatalog {
 
 impl RegtypeOutputCatalog {
     fn build(engine: &Engine) -> Result<Self, SQLError> {
-        let namespaces = build_pg_namespace(engine)?
-            .into_iter()
-            .filter_map(|row| {
-                Some((
-                    catalog_int(&row, "oid")?,
-                    catalog_str(&row, "nspname")?.to_string(),
-                ))
-            })
-            .collect();
+        let namespaces =
+            build_pg_namespace(engine.catalog_read_view(), engine.session_execution_view())?
+                .into_iter()
+                .filter_map(|row| {
+                    Some((
+                        catalog_int(&row, "oid")?,
+                        catalog_str(&row, "nspname")?.to_string(),
+                    ))
+                })
+                .collect();
         let classes = build_pg_class(engine)?
             .into_iter()
             .filter_map(|row| {

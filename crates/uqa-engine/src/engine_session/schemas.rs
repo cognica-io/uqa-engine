@@ -41,31 +41,11 @@ impl Engine {
     /// schema was created and `false` only for `IF NOT EXISTS`.
     pub fn register_schema(&self, name: &str, if_not_exists: bool) -> StorageBackendResult<bool> {
         self.with_implicit_storage_transaction(|engine| {
-            engine.register_schema_inner(name, if_not_exists)
+            engine.synchronize_catalog_registries()?;
+            engine
+                .mutation_coordinator()
+                .register_schema(name, if_not_exists)
         })
-    }
-
-    fn register_schema_inner(&self, name: &str, if_not_exists: bool) -> StorageBackendResult<bool> {
-        self.synchronize_catalog_registries()?;
-        Self::validate_schema_name(name)?;
-        let mut schemas = self.durable.schemas.write();
-        // Every named graph owns a namespace of the same name (AGE keeps
-        // one schema per graph), so the two name spaces cannot overlap.
-        if schemas.contains(name) || self.durable.graphs.read().contains_key(name) {
-            if if_not_exists {
-                return Ok(false);
-            }
-            return Err(StorageBackendError::Other(format!(
-                "schema `{name}` already exists"
-            )));
-        }
-        if let Some(catalog) = self.storage.catalog.as_ref() {
-            catalog.save_schema(name)?;
-        }
-        schemas.insert(name.to_string());
-        drop(schemas);
-        self.note_catalog_registry_changed();
-        Ok(true)
     }
 
     /// Drop an empty durable schema. `public` and the virtual system
@@ -124,17 +104,7 @@ impl Engine {
     }
 
     pub(crate) fn validate_schema_name(name: &str) -> StorageBackendResult<()> {
-        if name.is_empty() {
-            return Err(StorageBackendError::Other(format!(
-                "invalid schema name `{name}`"
-            )));
-        }
-        if is_virtual_system_schema(name) {
-            return Err(StorageBackendError::Other(format!(
-                "schema name `{name}` is reserved"
-            )));
-        }
-        Ok(())
+        crate::engine_capabilities::validate_schema_name(name)
     }
 
     fn schema_is_empty(&self, schema: &str) -> bool {

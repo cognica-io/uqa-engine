@@ -14,17 +14,17 @@ use uqa_planner::{
 use uqa_sql::ast::{CreateForeignServer, CreateForeignTable};
 use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult};
 
+use crate::engine_capabilities::{MutationCoordinator, QueryRuntimeView, SessionExecutionView};
 use crate::engine_session::{MaterializedViewRegistration, ViewRegistration};
-use crate::{SessionPortalWorker, SessionPortalWorkerRequest, SessionPortalWorkerResponse};
 
 use super::scalar::{
     analyze_physical_call_arguments, eval_physical, eval_physical_call_arguments,
     PhysicalEvalContext,
 };
 use super::{
-    plpgsql_exec, query_has_row_locks, run_alter_sequence, run_alter_table, run_create_index,
-    run_create_sequence, run_create_table, run_create_table_as, run_delete, run_drop, run_explain,
-    run_insert, run_merge, run_update, run_vacuum, select, CreateTableAsExecution, Engine,
+    plpgsql_exec, run_alter_sequence, run_alter_table, run_create_index, run_create_sequence,
+    run_create_table, run_create_table_as, run_delete, run_drop, run_explain, run_insert,
+    run_merge, run_update, run_vacuum, select, CreateTableAsExecution, Engine,
 };
 
 /// Owns top-level plan orchestration. Relational, mutation, DDL, procedural,
@@ -32,6 +32,9 @@ use super::{
 /// leaf executors never choose a second top-level SQL path.
 pub(super) struct UnifiedPlanExecutor<'engine, 'params> {
     engine: &'engine Engine,
+    session: SessionExecutionView<'engine>,
+    runtime: QueryRuntimeView<'engine>,
+    mutation: MutationCoordinator<'engine>,
     params: &'params [SQLParam],
     nested_statement: bool,
 }
@@ -52,13 +55,16 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
     ) -> Self {
         Self {
             engine,
+            session: engine.session_execution_view(),
+            runtime: engine.query_runtime_view(),
+            mutation: engine.mutation_coordinator(),
             params,
             nested_statement,
         }
     }
 
     pub(super) fn execute(&mut self, plan: &UnifiedPlan) -> Result<SQLResult, SQLError> {
-        self.engine.cancellation_token().check()?;
+        self.runtime.check_cancelled()?;
         super::read_only::validate_transaction_plan(self.engine, plan)?;
         match plan {
             UnifiedPlan::Query(query) => self.execute_query(query),
@@ -67,72 +73,25 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
     }
 
     fn execute_query(&self, query: &QueryPlan) -> Result<SQLResult, SQLError> {
-        if self.engine.transaction_depth() != 0 {
+        if self.session.transaction_depth() != 0 {
             select::lock_query_relations(self.engine, query)?;
         }
         let mut ctes = select::CteScope::new_for_current_routine();
         select::execute_query_plan_with_ctes(self.engine, query, self.params, &mut ctes)
     }
 
-    fn execute_declare_cursor(
-        &self,
-        name: &str,
-        binary: bool,
-        scroll: Option<bool>,
-        hold: bool,
-        query: &QueryPlan,
-    ) -> Result<SQLResult, SQLError> {
-        if !hold && !self.engine.in_transaction_block() {
-            return Err(SQLError::Routine {
-                sqlstate: "25P01".into(),
-                message: "DECLARE CURSOR can only be used in transaction blocks".into(),
-            });
-        }
-        self.engine.ensure_session_portal_available(name)?;
-        let has_row_locks = query_has_row_locks(query);
-        if has_row_locks && hold {
-            return Err(SQLError::Routine {
-                sqlstate: "0A000".into(),
-                message: "DECLARE CURSOR WITH HOLD ... FOR UPDATE is not supported".into(),
-            });
-        }
-        if has_row_locks && scroll == Some(true) {
-            return Err(SQLError::Routine {
-                sqlstate: "0A000".into(),
-                message: "DECLARE SCROLL CURSOR ... FOR UPDATE is not supported".into(),
-            });
-        }
-        select::lock_query_relations(self.engine, query)?;
-        let ctes = select::CteScope::new_for_current_routine();
-        let schema =
-            select::analyze_query_plan_schema(self.engine, query, self.params, &ctes, None)?;
-        select::validate_query_row_locks(self.engine, query, self.params)?;
-        self.engine
-            .open_pending_session_portal(crate::SessionPortalDeclaration {
-                name: name.to_string(),
-                query: query.clone(),
-                params: self.params.to_vec(),
-                columns: schema.columns().to_vec(),
-                column_types: schema.column_types().to_vec(),
-                scrollable: scroll.unwrap_or(!has_row_locks),
-                holdable: hold,
-                binary,
-            })?;
-        Ok(SQLResult::empty())
-    }
-
     pub(super) fn execute_query_to_spill(
         &self,
         plan: &UnifiedPlan,
     ) -> Result<select::QueryOutput, SQLError> {
-        self.engine.cancellation_token().check()?;
+        self.runtime.check_cancelled()?;
         super::read_only::validate_transaction_plan(self.engine, plan)?;
         let UnifiedPlan::Query(query) = plan else {
             return Err(SQLError::Unsupported(
                 "SQL cursor accepts exactly one query statement".into(),
             ));
         };
-        if self.engine.transaction_depth() != 0 {
+        if self.session.transaction_depth() != 0 {
             select::lock_query_relations(self.engine, query)?;
         }
         let mut ctes = select::CteScope::new_for_current_routine();
@@ -182,7 +141,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         let mut row = ResultRow::new();
         row.insert(
             name.to_string(),
-            Value::Str(self.engine.show_variable(name)?),
+            Value::Str(self.session.show_variable(name)?),
         );
         Ok(SQLResult {
             columns: vec![name.to_string()],
@@ -214,150 +173,6 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             None
         };
         run_explain(body, verbose, format, analysis.as_ref())
-    }
-
-    fn execute_truncate(
-        &self,
-        tables: &[uqa_sql::ast::TruncateTarget],
-        cascade: bool,
-        restart_identity: bool,
-    ) -> Result<SQLResult, SQLError> {
-        let mut targets = std::collections::BTreeSet::new();
-        let mut trigger_targets = Vec::new();
-        for requested in tables {
-            let table = self
-                .engine
-                .try_resolve_table_name(&requested.table)
-                .map_err(|err| {
-                    SQLError::Internal(format!("resolve table `{}`: {err}", requested.table))
-                })?
-                .ok_or_else(|| {
-                    SQLError::Unsupported(format!(
-                        "TRUNCATE TABLE: relation `{}` does not exist",
-                        requested.table
-                    ))
-                })?;
-            let hierarchy = self
-                .engine
-                .try_table_hierarchy(&table)
-                .map_err(|err| SQLError::Internal(format!("read table hierarchy: {err}")))?;
-            if !requested.include_descendants && hierarchy.partition_spec.is_some() {
-                return Err(SQLError::Routine {
-                    sqlstate: "42809".into(),
-                    message: "cannot truncate only a partitioned table".into(),
-                });
-            }
-            for target in self
-                .engine
-                .hierarchy_scan_tables(&table, requested.include_descendants)?
-            {
-                if targets.insert(target.clone()) {
-                    trigger_targets.push(target);
-                }
-            }
-        }
-        if cascade {
-            let mut cursor = 0;
-            while let Some(table) = trigger_targets.get(cursor).cloned() {
-                cursor += 1;
-                for (referrer, _) in self
-                    .engine
-                    .referrers_to(&table)
-                    .map_err(|err| SQLError::Internal(format!("read foreign keys: {err}")))?
-                {
-                    if targets.insert(referrer.clone()) {
-                        trigger_targets.push(referrer);
-                    }
-                }
-            }
-        }
-        for table in &trigger_targets {
-            self.engine
-                .ensure_no_pending_trigger_events(table, "TRUNCATE")?;
-        }
-        if !cascade {
-            for table in &targets {
-                if let Some((referrer, _)) = self
-                    .engine
-                    .referrers_to(table)
-                    .map_err(|err| SQLError::Internal(format!("read foreign keys: {err}")))?
-                    .into_iter()
-                    .find(|(referrer, _)| !targets.contains(referrer))
-                {
-                    return Err(SQLError::TypeMismatch(format!(
-                        "cannot truncate `{table}` because `{referrer}` references it; truncate both tables or use CASCADE"
-                    )));
-                }
-            }
-        }
-        let truncate = |engine: &Engine| {
-            for table in &trigger_targets {
-                crate::sql::triggers::fire_statement_triggers(
-                    engine,
-                    table,
-                    uqa_sql::ast::TriggerTiming::Before,
-                    uqa_sql::ast::TriggerEvent::Truncate,
-                    &[],
-                )?;
-            }
-            // Referencing relations first makes the mutation order explicit
-            // even though the low-level clear does not evaluate row FKs.
-            fn visit(
-                engine: &Engine,
-                table: &str,
-                targets: &std::collections::BTreeSet<String>,
-                visiting: &mut std::collections::BTreeSet<String>,
-                visited: &mut std::collections::BTreeSet<String>,
-                ordered: &mut Vec<String>,
-            ) -> Result<(), SQLError> {
-                if visited.contains(table) || !visiting.insert(table.to_string()) {
-                    return Ok(());
-                }
-                for (referrer, _) in engine
-                    .referrers_to(table)
-                    .map_err(|err| SQLError::Internal(format!("read foreign keys: {err}")))?
-                {
-                    if targets.contains(&referrer) {
-                        visit(engine, &referrer, targets, visiting, visited, ordered)?;
-                    }
-                }
-                visiting.remove(table);
-                if visited.insert(table.to_string()) {
-                    ordered.push(table.to_string());
-                }
-                Ok(())
-            }
-            let mut ordered = Vec::with_capacity(targets.len());
-            let mut visiting = std::collections::BTreeSet::new();
-            let mut visited = std::collections::BTreeSet::new();
-            for table in &trigger_targets {
-                visit(
-                    engine,
-                    table,
-                    &targets,
-                    &mut visiting,
-                    &mut visited,
-                    &mut ordered,
-                )?;
-            }
-            engine.truncate_tables_with_identity(&ordered, restart_identity)?;
-            for table in &trigger_targets {
-                crate::sql::triggers::fire_statement_triggers(
-                    engine,
-                    table,
-                    uqa_sql::ast::TriggerTiming::After,
-                    uqa_sql::ast::TriggerEvent::Truncate,
-                    &[],
-                )?;
-            }
-            Ok(())
-        };
-        if self.engine.transaction_depth() == 0 {
-            self.engine.transaction(truncate)?;
-        } else {
-            truncate(self.engine)?;
-        }
-        Ok(SQLResult::empty())
     }
 
     fn execute_prepare(&self, name: &str, body: &UnifiedPlan) -> Result<SQLResult, SQLError> {
@@ -479,6 +294,20 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         plpgsql_exec::run_call(self.engine, name, &args, &argument_types, explicit_variadic)
     }
 
+    fn execute_create_schema(
+        &self,
+        name: &str,
+        if_not_exists: bool,
+    ) -> Result<SQLResult, SQLError> {
+        self.engine.prepare_explicit_transaction_writer()?;
+        self.mutation
+            .register_schema(name, if_not_exists)
+            .map_err(|error| {
+                SQLError::Internal(format!("CREATE SCHEMA catalog write failed: {error}"))
+            })?;
+        Ok(SQLResult::empty())
+    }
+
     fn execute_command(&self, command: &CommandPlan) -> Result<SQLResult, SQLError> {
         match command {
             CommandPlan::CreateTable(statement) => {
@@ -583,14 +412,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             CommandPlan::CreateSchema {
                 name,
                 if_not_exists,
-            } => {
-                self.engine
-                    .register_schema(name, *if_not_exists)
-                    .map_err(|err| {
-                        SQLError::Internal(format!("CREATE SCHEMA catalog write failed: {err}"))
-                    })?;
-                Ok(SQLResult::empty())
-            }
+            } => self.execute_create_schema(name, *if_not_exists),
             CommandPlan::SetVariable { name, value } => {
                 if name.eq_ignore_ascii_case("role") {
                     self.engine.set_role(value)?;
@@ -645,7 +467,12 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 tables,
                 cascade,
                 restart_identity,
-            } => self.execute_truncate(tables, *cascade, *restart_identity),
+            } => crate::engine_truncate::execute_sql_truncate(
+                self.engine,
+                tables,
+                *cascade,
+                *restart_identity,
+            ),
             CommandPlan::Transaction(statement) => {
                 self.engine.run_transaction_statement(statement.clone())?;
                 Ok(SQLResult::empty())
@@ -656,7 +483,15 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 scroll,
                 hold,
                 query,
-            } => self.execute_declare_cursor(name, *binary, *scroll, *hold, query),
+            } => super::session_portal_worker::declare_session_portal(
+                self.engine,
+                self.params,
+                name,
+                *binary,
+                *scroll,
+                *hold,
+                query,
+            ),
             CommandPlan::FetchCursor(fetch) => self.engine.fetch_session_portal(fetch),
             CommandPlan::CloseCursor { name } => {
                 if let Some(name) = name {
@@ -718,130 +553,5 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             }
             CommandPlan::Call { name, args } => self.execute_call(name, args),
         }
-    }
-}
-
-struct SessionPortalRowConsumer {
-    requests: std::sync::mpsc::Receiver<SessionPortalWorkerRequest>,
-    responses: std::sync::mpsc::Sender<SessionPortalWorkerResponse>,
-    initial_next: std::cell::Cell<bool>,
-    closed: std::cell::Cell<bool>,
-    public_width: std::cell::Cell<usize>,
-}
-
-impl select::QueryRowConsumer for SessionPortalRowConsumer {
-    fn begin(
-        &self,
-        _engine: &Engine,
-        columns: &[String],
-        schema: &uqa_execution::RowSchema,
-    ) -> Result<(), SQLError> {
-        self.public_width.set(columns.len());
-        let column_types = columns
-            .iter()
-            .enumerate()
-            .map(|(position, column)| {
-                if schema.columns().get(position) == Some(column) {
-                    schema.column_type(position).cloned()
-                } else {
-                    schema
-                        .position(column)
-                        .and_then(|position| schema.column_type(position).cloned())
-                }
-            })
-            .collect();
-        self.responses
-            .send(SessionPortalWorkerResponse::Started {
-                columns: columns.to_vec(),
-                column_types,
-            })
-            .map_err(|_| SQLError::Internal("cursor consumer disconnected before startup".into()))
-    }
-
-    fn consume(
-        &self,
-        _engine: &Engine,
-        row: uqa_execution::OwnedPhysicalRow,
-    ) -> Result<select::QueryConsumerControl, SQLError> {
-        let request = if self.initial_next.replace(false) {
-            SessionPortalWorkerRequest::Next
-        } else {
-            match self.requests.recv() {
-                Ok(request) => request,
-                Err(_) => SessionPortalWorkerRequest::Close,
-            }
-        };
-        if matches!(request, SessionPortalWorkerRequest::Close) {
-            self.closed.set(true);
-            return Ok(select::QueryConsumerControl::Stop);
-        }
-        let view = row.view();
-        let values = (0..self.public_width.get())
-            .map(|position| view.value_at(position).cloned().unwrap_or(Value::Null))
-            .collect();
-        if self
-            .responses
-            .send(SessionPortalWorkerResponse::Row(values))
-            .is_err()
-        {
-            self.closed.set(true);
-            return Ok(select::QueryConsumerControl::Stop);
-        }
-        match self.requests.recv() {
-            Ok(SessionPortalWorkerRequest::Next) => {
-                self.initial_next.set(true);
-                Ok(select::QueryConsumerControl::Continue)
-            }
-            Ok(SessionPortalWorkerRequest::Close) | Err(_) => {
-                self.closed.set(true);
-                Ok(select::QueryConsumerControl::Stop)
-            }
-        }
-    }
-}
-
-pub(crate) fn start_session_portal_worker(
-    engine: Engine,
-    query: QueryPlan,
-    params: Vec<SQLParam>,
-) -> SessionPortalWorker {
-    let (request_tx, request_rx) = std::sync::mpsc::channel();
-    let (response_tx, response_rx) = std::sync::mpsc::channel();
-    let join = std::thread::spawn(move || {
-        let _statement_gate = engine.runtime.statement_gate.delegate_to_current_thread();
-        let first = match request_rx.recv() {
-            Ok(SessionPortalWorkerRequest::Next) => true,
-            Ok(SessionPortalWorkerRequest::Close) | Err(_) => return,
-        };
-        let consumer = std::rc::Rc::new(SessionPortalRowConsumer {
-            requests: request_rx,
-            responses: response_tx.clone(),
-            initial_next: std::cell::Cell::new(first),
-            closed: std::cell::Cell::new(false),
-            public_width: std::cell::Cell::new(0),
-        });
-        let mut ctes = select::CteScope::new_for_current_routine();
-        ctes.enable_command_progress_streaming();
-        let result = select::execute_query_plan_output(
-            &engine,
-            &query,
-            &params,
-            &mut ctes,
-            select::QueryOutputMode::RowConsumer(consumer.clone()),
-        );
-        match result {
-            Ok(_) if !consumer.closed.get() => {
-                let _ = response_tx.send(SessionPortalWorkerResponse::Eof);
-            }
-            Ok(_) => {}
-            Err(error) => {
-                let _ = response_tx.send(SessionPortalWorkerResponse::Error(error));
-            }
-        }
-    });
-    SessionPortalWorker {
-        requests: request_tx,
-        responses: response_rx,
-        join: Some(join),
     }
 }

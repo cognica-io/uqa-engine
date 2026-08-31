@@ -35,6 +35,25 @@ The plan owns read queries and physical command bodies. Relational query blocks 
 
 `ScalarExpr` is the executable scalar IR. Scalar subqueries point to owned query-plan slots and execute inside the current physical scope; the executor does not reconstruct a parser statement at runtime.
 
+## Statement capability boundaries
+
+```mermaid
+flowchart LR
+    Engine[Engine composition facade] --> Catalog[CatalogReadView]
+    Engine --> Session[SessionExecutionView]
+    Engine --> Runtime[QueryRuntimeView]
+    Engine --> Mutation[MutationCoordinator]
+    Catalog --> Namespace[pg_namespace rows]
+    Session --> Namespace
+    Session --> Settings[SHOW and pg_settings]
+    Runtime --> Execute[UnifiedPlanExecutor runtime checks]
+    Mutation --> Schema[CREATE SCHEMA]
+```
+
+The engine facade constructs borrowed capability views at execution boundaries instead of passing its full state surface into migrated leaves. The views borrow existing state owners and contain no `Engine` reference or recovery mechanism. `UnifiedPlanExecutor` stores the statement's session, runtime, and mutation capabilities while remaining the only exhaustive `UnifiedPlan` and `CommandPlan` dispatcher.
+
+Catalog scan orchestration passes `CatalogReadView` and `SessionExecutionView` into engine-free `pg_namespace` and `pg_settings` row builders. The `CREATE SCHEMA` command arm delegates to `MutationCoordinator`, which owns schema persistence and registry publication; the former direct inner implementation is absent. Command families not yet moved retain one established owner and do not gain a fallback path.
+
 ## Access path selection
 
 The optimizer chooses among three broad query access shapes inside one `UnifiedPlan` hierarchy:

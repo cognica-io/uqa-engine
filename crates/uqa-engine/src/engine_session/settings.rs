@@ -137,13 +137,13 @@ impl Engine {
     /// directly; every other parameter is stored in the session-vars
     /// map so a subsequent `SHOW <name>` can echo it back.
     pub fn set_variable(&self, name: &str, value: &str) -> Result<(), SQLError> {
-        if !crate::is_known_runtime_parameter(name) {
+        if !crate::engine_capabilities::is_known_runtime_parameter(name) {
             return Err(SQLError::Routine {
                 sqlstate: "42704".into(),
                 message: format!("unrecognized configuration parameter \"{name}\""),
             });
         }
-        if !crate::is_mutable_runtime_parameter(name) {
+        if !crate::engine_capabilities::is_mutable_runtime_parameter(name) {
             return Err(SQLError::Routine {
                 sqlstate: "55P02".into(),
                 message: format!("parameter \"{name}\" cannot be changed"),
@@ -185,7 +185,7 @@ impl Engine {
         }
         let value = Self::validate_default_transaction_parameter(name, value)?;
         if name.eq_ignore_ascii_case("work_mem") {
-            Self::parse_work_mem_bytes(&value)?;
+            crate::engine_capabilities::parse_work_mem_bytes(&value)?;
         }
         if name.eq_ignore_ascii_case("search_path") {
             let parts = parse_search_path_list(&value)?;
@@ -208,7 +208,7 @@ impl Engine {
     }
 
     pub fn reset_variable(&self, name: &str) -> Result<(), SQLError> {
-        if !crate::is_known_runtime_parameter(name) {
+        if !crate::engine_capabilities::is_known_runtime_parameter(name) {
             return Err(SQLError::Routine {
                 sqlstate: "42704".into(),
                 message: format!("unrecognized configuration parameter \"{name}\""),
@@ -231,7 +231,7 @@ impl Engine {
                 message: "permission denied to set parameter \"session_replication_role\"".into(),
             });
         }
-        if !crate::is_mutable_runtime_parameter(name) {
+        if !crate::engine_capabilities::is_mutable_runtime_parameter(name) {
             return Err(SQLError::Routine {
                 sqlstate: "55P02".into(),
                 message: format!("parameter \"{name}\" cannot be changed"),
@@ -261,33 +261,11 @@ impl Engine {
     /// and finally the registered runtime default. Unknown parameters are
     /// errors rather than successful empty strings.
     pub fn show_variable(&self, name: &str) -> Result<String, SQLError> {
-        if name.eq_ignore_ascii_case("search_path") {
-            return Ok(self.search_path().join(","));
-        }
-        if let Some(value) = self.transaction_parameter_value(name) {
-            return Ok(value);
-        }
-        let session = self.session.state.read();
-        if let Some(value) = session.session_vars.get(name) {
-            return Ok(value.clone());
-        }
-        if let Some((_, value)) = session
-            .session_vars
-            .iter()
-            .find(|(key, _)| key.eq_ignore_ascii_case(name))
-        {
-            return Ok(value.clone());
-        }
-        crate::default_runtime_parameter(name)
-            .map(str::to_string)
-            .ok_or_else(|| SQLError::Routine {
-                sqlstate: "42704".into(),
-                message: format!("unrecognized configuration parameter \"{name}\""),
-            })
+        self.session_execution_view().show_variable(name)
     }
 
     pub(crate) fn work_mem_bytes(&self) -> Result<usize, SQLError> {
-        Self::parse_work_mem_bytes(&self.show_variable("work_mem")?)
+        self.query_runtime_view().work_mem_bytes()
     }
 
     pub(crate) fn session_replication_role_is_replica(&self) -> bool {
@@ -298,48 +276,6 @@ impl Engine {
             .iter()
             .find(|(name, _)| name.eq_ignore_ascii_case("session_replication_role"))
             .is_some_and(|(_, value)| value == "replica")
-    }
-
-    fn parse_work_mem_bytes(raw: &str) -> Result<usize, SQLError> {
-        let compact = raw
-            .trim()
-            .chars()
-            .filter(|character| !character.is_ascii_whitespace())
-            .collect::<String>();
-        let digits = compact.bytes().take_while(u8::is_ascii_digit).count();
-        if digits == 0 {
-            return Err(SQLError::TypeMismatch(format!(
-                "work_mem must be a positive byte size, got {raw:?}"
-            )));
-        }
-        let amount = compact[..digits].parse::<usize>().map_err(|_| {
-            SQLError::TypeMismatch(format!("work_mem is outside the supported range: {raw:?}"))
-        })?;
-        if amount == 0 {
-            return Err(SQLError::TypeMismatch(
-                "work_mem must be greater than zero".into(),
-            ));
-        }
-        let unit = compact[digits..].to_ascii_lowercase();
-        let exponent = match unit.as_str() {
-            // PostgreSQL interprets a bare work_mem integer as kilobytes.
-            "b" => 0,
-            "" | "k" | "kb" | "kib" => 1,
-            "m" | "mb" | "mib" => 2,
-            "g" | "gb" | "gib" => 3,
-            "t" | "tb" | "tib" => 4,
-            _ => {
-                return Err(SQLError::TypeMismatch(format!(
-                    "unsupported work_mem unit in {raw:?}"
-                )))
-            }
-        };
-        let multiplier = 1024_usize.checked_pow(exponent).ok_or_else(|| {
-            SQLError::TypeMismatch(format!("work_mem is outside the supported range: {raw:?}"))
-        })?;
-        amount.checked_mul(multiplier).ok_or_else(|| {
-            SQLError::TypeMismatch(format!("work_mem is outside the supported range: {raw:?}"))
-        })
     }
 
     /// Apply `DISCARD <target>`. `ALL` resets every kind of session state;

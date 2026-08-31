@@ -160,6 +160,10 @@ flowchart TD
 | Query optimizer | [`crates/uqa-planner/src/query_optimizer.rs`](../../../crates/uqa-planner/src/query_optimizer.rs) |
 | Execution | [`crates/uqa-execution/src/lib.rs`](../../../crates/uqa-execution/src/lib.rs) |
 | Engine composition | [`crates/uqa-engine/src/lib.rs`](../../../crates/uqa-engine/src/lib.rs) |
+| Engine capability adapters | [`crates/uqa-engine/src/engine_capabilities.rs`](../../../crates/uqa-engine/src/engine_capabilities.rs) |
+| Unified plan dispatcher | [`crates/uqa-engine/src/sql/plan_executor.rs`](../../../crates/uqa-engine/src/sql/plan_executor.rs) |
+| Session portal workflow | [`crates/uqa-engine/src/sql/session_portal_worker.rs`](../../../crates/uqa-engine/src/sql/session_portal_worker.rs) |
+| Capability-scoped catalog rows | [`crates/uqa-engine/src/sql/catalog/pg_namespace.rs`](../../../crates/uqa-engine/src/sql/catalog/pg_namespace.rs) |
 | Storage contracts | [`crates/uqa-storage/src/lib.rs`](../../../crates/uqa-storage/src/lib.rs) |
 | Graph runtime | [`crates/uqa-graph/src/lib.rs`](../../../crates/uqa-graph/src/lib.rs) |
 

@@ -4,7 +4,9 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{DocId, Engine, SQLError};
+use std::collections::BTreeSet;
+
+use super::{DocId, Engine, SQLError, SQLResult};
 use crate::engine_table_storage::document_store_write_error;
 
 impl Engine {
@@ -138,4 +140,170 @@ impl Engine {
             .map_err(|err| SQLError::Internal(format!("invalidate column stats: {err}")))?;
         Ok(())
     }
+}
+
+pub(crate) fn execute_sql_truncate(
+    engine: &Engine,
+    tables: &[uqa_sql::ast::TruncateTarget],
+    cascade: bool,
+    restart_identity: bool,
+) -> Result<SQLResult, SQLError> {
+    let targets = resolve_sql_truncate_targets(engine, tables, cascade)?;
+    if engine.transaction_depth() == 0 {
+        engine.transaction(|engine| run_sql_truncate(engine, &targets, restart_identity))?;
+    } else {
+        run_sql_truncate(engine, &targets, restart_identity)?;
+    }
+    Ok(SQLResult::empty())
+}
+
+struct SQLTruncateTargets {
+    all: BTreeSet<String>,
+    trigger_order: Vec<String>,
+}
+
+fn resolve_sql_truncate_targets(
+    engine: &Engine,
+    tables: &[uqa_sql::ast::TruncateTarget],
+    cascade: bool,
+) -> Result<SQLTruncateTargets, SQLError> {
+    let mut targets = BTreeSet::new();
+    let mut trigger_targets = Vec::new();
+    for requested in tables {
+        let table = engine
+            .try_resolve_table_name(&requested.table)
+            .map_err(|err| {
+                SQLError::Internal(format!("resolve table `{}`: {err}", requested.table))
+            })?
+            .ok_or_else(|| {
+                SQLError::Unsupported(format!(
+                    "TRUNCATE TABLE: relation `{}` does not exist",
+                    requested.table
+                ))
+            })?;
+        let hierarchy = engine
+            .try_table_hierarchy(&table)
+            .map_err(|err| SQLError::Internal(format!("read table hierarchy: {err}")))?;
+        if !requested.include_descendants && hierarchy.partition_spec.is_some() {
+            return Err(SQLError::Routine {
+                sqlstate: "42809".into(),
+                message: "cannot truncate only a partitioned table".into(),
+            });
+        }
+        for target in engine.hierarchy_scan_tables(&table, requested.include_descendants)? {
+            if targets.insert(target.clone()) {
+                trigger_targets.push(target);
+            }
+        }
+    }
+    if cascade {
+        let mut cursor = 0;
+        while let Some(table) = trigger_targets.get(cursor).cloned() {
+            cursor += 1;
+            for (referrer, _) in engine
+                .referrers_to(&table)
+                .map_err(|err| SQLError::Internal(format!("read foreign keys: {err}")))?
+            {
+                if targets.insert(referrer.clone()) {
+                    trigger_targets.push(referrer);
+                }
+            }
+        }
+    }
+    for table in &trigger_targets {
+        engine.ensure_no_pending_trigger_events(table, "TRUNCATE")?;
+    }
+    if !cascade {
+        for table in &targets {
+            if let Some((referrer, _)) = engine
+                .referrers_to(table)
+                .map_err(|err| SQLError::Internal(format!("read foreign keys: {err}")))?
+                .into_iter()
+                .find(|(referrer, _)| !targets.contains(referrer))
+            {
+                return Err(SQLError::TypeMismatch(format!(
+                        "cannot truncate `{table}` because `{referrer}` references it; truncate both tables or use CASCADE"
+                    )));
+            }
+        }
+    }
+    Ok(SQLTruncateTargets {
+        all: targets,
+        trigger_order: trigger_targets,
+    })
+}
+
+fn run_sql_truncate(
+    engine: &Engine,
+    targets: &SQLTruncateTargets,
+    restart_identity: bool,
+) -> Result<(), SQLError> {
+    for table in &targets.trigger_order {
+        crate::sql::fire_statement_triggers(
+            engine,
+            table,
+            uqa_sql::ast::TriggerTiming::Before,
+            uqa_sql::ast::TriggerEvent::Truncate,
+            &[],
+        )?;
+    }
+    let ordered = truncate_dependency_order(engine, targets)?;
+    engine.truncate_tables_with_identity(&ordered, restart_identity)?;
+    for table in &targets.trigger_order {
+        crate::sql::fire_statement_triggers(
+            engine,
+            table,
+            uqa_sql::ast::TriggerTiming::After,
+            uqa_sql::ast::TriggerEvent::Truncate,
+            &[],
+        )?;
+    }
+    Ok(())
+}
+
+/// Referencing relations precede their targets even though the low-level clear does not evaluate row foreign keys.
+fn truncate_dependency_order(
+    engine: &Engine,
+    targets: &SQLTruncateTargets,
+) -> Result<Vec<String>, SQLError> {
+    let mut ordered = Vec::with_capacity(targets.all.len());
+    let mut visiting = BTreeSet::new();
+    let mut visited = BTreeSet::new();
+    for table in &targets.trigger_order {
+        visit_truncate_target(
+            engine,
+            table,
+            &targets.all,
+            &mut visiting,
+            &mut visited,
+            &mut ordered,
+        )?;
+    }
+    Ok(ordered)
+}
+
+fn visit_truncate_target(
+    engine: &Engine,
+    table: &str,
+    targets: &BTreeSet<String>,
+    visiting: &mut BTreeSet<String>,
+    visited: &mut BTreeSet<String>,
+    ordered: &mut Vec<String>,
+) -> Result<(), SQLError> {
+    if visited.contains(table) || !visiting.insert(table.to_string()) {
+        return Ok(());
+    }
+    for (referrer, _) in engine
+        .referrers_to(table)
+        .map_err(|err| SQLError::Internal(format!("read foreign keys: {err}")))?
+    {
+        if targets.contains(&referrer) {
+            visit_truncate_target(engine, &referrer, targets, visiting, visited, ordered)?;
+        }
+    }
+    visiting.remove(table);
+    if visited.insert(table.to_string()) {
+        ordered.push(table.to_string());
+    }
+    Ok(())
 }

@@ -7,10 +7,9 @@
 //! Durable views and logical-session catalog/runtime state.
 
 use super::{
-    build_histogram, build_mcv, distinct_count, Arc, BTreeMap, CatalogFacade, CatalogIndexRow,
-    ColumnStatsInput, DocId, DocumentStore, Engine, Ordering, RelationIdentity, SQLError,
-    StorageBackendError, StorageBackendResult, StoredView, StoredViewKind, TableState, Value,
-    ViewRow,
+    Arc, BTreeMap, CatalogFacade, CatalogIndexRow, ColumnStatsInput, DocId, DocumentStore, Engine,
+    Ordering, RelationIdentity, SQLError, StorageBackendError, StorageBackendResult, StoredView,
+    StoredViewKind, TableState, Value, ViewRow,
 };
 use uqa_execution::ScalarExpr;
 use uqa_planner::{QueryPlan, RelationalPlan, SourcePlan};
@@ -26,9 +25,10 @@ mod settings;
 mod settings_parse;
 mod view_binding;
 mod views;
+pub(crate) use schemas::is_virtual_system_schema;
 pub(crate) use views::{MaterializedViewRegistration, ViewRegistration};
 
-use analyze_helpers::collect_analyze_values;
+use analyze_helpers::{build_histogram, build_mcv, collect_analyze_values, distinct_count};
 use settings_parse::parse_search_path_list;
 pub(crate) use view_binding::query_plan_references_function;
 use view_binding::{

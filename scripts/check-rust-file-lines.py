@@ -30,7 +30,7 @@ ENTRY_FIELDS = {
     "target_modules",
     "migration_state",
 }
-MIGRATION_STATES = {"planned", "phase-0-urgent", "in-progress"}
+MIGRATION_STATES = {"planned", "in-progress"}
 
 
 class PolicyError(RuntimeError):
