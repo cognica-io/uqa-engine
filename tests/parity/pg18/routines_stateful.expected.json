@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "fea607399038461e73144b4345e567cbbf1a2f66c74f75a841469bd9e435b2ad",
+  "fixture_sha256": "e1b2f9ff69f7f4f622359ac7f5830688a37944761d84c1db90f8901445314c28",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -851,6 +851,112 @@
     {
       "name": "positional_dependency_cascade",
       "kind": "ok"
+    },
+    {
+      "name": "create_foreach_elements",
+      "kind": "ok"
+    },
+    {
+      "name": "foreach_elements_storage_order",
+      "kind": "rows",
+      "rows": [
+        [
+          "1,2,3,4,found=true"
+        ]
+      ]
+    },
+    {
+      "name": "foreach_empty_resets_found",
+      "kind": "rows",
+      "rows": [
+        [
+          "found=false"
+        ]
+      ]
+    },
+    {
+      "name": "create_foreach_slice",
+      "kind": "ok"
+    },
+    {
+      "name": "foreach_slice_bounds",
+      "kind": "rows",
+      "rows": [
+        [
+          "[5:6]=[5:6]={1,2};[5:6]=[5:6]={3,4};found=true"
+        ]
+      ]
+    },
+    {
+      "name": "create_foreach_source_log",
+      "kind": "ok"
+    },
+    {
+      "name": "create_foreach_source",
+      "kind": "ok"
+    },
+    {
+      "name": "create_foreach_subquery_sum",
+      "kind": "ok"
+    },
+    {
+      "name": "foreach_subquery_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "6"
+        ]
+      ]
+    },
+    {
+      "name": "foreach_expression_evaluated_once",
+      "kind": "rows",
+      "rows": [
+        [
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "create_foreach_null",
+      "kind": "ok"
+    },
+    {
+      "name": "foreach_null_expression",
+      "kind": "error",
+      "sqlstate": "22004"
+    },
+    {
+      "name": "create_foreach_nonarray",
+      "kind": "ok"
+    },
+    {
+      "name": "foreach_nonarray_expression",
+      "kind": "error",
+      "sqlstate": "42804"
+    },
+    {
+      "name": "create_foreach_slice_scalar",
+      "kind": "ok"
+    },
+    {
+      "name": "foreach_empty_dimension_precedes_target",
+      "kind": "error",
+      "sqlstate": "2202E"
+    },
+    {
+      "name": "foreach_slice_requires_array_target",
+      "kind": "error",
+      "sqlstate": "42804"
+    },
+    {
+      "name": "create_foreach_array_element",
+      "kind": "ok"
+    },
+    {
+      "name": "foreach_element_requires_scalar_target",
+      "kind": "error",
+      "sqlstate": "42804"
     }
   ]
 }

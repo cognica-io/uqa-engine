@@ -240,6 +240,41 @@ fn foreach_array_slices_preserve_dimensions_and_lower_bounds() {
 }
 
 #[test]
+fn foreach_array_scalar_subquery_is_typed_and_evaluated_once() {
+    let eng = engine();
+    exec(&eng, "CREATE TABLE foreach_source_log(value integer)");
+    exec(
+        &eng,
+        "CREATE FUNCTION foreach_source() RETURNS integer[] AS $$
+         BEGIN
+           INSERT INTO foreach_source_log VALUES (1);
+           RETURN ARRAY[1, 2, 3];
+         END;
+         $$ LANGUAGE plpgsql VOLATILE",
+    );
+    exec(
+        &eng,
+        "CREATE FUNCTION foreach_subquery_sum() RETURNS integer AS $$
+         DECLARE item integer; total integer := 0;
+         BEGIN
+           FOREACH item IN ARRAY (SELECT foreach_source()) LOOP
+             total := total + item;
+           END LOOP;
+           RETURN total;
+         END;
+         $$ LANGUAGE plpgsql",
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT foreach_subquery_sum() AS value"),
+        Value::Int(6)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT count(*) FROM foreach_source_log"),
+        Value::Int(1)
+    );
+}
+
+#[test]
 fn foreach_array_validates_expression_dimensions_and_target_type() {
     let eng = engine();
     exec(

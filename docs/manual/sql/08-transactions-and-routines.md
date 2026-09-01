@@ -134,7 +134,35 @@ END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 ```
 
-The implemented PL/pgSQL surface includes declarations, assignment, `IF` and `CASE`, basic loops, `WHILE`, integer and query `FOR`, labeled blocks and exits, `RETURN`, `RETURN NEXT`, `RETURN QUERY`, `PERFORM`, static SQL, dynamic `EXECUTE`, nested blocks, recursive calls with a depth limit, diagnostics, exception handlers, and cursors covered by the routine tests.
+The implemented PL/pgSQL surface includes declarations, assignment, `IF` and `CASE`, basic loops, `WHILE`, integer and query `FOR`, array `FOREACH`, labeled blocks and exits, `RETURN`, `RETURN NEXT`, `RETURN QUERY`, `PERFORM`, static SQL, dynamic `EXECUTE`, nested blocks, recursive calls with a depth limit, diagnostics, exception handlers, and cursors covered by the routine tests.
+
+### Array FOREACH
+
+The implemented syntax is `[ <<label>> ] FOREACH target [ SLICE number ] IN ARRAY expression LOOP statements END LOOP [ label ];`. Omitting `SLICE` is equivalent to `SLICE 0`.
+
+The array expression is evaluated exactly once. With `SLICE 0`, the target must not have an array type and receives each scalar element in storage order regardless of declared array dimensions or lower bounds. With a positive `SLICE`, the target must be an array variable and receives successive subarrays whose trailing dimensions and lower bounds are preserved; the slice number cannot exceed the input array's dimension count.
+
+`FOREACH` produces no SQL result rows. Its body can use the ordinary labeled `CONTINUE` and `EXIT` forms, and after the loop `FOUND` is true when at least one iteration began and false for an empty array.
+
+A NULL expression fails with SQLSTATE `22004`; a non-array expression or target whose scalar-versus-array shape does not match `SLICE` fails with `42804`; and a slice number outside `0..array_dimensions` fails with `2202E`. The dimension check precedes the target-shape check, including for a zero-dimensional empty array.
+
+```sql execute
+CREATE FUNCTION manual_foreach_sum(items INTEGER[])
+RETURNS INTEGER
+AS $$
+DECLARE
+    item INTEGER;
+    total INTEGER := 0;
+BEGIN
+    FOREACH item IN ARRAY items LOOP
+        total := total + item;
+    END LOOP;
+    RETURN total;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
+SELECT manual_foreach_sum(ARRAY[1, 2, 3]);
+```
 
 PL/pgSQL cursors support bound `CURSOR [(arguments)] FOR query` declarations with positional or named `OPEN` arguments, unbound static `OPEN ... FOR query`, dynamic `OPEN ... FOR EXECUTE ... USING`, explicit `SCROLL` and `NO SCROLL`, directional single-row `FETCH ... INTO`, `MOVE` directions and counts including `ALL`, `FOUND`, `ROW_COUNT`, and `CLOSE`. Static and dynamic cursor plans may be relational queries, `SHOW`, `EXPLAIN`, `CALL` with output parameters, or `INSERT`, `UPDATE`, `DELETE`, and `MERGE` with `RETURNING`; a mutation command without a result row is rejected before it can change data. Query cursors use query-dependent default scrollability, while command cursors default to `NO SCROLL`; PostgreSQL 18's explicit-`SCROLL` DML behavior for `INSERT`, `UPDATE`, and `DELETE`, which retains the returned row count while exposing `NULL` values, is preserved, `CALL` output cursors may scroll explicitly, and explicit-`SCROLL` `MERGE` cursors fail with SQLSTATE `0A000`.
 

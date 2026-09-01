@@ -527,3 +527,80 @@ DROP FUNCTION sf_positional_dependency(integer) RESTRICT;
 -- @case positional_dependency_cascade ok
 DROP FUNCTION sf_positional_dependency(integer) CASCADE;
 -- @end
+
+-- PL/pgSQL FOREACH traverses true arrays in storage order, retains slice bounds, evaluates its expression once, updates FOUND, and preserves PostgreSQL's validation order.
+-- @case create_foreach_elements ok
+CREATE FUNCTION sf_foreach_elements(items integer[]) RETURNS text LANGUAGE plpgsql AS $$ DECLARE item integer; output text := ''; BEGIN PERFORM 1; FOREACH item SLICE 0 IN ARRAY items LOOP output := output || coalesce(item::text, 'NULL') || ','; END LOOP; RETURN output || 'found=' || FOUND::text; END $$;
+-- @end
+
+-- @case foreach_elements_storage_order rows
+SELECT sf_foreach_elements('[0:1][5:6]={{1,2},{3,4}}'::integer[]) AS value;
+-- @end
+
+-- @case foreach_empty_resets_found rows
+SELECT sf_foreach_elements(ARRAY[]::integer[]) AS value;
+-- @end
+
+-- @case create_foreach_slice ok
+CREATE FUNCTION sf_foreach_slice(items integer[]) RETURNS text LANGUAGE plpgsql AS $$ DECLARE item integer[]; output text := ''; BEGIN FOREACH item SLICE 1 IN ARRAY items LOOP output := output || array_dims(item) || '=' || item::text || ';'; END LOOP; RETURN output || 'found=' || FOUND::text; END $$;
+-- @end
+
+-- @case foreach_slice_bounds rows
+SELECT sf_foreach_slice('[0:1][5:6]={{1,2},{3,4}}'::integer[]) AS value;
+-- @end
+
+-- @case create_foreach_source_log ok
+CREATE TABLE sf_foreach_source_log(value integer);
+-- @end
+
+-- @case create_foreach_source ok
+CREATE FUNCTION sf_foreach_source() RETURNS integer[] LANGUAGE plpgsql VOLATILE AS $$ BEGIN INSERT INTO sf_foreach_source_log VALUES (1); RETURN ARRAY[1,2,3]; END $$;
+-- @end
+
+-- @case create_foreach_subquery_sum ok
+CREATE FUNCTION sf_foreach_subquery_sum() RETURNS integer LANGUAGE plpgsql AS $$ DECLARE item integer; total integer := 0; BEGIN FOREACH item IN ARRAY (SELECT sf_foreach_source()) LOOP total := total + item; END LOOP; RETURN total; END $$;
+-- @end
+
+-- @case foreach_subquery_result rows
+SELECT sf_foreach_subquery_sum() AS value;
+-- @end
+
+-- @case foreach_expression_evaluated_once rows
+SELECT count(*) AS calls FROM sf_foreach_source_log;
+-- @end
+
+-- @case create_foreach_null ok
+CREATE FUNCTION sf_foreach_null(items integer[]) RETURNS integer LANGUAGE plpgsql AS $$ DECLARE item integer; BEGIN FOREACH item IN ARRAY items LOOP NULL; END LOOP; RETURN 0; END $$;
+-- @end
+
+-- @case foreach_null_expression error
+SELECT sf_foreach_null(NULL::integer[]);
+-- @end
+
+-- @case create_foreach_nonarray ok
+CREATE FUNCTION sf_foreach_nonarray() RETURNS integer LANGUAGE plpgsql AS $$ DECLARE item integer; BEGIN FOREACH item IN ARRAY 42 LOOP NULL; END LOOP; RETURN 0; END $$;
+-- @end
+
+-- @case foreach_nonarray_expression error
+SELECT sf_foreach_nonarray();
+-- @end
+
+-- @case create_foreach_slice_scalar ok
+CREATE FUNCTION sf_foreach_slice_scalar(items integer[]) RETURNS integer LANGUAGE plpgsql AS $$ DECLARE item integer; BEGIN FOREACH item SLICE 1 IN ARRAY items LOOP NULL; END LOOP; RETURN 0; END $$;
+-- @end
+
+-- @case foreach_empty_dimension_precedes_target error
+SELECT sf_foreach_slice_scalar(ARRAY[]::integer[]);
+-- @end
+
+-- @case foreach_slice_requires_array_target error
+SELECT sf_foreach_slice_scalar(ARRAY[1,2]);
+-- @end
+
+-- @case create_foreach_array_element ok
+CREATE FUNCTION sf_foreach_array_element(items integer[]) RETURNS integer LANGUAGE plpgsql AS $$ DECLARE item integer[]; BEGIN FOREACH item IN ARRAY items LOOP NULL; END LOOP; RETURN 0; END $$;
+-- @end
+
+-- @case foreach_element_requires_scalar_target error
+SELECT sf_foreach_array_element(ARRAY[]::integer[]);
+-- @end

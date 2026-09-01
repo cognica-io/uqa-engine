@@ -165,20 +165,21 @@ pub(super) fn eval_lowered_expression_with_type(
     params: &[SQLParam],
 ) -> Result<(Value, Option<uqa_sql::ast::ColumnType>), SQLError> {
     let mut expression = ExpressionPlan::lower(expression.clone());
+    let mut scope = CteScope::new_for_current_routine(engine);
+    scope.scalar_subqueries.clone_from(&expression.subqueries);
+    let hook = ScopedEngineHook::new(engine, &scope);
     let declared_type = uqa_execution::scalar_type_with_resolver(
         &expression.scalar,
         &RowSchema::default(),
         params,
-        engine,
+        &hook,
     )?;
     expression.scalar = uqa_execution::bind_type_introspection_with_resolver(
         expression.scalar,
         &RowSchema::default(),
         params,
-        engine,
+        &hook,
     );
-    let scope = CteScope::new_for_current_routine(engine);
-    let hook = ScopedEngineHook::new(engine, &scope);
     let context = PhysicalEvalContext::new(row, params)
         .with_function_hook(&hook)
         .with_subquery_runner(&hook);
@@ -198,15 +199,16 @@ pub(crate) fn eval_lowered_expression_with_schema(
     params: &[SQLParam],
 ) -> Result<Value, SQLError> {
     let mut expression = ExpressionPlan::lower(expression.clone());
-    uqa_execution::scalar_type_with_resolver(&expression.scalar, schema, params, engine)?;
+    let mut scope = CteScope::new_for_current_routine(engine);
+    scope.scalar_subqueries.clone_from(&expression.subqueries);
+    let hook = ScopedEngineHook::new(engine, &scope);
+    uqa_execution::scalar_type_with_resolver(&expression.scalar, schema, params, &hook)?;
     expression.scalar = uqa_execution::bind_type_introspection_with_resolver(
         expression.scalar,
         schema,
         params,
-        engine,
+        &hook,
     );
-    let scope = CteScope::new_for_current_routine(engine);
-    let hook = ScopedEngineHook::new(engine, &scope);
     let context = PhysicalEvalContext::new(Some(row), params)
         .with_row_schema(schema)
         .with_function_hook(&hook)
