@@ -16,7 +16,9 @@ use acl::{
 };
 use uqa_sql::ast::{GrantSequenceStmt, GrantSequenceTarget, SequenceRevokeBehavior};
 
-use crate::engine_roles::{role_can_set, RoleDefinition, RoleMembership, RoleMembershipKey};
+use crate::engine_roles::{
+    role_can_set, role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey,
+};
 use crate::engine_state::SequenceSecurity;
 use crate::{Engine, RelationIdentity, SQLError, Value};
 
@@ -26,6 +28,33 @@ struct ResolvedSequenceGrantTarget {
     relation: RelationIdentity,
     kind: &'static str,
     require_sequence: bool,
+}
+
+pub(crate) fn role_can_view_sequence(
+    security: &SequenceSecurity,
+    subject: &str,
+    roles: &BTreeMap<String, RoleDefinition>,
+    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+) -> bool {
+    role_inherits(roles, memberships, subject, &security.role_owner)
+        || [
+            AclPrivilege::Select,
+            AclPrivilege::Update,
+            AclPrivilege::Usage,
+        ]
+        .into_iter()
+        .any(|privilege| {
+            role_has_privilege(
+                security,
+                subject,
+                PrivilegeCheck {
+                    privilege,
+                    grant_option: false,
+                },
+                roles,
+                memberships,
+            )
+        })
 }
 
 impl Engine {

@@ -110,7 +110,7 @@ impl Engine {
             engine
                 .create_sequence_inner(
                     name,
-                    Self::default_sequence_state(start, increment),
+                    Self::default_sequence_state(start, increment, SequenceDataType::BigInt),
                     if_not_exists,
                     uqa_sql::ast::RelationPersistence::Permanent,
                     &uqa_sql::ast::SequenceOwnership::Unchanged,
@@ -160,6 +160,7 @@ impl Engine {
         name: &str,
         start: i64,
         increment: i64,
+        data_type: SequenceDataType,
         if_not_exists: bool,
         persistence: uqa_sql::ast::RelationPersistence,
     ) -> Result<bool, String> {
@@ -167,7 +168,7 @@ impl Engine {
             engine
                 .create_sequence_inner(
                     name,
-                    Self::default_sequence_state(start, increment),
+                    Self::default_sequence_state(start, increment, data_type),
                     if_not_exists,
                     persistence,
                     &uqa_sql::ast::SequenceOwnership::Unchanged,
@@ -176,15 +177,20 @@ impl Engine {
         })
     }
 
-    fn default_sequence_state(start: i64, increment: i64) -> SequenceState {
+    fn default_sequence_state(
+        start: i64,
+        increment: i64,
+        data_type: SequenceDataType,
+    ) -> SequenceState {
+        let (type_min, type_max) = data_type.bounds();
         SequenceState {
             start,
             increment,
             current: start,
             called: false,
-            data_type: SequenceDataType::BigInt,
-            min_value: if increment > 0 { 1 } else { i64::MIN },
-            max_value: if increment > 0 { i64::MAX } else { -1 },
+            data_type,
+            min_value: if increment > 0 { 1 } else { type_min },
+            max_value: if increment > 0 { type_max } else { -1 },
             cycle: false,
             cache_size: 1,
             definition_generation: [0; 16],

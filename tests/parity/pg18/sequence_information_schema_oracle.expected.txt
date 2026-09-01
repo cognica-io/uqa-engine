@@ -1,0 +1,12 @@
+temporary-information|uqa_sequence_information_current_temp
+temporary-pg|uqa_sequence_information_current_temp
+owner|generated_rows_bigserial_id_seq|bigint|64|2|0|1|1|9223372036854775807|1|NO
+owner|generated_rows_serial_id_seq|integer|32|2|0|1|1|2147483647|1|NO
+owner|generated_rows_smallserial_id_seq|smallint|16|2|0|1|1|32767|1|NO
+owner|small_ids|smallint|16|2|0|9|-30|12|-3|YES
+hidden|0
+explicit|generated_rows_bigserial_id_seq|bigint|1|1|9223372036854775807|1|NO
+explicit|generated_rows_serial_id_seq|integer|1|1|2147483647|1|NO
+explicit|generated_rows_smallserial_id_seq|smallint|1|1|32767|1|NO
+explicit|small_ids|smallint|9|-30|12|-3|YES
+inherited-owner|4

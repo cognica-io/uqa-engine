@@ -28,6 +28,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Corrected implicit `smallserial`/`serial2`, `serial`/`serial4`, and `bigserial`/`serial8` backing sequences to use PostgreSQL's `smallint`, `integer`, and `bigint` types, and made `information_schema.sequences` expose exact type, precision, bounds, start, increment, and cycle metadata while excluding internal identity sequences, filtering rows by owner inheritance or sequence privileges, and hiding other sessions' temporary sequences from both sequence catalog views across durable reopen.
 - Promoted legacy column-only `PRIMARY KEY` and `UNIQUE` flags into named durable table-key constraints during initial catalog restore, preventing a later catalog query, transaction commit, or unrelated `DROP TABLE` from failing because an upgraded persistent table exposed an anonymous constraint.
 - Corrected stateful PostgreSQL 18 oracle schema substitution inside string literals so catalog assertions inspect the intended schema instead of a quoted placeholder.
 - Rejected unauthorized routine replacement and explicit routine drops before mutation, required a SET-enabled path for ownership transfer, and prevented `SECURITY DEFINER` calls from changing the effective session role.

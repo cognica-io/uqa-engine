@@ -183,23 +183,53 @@ impl CatalogReadView {
             .collect()
     }
 
-    pub(crate) fn sequence_states(&self) -> Vec<(String, crate::SequenceState, String)> {
+    pub(crate) fn sequence_states(
+        &self,
+    ) -> Vec<(
+        crate::RelationIdentity,
+        crate::SequenceState,
+        uqa_sql::ast::RelationPersistence,
+        crate::engine_state::SequenceSecurity,
+    )> {
         self.snapshot
             .durable
             .sequences
             .iter()
             .map(|(identity, state)| {
                 (
-                    identity.qualified_name(),
+                    identity.clone(),
                     *state,
+                    self.snapshot
+                        .durable
+                        .sequence_persistence
+                        .get(identity)
+                        .copied()
+                        .unwrap_or_default(),
                     self.snapshot
                         .durable
                         .sequence_security
                         .get(identity)
-                        .map_or_else(|| "uqa".into(), |security| security.role_owner.clone()),
+                        .cloned()
+                        .unwrap_or_else(|| crate::engine_state::SequenceSecurity {
+                            role_owner: "uqa".into(),
+                            acl: None,
+                        }),
                 )
             })
             .collect()
+    }
+
+    pub(crate) fn sequence_is_visible_to(
+        &self,
+        security: &crate::engine_state::SequenceSecurity,
+        role: &str,
+    ) -> bool {
+        crate::engine_sequence_security::role_can_view_sequence(
+            security,
+            role,
+            &self.snapshot.durable.roles,
+            &self.snapshot.durable.role_memberships,
+        )
     }
 
     pub(crate) fn views_of_kind(

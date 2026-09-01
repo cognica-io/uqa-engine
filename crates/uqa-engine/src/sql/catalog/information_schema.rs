@@ -17,10 +17,10 @@ use super::helpers::oids::{current_user_name, split_schema_name, stable_oid};
 use super::helpers::rows::{catalog_name, catalog_ordinal, int_value, row, str_value};
 use super::helpers::type_metadata::{catalog_regtype_name, catalog_type_name};
 use super::helpers::views::{all_schema_names, view_columns_for};
-use crate::engine_capabilities::{CatalogReadView, RelationNameResolution};
+use crate::engine_capabilities::{CatalogReadView, RelationNameResolution, SessionExecutionView};
 use crate::engine_user_functions::routine_signature_types;
 use crate::sql::value_to_text;
-use crate::Engine;
+use crate::{Engine, SequenceOwnerDependency};
 use uqa_core::Value;
 use uqa_sql::ast::ColumnDef as SQLColumnDef;
 use uqa_sql::registry::registered_names;
@@ -558,28 +558,48 @@ pub(super) fn build_info_routines(catalog: &CatalogReadView) -> Result<Vec<Resul
     Ok(rows)
 }
 
-pub(super) fn build_info_sequences(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
+pub(super) fn build_info_sequences(
+    catalog: &CatalogReadView,
+    session: SessionExecutionView<'_>,
+) -> Vec<ResultRow> {
+    let current_user = session.current_user();
+    let temporary_schema = session.temporary_schema_name();
     catalog
-        .sequences()
+        .sequence_states()
         .into_iter()
-        .map(|(name, _, _, _)| {
-            let (schema, sequence) = split_schema_name(&name)?;
-            Ok(row([
+        .filter(|(relation, state, persistence, security)| {
+            (*persistence != uqa_sql::ast::RelationPersistence::Temporary
+                || relation.schema == temporary_schema)
+                && !state
+                    .owner
+                    .is_some_and(|owner| owner.dependency == SequenceOwnerDependency::Internal)
+                && catalog.sequence_is_visible_to(security, &current_user)
+        })
+        .map(|(relation, state, _, _)| {
+            let numeric_precision = match state.data_type {
+                uqa_sql::ast::SequenceDataType::SmallInt => 16,
+                uqa_sql::ast::SequenceDataType::Integer => 32,
+                uqa_sql::ast::SequenceDataType::BigInt => 64,
+            };
+            row([
                 ("sequence_catalog", catalog_name()),
-                ("sequence_schema", str_value(schema)),
-                ("sequence_name", str_value(sequence)),
-                ("data_type", str_value("bigint")),
-                ("numeric_precision", Value::Int(64)),
+                ("sequence_schema", str_value(relation.schema)),
+                ("sequence_name", str_value(relation.name)),
+                ("data_type", str_value(state.data_type.sql_name())),
+                ("numeric_precision", Value::Int(numeric_precision)),
                 ("numeric_precision_radix", Value::Int(2)),
                 ("numeric_scale", Value::Int(0)),
-                ("start_value", Value::Null),
-                ("minimum_value", Value::Null),
-                ("maximum_value", Value::Null),
-                ("increment", Value::Null),
-                ("cycle_option", str_value("NO")),
-            ]))
+                ("start_value", str_value(state.start.to_string())),
+                ("minimum_value", str_value(state.min_value.to_string())),
+                ("maximum_value", str_value(state.max_value.to_string())),
+                ("increment", str_value(state.increment.to_string())),
+                (
+                    "cycle_option",
+                    str_value(if state.cycle { "YES" } else { "NO" }),
+                ),
+            ])
         })
-        .collect::<Result<Vec<_>, SQLError>>()
+        .collect()
 }
 
 pub(super) fn build_info_table_constraints(

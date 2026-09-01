@@ -28,7 +28,7 @@ pub(super) fn build_info_schema_rows(
         VirtualRelation::InformationColumns => build_info_columns(engine, catalog, resolution)?,
         VirtualRelation::InformationViews => build_info_views(engine, catalog)?,
         VirtualRelation::InformationRoutines => build_info_routines(catalog)?,
-        VirtualRelation::InformationSequences => build_info_sequences(catalog)?,
+        VirtualRelation::InformationSequences => build_info_sequences(catalog, session),
         VirtualRelation::InformationTableConstraints => {
             build_info_table_constraints(catalog, resolution)?
         }
@@ -61,7 +61,7 @@ pub(super) fn build_info_schema_rows(
         VirtualRelation::PgSettings => build_pg_settings(session)?,
         VirtualRelation::PgDescription => Vec::new(),
         VirtualRelation::PgMatviews => build_pg_matviews(catalog)?,
-        VirtualRelation::PgSequences => build_pg_sequences(catalog)?,
+        VirtualRelation::PgSequences => build_pg_sequences(catalog, session)?,
         VirtualRelation::AgGraph => build_ag_graph(catalog)?,
         VirtualRelation::AgLabel => build_ag_label(catalog)?,
     }))

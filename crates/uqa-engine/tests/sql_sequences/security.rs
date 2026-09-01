@@ -6,6 +6,8 @@
 
 use super::*;
 
+#[path = "security/information_schema.rs"]
+mod information_schema;
 #[path = "security/targets.rs"]
 mod targets;
 #[path = "security/temporary_acl.rs"]

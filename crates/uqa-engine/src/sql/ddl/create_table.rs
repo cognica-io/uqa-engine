@@ -12,7 +12,7 @@ use super::{
     SQLResult,
 };
 use crate::sql::generated::prepare_generated_columns;
-use uqa_sql::ast::{AutoIncrementKind, AutoIncrementOwner, Expr};
+use uqa_sql::ast::{AutoIncrementKind, AutoIncrementOwner, Expr, SequenceDataType};
 
 use super::constraint_validation::{
     resolve_foreign_key_parent, validate_check_expression, validate_foreign_key_definition,
@@ -229,13 +229,24 @@ fn materialize_implicit_sequences(
         if auto_increment.kind == AutoIncrementKind::Legacy || auto_increment.sequence.is_some() {
             continue;
         }
+        let data_type = match &column.ty {
+            ColumnType::SmallInteger => SequenceDataType::SmallInt,
+            ColumnType::Integer => SequenceDataType::Integer,
+            ColumnType::BigInteger => SequenceDataType::BigInt,
+            _ => {
+                return Err(SQLError::Internal(format!(
+                    "implicit sequence column `{}` has non-integer type",
+                    column.name
+                )))
+            }
+        };
         let sequence = crate::RelationIdentity::new(
             relation.schema.clone(),
             format!("{}_{}_seq", relation.name, column.name),
         )
         .qualified_name();
         engine
-            .create_sequence_with_persistence(&sequence, 1, 1, false, table.persistence)
+            .create_sequence_with_persistence(&sequence, 1, 1, data_type, false, table.persistence)
             .map_err(|error| {
                 SQLError::Unsupported(format!(
                     "CREATE TABLE implicit sequence `{sequence}`: {error}"
