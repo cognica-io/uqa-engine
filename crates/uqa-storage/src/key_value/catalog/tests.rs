@@ -99,6 +99,7 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
             current: 1,
             called: false,
             persistence: "p".into(),
+            options: SequenceOptions::default(),
         })
         .unwrap();
 
@@ -141,6 +142,33 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
             .unwrap(),
         Some(22)
     );
+
+    let cycling_id = [9; 16];
+    catalog
+        .create_sequence_row(&SequenceRow {
+            relation: RelationIdentity::new("public", "cycling"),
+            object_id: cycling_id,
+            start: 5,
+            increment: 3,
+            current: 5,
+            called: false,
+            persistence: "p".into(),
+            options: crate::catalog::SequenceOptions {
+                data_type: "integer".into(),
+                min_value: Some(2),
+                max_value: Some(5),
+                cycle: true,
+            },
+        })
+        .unwrap();
+    for expected in [5, 2, 5, 2] {
+        assert_eq!(
+            catalog
+                .next_sequence_value("public.cycling", cycling_id)
+                .unwrap(),
+            Some(expected)
+        );
+    }
 }
 
 #[test]
@@ -217,6 +245,7 @@ fn relation_namespace_migration_rejects_alias_and_cross_kind_collisions() {
                         current: 0,
                         called: true,
                         persistence: "p".into(),
+                        options: SequenceOptions::default(),
                     })
                     .unwrap(),
                 )

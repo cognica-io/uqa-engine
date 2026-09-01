@@ -462,12 +462,31 @@ fn alter_constraint_not_valid_reports_postgresql_feature_state() {
 #[test]
 fn alter_sequence_preserves_if_exists() {
     let Statement::AlterSequence(sequence) =
-        first("ALTER SEQUENCE IF EXISTS absent RESTART WITH 7")
+        first("ALTER SEQUENCE IF EXISTS absent AS smallint INCREMENT -2 MINVALUE -20 MAXVALUE -2 START -4 RESTART WITH -6 CYCLE")
     else {
         panic!("expected ALTER SEQUENCE");
     };
     assert!(sequence.if_exists);
-    assert_eq!(sequence.restart, crate::ast::SequenceRestart::With(7));
+    assert_eq!(
+        sequence.data_type,
+        Some(crate::ast::SequenceDataType::SmallInt)
+    );
+    assert_eq!(sequence.increment, Some(-2));
+    assert_eq!(sequence.min_value, crate::ast::SequenceBound::Value(-20));
+    assert_eq!(sequence.max_value, crate::ast::SequenceBound::Value(-2));
+    assert_eq!(sequence.start, Some(-4));
+    assert_eq!(sequence.restart, crate::ast::SequenceRestart::With(-6));
+    assert_eq!(sequence.cycle, Some(true));
+
+    let Statement::AlterSequence(defaults) =
+        first("ALTER SEQUENCE absent NO MINVALUE NO MAXVALUE NO CYCLE RESTART")
+    else {
+        panic!("expected ALTER SEQUENCE defaults");
+    };
+    assert_eq!(defaults.min_value, crate::ast::SequenceBound::Default);
+    assert_eq!(defaults.max_value, crate::ast::SequenceBound::Default);
+    assert_eq!(defaults.cycle, Some(false));
+    assert_eq!(defaults.restart, crate::ast::SequenceRestart::FromStart);
 }
 
 #[test]

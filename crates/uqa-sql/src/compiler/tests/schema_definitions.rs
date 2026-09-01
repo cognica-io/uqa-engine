@@ -10,7 +10,47 @@ use super::*;
 
 #[test]
 fn sequence_options_do_not_truncate_or_ignore_values() {
-    assert!(compile("CREATE SEQUENCE s START 1.5").is_err());
+    let Statement::CreateSequence(sequence) = first(
+        "CREATE SEQUENCE app.s AS integer INCREMENT BY 3 MINVALUE 2 MAXVALUE 10 START WITH 8 CYCLE",
+    ) else {
+        panic!("not CREATE SEQUENCE");
+    };
+    assert_eq!(sequence.data_type, crate::ast::SequenceDataType::Integer);
+    assert_eq!(sequence.increment, 3);
+    assert_eq!(sequence.min_value, Some(2));
+    assert_eq!(sequence.max_value, Some(10));
+    assert_eq!(sequence.start, 8);
+    assert!(sequence.cycle);
+
+    let Statement::CreateSequence(descending) = first(
+        "CREATE SEQUENCE descending AS smallint INCREMENT -2 NO MINVALUE NO MAXVALUE NO CYCLE",
+    ) else {
+        panic!("not descending CREATE SEQUENCE");
+    };
+    assert_eq!(descending.data_type, crate::ast::SequenceDataType::SmallInt);
+    assert_eq!(descending.min_value, Some(i64::from(i16::MIN)));
+    assert_eq!(descending.max_value, Some(-1));
+    assert_eq!(descending.start, -1);
+    assert!(!descending.cycle);
+
+    assert_eq!(
+        compile("CREATE SEQUENCE s START 1.5")
+            .unwrap_err()
+            .sqlstate(),
+        Some("22P02")
+    );
+    assert_eq!(
+        compile("CREATE SEQUENCE s START 9223372036854775808")
+            .unwrap_err()
+            .sqlstate(),
+        Some("22003")
+    );
+    assert_eq!(
+        compile("CREATE SEQUENCE s MINVALUE 1 MINVALUE 2")
+            .unwrap_err()
+            .sqlstate(),
+        Some("42601")
+    );
     let error = compile("CREATE SEQUENCE s CACHE 10").unwrap_err();
     assert!(error.to_string().contains("not supported"));
 }

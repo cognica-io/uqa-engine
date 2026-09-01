@@ -5,8 +5,9 @@
 //
 
 use super::{
-    BTreeMap, CatalogFacade, Engine, RelationIdentity, SQLError, SequenceRestart, SequenceRow,
-    SequenceState, StorageBackendError, StorageBackendResult, SEQUENCES_METADATA_KEY,
+    BTreeMap, CatalogFacade, Engine, RelationIdentity, SQLError, SequenceBound, SequenceDataType,
+    SequenceOptions, SequenceRestart, SequenceRow, SequenceState, StorageBackendError,
+    StorageBackendResult, SEQUENCES_METADATA_KEY,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -47,7 +48,11 @@ impl SequenceValueError {
             } else {
                 "minimum"
             },
-            value: state.current,
+            value: if state.increment > 0 {
+                state.max_value
+            } else {
+                state.min_value
+            },
         }
     }
 
@@ -78,39 +83,38 @@ impl Engine {
         autonomous: bool,
         defines_lastval: bool,
     ) {
-        let session_currval = self
-            .session
-            .state
-            .read()
-            .sequence_currvals
-            .get(relation)
-            .copied();
+        let (session_currval, definition_generation) = {
+            let session = self.session.state.read();
+            (
+                session.sequence_currvals.get(relation).copied(),
+                session.sequence_definition_generation(relation, object_id),
+            )
+        };
         let value = super::NontransactionalSequenceValue {
             object_id,
             current,
             called,
-            session_currval,
-            defines_lastval,
             autonomous,
         };
         let mut transactions = self.session.transactions.lock();
         for frame in transactions.iter_mut() {
-            let previous_defines_lastval = frame
-                .nontransactional_sequence_values
-                .get(relation)
-                .is_some_and(|previous| {
-                    previous.object_id == object_id && previous.defines_lastval
-                });
             if defines_lastval {
-                for previous in frame.nontransactional_sequence_values.values_mut() {
-                    previous.defines_lastval = false;
+                for history in frame.nontransactional_sequence_values.values_mut() {
+                    history.defines_lastval = false;
                 }
             }
-            let mut frame_value = value;
-            frame_value.defines_lastval |= previous_defines_lastval;
-            frame
+            let history = frame
                 .nontransactional_sequence_values
-                .insert(relation.clone(), frame_value);
+                .entry(relation.clone())
+                .or_default();
+            let preserves_lastval =
+                !defines_lastval && history.object_id == object_id && history.defines_lastval;
+            history
+                .values_by_definition
+                .insert(definition_generation, value);
+            history.object_id = object_id;
+            history.session_currval = session_currval;
+            history.defines_lastval = defines_lastval || preserves_lastval;
         }
     }
 
@@ -183,12 +187,45 @@ impl Engine {
         if_not_exists: bool,
     ) -> Result<bool, String> {
         self.with_implicit_string_transaction(|engine| {
+            engine
+                .create_sequence_inner(
+                    name,
+                    Self::default_sequence_state(start, increment),
+                    if_not_exists,
+                    uqa_sql::ast::RelationPersistence::Permanent,
+                )
+                .map_err(|error| error.to_string())
+        })
+    }
+
+    pub(crate) fn create_sequence_sql(
+        &self,
+        sequence: &uqa_sql::ast::CreateSequence,
+    ) -> Result<bool, SQLError> {
+        self.with_implicit_transaction(|engine| {
+            let (type_min, type_max) = sequence.data_type.bounds();
             engine.create_sequence_inner(
-                name,
-                start,
-                increment,
-                if_not_exists,
-                uqa_sql::ast::RelationPersistence::Permanent,
+                &sequence.name,
+                SequenceState {
+                    start: sequence.start,
+                    increment: sequence.increment,
+                    current: sequence.start,
+                    called: false,
+                    data_type: sequence.data_type,
+                    min_value: sequence.min_value.unwrap_or(if sequence.increment > 0 {
+                        1
+                    } else {
+                        type_min
+                    }),
+                    max_value: sequence.max_value.unwrap_or(if sequence.increment > 0 {
+                        type_max
+                    } else {
+                        -1
+                    }),
+                    cycle: sequence.cycle,
+                },
+                sequence.if_not_exists,
+                sequence.persistence,
             )
         })
     }
@@ -202,75 +239,82 @@ impl Engine {
         persistence: uqa_sql::ast::RelationPersistence,
     ) -> Result<bool, String> {
         self.with_implicit_string_transaction(|engine| {
-            engine.create_sequence_inner(name, start, increment, if_not_exists, persistence)
+            engine
+                .create_sequence_inner(
+                    name,
+                    Self::default_sequence_state(start, increment),
+                    if_not_exists,
+                    persistence,
+                )
+                .map_err(|error| error.to_string())
         })
+    }
+
+    fn default_sequence_state(start: i64, increment: i64) -> SequenceState {
+        SequenceState {
+            start,
+            increment,
+            current: start,
+            called: false,
+            data_type: SequenceDataType::BigInt,
+            min_value: if increment > 0 { 1 } else { i64::MIN },
+            max_value: if increment > 0 { i64::MAX } else { -1 },
+            cycle: false,
+        }
     }
 
     fn create_sequence_inner(
         &self,
         name: &str,
-        start: i64,
-        increment: i64,
+        state: SequenceState,
         if_not_exists: bool,
         persistence: uqa_sql::ast::RelationPersistence,
-    ) -> Result<bool, String> {
-        Self::validate_sequence_increment(name, increment)?;
+    ) -> Result<bool, SQLError> {
+        Self::validate_sequence_definition(state, false)?;
         let name = if persistence == uqa_sql::ast::RelationPersistence::Temporary {
-            self.try_temporary_relation_name_for_create(name)?
+            self.try_temporary_relation_name_for_create(name)
+                .map_err(SQLError::Unsupported)?
         } else {
-            self.try_relation_name_for_create(name)?
+            self.try_relation_name_for_create(name)
+                .map_err(SQLError::Unsupported)?
         };
         let relation = Self::resolved_relation_identity(&name)
-            .map_err(|err| format!("resolve sequence `{name}`: {err}"))?;
-        let object_id = crate::new_sequence_object_id()
-            .map_err(|err| format!("allocate sequence `{name}` identity: {err}"))?;
-        self.refresh_sequences_from_catalog()
-            .map_err(|err| format!("load sequence catalog: {err}"))?;
-        if let Some(kind) = self
+            .map_err(|error| SQLError::Internal(format!("resolve sequence `{name}`: {error}")))?;
+        self.refresh_sequences_from_catalog().map_err(|error| {
+            SQLError::Internal(format!("load sequence catalog for `{name}`: {error}"))
+        })?;
+        if self
             .relation_kind_at(&name)
-            .map_err(|err| format!("resolve relation `{name}`: {err}"))?
+            .map_err(|error| SQLError::Internal(format!("resolve relation `{name}`: {error}")))?
+            .is_some()
         {
-            if kind != "sequence" {
-                return Err(format!("Relation `{name}` already exists as {kind}"));
-            }
+            return Self::sequence_create_collision(&name, if_not_exists);
         }
-        let state = SequenceState {
-            start,
-            increment,
-            current: start,
-            called: false,
-        };
+        let object_id = crate::new_sequence_object_id().map_err(|error| {
+            SQLError::Internal(format!("allocate sequence `{name}` identity: {error}"))
+        })?;
         if persistence == uqa_sql::ast::RelationPersistence::Temporary {
             let seqs = self.durable.sequences.read();
             if seqs.contains_key(&relation) {
-                return if if_not_exists {
-                    Ok(false)
-                } else {
-                    Err(format!("Sequence `{name}` already exists"))
-                };
+                return Self::sequence_create_collision(&name, if_not_exists);
             }
         } else if let Some(catalog) = self.storage.catalog.as_ref() {
             let created = catalog
                 .create_sequence_row(
-                    &Self::sequence_row(&name, object_id, state, persistence)
-                        .map_err(|err| format!("build sequence catalog row: {err}"))?,
+                    &Self::sequence_row(&name, object_id, state, persistence).map_err(|error| {
+                        SQLError::Internal(format!("build sequence catalog row: {error}"))
+                    })?,
                 )
-                .map_err(|err| format!("persist sequence catalog: {err}"))?;
+                .map_err(|error| {
+                    SQLError::Internal(format!("persist sequence catalog: {error}"))
+                })?;
             if !created {
-                return if if_not_exists {
-                    Ok(false)
-                } else {
-                    Err(format!("Sequence `{name}` already exists"))
-                };
+                return Self::sequence_create_collision(&name, if_not_exists);
             }
         } else {
             let seqs = self.durable.sequences.read();
             if seqs.contains_key(&relation) {
-                return if if_not_exists {
-                    Ok(false)
-                } else {
-                    Err(format!("Sequence `{name}` already exists"))
-                };
+                return Self::sequence_create_collision(&name, if_not_exists);
             }
         }
         self.durable
@@ -289,6 +333,17 @@ impl Engine {
         Ok(true)
     }
 
+    fn sequence_create_collision(name: &str, if_not_exists: bool) -> Result<bool, SQLError> {
+        if if_not_exists {
+            Ok(false)
+        } else {
+            Err(SQLError::Routine {
+                sqlstate: "42P07".into(),
+                message: format!("relation \"{name}\" already exists"),
+            })
+        }
+    }
+
     /// Compatibility wrapper for the original direct API. SQL lowering and
     /// all internal execution use [`SequenceRestart`] instead.
     #[allow(clippy::option_option)]
@@ -304,49 +359,54 @@ impl Engine {
             Some(None) => SequenceRestart::FromStart,
             Some(Some(value)) => SequenceRestart::With(value),
         };
+        let alter = uqa_sql::ast::AlterSequence {
+            name: name.into(),
+            restart,
+            increment,
+            start,
+            ..Default::default()
+        };
         self.with_implicit_string_transaction(|engine| {
             engine
-                .alter_sequence_inner(name, restart, increment, start, false)
+                .alter_sequence_inner(&alter)
                 .map(|_| ())
+                .map_err(|error| error.to_string())
         })
     }
 
-    pub(crate) fn alter_sequence_if_exists(
+    pub(crate) fn alter_sequence_sql(
         &self,
-        name: &str,
-        restart: SequenceRestart,
-        increment: Option<i64>,
-        start: Option<i64>,
-        if_exists: bool,
-    ) -> Result<bool, String> {
-        self.with_implicit_string_transaction(|engine| {
-            engine.alter_sequence_inner(name, restart, increment, start, if_exists)
-        })
+        alter: &uqa_sql::ast::AlterSequence,
+    ) -> Result<bool, SQLError> {
+        self.with_implicit_transaction(|engine| engine.alter_sequence_inner(alter))
     }
 
-    fn alter_sequence_inner(
-        &self,
-        name: &str,
-        restart: SequenceRestart,
-        increment: Option<i64>,
-        start: Option<i64>,
-        if_exists: bool,
-    ) -> Result<bool, String> {
-        let Some(name) = self
-            .try_resolve_sequence_name(name)
-            .map_err(|err| format!("load sequence catalog: {err}"))?
-        else {
-            return if if_exists {
-                Ok(false)
-            } else {
-                Err(format!("Sequence `{name}` does not exist"))
-            };
+    fn alter_sequence_inner(&self, alter: &uqa_sql::ast::AlterSequence) -> Result<bool, SQLError> {
+        let name = match self
+            .try_resolve_relation_kind(&alter.name)
+            .map_err(|error| {
+                SQLError::Internal(format!(
+                    "load sequence catalog for `{}`: {error}",
+                    alter.name
+                ))
+            })? {
+            Some((name, "sequence")) => name,
+            Some((_name, _kind)) => {
+                return Err(SQLError::Routine {
+                    sqlstate: "42809".into(),
+                    message: format!("\"{}\" is not a sequence", alter.name),
+                })
+            }
+            None if alter.if_exists => return Ok(false),
+            None => {
+                return Err(SQLError::Routine {
+                    sqlstate: "42P01".into(),
+                    message: format!("relation \"{}\" does not exist", alter.name),
+                })
+            }
         };
-        if let Some(increment) = increment {
-            Self::validate_sequence_increment(&name, increment)?;
-        }
         let relation = Self::resolved_relation_identity(&name)
-            .map_err(|err| format!("resolve sequence `{name}`: {err}"))?;
+            .map_err(|error| SQLError::Internal(format!("resolve sequence `{name}`: {error}")))?;
         let persistence = self
             .durable
             .sequence_persistence
@@ -360,23 +420,100 @@ impl Engine {
             .read()
             .get(&relation)
             .copied()
-            .ok_or_else(|| format!("Sequence `{name}` has no object identity"))?;
+            .ok_or_else(|| {
+                SQLError::Internal(format!("sequence `{name}` has no object identity"))
+            })?;
         let temporary = persistence == uqa_sql::ast::RelationPersistence::Temporary;
-        let mut state = self
+        let state = self
             .durable
             .sequences
             .read()
             .get(&relation)
             .copied()
-            .ok_or_else(|| format!("Sequence `{name}` does not exist"))?;
-        if let Some(start_val) = start {
+            .ok_or_else(|| SQLError::Internal(format!("sequence `{name}` disappeared")))?;
+        let state = Self::altered_sequence_state(state, alter)?;
+        let definition_generation =
+            crate::new_sequence_definition_generation().map_err(|error| {
+                SQLError::Internal(format!(
+                    "allocate sequence `{name}` definition generation: {error}"
+                ))
+            })?;
+        if !temporary {
+            if let Some(catalog) = self.storage.catalog.as_ref() {
+                if !catalog
+                    .replace_sequence_row(
+                        &Self::sequence_row(&name, object_id, state, persistence).map_err(
+                            |error| {
+                                SQLError::Internal(format!("build sequence catalog row: {error}"))
+                            },
+                        )?,
+                    )
+                    .map_err(|error| {
+                        SQLError::Internal(format!("persist sequence catalog: {error}"))
+                    })?
+                {
+                    return Err(SQLError::Internal(format!(
+                        "sequence `{name}` disappeared during ALTER"
+                    )));
+                }
+            }
+        }
+        self.durable
+            .sequences
+            .write()
+            .insert(relation.clone(), state);
+        self.session.state.write().sequence_definitions.insert(
+            relation,
+            super::SessionSequenceDefinition {
+                object_id,
+                generation: definition_generation,
+            },
+        );
+        self.note_catalog_registry_changed();
+        Ok(true)
+    }
+
+    fn altered_sequence_state(
+        mut state: SequenceState,
+        alter: &uqa_sql::ast::AlterSequence,
+    ) -> Result<SequenceState, SQLError> {
+        if let Some(data_type) = alter.data_type {
+            let (old_type_min, old_type_max) = state.data_type.bounds();
+            let (new_type_min, new_type_max) = data_type.bounds();
+            if state.min_value == old_type_min {
+                state.min_value = new_type_min;
+            }
+            if state.max_value == old_type_max {
+                state.max_value = new_type_max;
+            }
+            state.data_type = data_type;
+        }
+        if let Some(increment) = alter.increment {
+            state.increment = increment;
+        }
+        let (type_min, type_max) = state.data_type.bounds();
+        match alter.min_value {
+            SequenceBound::Unchanged => {}
+            SequenceBound::Default => {
+                state.min_value = if state.increment > 0 { 1 } else { type_min };
+            }
+            SequenceBound::Value(value) => state.min_value = value,
+        }
+        match alter.max_value {
+            SequenceBound::Unchanged => {}
+            SequenceBound::Default => {
+                state.max_value = if state.increment > 0 { type_max } else { -1 };
+            }
+            SequenceBound::Value(value) => state.max_value = value,
+        }
+        if let Some(start_val) = alter.start {
             state.start = start_val;
         }
-        if let Some(inc) = increment {
-            state.increment = inc;
+        if let Some(cycle) = alter.cycle {
+            state.cycle = cycle;
         }
-        if restart != SequenceRestart::Unchanged {
-            let restart_val = match restart {
+        if alter.restart != SequenceRestart::Unchanged {
+            let restart_val = match alter.restart {
                 SequenceRestart::Unchanged => unreachable!("restart action was checked above"),
                 SequenceRestart::FromStart => state.start,
                 SequenceRestart::With(value) => value,
@@ -384,35 +521,92 @@ impl Engine {
             state.current = restart_val;
             state.called = false;
         }
-        if !temporary {
-            if let Some(catalog) = self.storage.catalog.as_ref() {
-                if !catalog
-                    .replace_sequence_row(
-                        &Self::sequence_row(&name, object_id, state, persistence)
-                            .map_err(|err| format!("build sequence catalog row: {err}"))?,
-                    )
-                    .map_err(|err| format!("persist sequence catalog: {err}"))?
-                {
-                    return Err(format!("Sequence `{name}` does not exist"));
-                }
-            }
-        }
-        self.durable.sequences.write().insert(relation, state);
-        self.note_catalog_registry_changed();
-        Ok(true)
+        Self::validate_sequence_definition(state, true)?;
+        Ok(state)
     }
 
     pub(crate) fn restart_owned_sequence(&self, name: &str) -> StorageBackendResult<()> {
-        self.alter_sequence_inner(name, SequenceRestart::FromStart, None, None, false)
-            .map(|_| ())
-            .map_err(StorageBackendError::Other)
+        self.alter_sequence_inner(&uqa_sql::ast::AlterSequence {
+            name: name.into(),
+            restart: SequenceRestart::FromStart,
+            ..Default::default()
+        })
+        .map(|_| ())
+        .map_err(|error| StorageBackendError::Other(error.to_string()))
     }
 
-    fn validate_sequence_increment(name: &str, increment: i64) -> Result<(), String> {
-        if increment == 0 {
-            Err(format!("Sequence `{name}` increment must not be zero"))
-        } else {
-            Ok(())
+    fn validate_sequence_definition(
+        state: SequenceState,
+        validate_current: bool,
+    ) -> Result<(), SQLError> {
+        let invalid = |message| SQLError::Routine {
+            sqlstate: "22023".into(),
+            message,
+        };
+        if state.increment == 0 {
+            return Err(invalid("INCREMENT must not be zero".into()));
+        }
+        let (type_min, type_max) = state.data_type.bounds();
+        if !(type_min..=type_max).contains(&state.max_value) {
+            return Err(invalid(format!(
+                "MAXVALUE ({}) is out of range for sequence data type {}",
+                state.max_value,
+                state.data_type.sql_name()
+            )));
+        }
+        if !(type_min..=type_max).contains(&state.min_value) {
+            return Err(invalid(format!(
+                "MINVALUE ({}) is out of range for sequence data type {}",
+                state.min_value,
+                state.data_type.sql_name()
+            )));
+        }
+        if state.min_value >= state.max_value {
+            return Err(invalid(format!(
+                "MINVALUE ({}) must be less than MAXVALUE ({})",
+                state.min_value, state.max_value
+            )));
+        }
+        if state.start < state.min_value {
+            return Err(invalid(format!(
+                "START value ({}) cannot be less than MINVALUE ({})",
+                state.start, state.min_value
+            )));
+        }
+        if state.start > state.max_value {
+            return Err(invalid(format!(
+                "START value ({}) cannot be greater than MAXVALUE ({})",
+                state.start, state.max_value
+            )));
+        }
+        if validate_current && state.current < state.min_value {
+            return Err(invalid(format!(
+                "RESTART value ({}) cannot be less than MINVALUE ({})",
+                state.current, state.min_value
+            )));
+        }
+        if validate_current && state.current > state.max_value {
+            return Err(invalid(format!(
+                "RESTART value ({}) cannot be greater than MAXVALUE ({})",
+                state.current, state.max_value
+            )));
+        }
+        Ok(())
+    }
+
+    fn next_sequence_value(state: SequenceState) -> Option<i64> {
+        if !state.called {
+            return Some(state.current);
+        }
+        match state
+            .current
+            .checked_add(state.increment)
+            .filter(|value| (state.min_value..=state.max_value).contains(value))
+        {
+            Some(value) => Some(value),
+            None if state.cycle && state.increment > 0 => Some(state.min_value),
+            None if state.cycle => Some(state.max_value),
+            None => None,
         }
     }
 
@@ -546,6 +740,7 @@ impl Engine {
             self.durable.sequence_persistence.write().remove(&relation);
             let mut session = self.session.state.write();
             session.sequence_currvals.remove(&relation);
+            session.sequence_definitions.remove(&relation);
             if session
                 .last_sequence
                 .as_ref()
@@ -660,10 +855,7 @@ impl Engine {
             match catalog.next_sequence_value(&name, object_id) {
                 Ok(Some(current)) => current,
                 Ok(None) => return Err(SequenceValueError::Undefined(name)),
-                Err(_)
-                    if previous.called
-                        && previous.current.checked_add(previous.increment).is_none() =>
-                {
+                Err(_) if Self::next_sequence_value(previous).is_none() => {
                     return Err(SequenceValueError::exhausted(&name, previous));
                 }
                 Err(error) => {
@@ -677,14 +869,9 @@ impl Engine {
             let seq = seqs
                 .get_mut(&relation)
                 .ok_or_else(|| SequenceValueError::Undefined(name.clone()))?;
-            if seq.called {
-                seq.current = seq
-                    .current
-                    .checked_add(seq.increment)
-                    .ok_or_else(|| SequenceValueError::exhausted(&name, *seq))?;
-            } else {
-                seq.called = true;
-            }
+            seq.current = Self::next_sequence_value(*seq)
+                .ok_or_else(|| SequenceValueError::exhausted(&name, *seq))?;
+            seq.called = true;
             seq.current
         };
         if let Some(state) = self.durable.sequences.write().get_mut(&relation) {
@@ -814,11 +1001,7 @@ impl Engine {
         if self.current_transaction_is_read_only() && !temporary {
             return Err(SequenceValueError::ReadOnly("setval"));
         }
-        let (min, max) = if previous.increment > 0 {
-            (1, i64::MAX)
-        } else {
-            (i64::MIN, -1)
-        };
+        let (min, max) = (previous.min_value, previous.max_value);
         if !(min..=max).contains(&value) {
             return Err(SequenceValueError::SetvalOutOfBounds {
                 name,
@@ -922,6 +1105,12 @@ impl Engine {
             current: state.current,
             called: state.called,
             persistence: persistence.catalog_code().into(),
+            options: SequenceOptions {
+                data_type: state.data_type.sql_name().into(),
+                min_value: Some(state.min_value),
+                max_value: Some(state.max_value),
+                cycle: state.cycle,
+            },
         })
     }
 
@@ -1093,15 +1282,43 @@ impl Engine {
                 row.relation.qualified_name()
             )));
         }
-        Ok((
-            row.relation,
-            SequenceState {
-                start: row.start,
-                increment: row.increment,
-                current: row.current,
-                called: row.called,
-            },
-        ))
+        let data_type = match row.options.data_type.as_str() {
+            "smallint" => SequenceDataType::SmallInt,
+            "integer" => SequenceDataType::Integer,
+            "bigint" => SequenceDataType::BigInt,
+            other => {
+                return Err(StorageBackendError::Other(format!(
+                    "corrupt sequence `{}` has data type `{other}`",
+                    row.relation.qualified_name()
+                )))
+            }
+        };
+        let (type_min, type_max) = data_type.bounds();
+        let state = SequenceState {
+            start: row.start,
+            increment: row.increment,
+            current: row.current,
+            called: row.called,
+            data_type,
+            min_value: row.options.min_value.unwrap_or(if row.increment > 0 {
+                1
+            } else {
+                type_min
+            }),
+            max_value: row.options.max_value.unwrap_or(if row.increment > 0 {
+                type_max
+            } else {
+                -1
+            }),
+            cycle: row.options.cycle,
+        };
+        Self::validate_sequence_definition(state, false).map_err(|error| {
+            StorageBackendError::Other(format!(
+                "corrupt sequence `{}` definition: {error}",
+                row.relation.qualified_name()
+            ))
+        })?;
+        Ok((row.relation, state))
     }
 
     // -----------------------------------------------------------------

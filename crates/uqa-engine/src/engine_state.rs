@@ -255,6 +255,7 @@ impl SessionContext {
             session_vars: BTreeMap::new(),
             sequence_currvals: BTreeMap::new(),
             last_sequence: None,
+            sequence_definitions: BTreeMap::new(),
             prepared: BTreeMap::new(),
             sql_statement_cache: SQLStatementCache::default(),
             portal_names: BTreeSet::new(),

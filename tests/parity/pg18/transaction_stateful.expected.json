@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "4c76eb846302e3678a40aa92792eb5a73a3fc4f1bb43aff6b90d9d86448a5705",
+  "fixture_sha256": "4f3f30313cbd7611c134c9d900f0558d4402cec90313fb45602497b1f8854fc9",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -1058,6 +1058,209 @@
           "v",
           "u",
           "lastval"
+        ]
+      ]
+    },
+    {
+      "name": "create_sequence_option_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_option_catalog_defaults",
+      "kind": "rows",
+      "rows": [
+        [
+          "sequence_options_cycle",
+          "integer",
+          "8",
+          "2",
+          "10",
+          "3",
+          "t",
+          "1"
+        ],
+        [
+          "sequence_options_descending",
+          "smallint",
+          "-1",
+          "-32768",
+          "-1",
+          "-3",
+          "f",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "sequence_option_cycle_allocations",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_option_cycle_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "cycle_1",
+          "8"
+        ],
+        [
+          "cycle_2",
+          "2"
+        ],
+        [
+          "cycle_3",
+          "5"
+        ],
+        [
+          "cycle_4",
+          "8"
+        ]
+      ]
+    },
+    {
+      "name": "sequence_option_exhaustion_initial",
+      "kind": "rows",
+      "rows": [
+        [
+          "8"
+        ]
+      ]
+    },
+    {
+      "name": "sequence_option_exhaustion",
+      "kind": "error",
+      "sqlstate": "2200H"
+    },
+    {
+      "name": "sequence_option_exhaustion_preserves_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "8"
+        ]
+      ]
+    },
+    {
+      "name": "sequence_option_zero_increment",
+      "kind": "error",
+      "sqlstate": "22023"
+    },
+    {
+      "name": "sequence_option_equal_bounds",
+      "kind": "error",
+      "sqlstate": "22023"
+    },
+    {
+      "name": "sequence_option_start_below_minimum",
+      "kind": "error",
+      "sqlstate": "22023"
+    },
+    {
+      "name": "sequence_option_bound_outside_type",
+      "kind": "error",
+      "sqlstate": "22023"
+    },
+    {
+      "name": "sequence_option_invalid_type",
+      "kind": "error",
+      "sqlstate": "22023"
+    },
+    {
+      "name": "sequence_option_duplicate_cycle",
+      "kind": "error",
+      "sqlstate": "42601"
+    },
+    {
+      "name": "alter_sequence_options",
+      "kind": "ok"
+    },
+    {
+      "name": "alter_sequence_options_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "integer",
+          "10",
+          "1",
+          "20",
+          "1",
+          "f",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "alter_sequence_options_next",
+      "kind": "rows",
+      "rows": [
+        [
+          "12"
+        ]
+      ]
+    },
+    {
+      "name": "altered_sequence_transaction_rollback",
+      "kind": "ok"
+    },
+    {
+      "name": "altered_sequence_transaction_rollback_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "transaction_next",
+          "3",
+          "3",
+          "3"
+        ],
+        [
+          "transaction_state",
+          "2",
+          "10",
+          "10"
+        ]
+      ]
+    },
+    {
+      "name": "altered_sequence_savepoint_rollback",
+      "kind": "ok"
+    },
+    {
+      "name": "altered_sequence_savepoint_rollback_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "savepoint_next",
+          "3",
+          "3",
+          "3"
+        ],
+        [
+          "savepoint_state",
+          "2",
+          "10",
+          "10"
+        ]
+      ]
+    },
+    {
+      "name": "sequence_altered_before_savepoint_ownership",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_altered_before_savepoint_ownership_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "altered_before_outer_next",
+          "2",
+          "2",
+          "2"
+        ],
+        [
+          "altered_before_outer_state",
+          "1",
+          "10",
+          "10"
         ]
       ]
     },

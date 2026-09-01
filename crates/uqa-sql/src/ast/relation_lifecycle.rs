@@ -65,6 +65,43 @@ pub struct CreateSequence {
     pub increment: i64,
     #[serde(default)]
     pub persistence: RelationPersistence,
+    #[serde(default)]
+    pub data_type: SequenceDataType,
+    /// Concrete bounds are written by current compilers. `None` is retained for backward-compatible plans and means the `PostgreSQL` default for the declared type and increment direction.
+    #[serde(default)]
+    pub min_value: Option<i64>,
+    #[serde(default)]
+    pub max_value: Option<i64>,
+    #[serde(default)]
+    pub cycle: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SequenceDataType {
+    SmallInt,
+    Integer,
+    #[default]
+    BigInt,
+}
+
+impl SequenceDataType {
+    #[must_use]
+    pub const fn sql_name(self) -> &'static str {
+        match self {
+            Self::SmallInt => "smallint",
+            Self::Integer => "integer",
+            Self::BigInt => "bigint",
+        }
+    }
+
+    #[must_use]
+    pub const fn bounds(self) -> (i64, i64) {
+        match self {
+            Self::SmallInt => (i16::MIN as i64, i16::MAX as i64),
+            Self::Integer => (i32::MIN as i64, i32::MAX as i64),
+            Self::BigInt => (i64::MIN, i64::MAX),
+        }
+    }
 }
 
 /// Physical restart action carried by `ALTER SEQUENCE`.
@@ -77,6 +114,15 @@ pub enum SequenceRestart {
     FromStart,
     /// `RESTART WITH value`; allocate the supplied value next.
     With(i64),
+}
+
+/// `ALTER SEQUENCE` bound action, distinguishing omission from `NO MINVALUE` or `NO MAXVALUE`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SequenceBound {
+    #[default]
+    Unchanged,
+    Default,
+    Value(i64),
 }
 
 fn deserialize_sequence_restart<'de, D>(deserializer: D) -> Result<SequenceRestart, D::Error>
@@ -121,4 +167,12 @@ pub struct AlterSequence {
     pub restart: SequenceRestart,
     pub increment: Option<i64>,
     pub start: Option<i64>,
+    #[serde(default)]
+    pub data_type: Option<SequenceDataType>,
+    #[serde(default)]
+    pub min_value: SequenceBound,
+    #[serde(default)]
+    pub max_value: SequenceBound,
+    #[serde(default)]
+    pub cycle: Option<bool>,
 }

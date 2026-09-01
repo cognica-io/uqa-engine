@@ -182,11 +182,14 @@ impl Engine {
         {
             cleanup_errors.push(format!("ANALYZE statistics cache restore: {error}"));
         }
-        if let Err(error) = self.persist_nontransactional_sequence_values_after_rollback(
-            &nontransactional_sequence_values,
-            true,
-        ) {
-            cleanup_errors.push(format!("sequence value restore: {error}"));
+        if let Some(snapshot) = session_snapshot.as_ref() {
+            if let Err(error) = self.persist_nontransactional_sequence_values_after_rollback(
+                &nontransactional_sequence_values,
+                snapshot,
+                true,
+            ) {
+                cleanup_errors.push(format!("sequence value restore: {error}"));
+            }
         }
         if let Some(snapshot) = session_snapshot.as_ref() {
             self.restore_session_state(snapshot);
@@ -319,6 +322,7 @@ impl Engine {
         }
         if let Err(error) = self.persist_nontransactional_sequence_values_after_rollback(
             &nontransactional_sequence_values,
+            &session_snapshot,
             storage_savepoint.is_none(),
         ) {
             cleanup_errors.push(format!("sequence value restore: {error}"));
@@ -427,6 +431,7 @@ impl Engine {
     pub(super) fn persist_nontransactional_sequence_values_after_rollback(
         &self,
         values: &NontransactionalSequenceValues,
+        session_snapshot: &SessionStateSnapshot,
         outer: bool,
     ) -> StorageBackendResult<()> {
         if self.storage.catalog.is_none() {
@@ -438,16 +443,19 @@ impl Engine {
             let persistence = self.durable.sequence_persistence.read();
             values
                 .iter()
-                .filter(|(relation, _)| sequences.contains_key(*relation))
-                .filter(|(relation, value)| {
-                    object_ids.get(*relation).copied() == Some(value.object_id)
-                })
                 .filter(|(relation, _)| {
                     persistence.get(*relation).copied().unwrap_or_default()
                         != uqa_sql::ast::RelationPersistence::Temporary
                 })
-                .filter(|(_, value)| !value.autonomous)
-                .map(|(relation, value)| (relation.qualified_name(), value.object_id, *value))
+                .filter_map(|(relation, history)| {
+                    let object_id = object_ids.get(relation).copied()?;
+                    sequences.get(relation)?;
+                    let generation =
+                        session_snapshot.sequence_definition_generation(relation, object_id);
+                    let value = history.values_by_definition.get(&generation).copied()?;
+                    (value.object_id == object_id && !value.autonomous)
+                        .then(|| (relation.qualified_name(), value.object_id, value))
+                })
                 .collect::<Vec<_>>()
         };
         if persistent.is_empty() {
@@ -498,25 +506,35 @@ impl Engine {
         let mut sequences = self.durable.sequences.write();
         let object_ids = self.durable.sequence_object_ids.read();
         let mut session = self.session.state.write();
-        if let Some((relation, value)) = values.iter().find(|(_, value)| value.defines_lastval) {
+        if let Some((relation, history)) =
+            values.iter().find(|(_, history)| history.defines_lastval)
+        {
             session.last_sequence = Some(SessionLastSequenceReference {
                 relation: relation.clone(),
-                object_id: value.object_id,
+                object_id: history.object_id,
             });
         }
-        for (relation, value) in values {
-            if object_ids.get(relation).copied() != Some(value.object_id) {
-                continue;
-            }
-            let Some(sequence) = sequences.get_mut(relation) else {
+        for (relation, history) in values {
+            let Some(object_id) = object_ids.get(relation).copied() else {
                 continue;
             };
-            sequence.current = value.current;
-            sequence.called = value.called;
-            if let Some(currval) = value.session_currval {
-                session.sequence_currvals.insert(relation.clone(), currval);
-            } else {
-                session.sequence_currvals.remove(relation);
+            let generation = session.sequence_definition_generation(relation, object_id);
+            if let Some(value) = history
+                .values_by_definition
+                .get(&generation)
+                .filter(|value| value.object_id == object_id)
+            {
+                if let Some(sequence) = sequences.get_mut(relation) {
+                    sequence.current = value.current;
+                    sequence.called = value.called;
+                }
+            }
+            if history.object_id == object_id {
+                if let Some(currval) = history.session_currval {
+                    session.sequence_currvals.insert(relation.clone(), currval);
+                } else {
+                    session.sequence_currvals.remove(relation);
+                }
             }
         }
     }
@@ -529,7 +547,7 @@ impl Engine {
         cleanup_errors: &mut Vec<String>,
     ) {
         if let Err(error) =
-            self.persist_nontransactional_sequence_values_after_rollback(values, outer)
+            self.persist_nontransactional_sequence_values_after_rollback(values, snapshot, outer)
         {
             cleanup_errors.push(format!("sequence value restore: {error}"));
         }

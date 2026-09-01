@@ -14,7 +14,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::catalog::{
     CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignTableRow,
-    GraphSnapshot, RelationIdentity, RelationKind, SequenceRow, TableSchema, ViewRow,
+    GraphSnapshot, RelationIdentity, RelationKind, SequenceOptions, SequenceRow, TableSchema,
+    ViewRow,
 };
 use crate::{StorageBackendError, StorageBackendResult};
 

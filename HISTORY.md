@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Implemented PostgreSQL 18 sequence `AS smallint|integer|bigint`, direction-sensitive default and explicit minimum and maximum bounds, `CYCLE` and `NO CYCLE`, bound exhaustion, matching `ALTER SEQUENCE`, durable catalog migration, and definition-owned transaction and savepoint rollback while preserving session `currval` and `lastval`, verified by the 188-case transaction-state oracle.
 - Implemented PostgreSQL 18 SQL `DROP SEQUENCE` with multi-target atomic validation, `IF EXISTS`, exact relation-kind and dependency errors, `RESTRICT` and `CASCADE` for column defaults and recursive view dependencies, serial ownership direction, transactional and savepoint rollback, read-only rejection, durable reopen, and session-state identity, verified by the 166-case transaction-state oracle.
 - Implemented PostgreSQL 18 `lastval()` with exact session selection, `setval` interaction, rollback and exception persistence, `DISCARD SEQUENCES`, durable sequence-lifecycle identity, `pg_proc` metadata, and simple-query transaction behavior, verified by the 149-case transaction-state oracle.
 - Implemented PostgreSQL 18 three-argument `setval(regclass, bigint, boolean)` with exact called-state, `currval`, strict NULL, default-bound, relation-kind, read-only transaction, failed-statement, PL/pgSQL exception, rollback, savepoint, persistent reopen, `pg_sequences`, and function-signature behavior, verified by the 139-case transaction-state oracle.

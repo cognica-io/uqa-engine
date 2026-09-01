@@ -8,8 +8,19 @@
 
 use super::{
     migration_relation, params, Catalog, OptionalExtension, RelationIdentity, RelationKind, Result,
-    SQLiteError, SequenceRow, ViewRow,
+    SQLiteError, SequenceOptions, SequenceRow, ViewRow,
 };
+
+fn concrete_sequence_options(sequence: &SequenceRow) -> SequenceOptions {
+    let default_min = if sequence.increment > 0 { 1 } else { i64::MIN };
+    let default_max = if sequence.increment > 0 { i64::MAX } else { -1 };
+    SequenceOptions {
+        data_type: sequence.options.data_type.clone(),
+        min_value: Some(sequence.options.min_value.unwrap_or(default_min)),
+        max_value: Some(sequence.options.max_value.unwrap_or(default_max)),
+        cycle: sequence.options.cycle,
+    }
+}
 
 impl Catalog {
     pub fn create_sequence_row(&self, sequence: &SequenceRow) -> Result<bool> {
@@ -28,10 +39,11 @@ impl Catalog {
                 return Ok(false);
             }
             Self::claim_relation(&tx, &sequence.relation, RelationKind::Sequence)?;
+            let options = concrete_sequence_options(sequence);
             tx.execute(
                 "INSERT INTO _sequences
-                    (schema_name, relation_name, kind, object_id, start, increment, current, called, persistence)
-                 VALUES (?1, ?2, 'sequence', ?3, ?4, ?5, ?6, ?7, ?8)",
+                    (schema_name, relation_name, kind, object_id, start, increment, current, called, persistence, data_type, min_value, max_value, cycle)
+                 VALUES (?1, ?2, 'sequence', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                 params![
                     sequence.relation.schema,
                     sequence.relation.name,
@@ -40,7 +52,11 @@ impl Catalog {
                     sequence.increment,
                     sequence.current,
                     sequence.called,
-                    sequence.persistence
+                    sequence.persistence,
+                    options.data_type,
+                    options.min_value,
+                    options.max_value,
+                    options.cycle,
                 ],
             )?;
             tx.commit()?;
@@ -50,9 +66,11 @@ impl Catalog {
 
     pub fn replace_sequence_row(&self, sequence: &SequenceRow) -> Result<bool> {
         self.conn.with(|connection| {
+            let options = concrete_sequence_options(sequence);
             Ok(connection.execute(
                 "UPDATE _sequences
-                    SET object_id = ?3, start = ?4, increment = ?5, current = ?6, called = ?7, persistence = ?8
+                    SET object_id = ?3, start = ?4, increment = ?5, current = ?6, called = ?7, persistence = ?8,
+                        data_type = ?9, min_value = ?10, max_value = ?11, cycle = ?12
                   WHERE schema_name = ?1 AND relation_name = ?2",
                 params![
                     sequence.relation.schema,
@@ -62,7 +80,11 @@ impl Catalog {
                     sequence.increment,
                     sequence.current,
                     sequence.called,
-                    sequence.persistence
+                    sequence.persistence,
+                    options.data_type,
+                    options.min_value,
+                    options.max_value,
+                    options.cycle,
                 ],
             )? != 0)
         })
@@ -88,7 +110,8 @@ impl Catalog {
     pub fn load_sequence_rows(&self) -> Result<Vec<SequenceRow>> {
         self.conn.with(|connection| {
             let mut statement = connection.prepare(
-                "SELECT schema_name, relation_name, object_id, start, increment, current, called, persistence
+                "SELECT schema_name, relation_name, object_id, start, increment, current, called, persistence,
+                        data_type, min_value, max_value, cycle
                        FROM _sequences ORDER BY schema_name, relation_name",
             )?;
             let rows = statement.query_map([], |row| {
@@ -101,12 +124,28 @@ impl Catalog {
                     row.get::<_, i64>(5)?,
                     row.get::<_, bool>(6)?,
                     row.get::<_, String>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, i64>(9)?,
+                    row.get::<_, i64>(10)?,
+                    row.get::<_, bool>(11)?,
                 ))
             })?;
             let mut sequences = Vec::new();
             for row in rows {
-                let (schema, name, object_id, start, increment, current, called, persistence) =
-                    row?;
+                let (
+                    schema,
+                    name,
+                    object_id,
+                    start,
+                    increment,
+                    current,
+                    called,
+                    persistence,
+                    data_type,
+                    min_value,
+                    max_value,
+                    cycle,
+                ) = row?;
                 let object_id: [u8; 16] = object_id.try_into().map_err(|value: Vec<u8>| {
                     SQLiteError::StorageBackend(format!(
                         "corrupt sequence `{}.{name}` object identity has {} bytes",
@@ -122,6 +161,12 @@ impl Catalog {
                     current,
                     called,
                     persistence,
+                    options: SequenceOptions {
+                        data_type,
+                        min_value: Some(min_value),
+                        max_value: Some(max_value),
+                        cycle,
+                    },
                 });
             }
             Ok(sequences)
@@ -138,22 +183,25 @@ impl Catalog {
             let value = tx
                 .query_row(
                     "UPDATE _sequences
-                        SET current = CASE WHEN called = 0 THEN current
-                                           ELSE current + increment END,
+                        SET current = CASE
+                                WHEN called = 0 THEN current
+                                WHEN increment > 0 AND current <= max_value - increment
+                                    THEN current + increment
+                                WHEN increment < 0 AND current >= min_value - increment
+                                    THEN current + increment
+                                WHEN cycle != 0 AND increment > 0 THEN min_value
+                                WHEN cycle != 0 THEN max_value
+                                ELSE current
+                            END,
                             called = 1
                       WHERE schema_name = ?1 AND relation_name = ?2
-                        AND object_id = ?5
+                        AND object_id = ?3
                         AND (called = 0
-                             OR (increment > 0 AND current <= ?3 - increment)
-                             OR (increment < 0 AND current >= ?4 - increment))
+                             OR (increment > 0 AND current <= max_value - increment)
+                             OR (increment < 0 AND current >= min_value - increment)
+                             OR cycle != 0)
                       RETURNING current",
-                    params![
-                        relation.schema,
-                        relation.name,
-                        i64::MAX,
-                        i64::MIN,
-                        object_id.as_slice()
-                    ],
+                    params![relation.schema, relation.name, object_id.as_slice()],
                     |row| row.get(0),
                 )
                 .optional()?;
@@ -177,7 +225,7 @@ impl Catalog {
                     .transpose()?;
                 if stored_object_id.is_some_and(|stored| stored == object_id) {
                     return Err(SQLiteError::StorageBackend(format!(
-                        "sequence `{name}` overflow"
+                        "sequence `{name}` exhausted"
                     )));
                 }
             }

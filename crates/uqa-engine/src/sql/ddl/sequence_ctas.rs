@@ -25,15 +25,12 @@ pub(in crate::sql) fn run_create_sequence(
     engine: &Engine,
     s: uqa_sql::ast::CreateSequence,
 ) -> Result<SQLResult, SQLError> {
-    engine
-        .create_sequence_with_persistence(
-            &s.name,
-            s.start,
-            s.increment,
-            s.if_not_exists,
-            s.persistence,
-        )
-        .map_err(SQLError::Unsupported)?;
+    if !engine.create_sequence_sql(&s)? {
+        engine.push_sql_notice(
+            "NOTICE",
+            &format!("relation \"{}\" already exists, skipping", s.name),
+        );
+    }
     Ok(SQLResult::empty())
 }
 
@@ -41,9 +38,12 @@ pub(in crate::sql) fn run_alter_sequence(
     engine: &Engine,
     s: uqa_sql::ast::AlterSequence,
 ) -> Result<SQLResult, SQLError> {
-    engine
-        .alter_sequence_if_exists(&s.name, s.restart, s.increment, s.start, s.if_exists)
-        .map_err(SQLError::Unsupported)?;
+    if !engine.alter_sequence_sql(&s)? {
+        engine.push_sql_notice(
+            "NOTICE",
+            &format!("relation \"{}\" does not exist, skipping", s.name),
+        );
+    }
     Ok(SQLResult::empty())
 }
 

@@ -441,6 +441,286 @@ fn pg_sequences_reports_sequence_state_across_reopen() {
 }
 
 #[test]
+fn sequence_declared_bounds_types_and_cycle_survive_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("sequence-options.sqlite");
+    {
+        let engine = Engine::open(&database).unwrap();
+        engine
+            .sql(
+                "CREATE SEQUENCE configured AS integer INCREMENT 3 MINVALUE 2 MAXVALUE 10 START 8 CYCLE;
+                 CREATE SEQUENCE small_defaults AS smallint",
+                &[],
+            )
+            .unwrap();
+        let configured = engine
+            .sql(
+                "SELECT data_type, start_value, min_value, max_value, increment_by, cycle, cache_size, last_value FROM pg_sequences WHERE sequencename = 'configured'",
+                &[],
+            )
+            .unwrap();
+        assert_eq!(
+            configured.rows[0]["data_type"],
+            Value::Str("integer".into())
+        );
+        assert_eq!(configured.rows[0]["start_value"], Value::Int(8));
+        assert_eq!(configured.rows[0]["min_value"], Value::Int(2));
+        assert_eq!(configured.rows[0]["max_value"], Value::Int(10));
+        assert_eq!(configured.rows[0]["increment_by"], Value::Int(3));
+        assert_eq!(configured.rows[0]["cycle"], Value::Bool(true));
+        assert_eq!(configured.rows[0]["cache_size"], Value::Int(1));
+        assert_eq!(configured.rows[0]["last_value"], Value::Null);
+        let small = engine
+            .sql(
+                "SELECT data_type, min_value, max_value FROM pg_sequences WHERE sequencename = 'small_defaults'",
+                &[],
+            )
+            .unwrap();
+        assert_eq!(small.rows[0]["data_type"], Value::Str("smallint".into()));
+        assert_eq!(small.rows[0]["min_value"], Value::Int(1));
+        assert_eq!(small.rows[0]["max_value"], Value::Int(i64::from(i16::MAX)));
+        for expected in [8, 2, 5, 8, 2, 5, 8] {
+            assert_eq!(engine.nextval("configured").unwrap(), expected);
+        }
+        let below_minimum = engine
+            .sql("SELECT setval('configured', 1)", &[])
+            .unwrap_err();
+        assert_eq!(below_minimum.sqlstate(), Some("22003"));
+    }
+
+    let reopened = Engine::open(&database).unwrap();
+    assert_eq!(reopened.nextval("configured").unwrap(), 2);
+    let catalog = reopened
+        .sql(
+            "SELECT data_type, min_value, max_value, cycle, last_value FROM pg_sequences WHERE sequencename = 'configured'",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(catalog.rows[0]["data_type"], Value::Str("integer".into()));
+    assert_eq!(catalog.rows[0]["min_value"], Value::Int(2));
+    assert_eq!(catalog.rows[0]["max_value"], Value::Int(10));
+    assert_eq!(catalog.rows[0]["cycle"], Value::Bool(true));
+    assert_eq!(catalog.rows[0]["last_value"], Value::Int(2));
+}
+
+#[test]
+fn noncycling_sequence_overshoot_reports_the_configured_bound() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE SEQUENCE bounded INCREMENT 3 MINVALUE 2 MAXVALUE 10 START 8",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(engine.nextval("bounded").unwrap(), 8);
+    let exhausted = engine.sql("SELECT nextval('bounded')", &[]).unwrap_err();
+    assert_eq!(exhausted.sqlstate(), Some("2200H"));
+    assert!(exhausted.to_string().contains("maximum value"));
+    assert!(exhausted.to_string().contains("(10)"));
+    assert_eq!(
+        engine.sequence_state("bounded").unwrap().unwrap().1.current,
+        8
+    );
+}
+
+#[test]
+fn alter_sequence_options_are_transactional_and_validate_atomically() {
+    let engine = Engine::new();
+    engine.sql("CREATE SEQUENCE adjustable", &[]).unwrap();
+    engine
+        .sql(
+            "ALTER SEQUENCE adjustable AS smallint MINVALUE 2 MAXVALUE 5 START 3 RESTART CYCLE",
+            &[],
+        )
+        .unwrap();
+    for expected in [3, 4, 5, 2] {
+        assert_eq!(engine.nextval("adjustable").unwrap(), expected);
+    }
+    let configured = engine.sequence_state("adjustable").unwrap().unwrap().1;
+
+    engine.sql("BEGIN", &[]).unwrap();
+    assert_eq!(engine.nextval("adjustable").unwrap(), 3);
+    engine
+        .sql(
+            "ALTER SEQUENCE adjustable AS integer MINVALUE 1 MAXVALUE 20 START 10 RESTART WITH 12 NO CYCLE",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(engine.nextval("adjustable").unwrap(), 12);
+    engine.sql("ROLLBACK", &[]).unwrap();
+    let restored = engine.sequence_state("adjustable").unwrap().unwrap().1;
+    assert_eq!(restored.data_type, configured.data_type);
+    assert_eq!(restored.min_value, configured.min_value);
+    assert_eq!(restored.max_value, configured.max_value);
+    assert_eq!(restored.cycle, configured.cycle);
+    assert_eq!(restored.current, 3);
+    assert_eq!(engine.currval("adjustable").unwrap(), 12);
+    assert_eq!(engine.lastval().unwrap(), 12);
+    assert_eq!(engine.nextval("adjustable").unwrap(), 4);
+
+    for sql in [
+        "ALTER SEQUENCE adjustable INCREMENT 0",
+        "ALTER SEQUENCE adjustable MINVALUE 5 MAXVALUE 5",
+        "ALTER SEQUENCE adjustable START 1",
+        "ALTER SEQUENCE adjustable RESTART WITH 6",
+    ] {
+        let before = engine.sequence_state("adjustable").unwrap().unwrap().1;
+        let error = engine.sql(sql, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("22023"), "{sql}: {error}");
+        assert_eq!(
+            engine.sequence_state("adjustable").unwrap().unwrap().1,
+            before
+        );
+    }
+
+    engine
+        .sql("CREATE TABLE not_a_sequence(id integer)", &[])
+        .unwrap();
+    for sql in [
+        "ALTER SEQUENCE not_a_sequence CYCLE",
+        "ALTER SEQUENCE IF EXISTS not_a_sequence CYCLE",
+    ] {
+        assert_eq!(engine.sql(sql, &[]).unwrap_err().sqlstate(), Some("42809"));
+    }
+    engine
+        .sql("ALTER SEQUENCE IF EXISTS absent_sequence CYCLE", &[])
+        .unwrap();
+    assert_eq!(
+        engine.take_sql_notices(),
+        vec![(
+            "NOTICE".to_string(),
+            "relation \"absent_sequence\" does not exist, skipping".to_string()
+        )]
+    );
+}
+
+fn assert_sequence_values_follow_transactional_definition_ownership(engine: &Engine) {
+    engine
+        .sql(
+            "CREATE SEQUENCE altered_before_savepoint MINVALUE 1 MAXVALUE 30 START 1",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(engine.nextval("altered_before_savepoint").unwrap(), 1);
+    engine.sql("BEGIN", &[]).unwrap();
+    engine
+        .sql(
+            "ALTER SEQUENCE altered_before_savepoint RESTART WITH 10",
+            &[],
+        )
+        .unwrap();
+    engine.sql("SAVEPOINT allocation_boundary", &[]).unwrap();
+    assert_eq!(engine.nextval("altered_before_savepoint").unwrap(), 10);
+    engine
+        .sql("ROLLBACK TO SAVEPOINT allocation_boundary", &[])
+        .unwrap();
+    let after_savepoint = engine
+        .sequence_state("altered_before_savepoint")
+        .unwrap()
+        .unwrap()
+        .1;
+    assert_eq!(
+        (after_savepoint.current, after_savepoint.called),
+        (10, true)
+    );
+    assert_eq!(engine.currval("altered_before_savepoint").unwrap(), 10);
+    assert_eq!(engine.nextval("altered_before_savepoint").unwrap(), 11);
+    engine.sql("ROLLBACK", &[]).unwrap();
+    let after_outer_rollback = engine
+        .sequence_state("altered_before_savepoint")
+        .unwrap()
+        .unwrap()
+        .1;
+    assert_eq!(
+        (after_outer_rollback.current, after_outer_rollback.called),
+        (1, true)
+    );
+    assert_eq!(engine.currval("altered_before_savepoint").unwrap(), 11);
+    assert_eq!(engine.lastval().unwrap(), 11);
+    assert_eq!(engine.nextval("altered_before_savepoint").unwrap(), 2);
+
+    engine
+        .sql(
+            "CREATE SEQUENCE altered_inside_savepoint MINVALUE 1 MAXVALUE 30 START 1",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(engine.nextval("altered_inside_savepoint").unwrap(), 1);
+    engine.sql("BEGIN", &[]).unwrap();
+    assert_eq!(engine.nextval("altered_inside_savepoint").unwrap(), 2);
+    engine.sql("SAVEPOINT definition_boundary", &[]).unwrap();
+    engine
+        .sql(
+            "ALTER SEQUENCE altered_inside_savepoint RESTART WITH 10",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(engine.nextval("altered_inside_savepoint").unwrap(), 10);
+    engine
+        .sql("ROLLBACK TO SAVEPOINT definition_boundary", &[])
+        .unwrap();
+    let after_definition_rollback = engine
+        .sequence_state("altered_inside_savepoint")
+        .unwrap()
+        .unwrap()
+        .1;
+    assert_eq!(
+        (
+            after_definition_rollback.current,
+            after_definition_rollback.called
+        ),
+        (2, true)
+    );
+    assert_eq!(engine.currval("altered_inside_savepoint").unwrap(), 10);
+    assert_eq!(engine.lastval().unwrap(), 10);
+    assert_eq!(engine.nextval("altered_inside_savepoint").unwrap(), 3);
+    engine.sql("ROLLBACK", &[]).unwrap();
+    let after_transaction = engine
+        .sequence_state("altered_inside_savepoint")
+        .unwrap()
+        .unwrap()
+        .1;
+    assert_eq!(
+        (after_transaction.current, after_transaction.called),
+        (3, true)
+    );
+    assert_eq!(engine.currval("altered_inside_savepoint").unwrap(), 3);
+    assert_eq!(engine.nextval("altered_inside_savepoint").unwrap(), 4);
+}
+
+#[test]
+fn sequence_values_follow_transactional_alter_ownership_in_memory() {
+    assert_sequence_values_follow_transactional_definition_ownership(&Engine::new());
+}
+
+#[test]
+fn sequence_values_follow_transactional_alter_ownership_in_sqlite() {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = Engine::open(&directory.path().join("sequence-alter-rollback.sqlite")).unwrap();
+    assert_sequence_values_follow_transactional_definition_ownership(&engine);
+}
+
+#[test]
+fn create_sequence_option_errors_precede_catalog_mutation() {
+    let engine = Engine::new();
+    for (sql, state) in [
+        ("CREATE SEQUENCE bad_increment INCREMENT 0", "22023"),
+        ("CREATE SEQUENCE bad_bounds MINVALUE 5 MAXVALUE 5", "22023"),
+        (
+            "CREATE SEQUENCE bad_type_bound AS smallint MAXVALUE 32768",
+            "22023",
+        ),
+        ("CREATE SEQUENCE bad_start MINVALUE 5 START 4", "22023"),
+    ] {
+        let error = engine.sql(sql, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some(state), "{sql}: {error}");
+    }
+    for name in ["bad_increment", "bad_bounds", "bad_type_bound", "bad_start"] {
+        assert!(engine.sequence_state(name).unwrap().is_none(), "{name}");
+    }
+}
+
+#[test]
 fn discard_sequences_clears_currval_without_dropping_definition() {
     let eng = Engine::new();
     eng.sql("CREATE SEQUENCE kept START 3", &[]).unwrap();
@@ -1116,7 +1396,8 @@ fn bigint_boundary_starts_and_restarts_do_not_need_a_sentinel() {
         let eng = Engine::open(&db).unwrap();
         eng.sql(
             &format!(
-                "CREATE SEQUENCE ascending START WITH {} INCREMENT BY 1",
+                "CREATE SEQUENCE ascending START WITH {} INCREMENT BY 1 MINVALUE {}",
+                i64::MIN,
                 i64::MIN
             ),
             &[],
@@ -1124,7 +1405,8 @@ fn bigint_boundary_starts_and_restarts_do_not_need_a_sentinel() {
         .unwrap();
         eng.sql(
             &format!(
-                "CREATE SEQUENCE descending START WITH {} INCREMENT BY -1",
+                "CREATE SEQUENCE descending START WITH {} INCREMENT BY -1 MAXVALUE {}",
+                i64::MAX,
                 i64::MAX
             ),
             &[],
@@ -1135,7 +1417,11 @@ fn bigint_boundary_starts_and_restarts_do_not_need_a_sentinel() {
 
         eng.sql("CREATE SEQUENCE restartable", &[]).unwrap();
         eng.sql(
-            &format!("ALTER SEQUENCE restartable RESTART WITH {}", i64::MIN),
+            &format!(
+                "ALTER SEQUENCE restartable MINVALUE {} RESTART WITH {}",
+                i64::MIN,
+                i64::MIN
+            ),
             &[],
         )
         .unwrap();

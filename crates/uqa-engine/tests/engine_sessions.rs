@@ -15,7 +15,7 @@ use std::time::Duration;
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLFunctionOptions, SQLFunctionVolatility, ScoringMode};
 use uqa_sql::SQLError;
-use uqa_storage::{Catalog, ManagedConnection, RelationIdentity, SequenceRow};
+use uqa_storage::{Catalog, ManagedConnection, RelationIdentity, SequenceOptions, SequenceRow};
 
 fn scalar_int(engine: &Engine, sql: &str, column: &str) -> i64 {
     match engine.sql(sql, &[]).unwrap().rows[0].get(column) {
@@ -603,6 +603,7 @@ fn opening_an_engine_assigns_legacy_sequence_object_identities() {
             current: 5,
             called: false,
             persistence: "p".into(),
+            options: SequenceOptions::default(),
         })
         .unwrap());
     drop(catalog);

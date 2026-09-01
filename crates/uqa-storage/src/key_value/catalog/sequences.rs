@@ -8,9 +8,29 @@
 
 use super::{
     decode_relation_key, decode_value, encode_value, key_with_tag, relation_key, KeyValueCatalog,
-    RelationIdentity, RelationKind, SequenceRow, StorageBackendError, StorageBackendResult,
-    StoredRelation, StoredSequence, TAG_RELATION, TAG_SEQUENCE,
+    RelationIdentity, RelationKind, SequenceOptions, SequenceRow, StorageBackendError,
+    StorageBackendResult, StoredRelation, StoredSequence, TAG_RELATION, TAG_SEQUENCE,
 };
+
+fn concrete_sequence_options(sequence: &SequenceRow) -> SequenceOptions {
+    let default_min = if sequence.increment > 0 { 1 } else { i64::MIN };
+    let default_max = if sequence.increment > 0 { i64::MAX } else { -1 };
+    SequenceOptions {
+        data_type: sequence.options.data_type.clone(),
+        min_value: Some(sequence.options.min_value.unwrap_or(default_min)),
+        max_value: Some(sequence.options.max_value.unwrap_or(default_max)),
+        cycle: sequence.options.cycle,
+    }
+}
+
+fn sequence_bounds(stored: &StoredSequence) -> (i64, i64) {
+    let default_min = if stored.increment > 0 { 1 } else { i64::MIN };
+    let default_max = if stored.increment > 0 { i64::MAX } else { -1 };
+    (
+        stored.options.min_value.unwrap_or(default_min),
+        stored.options.max_value.unwrap_or(default_max),
+    )
+}
 
 fn validate_sequence_persistence(code: &str) -> StorageBackendResult<()> {
     if matches!(code, "p" | "u") {
@@ -56,6 +76,7 @@ impl KeyValueCatalog {
                 current: sequence.current,
                 called: sequence.called,
                 persistence: sequence.persistence.clone(),
+                options: concrete_sequence_options(sequence),
             })?,
         )?;
         batch.commit()?;
@@ -81,6 +102,7 @@ impl KeyValueCatalog {
                 current: sequence.current,
                 called: sequence.called,
                 persistence: sequence.persistence.clone(),
+                options: concrete_sequence_options(sequence),
             })?,
         )?;
         Ok(true)
@@ -117,6 +139,7 @@ impl KeyValueCatalog {
                     current: stored.current,
                     called: stored.called,
                     persistence: stored.persistence,
+                    options: stored.options,
                 })
             })
             .collect::<StorageBackendResult<Vec<_>>>()?;
@@ -141,12 +164,18 @@ impl KeyValueCatalog {
             return Ok(None);
         }
         if stored.called {
-            stored.current = stored
-                .current
-                .checked_add(stored.increment)
-                .ok_or_else(|| {
-                    crate::StorageBackendError::Other(format!("sequence `{name}` overflow"))
-                })?;
+            let (min_value, max_value) = sequence_bounds(&stored);
+            let next = stored.current.checked_add(stored.increment);
+            stored.current = match next.filter(|value| (min_value..=max_value).contains(value)) {
+                Some(value) => value,
+                None if stored.options.cycle && stored.increment > 0 => min_value,
+                None if stored.options.cycle => max_value,
+                None => {
+                    return Err(crate::StorageBackendError::Other(format!(
+                        "sequence `{name}` exhausted"
+                    )))
+                }
+            };
         } else {
             stored.called = true;
         }

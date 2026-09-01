@@ -1050,6 +1050,133 @@ SELECT lastval(1);
 SELECT oid, proname, prorettype, proargtypes::text, proisstrict, provolatile, proparallel, prosrc FROM pg_catalog.pg_proc WHERE oid = 2559;
 -- @end
 
+-- Sequence types, bounds, cycling, exhaustion, ALTER ownership, and rollback follow PostgreSQL 18 for every implemented option.
+-- @case create_sequence_option_fixture ok
+CREATE SEQUENCE sequence_options_cycle AS integer INCREMENT BY 3 MINVALUE 2 MAXVALUE 10 START WITH 8 CYCLE;
+CREATE SEQUENCE sequence_options_descending AS smallint INCREMENT BY -3;
+CREATE SEQUENCE sequence_options_exhausted AS integer INCREMENT BY 3 MINVALUE 2 MAXVALUE 10 START WITH 8 NO CYCLE;
+CREATE SEQUENCE sequence_options_alter AS smallint MINVALUE 2 MAXVALUE 5 START WITH 3 CYCLE;
+CREATE SEQUENCE sequence_options_transaction MINVALUE 1 MAXVALUE 30 START WITH 1;
+CREATE SEQUENCE sequence_options_savepoint MINVALUE 1 MAXVALUE 30 START WITH 1;
+CREATE SEQUENCE sequence_options_altered_before_savepoint MINVALUE 1 MAXVALUE 30 START WITH 1;
+CREATE TABLE sequence_option_observations(name text PRIMARY KEY, value bigint, session_value bigint, last_session_value bigint);
+INSERT INTO sequence_option_observations(name, value) VALUES ('transaction_initial', nextval('sequence_options_transaction'));
+INSERT INTO sequence_option_observations(name, value) VALUES ('savepoint_initial', nextval('sequence_options_savepoint'));
+INSERT INTO sequence_option_observations(name, value) VALUES ('altered_before_savepoint_initial', nextval('sequence_options_altered_before_savepoint'));
+-- @end
+
+-- @case sequence_option_catalog_defaults rows
+SELECT sequencename, data_type::text, start_value, min_value, max_value, increment_by, cycle, cache_size FROM pg_catalog.pg_sequences WHERE schemaname = current_schema() AND sequencename IN ('sequence_options_cycle', 'sequence_options_descending') ORDER BY sequencename;
+-- @end
+
+-- @case sequence_option_cycle_allocations ok
+INSERT INTO sequence_option_observations(name, value) VALUES ('cycle_1', nextval('sequence_options_cycle'));
+INSERT INTO sequence_option_observations(name, value) VALUES ('cycle_2', nextval('sequence_options_cycle'));
+INSERT INTO sequence_option_observations(name, value) VALUES ('cycle_3', nextval('sequence_options_cycle'));
+INSERT INTO sequence_option_observations(name, value) VALUES ('cycle_4', nextval('sequence_options_cycle'));
+-- @end
+
+-- @case sequence_option_cycle_result rows
+SELECT name, value FROM sequence_option_observations WHERE name LIKE 'cycle_%' ORDER BY name;
+-- @end
+
+-- @case sequence_option_exhaustion_initial rows
+SELECT nextval('sequence_options_exhausted') AS value;
+-- @end
+
+-- @case sequence_option_exhaustion error
+SELECT nextval('sequence_options_exhausted');
+-- @end
+
+-- @case sequence_option_exhaustion_preserves_state rows
+SELECT last_value FROM pg_catalog.pg_sequences WHERE schemaname = current_schema() AND sequencename = 'sequence_options_exhausted';
+-- @end
+
+-- @case sequence_option_zero_increment error
+CREATE SEQUENCE sequence_options_bad_increment INCREMENT BY 0;
+-- @end
+
+-- @case sequence_option_equal_bounds error
+CREATE SEQUENCE sequence_options_bad_bounds MINVALUE 5 MAXVALUE 5;
+-- @end
+
+-- @case sequence_option_start_below_minimum error
+CREATE SEQUENCE sequence_options_bad_start MINVALUE 5 START WITH 4;
+-- @end
+
+-- @case sequence_option_bound_outside_type error
+CREATE SEQUENCE sequence_options_bad_type_bound AS smallint MAXVALUE 32768;
+-- @end
+
+-- @case sequence_option_invalid_type error
+CREATE SEQUENCE sequence_options_bad_type AS numeric;
+-- @end
+
+-- @case sequence_option_duplicate_cycle error
+CREATE SEQUENCE sequence_options_duplicate_cycle CYCLE NO CYCLE;
+-- @end
+
+-- @case alter_sequence_options ok
+ALTER SEQUENCE sequence_options_alter AS integer MINVALUE 1 MAXVALUE 20 START WITH 10 RESTART WITH 12 NO CYCLE;
+-- @end
+
+-- @case alter_sequence_options_catalog rows
+SELECT data_type::text, start_value, min_value, max_value, increment_by, cycle, last_value FROM pg_catalog.pg_sequences WHERE schemaname = current_schema() AND sequencename = 'sequence_options_alter';
+-- @end
+
+-- @case alter_sequence_options_next rows
+SELECT nextval('sequence_options_alter') AS value;
+-- @end
+
+-- @case altered_sequence_transaction_rollback ok
+BEGIN;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.sequence_option_observations(name, value) VALUES ('transaction_pre_alter', nextval('__UQA_STATEFUL_SCHEMA__.sequence_options_transaction'));
+ALTER SEQUENCE __UQA_STATEFUL_SCHEMA__.sequence_options_transaction RESTART WITH 10;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.sequence_option_observations(name, value) VALUES ('transaction_post_alter', nextval('__UQA_STATEFUL_SCHEMA__.sequence_options_transaction'));
+ROLLBACK;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.sequence_option_observations SELECT 'transaction_state', last_value, currval('__UQA_STATEFUL_SCHEMA__.sequence_options_transaction'), lastval() FROM pg_catalog.pg_sequences WHERE schemaname = '__UQA_STATEFUL_SCHEMA__' AND sequencename = 'sequence_options_transaction';
+INSERT INTO __UQA_STATEFUL_SCHEMA__.sequence_option_observations(name, value) VALUES ('transaction_next', nextval('__UQA_STATEFUL_SCHEMA__.sequence_options_transaction'));
+UPDATE __UQA_STATEFUL_SCHEMA__.sequence_option_observations SET session_value = currval('__UQA_STATEFUL_SCHEMA__.sequence_options_transaction'), last_session_value = lastval() WHERE name = 'transaction_next';
+-- @end
+
+-- @case altered_sequence_transaction_rollback_result rows
+SELECT name, value, session_value, last_session_value FROM sequence_option_observations WHERE name IN ('transaction_state', 'transaction_next') ORDER BY name;
+-- @end
+
+-- @case altered_sequence_savepoint_rollback ok
+BEGIN;
+INSERT INTO sequence_option_observations(name, value) VALUES ('savepoint_pre_alter', nextval('sequence_options_savepoint'));
+SAVEPOINT sequence_definition_boundary;
+ALTER SEQUENCE sequence_options_savepoint RESTART WITH 10;
+INSERT INTO sequence_option_observations(name, value) VALUES ('savepoint_post_alter', nextval('sequence_options_savepoint'));
+ROLLBACK TO SAVEPOINT sequence_definition_boundary;
+INSERT INTO sequence_option_observations SELECT 'savepoint_state', last_value, currval('sequence_options_savepoint'), lastval() FROM pg_catalog.pg_sequences WHERE schemaname = current_schema() AND sequencename = 'sequence_options_savepoint';
+INSERT INTO sequence_option_observations(name, value) VALUES ('savepoint_next', nextval('sequence_options_savepoint'));
+UPDATE sequence_option_observations SET session_value = currval('sequence_options_savepoint'), last_session_value = lastval() WHERE name = 'savepoint_next';
+COMMIT;
+-- @end
+
+-- @case altered_sequence_savepoint_rollback_result rows
+SELECT name, value, session_value, last_session_value FROM sequence_option_observations WHERE name IN ('savepoint_state', 'savepoint_next') ORDER BY name;
+-- @end
+
+-- @case sequence_altered_before_savepoint_ownership ok
+BEGIN;
+ALTER SEQUENCE __UQA_STATEFUL_SCHEMA__.sequence_options_altered_before_savepoint RESTART WITH 10;
+SAVEPOINT sequence_allocation_boundary;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.sequence_option_observations(name, value) VALUES ('altered_before_savepoint_value', nextval('__UQA_STATEFUL_SCHEMA__.sequence_options_altered_before_savepoint'));
+ROLLBACK TO SAVEPOINT sequence_allocation_boundary;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.sequence_option_observations SELECT 'altered_before_savepoint_state', last_value, currval('__UQA_STATEFUL_SCHEMA__.sequence_options_altered_before_savepoint'), lastval() FROM pg_catalog.pg_sequences WHERE schemaname = '__UQA_STATEFUL_SCHEMA__' AND sequencename = 'sequence_options_altered_before_savepoint';
+ROLLBACK;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.sequence_option_observations SELECT 'altered_before_outer_state', last_value, currval('__UQA_STATEFUL_SCHEMA__.sequence_options_altered_before_savepoint'), lastval() FROM pg_catalog.pg_sequences WHERE schemaname = '__UQA_STATEFUL_SCHEMA__' AND sequencename = 'sequence_options_altered_before_savepoint';
+INSERT INTO __UQA_STATEFUL_SCHEMA__.sequence_option_observations(name, value) VALUES ('altered_before_outer_next', nextval('__UQA_STATEFUL_SCHEMA__.sequence_options_altered_before_savepoint'));
+UPDATE __UQA_STATEFUL_SCHEMA__.sequence_option_observations SET session_value = currval('__UQA_STATEFUL_SCHEMA__.sequence_options_altered_before_savepoint'), last_session_value = lastval() WHERE name = 'altered_before_outer_next';
+-- @end
+
+-- @case sequence_altered_before_savepoint_ownership_result rows
+SELECT name, value, session_value, last_session_value FROM sequence_option_observations WHERE name IN ('altered_before_outer_state', 'altered_before_outer_next') ORDER BY name;
+-- @end
+
 -- DROP SEQUENCE resolves every target before mutation, preserves transactional catalog and session state, and applies PostgreSQL dependency direction for defaults, views, and serial ownership.
 -- @case create_drop_sequence_fixture ok
 CREATE SEQUENCE drop_sequence_atomic;

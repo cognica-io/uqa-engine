@@ -134,14 +134,17 @@ use uqa_storage::{
     HNSWIndexParams, IVFIndex, IVFIndexParams, InvertedIndex, ManagedConnection,
     MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex, PersistentStorageBackend,
     PersistentStorageProvider, PersistentStorageSession, RelationIdentity,
-    SQLiteCompressedContainerAnchor, SQLiteStorageProvider, SequenceRow, StorageBackendError,
-    StorageBackendResult, StorageSavepointId, TableSchema, VectorFieldSchema, VectorIndex,
-    VectorIndexOpenMode, VectorIndexSpec, ViewRow,
+    SQLiteCompressedContainerAnchor, SQLiteStorageProvider, SequenceOptions, SequenceRow,
+    StorageBackendError, StorageBackendResult, StorageSavepointId, TableSchema, VectorFieldSchema,
+    VectorIndex, VectorIndexOpenMode, VectorIndexSpec, ViewRow,
 };
 
 pub use sql::{SQLCursor, SQLCursorSummary};
 pub use uqa_execution::{ColumnVector, ColumnarBatch};
-pub use uqa_sql::{ast::SequenceRestart, AsyncSQLEngine, SQLParam, SQLResult};
+pub use uqa_sql::{
+    ast::{SequenceBound, SequenceDataType, SequenceRestart},
+    AsyncSQLEngine, SQLParam, SQLResult,
+};
 pub use uqa_storage::{DatabaseFileFormat, SQLiteCompressionOptions, SQLiteError};
 
 use engine_state::{
@@ -253,12 +256,18 @@ type ColumnStatsMap = BTreeMap<String, uqa_planner::ColumnStats>;
 type TransactionRelationStates = BTreeMap<RelationIdentity, u64>;
 type FixedTransactionCatalogBaseline = BTreeMap<[u8; 16], (RelationIdentity, Vec<u8>)>;
 type NontransactionalColumnStats = Vec<NontransactionalColumnStatsEntry>;
-type NontransactionalSequenceValues = BTreeMap<RelationIdentity, NontransactionalSequenceValue>;
+type NontransactionalSequenceValues = BTreeMap<RelationIdentity, NontransactionalSequenceHistory>;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct SessionSequenceValue {
     object_id: [u8; 16],
     value: i64,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct SessionSequenceDefinition {
+    object_id: [u8; 16],
+    generation: [u8; 16],
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -267,13 +276,19 @@ struct SessionLastSequenceReference {
     object_id: [u8; 16],
 }
 
+#[derive(Clone, Default)]
+struct NontransactionalSequenceHistory {
+    values_by_definition: BTreeMap<[u8; 16], NontransactionalSequenceValue>,
+    object_id: [u8; 16],
+    session_currval: Option<SessionSequenceValue>,
+    defines_lastval: bool,
+}
+
 #[derive(Clone, Copy)]
 struct NontransactionalSequenceValue {
     object_id: [u8; 16],
     current: i64,
     called: bool,
-    session_currval: Option<SessionSequenceValue>,
-    defines_lastval: bool,
     autonomous: bool,
 }
 
@@ -307,7 +322,7 @@ pub struct Engine {
 }
 
 /// Mutable state of a single SQL sequence.
-#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub struct SequenceState {
     pub start: i64,
     pub increment: i64,
@@ -316,12 +331,65 @@ pub struct SequenceState {
     /// bit avoids the lossy `start - increment` sentinel at BIGINT boundaries.
     #[serde(default = "sequence_state_called_default")]
     pub called: bool,
+    pub data_type: SequenceDataType,
+    pub min_value: i64,
+    pub max_value: i64,
+    pub cycle: bool,
 }
 
 const fn sequence_state_called_default() -> bool {
     // Legacy serialized states used `current = start - increment`; treating
     // that value as called preserves their next allocation semantics.
     true
+}
+
+impl<'de> serde::Deserialize<'de> for SequenceState {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        struct Representation {
+            start: i64,
+            increment: i64,
+            current: i64,
+            #[serde(default = "sequence_state_called_default")]
+            called: bool,
+            #[serde(default)]
+            data_type: SequenceDataType,
+            #[serde(default)]
+            min_value: Option<i64>,
+            #[serde(default)]
+            max_value: Option<i64>,
+            #[serde(default)]
+            cycle: bool,
+        }
+
+        let representation = Representation::deserialize(deserializer)?;
+        let (type_min, type_max) = representation.data_type.bounds();
+        Ok(Self {
+            start: representation.start,
+            increment: representation.increment,
+            current: representation.current,
+            called: representation.called,
+            data_type: representation.data_type,
+            min_value: representation
+                .min_value
+                .unwrap_or(if representation.increment > 0 {
+                    1
+                } else {
+                    type_min
+                }),
+            max_value: representation
+                .max_value
+                .unwrap_or(if representation.increment > 0 {
+                    type_max
+                } else {
+                    -1
+                }),
+            cycle: representation.cycle,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -419,7 +487,7 @@ struct TransactionFrame {
     constraint_modes: ConstraintModeState,
     /// Statistics written by ANALYZE are nontransactional in `PostgreSQL`. Keep the latest values outside savepoint snapshots so any rollback can restore them after transactional storage state is rolled back.
     nontransactional_column_stats: NontransactionalColumnStats,
-    /// Values allocated by `nextval` or installed by `setval` are not rolled back in `PostgreSQL`. Every active frame records them so transaction, savepoint, and PL/pgSQL exception rollback can reapply them after restoring transactional catalog state.
+    /// Values allocated by `nextval` or installed by `setval` are not rolled back in `PostgreSQL`, except that allocations made against a transactionally changed sequence definition roll back with that definition. Every active frame records values by definition generation so transaction, savepoint, and PL/pgSQL exception rollback can reapply exactly the generation owned by the rollback target while preserving the latest session `currval` and `lastval` effects.
     nontransactional_sequence_values: NontransactionalSequenceValues,
 }
 
@@ -489,12 +557,26 @@ struct SessionStateSnapshot {
     session_vars: BTreeMap<String, String>,
     sequence_currvals: BTreeMap<RelationIdentity, SessionSequenceValue>,
     last_sequence: Option<SessionLastSequenceReference>,
+    sequence_definitions: BTreeMap<RelationIdentity, SessionSequenceDefinition>,
     prepared: BTreeMap<String, PreparedStatementPlan>,
     sql_statement_cache: SQLStatementCache,
     /// Names of portals that existed at this transaction or savepoint boundary. Rollback removes portals created later without rewinding cursor positions or resurrecting closed portals.
     portal_names: BTreeSet<String>,
     current_user: String,
     session_user: String,
+}
+
+impl SessionStateSnapshot {
+    fn sequence_definition_generation(
+        &self,
+        relation: &RelationIdentity,
+        object_id: [u8; 16],
+    ) -> [u8; 16] {
+        self.sequence_definitions
+            .get(relation)
+            .filter(|definition| definition.object_id == object_id)
+            .map_or(object_id, |definition| definition.generation)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -772,6 +854,10 @@ fn new_table_storage_generation() -> StorageBackendResult<[u8; 16]> {
 
 fn new_sequence_object_id() -> StorageBackendResult<[u8; 16]> {
     new_nonzero_catalog_identity("sequence", "object identity")
+}
+
+fn new_sequence_definition_generation() -> StorageBackendResult<[u8; 16]> {
+    new_nonzero_catalog_identity("sequence", "definition generation")
 }
 
 fn normalize_analyzer_config_value(value: &mut serde_json::Value) {

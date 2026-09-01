@@ -35,8 +35,8 @@ pub use block_max_index::{BlockMaxIndex, BlockMaxScorer, DEFAULT_BLOCK_SIZE};
 pub use btree_index::BTreeIndex;
 pub use catalog::{
     CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignTableRow,
-    GraphSnapshot, GraphVertexRow, RelationIdentity, RelationKind, SequenceRow, TableSchema,
-    VectorFieldSchema, ViewRow,
+    GraphSnapshot, GraphVertexRow, RelationIdentity, RelationKind, SequenceOptions, SequenceRow,
+    TableSchema, VectorFieldSchema, ViewRow,
 };
 pub use clustered_postings::{
     MaterializedPostingCursor, PostingCursor, PostingScore, POSTING_CLUSTER_DOCS,

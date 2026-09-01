@@ -289,6 +289,7 @@ fn migration_26_adds_persistent_sequence_object_identities() {
             current: 1,
             called: false,
             persistence: "p".into(),
+            options: SequenceOptions::default(),
         })
         .unwrap();
     drop(current);
@@ -312,6 +313,85 @@ fn migration_26_adds_persistent_sequence_object_identities() {
 }
 
 #[test]
+fn migration_27_adds_postgresql_sequence_defaults() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let current = Catalog::open(connection.clone()).unwrap();
+    current
+        .create_sequence_row(&SequenceRow {
+            relation: RelationIdentity::new("public", "legacy_descending_options"),
+            object_id: [27; 16],
+            start: -1,
+            increment: -3,
+            current: -1,
+            called: false,
+            persistence: "p".into(),
+            options: SequenceOptions::default(),
+        })
+        .unwrap();
+    drop(current);
+    connection
+        .with(|database| {
+            database.execute("ALTER TABLE _sequences DROP COLUMN cycle", [])?;
+            database.execute("ALTER TABLE _sequences DROP COLUMN max_value", [])?;
+            database.execute("ALTER TABLE _sequences DROP COLUMN min_value", [])?;
+            database.execute("ALTER TABLE _sequences DROP COLUMN data_type", [])?;
+            database.execute(
+                "UPDATE _metadata SET value = '26' WHERE key = 'schema_version'",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+    let upgraded = Catalog::open(connection).unwrap();
+    let sequence = upgraded.load_sequence_rows().unwrap().remove(0);
+    assert_eq!(sequence.options.data_type, "bigint");
+    assert_eq!(sequence.options.min_value, Some(i64::MIN));
+    assert_eq!(sequence.options.max_value, Some(-1));
+    assert!(!sequence.options.cycle);
+}
+
+#[test]
+fn migration_27_preserves_options_when_columns_precede_the_version_marker() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let current = Catalog::open(connection.clone()).unwrap();
+    current
+        .create_sequence_row(&SequenceRow {
+            relation: RelationIdentity::new("public", "already_migrated_options"),
+            object_id: [28; 16],
+            start: 3,
+            increment: 2,
+            current: 3,
+            called: false,
+            persistence: "p".into(),
+            options: SequenceOptions {
+                data_type: "integer".into(),
+                min_value: Some(2),
+                max_value: Some(9),
+                cycle: true,
+            },
+        })
+        .unwrap();
+    drop(current);
+    connection
+        .with(|database| {
+            database.execute(
+                "UPDATE _metadata SET value = '26' WHERE key = 'schema_version'",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+    let upgraded = Catalog::open(connection).unwrap();
+    let sequence = upgraded.load_sequence_rows().unwrap().remove(0);
+    assert_eq!(sequence.options.data_type, "integer");
+    assert_eq!(sequence.options.min_value, Some(2));
+    assert_eq!(sequence.options.max_value, Some(9));
+    assert!(sequence.options.cycle);
+}
+
+#[test]
 fn migration_18_preserves_legacy_sequence_sentinel_semantics() {
     let connection = ManagedConnection::open_in_memory().unwrap();
     let current = Catalog::open(connection.clone()).unwrap();
@@ -324,6 +404,7 @@ fn migration_18_preserves_legacy_sequence_sentinel_semantics() {
             current: 0,
             called: false,
             persistence: "p".into(),
+            options: SequenceOptions::default(),
         })
         .unwrap();
     drop(current);
@@ -377,6 +458,7 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
             current: 1,
             called: false,
             persistence: "p".into(),
+            options: SequenceOptions::default(),
         })
         .unwrap();
 
@@ -419,6 +501,33 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
             .unwrap(),
         Some(22)
     );
+
+    let cycling_id = [9; 16];
+    catalog
+        .create_sequence_row(&SequenceRow {
+            relation: RelationIdentity::new("public", "cycling"),
+            object_id: cycling_id,
+            start: 5,
+            increment: 3,
+            current: 5,
+            called: false,
+            persistence: "p".into(),
+            options: crate::catalog::SequenceOptions {
+                data_type: "integer".into(),
+                min_value: Some(2),
+                max_value: Some(5),
+                cycle: true,
+            },
+        })
+        .unwrap();
+    for expected in [5, 2, 5, 2] {
+        assert_eq!(
+            catalog
+                .next_sequence_value("public.cycling", cycling_id)
+                .unwrap(),
+            Some(expected)
+        );
+    }
 }
 
 #[test]
@@ -434,6 +543,7 @@ fn migration_23_moves_sequence_persistence_into_typed_rows() {
             current: 1,
             called: false,
             persistence: "u".into(),
+            options: SequenceOptions::default(),
         })
         .unwrap();
     drop(current);

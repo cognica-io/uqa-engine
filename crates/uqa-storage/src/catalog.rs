@@ -329,6 +329,27 @@ pub struct ColumnStatsRow {
 /// catalog backend as one atomic mutation so independent engine sessions (and
 /// independently opened engines) cannot return the same value.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SequenceOptions {
+    pub data_type: String,
+    /// `None` is accepted only while decoding a legacy row and is resolved from its increment direction by the engine.
+    pub min_value: Option<i64>,
+    /// `None` is accepted only while decoding a legacy row and is resolved from its increment direction by the engine.
+    pub max_value: Option<i64>,
+    pub cycle: bool,
+}
+
+impl Default for SequenceOptions {
+    fn default() -> Self {
+        Self {
+            data_type: "bigint".into(),
+            min_value: None,
+            max_value: None,
+            cycle: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SequenceRow {
     pub relation: RelationIdentity,
     /// Stable identity of this sequence incarnation. Dropping and recreating the same qualified name must allocate a different value.
@@ -341,6 +362,8 @@ pub struct SequenceRow {
     pub called: bool,
     /// `PostgreSQL` `pg_class.relpersistence` code. Durable sequence rows accept only permanent (`p`) and unlogged (`u`) values.
     pub persistence: String,
+    #[serde(default)]
+    pub options: SequenceOptions,
 }
 
 /// Engine-facing catalog facade for persistent metadata.

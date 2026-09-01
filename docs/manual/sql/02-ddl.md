@@ -320,17 +320,19 @@ CTAS creates and populates a table from a query, preserves the query's declared 
 ## Sequences
 
 ```sql
-CREATE SEQUENCE ticket_ids START WITH 1000 INCREMENT BY 1;
+CREATE SEQUENCE ticket_ids AS integer START WITH 1000 INCREMENT BY 1 MINVALUE 1000 MAXVALUE 999999 CYCLE;
 SELECT nextval('ticket_ids');
 SELECT currval('ticket_ids');
 SELECT lastval();
 SELECT setval('ticket_ids', 2000);
 SELECT setval('ticket_ids', 2500, false);
-ALTER SEQUENCE ticket_ids RESTART WITH 3000;
+ALTER SEQUENCE ticket_ids MAXVALUE 2000000 NO CYCLE RESTART WITH 3000;
 DROP SEQUENCE ticket_ids;
 ```
 
-`CREATE SEQUENCE` supports start and increment for ordinary, temporary, and unlogged sequences. Temporary sequences live in `pg_temp`, participate in `DISCARD TEMP`, and do not survive a reopen; unlogged sequence state survives a clean reopen, while crash-recovery reset semantics remain open. `ALTER SEQUENCE` supports restart, increment, and start. The two-argument `setval` marks the installed value as called, while the three-argument form accepts `false` to make the next `nextval` return the installed value exactly. Minimum, maximum, cache, cycle, explicit `OWNED BY`, and identity ownership are not implemented.
+`CREATE SEQUENCE` and `ALTER SEQUENCE` support `AS smallint`, `AS integer`, and `AS bigint`; positive or negative nonzero increments; `START [ WITH ]`; `RESTART [ WITH ]`; `MINVALUE`, `MAXVALUE`, `NO MINVALUE`, and `NO MAXVALUE`; and `CYCLE` or `NO CYCLE` for ordinary, temporary, and unlogged sequences. Type and direction determine PostgreSQL's default start and bounds, explicit bounds are validated against the declared type, a noncycling sequence reports `2200H` without advancing past a bound, and a cycling sequence wraps directly to the opposite bound. Temporary sequences live in `pg_temp`, participate in `DISCARD TEMP`, and do not survive a reopen; unlogged sequence state survives a clean reopen, while crash-recovery reset semantics remain open. The two-argument `setval` marks the installed value as called, while the three-argument form accepts `false` to make the next `nextval` return the installed value exactly. `CACHE`, explicit `OWNED BY`, and identity ownership options are not implemented.
+
+Sequence definition changes are transactional. An allocation made after an uncommitted `ALTER SEQUENCE` or `RESTART` follows that definition's transaction or savepoint ownership, while an earlier allocation against the retained definition remains nontransactional; the affected session `currval` and `lastval` still retain the most recently returned value across rollback, matching PostgreSQL 18.
 
 `DROP SEQUENCE [ IF EXISTS ] name [, ...] [ CASCADE | RESTRICT ]` resolves relation names through the current `search_path`, validates every target before mutation, ignores duplicate targets, and uses `RESTRICT` by default. A missing target reports `42P01` unless `IF EXISTS` requests a notice and continuation, a target of another relation kind reports `42809` even with `IF EXISTS`, a dependency rejected by `RESTRICT` reports `2BP01`, and a read-only transaction reports `25006` before target lookup.
 

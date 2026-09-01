@@ -18,7 +18,7 @@ use super::{
     posting_cluster_score_key_prefix, posting_document_key_prefix, posting_key_prefix,
     register_migration_relation, relation_key, reverse_posting_key_prefix, single_str_key,
     string_value, table_field_analyzer_prefix, vector_key_prefix, CatalogFacade, KeyValueBatch,
-    KeyValueCatalog, KeyValueStore, RelationIdentity, RelationKind, SequenceRow,
+    KeyValueCatalog, KeyValueStore, RelationIdentity, RelationKind, SequenceOptions, SequenceRow,
     StorageBackendError, StorageBackendResult, TableSchema, ViewRow, TAG_CATALOG_INDEX,
     TAG_FOREIGN_TABLE, TAG_METADATA, TAG_RELATION, TAG_SCHEMA, TAG_SEQUENCE, TAG_TABLE, TAG_VIEW,
 };
@@ -132,6 +132,7 @@ pub(super) fn collect_sequence_migrations(
                 current: stored.current,
                 called: stored.called,
                 persistence: stored.persistence,
+                options: stored.options,
             },
         });
     }
@@ -157,6 +158,7 @@ pub(super) fn collect_sequence_migrations(
                     current: state.current,
                     called: true,
                     persistence: "p".into(),
+                    options: SequenceOptions::default(),
                 },
             });
         }
@@ -348,6 +350,7 @@ pub(super) fn put_sequence_migrations(
                 current: sequence.row.current,
                 called: sequence.row.called,
                 persistence: sequence.row.persistence,
+                options: sequence.row.options,
             })?,
         )?;
         if let Some(old_key) = sequence.old_key {

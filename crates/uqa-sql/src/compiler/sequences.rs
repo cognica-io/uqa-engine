@@ -6,12 +6,15 @@
 
 //! CREATE/ALTER SEQUENCE lowering and option validation.
 
-use super::{range_var_name, relation_persistence, NodeEnum, Result, SQLError};
+use super::{
+    compile_pg_type_name, range_var_name, relation_persistence, NodeEnum, Result, SQLError,
+};
+use crate::ast::ColumnType;
 
 pub(super) fn compile_create_sequence(
     stmt: &pg_query::protobuf::CreateSeqStmt,
 ) -> Result<crate::ast::CreateSequence> {
-    use crate::ast::CreateSequence;
+    use crate::ast::{CreateSequence, SequenceDataType};
     let relation = stmt
         .sequence
         .as_ref()
@@ -25,6 +28,11 @@ pub(super) fn compile_create_sequence(
     let name = range_var_name(relation);
     let mut start = None;
     let mut increment = 1_i64;
+    let mut data_type = SequenceDataType::BigInt;
+    let mut min_value = None;
+    let mut max_value = None;
+    let mut cycle = false;
+    let mut seen = std::collections::BTreeSet::new();
     for opt in &stmt.options {
         let Some(NodeEnum::DefElem(elem)) = opt.node.as_ref() else {
             return Err(SQLError::Internal(
@@ -32,10 +40,36 @@ pub(super) fn compile_create_sequence(
             ));
         };
         let key = elem.defname.to_ascii_lowercase();
-        let value = compile_sequence_integer_option(elem, "CREATE SEQUENCE")?;
+        if !seen.insert(key.clone()) {
+            return Err(conflicting_sequence_options());
+        }
         match key.as_str() {
-            "start" => start = Some(value),
-            "increment" => increment = value,
+            "as" => data_type = compile_sequence_data_type(elem, "CREATE SEQUENCE")?,
+            "start" => start = Some(compile_sequence_integer_option(elem, "CREATE SEQUENCE")?),
+            "increment" => {
+                increment = compile_sequence_integer_option(elem, "CREATE SEQUENCE")?;
+            }
+            "minvalue" => {
+                min_value = elem
+                    .arg
+                    .as_ref()
+                    .map(|_| compile_sequence_integer_option(elem, "CREATE SEQUENCE"))
+                    .transpose()?;
+            }
+            "maxvalue" => {
+                max_value = elem
+                    .arg
+                    .as_ref()
+                    .map(|_| compile_sequence_integer_option(elem, "CREATE SEQUENCE"))
+                    .transpose()?;
+            }
+            "cycle" => cycle = compile_sequence_boolean_option(elem, "CREATE SEQUENCE")?,
+            "cache" => {
+                compile_sequence_integer_option(elem, "CREATE SEQUENCE")?;
+                return Err(SQLError::Unsupported(
+                    "CREATE SEQUENCE option `cache` is not supported".into(),
+                ));
+            }
             other => {
                 return Err(SQLError::Unsupported(format!(
                     "CREATE SEQUENCE option `{other}` is not supported"
@@ -43,22 +77,26 @@ pub(super) fn compile_create_sequence(
             }
         }
     }
+    let (type_min, type_max) = data_type.bounds();
+    let min_value = min_value.unwrap_or(if increment > 0 { 1 } else { type_min });
+    let max_value = max_value.unwrap_or(if increment > 0 { type_max } else { -1 });
     Ok(CreateSequence {
         name,
         if_not_exists: stmt.if_not_exists,
-        // With the unsupported MINVALUE/MAXVALUE clauses excluded above,
-        // the SQL defaults are 1 for ascending sequences and -1 for
-        // descending sequences.
-        start: start.unwrap_or(if increment > 0 { 1 } else { -1 }),
+        start: start.unwrap_or(if increment > 0 { min_value } else { max_value }),
         increment,
         persistence,
+        data_type,
+        min_value: Some(min_value),
+        max_value: Some(max_value),
+        cycle,
     })
 }
 
 pub(super) fn compile_alter_sequence(
     stmt: &pg_query::protobuf::AlterSeqStmt,
 ) -> Result<crate::ast::AlterSequence> {
-    use crate::ast::{AlterSequence, SequenceRestart};
+    use crate::ast::{AlterSequence, SequenceBound, SequenceRestart};
     if stmt.for_identity {
         return Err(SQLError::Unsupported(
             "ALTER SEQUENCE: identity-owned sequences are not supported".into(),
@@ -74,6 +112,7 @@ pub(super) fn compile_alter_sequence(
         if_exists: stmt.missing_ok,
         ..Default::default()
     };
+    let mut seen = std::collections::BTreeSet::new();
     for opt in &stmt.options {
         let Some(NodeEnum::DefElem(elem)) = opt.node.as_ref() else {
             return Err(SQLError::Internal(
@@ -81,17 +120,46 @@ pub(super) fn compile_alter_sequence(
             ));
         };
         let key = elem.defname.to_ascii_lowercase();
-        let value = if elem.arg.is_none() && key == "restart" {
-            None
-        } else {
-            Some(compile_sequence_integer_option(elem, "ALTER SEQUENCE")?)
-        };
+        if !seen.insert(key.clone()) {
+            return Err(conflicting_sequence_options());
+        }
         match key.as_str() {
             "restart" => {
-                alter.restart = value.map_or(SequenceRestart::FromStart, SequenceRestart::With);
+                alter.restart = elem
+                    .arg
+                    .as_ref()
+                    .map(|_| compile_sequence_integer_option(elem, "ALTER SEQUENCE"))
+                    .transpose()?
+                    .map_or(SequenceRestart::FromStart, SequenceRestart::With);
             }
-            "increment" => alter.increment = value,
-            "start" => alter.start = value,
+            "increment" => {
+                alter.increment = Some(compile_sequence_integer_option(elem, "ALTER SEQUENCE")?);
+            }
+            "start" => {
+                alter.start = Some(compile_sequence_integer_option(elem, "ALTER SEQUENCE")?);
+            }
+            "as" => alter.data_type = Some(compile_sequence_data_type(elem, "ALTER SEQUENCE")?),
+            "minvalue" => {
+                alter.min_value = elem.arg.as_ref().map_or(Ok(SequenceBound::Default), |_| {
+                    compile_sequence_integer_option(elem, "ALTER SEQUENCE")
+                        .map(SequenceBound::Value)
+                })?;
+            }
+            "maxvalue" => {
+                alter.max_value = elem.arg.as_ref().map_or(Ok(SequenceBound::Default), |_| {
+                    compile_sequence_integer_option(elem, "ALTER SEQUENCE")
+                        .map(SequenceBound::Value)
+                })?;
+            }
+            "cycle" => {
+                alter.cycle = Some(compile_sequence_boolean_option(elem, "ALTER SEQUENCE")?);
+            }
+            "cache" => {
+                compile_sequence_integer_option(elem, "ALTER SEQUENCE")?;
+                return Err(SQLError::Unsupported(
+                    "ALTER SEQUENCE option `cache` is not supported".into(),
+                ));
+            }
             other => {
                 return Err(SQLError::Unsupported(format!(
                     "ALTER SEQUENCE option `{other}` is not supported"
@@ -100,6 +168,49 @@ pub(super) fn compile_alter_sequence(
         }
     }
     Ok(alter)
+}
+
+fn conflicting_sequence_options() -> SQLError {
+    SQLError::Routine {
+        sqlstate: "42601".into(),
+        message: "conflicting or redundant options".into(),
+    }
+}
+
+fn compile_sequence_data_type(
+    elem: &pg_query::protobuf::DefElem,
+    statement: &str,
+) -> Result<crate::ast::SequenceDataType> {
+    let Some(NodeEnum::TypeName(type_name)) =
+        elem.arg.as_deref().and_then(|node| node.node.as_ref())
+    else {
+        return Err(SQLError::Internal(format!(
+            "{statement} contains a malformed AS type"
+        )));
+    };
+    match compile_pg_type_name(type_name, "sequence")? {
+        ColumnType::SmallInteger => Ok(crate::ast::SequenceDataType::SmallInt),
+        ColumnType::Integer => Ok(crate::ast::SequenceDataType::Integer),
+        ColumnType::BigInteger => Ok(crate::ast::SequenceDataType::BigInt),
+        _ => Err(SQLError::Routine {
+            sqlstate: "22023".into(),
+            message: "sequence type must be smallint, integer, or bigint".into(),
+        }),
+    }
+}
+
+fn compile_sequence_boolean_option(
+    elem: &pg_query::protobuf::DefElem,
+    statement: &str,
+) -> Result<bool> {
+    match elem.arg.as_deref().and_then(|node| node.node.as_ref()) {
+        Some(NodeEnum::Boolean(value)) => Ok(value.boolval),
+        Some(NodeEnum::Integer(value)) if matches!(value.ival, 0 | 1) => Ok(value.ival != 0),
+        other => Err(SQLError::Internal(format!(
+            "{statement} option `{}` has malformed Boolean value {other:?}",
+            elem.defname
+        ))),
+    }
 }
 
 pub(super) fn compile_sequence_integer_option(
@@ -122,9 +233,18 @@ pub(super) fn compile_sequence_integer_option(
         }
     };
     raw.parse::<i64>().map_err(|_| {
-        SQLError::TypeMismatch(format!(
-            "{statement} option `{}` expects an integer, got `{raw}`",
-            elem.defname
-        ))
+        let integer_syntax = raw
+            .strip_prefix(['+', '-'])
+            .unwrap_or(raw)
+            .bytes()
+            .all(|byte| byte.is_ascii_digit());
+        SQLError::Routine {
+            sqlstate: if integer_syntax { "22003" } else { "22P02" }.into(),
+            message: if integer_syntax {
+                format!("value \"{raw}\" is out of range for type bigint")
+            } else {
+                format!("invalid input syntax for type bigint: \"{raw}\"")
+            },
+        }
     })
 }

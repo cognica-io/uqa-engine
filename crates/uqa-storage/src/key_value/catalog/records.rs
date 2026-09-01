@@ -98,6 +98,8 @@ pub(super) struct StoredSequence {
     pub(super) called: bool,
     #[serde(default = "legacy_sequence_persistence")]
     pub(super) persistence: String,
+    #[serde(default)]
+    pub(super) options: crate::catalog::SequenceOptions,
 }
 
 pub(super) const fn legacy_sequence_called() -> bool {
