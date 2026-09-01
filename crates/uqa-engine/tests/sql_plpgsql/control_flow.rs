@@ -429,6 +429,235 @@ fn for_over_query_and_record_fields() {
     assert_eq!(scalar(&eng, "SELECT sum_evens() AS v"), Value::Int(106));
 }
 
+#[test]
+fn dynamic_query_for_evaluates_once_assigns_rows_and_sets_found_on_exit() {
+    let eng = engine();
+    exec(&eng, "CREATE TABLE dynamic_for_values(v integer)");
+    exec(
+        &eng,
+        "INSERT INTO dynamic_for_values VALUES (1),(2),(3),(4)",
+    );
+    exec(&eng, "CREATE TABLE dynamic_for_eval_log(kind text)");
+    exec(
+        &eng,
+        "CREATE FUNCTION dynamic_for_text() RETURNS text LANGUAGE plpgsql VOLATILE AS $$
+         BEGIN
+           INSERT INTO dynamic_for_eval_log VALUES ('text');
+           RETURN 'SELECT v FROM dynamic_for_values WHERE v <= $1 ORDER BY v';
+         END $$",
+    );
+    exec(
+        &eng,
+        "CREATE FUNCTION dynamic_for_limit() RETURNS integer LANGUAGE plpgsql VOLATILE AS $$
+         BEGIN
+           INSERT INTO dynamic_for_eval_log VALUES ('param');
+           RETURN 3;
+         END $$",
+    );
+    exec(
+        &eng,
+        "CREATE FUNCTION dynamic_for_report() RETURNS text LANGUAGE plpgsql AS $$
+         DECLARE rec record; output text := '';
+         BEGIN
+           PERFORM 1 WHERE false;
+           <<walk>>
+           FOR rec IN EXECUTE dynamic_for_text() USING dynamic_for_limit() LOOP
+             CONTINUE walk WHEN rec.v = 2;
+             output := output || rec.v || ':' || FOUND || ',';
+           END LOOP walk;
+           RETURN output || 'last=' || rec.v || '|found=' || FOUND;
+         END $$",
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT dynamic_for_report()"),
+        Value::Str("1:false,3:false,last=3|found=true".into())
+    );
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT count(*) FROM dynamic_for_eval_log WHERE kind = 'text'"
+        ),
+        Value::Int(1)
+    );
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT count(*) FROM dynamic_for_eval_log WHERE kind = 'param'"
+        ),
+        Value::Int(1)
+    );
+
+    exec(
+        &eng,
+        "CREATE FUNCTION dynamic_for_row_target() RETURNS text LANGUAGE plpgsql AS $$
+         DECLARE number integer; label text; output text := '';
+         BEGIN
+           FOR number, label IN EXECUTE
+             'SELECT v, v::text || ''x'' FROM dynamic_for_values WHERE v <= $1 ORDER BY v'
+             USING 2
+           LOOP
+             output := output || number || label || ',';
+           END LOOP;
+           RETURN output;
+         END $$",
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT dynamic_for_row_target()"),
+        Value::Str("11x,22x,".into())
+    );
+
+    exec(
+        &eng,
+        "CREATE FUNCTION dynamic_for_empty_target() RETURNS text LANGUAGE plpgsql AS $$
+         DECLARE number integer := 9; label text := 'before';
+         BEGIN
+           PERFORM 1;
+           FOR number, label IN EXECUTE
+             'SELECT v, v::text FROM dynamic_for_values WHERE false'
+           LOOP NULL; END LOOP;
+           RETURN (number IS NULL)::text || ',' || (label IS NULL)::text || ',' || FOUND::text;
+         END $$",
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT dynamic_for_empty_target()"),
+        Value::Str("true,true,false".into())
+    );
+}
+
+#[test]
+fn query_for_portals_match_postgresql_prefetch_and_returning_behavior() {
+    let eng = engine();
+    exec(&eng, "CREATE SEQUENCE static_for_sequence START WITH 1");
+    exec(&eng, "CREATE SEQUENCE dynamic_for_sequence START WITH 1");
+    exec(
+        &eng,
+        "CREATE FUNCTION static_for_prefetch() RETURNS bigint LANGUAGE plpgsql AS $$
+         DECLARE rec record;
+         BEGIN
+           FOR rec IN SELECT nextval('static_for_sequence') AS value FROM generate_series(1, 100)
+           LOOP EXIT; END LOOP;
+           RETURN currval('static_for_sequence');
+         END $$",
+    );
+    exec(
+        &eng,
+        "CREATE FUNCTION dynamic_for_prefetch() RETURNS bigint LANGUAGE plpgsql AS $$
+         DECLARE rec record;
+         BEGIN
+           FOR rec IN EXECUTE
+             'SELECT nextval(''dynamic_for_sequence'') AS value FROM generate_series(1, 100)'
+           LOOP EXIT; END LOOP;
+           RETURN currval('dynamic_for_sequence');
+         END $$",
+    );
+    assert_eq!(scalar(&eng, "SELECT static_for_prefetch()"), Value::Int(10));
+    assert_eq!(
+        scalar(&eng, "SELECT dynamic_for_prefetch()"),
+        Value::Int(10)
+    );
+
+    exec(
+        &eng,
+        "CREATE FUNCTION static_for_empty_target() RETURNS text LANGUAGE plpgsql AS $$
+         DECLARE number integer := 9;
+         BEGIN
+           PERFORM 1;
+           FOR number IN SELECT v FROM generate_series(1, 2) AS source(v) WHERE false
+           LOOP NULL; END LOOP;
+           RETURN (number IS NULL)::text || ',' || FOUND::text;
+         END $$",
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT static_for_empty_target()"),
+        Value::Str("true,false".into())
+    );
+
+    exec(&eng, "CREATE TABLE static_for_returned(v integer)");
+    exec(&eng, "CREATE TABLE dynamic_for_returned(v integer)");
+    exec(
+        &eng,
+        "CREATE FUNCTION static_for_returning() RETURNS text LANGUAGE plpgsql AS $$
+         DECLARE rec record; output text := '';
+         BEGIN
+           FOR rec IN INSERT INTO static_for_returned VALUES (7),(8) RETURNING v
+           LOOP output := output || rec.v || ','; END LOOP;
+           RETURN output || FOUND;
+         END $$",
+    );
+    exec(
+        &eng,
+        "CREATE FUNCTION dynamic_for_returning() RETURNS text LANGUAGE plpgsql AS $$
+         DECLARE rec record; output text := '';
+         BEGIN
+           FOR rec IN EXECUTE 'INSERT INTO dynamic_for_returned VALUES (7),(8) RETURNING v'
+           LOOP output := output || rec.v || ','; END LOOP;
+           RETURN output || FOUND;
+         END $$",
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT static_for_returning()"),
+        Value::Str("7,8,true".into())
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT dynamic_for_returning()"),
+        Value::Str("7,8,true".into())
+    );
+}
+
+#[test]
+fn dynamic_query_for_errors_match_postgresql_without_mutating() {
+    let eng = engine();
+    exec(&eng, "CREATE TABLE dynamic_for_inserted(v integer)");
+    exec(
+        &eng,
+        "CREATE FUNCTION dynamic_for_null() RETURNS integer LANGUAGE plpgsql AS $$
+         DECLARE rec record;
+         BEGIN FOR rec IN EXECUTE NULL::text LOOP NULL; END LOOP; RETURN 0; END $$",
+    );
+    let err = exec_err(&eng, "SELECT dynamic_for_null()");
+    assert_eq!(err.sqlstate(), Some("22004"));
+    assert!(
+        err.to_string()
+            .contains("query string argument of EXECUTE is null"),
+        "got: {err}"
+    );
+
+    exec(
+        &eng,
+        "CREATE FUNCTION dynamic_for_multi() RETURNS integer LANGUAGE plpgsql AS $$
+         DECLARE rec record;
+         BEGIN FOR rec IN EXECUTE 'SELECT 1; SELECT 2' LOOP NULL; END LOOP; RETURN 0; END $$",
+    );
+    let err = exec_err(&eng, "SELECT dynamic_for_multi()");
+    assert_eq!(err.sqlstate(), Some("42P11"));
+    assert!(
+        err.to_string()
+            .contains("cannot open multi-query plan as cursor"),
+        "got: {err}"
+    );
+
+    exec(
+        &eng,
+        "CREATE FUNCTION dynamic_for_nonreturning() RETURNS integer LANGUAGE plpgsql AS $$
+         DECLARE rec record;
+         BEGIN
+           FOR rec IN EXECUTE 'INSERT INTO dynamic_for_inserted VALUES (9)' LOOP NULL; END LOOP;
+           RETURN 0;
+         END $$",
+    );
+    let err = exec_err(&eng, "SELECT dynamic_for_nonreturning()");
+    assert_eq!(err.sqlstate(), Some("42P11"));
+    assert!(
+        err.to_string()
+            .contains("cannot open INSERT query as cursor"),
+        "got: {err}"
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT count(*) FROM dynamic_for_inserted"),
+        Value::Int(0)
+    );
+}
+
 // ---------------------------------------------------------------------
 // SELECT INTO, FOUND, GET DIAGNOSTICS
 // ---------------------------------------------------------------------

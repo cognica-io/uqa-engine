@@ -473,6 +473,8 @@ struct SessionPortalState {
     position: SessionPortalPosition,
     scrollable: bool,
     holdable: bool,
+    /// A PL/pgSQL row loop pins its portal while user statements run so the loop body cannot close the executor that owns its current tuple batch.
+    pin_count: usize,
     /// The engine carries typed values rather than wire encodings; retaining the declaration format lets a `PostgreSQL` wire adapter request binary result encoding without changing portal execution.
     _binary: bool,
 }

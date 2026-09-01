@@ -233,6 +233,42 @@ pub(super) fn lower_stmt(raw: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLp
             body: lower_optional_stmt_list(stmt, "body", datums)?,
         });
     }
+    if let Some(stmt) = raw.get("PLpgSQL_stmt_forc") {
+        let target = match lower_into_target(require(stmt, "var")?, datums)? {
+            IntoTarget::Rec(target) => target,
+            IntoTarget::Row(_) => {
+                return Err(SQLError::Internal(
+                    "PL/pgSQL bound-cursor FOR target is not a record datum".into(),
+                ));
+            }
+        };
+        let cursor = json_usize_or_zero(stmt, "curvar")?;
+        validate_cursor_datum(datums, cursor, "bound-cursor FOR")?;
+        if !matches!(
+            datums.get(cursor),
+            Some(PLpgSQLDatum::Var(variable)) if variable.cursor.is_some()
+        ) {
+            return Err(SQLError::Internal(
+                "PL/pgSQL cursor FOR references an unbound cursor".into(),
+            ));
+        }
+        return Ok(PLpgSQLStmt::ForCursor {
+            label: json_optional_str(stmt, "label")?,
+            target,
+            cursor,
+            arguments: lower_cursor_arguments(stmt.get("argquery"))?,
+            body: lower_optional_stmt_list(stmt, "body", datums)?,
+        });
+    }
+    if let Some(stmt) = raw.get("PLpgSQL_stmt_dynfors") {
+        return Ok(PLpgSQLStmt::ForDynamic {
+            label: json_optional_str(stmt, "label")?,
+            target: lower_into_target(require(stmt, "var")?, datums)?,
+            query: lower_expr(require(stmt, "query")?)?,
+            params: lower_expr_list(stmt.get("params"))?,
+            body: lower_optional_stmt_list(stmt, "body", datums)?,
+        });
+    }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_fors") {
         let target = lower_into_target(require(stmt, "var")?, datums)?;
         let query = lower_full_statement(require(stmt, "query")?)?;

@@ -51,12 +51,12 @@ pub struct PLpgSQLFunction {
 }
 
 impl PLpgSQLFunction {
-    /// Datum indices used as `FOR i IN a..b` loop counters. The
-    /// interpreter binds these names only while their loop runs so an
-    /// outer variable with the same name stays visible elsewhere.
-    pub fn fori_variable_datums(&self) -> std::collections::BTreeSet<usize> {
+    /// Datum indices synthesized for loop-local variables. The interpreter
+    /// binds these names only while their loop runs so an outer variable with
+    /// the same name stays visible elsewhere.
+    pub fn loop_local_variable_datums(&self) -> std::collections::BTreeSet<usize> {
         let mut out = std::collections::BTreeSet::new();
-        collect_fori_vars_block(&self.action, &mut out);
+        collect_loop_local_vars_block(&self.action, &mut out);
         out
     }
 
@@ -80,50 +80,62 @@ impl PLpgSQLFunction {
     }
 }
 
-fn collect_fori_vars_block(block: &PLpgSQLBlock, out: &mut std::collections::BTreeSet<usize>) {
-    collect_fori_vars_stmts(&block.body, out);
+fn collect_loop_local_vars_block(
+    block: &PLpgSQLBlock,
+    out: &mut std::collections::BTreeSet<usize>,
+) {
+    collect_loop_local_vars_stmts(&block.body, out);
     for arm in &block.exceptions {
-        collect_fori_vars_stmts(&arm.body, out);
+        collect_loop_local_vars_stmts(&arm.body, out);
     }
 }
 
-fn collect_fori_vars_stmts(stmts: &[PLpgSQLStmt], out: &mut std::collections::BTreeSet<usize>) {
+fn collect_loop_local_vars_stmts(
+    stmts: &[PLpgSQLStmt],
+    out: &mut std::collections::BTreeSet<usize>,
+) {
     for stmt in stmts {
         match stmt {
-            PLpgSQLStmt::Block(block) => collect_fori_vars_block(block, out),
+            PLpgSQLStmt::Block(block) => collect_loop_local_vars_block(block, out),
             PLpgSQLStmt::If {
                 then_body,
                 elsifs,
                 else_body,
                 ..
             } => {
-                collect_fori_vars_stmts(then_body, out);
+                collect_loop_local_vars_stmts(then_body, out);
                 for (_, body) in elsifs {
-                    collect_fori_vars_stmts(body, out);
+                    collect_loop_local_vars_stmts(body, out);
                 }
                 if let Some(body) = else_body {
-                    collect_fori_vars_stmts(body, out);
+                    collect_loop_local_vars_stmts(body, out);
                 }
             }
             PLpgSQLStmt::Case {
                 arms, else_body, ..
             } => {
                 for (_, body) in arms {
-                    collect_fori_vars_stmts(body, out);
+                    collect_loop_local_vars_stmts(body, out);
                 }
                 if let Some(body) = else_body {
-                    collect_fori_vars_stmts(body, out);
+                    collect_loop_local_vars_stmts(body, out);
                 }
             }
             PLpgSQLStmt::Loop { body, .. } | PLpgSQLStmt::While { body, .. } => {
-                collect_fori_vars_stmts(body, out);
+                collect_loop_local_vars_stmts(body, out);
             }
             PLpgSQLStmt::ForI { var, body, .. } => {
                 out.insert(*var);
-                collect_fori_vars_stmts(body, out);
+                collect_loop_local_vars_stmts(body, out);
             }
-            PLpgSQLStmt::ForQuery { body, .. } | PLpgSQLStmt::ForeachArray { body, .. } => {
-                collect_fori_vars_stmts(body, out);
+            PLpgSQLStmt::ForCursor { target, body, .. } => {
+                out.insert(*target);
+                collect_loop_local_vars_stmts(body, out);
+            }
+            PLpgSQLStmt::ForQuery { body, .. }
+            | PLpgSQLStmt::ForDynamic { body, .. }
+            | PLpgSQLStmt::ForeachArray { body, .. } => {
+                collect_loop_local_vars_stmts(body, out);
             }
             _ => {}
         }
@@ -324,6 +336,22 @@ pub enum PLpgSQLStmt {
         label: Option<String>,
         target: IntoTarget,
         query: Statement,
+        body: Vec<PLpgSQLStmt>,
+    },
+    /// `FOR target IN EXECUTE query [USING params] LOOP`.
+    ForDynamic {
+        label: Option<String>,
+        target: IntoTarget,
+        query: Expr,
+        params: Vec<Expr>,
+        body: Vec<PLpgSQLStmt>,
+    },
+    /// `FOR recordvar IN bound_cursor [(arguments)] LOOP`.
+    ForCursor {
+        label: Option<String>,
+        target: usize,
+        cursor: usize,
+        arguments: Vec<PLpgSQLCursorArgument>,
         body: Vec<PLpgSQLStmt>,
     },
     /// `FOREACH target [SLICE n] IN ARRAY expression LOOP`.

@@ -7,9 +7,10 @@
 //! Bound PL/pgSQL cursor execution.
 
 use super::{
-    bind_statement, coerce_routine_value, compile, optimize_engine_plan, CursorDirection,
-    FetchCursorStmt, Interpreter, IntoTarget, PLpgSQLCursorArgument, PLpgSQLCursorCount,
-    PLpgSQLCursorOpen, PLpgSQLDatum, PLpgSQLRowField, SQLError, Statement, Value,
+    bind_statement, coerce_routine_value, compile, optimize_engine_plan, result_row_values,
+    CursorDirection, Expr, FetchCursorStmt, Flow, Interpreter, IntoTarget, LoopSignal,
+    PLpgSQLCursorArgument, PLpgSQLCursorCount, PLpgSQLCursorOpen, PLpgSQLDatum, PLpgSQLRowField,
+    PLpgSQLStmt, SQLError, SQLParam, Statement, Value,
 };
 use uqa_planner::UnifiedPlan;
 
@@ -113,6 +114,152 @@ impl Interpreter<'_> {
         self.engine.close_session_portal(&portal_name)
     }
 
+    pub(super) fn exec_query_for(
+        &mut self,
+        label: Option<&str>,
+        target: &IntoTarget,
+        query: &Statement,
+        body: &[PLpgSQLStmt],
+    ) -> Result<Flow, SQLError> {
+        let query = bind_statement(query, &mut self.resolver())?;
+        let plan = self.lower_cursor_plan(query)?;
+        let portal_name = self.open_internal_for_portal(&[], &plan)?;
+        self.exec_pinned_for_portal(&portal_name, label, target, body, true)
+    }
+
+    pub(super) fn exec_dynamic_for(
+        &mut self,
+        label: Option<&str>,
+        target: &IntoTarget,
+        query: &Expr,
+        params: &[Expr],
+        body: &[PLpgSQLStmt],
+    ) -> Result<Flow, SQLError> {
+        let (text, params) = self.eval_dynamic_sql(query, params)?;
+        let query = compile_cursor_statement(&text)?;
+        let plan = self.lower_cursor_plan(query)?;
+        let portal_name = self.open_internal_for_portal(&params, &plan)?;
+        self.exec_pinned_for_portal(&portal_name, label, target, body, true)
+    }
+
+    pub(super) fn exec_cursor_for(
+        &mut self,
+        label: Option<&str>,
+        target: usize,
+        cursor: usize,
+        arguments: &[PLpgSQLCursorArgument],
+        body: &[PLpgSQLStmt],
+    ) -> Result<Flow, SQLError> {
+        let cursor_was_null = match self.values.get(cursor) {
+            Some(value) => matches!(value, Value::Null),
+            None => {
+                return Err(SQLError::Internal(format!(
+                    "PL/pgSQL bound-cursor FOR references missing datum {cursor}"
+                )));
+            }
+        };
+        self.exec_open_cursor(
+            cursor,
+            &PLpgSQLCursorOpen::Bound {
+                arguments: arguments.to_vec(),
+            },
+        )?;
+        let portal_name = self.open_portal_name(cursor, "FOR")?;
+        let target = IntoTarget::Rec(target);
+        let result = self.exec_pinned_for_portal(&portal_name, label, &target, body, false);
+        if cursor_was_null {
+            self.values[cursor] = Value::Null;
+        }
+        result
+    }
+
+    fn open_internal_for_portal(
+        &self,
+        params: &[SQLParam],
+        plan: &UnifiedPlan,
+    ) -> Result<String, SQLError> {
+        let portal_name = self.engine.allocate_session_portal_name();
+        crate::sql::session_portal_worker::open_plpgsql_session_portal(
+            self.engine,
+            params,
+            &portal_name,
+            Some(false),
+            plan,
+        )?;
+        Ok(portal_name)
+    }
+
+    fn exec_pinned_for_portal(
+        &mut self,
+        portal_name: &str,
+        label: Option<&str>,
+        target: &IntoTarget,
+        body: &[PLpgSQLStmt],
+        prefetch: bool,
+    ) -> Result<Flow, SQLError> {
+        if let Err(error) = self.engine.pin_session_portal(portal_name) {
+            let _ = self.engine.close_session_portal(portal_name);
+            return Err(error);
+        }
+        let loop_result = self.exec_for_portal_rows(portal_name, label, target, body, prefetch);
+        let unpin_result = self.engine.unpin_session_portal(portal_name);
+        let close_result = match &unpin_result {
+            Ok(()) => self.engine.close_session_portal(portal_name),
+            Err(_) => Ok(()),
+        };
+        match loop_result {
+            Err(error) => Err(error),
+            Ok(_) if unpin_result.is_err() => Err(unpin_result.unwrap_err()),
+            Ok(_) if close_result.is_err() => Err(close_result.unwrap_err()),
+            Ok(flow) => Ok(flow),
+        }
+    }
+
+    fn exec_for_portal_rows(
+        &mut self,
+        portal_name: &str,
+        label: Option<&str>,
+        target: &IntoTarget,
+        body: &[PLpgSQLStmt],
+        prefetch: bool,
+    ) -> Result<Flow, SQLError> {
+        let mut iterated = false;
+        let mut outcome = Flow::Normal;
+        let mut fetch_count = if prefetch { 10 } else { 1 };
+        let mut initial_fetch = true;
+        'batches: loop {
+            let result = self.engine.fetch_session_portal(&FetchCursorStmt {
+                name: portal_name.to_string(),
+                direction: CursorDirection::Forward,
+                count: fetch_count,
+                move_only: false,
+            })?;
+            if result.rows.is_empty() {
+                if initial_fetch {
+                    self.assign_into(target, &result.columns, None)?;
+                }
+                break;
+            }
+            initial_fetch = false;
+            iterated = true;
+            for row_index in 0..result.rows.len() {
+                let values = result_row_values(&result, row_index);
+                self.assign_into(target, &result.columns, values.as_deref())?;
+                match self.exec_loop_body(label, body)? {
+                    LoopSignal::Continue => {}
+                    LoopSignal::Break => break 'batches,
+                    LoopSignal::Propagate(flow) => {
+                        outcome = flow;
+                        break 'batches;
+                    }
+                }
+            }
+            fetch_count = if prefetch { 50 } else { 1 };
+        }
+        self.set_found(iterated);
+        Ok(outcome)
+    }
+
     fn cursor_variable_name(&self, cursor_index: usize, operation: &str) -> Result<&str, SQLError> {
         match self.datums.get(cursor_index) {
             Some(PLpgSQLDatum::Var(variable)) => Ok(&variable.name),
@@ -189,6 +336,10 @@ impl Interpreter<'_> {
                 self.restore_cursor_arguments(fields, &saved_values);
                 return Err(error);
             }
+        }
+        if !fields.is_empty() {
+            self.last_row_count = 1;
+            self.set_found(true);
         }
         for field in fields {
             self.push_binding(&field.name, field.varno);

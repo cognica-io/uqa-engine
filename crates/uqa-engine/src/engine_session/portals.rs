@@ -147,6 +147,7 @@ impl Engine {
                 position: SessionPortalPosition::BeforeFirst,
                 scrollable,
                 holdable,
+                pin_count: 0,
                 _binary: binary,
             },
         );
@@ -185,6 +186,7 @@ impl Engine {
                 position: SessionPortalPosition::BeforeFirst,
                 scrollable,
                 holdable: false,
+                pin_count: 0,
                 _binary: false,
             },
         );
@@ -228,6 +230,30 @@ impl Engine {
         if self.session.portals.lock().contains_key(name) {
             return Err(cursor_error(name, "already exists", "42P03"));
         }
+        Ok(())
+    }
+
+    pub(crate) fn pin_session_portal(&self, name: &str) -> Result<(), SQLError> {
+        let mut portals = self.session.portals.lock();
+        let portal = portals
+            .get_mut(name)
+            .ok_or_else(|| cursor_error(name, "does not exist", "34000"))?;
+        portal.pin_count = portal
+            .pin_count
+            .checked_add(1)
+            .ok_or_else(|| SQLError::Internal(format!("cursor \"{name}\" pin count overflow")))?;
+        Ok(())
+    }
+
+    pub(crate) fn unpin_session_portal(&self, name: &str) -> Result<(), SQLError> {
+        let mut portals = self.session.portals.lock();
+        let portal = portals
+            .get_mut(name)
+            .ok_or_else(|| cursor_error(name, "does not exist", "34000"))?;
+        portal.pin_count = portal
+            .pin_count
+            .checked_sub(1)
+            .ok_or_else(|| SQLError::Internal(format!("cursor \"{name}\" is not pinned")))?;
         Ok(())
     }
 
@@ -303,9 +329,17 @@ impl Engine {
     }
 
     pub(crate) fn close_session_portal(&self, name: &str) -> Result<(), SQLError> {
-        if self.session.portals.lock().remove(name).is_none() {
+        let mut portals = self.session.portals.lock();
+        let Some(portal) = portals.get(name) else {
             return Err(cursor_error(name, "does not exist", "34000"));
+        };
+        if portal.pin_count != 0 {
+            return Err(SQLError::Routine {
+                sqlstate: "24000".into(),
+                message: format!("cannot drop pinned portal \"{name}\""),
+            });
         }
+        portals.remove(name);
         Ok(())
     }
 

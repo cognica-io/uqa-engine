@@ -630,3 +630,167 @@ fn merge_returning_cursor_is_deferred_and_rejects_scrolling() {
         Value::Int(12)
     );
 }
+
+#[test]
+fn bound_cursor_for_uses_named_arguments_loop_scope_and_single_row_fetches() {
+    let engine = engine();
+    exec(&engine, "CREATE TABLE cursor_for_values(v integer)");
+    exec(
+        &engine,
+        "INSERT INTO cursor_for_values VALUES (1),(2),(3),(4)",
+    );
+    exec(
+        &engine,
+        "CREATE FUNCTION bound_cursor_for_report(low integer, high integer)
+         RETURNS text LANGUAGE plpgsql AS $$
+         DECLARE loop_row text := 'outer';
+                 c CURSOR (low_value integer, high_value integer) FOR
+                   SELECT v, v * 10 AS ten FROM cursor_for_values
+                   WHERE v BETWEEN low_value AND high_value ORDER BY v;
+                 output text := ''; loop_found boolean;
+         BEGIN
+           PERFORM 1 WHERE false;
+           <<walk>>
+           FOR loop_row IN c(high_value => high, low_value => low) LOOP
+             output := output || loop_row.v || ':' || loop_row.ten || ':' || FOUND || ',';
+             EXIT walk WHEN loop_row.v = 2;
+           END LOOP walk;
+           loop_found := FOUND;
+           RETURN output || 'loop=' || loop_found || '|outer=' || loop_row || '|null=' || (c IS NULL);
+         END $$",
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT bound_cursor_for_report(1, 3)"),
+        Value::Str("1:10:true,2:20:true,loop=true|outer=outer|null=true".into())
+    );
+
+    exec(
+        &engine,
+        "CREATE FUNCTION bound_cursor_for_found_timing() RETURNS text LANGUAGE plpgsql AS $$
+         DECLARE c CURSOR FOR SELECT v FROM cursor_for_values WHERE v <= 2 ORDER BY v;
+                 output text := '';
+         BEGIN
+           PERFORM 1 WHERE false;
+           FOR loop_row IN c LOOP output := output || FOUND || ','; END LOOP;
+           RETURN output || 'after=' || FOUND || '|null=' || (c IS NULL);
+         END $$",
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT bound_cursor_for_found_timing()"),
+        Value::Str("false,false,after=true|null=true".into())
+    );
+
+    exec(&engine, "CREATE SEQUENCE cursor_for_sequence START WITH 1");
+    exec(
+        &engine,
+        "CREATE FUNCTION bound_cursor_for_prefetch() RETURNS bigint LANGUAGE plpgsql AS $$
+         DECLARE c CURSOR FOR
+                   SELECT nextval('cursor_for_sequence') AS value FROM generate_series(1, 100);
+         BEGIN
+           FOR loop_row IN c LOOP EXIT; END LOOP;
+           RETURN currval('cursor_for_sequence');
+         END $$",
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT bound_cursor_for_prefetch()"),
+        Value::Int(1)
+    );
+}
+
+#[test]
+fn bound_cursor_for_closes_pinned_portals_and_restores_explicit_names() {
+    let engine = engine();
+    exec(&engine, "CREATE TABLE cursor_for_cleanup(v integer)");
+    exec(&engine, "INSERT INTO cursor_for_cleanup VALUES (7),(8)");
+    exec(
+        &engine,
+        "CREATE FUNCTION bound_cursor_for_custom_name() RETURNS text LANGUAGE plpgsql AS $$
+         DECLARE c CURSOR FOR SELECT v FROM cursor_for_cleanup ORDER BY v; output text := '';
+         BEGIN
+           c := 'cursor_for_custom';
+           FOR loop_row IN c LOOP output := output || loop_row.v || ','; EXIT; END LOOP;
+           RETURN output || c::text || '|' || FOUND;
+         END $$",
+    );
+    for _ in 0..2 {
+        assert_eq!(
+            scalar(&engine, "SELECT bound_cursor_for_custom_name()"),
+            Value::Str("7,cursor_for_custom|true".into())
+        );
+    }
+
+    exec(
+        &engine,
+        "CREATE FUNCTION bound_cursor_for_reassign_name() RETURNS text LANGUAGE plpgsql AS $$
+         DECLARE c CURSOR FOR SELECT v FROM cursor_for_cleanup ORDER BY v;
+         BEGIN
+           c := 'cursor_for_initial';
+           FOR loop_row IN c LOOP c := 'cursor_for_changed'; EXIT; END LOOP;
+           RETURN c::text;
+         END $$",
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT bound_cursor_for_reassign_name()"),
+        Value::Str("cursor_for_changed".into())
+    );
+
+    exec(
+        &engine,
+        "CREATE FUNCTION bound_cursor_for_return() RETURNS integer LANGUAGE plpgsql AS $$
+         DECLARE c CURSOR FOR SELECT v FROM cursor_for_cleanup ORDER BY v;
+         BEGIN
+           c := 'cursor_for_return';
+           FOR loop_row IN c LOOP RETURN loop_row.v; END LOOP;
+           RETURN 0;
+         END $$",
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT bound_cursor_for_return()"),
+        Value::Int(7)
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT bound_cursor_for_return()"),
+        Value::Int(7)
+    );
+
+    exec(
+        &engine,
+        "CREATE FUNCTION bound_cursor_for_close_inside() RETURNS integer LANGUAGE plpgsql AS $$
+         DECLARE c CURSOR FOR SELECT v FROM cursor_for_cleanup ORDER BY v;
+         BEGIN
+           c := 'cursor_for_pinned';
+           FOR loop_row IN c LOOP CLOSE c; RETURN loop_row.v; END LOOP;
+           RETURN 0;
+         END $$",
+    );
+    let err = exec_err(&engine, "SELECT bound_cursor_for_close_inside()");
+    assert_eq!(err.sqlstate(), Some("24000"));
+    assert!(
+        err.to_string()
+            .contains("cannot drop pinned portal \"cursor_for_pinned\""),
+        "got: {err}"
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT bound_cursor_for_custom_name()"),
+        Value::Str("7,cursor_for_custom|true".into())
+    );
+
+    exec(
+        &engine,
+        "CREATE FUNCTION bound_cursor_for_already_open() RETURNS integer LANGUAGE plpgsql AS $$
+         DECLARE c CURSOR FOR SELECT v FROM cursor_for_cleanup;
+         BEGIN
+           c := 'cursor_for_busy';
+           OPEN c;
+           FOR loop_row IN c LOOP RETURN loop_row.v; END LOOP;
+           RETURN 0;
+         END $$",
+    );
+    let err = exec_err(&engine, "SELECT bound_cursor_for_already_open()");
+    assert_eq!(err.sqlstate(), Some("42P03"));
+    assert!(
+        err.to_string()
+            .contains("cursor \"cursor_for_busy\" already in use"),
+        "got: {err}"
+    );
+}

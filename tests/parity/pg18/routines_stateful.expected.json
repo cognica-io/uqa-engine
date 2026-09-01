@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "e1b2f9ff69f7f4f622359ac7f5830688a37944761d84c1db90f8901445314c28",
+  "fixture_sha256": "1b305c3d27443e85c9d5310ebaa296f6f777b2830619269bd4b5af1eb3438834",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -957,6 +957,150 @@
       "name": "foreach_element_requires_scalar_target",
       "kind": "error",
       "sqlstate": "42804"
+    },
+    {
+      "name": "create_query_for_values",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_query_for_values",
+      "kind": "ok"
+    },
+    {
+      "name": "create_query_for_eval_log",
+      "kind": "ok"
+    },
+    {
+      "name": "create_query_for_text",
+      "kind": "ok"
+    },
+    {
+      "name": "create_query_for_limit",
+      "kind": "ok"
+    },
+    {
+      "name": "create_dynamic_query_for_report",
+      "kind": "ok"
+    },
+    {
+      "name": "dynamic_query_for_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "1:false,2:false,3:false,last=3|found=true"
+        ]
+      ]
+    },
+    {
+      "name": "dynamic_query_for_evaluates_once",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "create_static_query_for_sequence",
+      "kind": "ok"
+    },
+    {
+      "name": "create_dynamic_query_for_sequence",
+      "kind": "ok"
+    },
+    {
+      "name": "create_cursor_query_for_sequence",
+      "kind": "ok"
+    },
+    {
+      "name": "create_query_for_prefetch_report",
+      "kind": "ok"
+    },
+    {
+      "name": "query_for_prefetch_counts",
+      "kind": "rows",
+      "rows": [
+        [
+          "10,10,1"
+        ]
+      ]
+    },
+    {
+      "name": "create_bound_cursor_for_report",
+      "kind": "ok"
+    },
+    {
+      "name": "bound_cursor_for_named_arguments",
+      "kind": "rows",
+      "rows": [
+        [
+          "2:true,3:true,found=true|outer=outer|null=true"
+        ]
+      ]
+    },
+    {
+      "name": "create_dynamic_query_for_null",
+      "kind": "ok"
+    },
+    {
+      "name": "dynamic_query_for_null",
+      "kind": "error",
+      "sqlstate": "22004"
+    },
+    {
+      "name": "create_dynamic_query_for_multi",
+      "kind": "ok"
+    },
+    {
+      "name": "dynamic_query_for_multi",
+      "kind": "error",
+      "sqlstate": "42P11"
+    },
+    {
+      "name": "create_dynamic_query_for_inserted",
+      "kind": "ok"
+    },
+    {
+      "name": "create_dynamic_query_for_nonreturning",
+      "kind": "ok"
+    },
+    {
+      "name": "dynamic_query_for_nonreturning",
+      "kind": "error",
+      "sqlstate": "42P11"
+    },
+    {
+      "name": "dynamic_query_for_nonreturning_is_execution_free",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "create_bound_cursor_for_pinned_close",
+      "kind": "ok"
+    },
+    {
+      "name": "bound_cursor_for_pinned_close",
+      "kind": "error",
+      "sqlstate": "24000"
+    },
+    {
+      "name": "create_bound_cursor_for_reuse",
+      "kind": "ok"
+    },
+    {
+      "name": "bound_cursor_for_closes_and_reuses_name",
+      "kind": "rows",
+      "rows": [
+        [
+          "1:sf_query_for_reuse",
+          "1:sf_query_for_reuse"
+        ]
+      ]
     }
   ]
 }

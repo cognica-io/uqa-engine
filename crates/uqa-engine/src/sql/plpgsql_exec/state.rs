@@ -36,7 +36,7 @@ impl<'a> Interpreter<'a> {
                 bound.len()
             )));
         }
-        let loop_vars: BTreeSet<usize> = parsed.fori_variable_datums();
+        let loop_vars: BTreeSet<usize> = parsed.loop_local_variable_datums();
         let cursor_arguments: BTreeSet<usize> = parsed.cursor_argument_datums();
         let mut bindings: HashMap<String, Vec<usize>> = HashMap::new();
         for (idx, datum) in datums.iter().enumerate() {

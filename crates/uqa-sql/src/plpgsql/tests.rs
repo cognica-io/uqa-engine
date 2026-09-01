@@ -86,6 +86,84 @@ fn pg18_bound_cursor_named_arguments_lower_in_declaration_order() {
 }
 
 #[test]
+fn pg18_dynamic_and_bound_cursor_for_loops_lower_structurally() {
+    let parsed = parse_plpgsql_text(
+        "CREATE FUNCTION row_loops() RETURNS integer LANGUAGE plpgsql AS $$
+         DECLARE a integer; b text; cursor_row text := 'outer';
+                 c CURSOR (low_value integer, high_value integer)
+                   FOR SELECT low_value AS value WHERE low_value <= high_value;
+         BEGIN
+           <<dynamic_rows>>
+           FOR a, b IN EXECUTE 'SELECT $1, $2' USING 1, 'x' LOOP NULL; END LOOP dynamic_rows;
+           <<cursor_rows>>
+           FOR cursor_row IN c(high_value => 2, low_value => 1) LOOP
+             a := cursor_row.value;
+           END LOOP cursor_rows;
+           RETURN a;
+         END
+         $$;",
+    )
+    .unwrap();
+
+    let cursor = parsed
+        .datums
+        .iter()
+        .position(|datum| matches!(datum, PLpgSQLDatum::Var(var) if var.name == "c"))
+        .unwrap();
+    let cursor_target = parsed
+        .datums
+        .iter()
+        .position(|datum| matches!(datum, PLpgSQLDatum::Rec { name } if name == "cursor_row"))
+        .unwrap();
+    let PLpgSQLStmt::ForDynamic {
+        label,
+        target: IntoTarget::Row(fields),
+        params,
+        body,
+        ..
+    } = &parsed.action.body[0]
+    else {
+        panic!("expected dynamic-query FOR as the first statement");
+    };
+    assert_eq!(label.as_deref(), Some("dynamic_rows"));
+    assert_eq!(
+        fields
+            .iter()
+            .map(|field| field.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["a", "b"]
+    );
+    assert_eq!(params.len(), 2);
+    assert!(body.is_empty());
+
+    let PLpgSQLStmt::ForCursor {
+        label,
+        target,
+        cursor: lowered_cursor,
+        arguments,
+        body,
+    } = &parsed.action.body[1]
+    else {
+        panic!("expected bound-cursor FOR as the second statement");
+    };
+    assert_eq!(label.as_deref(), Some("cursor_rows"));
+    assert_eq!(*target, cursor_target);
+    assert_eq!(*lowered_cursor, cursor);
+    assert_eq!(
+        arguments
+            .iter()
+            .map(|argument| argument.name.as_deref())
+            .collect::<Vec<_>>(),
+        vec![Some("low_value"), Some("high_value")]
+    );
+    assert_eq!(body.len(), 1);
+    assert_eq!(
+        parsed.loop_local_variable_datums(),
+        std::collections::BTreeSet::from([cursor_target])
+    );
+}
+
+#[test]
 fn pg18_dynamic_open_fetch_directions_and_move_lower_structurally() {
     let parsed = parse_plpgsql_text(
         "CREATE FUNCTION cursor_controls() RETURNS integer LANGUAGE plpgsql AS $$

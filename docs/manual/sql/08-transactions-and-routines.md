@@ -134,7 +134,40 @@ END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 ```
 
-The implemented PL/pgSQL surface includes declarations, assignment, `IF` and `CASE`, basic loops, `WHILE`, integer and query `FOR`, array `FOREACH`, labeled blocks and exits, `RETURN`, `RETURN NEXT`, `RETURN QUERY`, `PERFORM`, static SQL, dynamic `EXECUTE`, nested blocks, recursive calls with a depth limit, diagnostics, exception handlers, and cursors covered by the routine tests.
+The implemented PL/pgSQL surface includes declarations, assignment, `IF` and `CASE`, basic loops, `WHILE`, integer, static-query, dynamic-query, and bound-cursor `FOR`, array `FOREACH`, labeled blocks and exits, `RETURN`, `RETURN NEXT`, `RETURN QUERY`, `PERFORM`, static SQL, dynamic `EXECUTE`, nested blocks, recursive calls with a depth limit, diagnostics, exception handlers, and cursors covered by the routine tests.
+
+### Query FOR loops
+
+The implemented forms are `[ <<label>> ] FOR target IN query LOOP statements END LOOP [ label ];`, `[ <<label>> ] FOR target IN EXECUTE text_expression [ USING expression [, ...] ] LOOP statements END LOOP [ label ];`, and `[ <<label>> ] FOR record_variable IN bound_cursor [ ( [ argument_name => ] argument_expression [, ...] ) ] LOOP statements END LOOP [ label ];`.
+
+Static and dynamic query targets can be a record variable, a row variable, or a comma-separated scalar target list. A bound-cursor loop declares its record variable for the loop, so a same-named outer variable is shadowed only within that loop. Cursor arguments can be positional or named; named arguments are matched in declaration order.
+
+The dynamic query expression and each `USING` expression are evaluated exactly once when the loop is entered, with the query text evaluated before the parameters. Static and dynamic loops use an implicit `NO SCROLL` portal and fetch up to 10 rows initially and up to 50 on later fetches, so volatile row expressions in the fetched batch can run before an early `EXIT`; a bound-cursor loop fetches one row at a time because its cursor remains visible to the routine. Every loop pins its portal while the body runs and closes it on normal completion, `EXIT`, `RETURN`, or error. A bound cursor whose variable was NULL receives an automatically generated portal name during the loop and becomes NULL again afterward; an explicit cursor name is retained, including a name assigned by the body.
+
+The target receives each row before the body runs. After a nonempty static or dynamic loop, the target retains the last assigned row; if the query returns no rows, the target is assigned NULL. `FOUND` is not changed by ordinary loop iteration and is set only when the loop exits: true if at least one row was assigned and false otherwise. Evaluating a nonempty bound-cursor argument list follows PostgreSQL's internal single-row `SELECT` behavior, so it sets `FOUND` to true and `ROW_COUNT` to 1 before the first loop body execution.
+
+A NULL dynamic query string fails with SQLSTATE `22004`. A dynamic string containing multiple statements or a command without result rows fails with `42P11`, and the latter is rejected before changing data. Opening a bound cursor that is already in use fails with `42P03`; attempting to `CLOSE` the cursor from inside its loop fails with `24000` because the active portal is pinned.
+
+```sql execute
+CREATE FUNCTION manual_dynamic_for(limit_value INTEGER)
+RETURNS TEXT
+AS $$
+DECLARE
+    loop_row RECORD;
+    output TEXT := '';
+BEGIN
+    FOR loop_row IN EXECUTE
+        'SELECT value FROM generate_series(1, $1) AS source(value) ORDER BY value'
+        USING limit_value
+    LOOP
+        output := output || loop_row.value;
+    END LOOP;
+    RETURN output || ':found=' || FOUND;
+END;
+$$ LANGUAGE plpgsql;
+
+SELECT manual_dynamic_for(3);
+```
 
 ### Array FOREACH
 

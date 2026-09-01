@@ -109,25 +109,27 @@ impl Interpreter<'_> {
                 target,
                 query,
                 body,
+            } => self.exec_query_for(label.as_deref(), target, query, body),
+            PLpgSQLStmt::ForDynamic {
+                label,
+                target,
+                query,
+                params,
+                body,
+            } => self.exec_dynamic_for(label.as_deref(), target, query, params, body),
+            PLpgSQLStmt::ForCursor {
+                label,
+                target,
+                cursor,
+                arguments,
+                body,
             } => {
-                let result = self.exec_query(query)?;
-                let mut iterated = false;
-                let mut outcome = Flow::Normal;
-                for row_index in 0..result.rows.len() {
-                    iterated = true;
-                    let values = result_row_values(&result, row_index);
-                    self.assign_into(target, &result.columns, values.as_deref())?;
-                    match self.exec_loop_body(label.as_deref(), body)? {
-                        LoopSignal::Continue => {}
-                        LoopSignal::Break => break,
-                        LoopSignal::Propagate(flow) => {
-                            outcome = flow;
-                            break;
-                        }
-                    }
-                }
-                self.set_found(iterated);
-                Ok(outcome)
+                let name = self.datum_name(*target)?;
+                self.push_binding(&name, *target);
+                let result =
+                    self.exec_cursor_for(label.as_deref(), *target, *cursor, arguments, body);
+                self.pop_binding(&name);
+                result
             }
             PLpgSQLStmt::ForeachArray {
                 label,

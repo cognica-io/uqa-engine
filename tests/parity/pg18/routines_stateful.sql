@@ -604,3 +604,112 @@ CREATE FUNCTION sf_foreach_array_element(items integer[]) RETURNS integer LANGUA
 -- @case foreach_element_requires_scalar_target error
 SELECT sf_foreach_array_element(ARRAY[]::integer[]);
 -- @end
+
+-- Static, dynamic, and bound-cursor query FOR loops share PostgreSQL's portal lifecycle while retaining their distinct prefetch and expression-evaluation behavior.
+-- @case create_query_for_values ok
+CREATE TABLE sf_query_for_values(value integer);
+-- @end
+
+-- @case insert_query_for_values ok
+INSERT INTO sf_query_for_values VALUES (1), (2), (3), (4);
+-- @end
+
+-- @case create_query_for_eval_log ok
+CREATE TABLE sf_query_for_eval_log(kind text);
+-- @end
+
+-- @case create_query_for_text ok
+CREATE FUNCTION sf_query_for_text() RETURNS text LANGUAGE plpgsql VOLATILE AS $$ BEGIN INSERT INTO sf_query_for_eval_log VALUES ('text'); RETURN 'SELECT value FROM sf_query_for_values WHERE value <= $1 ORDER BY value'; END $$;
+-- @end
+
+-- @case create_query_for_limit ok
+CREATE FUNCTION sf_query_for_limit() RETURNS integer LANGUAGE plpgsql VOLATILE AS $$ BEGIN INSERT INTO sf_query_for_eval_log VALUES ('parameter'); RETURN 3; END $$;
+-- @end
+
+-- @case create_dynamic_query_for_report ok
+CREATE FUNCTION sf_dynamic_query_for_report() RETURNS text LANGUAGE plpgsql AS $$ DECLARE loop_row record; output text := ''; BEGIN PERFORM 1 WHERE false; FOR loop_row IN EXECUTE sf_query_for_text() USING sf_query_for_limit() LOOP output := output || loop_row.value || ':' || FOUND || ','; END LOOP; RETURN output || 'last=' || loop_row.value || '|found=' || FOUND; END $$;
+-- @end
+
+-- @case dynamic_query_for_result rows
+SELECT sf_dynamic_query_for_report() AS value;
+-- @end
+
+-- @case dynamic_query_for_evaluates_once rows
+SELECT count(*) FILTER (WHERE kind = 'text') AS text_calls, count(*) FILTER (WHERE kind = 'parameter') AS parameter_calls FROM sf_query_for_eval_log;
+-- @end
+
+-- @case create_static_query_for_sequence ok
+CREATE SEQUENCE sf_static_query_for_sequence START WITH 1;
+-- @end
+
+-- @case create_dynamic_query_for_sequence ok
+CREATE SEQUENCE sf_dynamic_query_for_sequence START WITH 1;
+-- @end
+
+-- @case create_cursor_query_for_sequence ok
+CREATE SEQUENCE sf_cursor_query_for_sequence START WITH 1;
+-- @end
+
+-- @case create_query_for_prefetch_report ok
+CREATE FUNCTION sf_query_for_prefetch_report() RETURNS text LANGUAGE plpgsql AS $$ DECLARE loop_row record; bound_rows CURSOR FOR SELECT nextval('sf_cursor_query_for_sequence') AS value FROM generate_series(1, 100); BEGIN FOR loop_row IN SELECT nextval('sf_static_query_for_sequence') AS value FROM generate_series(1, 100) LOOP EXIT; END LOOP; FOR loop_row IN EXECUTE 'SELECT nextval(''sf_dynamic_query_for_sequence'') AS value FROM generate_series(1, 100)' LOOP EXIT; END LOOP; FOR loop_row IN bound_rows LOOP EXIT; END LOOP; RETURN currval('sf_static_query_for_sequence') || ',' || currval('sf_dynamic_query_for_sequence') || ',' || currval('sf_cursor_query_for_sequence'); END $$;
+-- @end
+
+-- @case query_for_prefetch_counts rows
+SELECT sf_query_for_prefetch_report() AS value;
+-- @end
+
+-- @case create_bound_cursor_for_report ok
+CREATE FUNCTION sf_bound_cursor_for_report(low_value integer, high_value integer) RETURNS text LANGUAGE plpgsql AS $$ DECLARE loop_row text := 'outer'; bound_rows CURSOR (low_bound integer, high_bound integer) FOR SELECT value FROM sf_query_for_values WHERE value BETWEEN low_bound AND high_bound ORDER BY value; output text := ''; BEGIN PERFORM 1 WHERE false; FOR loop_row IN bound_rows(high_bound => high_value, low_bound => low_value) LOOP output := output || loop_row.value || ':' || FOUND || ','; END LOOP; RETURN output || 'found=' || FOUND || '|outer=' || loop_row || '|null=' || (bound_rows IS NULL); END $$;
+-- @end
+
+-- @case bound_cursor_for_named_arguments rows
+SELECT sf_bound_cursor_for_report(2, 3) AS value;
+-- @end
+
+-- @case create_dynamic_query_for_null ok
+CREATE FUNCTION sf_dynamic_query_for_null() RETURNS integer LANGUAGE plpgsql AS $$ DECLARE loop_row record; BEGIN FOR loop_row IN EXECUTE NULL::text LOOP NULL; END LOOP; RETURN 0; END $$;
+-- @end
+
+-- @case dynamic_query_for_null error
+SELECT sf_dynamic_query_for_null();
+-- @end
+
+-- @case create_dynamic_query_for_multi ok
+CREATE FUNCTION sf_dynamic_query_for_multi() RETURNS integer LANGUAGE plpgsql AS $$ DECLARE loop_row record; BEGIN FOR loop_row IN EXECUTE 'SELECT 1; SELECT 2' LOOP NULL; END LOOP; RETURN 0; END $$;
+-- @end
+
+-- @case dynamic_query_for_multi error
+SELECT sf_dynamic_query_for_multi();
+-- @end
+
+-- @case create_dynamic_query_for_inserted ok
+CREATE TABLE sf_dynamic_query_for_inserted(value integer);
+-- @end
+
+-- @case create_dynamic_query_for_nonreturning ok
+CREATE FUNCTION sf_dynamic_query_for_nonreturning() RETURNS integer LANGUAGE plpgsql AS $$ DECLARE loop_row record; BEGIN FOR loop_row IN EXECUTE 'INSERT INTO sf_dynamic_query_for_inserted VALUES (9)' LOOP NULL; END LOOP; RETURN 0; END $$;
+-- @end
+
+-- @case dynamic_query_for_nonreturning error
+SELECT sf_dynamic_query_for_nonreturning();
+-- @end
+
+-- @case dynamic_query_for_nonreturning_is_execution_free rows
+SELECT count(*) AS rows FROM sf_dynamic_query_for_inserted;
+-- @end
+
+-- @case create_bound_cursor_for_pinned_close ok
+CREATE FUNCTION sf_bound_cursor_for_pinned_close() RETURNS integer LANGUAGE plpgsql AS $$ DECLARE bound_rows CURSOR FOR SELECT value FROM sf_query_for_values ORDER BY value; BEGIN bound_rows := 'sf_query_for_pinned'; FOR loop_row IN bound_rows LOOP CLOSE bound_rows; RETURN loop_row.value; END LOOP; RETURN 0; END $$;
+-- @end
+
+-- @case bound_cursor_for_pinned_close error
+SELECT sf_bound_cursor_for_pinned_close();
+-- @end
+
+-- @case create_bound_cursor_for_reuse ok
+CREATE FUNCTION sf_bound_cursor_for_reuse() RETURNS text LANGUAGE plpgsql AS $$ DECLARE bound_rows CURSOR FOR SELECT value FROM sf_query_for_values ORDER BY value; output text := ''; BEGIN bound_rows := 'sf_query_for_reuse'; FOR loop_row IN bound_rows LOOP output := output || loop_row.value; EXIT; END LOOP; RETURN output || ':' || bound_rows::text; END $$;
+-- @end
+
+-- @case bound_cursor_for_closes_and_reuses_name rows
+SELECT sf_bound_cursor_for_reuse() AS first_call, sf_bound_cursor_for_reuse() AS second_call;
+-- @end
