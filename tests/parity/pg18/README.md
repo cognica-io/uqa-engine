@@ -66,6 +66,12 @@ docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/pa
 docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/sequence_name_lifecycle_session_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/sequence_name_lifecycle_session_oracle.expected.txt -
 ```
 
+`sequence_security_oracle.sql` records PostgreSQL 18.4 sequence role ownership and ACL behavior. The checked-in transcript verifies the default ACL and owner, an independent grant-option chain, all six `has_sequence_privilege` name/OID overloads, value-function access, grant-option `CASCADE`, implicit owner grant options after self-revocation, and ownership-transfer grantor rewriting.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/sequence_security_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/sequence_security_oracle.expected.txt -
+```
+
 ## Transaction catalog visibility oracle
 
 `transaction_catalog_visibility_oracle.sql` uses `dblink` to commit catalog and storage changes from a sibling PostgreSQL 18.4 session after a `REPEATABLE READ` snapshot is established. The checked-in transcript verifies that the fixed snapshot uses current committed view and routine definitions, resolves a relation created after snapshot acquisition with no snapshot-visible rows, and treats a concurrently truncated relation as empty. The paired `pg18_fixed_snapshot_*` Rust integration tests exercise the same catalog identities and row-visibility boundaries in UQA, including transaction-local DDL and rollback.

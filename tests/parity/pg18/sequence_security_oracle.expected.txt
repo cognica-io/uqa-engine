@@ -1,0 +1,8 @@
+default|t|uqa_sequence_acl_owner
+explicit|{uqa_sequence_acl_owner=rwU/uqa_sequence_acl_owner,uqa_sequence_acl_delegate=U*/uqa_sequence_acl_owner,uqa_sequence_acl_reader=U/uqa_sequence_acl_delegate}
+explicit-overloads|t|t|t|t
+current-overloads|t|t
+values|1|1|1
+cascade|t|f|f
+implicit-owner|t
+transfer|uqa_sequence_acl_new_owner|{uqa_sequence_acl_delegate=U/uqa_sequence_acl_new_owner,uqa_sequence_acl_new_owner=r*w*U*/uqa_sequence_acl_new_owner}
