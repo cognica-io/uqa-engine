@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "034266e16f2f98ae4ba69de7ea5e9455202f643098cbe9dc3fb9fe3e0eda76e3",
+  "fixture_sha256": "d7de36b2c647bc2680266e8731524803ed8f3a37367e5f874a3a69de8c7c406d",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -944,6 +944,218 @@
           "11"
         ]
       ]
+    },
+    {
+      "name": "create_setval_is_called_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "setval_false_session_semantics",
+      "kind": "ok"
+    },
+    {
+      "name": "setval_false_session_semantics_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "catalog_after_false",
+          null,
+          "t"
+        ],
+        [
+          "currval_after_false",
+          "10",
+          null
+        ],
+        [
+          "false_return",
+          "42",
+          null
+        ],
+        [
+          "first_next_after_false",
+          "42",
+          null
+        ],
+        [
+          "initial_next",
+          "10",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "setval_false_reopen_prepare",
+      "kind": "ok"
+    },
+    {
+      "name": "setval_false_reopen_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          null,
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "setval_false_reopen_next",
+      "kind": "rows",
+      "rows": [
+        [
+          "70"
+        ]
+      ]
+    },
+    {
+      "name": "setval_false_transaction_rollback",
+      "kind": "ok"
+    },
+    {
+      "name": "setval_false_transaction_rollback_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "currval_after_rollback",
+          "71"
+        ],
+        [
+          "next_after_rollback",
+          "80"
+        ]
+      ]
+    },
+    {
+      "name": "setval_false_savepoint_rollback",
+      "kind": "ok"
+    },
+    {
+      "name": "setval_false_savepoint_rollback_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "currval_after_savepoint",
+          "81"
+        ],
+        [
+          "next_after_savepoint",
+          "90"
+        ],
+        [
+          "savepoint_seed",
+          "81"
+        ]
+      ]
+    },
+    {
+      "name": "setval_false_exception_subtransaction",
+      "kind": "ok"
+    },
+    {
+      "name": "setval_false_exception_subtransaction_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "currval_after_exception",
+          "91"
+        ],
+        [
+          "exception_seed",
+          "91"
+        ],
+        [
+          "next_after_exception",
+          "100"
+        ]
+      ]
+    },
+    {
+      "name": "setval_false_failed_statement",
+      "kind": "error",
+      "sqlstate": "P0001"
+    },
+    {
+      "name": "setval_false_failed_statement_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          null,
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "setval_false_failed_statement_next",
+      "kind": "rows",
+      "rows": [
+        [
+          "110"
+        ]
+      ]
+    },
+    {
+      "name": "setval_null_arguments_are_strict",
+      "kind": "rows",
+      "rows": [
+        [
+          null,
+          null,
+          null,
+          "110"
+        ]
+      ]
+    },
+    {
+      "name": "setval_positive_default_bound",
+      "kind": "error",
+      "sqlstate": "22003"
+    },
+    {
+      "name": "setval_bound_failure_preserves_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "111"
+        ]
+      ]
+    },
+    {
+      "name": "setval_descending_default_bound",
+      "kind": "error",
+      "sqlstate": "22003"
+    },
+    {
+      "name": "setval_descending_minimum_prepare",
+      "kind": "ok"
+    },
+    {
+      "name": "setval_descending_minimum_next",
+      "kind": "rows",
+      "rows": [
+        [
+          "-9223372036854775808"
+        ]
+      ]
+    },
+    {
+      "name": "setval_descending_exhaustion",
+      "kind": "error",
+      "sqlstate": "2200H"
+    },
+    {
+      "name": "setval_wrong_relation_kind",
+      "kind": "error",
+      "sqlstate": "42809"
+    },
+    {
+      "name": "setval_wrong_boolean_type",
+      "kind": "error",
+      "sqlstate": "42883"
+    },
+    {
+      "name": "setval_permanent_sequence_in_read_only_transaction",
+      "kind": "error",
+      "sqlstate": "25006"
     }
   ]
 }

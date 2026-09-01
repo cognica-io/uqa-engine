@@ -328,6 +328,50 @@ fn migration_18_preserves_legacy_sequence_sentinel_semantics() {
 }
 
 #[test]
+fn sequence_set_value_preserves_the_next_allocation_state() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let catalog = Catalog::open(connection).unwrap();
+    catalog
+        .create_sequence_row(&SequenceRow {
+            relation: RelationIdentity::new("public", "controlled"),
+            start: 1,
+            increment: 2,
+            current: 1,
+            called: false,
+            persistence: "p".into(),
+        })
+        .unwrap();
+
+    assert_eq!(
+        catalog
+            .set_sequence_value("public.controlled", 7, false)
+            .unwrap(),
+        Some(7)
+    );
+    let uncalled = catalog.load_sequence_rows().unwrap().remove(0);
+    assert_eq!(uncalled.current, 7);
+    assert!(!uncalled.called);
+    assert_eq!(
+        catalog.next_sequence_value("public.controlled").unwrap(),
+        Some(7)
+    );
+    assert_eq!(
+        catalog.next_sequence_value("public.controlled").unwrap(),
+        Some(9)
+    );
+    assert_eq!(
+        catalog
+            .set_sequence_value("public.controlled", 20, true)
+            .unwrap(),
+        Some(20)
+    );
+    assert_eq!(
+        catalog.next_sequence_value("public.controlled").unwrap(),
+        Some(22)
+    );
+}
+
+#[test]
 fn migration_23_moves_sequence_persistence_into_typed_rows() {
     let connection = ManagedConnection::open_in_memory().unwrap();
     let current = Catalog::open(connection.clone()).unwrap();

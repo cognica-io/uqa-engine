@@ -153,14 +153,14 @@ impl Catalog {
         })
     }
 
-    pub fn set_sequence_value(&self, name: &str, value: i64) -> Result<Option<i64>> {
+    pub fn set_sequence_value(&self, name: &str, value: i64, called: bool) -> Result<Option<i64>> {
         let relation = migration_relation(name)?;
         self.conn.with(|connection| {
             Ok(connection
                 .query_row(
-                    "UPDATE _sequences SET current = ?3, called = 1
+                    "UPDATE _sequences SET current = ?3, called = ?4
                      WHERE schema_name = ?1 AND relation_name = ?2 RETURNING current",
-                    params![relation.schema, relation.name, value],
+                    params![relation.schema, relation.name, value, called],
                     |row| row.get(0),
                 )
                 .optional()?)

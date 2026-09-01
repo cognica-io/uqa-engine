@@ -98,6 +98,221 @@ fn sequence_setval_via_sql_updates_currval() {
 }
 
 #[test]
+fn sequence_function_signatures_match_postgres_overloads() {
+    let eng = Engine::new();
+    eng.sql("CREATE SEQUENCE signature_sequence", &[]).unwrap();
+    assert_eq!(
+        eng.sql(
+            "SELECT setval('signature_sequence'::text, 5::smallint, false) AS value",
+            &[],
+        )
+        .unwrap()
+        .rows[0]["value"],
+        Value::Int(5)
+    );
+
+    for sql in [
+        "SELECT setval('signature_sequence', 6, 1)",
+        "SELECT setval('signature_sequence', 6.5)",
+        "SELECT setval('signature_sequence'::name, 6)",
+    ] {
+        let error = eng.sql(sql, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42883"), "{sql}: {error}");
+    }
+    let state = eng.sequence_state("signature_sequence").unwrap().unwrap().1;
+    assert_eq!(state.current, 5);
+    assert!(!state.called);
+}
+
+#[test]
+fn three_argument_setval_controls_first_allocation_and_session_currval() {
+    let eng = Engine::new();
+    eng.sql("CREATE SEQUENCE setval_control", &[]).unwrap();
+
+    let result = eng
+        .sql("SELECT setval('setval_control', 42, false) AS value", &[])
+        .unwrap();
+    assert_eq!(result.rows[0]["value"], Value::Int(42));
+    let state = eng.sequence_state("setval_control").unwrap().unwrap().1;
+    assert_eq!(state.current, 42);
+    assert!(!state.called);
+    assert_eq!(
+        eng.sql(
+            "SELECT last_value FROM pg_catalog.pg_sequences WHERE sequencename = 'setval_control'",
+            &[],
+        )
+        .unwrap()
+        .rows[0]["last_value"],
+        Value::Null
+    );
+    assert_eq!(
+        eng.sql("SELECT currval('setval_control')", &[])
+            .unwrap_err()
+            .sqlstate(),
+        Some("55000")
+    );
+    assert_eq!(eng.nextval("setval_control").unwrap(), 42);
+    assert_eq!(eng.currval("setval_control").unwrap(), 42);
+
+    assert_eq!(
+        eng.sql("SELECT setval('setval_control', 50, true) AS value", &[],)
+            .unwrap()
+            .rows[0]["value"],
+        Value::Int(50)
+    );
+    assert_eq!(eng.currval("setval_control").unwrap(), 50);
+    assert_eq!(eng.nextval("setval_control").unwrap(), 51);
+    assert_eq!(
+        eng.sql("SELECT setval('setval_control', 70, false) AS value", &[],)
+            .unwrap()
+            .rows[0]["value"],
+        Value::Int(70)
+    );
+    assert_eq!(eng.currval("setval_control").unwrap(), 51);
+    assert_eq!(eng.nextval("setval_control").unwrap(), 70);
+
+    let before_nulls = eng.sequence_state("setval_control").unwrap().unwrap().1;
+    let nulls = eng
+        .sql(
+            "SELECT setval(NULL, 80, false) AS null_name,
+                    setval('setval_control', NULL, false) AS null_value,
+                    setval('setval_control', 80, NULL) AS null_called",
+            &[],
+        )
+        .unwrap();
+    for column in ["null_name", "null_value", "null_called"] {
+        assert_eq!(nulls.rows[0][column], Value::Null, "{column}");
+    }
+    let after_nulls = eng.sequence_state("setval_control").unwrap().unwrap().1;
+    assert_eq!(after_nulls.current, before_nulls.current);
+    assert_eq!(after_nulls.called, before_nulls.called);
+}
+
+#[test]
+fn sequence_value_functions_enforce_relation_kind_and_default_bounds() {
+    let eng = Engine::new();
+    eng.sql("CREATE TABLE not_a_sequence (id INTEGER)", &[])
+        .unwrap();
+    for sql in [
+        "SELECT nextval('not_a_sequence')",
+        "SELECT currval('not_a_sequence')",
+        "SELECT setval('not_a_sequence', 1)",
+        "SELECT setval('not_a_sequence', 1, false)",
+    ] {
+        let error = eng.sql(sql, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42809"), "{sql}: {error}");
+    }
+
+    eng.sql("CREATE SEQUENCE ascending_bounds", &[]).unwrap();
+    for sql in [
+        "SELECT setval('ascending_bounds', 0)",
+        "SELECT setval('ascending_bounds', 0, false)",
+        "SELECT setval('ascending_bounds', -1, true)",
+    ] {
+        let error = eng.sql(sql, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("22003"), "{sql}: {error}");
+    }
+    let ascending = eng.sequence_state("ascending_bounds").unwrap().unwrap().1;
+    assert_eq!(ascending.current, 1);
+    assert!(!ascending.called);
+    assert_eq!(
+        eng.setval_with_is_called("ascending_bounds", i64::MAX, false)
+            .unwrap(),
+        i64::MAX
+    );
+    assert_eq!(eng.nextval("ascending_bounds").unwrap(), i64::MAX);
+    assert_eq!(
+        eng.sql("SELECT nextval('ascending_bounds')", &[])
+            .unwrap_err()
+            .sqlstate(),
+        Some("2200H")
+    );
+
+    eng.sql("CREATE SEQUENCE descending_bounds INCREMENT BY -1", &[])
+        .unwrap();
+    assert_eq!(
+        eng.sql("SELECT setval('descending_bounds', 0, false)", &[])
+            .unwrap_err()
+            .sqlstate(),
+        Some("22003")
+    );
+    assert_eq!(
+        eng.setval_with_is_called("descending_bounds", i64::MIN, false)
+            .unwrap(),
+        i64::MIN
+    );
+    assert_eq!(eng.nextval("descending_bounds").unwrap(), i64::MIN);
+    assert!(eng.nextval("descending_bounds").is_err());
+}
+
+#[test]
+fn uncalled_setval_state_survives_failed_statements_and_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("setval-is-called.sqlite");
+    {
+        let eng = Engine::open(&database).unwrap();
+        eng.sql("CREATE SEQUENCE durable_setval", &[]).unwrap();
+        assert_eq!(eng.nextval("durable_setval").unwrap(), 1);
+        let error = eng
+            .sql(
+                "DO $$
+                 BEGIN
+                     PERFORM setval('durable_setval', 80, false);
+                     RAISE EXCEPTION 'setval statement failure';
+                 END
+                 $$",
+                &[],
+            )
+            .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("P0001"));
+        let state = eng.sequence_state("durable_setval").unwrap().unwrap().1;
+        assert_eq!(state.current, 80);
+        assert!(!state.called);
+        assert_eq!(eng.currval("durable_setval").unwrap(), 1);
+
+        eng.sql(
+            "DO $$
+             BEGIN
+                 BEGIN
+                     PERFORM setval('durable_setval', 90, false);
+                     RAISE EXCEPTION 'caught setval failure';
+                 EXCEPTION WHEN OTHERS THEN
+                     NULL;
+                 END;
+             END
+             $$",
+            &[],
+        )
+        .unwrap();
+        let state = eng.sequence_state("durable_setval").unwrap().unwrap().1;
+        assert_eq!(state.current, 90);
+        assert!(!state.called);
+        assert_eq!(eng.currval("durable_setval").unwrap(), 1);
+    }
+
+    let reopened = Engine::open(&database).unwrap();
+    let state = reopened
+        .sequence_state("durable_setval")
+        .unwrap()
+        .unwrap()
+        .1;
+    assert_eq!(state.current, 90);
+    assert!(!state.called);
+    assert!(reopened.currval("durable_setval").is_err());
+    assert_eq!(
+        reopened
+            .sql(
+                "SELECT last_value FROM pg_catalog.pg_sequences WHERE sequencename = 'durable_setval'",
+                &[],
+            )
+            .unwrap()
+            .rows[0]["last_value"],
+        Value::Null
+    );
+    assert_eq!(reopened.nextval("durable_setval").unwrap(), 90);
+}
+
+#[test]
 fn pg_sequences_reports_sequence_state_across_reopen() {
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("pg-sequences.sqlite");
@@ -559,7 +774,8 @@ fn rejected_sequence_ddl_has_no_current_or_reopened_side_effects() {
         for sql in [
             "SELECT nextval('kept', 'ignored')",
             "SELECT currval('kept', 'ignored')",
-            "SELECT setval('kept', 99, true)",
+            "SELECT setval('kept', 99, 1)",
+            "SELECT setval('kept', 99, true, false)",
         ] {
             assert!(
                 eng.sql(sql, &[]).is_err(),

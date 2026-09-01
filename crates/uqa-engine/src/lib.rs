@@ -253,7 +253,15 @@ type ColumnStatsMap = BTreeMap<String, uqa_planner::ColumnStats>;
 type TransactionRelationStates = BTreeMap<RelationIdentity, u64>;
 type FixedTransactionCatalogBaseline = BTreeMap<[u8; 16], (RelationIdentity, Vec<u8>)>;
 type NontransactionalColumnStats = Vec<NontransactionalColumnStatsEntry>;
-type NontransactionalSequenceValues = BTreeMap<RelationIdentity, i64>;
+type NontransactionalSequenceValues = BTreeMap<RelationIdentity, NontransactionalSequenceValue>;
+
+#[derive(Clone, Copy)]
+struct NontransactionalSequenceValue {
+    current: i64,
+    called: bool,
+    session_currval: Option<i64>,
+    autonomous: bool,
+}
 
 #[derive(Clone)]
 struct NontransactionalColumnStatsEntry {

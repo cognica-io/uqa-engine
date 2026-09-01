@@ -19,7 +19,7 @@ impl EngineHook for DomainCastHook {
         unreachable!("domain cast test does not call sequence functions")
     }
 
-    fn setval(&self, _name: &str, _value: i64) -> Result<i64> {
+    fn setval(&self, _name: &str, _value: i64, _is_called: bool) -> Result<i64> {
         unreachable!("domain cast test does not call sequence functions")
     }
 

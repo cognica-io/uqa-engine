@@ -442,6 +442,7 @@ impl Engine {
                     persistence.get(*relation).copied().unwrap_or_default()
                         != uqa_sql::ast::RelationPersistence::Temporary
                 })
+                .filter(|(_, value)| !value.autonomous)
                 .map(|(relation, value)| (relation.qualified_name(), *value))
                 .collect::<Vec<_>>()
         };
@@ -450,7 +451,10 @@ impl Engine {
         }
         let persist = |catalog: &dyn uqa_storage::CatalogFacade| -> StorageBackendResult<()> {
             for (name, value) in &persistent {
-                if catalog.set_sequence_value(name, *value)?.is_none() {
+                if catalog
+                    .set_sequence_value(name, value.current, value.called)?
+                    .is_none()
+                {
                     return Err(StorageBackendError::Other(format!(
                         "sequence `{name}` disappeared while restoring its nontransactional value"
                     )));
@@ -493,9 +497,13 @@ impl Engine {
             let Some(sequence) = sequences.get_mut(relation) else {
                 continue;
             };
-            sequence.current = *value;
-            sequence.called = true;
-            session.sequence_currvals.insert(relation.clone(), *value);
+            sequence.current = value.current;
+            sequence.called = value.called;
+            if let Some(currval) = value.session_currval {
+                session.sequence_currvals.insert(relation.clone(), currval);
+            } else {
+                session.sequence_currvals.remove(relation);
+            }
         }
     }
 

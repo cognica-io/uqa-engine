@@ -348,7 +348,48 @@ fn assert_sequence_values_survive_rollback(engine: &Engine) -> i64 {
             .current,
         100
     );
-    100
+
+    engine.begin().unwrap();
+    assert_eq!(
+        engine
+            .setval_with_is_called("explicit_rollback_sequence", 200, false)
+            .unwrap(),
+        200
+    );
+    engine.rollback().unwrap();
+    assert_eq!(engine.currval("explicit_rollback_sequence").unwrap(), 100);
+    let state = engine
+        .sequence_state("explicit_rollback_sequence")
+        .unwrap()
+        .unwrap()
+        .1;
+    assert_eq!(state.current, 200);
+    assert!(!state.called);
+    assert_eq!(engine.nextval("explicit_rollback_sequence").unwrap(), 200);
+
+    engine.begin().unwrap();
+    engine.savepoint("uncalled_sequence_point").unwrap();
+    assert_eq!(
+        engine
+            .setval_with_is_called("explicit_rollback_sequence", 300, false)
+            .unwrap(),
+        300
+    );
+    engine
+        .rollback_to_savepoint("uncalled_sequence_point")
+        .unwrap();
+    assert_eq!(engine.currval("explicit_rollback_sequence").unwrap(), 200);
+    let state = engine
+        .sequence_state("explicit_rollback_sequence")
+        .unwrap()
+        .unwrap()
+        .1;
+    assert_eq!(state.current, 300);
+    assert!(!state.called);
+    engine.rollback().unwrap();
+    assert_eq!(engine.currval("explicit_rollback_sequence").unwrap(), 200);
+    assert_eq!(engine.nextval("explicit_rollback_sequence").unwrap(), 300);
+    300
 }
 
 #[test]

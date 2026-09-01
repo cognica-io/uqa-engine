@@ -81,6 +81,51 @@ fn relation_namespace_migration_is_one_batch_and_moves_public_data() {
 }
 
 #[test]
+fn sequence_set_value_preserves_the_next_allocation_state() {
+    let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
+    let catalog = KeyValueCatalog::new(store);
+    catalog.save_schema("public").unwrap();
+    catalog
+        .create_sequence_row(&SequenceRow {
+            relation: RelationIdentity::new("public", "controlled"),
+            start: 1,
+            increment: 2,
+            current: 1,
+            called: false,
+            persistence: "p".into(),
+        })
+        .unwrap();
+
+    assert_eq!(
+        catalog
+            .set_sequence_value("public.controlled", 7, false)
+            .unwrap(),
+        Some(7)
+    );
+    let uncalled = catalog.load_sequence_rows().unwrap().remove(0);
+    assert_eq!(uncalled.current, 7);
+    assert!(!uncalled.called);
+    assert_eq!(
+        catalog.next_sequence_value("public.controlled").unwrap(),
+        Some(7)
+    );
+    assert_eq!(
+        catalog.next_sequence_value("public.controlled").unwrap(),
+        Some(9)
+    );
+    assert_eq!(
+        catalog
+            .set_sequence_value("public.controlled", 20, true)
+            .unwrap(),
+        Some(20)
+    );
+    assert_eq!(
+        catalog.next_sequence_value("public.controlled").unwrap(),
+        Some(22)
+    );
+}
+
+#[test]
 fn relation_namespace_migration_moves_all_physical_index_namespaces() {
     let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
     let catalog = KeyValueCatalog::new(Arc::clone(&store));

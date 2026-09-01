@@ -222,7 +222,27 @@ SELECT to_regclass('pg_catalog.pg_type') AS relation_oid,
 
 ## Sequence functions
 
-`nextval`, `currval`, and two-argument `setval` operate on named sequences. A value allocated by `nextval` or installed by `setval` is not reclaimed by a failed statement, PL/pgSQL exception subtransaction, transaction rollback, or savepoint rollback; the durable sequence state survives reopen. `currval` reflects the latest such value only in the session that produced or installed it, including after rollback, and a new session has no `currval` until it calls `nextval` or `setval`. `pg_sequences` reports the configured start and increment, default bounds, default cycle and cache values, and a NULL `last_value` until the sequence is first called. `pg_proc` exposes the sequence functions' PostgreSQL 18 OIDs, signatures, volatility, parallel-safety, strictness, and source identities, so their `regproc` output uses the PostgreSQL routine names.
+```text
+nextval(sequence regclass)
+currval(sequence regclass)
+setval(sequence regclass, value bigint)
+setval(sequence regclass, value bigint, is_called boolean)
+```
+
+The sequence argument accepts the PostgreSQL `regclass` input forms, and smaller integer values are implicitly widened to `bigint`. All four signatures are strict: a NULL argument returns NULL without reading or changing sequence state. Unsupported argument types, named notation, or arities report `42883`.
+
+`nextval` returns the next allocated value and establishes the session's `currval`. `currval` returns that session-local value or reports `55000` when the session has not established one. Two-argument `setval` is equivalent to `setval(sequence, value, true)`: it stores the value as already called, establishes `currval`, and makes the next `nextval` advance by the sequence increment. `setval(sequence, value, false)` stores an uncalled value, leaves an existing `currval` unchanged, does not establish one when it is undefined, and makes the next `nextval` return the installed value exactly.
+
+Values allocated by `nextval` or installed by either `setval` form are not reclaimed by a failed statement, caught PL/pgSQL exception, transaction rollback, or savepoint rollback. The durable value and called state survive reopen, while `currval` remains session-local and is undefined in a new session. A permanent sequence cannot be changed in a read-only transaction and reports `25006`; a temporary sequence remains writable there.
+
+The implemented default ascending bounds are `1` through `9223372036854775807`, and the default descending bounds are `-9223372036854775808` through `-1`. An out-of-bounds `setval` reports `22003`, advancing past a bound reports `2200H`, a missing relation reports `42P01`, and a relation of another kind reports `42809`. `pg_sequences` reports the configured start and increment, default bounds, default cycle and cache values, and a NULL `last_value` while the sequence is uncalled. `pg_proc` exposes the sequence functions' PostgreSQL 18 OIDs, signatures, volatility, parallel safety, strictness, and source identities.
+
+```sql execute
+CREATE SEQUENCE manual_setval_sequence START WITH 10;
+SELECT setval('manual_setval_sequence', 25, false) AS installed;
+SELECT nextval('manual_setval_sequence') AS first_allocated;
+SELECT currval('manual_setval_sequence') AS current_value;
+```
 
 ## Aggregate functions
 

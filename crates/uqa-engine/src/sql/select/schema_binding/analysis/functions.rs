@@ -145,6 +145,18 @@ pub(super) fn validate_scalar_function(
     if validate_fixed_builtin(name, binding, args, schema, params, resolver)? {
         return Ok(());
     }
+    if let Some(valid) =
+        sequence_function_signature_matches(&lower, args, schema, params, resolver)?
+    {
+        if valid {
+            return Ok(());
+        }
+        if resolve_sql_function(routines, name, binding, args, schema, params, resolver)?.is_some()
+        {
+            return Ok(());
+        }
+        return Err(undefined_function(name, args, schema, params, resolver));
+    }
     if matches!(
         lower.as_str(),
         "uuid_extract_version" | "uuid_extract_timestamp"
@@ -193,6 +205,38 @@ fn validate_fixed_builtin(
         Some(resolver),
     )
     .map(|resolved| resolved.is_some())
+}
+
+fn sequence_function_signature_matches(
+    name: &str,
+    args: &[ScalarExpr],
+    schema: &RowSchema,
+    params: &[SQLParam],
+    resolver: &dyn FunctionTypeResolver,
+) -> Result<Option<bool>, SQLError> {
+    let parameter_types: &[&str] = match name {
+        "nextval" | "currval" => &["regclass"],
+        "setval" if args.len() == 2 => &["regclass", "int8"],
+        "setval" => &["regclass", "int8", "bool"],
+        _ => return Ok(None),
+    };
+    let (argument_names, argument_types, explicit_variadic) =
+        uqa_execution::function_call_argument_signature(args, schema, params, Some(resolver))?;
+    if explicit_variadic {
+        return Ok(Some(false));
+    }
+    let parameters = parameter_types
+        .iter()
+        .map(|type_name| uqa_execution::FunctionParameterDescriptor {
+            name: None,
+            type_name: (*type_name).into(),
+            has_default: false,
+        })
+        .collect::<Vec<_>>();
+    Ok(Some(
+        uqa_execution::match_function_signature(&parameters, &argument_names, &argument_types)
+            .is_some(),
+    ))
 }
 
 fn validate_uuid_extraction_function(
@@ -338,8 +382,6 @@ fn builtin_scalar_function(name: &str, argument_count: usize) -> bool {
             0
         ) | ("uuidv7", 0..=1)
             | ("setseed", 1)
-            | ("nextval" | "currval", 1)
-            | ("setval", 2)
             | ("crc32" | "crc32c", 1)
             | ("div", 2)
             | ("generate_series", 2..=3)

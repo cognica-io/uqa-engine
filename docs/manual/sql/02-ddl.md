@@ -324,10 +324,11 @@ CREATE SEQUENCE ticket_ids START WITH 1000 INCREMENT BY 1;
 SELECT nextval('ticket_ids');
 SELECT currval('ticket_ids');
 SELECT setval('ticket_ids', 2000);
+SELECT setval('ticket_ids', 2500, false);
 ALTER SEQUENCE ticket_ids RESTART WITH 3000;
 ```
 
-`CREATE SEQUENCE` supports start and increment for ordinary, temporary, and unlogged sequences. Temporary sequences live in `pg_temp`, participate in `DISCARD TEMP`, and do not survive a reopen; unlogged sequence state survives a clean reopen, while crash-recovery reset semantics remain open. `ALTER SEQUENCE` supports restart, increment, and start. SQL `DROP SEQUENCE` is not implemented; the Rust engine API provides `Engine::drop_sequence`. Minimum, maximum, cache, cycle, ownership, and identity ownership are not implemented.
+`CREATE SEQUENCE` supports start and increment for ordinary, temporary, and unlogged sequences. Temporary sequences live in `pg_temp`, participate in `DISCARD TEMP`, and do not survive a reopen; unlogged sequence state survives a clean reopen, while crash-recovery reset semantics remain open. `ALTER SEQUENCE` supports restart, increment, and start. The two-argument `setval` marks the installed value as called, while the three-argument form accepts `false` to make the next `nextval` return the installed value exactly. SQL `DROP SEQUENCE` is not implemented; the Rust engine API provides `Engine::drop_sequence`. Minimum, maximum, cache, cycle, ownership, and identity ownership are not implemented.
 
 ## Foreign servers and tables
 

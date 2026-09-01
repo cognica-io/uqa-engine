@@ -149,6 +149,7 @@ impl KeyValueCatalog {
         &self,
         name: &str,
         value: i64,
+        called: bool,
     ) -> StorageBackendResult<Option<i64>> {
         let _guard = self.sequence_lock.lock();
         let relation =
@@ -159,7 +160,7 @@ impl KeyValueCatalog {
         };
         let mut stored: StoredSequence = decode_value(&encoded)?;
         stored.current = value;
-        stored.called = true;
+        stored.called = called;
         self.store.put(&key, &encode_value(&stored)?)?;
         Ok(Some(value))
     }

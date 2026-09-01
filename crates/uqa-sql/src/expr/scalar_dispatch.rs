@@ -26,21 +26,24 @@ pub(super) fn eval_sequence_function(
             "sequence function `{name}` requires an engine hook on the EvalContext"
         ))
     })?;
-    let expected = match name {
-        "nextval" | "currval" => 1,
-        "setval" => 2,
+    let (valid_arity, expected) = match name {
+        "nextval" | "currval" => (args.len() == 1, "1"),
+        "setval" => (matches!(args.len(), 2 | 3), "2 or 3"),
         other => {
             return Err(SQLError::Unsupported(format!(
                 "unknown sequence function `{other}`"
             )));
         }
     };
-    if args.len() != expected {
+    if !valid_arity {
         return Err(SQLError::BadArity {
             name: name.to_string(),
-            expected: expected.to_string(),
+            expected: expected.into(),
             actual: args.len(),
         });
+    }
+    if args.iter().any(|argument| matches!(argument, Value::Null)) {
+        return Ok(Value::Null);
     }
     let seq_name = value_to_string(&args[0]);
     let value = match name {
@@ -48,7 +51,16 @@ pub(super) fn eval_sequence_function(
         "currval" => engine.currval(&seq_name),
         "setval" => {
             let n = to_i64(&args[1])?;
-            engine.setval(&seq_name, n)
+            let is_called = match args.get(2) {
+                None => true,
+                Some(Value::Bool(is_called)) => *is_called,
+                Some(value) => {
+                    return Err(SQLError::TypeMismatch(format!(
+                        "setval requires a boolean third argument, got {value:?}"
+                    )));
+                }
+            };
+            engine.setval(&seq_name, n, is_called)
         }
         _ => unreachable!("sequence function name was validated above"),
     }?;

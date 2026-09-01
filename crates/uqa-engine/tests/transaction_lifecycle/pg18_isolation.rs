@@ -557,6 +557,7 @@ fn exercise_pg18_read_only_dml_edges(eng: &Engine) {
         "DROP TABLE temporary_rows",
         "SELECT nextval('permanent_sequence')",
         "SELECT setval('permanent_sequence', 42)",
+        "SELECT setval('permanent_sequence', 42, false)",
         "SELECT mutate_read_only()",
         "SELECT * FROM permanent_rows FOR UPDATE",
     ] {
@@ -676,6 +677,16 @@ fn pg18_read_only_transactions_allow_only_temporary_relation_dml() {
         .unwrap();
     eng.sql("SELECT setval('temporary_sequence', 42)", &[])
         .unwrap();
+    eng.sql("SELECT setval('temporary_sequence', 84, false)", &[])
+        .unwrap();
+    assert_eq!(
+        integer_column(
+            &eng.sql("SELECT nextval('temporary_sequence') AS value", &[])
+                .unwrap(),
+            "value"
+        ),
+        [84]
+    );
     eng.sql("ANALYZE permanent_rows", &[]).unwrap();
     assert_eq!(
         integer_column(

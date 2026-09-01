@@ -13,8 +13,17 @@ use super::{
 enum SequenceValueError {
     #[error("relation \"{0}\" does not exist")]
     Undefined(String),
+    #[error("cannot open relation \"{name}\": this operation is not supported for {kind}s")]
+    WrongKind { name: String, kind: &'static str },
     #[error("currval of sequence \"{0}\" is not yet defined in this session")]
     CurrvalUndefined(String),
+    #[error("setval: value {value} is out of bounds for sequence \"{name}\" ({min}..{max})")]
+    SetvalOutOfBounds {
+        name: String,
+        value: i64,
+        min: i64,
+        max: i64,
+    },
     #[error("nextval: reached {bound} value of sequence \"{name}\" ({value})")]
     Exhausted {
         name: String,
@@ -43,7 +52,9 @@ impl SequenceValueError {
     fn into_sql_error(self) -> SQLError {
         let sqlstate = match self {
             Self::Undefined(_) => "42P01",
+            Self::WrongKind { .. } => "42809",
             Self::CurrvalUndefined(_) => "55000",
+            Self::SetvalOutOfBounds { .. } => "22003",
             Self::Exhausted { .. } => "2200H",
             Self::ReadOnly(_) => "25006",
             Self::Internal(message) => return SQLError::Internal(message),
@@ -56,7 +67,26 @@ impl SequenceValueError {
 }
 
 impl Engine {
-    fn record_nontransactional_sequence_value(&self, relation: &RelationIdentity, value: i64) {
+    fn record_nontransactional_sequence_value(
+        &self,
+        relation: &RelationIdentity,
+        current: i64,
+        called: bool,
+        autonomous: bool,
+    ) {
+        let session_currval = self
+            .session
+            .state
+            .read()
+            .sequence_currvals
+            .get(relation)
+            .copied();
+        let value = super::NontransactionalSequenceValue {
+            current,
+            called,
+            session_currval,
+            autonomous,
+        };
         let mut transactions = self.session.transactions.lock();
         for frame in transactions.iter_mut() {
             frame
@@ -424,12 +454,18 @@ impl Engine {
         &self,
         reference: &str,
     ) -> Result<(String, RelationIdentity), SequenceValueError> {
-        let name = self
-            .try_resolve_sequence_name(reference)
+        let (name, kind) = self
+            .try_resolve_relation_kind(reference)
             .map_err(|error| {
                 SequenceValueError::Internal(format!("load sequence catalog: {error}"))
             })?
             .ok_or_else(|| SequenceValueError::Undefined(reference.to_string()))?;
+        if kind != "sequence" {
+            return Err(SequenceValueError::WrongKind {
+                name: reference.to_string(),
+                kind,
+            });
+        }
         let relation = Self::resolved_relation_identity(&name).map_err(|error| {
             SequenceValueError::Internal(format!("resolve sequence `{name}`: {error}"))
         })?;
@@ -473,6 +509,7 @@ impl Engine {
                     SequenceValueError::Internal(format!("open sequence session: {error}"))
                 })?
         };
+        let autonomous = sequence_session.is_some();
         if !temporary && sequence_session.is_none() {
             self.prepare_explicit_transaction_writer()
                 .map_err(|error| {
@@ -527,7 +564,7 @@ impl Engine {
             .write()
             .sequence_currvals
             .insert(relation.clone(), current);
-        self.record_nontransactional_sequence_value(&relation, current);
+        self.record_nontransactional_sequence_value(&relation, current, true, autonomous);
         Ok(current)
     }
 
@@ -552,17 +589,44 @@ impl Engine {
     }
 
     pub fn setval(&self, name: &str, value: i64) -> Result<i64, String> {
-        self.setval_inner(name, value)
+        self.setval_inner(name, value, true)
             .map_err(|error| error.to_string())
     }
 
-    pub(crate) fn setval_sql(&self, name: &str, value: i64) -> Result<i64, SQLError> {
-        self.setval_inner(name, value)
+    pub fn setval_with_is_called(
+        &self,
+        name: &str,
+        value: i64,
+        is_called: bool,
+    ) -> Result<i64, String> {
+        self.setval_inner(name, value, is_called)
+            .map_err(|error| error.to_string())
+    }
+
+    pub(crate) fn setval_sql(
+        &self,
+        name: &str,
+        value: i64,
+        is_called: bool,
+    ) -> Result<i64, SQLError> {
+        self.setval_inner(name, value, is_called)
             .map_err(SequenceValueError::into_sql_error)
     }
 
-    fn setval_inner(&self, name: &str, value: i64) -> Result<i64, SequenceValueError> {
+    fn setval_inner(
+        &self,
+        name: &str,
+        value: i64,
+        is_called: bool,
+    ) -> Result<i64, SequenceValueError> {
         let (name, relation) = self.resolve_sequence_value_target(name)?;
+        let previous = self
+            .durable
+            .sequences
+            .read()
+            .get(&relation)
+            .copied()
+            .ok_or_else(|| SequenceValueError::Undefined(name.clone()))?;
         let temporary = self
             .durable
             .sequence_persistence
@@ -574,6 +638,19 @@ impl Engine {
         if self.current_transaction_is_read_only() && !temporary {
             return Err(SequenceValueError::ReadOnly("setval"));
         }
+        let (min, max) = if previous.increment > 0 {
+            (1, i64::MAX)
+        } else {
+            (i64::MIN, -1)
+        };
+        if !(min..=max).contains(&value) {
+            return Err(SequenceValueError::SetvalOutOfBounds {
+                name,
+                value,
+                min,
+                max,
+            });
+        }
         let sequence_session = if temporary {
             None
         } else {
@@ -582,6 +659,7 @@ impl Engine {
                     SequenceValueError::Internal(format!("open sequence session: {error}"))
                 })?
         };
+        let autonomous = sequence_session.is_some();
         if !temporary && sequence_session.is_none() {
             self.prepare_explicit_transaction_writer()
                 .map_err(|error| {
@@ -598,7 +676,7 @@ impl Engine {
         };
         if let Some(catalog) = catalog {
             catalog
-                .set_sequence_value(&name, value)
+                .set_sequence_value(&name, value, is_called)
                 .map_err(|error| {
                     SequenceValueError::Internal(format!("persist sequence value: {error}"))
                 })?
@@ -609,14 +687,16 @@ impl Engine {
             .get_mut(&relation)
             .ok_or(SequenceValueError::Undefined(name))?;
         seq.current = value;
-        seq.called = true;
+        seq.called = is_called;
         drop(seqs);
-        self.session
-            .state
-            .write()
-            .sequence_currvals
-            .insert(relation.clone(), value);
-        self.record_nontransactional_sequence_value(&relation, value);
+        if is_called {
+            self.session
+                .state
+                .write()
+                .sequence_currvals
+                .insert(relation.clone(), value);
+        }
+        self.record_nontransactional_sequence_value(&relation, value, is_called, autonomous);
         Ok(value)
     }
 

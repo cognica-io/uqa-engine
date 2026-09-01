@@ -964,3 +964,141 @@ SELECT attname, atthasmissing, attmissingval::text FROM pg_catalog.pg_attribute 
 -- @case volatile_added_column_default_result rows
 SELECT id, volatile_default FROM attribute_defaults ORDER BY id;
 -- @end
+
+-- Three-argument setval retains PostgreSQL's called bit, session currval, nontransactional rollback behavior, default bounds, and relation-kind errors.
+-- @case create_setval_is_called_fixture ok
+CREATE SEQUENCE setval_is_called_sequence START WITH 10;
+CREATE SEQUENCE setval_descending_sequence INCREMENT BY -1;
+CREATE TABLE setval_observations(name text PRIMARY KEY, value bigint, flag boolean);
+CREATE TABLE setval_not_sequence(id integer);
+-- @end
+
+-- @case setval_false_session_semantics ok
+INSERT INTO setval_observations VALUES ('initial_next', nextval('setval_is_called_sequence'), NULL);
+INSERT INTO setval_observations VALUES ('false_return', setval('setval_is_called_sequence', 42, false), NULL);
+INSERT INTO setval_observations VALUES ('currval_after_false', currval('setval_is_called_sequence'), NULL);
+INSERT INTO setval_observations SELECT 'catalog_after_false', last_value, last_value IS NULL FROM pg_catalog.pg_sequences WHERE schemaname = current_schema() AND sequencename = 'setval_is_called_sequence';
+INSERT INTO setval_observations VALUES ('first_next_after_false', nextval('setval_is_called_sequence'), NULL);
+-- @end
+
+-- @case setval_false_session_semantics_result rows
+SELECT name, value, flag FROM setval_observations WHERE name IN ('initial_next', 'false_return', 'currval_after_false', 'catalog_after_false', 'first_next_after_false') ORDER BY name;
+-- @end
+
+-- @case setval_false_reopen_prepare ok
+INSERT INTO setval_observations VALUES ('false_reopen_return', setval('setval_is_called_sequence', 70, false), NULL);
+-- @end
+
+-- @case setval_false_reopen_catalog rows
+SELECT last_value, last_value IS NULL AS is_null FROM pg_catalog.pg_sequences WHERE schemaname = current_schema() AND sequencename = 'setval_is_called_sequence';
+-- @end
+
+-- @case setval_false_reopen_next rows
+SELECT nextval('setval_is_called_sequence') AS value;
+-- @end
+
+-- @case setval_false_transaction_rollback ok
+BEGIN;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.setval_observations VALUES ('rolled_back_seed', nextval('__UQA_STATEFUL_SCHEMA__.setval_is_called_sequence'), NULL);
+INSERT INTO __UQA_STATEFUL_SCHEMA__.setval_observations VALUES ('rolled_back_setval', setval('__UQA_STATEFUL_SCHEMA__.setval_is_called_sequence', 80, false), NULL);
+ROLLBACK;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.setval_observations VALUES ('currval_after_rollback', currval('__UQA_STATEFUL_SCHEMA__.setval_is_called_sequence'), NULL);
+INSERT INTO __UQA_STATEFUL_SCHEMA__.setval_observations VALUES ('next_after_rollback', nextval('__UQA_STATEFUL_SCHEMA__.setval_is_called_sequence'), NULL);
+-- @end
+
+-- @case setval_false_transaction_rollback_result rows
+SELECT name, value FROM setval_observations WHERE name IN ('rolled_back_seed', 'rolled_back_setval', 'currval_after_rollback', 'next_after_rollback') ORDER BY name;
+-- @end
+
+-- @case setval_false_savepoint_rollback ok
+BEGIN;
+INSERT INTO setval_observations VALUES ('savepoint_seed', nextval('setval_is_called_sequence'), NULL);
+SAVEPOINT setval_point;
+INSERT INTO setval_observations VALUES ('rolled_back_savepoint_setval', setval('setval_is_called_sequence', 90, false), NULL);
+ROLLBACK TO SAVEPOINT setval_point;
+INSERT INTO setval_observations VALUES ('currval_after_savepoint', currval('setval_is_called_sequence'), NULL);
+INSERT INTO setval_observations VALUES ('next_after_savepoint', nextval('setval_is_called_sequence'), NULL);
+COMMIT;
+-- @end
+
+-- @case setval_false_savepoint_rollback_result rows
+SELECT name, value FROM setval_observations WHERE name IN ('savepoint_seed', 'rolled_back_savepoint_setval', 'currval_after_savepoint', 'next_after_savepoint') ORDER BY name;
+-- @end
+
+-- @case setval_false_exception_subtransaction ok
+INSERT INTO setval_observations VALUES ('exception_seed', nextval('setval_is_called_sequence'), NULL);
+DO $$
+BEGIN
+    BEGIN
+        PERFORM setval('setval_is_called_sequence', 100, false);
+        RAISE EXCEPTION 'caught setval failure';
+    EXCEPTION WHEN OTHERS THEN
+        NULL;
+    END;
+END
+$$;
+INSERT INTO setval_observations VALUES ('currval_after_exception', currval('setval_is_called_sequence'), NULL);
+INSERT INTO setval_observations VALUES ('next_after_exception', nextval('setval_is_called_sequence'), NULL);
+-- @end
+
+-- @case setval_false_exception_subtransaction_result rows
+SELECT name, value FROM setval_observations WHERE name IN ('exception_seed', 'currval_after_exception', 'next_after_exception') ORDER BY name;
+-- @end
+
+-- @case setval_false_failed_statement error
+DO $$
+BEGIN
+    PERFORM setval('setval_is_called_sequence', 110, false);
+    RAISE EXCEPTION 'uncaught setval failure';
+END
+$$;
+-- @end
+
+-- @case setval_false_failed_statement_catalog rows
+SELECT last_value, last_value IS NULL AS is_null FROM pg_catalog.pg_sequences WHERE schemaname = current_schema() AND sequencename = 'setval_is_called_sequence';
+-- @end
+
+-- @case setval_false_failed_statement_next rows
+SELECT nextval('setval_is_called_sequence') AS value;
+-- @end
+
+-- @case setval_null_arguments_are_strict rows
+SELECT setval(NULL, 120, false), setval('setval_is_called_sequence', NULL, false), setval('setval_is_called_sequence', 120, NULL), (SELECT last_value FROM pg_catalog.pg_sequences WHERE schemaname = current_schema() AND sequencename = 'setval_is_called_sequence');
+-- @end
+
+-- @case setval_positive_default_bound error
+SELECT setval('setval_is_called_sequence', 0, false);
+-- @end
+
+-- @case setval_bound_failure_preserves_state rows
+SELECT nextval('setval_is_called_sequence') AS value;
+-- @end
+
+-- @case setval_descending_default_bound error
+SELECT setval('setval_descending_sequence', 0, false);
+-- @end
+
+-- @case setval_descending_minimum_prepare ok
+INSERT INTO setval_observations VALUES ('descending_minimum', setval('setval_descending_sequence', -9223372036854775808, false), NULL);
+-- @end
+
+-- @case setval_descending_minimum_next rows
+SELECT nextval('setval_descending_sequence') AS value;
+-- @end
+
+-- @case setval_descending_exhaustion error
+SELECT nextval('setval_descending_sequence');
+-- @end
+
+-- @case setval_wrong_relation_kind error
+SELECT setval('setval_not_sequence', 1, false);
+-- @end
+
+-- @case setval_wrong_boolean_type error
+SELECT setval('setval_is_called_sequence', 120, 1);
+-- @end
+
+-- @case setval_permanent_sequence_in_read_only_transaction error
+BEGIN READ ONLY;
+SELECT setval('setval_is_called_sequence', 120, false);
+-- @end

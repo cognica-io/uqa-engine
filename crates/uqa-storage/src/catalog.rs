@@ -388,7 +388,12 @@ pub trait CatalogFacade: Send + Sync {
     fn drop_sequence_row(&self, name: &str) -> StorageBackendResult<bool>;
     fn load_sequence_rows(&self) -> StorageBackendResult<Vec<SequenceRow>>;
     fn next_sequence_value(&self, name: &str) -> StorageBackendResult<Option<i64>>;
-    fn set_sequence_value(&self, name: &str, value: i64) -> StorageBackendResult<Option<i64>>;
+    fn set_sequence_value(
+        &self,
+        name: &str,
+        value: i64,
+        called: bool,
+    ) -> StorageBackendResult<Option<i64>>;
 
     fn save_view(&self, view: &ViewRow) -> StorageBackendResult<()>;
     fn drop_view(&self, relation: &RelationIdentity) -> StorageBackendResult<bool>;

@@ -355,8 +355,13 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         self.engine.currval_sql(name)
     }
 
-    fn setval(&self, name: &str, value: i64) -> std::result::Result<i64, SQLError> {
-        self.engine.setval_sql(name, value)
+    fn setval(
+        &self,
+        name: &str,
+        value: i64,
+        is_called: bool,
+    ) -> std::result::Result<i64, SQLError> {
+        self.engine.setval_sql(name, value, is_called)
     }
 
     fn call_scalar_function(
