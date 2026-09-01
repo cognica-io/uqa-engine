@@ -381,7 +381,7 @@ impl<'a> EvalContext<'a> {
 
     /// Resolve an unqualified column through the same row semantics used by
     /// the AST evaluator. Physical scalar IR evaluators call this instead of
-    /// reconstructing an [`Expr::Column`] carrier.
+    /// reconstructing an [`Expr::Column`](crate::ast::Expr::Column) carrier.
     pub fn column_value(&self, name: &str) -> Result<Value> {
         if self.row_lookup()?.column_is_ambiguous(name) {
             return Err(SQLError::AmbiguousColumn(name.to_string()));

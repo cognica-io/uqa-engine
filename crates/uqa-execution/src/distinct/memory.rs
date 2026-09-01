@@ -116,7 +116,7 @@ impl Default for CanonicalRowHashSet {
 /// Exact, byte-bounded row-key set that can outlive one physical operator.
 ///
 /// Recursive fixpoint evaluation needs duplicate state to survive across
-/// multiple executions of its recursive term. [`Distinct`] deliberately
+/// multiple executions of its recursive term. [`Distinct`](crate::distinct::Distinct) deliberately
 /// resets its state on every `open`, so this small public carrier exposes the
 /// same collision-safe memory-to-disk migration without coupling the engine to
 /// the on-disk format.

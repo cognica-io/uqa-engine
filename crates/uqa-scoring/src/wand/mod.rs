@@ -9,7 +9,7 @@
 //! Both implementations advance posting-list cursors through pivot
 //! resolution. Pruning is *exact* under their respective upper-bound
 //! contracts: for WAND the per-term `term_upper_bound(df)`; for BMW the
-//! tighter per-block max stored in [`BlockMaxIndex`]. The output top-k
+//! tighter per-block max stored in [`BlockMaxIndex`](uqa_storage::BlockMaxIndex). The output top-k
 
 mod common;
 mod cursor;
