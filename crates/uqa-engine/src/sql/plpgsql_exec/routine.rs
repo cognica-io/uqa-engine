@@ -6,6 +6,8 @@
 
 //! Routine execution, recursion limits, and `LANGUAGE sql` result shaping.
 
+use std::cell::RefCell;
+
 use super::{
     coerce_routine_value, result_row_values, Cell, CompiledFunctionBody, CreateFunction, Engine,
     FunctionReturns, Interpreter, PLpgSQLDatum, RoutineOutcome, SQLError, SQLParam, SQLResult,
@@ -30,6 +32,86 @@ pub(in crate::sql) struct TriggerRoutineContext {
 thread_local! {
     static CALL_DEPTH: Cell<usize> = const { Cell::new(0) };
     static STACK_BASE: Cell<usize> = const { Cell::new(0) };
+    static ROUTINE_TRANSACTION_STACK: RefCell<Vec<RoutineTransactionContext>> = const { RefCell::new(Vec::new()) };
+    static DIRECT_ROUTINE_COMMAND_STACK: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+}
+
+#[derive(Clone, Copy)]
+struct RoutineTransactionContext {
+    session: usize,
+    nonatomic: bool,
+}
+
+pub(super) struct RoutineTransactionGuard;
+
+pub(super) struct DirectRoutineCommandGuard {
+    session: usize,
+}
+
+fn session_identity(engine: &Engine) -> usize {
+    std::sync::Arc::as_ptr(&engine.session) as usize
+}
+
+impl RoutineTransactionGuard {
+    pub(super) fn enter(engine: &Engine, nonatomic: bool) -> Self {
+        ROUTINE_TRANSACTION_STACK.with(|stack| {
+            stack.borrow_mut().push(RoutineTransactionContext {
+                session: session_identity(engine),
+                nonatomic,
+            });
+        });
+        Self
+    }
+}
+
+impl Drop for RoutineTransactionGuard {
+    fn drop(&mut self) {
+        ROUTINE_TRANSACTION_STACK.with(|stack| {
+            let removed = stack.borrow_mut().pop();
+            debug_assert!(removed.is_some(), "routine transaction stack underflow");
+        });
+    }
+}
+
+impl DirectRoutineCommandGuard {
+    pub(super) fn enter(engine: &Engine) -> Self {
+        let session = session_identity(engine);
+        DIRECT_ROUTINE_COMMAND_STACK.with(|stack| stack.borrow_mut().push(session));
+        Self { session }
+    }
+}
+
+impl Drop for DirectRoutineCommandGuard {
+    fn drop(&mut self) {
+        DIRECT_ROUTINE_COMMAND_STACK.with(|stack| {
+            let removed = stack.borrow_mut().pop();
+            debug_assert_eq!(
+                removed,
+                Some(self.session),
+                "direct routine command stack mismatch"
+            );
+        });
+    }
+}
+
+pub(super) fn routine_transaction_control_allowed(engine: &Engine) -> bool {
+    let session = session_identity(engine);
+    ROUTINE_TRANSACTION_STACK.with(|stack| {
+        stack
+            .borrow()
+            .last()
+            .is_some_and(|context| context.session == session && context.nonatomic)
+    })
+}
+
+pub(super) fn nonatomic_routine_entry_allowed(engine: &Engine, nested_statement: bool) -> bool {
+    if !nested_statement {
+        return true;
+    }
+    let session = session_identity(engine);
+    routine_transaction_control_allowed(engine)
+        && DIRECT_ROUTINE_COMMAND_STACK
+            .with(|stack| stack.borrow().last().is_some_and(|entry| *entry == session))
 }
 
 /// Native stack budget for nested routine calls, measured from the
@@ -85,6 +167,7 @@ pub(super) fn execute_routine(
     function: &SQLUserFunction,
     bound: Vec<Value>,
     invocation: &RoutineInvocationBinding,
+    allow_nonatomic: bool,
 ) -> Result<RoutineOutcome, SQLError> {
     if matches!(
         &function.def.returns,
@@ -100,6 +183,11 @@ pub(super) fn execute_routine(
     let _transition_scope = crate::sql::triggers::enter_empty_transition_relation_scope();
     let specialized = specialized_definition(&function.def, invocation)?;
     let definition = specialized.as_ref().unwrap_or(&function.def);
+    let nonatomic = allow_nonatomic
+        && definition.is_procedure
+        && !definition.security.security_definer
+        && definition.config.is_empty();
+    let _transaction_context = RoutineTransactionGuard::enter(engine, nonatomic);
     engine.ensure_routine_execute_privilege(definition)?;
     engine.with_routine_context(definition, || match &function.compiled {
         CompiledFunctionBody::PLpgSQL(parsed) => {
@@ -127,6 +215,7 @@ pub(in crate::sql) fn execute_trigger_routine(
     context: &TriggerRoutineContext,
 ) -> Result<Value, SQLError> {
     let _guard = DepthGuard::enter(engine)?;
+    let _transaction_context = RoutineTransactionGuard::enter(engine, false);
     engine.ensure_routine_execute_privilege(&function.def)?;
     engine.with_routine_context(&function.def, || {
         let CompiledFunctionBody::PLpgSQL(parsed) = &function.compiled else {
@@ -230,6 +319,16 @@ fn execute_sql_language(
         .collect::<Result<Vec<_>, SQLError>>()?;
     let mut last = SQLResult::empty();
     for plan in plans {
+        let _direct_routine_command = matches!(
+            plan,
+            uqa_planner::UnifiedPlan::Command(command)
+                if matches!(
+                    command.as_ref(),
+                    uqa_planner::CommandPlan::Call { .. }
+                        | uqa_planner::CommandPlan::DoBlock { .. }
+                )
+        )
+        .then(|| DirectRoutineCommandGuard::enter(engine));
         last = UnifiedPlanExecutor::new_nested(engine, &params).execute(plan)?;
     }
     let out_params = def.output_params();

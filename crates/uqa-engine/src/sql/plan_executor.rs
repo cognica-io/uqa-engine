@@ -404,7 +404,14 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             .with_function_hook(&hook)
             .with_subquery_runner(&hook);
         let args = eval_physical_call_arguments(arguments, &context)?;
-        plpgsql_exec::run_call(self.engine, name, &args, &argument_types, explicit_variadic)
+        plpgsql_exec::run_call(
+            self.engine,
+            name,
+            &args,
+            &argument_types,
+            explicit_variadic,
+            self.nested_statement,
+        )
     }
 
     fn execute_create_schema(
@@ -666,7 +673,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 Ok(SQLResult::empty())
             }
             CommandPlan::DoBlock { language, body } => {
-                plpgsql_exec::run_do_block(self.engine, language, body)
+                plpgsql_exec::run_do_block(self.engine, language, body, self.nested_statement)
             }
             CommandPlan::Call { name, args } => self.execute_call(name, args),
         }

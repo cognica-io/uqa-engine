@@ -487,6 +487,9 @@ pub(super) fn rollback_after_statement_error<T>(
     engine: &Engine,
     statement_error: SQLError,
 ) -> Result<T, SQLError> {
+    if engine.transaction_depth() == 0 {
+        return Err(statement_error);
+    }
     match engine.run_transaction_statement(uqa_sql::ast::TransactionStmt::Rollback) {
         Ok(()) => Err(statement_error),
         Err(rollback_error) => Err(SQLError::Internal(format!(

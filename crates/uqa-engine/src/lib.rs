@@ -465,6 +465,12 @@ struct SessionStateSnapshot {
     session_user: String,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PinnedPortalTransactionControl {
+    MakeHoldable,
+    Reject,
+}
+
 struct SessionPortalState {
     data: SessionPortalData,
     columns: Vec<String>,
@@ -473,6 +479,8 @@ struct SessionPortalState {
     position: SessionPortalPosition,
     scrollable: bool,
     holdable: bool,
+    /// Action to take when procedural transaction control encounters this pinned PL/pgSQL loop portal.
+    pinned_transaction_control: PinnedPortalTransactionControl,
     /// A PL/pgSQL row loop pins its portal while user statements run so the loop body cannot close the executor that owns its current tuple batch.
     pin_count: usize,
     /// The engine carries typed values rather than wire encodings; retaining the declaration format lets a `PostgreSQL` wire adapter request binary result encoding without changing portal execution.

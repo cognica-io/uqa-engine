@@ -429,6 +429,14 @@ pub enum PLpgSQLStmt {
     CloseCursor {
         cursor: usize,
     },
+    /// Procedural `COMMIT [AND [NO] CHAIN]`.
+    Commit {
+        chain: bool,
+    },
+    /// Procedural `ROLLBACK [AND [NO] CHAIN]`.
+    Rollback {
+        chain: bool,
+    },
     /// `GET DIAGNOSTICS var = KIND [, ...]` as `(kind, target datum)`.
     GetDiagnostics {
         items: Vec<(String, usize)>,

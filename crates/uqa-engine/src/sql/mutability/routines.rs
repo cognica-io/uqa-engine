@@ -492,6 +492,9 @@ fn plpgsql_statement_may_mutate_engine(
             }
         }
         PLpgSQLStmt::CloseCursor { .. } => Ok(classification.procedural_state_requires_transaction),
+        PLpgSQLStmt::Commit { .. } | PLpgSQLStmt::Rollback { .. } => Ok(classification
+            .include_session_mutations
+            || classification.procedural_state_requires_transaction),
         PLpgSQLStmt::GetDiagnostics { .. } => Ok(false),
     }
 }

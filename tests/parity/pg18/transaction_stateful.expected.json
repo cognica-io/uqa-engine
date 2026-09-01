@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "fbf0fc4f1942ccf165c33696ee4c5dc0aa1f711d281b4ab20e947c27ee967f2b",
+  "fixture_sha256": "034266e16f2f98ae4ba69de7ea5e9455202f643098cbe9dc3fb9fe3e0eda76e3",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -51,6 +51,152 @@
     {
       "name": "schema_create_commit_cleanup",
       "kind": "ok"
+    },
+    {
+      "name": "create_procedural_transaction_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "procedural_commit_continue",
+      "kind": "ok"
+    },
+    {
+      "name": "procedural_commit_continue_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "commit-after"
+        ],
+        [
+          "commit-before"
+        ]
+      ]
+    },
+    {
+      "name": "procedural_transaction_log_reset",
+      "kind": "ok"
+    },
+    {
+      "name": "procedural_rollback_continue",
+      "kind": "ok"
+    },
+    {
+      "name": "procedural_rollback_continue_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "keep-12"
+        ]
+      ]
+    },
+    {
+      "name": "procedural_transaction_log_reset_after_rollback",
+      "kind": "ok"
+    },
+    {
+      "name": "procedural_error_after_commit",
+      "kind": "error",
+      "sqlstate": "22012"
+    },
+    {
+      "name": "procedural_error_after_commit_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "segment-committed"
+        ]
+      ]
+    },
+    {
+      "name": "procedural_transaction_log_reset_after_error",
+      "kind": "ok"
+    },
+    {
+      "name": "procedural_direct_nested_call",
+      "kind": "ok"
+    },
+    {
+      "name": "procedural_direct_nested_call_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "inner-after"
+        ],
+        [
+          "inner-before"
+        ],
+        [
+          "outer-after"
+        ]
+      ]
+    },
+    {
+      "name": "procedural_transaction_log_reset_after_nested_call",
+      "kind": "ok"
+    },
+    {
+      "name": "procedural_function_bridge_rejected",
+      "kind": "error",
+      "sqlstate": "2D000"
+    },
+    {
+      "name": "procedural_function_bridge_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "procedural_select_loop",
+      "kind": "ok"
+    },
+    {
+      "name": "procedural_select_loop_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "12"
+        ]
+      ]
+    },
+    {
+      "name": "procedural_transaction_log_reset_after_loop",
+      "kind": "ok"
+    },
+    {
+      "name": "procedural_command_loop_rejected",
+      "kind": "error",
+      "sqlstate": "55000"
+    },
+    {
+      "name": "procedural_command_loop_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "procedural_dynamic_commit_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "procedural_simple_query_batch_rejected",
+      "kind": "error",
+      "sqlstate": "2D000"
+    },
+    {
+      "name": "procedural_simple_query_batch_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
     },
     {
       "name": "create_cursor_fixture",

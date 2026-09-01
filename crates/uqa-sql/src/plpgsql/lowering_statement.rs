@@ -524,6 +524,16 @@ pub(super) fn lower_stmt(raw: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLp
             strict: false,
         });
     }
+    if let Some(stmt) = raw.get("PLpgSQL_stmt_commit") {
+        return Ok(PLpgSQLStmt::Commit {
+            chain: json_bool_or_false(stmt, "chain")?,
+        });
+    }
+    if let Some(stmt) = raw.get("PLpgSQL_stmt_rollback") {
+        return Ok(PLpgSQLStmt::Rollback {
+            chain: json_bool_or_false(stmt, "chain")?,
+        });
+    }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_getdiag") {
         if json_bool_or_false(stmt, "is_stacked")? {
             return Err(SQLError::Unsupported("GET STACKED DIAGNOSTICS".into()));

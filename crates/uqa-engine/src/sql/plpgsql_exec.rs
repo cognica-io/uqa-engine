@@ -48,6 +48,7 @@ mod routine;
 mod sql_runtime;
 mod state;
 mod statements;
+mod transaction_control;
 
 pub(crate) use handlers::{
     call_bound_user_scalar_function, call_bound_user_table_function, call_user_scalar_function,
@@ -66,7 +67,7 @@ use resolution::{
     call_signature, coerce_routine_value, output_column_names, resolve_bound_routine,
     resolve_routine, routine_resolution_error, ResolvedRoutine,
 };
-use routine::{execute_routine, DepthGuard};
+use routine::{execute_routine, DepthGuard, DirectRoutineCommandGuard, RoutineTransactionGuard};
 
 /// Control-flow signal propagated by statement execution.
 enum Flow {

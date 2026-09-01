@@ -452,6 +452,45 @@ fn pg18_assert_statements_preserve_conditions_and_lazy_messages() {
 }
 
 #[test]
+fn pg18_procedural_transaction_statements_preserve_chain_mode() {
+    let parsed = parse_plpgsql_text(
+        "CREATE PROCEDURE transaction_shape() LANGUAGE plpgsql AS $$
+         BEGIN
+           COMMIT;
+           COMMIT AND CHAIN;
+           COMMIT AND NO CHAIN;
+           ROLLBACK;
+           ROLLBACK AND CHAIN;
+           ROLLBACK AND NO CHAIN;
+         END $$;",
+    )
+    .unwrap();
+
+    let modes = parsed
+        .action
+        .body
+        .iter()
+        .filter_map(|statement| match statement {
+            PLpgSQLStmt::Commit { chain } => Some(("commit", *chain)),
+            PLpgSQLStmt::Rollback { chain } => Some(("rollback", *chain)),
+            PLpgSQLStmt::Return { value: None } => None,
+            other => panic!("unexpected transaction statement: {other:?}"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        modes,
+        [
+            ("commit", false),
+            ("commit", true),
+            ("commit", false),
+            ("rollback", false),
+            ("rollback", true),
+            ("rollback", false),
+        ]
+    );
+}
+
+#[test]
 fn omitted_zero_datum_references_remain_valid_but_malformed_values_fail() {
     let datums = vec![scalar_datum("target")];
     let assignment = serde_json::json!({

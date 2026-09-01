@@ -7,7 +7,7 @@
 //! Dynamic SQL, `RAISE`, and statement-result bookkeeping.
 
 use super::{
-    cast_value_from, coercion_type_name, condition_sqlstate, format_raise_message,
+    cast_value_from, coercion_type_name, compile, condition_sqlstate, format_raise_message,
     looks_like_sqlstate, result_row_count, result_row_values, strict_into_check, Expr, Flow,
     Interpreter, IntoTarget, RaiseLevel, SQLError, SQLParam, SQLResult, Statement, Value,
 };
@@ -113,6 +113,15 @@ impl Interpreter<'_> {
         params: &[Expr],
     ) -> Result<SQLResult, SQLError> {
         let (text, bound_params) = self.eval_dynamic_sql(query, params)?;
+        if compile(&text)?
+            .iter()
+            .any(|statement| matches!(statement, Statement::Transaction(_)))
+        {
+            return Err(SQLError::Routine {
+                sqlstate: "0A000".into(),
+                message: "EXECUTE of transaction commands is not implemented".into(),
+            });
+        }
         crate::sql::execute_nested(self.engine, &text, &bound_params)
     }
 

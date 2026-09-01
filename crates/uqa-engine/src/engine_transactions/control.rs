@@ -32,6 +32,55 @@ impl Engine {
         }
     }
 
+    pub(crate) fn finish_procedural_transaction(
+        &self,
+        commit: bool,
+        chain: bool,
+    ) -> Result<(), SQLError> {
+        let _statement = self.runtime.statement_gate.lock();
+        let chained_characteristics = {
+            let stack = self.session.transactions.lock();
+            let valid = stack.len() == 1
+                && stack.last().is_some_and(|frame| {
+                    frame.implicit_statement
+                        && frame.status == TransactionStatus::Active
+                        && frame.savepoints.is_empty()
+                });
+            if !valid {
+                return Err(invalid_transaction_termination());
+            }
+            stack.last().map(|frame| frame.characteristics)
+        };
+        self.prepare_pinned_session_portals_for_transaction_control()?;
+        self.run_transaction_statement(if commit {
+            TransactionStmt::Commit
+        } else {
+            TransactionStmt::Rollback
+        })?;
+        if self.transaction_depth() != 0 {
+            return Err(SQLError::Internal(
+                "procedural transaction boundary did not close its transaction".into(),
+            ));
+        }
+        let characteristics = if chain {
+            chained_characteristics.ok_or_else(|| {
+                SQLError::Internal(
+                    "procedural transaction chain lost its transaction characteristics".into(),
+                )
+            })?
+        } else {
+            self.default_transaction_characteristics()
+        };
+        let mut stack = self.session.transactions.lock();
+        self.begin_transaction_frame(
+            &mut stack,
+            characteristics.read_only,
+            true,
+            true,
+            characteristics,
+        )
+    }
+
     fn prepare_transaction_completion(&self, tx: &TransactionStmt) -> Result<bool, SQLError> {
         let apply_on_commit = if matches!(
             tx,
@@ -203,5 +252,12 @@ impl Engine {
             }
         }
         Ok(())
+    }
+}
+
+fn invalid_transaction_termination() -> SQLError {
+    SQLError::Routine {
+        sqlstate: "2D000".into(),
+        message: "invalid transaction termination".into(),
     }
 }

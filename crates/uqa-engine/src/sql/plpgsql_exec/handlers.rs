@@ -6,11 +6,12 @@
 
 //! SQL statement handlers and scalar/table routine entry points.
 
+use super::routine::nonatomic_routine_entry_allowed;
 use super::{
     call_signature, execute_routine, output_column_names, resolve_bound_routine, resolve_routine,
     routine_local_name, routine_resolution_error, CreateFunction, DepthGuard, DropFunctionStmt,
-    Engine, FunctionBinding, FunctionReturns, Interpreter, ResolvedRoutine, ResultRow, SQLError,
-    SQLResult, SQLTableFunctionResult, Value,
+    Engine, FunctionBinding, FunctionReturns, Interpreter, ResolvedRoutine, ResultRow,
+    RoutineTransactionGuard, SQLError, SQLResult, SQLTableFunctionResult, Value,
 };
 
 pub(in crate::sql) fn run_create_function(
@@ -33,6 +34,7 @@ pub(in crate::sql) fn run_do_block(
     engine: &Engine,
     language: &str,
     body: &str,
+    nested_statement: bool,
 ) -> Result<SQLResult, SQLError> {
     if language != "plpgsql" {
         return Err(SQLError::Routine {
@@ -64,6 +66,10 @@ pub(in crate::sql) fn run_do_block(
         execute_acl: None,
     };
     let _guard = DepthGuard::enter(engine)?;
+    let _transaction_context = RoutineTransactionGuard::enter(
+        engine,
+        nonatomic_routine_entry_allowed(engine, nested_statement),
+    );
     let mut interpreter = Interpreter::new(engine, &def, &parsed, Vec::new())?;
     interpreter.run(&parsed.action)?;
     Ok(SQLResult::empty())
@@ -75,6 +81,7 @@ pub(in crate::sql) fn run_call(
     call_args: &[(Option<String>, Value)],
     argument_types: &[Option<uqa_sql::ast::ColumnType>],
     explicit_variadic: bool,
+    nested_statement: bool,
 ) -> Result<SQLResult, SQLError> {
     let function = match resolve_routine(
         engine,
@@ -105,7 +112,13 @@ pub(in crate::sql) fn run_call(
             message: format!("{} is not a procedure", call_signature(name, call_args)),
         });
     }
-    let outcome = execute_routine(engine, &function, bound, &invocation)?;
+    let outcome = execute_routine(
+        engine,
+        &function,
+        bound,
+        &invocation,
+        nonatomic_routine_entry_allowed(engine, nested_statement),
+    )?;
     let out_params = function.def.output_params();
     if out_params.is_empty() {
         return Ok(SQLResult::empty());
@@ -215,7 +228,7 @@ fn execute_resolved_scalar_function(
         engine.ensure_routine_execute_privilege(&function.def)?;
         return Ok(Value::Null);
     }
-    let outcome = execute_routine(engine, &function, bound, &invocation)?;
+    let outcome = execute_routine(engine, &function, bound, &invocation, false)?;
     let out_params = function.def.output_params();
     if outcome.out_values.len() != out_params.len() {
         return Err(SQLError::Internal(format!(
@@ -369,7 +382,7 @@ fn execute_resolved_table_function(
         };
         return Ok(SQLTableFunctionResult::new(columns, rows));
     }
-    let outcome = execute_routine(engine, &function, bound, &invocation)?;
+    let outcome = execute_routine(engine, &function, bound, &invocation, false)?;
     if let Some((columns, types)) = record_definition {
         if !crate::engine_user_functions::routine_returns_anonymous_record(&function.def) {
             return Err(SQLError::Internal(format!(

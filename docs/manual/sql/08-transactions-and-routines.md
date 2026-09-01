@@ -134,7 +134,7 @@ END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 ```
 
-The implemented PL/pgSQL surface includes declarations, assignment, `IF` and `CASE`, basic loops, `WHILE`, integer, static-query, dynamic-query, and bound-cursor `FOR`, array `FOREACH`, labeled blocks and exits, `RETURN`, `RETURN NEXT`, `RETURN QUERY`, `PERFORM`, static SQL, dynamic `EXECUTE`, nested blocks, recursive calls with a depth limit, diagnostics, exception handlers, assertions, and cursors covered by the routine tests.
+The implemented PL/pgSQL surface includes declarations, assignment, `IF` and `CASE`, basic loops, `WHILE`, integer, static-query, dynamic-query, and bound-cursor `FOR`, array `FOREACH`, labeled blocks and exits, `RETURN`, `RETURN NEXT`, `RETURN QUERY`, `PERFORM`, static SQL, dynamic `EXECUTE`, nested blocks, recursive calls with a depth limit, diagnostics, exception handlers, assertions, procedural transaction control, and cursors covered by the routine tests.
 
 ### Query FOR loops
 
@@ -327,6 +327,42 @@ $$ LANGUAGE plpgsql;
 ```
 
 An anonymous block executes without creating a durable routine identity.
+
+## PL/pgSQL transaction control
+
+The implemented transaction-control syntax in a PL/pgSQL procedure or anonymous block is `COMMIT [ AND [ NO ] CHAIN ];` and `ROLLBACK [ AND [ NO ] CHAIN ];`. Each command ends the current transaction segment and automatically starts a new one while retaining local PL/pgSQL datum values. `COMMIT` makes the current segment durable, `ROLLBACK` discards it, and an unhandled later error rolls back only the active segment rather than an earlier committed segment. `AND CHAIN` carries the current isolation level, read-only mode, and deferrability into the new segment; the default and `AND NO CHAIN` use the current session defaults.
+
+Transaction control is allowed when the outer command is a standalone top-level `CALL` or `DO` outside an explicit transaction block, including an uninterrupted direct nesting chain of `CALL` and `DO`. It is rejected with invalid transaction termination (`2D000`) in functions, triggers, exception-handler subtransactions, `SECURITY DEFINER` procedures, procedures that have a `SET` clause, explicit transaction blocks, a `CALL` or `DO` that is not the only statement in its simple-query command, and nested routine calls reached through another SQL command such as `SELECT`. Dynamic `EXECUTE` rejects transaction commands with feature not supported (`0A000`).
+
+At the first transaction boundary inside a query-driven cursor `FOR` loop, the remaining query rows are materialized and its pinned portal becomes holdable so iteration can continue. A transaction command inside a command-driven cursor loop, including `SHOW`, `EXPLAIN`, `CALL`, or DML with `RETURNING`, fails with object not in prerequisite state (`55000`). Explicit cursors close at the boundary and a later access reports invalid cursor name (`34000`).
+
+```sql execute
+CREATE TABLE manual_procedural_tx_log (step TEXT);
+```
+
+```sql execute
+CREATE PROCEDURE manual_split_transaction()
+AS $$
+BEGIN
+    INSERT INTO manual_procedural_tx_log VALUES ('before commit');
+    COMMIT;
+    INSERT INTO manual_procedural_tx_log VALUES ('after commit');
+END;
+$$ LANGUAGE plpgsql;
+```
+
+```sql execute
+CALL manual_split_transaction();
+```
+
+```sql execute
+SELECT step FROM manual_procedural_tx_log ORDER BY step;
+```
+
+```sql execute
+DROP PROCEDURE manual_split_transaction();
+DROP TABLE manual_procedural_tx_log;
+```
 
 ## Overloads, defaults, and replacement
 

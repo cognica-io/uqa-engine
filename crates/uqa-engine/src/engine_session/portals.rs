@@ -11,12 +11,13 @@ mod fetch;
 
 use crate::{
     AnalyzerPhase, DocumentStore, Engine, EpochCoordinator, InvertedIndex, MemoryDocumentStore,
-    MemoryInvertedIndex, MemoryVectorIndex, QueryRuntime, RelationIdentity, RuntimeExtensions,
-    SQLError, SQLResult, SessionPortalCatalogSnapshot, SessionPortalCommandDeclaration,
-    SessionPortalData, SessionPortalDeclaration, SessionPortalMaterialization,
-    SessionPortalPosition, SessionPortalRestart, SessionPortalSQLFunctionSnapshots,
-    SessionPortalState, SessionPortalTableSnapshots, SessionPortalTransactionOverlay,
-    SessionPortalViewSnapshots, StorageContext, TableState, Value, VectorIndex,
+    MemoryInvertedIndex, MemoryVectorIndex, PinnedPortalTransactionControl, QueryRuntime,
+    RelationIdentity, RuntimeExtensions, SQLError, SQLResult, SessionPortalCatalogSnapshot,
+    SessionPortalCommandDeclaration, SessionPortalData, SessionPortalDeclaration,
+    SessionPortalMaterialization, SessionPortalPosition, SessionPortalRestart,
+    SessionPortalSQLFunctionSnapshots, SessionPortalState, SessionPortalTableSnapshots,
+    SessionPortalTransactionOverlay, SessionPortalViewSnapshots, StorageContext, TableState, Value,
+    VectorIndex,
 };
 use binding::bind_session_portal_function_relations;
 use fetch::{
@@ -147,6 +148,7 @@ impl Engine {
                 position: SessionPortalPosition::BeforeFirst,
                 scrollable,
                 holdable,
+                pinned_transaction_control: PinnedPortalTransactionControl::MakeHoldable,
                 pin_count: 0,
                 _binary: binary,
             },
@@ -186,6 +188,7 @@ impl Engine {
                 position: SessionPortalPosition::BeforeFirst,
                 scrollable,
                 holdable: false,
+                pinned_transaction_control: PinnedPortalTransactionControl::Reject,
                 pin_count: 0,
                 _binary: false,
             },
@@ -313,19 +316,62 @@ impl Engine {
             })
             .collect::<Vec<_>>();
         let materialized_any = !names.is_empty();
+        self.materialize_named_session_portals(&names)?;
+        Ok(materialized_any)
+    }
+
+    pub(crate) fn prepare_pinned_session_portals_for_transaction_control(
+        &self,
+    ) -> Result<(), SQLError> {
+        let names = {
+            let mut portals = self.session.portals.lock();
+            if portals.values().any(|portal| {
+                portal.pin_count != 0
+                    && portal.pinned_transaction_control == PinnedPortalTransactionControl::Reject
+            }) {
+                return Err(SQLError::Routine {
+                    sqlstate: "55000".into(),
+                    message: "cannot perform transaction commands inside a cursor loop that is not read-only".into(),
+                });
+            }
+            let names = portals
+                .iter()
+                .filter_map(|(name, portal)| (portal.pin_count != 0).then_some(name.clone()))
+                .collect::<Vec<_>>();
+            for name in &names {
+                if let Some(portal) = portals.get_mut(name) {
+                    portal.holdable = true;
+                }
+            }
+            names
+        };
+        self.materialize_named_session_portals(&names)?;
+        if !names.is_empty() {
+            let mut stack = self.session.transactions.lock();
+            let frame = stack.last_mut().ok_or_else(|| {
+                SQLError::Internal(
+                    "pinned PL/pgSQL portal prepared without an active transaction".into(),
+                )
+            })?;
+            frame.session_snapshot.portal_names.extend(names);
+        }
+        Ok(())
+    }
+
+    fn materialize_named_session_portals(&self, names: &[String]) -> Result<(), SQLError> {
         for name in names {
             let mut state = self
                 .session
                 .portals
                 .lock()
-                .remove(&name)
-                .ok_or_else(|| cursor_error(&name, "does not exist", "34000"))?;
+                .remove(name)
+                .ok_or_else(|| cursor_error(name, "does not exist", "34000"))?;
             let _row_lock_statement = self.begin_row_lock_statement();
             let result = materialize_portal_to_end(self, &mut state);
-            self.session.portals.lock().insert(name, state);
+            self.session.portals.lock().insert(name.clone(), state);
             result?;
         }
-        Ok(materialized_any)
+        Ok(())
     }
 
     pub(crate) fn close_session_portal(&self, name: &str) -> Result<(), SQLError> {

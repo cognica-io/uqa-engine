@@ -37,6 +37,179 @@ SELECT count(*) FROM pg_catalog.pg_namespace WHERE nspname = '__UQA_SCHEMA_PROBE
 DROP SCHEMA __UQA_SCHEMA_PROBE__;
 -- @end
 
+-- Procedural transaction control is nonatomic only for a standalone top-level CALL/DO and an uninterrupted nested CALL/DO chain.
+-- @case create_procedural_transaction_fixture ok
+SET search_path = __UQA_STATEFUL_SCHEMA__, pg_catalog;
+CREATE TABLE procedural_transaction_log(entry text NOT NULL);
+CREATE TABLE procedural_loop_source(value integer PRIMARY KEY);
+INSERT INTO procedural_loop_source VALUES (1), (2), (3), (4), (5), (6), (7), (8), (9), (10), (11), (12);
+CREATE TABLE procedural_command_target(value integer);
+CREATE PROCEDURE procedural_commit_continue() LANGUAGE plpgsql AS $$
+BEGIN
+    INSERT INTO __UQA_STATEFUL_SCHEMA__.procedural_transaction_log VALUES ('commit-before');
+    COMMIT;
+    INSERT INTO __UQA_STATEFUL_SCHEMA__.procedural_transaction_log VALUES ('commit-after');
+END
+$$;
+CREATE PROCEDURE procedural_rollback_continue() LANGUAGE plpgsql AS $$
+DECLARE
+    local_value integer := 10;
+BEGIN
+    local_value := local_value + 1;
+    INSERT INTO __UQA_STATEFUL_SCHEMA__.procedural_transaction_log VALUES ('discard-' || local_value);
+    ROLLBACK;
+    local_value := local_value + 1;
+    INSERT INTO __UQA_STATEFUL_SCHEMA__.procedural_transaction_log VALUES ('keep-' || local_value);
+END
+$$;
+CREATE PROCEDURE procedural_error_after_commit() LANGUAGE plpgsql AS $$
+DECLARE
+    quotient integer;
+BEGIN
+    INSERT INTO __UQA_STATEFUL_SCHEMA__.procedural_transaction_log VALUES ('segment-committed');
+    COMMIT;
+    INSERT INTO __UQA_STATEFUL_SCHEMA__.procedural_transaction_log VALUES ('segment-discarded');
+    quotient := 1 / 0;
+END
+$$;
+CREATE PROCEDURE procedural_inner() LANGUAGE plpgsql AS $$
+BEGIN
+    INSERT INTO __UQA_STATEFUL_SCHEMA__.procedural_transaction_log VALUES ('inner-before');
+    COMMIT;
+    INSERT INTO __UQA_STATEFUL_SCHEMA__.procedural_transaction_log VALUES ('inner-after');
+END
+$$;
+CREATE PROCEDURE procedural_outer_direct() LANGUAGE plpgsql AS $$
+BEGIN
+    CALL __UQA_STATEFUL_SCHEMA__.procedural_inner();
+    INSERT INTO __UQA_STATEFUL_SCHEMA__.procedural_transaction_log VALUES ('outer-after');
+END
+$$;
+CREATE FUNCTION procedural_bridge() RETURNS integer LANGUAGE plpgsql AS $$
+BEGIN
+    CALL __UQA_STATEFUL_SCHEMA__.procedural_inner();
+    RETURN 1;
+END
+$$;
+CREATE PROCEDURE procedural_outer_bridge() LANGUAGE plpgsql AS $$
+BEGIN
+    PERFORM __UQA_STATEFUL_SCHEMA__.procedural_bridge();
+END
+$$;
+CREATE PROCEDURE procedural_select_loop() LANGUAGE plpgsql AS $$
+DECLARE
+    row_value record;
+BEGIN
+    FOR row_value IN SELECT value FROM __UQA_STATEFUL_SCHEMA__.procedural_loop_source ORDER BY value LOOP
+        INSERT INTO __UQA_STATEFUL_SCHEMA__.procedural_transaction_log VALUES ('loop-' || row_value.value);
+        COMMIT;
+    END LOOP;
+END
+$$;
+CREATE PROCEDURE procedural_command_loop() LANGUAGE plpgsql AS $$
+DECLARE
+    row_value record;
+BEGIN
+    FOR row_value IN INSERT INTO __UQA_STATEFUL_SCHEMA__.procedural_command_target SELECT value FROM __UQA_STATEFUL_SCHEMA__.procedural_loop_source RETURNING value LOOP
+        COMMIT;
+    END LOOP;
+END
+$$;
+CREATE PROCEDURE procedural_dynamic_commit() LANGUAGE plpgsql AS $$
+BEGIN
+    EXECUTE 'COMMIT';
+END
+$$;
+-- @end
+
+-- @case procedural_commit_continue ok
+CALL __UQA_STATEFUL_SCHEMA__.procedural_commit_continue();
+-- @end
+
+-- @case procedural_commit_continue_result rows
+SELECT entry FROM __UQA_STATEFUL_SCHEMA__.procedural_transaction_log ORDER BY entry;
+-- @end
+
+-- @case procedural_transaction_log_reset ok
+TRUNCATE __UQA_STATEFUL_SCHEMA__.procedural_transaction_log;
+-- @end
+
+-- @case procedural_rollback_continue ok
+CALL __UQA_STATEFUL_SCHEMA__.procedural_rollback_continue();
+-- @end
+
+-- @case procedural_rollback_continue_result rows
+SELECT entry FROM __UQA_STATEFUL_SCHEMA__.procedural_transaction_log;
+-- @end
+
+-- @case procedural_transaction_log_reset_after_rollback ok
+TRUNCATE __UQA_STATEFUL_SCHEMA__.procedural_transaction_log;
+-- @end
+
+-- @case procedural_error_after_commit error
+CALL __UQA_STATEFUL_SCHEMA__.procedural_error_after_commit();
+-- @end
+
+-- @case procedural_error_after_commit_result rows
+SELECT entry FROM __UQA_STATEFUL_SCHEMA__.procedural_transaction_log ORDER BY entry;
+-- @end
+
+-- @case procedural_transaction_log_reset_after_error ok
+TRUNCATE __UQA_STATEFUL_SCHEMA__.procedural_transaction_log;
+-- @end
+
+-- @case procedural_direct_nested_call ok
+CALL __UQA_STATEFUL_SCHEMA__.procedural_outer_direct();
+-- @end
+
+-- @case procedural_direct_nested_call_result rows
+SELECT entry FROM __UQA_STATEFUL_SCHEMA__.procedural_transaction_log ORDER BY entry;
+-- @end
+
+-- @case procedural_transaction_log_reset_after_nested_call ok
+TRUNCATE __UQA_STATEFUL_SCHEMA__.procedural_transaction_log;
+-- @end
+
+-- @case procedural_function_bridge_rejected error
+CALL __UQA_STATEFUL_SCHEMA__.procedural_outer_bridge();
+-- @end
+
+-- @case procedural_function_bridge_result rows
+SELECT count(*) FROM __UQA_STATEFUL_SCHEMA__.procedural_transaction_log;
+-- @end
+
+-- @case procedural_select_loop ok
+CALL __UQA_STATEFUL_SCHEMA__.procedural_select_loop();
+-- @end
+
+-- @case procedural_select_loop_result rows
+SELECT count(*) FROM __UQA_STATEFUL_SCHEMA__.procedural_transaction_log;
+-- @end
+
+-- @case procedural_transaction_log_reset_after_loop ok
+TRUNCATE __UQA_STATEFUL_SCHEMA__.procedural_transaction_log;
+-- @end
+
+-- @case procedural_command_loop_rejected error
+CALL __UQA_STATEFUL_SCHEMA__.procedural_command_loop();
+-- @end
+
+-- @case procedural_command_loop_result rows
+SELECT count(*) FROM __UQA_STATEFUL_SCHEMA__.procedural_command_target;
+-- @end
+
+-- @case procedural_dynamic_commit_rejected error
+CALL __UQA_STATEFUL_SCHEMA__.procedural_dynamic_commit();
+-- @end
+
+-- @case procedural_simple_query_batch_rejected error
+CALL __UQA_STATEFUL_SCHEMA__.procedural_commit_continue(); SELECT 1;
+-- @end
+
+-- @case procedural_simple_query_batch_result rows
+SELECT count(*) FROM __UQA_STATEFUL_SCHEMA__.procedural_transaction_log;
+-- @end
+
 -- @case create_cursor_fixture ok
 CREATE TABLE cursor_source(id integer PRIMARY KEY);
 INSERT INTO cursor_source VALUES (1);

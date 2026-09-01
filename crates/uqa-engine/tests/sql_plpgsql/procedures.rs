@@ -260,3 +260,475 @@ fn do_block_side_effects() {
         "got: {err}"
     );
 }
+
+#[test]
+fn procedural_commit_and_rollback_continue_in_fresh_transactions() {
+    let eng = engine();
+    exec(&eng, "CREATE TABLE transaction_log (value INTEGER)");
+    exec(
+        &eng,
+        "CREATE PROCEDURE commit_then_continue() LANGUAGE plpgsql AS $$
+         BEGIN
+           INSERT INTO transaction_log VALUES (1);
+           COMMIT;
+           INSERT INTO transaction_log VALUES (2);
+         END $$",
+    );
+    exec(&eng, "CALL commit_then_continue()");
+    let result = exec(&eng, "SELECT value FROM transaction_log ORDER BY value");
+    assert_eq!(
+        result
+            .rows
+            .iter()
+            .map(|row| row.get("value").cloned().unwrap_or(Value::Null))
+            .collect::<Vec<_>>(),
+        [Value::Int(1), Value::Int(2)]
+    );
+
+    exec(&eng, "TRUNCATE transaction_log");
+    exec(
+        &eng,
+        "CREATE PROCEDURE rollback_then_continue() LANGUAGE plpgsql AS $$
+         DECLARE local_value INTEGER := 10;
+         BEGIN
+           local_value := local_value + 1;
+           INSERT INTO transaction_log VALUES (local_value);
+           ROLLBACK;
+           local_value := local_value + 1;
+           INSERT INTO transaction_log VALUES (local_value);
+         END $$",
+    );
+    exec(&eng, "CALL rollback_then_continue()");
+    assert_eq!(
+        scalar(&eng, "SELECT value FROM transaction_log"),
+        Value::Int(12)
+    );
+
+    exec(
+        &eng,
+        "DO $$
+         BEGIN
+           INSERT INTO transaction_log VALUES (20);
+           COMMIT AND CHAIN;
+           INSERT INTO transaction_log VALUES (21);
+           ROLLBACK AND CHAIN;
+           INSERT INTO transaction_log VALUES (22);
+         END $$",
+    );
+    let result = exec(&eng, "SELECT value FROM transaction_log ORDER BY value");
+    assert_eq!(
+        result
+            .rows
+            .iter()
+            .map(|row| row.get("value").cloned().unwrap_or(Value::Null))
+            .collect::<Vec<_>>(),
+        [Value::Int(12), Value::Int(20), Value::Int(22)]
+    );
+}
+
+#[test]
+fn procedural_transaction_control_rejects_atomic_execution_contexts() {
+    let eng = engine();
+    exec(&eng, "CREATE TABLE atomic_transaction_log (value TEXT)");
+    exec(
+        &eng,
+        "CREATE FUNCTION function_commit() RETURNS INTEGER LANGUAGE plpgsql AS $$
+         BEGIN
+           INSERT INTO atomic_transaction_log VALUES ('function');
+           COMMIT;
+           RETURN 1;
+         END $$",
+    );
+    let error = exec_err(&eng, "SELECT function_commit()");
+    assert_eq!(error.sqlstate(), Some("2D000"), "got: {error}");
+    assert_eq!(
+        scalar(&eng, "SELECT count(*) FROM atomic_transaction_log"),
+        Value::Int(0)
+    );
+
+    exec(
+        &eng,
+        "CREATE PROCEDURE atomic_commit() LANGUAGE plpgsql AS $$
+         BEGIN
+           INSERT INTO atomic_transaction_log VALUES ('procedure');
+           COMMIT;
+         END $$",
+    );
+    exec(&eng, "BEGIN");
+    let error = exec_err(&eng, "CALL atomic_commit()");
+    assert_eq!(error.sqlstate(), Some("2D000"), "got: {error}");
+    let error = exec_err(&eng, "SELECT 1");
+    assert_eq!(error.sqlstate(), Some("25P02"), "got: {error}");
+    exec(&eng, "ROLLBACK");
+
+    exec(
+        &eng,
+        "CREATE PROCEDURE catch_subtransaction_commit() LANGUAGE plpgsql AS $$
+         BEGIN
+           BEGIN
+             INSERT INTO atomic_transaction_log VALUES ('discarded');
+             COMMIT;
+           EXCEPTION WHEN invalid_transaction_termination THEN
+             INSERT INTO atomic_transaction_log VALUES ('caught:2D000');
+           END;
+         END $$",
+    );
+    exec(&eng, "CALL catch_subtransaction_commit()");
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT string_agg(value, ',' ORDER BY value) FROM atomic_transaction_log"
+        ),
+        Value::Str("caught:2D000".into())
+    );
+    exec(&eng, "TRUNCATE atomic_transaction_log");
+
+    exec(
+        &eng,
+        "CREATE PROCEDURE definer_commit() LANGUAGE plpgsql SECURITY DEFINER AS $$
+         BEGIN
+           INSERT INTO atomic_transaction_log VALUES ('definer');
+           COMMIT;
+         END $$",
+    );
+    let error = exec_err(&eng, "CALL definer_commit()");
+    assert_eq!(error.sqlstate(), Some("2D000"), "got: {error}");
+    exec(
+        &eng,
+        "CREATE PROCEDURE configured_commit() LANGUAGE plpgsql SET search_path = public AS $$
+         BEGIN
+           INSERT INTO atomic_transaction_log VALUES ('configured');
+           COMMIT;
+         END $$",
+    );
+    let error = exec_err(&eng, "CALL configured_commit()");
+    assert_eq!(error.sqlstate(), Some("2D000"), "got: {error}");
+    assert_eq!(
+        scalar(&eng, "SELECT count(*) FROM atomic_transaction_log"),
+        Value::Int(0)
+    );
+
+    exec(
+        &eng,
+        "CREATE PROCEDURE dynamic_commit() LANGUAGE plpgsql AS $$
+         BEGIN
+           INSERT INTO atomic_transaction_log VALUES ('dynamic');
+           EXECUTE 'COMMIT';
+         END $$",
+    );
+    let error = exec_err(&eng, "CALL dynamic_commit()");
+    assert_eq!(error.sqlstate(), Some("0A000"), "got: {error}");
+    assert!(
+        error
+            .to_string()
+            .contains("EXECUTE of transaction commands is not implemented"),
+        "got: {error}"
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT count(*) FROM atomic_transaction_log"),
+        Value::Int(0)
+    );
+}
+
+#[test]
+fn nested_procedure_transaction_control_requires_a_direct_call_chain() {
+    let eng = engine();
+    exec(&eng, "CREATE TABLE nested_transaction_log (value TEXT)");
+    exec(
+        &eng,
+        "CREATE PROCEDURE inner_transaction() LANGUAGE plpgsql AS $$
+         BEGIN
+           INSERT INTO nested_transaction_log VALUES ('inner-before');
+           COMMIT;
+           INSERT INTO nested_transaction_log VALUES ('inner-after');
+         END $$",
+    );
+    exec(
+        &eng,
+        "CREATE PROCEDURE outer_direct_transaction() LANGUAGE plpgsql AS $$
+         BEGIN
+           CALL inner_transaction();
+           INSERT INTO nested_transaction_log VALUES ('outer-after');
+         END $$",
+    );
+    exec(&eng, "CALL outer_direct_transaction()");
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT string_agg(value, ',' ORDER BY value) FROM nested_transaction_log"
+        ),
+        Value::Str("inner-after,inner-before,outer-after".into())
+    );
+
+    exec(&eng, "TRUNCATE nested_transaction_log");
+    exec(
+        &eng,
+        "CREATE PROCEDURE outer_direct_do() LANGUAGE plpgsql AS $outer$
+         BEGIN
+           DO $inner$
+           BEGIN
+             INSERT INTO nested_transaction_log VALUES ('do-before');
+             COMMIT;
+             INSERT INTO nested_transaction_log VALUES ('do-after');
+           END
+           $inner$;
+           INSERT INTO nested_transaction_log VALUES ('do-outer');
+         END
+         $outer$",
+    );
+    exec(&eng, "CALL outer_direct_do()");
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT string_agg(value, ',' ORDER BY value) FROM nested_transaction_log"
+        ),
+        Value::Str("do-after,do-before,do-outer".into())
+    );
+
+    exec(&eng, "TRUNCATE nested_transaction_log");
+    exec(
+        &eng,
+        "CREATE FUNCTION transaction_bridge() RETURNS INTEGER LANGUAGE plpgsql AS $$
+         BEGIN
+           CALL inner_transaction();
+           RETURN 1;
+         END $$",
+    );
+    exec(
+        &eng,
+        "CREATE PROCEDURE outer_bridged_transaction() LANGUAGE plpgsql AS $$
+         BEGIN
+           PERFORM transaction_bridge();
+         END $$",
+    );
+    let error = exec_err(&eng, "CALL outer_bridged_transaction()");
+    assert_eq!(error.sqlstate(), Some("2D000"), "got: {error}");
+    assert_eq!(
+        scalar(&eng, "SELECT count(*) FROM nested_transaction_log"),
+        Value::Int(0)
+    );
+
+    let error = exec_err(&eng, "CALL inner_transaction(); SELECT 1");
+    assert_eq!(error.sqlstate(), Some("2D000"), "got: {error}");
+    assert_eq!(
+        scalar(&eng, "SELECT count(*) FROM nested_transaction_log"),
+        Value::Int(0)
+    );
+}
+
+#[test]
+fn later_procedure_errors_preserve_only_completed_transaction_segments() {
+    let eng = engine();
+    exec(
+        &eng,
+        "CREATE TABLE segmented_transaction_log (value INTEGER)",
+    );
+    exec(
+        &eng,
+        "CREATE PROCEDURE fail_after_commit() LANGUAGE plpgsql AS $$
+         DECLARE quotient INTEGER;
+         BEGIN
+           INSERT INTO segmented_transaction_log VALUES (1);
+           COMMIT;
+           INSERT INTO segmented_transaction_log VALUES (2);
+           quotient := 1 / 0;
+         END $$",
+    );
+    let error = exec_err(&eng, "CALL fail_after_commit()");
+    assert_eq!(error.sqlstate(), Some("22012"), "got: {error}");
+    assert_eq!(eng.transaction_depth(), 0);
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT string_agg(value::text, ',' ORDER BY value) FROM segmented_transaction_log"
+        ),
+        Value::Str("1".into())
+    );
+}
+
+#[test]
+fn procedural_transaction_control_preserves_select_loops_and_closes_explicit_cursors() {
+    let eng = engine();
+    exec(&eng, "CREATE TABLE transaction_loop_source (value INTEGER)");
+    exec(
+        &eng,
+        "INSERT INTO transaction_loop_source VALUES (1), (2), (3), (4), (5), (6), (7), (8), (9), (10), (11), (12)",
+    );
+    exec(&eng, "CREATE TABLE transaction_loop_log (value TEXT)");
+    exec(
+        &eng,
+        "CREATE PROCEDURE commit_in_select_loop() LANGUAGE plpgsql AS $$
+         DECLARE row_value RECORD;
+         BEGIN
+           FOR row_value IN SELECT value FROM transaction_loop_source ORDER BY value LOOP
+             INSERT INTO transaction_loop_log VALUES ('commit:' || row_value.value);
+             COMMIT;
+           END LOOP;
+         END $$",
+    );
+    exec(&eng, "CALL commit_in_select_loop()");
+    assert_eq!(
+        scalar(&eng, "SELECT count(*) FROM transaction_loop_log"),
+        Value::Int(12)
+    );
+
+    exec(&eng, "TRUNCATE transaction_loop_log");
+    exec(
+        &eng,
+        "CREATE PROCEDURE rollback_in_select_loop() LANGUAGE plpgsql AS $$
+         DECLARE row_value RECORD; visited INTEGER := 0;
+         BEGIN
+           FOR row_value IN SELECT value FROM transaction_loop_source ORDER BY value LOOP
+             visited := visited + 1;
+             INSERT INTO transaction_loop_log VALUES ('discard:' || row_value.value);
+             ROLLBACK;
+           END LOOP;
+           INSERT INTO transaction_loop_log VALUES ('visited:' || visited);
+         END $$",
+    );
+    exec(&eng, "CALL rollback_in_select_loop()");
+    assert_eq!(
+        scalar(&eng, "SELECT value FROM transaction_loop_log"),
+        Value::Str("visited:12".into())
+    );
+
+    exec(&eng, "TRUNCATE transaction_loop_log");
+    exec(
+        &eng,
+        "CREATE PROCEDURE explicit_cursor_commit() LANGUAGE plpgsql AS $$
+         DECLARE cursor_value refcursor; fetched INTEGER;
+         BEGIN
+           OPEN cursor_value FOR SELECT value FROM transaction_loop_source ORDER BY value;
+           FETCH cursor_value INTO fetched;
+           INSERT INTO transaction_loop_log VALUES ('fetched:' || fetched);
+           COMMIT;
+           BEGIN
+             FETCH cursor_value INTO fetched;
+           EXCEPTION WHEN invalid_cursor_name THEN
+             INSERT INTO transaction_loop_log VALUES ('closed:34000');
+           END;
+         END $$",
+    );
+    exec(&eng, "CALL explicit_cursor_commit()");
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT string_agg(value, ',' ORDER BY value) FROM transaction_loop_log"
+        ),
+        Value::Str("closed:34000,fetched:1".into())
+    );
+}
+
+#[test]
+fn procedural_transaction_control_rejects_command_driven_cursor_loops() {
+    let eng = engine();
+    exec(&eng, "CREATE TABLE command_loop_source (value INTEGER)");
+    exec(&eng, "INSERT INTO command_loop_source VALUES (1), (2), (3)");
+    exec(&eng, "CREATE TABLE command_loop_target (value INTEGER)");
+    exec(
+        &eng,
+        "CREATE PROCEDURE commit_in_command_loop() LANGUAGE plpgsql AS $$
+         DECLARE row_value RECORD;
+         BEGIN
+           FOR row_value IN INSERT INTO command_loop_target SELECT value FROM command_loop_source RETURNING value LOOP
+             COMMIT;
+           END LOOP;
+         END $$",
+    );
+    let error = exec_err(&eng, "CALL commit_in_command_loop()");
+    assert_eq!(error.sqlstate(), Some("55000"), "got: {error}");
+    assert!(
+        error.to_string().contains(
+            "cannot perform transaction commands inside a cursor loop that is not read-only"
+        ),
+        "got: {error}"
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT count(*) FROM command_loop_target"),
+        Value::Int(0)
+    );
+}
+
+#[test]
+fn procedural_transaction_chain_controls_next_transaction_characteristics() {
+    let eng = engine();
+    exec(
+        &eng,
+        "CREATE TABLE procedural_characteristics (kind TEXT, isolation_level TEXT)",
+    );
+    exec(
+        &eng,
+        "CREATE PROCEDURE chained_characteristics() LANGUAGE plpgsql AS $$
+         DECLARE isolation_level TEXT;
+         BEGIN
+           SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+           COMMIT AND CHAIN;
+           SHOW transaction_isolation INTO isolation_level;
+           INSERT INTO procedural_characteristics VALUES ('chain', isolation_level);
+         END $$",
+    );
+    exec(&eng, "CALL chained_characteristics()");
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT isolation_level FROM procedural_characteristics WHERE kind = 'chain'"
+        ),
+        Value::Str("read committed".into())
+    );
+
+    exec(
+        &eng,
+        "CREATE PROCEDURE unchained_characteristics() LANGUAGE plpgsql AS $$
+         DECLARE isolation_level TEXT;
+         BEGIN
+           SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+           COMMIT;
+           SHOW transaction_isolation INTO isolation_level;
+           INSERT INTO procedural_characteristics VALUES ('no-chain', isolation_level);
+         END $$",
+    );
+    exec(&eng, "CALL unchained_characteristics()");
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT isolation_level FROM procedural_characteristics WHERE kind = 'no-chain'"
+        ),
+        Value::Str("serializable".into())
+    );
+}
+
+#[test]
+fn persistent_procedural_boundaries_survive_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("procedural-transactions.db");
+    {
+        let eng = Engine::open(&database).unwrap();
+        exec(
+            &eng,
+            "CREATE TABLE persistent_transaction_log (value INTEGER)",
+        );
+        exec(
+            &eng,
+            "CREATE PROCEDURE persistent_segments() LANGUAGE plpgsql AS $$
+             DECLARE quotient INTEGER;
+             BEGIN
+               INSERT INTO persistent_transaction_log VALUES (1);
+               COMMIT;
+               INSERT INTO persistent_transaction_log VALUES (2);
+               quotient := 1 / 0;
+             END $$",
+        );
+        let error = exec_err(&eng, "CALL persistent_segments()");
+        assert_eq!(error.sqlstate(), Some("22012"), "got: {error}");
+        assert_eq!(eng.transaction_depth(), 0);
+        assert_eq!(
+            scalar(&eng, "SELECT value FROM persistent_transaction_log"),
+            Value::Int(1)
+        );
+    }
+    let reopened = Engine::open(&database).unwrap();
+    assert_eq!(
+        scalar(&reopened, "SELECT value FROM persistent_transaction_log"),
+        Value::Int(1)
+    );
+}
