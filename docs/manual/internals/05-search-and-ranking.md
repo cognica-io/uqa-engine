@@ -27,7 +27,7 @@ Index and search analyzer assignment is field-specific. Documents add analyzed t
 Raw BM25 is a ranking score, not a probability. For term $t$:
 
 $$
-\operatorname{IDF}(t) = \ln\left(\frac{N - n_t + 0.5}{n_t + 0.5} + 1\right),
+\mathrm{IDF}(t) = \ln\left(\frac{N - n_t + 0.5}{n_t + 0.5} + 1\right),
 $$
 
 and the term contribution uses frequency and length normalization with defaults $k_1 = 1.2$ and $b = 0.75$.
@@ -87,7 +87,7 @@ Before access-path selection, the relational optimizer detects direct same-relat
 Exact Bayesian evidence adds one prior and signed likelihood-ratio evidence:
 
 $$
-L = \operatorname{logit}(\pi) + \sum_i \ell_i, \qquad P = \sigma(L).
+L = \mathrm{logit}(\pi) + \sum_i \ell_i, \qquad P = \sigma(L).
 $$
 
 Robust positive-evidence pooling has a separate type and name. It applies gating, confidence scaling, and optional adaptive weights as a ranking heuristic. The code does not claim that its output is an exact posterior.

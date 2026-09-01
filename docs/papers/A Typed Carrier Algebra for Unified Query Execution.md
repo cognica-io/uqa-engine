@@ -98,22 +98,22 @@ and we write $P_\Pi(U)$ for the set of all such maps.
 Its support is
 
 $$
-\operatorname{supp}(P)=\{d\in U\mid P(d)\text{ is defined}\}.
+\mathrm{supp}(P)=\{d\in U\mid P(d)\text{ is defined}\}.
 $$
 
-The map $\operatorname{supp}:P_\Pi(U)\to\mathcal P(U)$ is generally many-to-one. Two posting values with the same identifiers but different positions, scores, or fields have the same support. If $\operatorname{lift}(D)$ assigns a default payload to every $d\in D$, then
+The map $\mathrm{supp}:P_\Pi(U)\to\mathcal P(U)$ is generally many-to-one. Two posting values with the same identifiers but different positions, scores, or fields have the same support. If $\mathrm{lift}(D)$ assigns a default payload to every $d\in D$, then
 
 $$
-\operatorname{supp}(\operatorname{lift}(D))=D,
+\mathrm{supp}(\mathrm{lift}(D))=D,
 $$
 
 but in general
 
 $$
-\operatorname{lift}(\operatorname{supp}(P))\neq P.
+\mathrm{lift}(\mathrm{supp}(P))\neq P.
 $$
 
-Thus document sets are a **retract** of decorated postings, not a representation isomorphic to all of them. Equivalently, $\iota=\operatorname{lift}\circ\operatorname{supp}$ is an idempotent on $P_\Pi(U)$ whose splitting is $\mathcal P(U)$ [24]. This is not a formality: the fixed points of $\iota$ are exactly the posting values on which Boolean reasoning is sound, which is the semantic content of the membership-only guard used by the optimizer in Section 8.2. Proposition 4.4 makes the identification precise.
+Thus document sets are a **retract** of decorated postings, not a representation isomorphic to all of them. Equivalently, $\iota=\mathrm{lift}\circ\mathrm{supp}$ is an idempotent on $P_\Pi(U)$ whose splitting is $\mathcal P(U)$ [24]. This is not a formality: the fixed points of $\iota$ are exactly the posting values on which Boolean reasoning is sound, which is the semantic content of the membership-only guard used by the optimizer in Section 8.2. Proposition 4.4 makes the identification precise.
 
 This distinction matters operationally. Suppose a collision policy $m$ on payloads adds scores, unions positions, and gives the right operand precedence for colliding fields; write $\widetilde\cup_m$ for the induced posting union defined in Section 4.3. For a posting $P$ containing a scored document,
 
@@ -177,19 +177,19 @@ Each operator has a signature. Representative examples are:
 
 $$
 \begin{aligned}
-\operatorname{term}_{f,q} &: \Sigma \to P_\Pi(U),\\
-\operatorname{filter}_{p} &: D_U\to D_U,\\
-\operatorname{vector}_{f,v,\tau} &: \Sigma\to P_\Pi(U),\\
-\operatorname{knn}_{f,v,k} &: \Sigma\to V_s(P_\Pi(U)),\\
-\operatorname{rank}_s &: P_\Pi(U)\to V_s(P_\Pi(U)),\\
-\operatorname{top}_k &: V_s(P_\Pi(U))\to P_\Pi(U),\\
-\operatorname{join}_{\theta} &: J_A\times J_B\to J_{A\cup B},\\
-\operatorname{traverse}_{R} &: \mathcal G\to GP(U),\\
-\operatorname{aggregate}_{h} &: B_\Gamma\to A_M.
+\mathrm{term}_{f,q} &: \Sigma \to P_\Pi(U),\\
+\mathrm{filter}_{p} &: D_U\to D_U,\\
+\mathrm{vector}_{f,v,\tau} &: \Sigma\to P_\Pi(U),\\
+\mathrm{knn}_{f,v,k} &: \Sigma\to V_s(P_\Pi(U)),\\
+\mathrm{rank}_s &: P_\Pi(U)\to V_s(P_\Pi(U)),\\
+\mathrm{top}_k &: V_s(P_\Pi(U))\to P_\Pi(U),\\
+\mathrm{join}_{\theta} &: J_A\times J_B\to J_{A\cup B},\\
+\mathrm{traverse}_{R} &: \mathcal G\to GP(U),\\
+\mathrm{aggregate}_{h} &: B_\Gamma\to A_M.
 \end{aligned}
 $$
 
-The snapshot $\Sigma$ is not a carrier. For a pinned $\Sigma$, an access operator such as $\operatorname{term}_{f,q}$ is read as a morphism $\mathbf 1\to P_\Pi(U)$ from the terminal object, so that the whole pure fragment lives in one category over the carrier objects alone.
+The snapshot $\Sigma$ is not a carrier. For a pinned $\Sigma$, an access operator such as $\mathrm{term}_{f,q}$ is read as a morphism $\mathbf 1\to P_\Pi(U)$ from the terminal object, so that the whole pure fragment lives in one category over the carrier objects alone.
 
 An operator composition $g\circ f$ exists only when the output carrier of $f$ is the input carrier of $g$, or when an explicit adapter is inserted. The pure fragment therefore forms a category $\mathsf{UQA}$: carriers are objects, total deterministic operators are morphisms, identities are carrier identities, and composition is ordinary function composition. This modest categorical statement is sufficient. A value-only adapter is not called a functor unless an operator mapping exists and identity and composition preservation have been established [24].
 
@@ -197,14 +197,14 @@ Two classes of operator are deliberately outside $\mathsf{UQA}$. Merges that may
 
 ### 3.4 Carrier-relative equivalence
 
-For every carrier $C$, let $\operatorname{obs}_C$ expose the values that are semantically visible at that boundary. Queries $q_1,q_2:\Sigma\times X\to C$ are equivalent under snapshot $\Sigma$ when
+For every carrier $C$, let $\mathrm{obs}_C$ expose the values that are semantically visible at that boundary. Queries $q_1,q_2:\Sigma\times X\to C$ are equivalent under snapshot $\Sigma$ when
 
 $$
 q_1\equiv_C q_2
 \iff
-\operatorname{obs}_C(q_1(\Sigma,x))
+\mathrm{obs}_C(q_1(\Sigma,x))
 =
-\operatorname{obs}_C(q_2(\Sigma,x))
+\mathrm{obs}_C(q_2(\Sigma,x))
 \quad\text{for every valid }x.
 $$
 
@@ -212,27 +212,27 @@ Equality of support is therefore weaker than equality of decorated postings, and
 
 ### 3.5 Observations are ordered, and the order is not linear
 
-The observations of Section 3.2 are not independent. Say that $\operatorname{obs}_{C'}$ **refines** $\operatorname{obs}_C$, written $\operatorname{obs}_C\sqsubseteq\operatorname{obs}_{C'}$, when there is a function $u$ with $\operatorname{obs}_C=u\circ\operatorname{obs}_{C'}$: everything the coarser observation can see is recoverable from the finer one.
+The observations of Section 3.2 are not independent. Say that $\mathrm{obs}_{C'}$ **refines** $\mathrm{obs}_C$, written $\mathrm{obs}_C\sqsubseteq\mathrm{obs}_{C'}$, when there is a function $u$ with $\mathrm{obs}_C=u\circ\mathrm{obs}_{C'}$: everything the coarser observation can see is recoverable from the finer one.
 
-**Lemma 3.1 (Refinement weakens equivalence).** If $\operatorname{obs}_C\sqsubseteq\operatorname{obs}_{C'}$, then $q_1\equiv_{C'}q_2$ implies $q_1\equiv_{C}q_2$.
+**Lemma 3.1 (Refinement weakens equivalence).** If $\mathrm{obs}_C\sqsubseteq\mathrm{obs}_{C'}$, then $q_1\equiv_{C'}q_2$ implies $q_1\equiv_{C}q_2$.
 
-**Proof.** Apply $u$ to both sides of the equality of $\operatorname{obs}_{C'}$ values. $\square$
+**Proof.** Apply $u$ to both sides of the equality of $\mathrm{obs}_{C'}$ values. $\square$
 
 The lemma is one line, and it is the reason the rewrite table of Section 8.2 is a structure rather than a list: a rewrite proved sound at a finer observation is automatically sound at every coarser one, and never the converse. Concretely,
 
 $$
-\operatorname{obs}_{\mathsf{supp}}
+\mathrm{obs}_{\mathsf{supp}}
 \sqsubseteq
-\operatorname{obs}_{\mathsf{payload}}
+\mathrm{obs}_{\mathsf{payload}}
 \sqsubseteq
-\operatorname{obs}_{\mathsf{ranked}},
+\mathrm{obs}_{\mathsf{ranked}},
 \qquad
-\operatorname{obs}_{\mathsf{supp}}
+\mathrm{obs}_{\mathsf{supp}}
 \sqsubseteq
-\operatorname{obs}_{\mathsf{graph}},
+\mathrm{obs}_{\mathsf{graph}},
 $$
 
-since $\operatorname{supp}$ forgets payload, a ranked view forgets its order under re-materialization, and a graph posting forgets its side map.
+since $\mathrm{supp}$ forgets payload, a ranked view forgets its order under re-materialization, and a graph posting forgets its side map.
 
 The refinement order is a partial order and not a chain. SQL bag multiplicity and graph match context are incomparable: neither is recoverable from the other. An optimizer that assumes a single linear "amount of information" axis will therefore admit unsound rewrites at exactly the cross-paradigm boundaries this framework exists to protect.
 
@@ -293,15 +293,15 @@ For the log semiring over $\mathbb R\cup\{-\infty\}$, $0_K=-\infty$, $1_K=0$, ad
 Support projection from a general semiring relation needs two familiar qualifications:
 
 $$
-\operatorname{supp}(r\oplus s)
-=\operatorname{supp}(r)\cup\operatorname{supp}(s)
+\mathrm{supp}(r\oplus s)
+=\mathrm{supp}(r)\cup\mathrm{supp}(s)
 $$
 
 when $K$ is zero-sum-free, and
 
 $$
-\operatorname{supp}(r\otimes s)
-=\operatorname{supp}(r)\cap\operatorname{supp}(s)
+\mathrm{supp}(r\otimes s)
+=\mathrm{supp}(r)\cap\mathrm{supp}(s)
 $$
 
 when $K$ has no zero divisors [12]. The Boolean and log semirings used here satisfy both conditions: $\log(e^a+e^b)=-\infty$ only when $a=b=-\infty$, and $a+b=-\infty$ only when $a=-\infty$ or $b=-\infty$. A semiring admitting additive cancellation, such as $(\mathbb R,+,\cdot)$, satisfies neither, and support projection is then unsound.
@@ -313,9 +313,9 @@ Let $m:\Pi\times\Pi\to\Pi$ be a collision policy. Define decorated support-union
 $$
 (P\mathbin{\widetilde\cup_m}Q)(d)=
 \begin{cases}
-m(P(d),Q(d)), & d\in\operatorname{supp}(P)\cap\operatorname{supp}(Q),\\
-P(d), & d\in\operatorname{supp}(P)\setminus\operatorname{supp}(Q),\\
-Q(d), & d\in\operatorname{supp}(Q)\setminus\operatorname{supp}(P),
+m(P(d),Q(d)), & d\in\mathrm{supp}(P)\cap\mathrm{supp}(Q),\\
+P(d), & d\in\mathrm{supp}(P)\setminus\mathrm{supp}(Q),\\
+Q(d), & d\in\mathrm{supp}(Q)\setminus\mathrm{supp}(P),
 \end{cases}
 $$
 
@@ -325,10 +325,10 @@ and by retaining only the first case for $\widetilde\cap_m$.
 
 $$
 \begin{aligned}
-\operatorname{supp}(P\mathbin{\widetilde\cup_m}Q)
-&=\operatorname{supp}(P)\cup\operatorname{supp}(Q),\\
-\operatorname{supp}(P\mathbin{\widetilde\cap_m}Q)
-&=\operatorname{supp}(P)\cap\operatorname{supp}(Q).
+\mathrm{supp}(P\mathbin{\widetilde\cup_m}Q)
+&=\mathrm{supp}(P)\cup\mathrm{supp}(Q),\\
+\mathrm{supp}(P\mathbin{\widetilde\cap_m}Q)
+&=\mathrm{supp}(P)\cap\mathrm{supp}(Q).
 \end{aligned}
 $$
 
@@ -340,15 +340,15 @@ No Boolean law for the full posting value follows from Proposition 4.3. If $m$ a
 - score-bearing or field-bearing subtrees may not be deduplicated merely because they are structurally equal; and
 - set-level optimizer proofs must name support equality rather than silently using full-value equality.
 
-The first bullet is usually stated informally. It has an exact characterization, which matters because the optimizer must decide it mechanically. Let $\pi_0\in\Pi$ be the default payload used by $\operatorname{lift}$, and let
+The first bullet is usually stated informally. It has an exact characterization, which matters because the optimizer must decide it mechanically. Let $\pi_0\in\Pi$ be the default payload used by $\mathrm{lift}$, and let
 
 $$
 P^{\mathsf{def}}_\Pi(U)
 =
-\{P\in P_\Pi(U)\mid P(d)=\pi_0\text{ for all }d\in\operatorname{supp}(P)\}.
+\{P\in P_\Pi(U)\mid P(d)=\pi_0\text{ for all }d\in\mathrm{supp}(P)\}.
 $$
 
-**Proposition 4.4 (Membership-only values are the fixed points of the retraction).** For $P\in P_\Pi(U)$, the following are equivalent: (i) $P\in P^{\mathsf{def}}_\Pi(U)$; (ii) $\operatorname{lift}(\operatorname{supp}(P))=P$. If in addition $m(\pi_0,\pi_0)=\pi_0$, then $P^{\mathsf{def}}_\Pi(U)$ is closed under $\widetilde\cup_m$ and $\widetilde\cap_m$, and
+**Proposition 4.4 (Membership-only values are the fixed points of the retraction).** For $P\in P_\Pi(U)$, the following are equivalent: (i) $P\in P^{\mathsf{def}}_\Pi(U)$; (ii) $\mathrm{lift}(\mathrm{supp}(P))=P$. If in addition $m(\pi_0,\pi_0)=\pi_0$, then $P^{\mathsf{def}}_\Pi(U)$ is closed under $\widetilde\cup_m$ and $\widetilde\cap_m$, and
 
 $$
 \left(P^{\mathsf{def}}_\Pi(U),\widetilde\cup_m,\widetilde\cap_m\right)
@@ -356,44 +356,44 @@ $$
 \left(\mathcal P(U),\cup,\cap\right)
 $$
 
-as lattices, with $\operatorname{supp}$ and $\operatorname{lift}$ mutually inverse.
+as lattices, with $\mathrm{supp}$ and $\mathrm{lift}$ mutually inverse.
 
-**Proof.** (i) $\Rightarrow$ (ii): $\operatorname{lift}$ assigns $\pi_0$ on exactly $\operatorname{supp}(P)$, which by (i) reproduces $P$. (ii) $\Rightarrow$ (i): the value of $\operatorname{lift}(\operatorname{supp}(P))$ at any $d$ in its domain is $\pi_0$ by construction. Closure: the three cases of $\widetilde\cup_m$ yield $m(\pi_0,\pi_0)=\pi_0$, $\pi_0$, and $\pi_0$ respectively. The lattice isomorphism is then Proposition 4.3 restricted to $P^{\mathsf{def}}_\Pi(U)$, where $\operatorname{supp}$ is injective. $\square$
+**Proof.** (i) $\Rightarrow$ (ii): $\mathrm{lift}$ assigns $\pi_0$ on exactly $\mathrm{supp}(P)$, which by (i) reproduces $P$. (ii) $\Rightarrow$ (i): the value of $\mathrm{lift}(\mathrm{supp}(P))$ at any $d$ in its domain is $\pi_0$ by construction. Closure: the three cases of $\widetilde\cup_m$ yield $m(\pi_0,\pi_0)=\pi_0$, $\pi_0$, and $\pi_0$ respectively. The lattice isomorphism is then Proposition 4.3 restricted to $P^{\mathsf{def}}_\Pi(U)$, where $\mathrm{supp}$ is injective. $\square$
 
 Idempotence, commutativity, associativity, and absorption therefore hold on $P^{\mathsf{def}}_\Pi(U)$ and are transported from $\mathcal P(U)$ rather than assumed. The engineering consequence is stated as a proof obligation in Section 8.2: the syntactic membership-only predicate must be a sound under-approximation of $P^{\mathsf{def}}_\Pi(U)$. Rejecting a value that happens to lie in $P^{\mathsf{def}}_\Pi(U)$ costs an optimization; accepting one that does not costs correctness.
 
 ### 4.4 Ranking is a separate algebra
 
-For a posting $P$, a scoring function $s:U\times\Pi\to\mathbb R$, and a deterministic tie key, $\operatorname{rank}_s(P)$ totally orders $\operatorname{supp}(P)$ by $s(d,P(d))$. The selection $\operatorname{top}_k$ returns at most $k$ entries and then may be re-materialized in identifier order.
+For a posting $P$, a scoring function $s:U\times\Pi\to\mathbb R$, and a deterministic tie key, $\mathrm{rank}_s(P)$ totally orders $\mathrm{supp}(P)$ by $s(d,P(d))$. The selection $\mathrm{top}_k$ returns at most $k$ entries and then may be re-materialized in identifier order.
 
-Top-$k$ is deterministic, but it is not monotone with respect to support inclusion: if $A\subseteq B$, a document in $\operatorname{top}_k(A)$ may be evicted in $\operatorname{top}_k(B)$ by higher-scoring members of $B\setminus A$.
+Top-$k$ is deterministic, but it is not monotone with respect to support inclusion: if $A\subseteq B$, a document in $\mathrm{top}_k(A)$ may be evicted in $\mathrm{top}_k(B)$ by higher-scoring members of $B\setminus A$.
 
 Whether truncation may be pushed below a merge depends on the merge, and the distinction is exactly the payload distinction of Section 4.3. Call a union **score-preserving** when the score of $d$ in the result depends only on $d$ and not on which operands contained it.
 
 **Proposition 4.5 (Pushdown under a score-preserving union).** If $\widetilde\cup_m$ is score-preserving and the tie key is a function of the identifier alone, then
 
 $$
-\operatorname{top}_k(A\mathbin{\widetilde\cup_m}B)
+\mathrm{top}_k(A\mathbin{\widetilde\cup_m}B)
 =
-\operatorname{top}_k\!\left(
-\operatorname{top}_k(A)\mathbin{\widetilde\cup_m}\operatorname{top}_k(B)
+\mathrm{top}_k\!\left(
+\mathrm{top}_k(A)\mathbin{\widetilde\cup_m}\mathrm{top}_k(B)
 \right).
 $$
 
-**Proof.** Write $S=\operatorname{top}_k(A)\mathbin{\widetilde\cup_m}\operatorname{top}_k(B)$. Let $d\in\operatorname{top}_k(A\mathbin{\widetilde\cup_m}B)$ and suppose $d\in\operatorname{supp}(A)$, the other case being symmetric. Score preservation gives $d$ the same key in $A$ as in the merge, and $\operatorname{supp}(A)\subseteq\operatorname{supp}(A\mathbin{\widetilde\cup_m}B)$, so $d$ is among the $k$ largest keys of $A$ and survives its truncation. Hence
+**Proof.** Write $S=\mathrm{top}_k(A)\mathbin{\widetilde\cup_m}\mathrm{top}_k(B)$. Let $d\in\mathrm{top}_k(A\mathbin{\widetilde\cup_m}B)$ and suppose $d\in\mathrm{supp}(A)$, the other case being symmetric. Score preservation gives $d$ the same key in $A$ as in the merge, and $\mathrm{supp}(A)\subseteq\mathrm{supp}(A\mathbin{\widetilde\cup_m}B)$, so $d$ is among the $k$ largest keys of $A$ and survives its truncation. Hence
 
 $$
-\operatorname{top}_k(A\mathbin{\widetilde\cup_m}B)\subseteq S\subseteq A\mathbin{\widetilde\cup_m}B,
+\mathrm{top}_k(A\mathbin{\widetilde\cup_m}B)\subseteq S\subseteq A\mathbin{\widetilde\cup_m}B,
 $$
 
-with keys unchanged throughout. The $k$ largest keys of $S$ are therefore exactly the $k$ largest of $A\mathbin{\widetilde\cup_m}B$, and $\operatorname{top}_k(S)$ equals the left side. $\square$
+with keys unchanged throughout. The $k$ largest keys of $S$ are therefore exactly the $k$ largest of $A\mathbin{\widetilde\cup_m}B$, and $\mathrm{top}_k(S)$ equals the left side. $\square$
 
-The proposition fails as soon as $m$ combines scores. Let $k=1$, $A=\{d_1\mapsto3,\;d_2\mapsto2\}$, $B=\{d_2\mapsto2\}$, and let $m$ add scores. Then $A\mathbin{\widetilde\cup_m}B=\{d_1\mapsto3,\;d_2\mapsto4\}$, while $\operatorname{top}_1(A)=\{d_1\mapsto3\}$ and $\operatorname{top}_1(B)=B$, so
+The proposition fails as soon as $m$ combines scores. Let $k=1$, $A=\{d_1\mapsto3,\;d_2\mapsto2\}$, $B=\{d_2\mapsto2\}$, and let $m$ add scores. Then $A\mathbin{\widetilde\cup_m}B=\{d_1\mapsto3,\;d_2\mapsto4\}$, while $\mathrm{top}_1(A)=\{d_1\mapsto3\}$ and $\mathrm{top}_1(B)=B$, so
 
 $$
-\operatorname{top}_1(A\mathbin{\widetilde\cup_m}B)=\{d_2\},
+\mathrm{top}_1(A\mathbin{\widetilde\cup_m}B)=\{d_2\},
 \qquad
-\operatorname{top}_1\!\left(\operatorname{top}_1(A)\mathbin{\widetilde\cup_m}\operatorname{top}_1(B)\right)=\{d_1\},
+\mathrm{top}_1\!\left(\mathrm{top}_1(A)\mathbin{\widetilde\cup_m}\mathrm{top}_1(B)\right)=\{d_1\},
 $$
 
 because truncating $A$ first discards the $d_2$ contribution that the merge would have amplified. Fusion parents behave the same way: a document below the local threshold in every input can be raised above it by their combination.
@@ -447,11 +447,11 @@ Text, vector, and graph joins are predicates over typed tuple components:
 $$
 \begin{aligned}
 \theta_{\mathrm{text},\tau}
-&=\{(l,r)\mid \operatorname{sim}_{\mathrm{text}}(l.f,r.g)\ge\tau\},\\
+&=\{(l,r)\mid \mathrm{sim}_{\mathrm{text}}(l.f,r.g)\ge\tau\},\\
 \theta_{\mathrm{vec},\tau}
-&=\{(l,r)\mid \operatorname{sim}_{\mathrm{vec}}(l.v,r.w)\ge\tau\},\\
+&=\{(l,r)\mid \mathrm{sim}_{\mathrm{vec}}(l.v,r.w)\ge\tau\},\\
 \theta_{\mathrm{graph}}
-&=\{(l,r)\mid r.id\in\operatorname{traverse}(G,l.id,R)\}.
+&=\{(l,r)\mid r.id\in\mathrm{traverse}(G,l.id,R)\}.
 \end{aligned}
 $$
 
@@ -470,28 +470,28 @@ $$
 Let $h:X\to M$ lift one input and define, on *sequences*,
 
 $$
-\operatorname{fold}(x_1,\ldots,x_n)
+\mathrm{fold}(x_1,\ldots,x_n)
 =h(x_1)\odot\cdots\odot h(x_n),
 \qquad
-\operatorname{fold}(\varepsilon)=e.
+\mathrm{fold}(\varepsilon)=e.
 $$
 
 **Theorem 5.1 (Contiguous partition decomposition).** If a sequence $\sigma$ splits as the concatenation $\sigma_1\sigma_2$, then
 
 $$
-\operatorname{fold}(\sigma)
-=\operatorname{fold}(\sigma_1)\odot\operatorname{fold}(\sigma_2).
+\mathrm{fold}(\sigma)
+=\mathrm{fold}(\sigma_1)\odot\mathrm{fold}(\sigma_2).
 $$
 
 **Proof.** Reassociate, using $e$ for an empty part. $\square$
 
 Associativity alone gives the contiguous case. It does not give the case the executor actually needs, because a physical partition of a bag imposes no order relation between its parts.
 
-**Corollary 5.2 (Bag partition decomposition).** If $M$ is commutative, then $\operatorname{fold}$ is well defined on bags—independent of the enumeration chosen—and for every disjoint bag partition $X=X_1\uplus X_2$,
+**Corollary 5.2 (Bag partition decomposition).** If $M$ is commutative, then $\mathrm{fold}$ is well defined on bags—independent of the enumeration chosen—and for every disjoint bag partition $X=X_1\uplus X_2$,
 
 $$
-\operatorname{fold}(X)
-=\operatorname{fold}(X_1)\odot\operatorname{fold}(X_2).
+\mathrm{fold}(X)
+=\mathrm{fold}(X_1)\odot\mathrm{fold}(X_2).
 $$
 
 **Proof.** Commutativity makes the value of a fold invariant under permutation, so any enumeration of $X$ may be permuted into one enumerating $X_1$ before $X_2$; then apply Theorem 5.1. $\square$
@@ -515,7 +515,7 @@ $$
 A path $p$ defines a partial evaluation
 
 $$
-\operatorname{eval}_p:\mathrm{Value}\to \mathrm{Option}(\mathrm{Value}).
+\mathrm{eval}_p:\mathrm{Value}\to \mathrm{Option}(\mathrm{Value}).
 $$
 
 This is the standard complex-value model of the nested relational calculus [8]. A deterministic path filter distributes over bag union because it evaluates each row independently. Path projection and unnesting have different carriers: projection changes row values, while unnesting changes multiplicity and therefore belongs to the row-bag algebra. Idempotence of projection is claimed only for a normalized representation whose output paths are stable under repeated evaluation; it is not inferred merely from the word “projection.”
@@ -532,9 +532,9 @@ $$
 S_{\mathrm{BM25}}(q,d)
 =
 \sum_{t\in q}
-\operatorname{IDF}(t)
+\mathrm{IDF}(t)
 \frac{f(t,d)(k_1+1)}
-{f(t,d)+k_1\left(1-b+b\,|d|/\operatorname{avgdl}\right)}.
+{f(t,d)+k_1\left(1-b+b\,|d|/\mathrm{avgdl}\right)}.
 $$
 
 The implementation uses a numerically stable equivalent and a Robertson–Spärck Jones IDF [31]. The complete raw query score belongs to the carrier
@@ -611,7 +611,7 @@ Three consequences are operationally important.
 2. Negative evidence must remain negative; discarding it changes the model.
 3. The prior enters once. Feeding posterior probabilities that already contain the same prior into the sum double-counts it.
 
-If a calibrated signal output $p_i$ contains a base-rate logit $\lambda_i$, its prior-free evidence is $\operatorname{logit}(p_i)-\lambda_i$. The type boundary should make this conversion explicit.
+If a calibrated signal output $p_i$ contains a base-rate logit $\lambda_i$, its prior-free evidence is $\mathrm{logit}(p_i)-\lambda_i$. The type boundary should make this conversion explicit.
 
 ### 6.3 Robust positive-evidence pooling
 
@@ -625,7 +625,7 @@ h(p_1,\ldots,p_n)
 n^\alpha
 \frac{1}{n}
 \sum_{i=1}^{n}
-g(\operatorname{logit}(p_i))
+g(\mathrm{logit}(p_i))
 \right),
 $$
 
@@ -676,9 +676,9 @@ $$
 with invariant
 
 $$
-\operatorname{dom}(\gamma)
+\mathrm{dom}(\gamma)
 \subseteq
-\operatorname{supp}(P).
+\mathrm{supp}(P).
 $$
 
 The invariant prevents graph metadata from referring to a result that the underlying posting does not contain.
@@ -717,9 +717,9 @@ Then $\Phi$ is injective on valid graph postings, $\Phi^{-1}$ is total on $\Phi(
 $$
 \Phi^{-1}(\Phi(g))=g,
 \qquad
-\operatorname{supp}(\Phi(g))
+\mathrm{supp}(\Phi(g))
 =
-\operatorname{supp}(P).
+\mathrm{supp}(P).
 $$
 
 **Proof sketch.** Encoding writes a versioned envelope containing the base score, exact optional score-override state, graph name, vertex and edge identifiers, and displaced reserved values. Decoding recognizes the version, restores the displaced values and base score, and reconstructs the side map under the support invariant. Encoding neither inserts nor removes posting identifiers. $\square$
@@ -759,11 +759,11 @@ A graph pattern is better modeled as a relation of variable assignments than as 
 Under these conditions,
 
 $$
-\operatorname{Match}(P_1\sqcup P_2,G)
+\mathrm{Match}(P_1\sqcup P_2,G)
 \equiv
-\operatorname{Match}(P_1,G)
+\mathrm{Match}(P_1,G)
 \bowtie
-\operatorname{Match}(P_2,G).
+\mathrm{Match}(P_2,G).
 $$
 
 General subgraph isomorphism remains computationally hard, and pattern semantics differ across languages in ways that change the answer set—homomorphism, no-repeated-edge, and injective matching are not interchangeable [3]. The presence of a unified algebra does not remove either boundary; it enables the optimizer to choose filters, indexes, traversal direction, cached patterns, or bounded RPQs while preserving whichever semantics the statement declared.
@@ -836,22 +836,22 @@ Unsupported retrieval lowering returns control to the enclosing relational node.
 
 ### 8.2 Law-indexed rewrite criterion
 
-**Theorem 8.1 (Contextual rewrite soundness).** Let $e_1,e_2:\Sigma\times X\to C$ be pure expressions with $e_1\equiv_C e_2$. Let $\mathcal K[\cdot]$ be a deterministic context of result carrier $Y$ that **observes only $\operatorname{obs}_C$**, by which is meant that it factors as
+**Theorem 8.1 (Contextual rewrite soundness).** Let $e_1,e_2:\Sigma\times X\to C$ be pure expressions with $e_1\equiv_C e_2$. Let $\mathcal K[\cdot]$ be a deterministic context of result carrier $Y$ that **observes only $\mathrm{obs}_C$**, by which is meant that it factors as
 
 $$
 \mathcal K
 =
-\overline{\mathcal K}\circ\operatorname{obs}_C
+\overline{\mathcal K}\circ\mathrm{obs}_C
 \qquad\text{for some }\overline{\mathcal K}.
 $$
 
 Then $\mathcal K[e_1]\equiv_Y \mathcal K[e_2]$.
 
-**Proof.** For every valid input, $\operatorname{obs}_Y(\mathcal K[e_i](\Sigma,x))=\operatorname{obs}_Y\!\left(\overline{\mathcal K}(\operatorname{obs}_C(e_i(\Sigma,x)))\right)$, and the two inner arguments are equal by hypothesis. $\square$
+**Proof.** For every valid input, $\mathrm{obs}_Y(\mathcal K[e_i](\Sigma,x))=\mathrm{obs}_Y\!\left(\overline{\mathcal K}(\mathrm{obs}_C(e_i(\Sigma,x)))\right)$, and the two inner arguments are equal by hypothesis. $\square$
 
-**Corollary 8.2 (Rewrites descend the refinement order).** If $\operatorname{obs}_C\sqsubseteq\operatorname{obs}_{C'}$ and $e_1\equiv_{C'}e_2$, then the conclusion holds in every context that observes only $\operatorname{obs}_C$. Combine Lemma 3.1 with Theorem 8.1. $\square$
+**Corollary 8.2 (Rewrites descend the refinement order).** If $\mathrm{obs}_C\sqsubseteq\mathrm{obs}_{C'}$ and $e_1\equiv_{C'}e_2$, then the conclusion holds in every context that observes only $\mathrm{obs}_C$. Combine Lemma 3.1 with Theorem 8.1. $\square$
 
-Stating the observation restriction as a factorization is what makes the theorem usable rather than circular. "Observes only $\operatorname{obs}_C$" is not a property a node can inspect about itself; it is a property of its parent, and it must be either declared per operator or derived. The implementation declares it. Deriving it—a top-down analysis that propagates a demanded observation level from the plan root, the dual of required-column analysis in a compiler—would admit rewrites that per-node classification cannot express, since a score-bearing subtree whose parent demands only support recovers Boolean idempotence. This is listed as open work in Section 11.
+Stating the observation restriction as a factorization is what makes the theorem usable rather than circular. "Observes only $\mathrm{obs}_C$" is not a property a node can inspect about itself; it is a property of its parent, and it must be either declared per operator or derived. The implementation declares it. Deriving it—a top-down analysis that propagates a demanded observation level from the plan root, the dual of required-column analysis in a compiler—would admit rewrites that per-node classification cannot express, since a score-bearing subtree whose parent demands only support recovers Boolean idempotence. This is listed as open work in Section 11.
 
 The theorem is elementary; its engineering consequence is substantial. A rewrite implementation must establish:
 
@@ -931,7 +931,7 @@ $$
 where $\mathcal S$ includes durable catalog state, graph state, indexes, models, caches, and session-local state, and $\mathcal E$ is the error type. ($E$ remains the edge set of Section 7.1.) This is the Kleisli form anticipated in Section 3.3; commands are outside the total category $\mathsf{UQA}$ by construction. For a transaction $T$, atomic visibility requires [14]:
 
 $$
-\operatorname{publish}(T)
+\mathrm{publish}(T)
 \text{ occurs only after every durable component of }T\text{ succeeds}.
 $$
 
@@ -944,10 +944,10 @@ Logical sessions own transaction affinity, variables, search path, prepared plan
 For deterministic reads, a persistent representation is correct when closing and reopening a committed snapshot preserves the observable query result:
 
 $$
-\operatorname{obs}_C
-\left(q(\operatorname{reopen}(\operatorname{persist}(\Sigma)))\right)
+\mathrm{obs}_C
+\left(q(\mathrm{reopen}(\mathrm{persist}(\Sigma)))\right)
 =
-\operatorname{obs}_C(q(\Sigma)).
+\mathrm{obs}_C(q(\Sigma)).
 $$
 
 This is an implementation refinement theorem under assumptions that serialization is complete, migrations preserve semantics, and external nondeterminism is absent. It is validated separately for documents, schemas, indexes, graphs, models, statistics, transactions, and encrypted storage.
@@ -1006,7 +1006,7 @@ The framework leaves several important boundaries explicit.
 
 10. **Per-node observation classification.** Theorem 8.1 requires the parent's observation as a hypothesis, and the implementation supplies it by per-operator declaration. A rewrite is therefore rejected whenever the *node* is payload-bearing, even when the *parent* demands only support. The classification is sound but not complete.
 
-Promising future work includes a top-down demanded-observation analysis that propagates the required $\operatorname{obs}$ level from the plan root and discharges the hypothesis of Theorem 8.1 by derivation rather than declaration; an effect system for volatility and transaction behavior; a fully positional typed row carrier; semiring annotations over generalized tuples; incremental view and graph maintenance; proof-producing rewrite registration; and distributed carrier-preserving execution.
+Promising future work includes a top-down demanded-observation analysis that propagates the required $\mathrm{obs}$ level from the plan root and discharges the hypothesis of Theorem 8.1 by derivation rather than declaration; an effect system for volatility and transaction behavior; a fully positional typed row carrier; semiring annotations over generalized tuples; incremental view and graph maintenance; proof-producing rewrite registration; and distributed carrier-preserving execution.
 
 ## 12. Conclusion
 

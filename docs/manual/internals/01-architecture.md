@@ -112,13 +112,13 @@ The executable dependency policy is stored in [`scripts/workspace-dependency-pol
 The support projection
 
 $$
-\operatorname{support}: \operatorname{PostingList} \rightarrow \operatorname{DocSet}
+\mathrm{support}: \mathrm{PostingList} \rightarrow \mathrm{DocSet}
 $$
 
 is lossy because payload is removed. The supported round trip is
 
 $$
-\operatorname{support}(\operatorname{PostingList::from}(D)) = D.
+\mathrm{support}(\mathrm{PostingList::from}(D)) = D.
 $$
 
 The reverse direction cannot reconstruct positions, scores, or fields. Optimizer laws that rely on idempotence therefore apply only to membership-only trees unless a payload-specific proof exists.

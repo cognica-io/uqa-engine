@@ -72,7 +72,7 @@ Operator precedence is `NOT`, then `AND`, then `OR`. Adjacent terms imply `AND`.
 For a query term, UQA Engine uses the inverse document frequency
 
 $$
-\operatorname{IDF}(t) = \ln\left(\frac{N - n_t + 0.5}{n_t + 0.5} + 1\right),
+\mathrm{IDF}(t) = \ln\left(\frac{N - n_t + 0.5}{n_t + 0.5} + 1\right),
 $$
 
 where $N$ is the number of indexed documents and $n_t$ is the document frequency of term $t$. Its term contribution is
@@ -84,7 +84,7 @@ $$
 with
 
 $$
-w_t = b_t \operatorname{IDF}(t), \qquad
+w_t = b_t \mathrm{IDF}(t), \qquad
 I = \frac{1}{k_1\left((1-b) + b\frac{d}{\bar d}\right)}.
 $$
 
@@ -184,7 +184,7 @@ Exactness describes the prior and evidence algebra. The KNN evidence is still a 
 Exact Bayesian evidence fusion is
 
 $$
-\operatorname{logit}(P) = \operatorname{logit}(\pi)
+\mathrm{logit}(P) = \mathrm{logit}(\pi)
  + \sum_i \ell_i,
 $$
 

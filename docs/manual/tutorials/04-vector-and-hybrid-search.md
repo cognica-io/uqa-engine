@@ -38,7 +38,7 @@ ORDER BY _score DESC, id ASC;
 Save exact results when evaluating an approximate index. Recall at $k$ is
 
 $$
-\operatorname{recall@k} = \frac{|A_k \cap E_k|}{k},
+\mathrm{recall@k} = \frac{|A_k \cap E_k|}{k},
 $$
 
 where $A_k$ is the approximate top-K identity set and $E_k$ is the exact set.

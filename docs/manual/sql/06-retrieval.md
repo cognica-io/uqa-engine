@@ -114,7 +114,7 @@ Write a fusion function explicitly to override the default policy, select robust
 Exact Bayesian evidence fusion is
 
 $$
-P = \sigma\left(\operatorname{logit}(\pi) + \sum_i \ell_i\right),
+P = \sigma\left(\mathrm{logit}(\pi) + \sum_i \ell_i\right),
 $$
 
 where $\pi$ is the prior and each $\ell_i$ is prior-free evidence. Counting a posterior's prior again produces an incorrect result.
