@@ -198,4 +198,7 @@ pub struct AlterSequence {
     pub cache_size: Option<i64>,
     #[serde(default)]
     pub ownership: SequenceOwnership,
+    /// `SET LOGGED` or `SET UNLOGGED`. Temporary is never a valid requested target state.
+    #[serde(default)]
+    pub persistence: Option<RelationPersistence>,
 }

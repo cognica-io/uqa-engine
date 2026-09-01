@@ -1250,6 +1250,117 @@ CREATE SEQUENCE sequence_cache_zero CACHE 0;
 ALTER SEQUENCE sequence_cache_basic CACHE 0;
 -- @end
 
+-- Sequence logged-state changes are transactional catalog rewrites. Actual changes invalidate cached blocks without clearing currval, same-state changes preserve caches, and rollback retains or abandons the prior block according to whether the changed definition was used.
+-- @case create_sequence_persistence_fixture ok
+CREATE SEQUENCE sequence_persistence_logged CACHE 3;
+CREATE UNLOGGED SEQUENCE sequence_persistence_unlogged CACHE 3;
+CREATE SEQUENCE sequence_persistence_alter_only CACHE 3;
+CREATE SEQUENCE sequence_persistence_value CACHE 3;
+CREATE SEQUENCE sequence_persistence_savepoint CACHE 3;
+CREATE TABLE sequence_persistence_owner(id bigint);
+CREATE SEQUENCE sequence_persistence_owned OWNED BY sequence_persistence_owner.id;
+CREATE TABLE sequence_persistence_serial(id serial);
+CREATE TABLE sequence_persistence_identity(id bigint GENERATED ALWAYS AS IDENTITY);
+CREATE TABLE sequence_persistence_wrong_kind(id bigint);
+CREATE TABLE sequence_persistence_observations(name text PRIMARY KEY, value bigint, session_value bigint, persistence text);
+-- @end
+
+-- @case sequence_persistence_initial_catalog rows
+SELECT relname, relpersistence FROM pg_catalog.pg_class WHERE relnamespace = current_schema()::regnamespace AND relname IN ('sequence_persistence_logged', 'sequence_persistence_unlogged') ORDER BY relname;
+-- @end
+
+-- @case sequence_persistence_noop_cache ok
+INSERT INTO sequence_persistence_observations SELECT 'noop_first', nextval('sequence_persistence_logged'), currval('sequence_persistence_logged'), relpersistence::text FROM pg_catalog.pg_class WHERE oid = 'sequence_persistence_logged'::regclass;
+ALTER SEQUENCE sequence_persistence_logged SET LOGGED;
+INSERT INTO sequence_persistence_observations SELECT 'noop_after', nextval('sequence_persistence_logged'), currval('sequence_persistence_logged'), relpersistence::text FROM pg_catalog.pg_class WHERE oid = 'sequence_persistence_logged'::regclass;
+-- @end
+
+-- @case sequence_persistence_noop_cache_result rows
+SELECT name, value, session_value, persistence FROM sequence_persistence_observations WHERE name LIKE 'noop_%' ORDER BY name;
+-- @end
+
+-- @case sequence_persistence_changed_cache ok
+INSERT INTO sequence_persistence_observations SELECT 'changed_before', nextval('sequence_persistence_logged'), currval('sequence_persistence_logged'), relpersistence::text FROM pg_catalog.pg_class WHERE oid = 'sequence_persistence_logged'::regclass;
+ALTER SEQUENCE sequence_persistence_logged SET UNLOGGED;
+INSERT INTO sequence_persistence_observations SELECT 'changed_after', nextval('sequence_persistence_logged'), currval('sequence_persistence_logged'), relpersistence::text FROM pg_catalog.pg_class WHERE oid = 'sequence_persistence_logged'::regclass;
+-- @end
+
+-- @case sequence_persistence_changed_cache_result rows
+SELECT name, value, session_value, persistence FROM sequence_persistence_observations WHERE name LIKE 'changed_%' ORDER BY name;
+-- @end
+
+-- @case sequence_persistence_historical_table_syntax ok
+ALTER TABLE sequence_persistence_logged SET LOGGED;
+-- @end
+
+-- @case sequence_persistence_owned_kinds ok
+ALTER SEQUENCE sequence_persistence_owned SET UNLOGGED;
+ALTER SEQUENCE sequence_persistence_serial_id_seq SET UNLOGGED;
+ALTER SEQUENCE sequence_persistence_identity_id_seq SET UNLOGGED;
+-- @end
+
+-- @case sequence_persistence_committed_catalog rows
+SELECT relname, relpersistence FROM pg_catalog.pg_class WHERE relnamespace = current_schema()::regnamespace AND relname IN ('sequence_persistence_identity_id_seq', 'sequence_persistence_logged', 'sequence_persistence_owned', 'sequence_persistence_serial_id_seq', 'sequence_persistence_unlogged') ORDER BY relname;
+-- @end
+
+-- @case sequence_persistence_alter_only_rollback ok
+BEGIN;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.sequence_persistence_observations(name, value) VALUES ('alter_only_seed_rolled_back', nextval('__UQA_STATEFUL_SCHEMA__.sequence_persistence_alter_only'));
+ALTER SEQUENCE __UQA_STATEFUL_SCHEMA__.sequence_persistence_alter_only SET UNLOGGED;
+ROLLBACK;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.sequence_persistence_observations SELECT 'alter_only_after', nextval('__UQA_STATEFUL_SCHEMA__.sequence_persistence_alter_only'), currval('__UQA_STATEFUL_SCHEMA__.sequence_persistence_alter_only'), relpersistence::text FROM pg_catalog.pg_class WHERE oid = '__UQA_STATEFUL_SCHEMA__.sequence_persistence_alter_only'::regclass;
+-- @end
+
+-- @case sequence_persistence_alter_only_rollback_result rows
+SELECT name, value, session_value, persistence FROM sequence_persistence_observations WHERE name = 'alter_only_after';
+-- @end
+
+-- @case sequence_persistence_value_rollback ok
+BEGIN;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.sequence_persistence_observations(name, value) VALUES ('value_seed_rolled_back', nextval('__UQA_STATEFUL_SCHEMA__.sequence_persistence_value'));
+ALTER SEQUENCE __UQA_STATEFUL_SCHEMA__.sequence_persistence_value SET UNLOGGED;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.sequence_persistence_observations(name, value) VALUES ('value_changed_rolled_back', nextval('__UQA_STATEFUL_SCHEMA__.sequence_persistence_value'));
+ROLLBACK;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.sequence_persistence_observations SELECT 'value_after', nextval('__UQA_STATEFUL_SCHEMA__.sequence_persistence_value'), currval('__UQA_STATEFUL_SCHEMA__.sequence_persistence_value'), relpersistence::text FROM pg_catalog.pg_class WHERE oid = '__UQA_STATEFUL_SCHEMA__.sequence_persistence_value'::regclass;
+-- @end
+
+-- @case sequence_persistence_value_rollback_result rows
+SELECT name, value, session_value, persistence FROM sequence_persistence_observations WHERE name = 'value_after';
+-- @end
+
+-- @case sequence_persistence_savepoint_rollback ok
+BEGIN;
+INSERT INTO sequence_persistence_observations(name, value) VALUES ('persistence_savepoint_seed', nextval('sequence_persistence_savepoint'));
+SAVEPOINT sequence_persistence_boundary;
+ALTER SEQUENCE sequence_persistence_savepoint SET UNLOGGED;
+INSERT INTO sequence_persistence_observations(name, value) VALUES ('persistence_savepoint_changed_rolled_back', nextval('sequence_persistence_savepoint'));
+ROLLBACK TO SAVEPOINT sequence_persistence_boundary;
+INSERT INTO sequence_persistence_observations SELECT 'persistence_savepoint_after', nextval('sequence_persistence_savepoint'), currval('sequence_persistence_savepoint'), relpersistence::text FROM pg_catalog.pg_class WHERE oid = 'sequence_persistence_savepoint'::regclass;
+COMMIT;
+-- @end
+
+-- @case sequence_persistence_savepoint_rollback_result rows
+SELECT name, value, session_value, persistence FROM sequence_persistence_observations WHERE name LIKE 'persistence_savepoint_%' ORDER BY name;
+-- @end
+
+-- @case sequence_persistence_missing_if_exists ok
+ALTER SEQUENCE IF EXISTS sequence_persistence_missing SET UNLOGGED;
+-- @end
+
+-- @case sequence_persistence_wrong_kind error
+ALTER SEQUENCE IF EXISTS sequence_persistence_wrong_kind SET UNLOGGED;
+-- @end
+
+-- @case sequence_persistence_temporary_error error
+CREATE TEMP SEQUENCE sequence_persistence_temporary;
+ALTER SEQUENCE sequence_persistence_temporary SET LOGGED;
+-- @end
+
+-- @case sequence_persistence_read_only_precedence error
+BEGIN READ ONLY;
+ALTER SEQUENCE IF EXISTS sequence_persistence_missing SET UNLOGGED;
+-- @end
+
 -- Sequence ownership uses automatic or internal dependencies keyed by stable table and column identity. Renames retain the link, owner drops remove the sequence, and only RESTART IDENTITY resets owned sequences.
 -- @case create_sequence_owner_fixture ok
 CREATE TABLE sequence_owner_table(id bigint, other bigint);

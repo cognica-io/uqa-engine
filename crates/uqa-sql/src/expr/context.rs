@@ -134,6 +134,11 @@ pub trait EngineHook {
         Ok(None)
     }
 
+    /// Resolve a `regnamespace` input while preserving hard input errors for direct casts.
+    fn resolve_regnamespace(&self, name: &str) -> Result<Option<i64>> {
+        self.resolve_regobject(&ColumnType::Regnamespace, name)
+    }
+
     /// Resolve the text argument of one `PostgreSQL` `to_reg*` lookup function. The engine override owns catalog visibility and the lookup function's NULL-versus-error boundary; the default preserves the two historical hooks for embedders that only implement `regclass` or `regprocedure`.
     fn resolve_regobject(&self, ty: &ColumnType, name: &str) -> Result<Option<i64>> {
         match ty {
@@ -364,6 +369,17 @@ pub fn cast_value_with_type_resolution(
                 .ok_or_else(|| SQLError::Routine {
                     sqlstate: "42704".into(),
                     message: format!("role \"{name}\" does not exist"),
+                });
+        }
+    }
+    if matches!(target_column_type.as_ref(), Some(ColumnType::Regnamespace)) {
+        if let (Some(engine), Value::Str(name) | Value::FixedChar(name)) = (engine, value) {
+            return engine
+                .resolve_regnamespace(name)?
+                .map(Value::Int)
+                .ok_or_else(|| SQLError::Routine {
+                    sqlstate: "3F000".into(),
+                    message: format!("schema \"{name}\" does not exist"),
                 });
         }
     }

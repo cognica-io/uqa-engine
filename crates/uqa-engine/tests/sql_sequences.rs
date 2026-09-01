@@ -17,6 +17,8 @@ mod cache;
 mod lifecycle;
 #[path = "sql_sequences/ownership.rs"]
 mod ownership;
+#[path = "sql_sequences/persistence.rs"]
+mod persistence;
 
 fn regclass_reference(expression: &Expr) -> Option<&str> {
     match expression {

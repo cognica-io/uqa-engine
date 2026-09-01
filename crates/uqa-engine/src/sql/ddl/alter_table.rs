@@ -67,6 +67,25 @@ pub(in crate::sql) fn run_alter_table(
         .map_err(|err| ddl_storage_error("ALTER TABLE", err))?
     {
         Some((canonical, "table")) => stmt.table = canonical,
+        Some((canonical, "sequence")) => {
+            let [AlterTableAction::SetPersistence { persistence }] = stmt.actions.as_slice() else {
+                return Err(SQLError::Routine {
+                    sqlstate: "42809".into(),
+                    message: format!(
+                        "ALTER TABLE: relation `{canonical}` is a sequence, not a table"
+                    ),
+                });
+            };
+            return super::run_alter_sequence(
+                engine,
+                uqa_sql::ast::AlterSequence {
+                    name: canonical,
+                    if_exists: stmt.if_exists,
+                    persistence: Some(*persistence),
+                    ..uqa_sql::ast::AlterSequence::default()
+                },
+            );
+        }
         Some((canonical, "view"))
             if stmt.actions.iter().all(|action| {
                 matches!(
@@ -97,7 +116,13 @@ pub(in crate::sql) fn run_alter_table(
                 message: format!("ALTER TABLE: relation `{canonical}` is a {kind}, not a table"),
             });
         }
-        None if stmt.if_exists => return Ok(SQLResult::empty()),
+        None if stmt.if_exists => {
+            engine.push_sql_notice(
+                "NOTICE",
+                &format!("relation \"{}\" does not exist, skipping", stmt.table),
+            );
+            return Ok(SQLResult::empty());
+        }
         None => {
             return Err(SQLError::Unsupported(format!(
                 "ALTER TABLE: relation `{}` does not exist",
@@ -460,6 +485,16 @@ fn run_alter_table_action(
         }
         AlterTableAction::SetRuleEnableMode { name, mode } => {
             engine.set_rule_enable_mode(&stmt.table, &name, mode)?;
+        }
+        AlterTableAction::SetPersistence { persistence } => {
+            return Err(SQLError::Unsupported(format!(
+                "ALTER TABLE SET {} is not supported for tables",
+                match persistence {
+                    uqa_sql::ast::RelationPersistence::Permanent => "LOGGED",
+                    uqa_sql::ast::RelationPersistence::Unlogged => "UNLOGGED",
+                    uqa_sql::ast::RelationPersistence::Temporary => "TEMPORARY",
+                }
+            )));
         }
         AlterTableAction::SetDefault { name, default } => {
             reject_default_change_on_generated_column(engine, &stmt.table, &name)?;

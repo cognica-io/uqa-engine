@@ -355,6 +355,48 @@ fn lookup_regnamespace_oid(engine: &Engine, name: &str) -> Result<Option<i64>, S
         .find_map(|(oid, schema)| (schema == name).then_some(*oid)))
 }
 
+pub(crate) fn resolve_regnamespace_oid(
+    engine: &Engine,
+    input: &str,
+) -> Result<Option<i64>, SQLError> {
+    match numeric_regobject_oid(input) {
+        NumericRegobjectOid::Valid(oid) => return Ok(Some(oid)),
+        NumericRegobjectOid::InvalidSyntax => {
+            return Err(SQLError::Routine {
+                sqlstate: "22P02".into(),
+                message: format!("invalid input syntax for type oid: \"{input}\""),
+            });
+        }
+        NumericRegobjectOid::OutOfRange => {
+            return Err(SQLError::Routine {
+                sqlstate: "22003".into(),
+                message: format!("value \"{input}\" is out of range for type oid"),
+            });
+        }
+        NumericRegobjectOid::NotNumeric => {}
+    }
+    let names = uqa_sql::parse_regobject_name(input).ok_or_else(|| SQLError::Routine {
+        sqlstate: "42602".into(),
+        message: "invalid name syntax".into(),
+    })?;
+    let [name] = names.as_slice() else {
+        return Err(SQLError::Routine {
+            sqlstate: "42602".into(),
+            message: "invalid name syntax".into(),
+        });
+    };
+    let catalog = regtype_output_catalog(engine)?;
+    catalog
+        .namespaces
+        .iter()
+        .find_map(|(oid, schema)| (schema == name).then_some(*oid))
+        .map(Some)
+        .ok_or_else(|| SQLError::Routine {
+            sqlstate: "3F000".into(),
+            message: format!("schema \"{}\" does not exist", name.replace('"', "\"\"")),
+        })
+}
+
 fn lookup_regtype_oid(engine: &Engine, name: &str) -> Result<Option<i64>, SQLError> {
     match numeric_regobject_oid(name) {
         NumericRegobjectOid::Valid(oid) => return Ok(Some(oid)),

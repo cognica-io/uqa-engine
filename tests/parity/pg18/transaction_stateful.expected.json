@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "71d1948a176498ce84a66b0e77d1b4e0048c5897fa1a1ff25a5b1ed7b24025e2",
+  "fixture_sha256": "eda29c6c5adfc3f052c167c6177ce9a92d0a60713b775dab3a2ccd536c192db1",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -1396,6 +1396,175 @@
       "name": "sequence_cache_zero_alter",
       "kind": "error",
       "sqlstate": "22023"
+    },
+    {
+      "name": "create_sequence_persistence_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_persistence_initial_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "sequence_persistence_logged",
+          "p"
+        ],
+        [
+          "sequence_persistence_unlogged",
+          "u"
+        ]
+      ]
+    },
+    {
+      "name": "sequence_persistence_noop_cache",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_persistence_noop_cache_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "noop_after",
+          "2",
+          "2",
+          "p"
+        ],
+        [
+          "noop_first",
+          "1",
+          "1",
+          "p"
+        ]
+      ]
+    },
+    {
+      "name": "sequence_persistence_changed_cache",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_persistence_changed_cache_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "changed_after",
+          "7",
+          "7",
+          "u"
+        ],
+        [
+          "changed_before",
+          "4",
+          "4",
+          "p"
+        ]
+      ]
+    },
+    {
+      "name": "sequence_persistence_historical_table_syntax",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_persistence_owned_kinds",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_persistence_committed_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "sequence_persistence_identity_id_seq",
+          "u"
+        ],
+        [
+          "sequence_persistence_logged",
+          "p"
+        ],
+        [
+          "sequence_persistence_owned",
+          "u"
+        ],
+        [
+          "sequence_persistence_serial_id_seq",
+          "u"
+        ],
+        [
+          "sequence_persistence_unlogged",
+          "u"
+        ]
+      ]
+    },
+    {
+      "name": "sequence_persistence_alter_only_rollback",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_persistence_alter_only_rollback_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "alter_only_after",
+          "2",
+          "2",
+          "p"
+        ]
+      ]
+    },
+    {
+      "name": "sequence_persistence_value_rollback",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_persistence_value_rollback_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "value_after",
+          "4",
+          "4",
+          "p"
+        ]
+      ]
+    },
+    {
+      "name": "sequence_persistence_savepoint_rollback",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_persistence_savepoint_rollback_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "persistence_savepoint_after",
+          "4",
+          "4",
+          "p"
+        ],
+        [
+          "persistence_savepoint_seed",
+          "1",
+          null,
+          null
+        ]
+      ]
+    },
+    {
+      "name": "sequence_persistence_missing_if_exists",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_persistence_wrong_kind",
+      "kind": "error",
+      "sqlstate": "42809"
+    },
+    {
+      "name": "sequence_persistence_temporary_error",
+      "kind": "error",
+      "sqlstate": "42P16"
+    },
+    {
+      "name": "sequence_persistence_read_only_precedence",
+      "kind": "error",
+      "sqlstate": "25006"
     },
     {
       "name": "create_sequence_owner_fixture",

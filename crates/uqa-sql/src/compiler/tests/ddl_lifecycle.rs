@@ -491,6 +491,38 @@ fn alter_sequence_preserves_if_exists() {
 }
 
 #[test]
+fn alter_sequence_persistence_preserves_target_and_historical_table_syntax() {
+    let Statement::AlterSequence(unlogged) = first("ALTER SEQUENCE IF EXISTS app.ids SET UNLOGGED")
+    else {
+        panic!("expected ALTER SEQUENCE SET UNLOGGED");
+    };
+    assert_eq!(unlogged.name, "app.ids");
+    assert!(unlogged.if_exists);
+    assert_eq!(
+        unlogged.persistence,
+        Some(crate::ast::RelationPersistence::Unlogged)
+    );
+
+    let Statement::AlterSequence(logged) = first("ALTER SEQUENCE app.ids SET LOGGED") else {
+        panic!("expected ALTER SEQUENCE SET LOGGED");
+    };
+    assert_eq!(
+        logged.persistence,
+        Some(crate::ast::RelationPersistence::Permanent)
+    );
+
+    let Statement::AlterTable(table_syntax) = first("ALTER TABLE app.ids SET UNLOGGED") else {
+        panic!("expected historical ALTER TABLE sequence syntax");
+    };
+    assert!(matches!(
+        table_syntax.actions.as_slice(),
+        [crate::ast::AlterTableAction::SetPersistence {
+            persistence: crate::ast::RelationPersistence::Unlogged
+        }]
+    ));
+}
+
+#[test]
 fn create_table_as_preserves_positional_column_names() {
     let Statement::CreateTableAs {
         name,

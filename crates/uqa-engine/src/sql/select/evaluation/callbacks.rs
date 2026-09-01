@@ -331,6 +331,10 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         crate::sql::resolve_regrole_oid(self.engine, name)
     }
 
+    fn resolve_regnamespace(&self, name: &str) -> std::result::Result<Option<i64>, SQLError> {
+        crate::sql::resolve_regnamespace_oid(self.engine, name)
+    }
+
     fn resolve_regobject(
         &self,
         ty: &uqa_sql::ast::ColumnType,

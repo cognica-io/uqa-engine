@@ -19,7 +19,7 @@ use super::{
     AlterViewOptionsAction, AlterViewOptionsStmt, DropKind, DropStmt, Node, NodeEnum, Result,
     SQLError, Statement, TableKeyConstraint, TableKeyConstraintKind,
 };
-use crate::ast::{EventEnableMode, ForeignKey, TableCheck};
+use crate::ast::{AlterSequence, EventEnableMode, ForeignKey, RelationPersistence, TableCheck};
 
 fn extract_strings(nodes: &[pg_query::protobuf::Node]) -> Result<Vec<String>> {
     nodes.iter().map(extract_string).collect()
@@ -131,6 +131,33 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
     if stmt.cmds.is_empty() {
         return Err(SQLError::Internal("ALTER TABLE without command".into()));
     }
+    if stmt.objtype() == ObjectType::ObjectSequence {
+        let [command] = stmt.cmds.as_slice() else {
+            return Err(SQLError::Unsupported(
+                "ALTER SEQUENCE SET persistence accepts one action".into(),
+            ));
+        };
+        let Some(NodeEnum::AlterTableCmd(command)) = command.node.as_ref() else {
+            return Err(SQLError::Internal(
+                "ALTER SEQUENCE SET persistence command body is malformed".into(),
+            ));
+        };
+        let persistence = match command.subtype() {
+            AlterTableType::AtSetLogged => RelationPersistence::Permanent,
+            AlterTableType::AtSetUnLogged => RelationPersistence::Unlogged,
+            other => {
+                return Err(SQLError::Unsupported(format!(
+                    "ALTER SEQUENCE action {other:?} is not supported"
+                )))
+            }
+        };
+        return Ok(Statement::AlterSequence(AlterSequence {
+            name: table,
+            if_exists,
+            persistence: Some(persistence),
+            ..AlterSequence::default()
+        }));
+    }
     if matches!(
         stmt.objtype(),
         ObjectType::ObjectView | ObjectType::ObjectMatview
@@ -209,6 +236,12 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
             }
         };
         let action = match cmd.subtype() {
+            AlterTableType::AtSetLogged => AlterTableAction::SetPersistence {
+                persistence: RelationPersistence::Permanent,
+            },
+            AlterTableType::AtSetUnLogged => AlterTableAction::SetPersistence {
+                persistence: RelationPersistence::Unlogged,
+            },
             AlterTableType::AtEnableTrig
             | AlterTableType::AtEnableAlwaysTrig
             | AlterTableType::AtEnableReplicaTrig

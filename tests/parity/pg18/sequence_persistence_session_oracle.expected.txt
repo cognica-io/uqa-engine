@@ -1,0 +1,5 @@
+seed|1|1
+peer|ALTER SEQUENCE|ALTER SEQUENCE
+after|4|4|2|2
+changed_ids|u
+unchanged_ids|p

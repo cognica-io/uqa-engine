@@ -614,6 +614,35 @@ fn sequence_cache_blocks_are_session_local_and_definition_invalidations_are_glob
 }
 
 #[test]
+fn sequence_persistence_changes_invalidate_remote_caches_only_when_state_changes() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("session-sequence-persistence.db");
+    let root = Engine::open(&path).unwrap();
+    root.sql(
+        "CREATE SEQUENCE changed_ids CACHE 3;
+         CREATE SEQUENCE unchanged_ids CACHE 3",
+        &[],
+    )
+    .unwrap();
+    let sibling = root.new_session().unwrap();
+
+    assert_eq!(root.nextval("changed_ids").unwrap(), 1);
+    assert_eq!(root.nextval("unchanged_ids").unwrap(), 1);
+    sibling
+        .sql(
+            "ALTER SEQUENCE changed_ids SET UNLOGGED;
+             ALTER SEQUENCE unchanged_ids SET LOGGED",
+            &[],
+        )
+        .unwrap();
+
+    assert_eq!(root.nextval("changed_ids").unwrap(), 4);
+    assert_eq!(root.nextval("unchanged_ids").unwrap(), 2);
+    assert_eq!(root.currval("changed_ids").unwrap(), 4);
+    assert_eq!(root.currval("unchanged_ids").unwrap(), 2);
+}
+
+#[test]
 fn currval_is_owned_by_the_logical_session() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("session-currval.db");

@@ -106,6 +106,17 @@ fn assert_namespace_and_type_lookups(eng: &Engine) {
         namespace_oid
     );
     assert_eq!(
+        scalar(eng, "SELECT 'reg_lookup'::regnamespace::oid"),
+        namespace_oid
+    );
+    assert_eq!(
+        scalar(
+            eng,
+            "SELECT relnamespace = current_schema()::regnamespace FROM pg_catalog.pg_class WHERE oid = 'reg_lookup.\"MixedTable\"'::regclass",
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
         text(eng, "SELECT to_regnamespace('select')::text"),
         "\"select\""
     );
@@ -136,6 +147,39 @@ fn assert_namespace_and_type_lookups(eng: &Engine) {
         scalar(eng, "SELECT to_regtype('\"integer\"') IS NULL"),
         Value::Bool(true)
     );
+}
+
+#[test]
+fn pg18_regnamespace_casts_preserve_oid_identity_and_hard_errors() {
+    let eng = engine();
+    create_lookup_objects(&eng);
+    assert_eq!(
+        text(&eng, "SELECT 11::oid::regnamespace::text"),
+        "pg_catalog"
+    );
+    for (sql, state, detail) in [
+        (
+            "SELECT 'missing_namespace'::regnamespace",
+            "3F000",
+            "schema \"missing_namespace\" does not exist",
+        ),
+        (
+            "SELECT '09'::regnamespace",
+            "22P02",
+            "invalid input syntax for type oid",
+        ),
+        (
+            "SELECT '4294967296'::regnamespace",
+            "22003",
+            "out of range for type oid",
+        ),
+        ("SELECT 'a.b'::regnamespace", "42602", "invalid name syntax"),
+        ("SELECT ''::regnamespace", "42602", "invalid name syntax"),
+    ] {
+        let error = eng.sql(sql, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some(state), "{sql}: {error}");
+        assert!(error.to_string().contains(detail), "{sql}: {error}");
+    }
 }
 
 fn assert_lookup_result_types(eng: &Engine) {

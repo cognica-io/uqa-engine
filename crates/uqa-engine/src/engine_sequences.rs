@@ -9,6 +9,7 @@ use super::{
     SequenceOwnerDependency, SequenceRestart, SequenceState, StorageBackendError,
     StorageBackendResult,
 };
+use uqa_sql::ast::RelationPersistence;
 
 impl Engine {
     /// Resolve a sequence reference at DDL binding time using the current
@@ -319,6 +320,11 @@ impl Engine {
             .get(&relation)
             .copied()
             .unwrap_or_default();
+        let target_persistence =
+            Self::altered_sequence_persistence(alter, persistence, &relation.name)?;
+        if target_persistence == persistence && Self::sequence_alter_is_persistence_only(alter) {
+            return Ok(true);
+        }
         let object_id = self
             .durable
             .sequence_object_ids
@@ -362,7 +368,14 @@ impl Engine {
                 ))
             })?;
         state.definition_generation = definition_generation;
-        self.persist_sequence_state_replacement(&name, &relation, object_id, persistence, state)?;
+        self.persist_sequence_state_replacement(
+            &name,
+            &relation,
+            object_id,
+            target_persistence,
+            state,
+            alter.persistence.is_none(),
+        )?;
         if alter.ownership != uqa_sql::ast::SequenceOwnership::Unchanged {
             self.clear_auto_increment_owner_markers(&name)
                 .map_err(|error| {
@@ -374,6 +387,45 @@ impl Engine {
         Ok(true)
     }
 
+    fn altered_sequence_persistence(
+        alter: &uqa_sql::ast::AlterSequence,
+        current: RelationPersistence,
+        relation_name: &str,
+    ) -> Result<RelationPersistence, SQLError> {
+        match alter.persistence {
+            None => Ok(current),
+            Some(RelationPersistence::Permanent | RelationPersistence::Unlogged)
+                if current == RelationPersistence::Temporary =>
+            {
+                Err(SQLError::Routine {
+                    sqlstate: "42P16".into(),
+                    message: format!(
+                        "cannot change logged status of table \"{relation_name}\" because it is temporary"
+                    ),
+                })
+            }
+            Some(requested @ (RelationPersistence::Permanent | RelationPersistence::Unlogged)) => {
+                Ok(requested)
+            }
+            Some(RelationPersistence::Temporary) => Err(SQLError::Internal(
+                "ALTER SEQUENCE cannot request temporary persistence".into(),
+            )),
+        }
+    }
+
+    fn sequence_alter_is_persistence_only(alter: &uqa_sql::ast::AlterSequence) -> bool {
+        alter.persistence.is_some()
+            && alter.restart == SequenceRestart::Unchanged
+            && alter.increment.is_none()
+            && alter.start.is_none()
+            && alter.data_type.is_none()
+            && alter.min_value == SequenceBound::Unchanged
+            && alter.max_value == SequenceBound::Unchanged
+            && alter.cycle.is_none()
+            && alter.cache_size.is_none()
+            && alter.ownership == uqa_sql::ast::SequenceOwnership::Unchanged
+    }
+
     pub(crate) fn persist_sequence_state_replacement(
         &self,
         name: &str,
@@ -381,6 +433,7 @@ impl Engine {
         object_id: [u8; 16],
         persistence: uqa_sql::ast::RelationPersistence,
         state: SequenceState,
+        invalidate_current_cache: bool,
     ) -> Result<(), SQLError> {
         let temporary = persistence == uqa_sql::ast::RelationPersistence::Temporary;
         if !temporary {
@@ -407,7 +460,13 @@ impl Engine {
             .sequences
             .write()
             .insert(relation.clone(), state);
-        self.session.sequence_caches.lock().remove(relation);
+        self.durable
+            .sequence_persistence
+            .write()
+            .insert(relation.clone(), persistence);
+        if invalidate_current_cache {
+            self.session.sequence_caches.lock().remove(relation);
+        }
         self.note_catalog_registry_changed();
         Ok(())
     }

@@ -386,6 +386,7 @@ impl Engine {
             object_id,
             persistence,
             state,
+            true,
         )
     }
 

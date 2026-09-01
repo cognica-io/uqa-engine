@@ -186,6 +186,9 @@ pub enum AlterTableAction {
         from: String,
         to: String,
     },
+    SetPersistence {
+        persistence: RelationPersistence,
+    },
     SetTriggerEnableMode {
         name: Option<String>,
         user_only: bool,
