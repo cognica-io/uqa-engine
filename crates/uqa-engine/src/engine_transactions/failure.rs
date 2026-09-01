@@ -90,10 +90,9 @@ impl Engine {
 
         let rollback_state = statement_abort_snapshot(frame);
         let frame_storage_savepoint = frame.storage_savepoint;
-        let raw_nontransactional_column_stats = stack
-            .first()
-            .map(|frame| frame.nontransactional_column_stats.clone())
-            .unwrap_or_default();
+        let outer_frame = &stack[0];
+        let raw_nontransactional_column_stats = outer_frame.nontransactional_column_stats.clone();
+        let nontransactional_sequence_values = outer_frame.nontransactional_sequence_values.clone();
         let nontransactional_column_stats = self.nontransactional_column_stats_after_rollback(
             &raw_nontransactional_column_stats,
             &rollback_state.relation_states,
@@ -159,7 +158,12 @@ impl Engine {
         {
             cleanup_errors.push(format!("ANALYZE statistics cache restore: {restore_error}"));
         }
-        self.restore_session_state(&rollback_state.session);
+        self.restore_session_state_preserving_sequences(
+            &rollback_state.session,
+            &nontransactional_sequence_values,
+            backend_aborted,
+            &mut cleanup_errors,
+        );
         self.release_aborted_statement_locks(rollback_state.keep_mark);
         if let Some(frame) = stack.last_mut() {
             frame.status = if backend_aborted {

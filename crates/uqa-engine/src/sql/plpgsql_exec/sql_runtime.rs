@@ -7,12 +7,45 @@
 //! Dynamic SQL, `RAISE`, and statement-result bookkeeping.
 
 use super::{
-    condition_sqlstate, format_raise_message, looks_like_sqlstate, result_row_count,
-    result_row_values, strict_into_check, Expr, Flow, Interpreter, IntoTarget, RaiseLevel,
-    SQLError, SQLParam, SQLResult, Statement, Value,
+    cast_value_from, coercion_type_name, condition_sqlstate, format_raise_message,
+    looks_like_sqlstate, result_row_count, result_row_values, strict_into_check, Expr, Flow,
+    Interpreter, IntoTarget, RaiseLevel, SQLError, SQLParam, SQLResult, Statement, Value,
 };
 
 impl Interpreter<'_> {
+    pub(super) fn exec_assert(
+        &mut self,
+        condition: &Expr,
+        message: Option<&Expr>,
+    ) -> Result<Flow, SQLError> {
+        if !self.engine.plpgsql_asserts_enabled() {
+            return Ok(Flow::Normal);
+        }
+        if self.eval_boolean(condition)? == Some(true) {
+            return Ok(Flow::Normal);
+        }
+        let message = match message {
+            Some(expression) => {
+                let (value, declared_type) = self.eval_expr_with_type(expression)?;
+                let source_type = declared_type.as_ref().map(coercion_type_name);
+                match cast_value_from(&value, "text", source_type.as_deref())? {
+                    Value::Null => "assertion failed".into(),
+                    Value::Str(text) => text,
+                    other => {
+                        return Err(SQLError::Internal(format!(
+                            "PL/pgSQL ASSERT message coercion returned {other:?}"
+                        )))
+                    }
+                }
+            }
+            None => "assertion failed".into(),
+        };
+        Err(SQLError::Routine {
+            sqlstate: "P0004".into(),
+            message,
+        })
+    }
+
     pub(super) fn exec_raise(
         &mut self,
         level: RaiseLevel,

@@ -7,9 +7,10 @@
 //! COMMIT, ROLLBACK, and nontransactional statistics restoration.
 
 use super::{
-    Engine, NontransactionalColumnStats, SQLError, StorageBackendError, StorageBackendResult,
-    StorageSavepointId, TransactionDirtyState, TransactionFrame, TransactionIntent,
-    TransactionRelationStates, TransactionStatus,
+    Engine, NontransactionalColumnStats, NontransactionalSequenceValues, SQLError,
+    SessionStateSnapshot, StorageBackendError, StorageBackendResult, StorageSavepointId,
+    TransactionDirtyState, TransactionFrame, TransactionIntent, TransactionRelationStates,
+    TransactionStatus,
 };
 
 impl Engine {
@@ -127,6 +128,10 @@ impl Engine {
             .first()
             .map(|frame| frame.nontransactional_column_stats.clone())
             .unwrap_or_default();
+        let nontransactional_sequence_values = stack
+            .first()
+            .map(|frame| frame.nontransactional_sequence_values.clone())
+            .unwrap_or_default();
         let rollback_relation_states = stack
             .first()
             .map(|frame| frame.relation_states_at_begin.clone())
@@ -177,9 +182,16 @@ impl Engine {
         {
             cleanup_errors.push(format!("ANALYZE statistics cache restore: {error}"));
         }
+        if let Err(error) = self.persist_nontransactional_sequence_values_after_rollback(
+            &nontransactional_sequence_values,
+            true,
+        ) {
+            cleanup_errors.push(format!("sequence value restore: {error}"));
+        }
         if let Some(snapshot) = session_snapshot.as_ref() {
             self.restore_session_state(snapshot);
         }
+        self.apply_nontransactional_sequence_values(&nontransactional_sequence_values);
         if cleanup_errors.is_empty() {
             finish_error
         } else {
@@ -252,6 +264,10 @@ impl Engine {
         &self,
         stack: &mut Vec<TransactionFrame>,
     ) -> Result<(), SQLError> {
+        let nontransactional_sequence_values = stack
+            .last()
+            .map(|frame| frame.nontransactional_sequence_values.clone())
+            .unwrap_or_default();
         let rollback_relation_states = stack
             .last()
             .map(|frame| frame.relation_states_at_begin.clone())
@@ -301,7 +317,14 @@ impl Engine {
         {
             cleanup_errors.push(format!("ANALYZE statistics cache restore: {error}"));
         }
+        if let Err(error) = self.persist_nontransactional_sequence_values_after_rollback(
+            &nontransactional_sequence_values,
+            storage_savepoint.is_none(),
+        ) {
+            cleanup_errors.push(format!("sequence value restore: {error}"));
+        }
         self.restore_session_state(&session_snapshot);
+        self.apply_nontransactional_sequence_values(&nontransactional_sequence_values);
         let begin_lock_mark = frame.begin_lock_mark;
         let first_snapshot_set = frame.first_snapshot_set;
         stack.pop();
@@ -399,6 +422,97 @@ impl Engine {
             }
         }
         Ok(())
+    }
+
+    pub(super) fn persist_nontransactional_sequence_values_after_rollback(
+        &self,
+        values: &NontransactionalSequenceValues,
+        outer: bool,
+    ) -> StorageBackendResult<()> {
+        if self.storage.catalog.is_none() {
+            return Ok(());
+        }
+        let persistent = {
+            let sequences = self.durable.sequences.read();
+            let persistence = self.durable.sequence_persistence.read();
+            values
+                .iter()
+                .filter(|(relation, _)| sequences.contains_key(*relation))
+                .filter(|(relation, _)| {
+                    persistence.get(*relation).copied().unwrap_or_default()
+                        != uqa_sql::ast::RelationPersistence::Temporary
+                })
+                .map(|(relation, value)| (relation.qualified_name(), *value))
+                .collect::<Vec<_>>()
+        };
+        if persistent.is_empty() {
+            return Ok(());
+        }
+        let persist = |catalog: &dyn uqa_storage::CatalogFacade| -> StorageBackendResult<()> {
+            for (name, value) in &persistent {
+                if catalog.set_sequence_value(name, *value)?.is_none() {
+                    return Err(StorageBackendError::Other(format!(
+                        "sequence `{name}` disappeared while restoring its nontransactional value"
+                    )));
+                }
+            }
+            Ok(())
+        };
+        if !outer {
+            return persist(self.storage.catalog.as_deref().ok_or_else(|| {
+                StorageBackendError::Other(
+                    "persistent sequence values require a catalog after rollback".into(),
+                )
+            })?);
+        }
+        let provider = self.storage.provider.as_ref().ok_or_else(|| {
+            StorageBackendError::Other(
+                "nontransactional sequence values require an independent session".into(),
+            )
+        })?;
+        let session = provider.open_session()?;
+        session.backend.begin_transaction()?;
+        match persist(session.catalog.as_ref()) {
+            Ok(()) => session.backend.commit_transaction(),
+            Err(error) => match session.backend.rollback_transaction() {
+                Ok(()) => Err(error),
+                Err(rollback_error) => Err(StorageBackendError::Other(format!(
+                    "restore nontransactional sequence values failed: {error}; rollback also failed: {rollback_error}"
+                ))),
+            },
+        }
+    }
+
+    pub(super) fn apply_nontransactional_sequence_values(
+        &self,
+        values: &NontransactionalSequenceValues,
+    ) {
+        let mut sequences = self.durable.sequences.write();
+        let mut session = self.session.state.write();
+        for (relation, value) in values {
+            let Some(sequence) = sequences.get_mut(relation) else {
+                continue;
+            };
+            sequence.current = *value;
+            sequence.called = true;
+            session.sequence_currvals.insert(relation.clone(), *value);
+        }
+    }
+
+    pub(super) fn restore_session_state_preserving_sequences(
+        &self,
+        snapshot: &SessionStateSnapshot,
+        values: &NontransactionalSequenceValues,
+        outer: bool,
+        cleanup_errors: &mut Vec<String>,
+    ) {
+        if let Err(error) =
+            self.persist_nontransactional_sequence_values_after_rollback(values, outer)
+        {
+            cleanup_errors.push(format!("sequence value restore: {error}"));
+        }
+        self.restore_session_state(snapshot);
+        self.apply_nontransactional_sequence_values(values);
     }
 
     pub(super) fn nontransactional_column_stats_after_rollback(

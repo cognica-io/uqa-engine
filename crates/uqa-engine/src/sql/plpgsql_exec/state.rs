@@ -7,11 +7,11 @@
 //! Interpreter activation state, expression binding, and routine lifecycle.
 
 use super::{
-    bind_expr, bind_statement, coerce_routine_value, eval_lowered_expression,
-    eval_lowered_expression_with_type, execute_compiled_statement, BTreeSet, ColumnType,
-    CreateFunction, DatumResolver, Engine, Expr, Flow, FunctionReturns, HashMap, Interpreter,
-    PLpgSQLBlock, PLpgSQLDatum, PLpgSQLFunction, RoutineOutcome, SQLError, SQLResult, Statement,
-    Value,
+    bind_expr, bind_statement, cast_value_from, coerce_routine_value, coercion_type_name,
+    eval_lowered_expression, eval_lowered_expression_with_type, execute_compiled_statement,
+    BTreeSet, ColumnType, CreateFunction, DatumResolver, Engine, Expr, Flow, FunctionReturns,
+    HashMap, Interpreter, PLpgSQLBlock, PLpgSQLDatum, PLpgSQLFunction, RoutineOutcome, SQLError,
+    SQLResult, Statement, Value,
 };
 
 impl<'a> Interpreter<'a> {
@@ -256,6 +256,18 @@ impl<'a> Interpreter<'a> {
     ) -> Result<(Value, Option<ColumnType>), SQLError> {
         let bound = bind_expr(expr, &mut self.resolver())?;
         eval_lowered_expression_with_type(self.engine, &bound, None, &[])
+    }
+
+    pub(super) fn eval_boolean(&self, expr: &Expr) -> Result<Option<bool>, SQLError> {
+        let (value, declared_type) = self.eval_expr_with_type(expr)?;
+        let source_type = declared_type.as_ref().map(coercion_type_name);
+        match cast_value_from(&value, "boolean", source_type.as_deref())? {
+            Value::Null => Ok(None),
+            Value::Bool(value) => Ok(Some(value)),
+            other => Err(SQLError::Internal(format!(
+                "PL/pgSQL boolean coercion returned {other:?}"
+            ))),
+        }
     }
 
     pub(super) fn exec_query(&self, statement: &Statement) -> Result<SQLResult, SQLError> {

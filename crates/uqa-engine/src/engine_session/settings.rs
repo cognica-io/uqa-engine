@@ -21,7 +21,7 @@ impl Engine {
     pub fn load_library(&self, library: &str) -> Result<(), SQLError> {
         let requested = library.strip_prefix("$libdir/").unwrap_or(library);
         let base = requested.strip_suffix(".so").unwrap_or(requested);
-        if base == "age" && !requested.contains('/') {
+        if matches!(base, "age" | "plpgsql") && !requested.contains('/') {
             return Ok(());
         }
         let path = if library.contains('/') {
@@ -183,7 +183,14 @@ impl Engine {
             session.sql_statement_cache.clear();
             return Ok(());
         }
-        let value = Self::validate_default_transaction_parameter(name, value)?;
+        let mut value = Self::validate_default_transaction_parameter(name, value)?;
+        if name.eq_ignore_ascii_case("plpgsql.check_asserts") {
+            value = if crate::engine_capabilities::parse_boolean_runtime_parameter(name, &value)? {
+                "on".into()
+            } else {
+                "off".into()
+            };
+        }
         if name.eq_ignore_ascii_case("work_mem") {
             crate::engine_capabilities::parse_work_mem_bytes(&value)?;
         }
@@ -276,6 +283,16 @@ impl Engine {
             .iter()
             .find(|(name, _)| name.eq_ignore_ascii_case("session_replication_role"))
             .is_some_and(|(_, value)| value == "replica")
+    }
+
+    pub(crate) fn plpgsql_asserts_enabled(&self) -> bool {
+        self.session
+            .state
+            .read()
+            .session_vars
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("plpgsql.check_asserts"))
+            .is_none_or(|(_, value)| value == "on")
     }
 
     /// Apply `DISCARD <target>`. `ALL` resets every kind of session state;

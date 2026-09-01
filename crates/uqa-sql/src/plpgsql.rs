@@ -390,6 +390,11 @@ pub enum PLpgSQLStmt {
         message: Option<String>,
         params: Vec<Expr>,
     },
+    /// `ASSERT condition [, message]`.
+    Assert {
+        condition: Expr,
+        message: Option<Expr>,
+    },
     /// Embedded SQL statement, optionally `INTO [STRICT] target`.
     ExecSQL {
         stmt: Statement,

@@ -424,6 +424,13 @@ fn plpgsql_statement_may_mutate_engine(
             visiting_routines,
             classification,
         ),
+        PLpgSQLStmt::Assert { condition, message } => plpgsql_expressions_may_mutate_engine(
+            engine,
+            [Some(condition), message.as_ref()].into_iter().flatten(),
+            visiting_views,
+            visiting_routines,
+            classification,
+        ),
         PLpgSQLStmt::OpenCursor { cursor, open } => {
             if classification.procedural_state_requires_transaction {
                 return Ok(true);

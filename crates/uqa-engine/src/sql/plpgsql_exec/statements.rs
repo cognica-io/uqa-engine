@@ -7,8 +7,8 @@
 //! PL/pgSQL statement dispatch.
 
 use super::{
-    result_row_count, result_row_values, return_query_context_error, strict_into_check, truthy,
-    Flow, Interpreter, LoopSignal, PLpgSQLStmt, SQLError, Value,
+    result_row_count, result_row_values, return_query_context_error, strict_into_check, Flow,
+    Interpreter, LoopSignal, PLpgSQLStmt, SQLError, Value,
 };
 
 impl Interpreter<'_> {
@@ -28,11 +28,11 @@ impl Interpreter<'_> {
                 elsifs,
                 else_body,
             } => {
-                if truthy(&self.eval_expr(cond)?) {
+                if self.eval_boolean(cond)?.unwrap_or(false) {
                     return self.exec_stmts(then_body);
                 }
                 for (elsif_cond, body) in elsifs {
-                    if truthy(&self.eval_expr(elsif_cond)?) {
+                    if self.eval_boolean(elsif_cond)?.unwrap_or(false) {
                         return self.exec_stmts(body);
                     }
                 }
@@ -52,7 +52,7 @@ impl Interpreter<'_> {
                     self.values[*varno] = value;
                 }
                 for (cond, body) in arms {
-                    if truthy(&self.eval_expr(cond)?) {
+                    if self.eval_boolean(cond)?.unwrap_or(false) {
                         return self.exec_stmts(body);
                     }
                 }
@@ -72,7 +72,7 @@ impl Interpreter<'_> {
                 }
             },
             PLpgSQLStmt::While { label, cond, body } => loop {
-                if !truthy(&self.eval_expr(cond)?) {
+                if !self.eval_boolean(cond)?.unwrap_or(false) {
                     return Ok(Flow::Normal);
                 }
                 match self.exec_loop_body(label.as_deref(), body)? {
@@ -144,7 +144,7 @@ impl Interpreter<'_> {
                 cond,
             } => {
                 if let Some(cond) = cond {
-                    if !truthy(&self.eval_expr(cond)?) {
+                    if !self.eval_boolean(cond)?.unwrap_or(false) {
                         return Ok(Flow::Normal);
                     }
                 }
@@ -181,6 +181,9 @@ impl Interpreter<'_> {
                 message,
                 params,
             } => self.exec_raise(*level, condition.as_deref(), message.as_deref(), params),
+            PLpgSQLStmt::Assert { condition, message } => {
+                self.exec_assert(condition, message.as_ref())
+            }
             PLpgSQLStmt::ExecSQL { stmt, into, strict } => {
                 let result = self.exec_query(stmt)?;
                 self.consume_statement_result(stmt, &result, into.as_ref(), *strict)?;

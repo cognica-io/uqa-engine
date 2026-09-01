@@ -172,6 +172,143 @@ fn exception_when_sqlstate_condition() {
 }
 
 #[test]
+fn assert_uses_postgresql_failure_messages_handlers_and_diagnostics() {
+    let eng = engine();
+    exec(
+        &eng,
+        "CREATE FUNCTION assert_true_state() RETURNS text LANGUAGE plpgsql AS $$
+         DECLARE rows_before bigint; rows_after bigint;
+         BEGIN
+           PERFORM 1 WHERE false;
+           GET DIAGNOSTICS rows_before = ROW_COUNT;
+           ASSERT true, 'unused';
+           GET DIAGNOSTICS rows_after = ROW_COUNT;
+           RETURN FOUND::text || ':' || rows_before || ':' || rows_after;
+         END $$",
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT assert_true_state()"),
+        Value::Str("false:0:0".into())
+    );
+
+    for (body, expected) in [
+        ("ASSERT false", "assertion failed"),
+        ("ASSERT NULL::boolean", "assertion failed"),
+        ("ASSERT false, 'custom failure'", "custom failure"),
+        ("ASSERT false, NULL::text", "assertion failed"),
+        ("ASSERT false, 42", "42"),
+    ] {
+        let error = exec_err(&eng, &format!("DO $$ BEGIN {body}; END $$"));
+        assert_eq!(error.sqlstate(), Some("P0004"));
+        assert_eq!(error.to_string(), expected);
+    }
+
+    exec(
+        &eng,
+        "CREATE FUNCTION assert_handler() RETURNS text LANGUAGE plpgsql AS $$
+         BEGIN
+           BEGIN
+             ASSERT false;
+           EXCEPTION WHEN OTHERS THEN
+             RETURN 'caught by others';
+           END;
+           RETURN 'not caught';
+         EXCEPTION WHEN assert_failure THEN
+           RETURN SQLSTATE || ':' || SQLERRM;
+         END $$",
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT assert_handler()"),
+        Value::Str("P0004:assertion failed".into())
+    );
+}
+
+#[test]
+fn plpgsql_boolean_conditions_use_postgresql_assignment_casts() {
+    let eng = engine();
+    exec(
+        &eng,
+        "CREATE FUNCTION boolean_control(value text) RETURNS text LANGUAGE plpgsql AS $$
+         BEGIN
+           IF value THEN RETURN 'true'; ELSE RETURN 'false'; END IF;
+         END $$",
+    );
+    for (input, expected) in [
+        ("true", "true"),
+        ("false", "false"),
+        ("yes", "true"),
+        ("no", "false"),
+        ("1", "true"),
+        ("0", "false"),
+    ] {
+        assert_eq!(
+            scalar(&eng, &format!("SELECT boolean_control('{input}')")),
+            Value::Str(expected.into())
+        );
+    }
+    let error = exec_err(&eng, "SELECT boolean_control('nonsense')");
+    assert_eq!(error.sqlstate(), Some("22P02"));
+    assert!(error
+        .to_string()
+        .contains("invalid input syntax for type boolean: \"nonsense\""));
+}
+
+#[test]
+fn assert_evaluates_messages_lazily_and_honors_check_asserts() {
+    let eng = engine();
+    exec(&eng, "CREATE SEQUENCE assert_true_condition_sequence");
+    exec(&eng, "CREATE SEQUENCE assert_true_message_sequence");
+    exec(
+        &eng,
+        "CREATE FUNCTION assert_true_eval() RETURNS text LANGUAGE plpgsql AS $$
+         BEGIN
+           ASSERT nextval('assert_true_condition_sequence') > 0,
+                  nextval('assert_true_message_sequence')::text;
+           RETURN 'ok';
+         END $$",
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT assert_true_eval()"),
+        Value::Str("ok".into())
+    );
+    assert_eq!(eng.currval("assert_true_condition_sequence").unwrap(), 1);
+    assert!(eng.currval("assert_true_message_sequence").is_err());
+
+    exec(&eng, "CREATE SEQUENCE assert_false_condition_sequence");
+    exec(&eng, "CREATE SEQUENCE assert_false_message_sequence");
+    exec(
+        &eng,
+        "CREATE FUNCTION assert_false_eval() RETURNS text LANGUAGE plpgsql AS $$
+         BEGIN
+           BEGIN
+             ASSERT nextval('assert_false_condition_sequence') < 0,
+                    nextval('assert_false_message_sequence')::text;
+           EXCEPTION WHEN assert_failure THEN RETURN SQLSTATE;
+           END;
+           RETURN 'not caught';
+         END $$",
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT assert_false_eval()"),
+        Value::Str("P0004".into())
+    );
+    assert_eq!(eng.currval("assert_false_condition_sequence").unwrap(), 1);
+    assert_eq!(eng.currval("assert_false_message_sequence").unwrap(), 1);
+
+    exec(&eng, "CREATE SEQUENCE assert_off_condition_sequence");
+    exec(&eng, "CREATE SEQUENCE assert_off_message_sequence");
+    exec(&eng, "SET plpgsql.check_asserts = off");
+    exec(
+        &eng,
+        "DO $$ BEGIN ASSERT nextval('assert_off_condition_sequence') < 0,
+                             nextval('assert_off_message_sequence')::text; END $$",
+    );
+    assert!(eng.currval("assert_off_condition_sequence").is_err());
+    assert!(eng.currval("assert_off_message_sequence").is_err());
+    exec(&eng, "RESET plpgsql.check_asserts");
+}
+
+#[test]
 fn exception_block_rolls_back_database_changes_before_handler() {
     assert_exception_block_rollback(&engine());
 

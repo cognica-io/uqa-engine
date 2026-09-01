@@ -7,6 +7,7 @@
 use super::{
     Engine, SQLError, TransactionCharacteristicsState, TransactionFrame, TransactionIntent,
 };
+use crate::engine_capabilities::parse_boolean_runtime_parameter;
 use uqa_sql::ast::{TransactionCharacteristics, TransactionIsolationLevel};
 
 fn session_value(
@@ -19,17 +20,6 @@ fn session_value(
             .find(|(key, _)| key.eq_ignore_ascii_case(name))
             .map(|(_, value)| value.clone())
     })
-}
-
-fn parse_boolean_parameter(name: &str, value: &str) -> Result<bool, SQLError> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "on" | "true" | "yes" | "1" => Ok(true),
-        "off" | "false" | "no" | "0" => Ok(false),
-        _ => Err(SQLError::Routine {
-            sqlstate: "22023".into(),
-            message: format!("parameter \"{name}\" requires a Boolean value"),
-        }),
-    }
 }
 
 fn parse_isolation_parameter(
@@ -79,11 +69,13 @@ impl Engine {
             })
             .unwrap_or(TransactionIsolationLevel::ReadCommitted);
         let read_only = session_value(&session.session_vars, "default_transaction_read_only")
-            .and_then(|value| parse_boolean_parameter("default_transaction_read_only", &value).ok())
+            .and_then(|value| {
+                parse_boolean_runtime_parameter("default_transaction_read_only", &value).ok()
+            })
             .unwrap_or(false);
         let deferrable = session_value(&session.session_vars, "default_transaction_deferrable")
             .and_then(|value| {
-                parse_boolean_parameter("default_transaction_deferrable", &value).ok()
+                parse_boolean_runtime_parameter("default_transaction_deferrable", &value).ok()
             })
             .unwrap_or(false);
         TransactionCharacteristicsState {
@@ -213,12 +205,12 @@ impl Engine {
             }
         } else if name.eq_ignore_ascii_case("transaction_read_only") {
             TransactionCharacteristics {
-                read_only: Some(parse_boolean_parameter(name, value)?),
+                read_only: Some(parse_boolean_runtime_parameter(name, value)?),
                 ..TransactionCharacteristics::default()
             }
         } else if name.eq_ignore_ascii_case("transaction_deferrable") {
             TransactionCharacteristics {
-                deferrable: Some(parse_boolean_parameter(name, value)?),
+                deferrable: Some(parse_boolean_runtime_parameter(name, value)?),
                 ..TransactionCharacteristics::default()
             }
         } else {
@@ -241,7 +233,7 @@ impl Engine {
         if name.eq_ignore_ascii_case("default_transaction_read_only")
             || name.eq_ignore_ascii_case("default_transaction_deferrable")
         {
-            return parse_boolean_parameter(name, value)
+            return parse_boolean_runtime_parameter(name, value)
                 .map(|value| if value { "on" } else { "off" }.into());
         }
         Ok(value.to_string())

@@ -139,6 +139,57 @@ fn session_replication_role_validates_values_privileges_and_transaction_scope() 
 }
 
 #[test]
+fn plpgsql_check_asserts_matches_boolean_setting_and_routine_scope() {
+    let eng = Engine::new();
+    eng.sql("LOAD 'plpgsql'", &[]).unwrap();
+    eng.sql("LOAD '$libdir/plpgsql'", &[]).unwrap();
+    assert_eq!(eng.show_variable("plpgsql.check_asserts").unwrap(), "on");
+
+    let settings = eng
+        .sql(
+            "SELECT setting, category, short_desc, context, vartype, boot_val, reset_val
+             FROM pg_catalog.pg_settings WHERE name = 'plpgsql.check_asserts'",
+            &[],
+        )
+        .unwrap();
+    let row = &settings.rows[0];
+    assert_eq!(row["setting"], Value::Str("on".into()));
+    assert_eq!(row["category"], Value::Str("Customized Options".into()));
+    assert_eq!(
+        row["short_desc"],
+        Value::Str("Perform checks given in ASSERT statements.".into())
+    );
+    assert_eq!(row["context"], Value::Str("user".into()));
+    assert_eq!(row["vartype"], Value::Str("bool".into()));
+    assert_eq!(row["boot_val"], Value::Str("on".into()));
+    assert_eq!(row["reset_val"], Value::Str("on".into()));
+
+    eng.sql("SET plpgsql.check_asserts = of", &[]).unwrap();
+    assert_eq!(eng.show_variable("plpgsql.check_asserts").unwrap(), "off");
+    eng.sql("SET plpgsql.check_asserts = t", &[]).unwrap();
+    assert_eq!(eng.show_variable("plpgsql.check_asserts").unwrap(), "on");
+    let invalid = eng.sql("SET plpgsql.check_asserts = o", &[]).unwrap_err();
+    assert_eq!(invalid.sqlstate(), Some("22023"));
+    assert_eq!(
+        invalid.to_string(),
+        "parameter \"plpgsql.check_asserts\" requires a Boolean value"
+    );
+
+    eng.sql("BEGIN; SET plpgsql.check_asserts = off; ROLLBACK", &[])
+        .unwrap();
+    assert_eq!(eng.show_variable("plpgsql.check_asserts").unwrap(), "on");
+    eng.sql(
+        "CREATE FUNCTION disabled_assert() RETURNS integer LANGUAGE plpgsql
+         SET plpgsql.check_asserts = off AS $$ BEGIN ASSERT false; RETURN 7; END $$",
+        &[],
+    )
+    .unwrap();
+    let result = eng.sql("SELECT disabled_assert() AS value", &[]).unwrap();
+    assert_eq!(result.rows[0]["value"], Value::Int(7));
+    assert_eq!(eng.show_variable("plpgsql.check_asserts").unwrap(), "on");
+}
+
+#[test]
 fn show_unknown_variable_is_an_error() {
     let eng = Engine::new();
     let err = eng.sql("SHOW some_unknown_var", &[]).unwrap_err();

@@ -253,6 +253,7 @@ type ColumnStatsMap = BTreeMap<String, uqa_planner::ColumnStats>;
 type TransactionRelationStates = BTreeMap<RelationIdentity, u64>;
 type FixedTransactionCatalogBaseline = BTreeMap<[u8; 16], (RelationIdentity, Vec<u8>)>;
 type NontransactionalColumnStats = Vec<NontransactionalColumnStatsEntry>;
+type NontransactionalSequenceValues = BTreeMap<RelationIdentity, i64>;
 
 #[derive(Clone)]
 struct NontransactionalColumnStatsEntry {
@@ -387,6 +388,8 @@ struct TransactionFrame {
     constraint_modes: ConstraintModeState,
     /// Statistics written by ANALYZE are nontransactional in `PostgreSQL`. Keep the latest values outside savepoint snapshots so any rollback can restore them after transactional storage state is rolled back.
     nontransactional_column_stats: NontransactionalColumnStats,
+    /// Values allocated by `nextval` or installed by `setval` are not rolled back in `PostgreSQL`. Every active frame records them so transaction, savepoint, and PL/pgSQL exception rollback can reapply them after restoring transactional catalog state.
+    nontransactional_sequence_values: NontransactionalSequenceValues,
 }
 
 enum FixedTransactionSnapshot {
@@ -447,10 +450,7 @@ struct TransactionSavepoint {
     constraint_modes: ConstraintModeState,
 }
 
-/// Lightweight SQL-session state that follows transaction/savepoint rollback
-/// for every backend. It is intentionally separate from the database-sized
-/// memory-engine snapshot so persistent sessions receive identical SET,
-/// search-path, sequence-currval, PREPARE, and statement-cache semantics.
+/// Lightweight SQL-session state that follows transaction/savepoint rollback for every backend. It is intentionally separate from the database-sized memory-engine snapshot so persistent sessions receive identical SET, search-path, PREPARE, and statement-cache semantics. Sequence `currval` entries produced after the snapshot are reapplied because sequence functions are nontransactional in `PostgreSQL`.
 #[derive(Clone, Default)]
 struct SessionStateSnapshot {
     search_path: Vec<String>,

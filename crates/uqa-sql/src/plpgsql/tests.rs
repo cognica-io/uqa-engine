@@ -427,6 +427,31 @@ fn pg18_foreach_array_statements_preserve_targets_slices_labels_and_bodies() {
 }
 
 #[test]
+fn pg18_assert_statements_preserve_conditions_and_lazy_messages() {
+    let parsed = parse_plpgsql_text(
+        "CREATE FUNCTION assert_shape(flag boolean) RETURNS integer LANGUAGE plpgsql AS $$
+         BEGIN
+           ASSERT flag;
+           ASSERT flag, 'flag=' || flag;
+           RETURN 1;
+         END $$;",
+    )
+    .unwrap();
+
+    assert!(matches!(
+        parsed.action.body[0],
+        PLpgSQLStmt::Assert { message: None, .. }
+    ));
+    assert!(matches!(
+        parsed.action.body[1],
+        PLpgSQLStmt::Assert {
+            message: Some(_),
+            ..
+        }
+    ));
+}
+
+#[test]
 fn omitted_zero_datum_references_remain_valid_but_malformed_values_fail() {
     let datums = vec![scalar_datum("target")];
     let assignment = serde_json::json!({
@@ -662,5 +687,29 @@ fn malformed_into_diagnostics_and_expression_modes_fail_at_lowering() {
     assert!(matches!(
         lower_full_statement(&json_expr("SELECT 1", 2)),
         Err(SQLError::Internal(message)) if message.contains("parse mode 2")
+    ));
+}
+
+#[test]
+fn malformed_assert_nodes_fail_at_lowering() {
+    let missing_condition = serde_json::json!({
+        "PLpgSQL_stmt_assert": {
+            "message": json_expr("'message'", 2)
+        }
+    });
+    assert!(matches!(
+        lower_stmt(&missing_condition, &[]),
+        Err(SQLError::Internal(message)) if message.contains("cond")
+    ));
+
+    let malformed_message = serde_json::json!({
+        "PLpgSQL_stmt_assert": {
+            "cond": json_expr("true", 2),
+            "message": []
+        }
+    });
+    assert!(matches!(
+        lower_stmt(&malformed_message, &[]),
+        Err(SQLError::Internal(_))
     ));
 }

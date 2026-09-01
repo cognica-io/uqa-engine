@@ -434,6 +434,9 @@ pub(super) fn default_runtime_parameter(name: &str) -> Option<&'static str> {
     if name.eq_ignore_ascii_case("session_replication_role") {
         return Some("origin");
     }
+    if name.eq_ignore_ascii_case("plpgsql.check_asserts") {
+        return Some("on");
+    }
     if name.eq_ignore_ascii_case("default_transaction_isolation")
         || name.eq_ignore_ascii_case("transaction_isolation")
     {
@@ -460,12 +463,32 @@ pub(super) fn is_mutable_runtime_parameter(name: &str) -> bool {
         || name.eq_ignore_ascii_case("timezone")
         || name.eq_ignore_ascii_case("work_mem")
         || name.eq_ignore_ascii_case("session_replication_role")
+        || name.eq_ignore_ascii_case("plpgsql.check_asserts")
         || name.eq_ignore_ascii_case("default_transaction_isolation")
         || name.eq_ignore_ascii_case("default_transaction_read_only")
         || name.eq_ignore_ascii_case("default_transaction_deferrable")
         || name.eq_ignore_ascii_case("transaction_isolation")
         || name.eq_ignore_ascii_case("transaction_read_only")
         || name.eq_ignore_ascii_case("transaction_deferrable")
+}
+
+pub(super) fn parse_boolean_runtime_parameter(name: &str, value: &str) -> Result<bool, SQLError> {
+    let text = value.trim().to_ascii_lowercase();
+    let matches_prefix = |word: &str| !text.is_empty() && word.starts_with(&text);
+    if matches_prefix("true") || matches_prefix("yes") || text == "on" || text == "1" {
+        return Ok(true);
+    }
+    if matches_prefix("false")
+        || matches_prefix("no")
+        || (matches_prefix("off") && text.len() >= 2)
+        || text == "0"
+    {
+        return Ok(false);
+    }
+    Err(SQLError::Routine {
+        sqlstate: "22023".into(),
+        message: format!("parameter \"{name}\" requires a Boolean value"),
+    })
 }
 
 fn session_value(

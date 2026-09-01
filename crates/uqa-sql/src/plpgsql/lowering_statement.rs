@@ -342,6 +342,12 @@ pub(super) fn lower_stmt(raw: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLp
             params: lower_expr_list(stmt.get("params"))?,
         });
     }
+    if let Some(stmt) = raw.get("PLpgSQL_stmt_assert") {
+        return Ok(PLpgSQLStmt::Assert {
+            condition: lower_expr(require(stmt, "cond")?)?,
+            message: stmt.get("message").map(lower_expr).transpose()?,
+        });
+    }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_execsql") {
         let sql = lower_full_statement(require(stmt, "sqlstmt")?)?;
         let has_into = json_bool_or_false(stmt, "into")?;

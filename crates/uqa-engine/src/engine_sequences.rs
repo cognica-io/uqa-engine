@@ -56,6 +56,15 @@ impl SequenceValueError {
 }
 
 impl Engine {
+    fn record_nontransactional_sequence_value(&self, relation: &RelationIdentity, value: i64) {
+        let mut transactions = self.session.transactions.lock();
+        for frame in transactions.iter_mut() {
+            frame
+                .nontransactional_sequence_values
+                .insert(relation.clone(), value);
+        }
+    }
+
     /// Resolve a sequence reference at DDL binding time using the current
     /// `search_path`. Persisted expressions must store the returned canonical
     /// relation name so later session state cannot change their target.
@@ -517,7 +526,8 @@ impl Engine {
             .state
             .write()
             .sequence_currvals
-            .insert(relation, current);
+            .insert(relation.clone(), current);
+        self.record_nontransactional_sequence_value(&relation, current);
         Ok(current)
     }
 
@@ -605,7 +615,8 @@ impl Engine {
             .state
             .write()
             .sequence_currvals
-            .insert(relation, value);
+            .insert(relation.clone(), value);
+        self.record_nontransactional_sequence_value(&relation, value);
         Ok(value)
     }
 

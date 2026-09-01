@@ -97,22 +97,20 @@ fn assert_nested_view_failure_rolls_back(engine: &Arc<Engine>) -> i64 {
         .unwrap_err();
     assert_nested_view_error(&error);
     assert_scoring_params_absent(engine, NESTED_VIEW_KEY);
-    assert_eq!(
+    let failed_nextval = engine.currval("nested_view_sequence").unwrap();
+    assert_eq!(failed_nextval, sequence_before);
+    assert!(
         engine
             .sequence_state("nested_view_sequence")
             .unwrap()
             .unwrap()
             .1
-            .current,
-        sequence_before,
-        "failed nested view execution advanced its sequence"
-    );
-    assert!(
-        engine.currval("nested_view_sequence").is_err(),
-        "failed nextval became the session currval"
+            .called,
+        "failed nested view execution did not preserve its sequence call"
     );
 
     let committed_value = engine.nextval("nested_view_sequence").unwrap();
+    assert_eq!(committed_value, failed_nextval + 1);
     assert_eq!(
         engine.currval("nested_view_sequence").unwrap(),
         committed_value
@@ -140,8 +138,8 @@ fn assert_nested_view_failure_rolls_back(engine: &Arc<Engine>) -> i64 {
     assert_scoring_params_absent(engine, NESTED_VIEW_KEY);
     assert_eq!(
         engine.currval("nested_view_sequence").unwrap(),
-        committed_value,
-        "failed setval replaced the session currval"
+        99,
+        "failed setval did not become the session currval"
     );
     assert_eq!(
         engine
@@ -150,10 +148,10 @@ fn assert_nested_view_failure_rolls_back(engine: &Arc<Engine>) -> i64 {
             .unwrap()
             .1
             .current,
-        committed_value,
-        "failed setval changed the sequence state"
+        99,
+        "failed setval did not preserve the sequence state"
     );
-    committed_value
+    99
 }
 
 #[test]
@@ -227,7 +225,7 @@ fn failed_registered_callbacks_roll_back_captured_persistent_mutations() {
 }
 
 #[test]
-fn nested_view_mutations_are_writer_classified_and_rolled_back() {
+fn nested_view_mutations_roll_back_except_sequence_values() {
     let memory = Arc::new(Engine::new());
     assert_nested_view_failure_rolls_back(&memory);
 
@@ -251,7 +249,7 @@ fn nested_view_mutations_are_writer_classified_and_rolled_back() {
             .1
             .current,
         sequence_before,
-        "failed nested view execution persisted a sequence advance"
+        "failed nested view execution did not persist its sequence value"
     );
 }
 
@@ -294,7 +292,7 @@ fn cursor_worker_allows_same_statement_registered_callback_reentry() {
     assert_scoring_params_absent(&engine, "callback.cursor");
 }
 
-fn assert_explicit_sequence_currval_rollback(engine: &Engine) -> i64 {
+fn assert_sequence_values_survive_rollback(engine: &Engine) -> i64 {
     engine
         .sql("CREATE SEQUENCE explicit_rollback_sequence START 10", &[])
         .unwrap();
@@ -308,25 +306,22 @@ fn assert_explicit_sequence_currval_rollback(engine: &Engine) -> i64 {
     engine.begin().unwrap();
     assert_eq!(engine.nextval("explicit_rollback_sequence").unwrap(), 10);
     engine.rollback().unwrap();
-    assert!(engine.currval("explicit_rollback_sequence").is_err());
-    assert_eq!(
+    assert_eq!(engine.currval("explicit_rollback_sequence").unwrap(), 10);
+    assert!(
         engine
             .sequence_state("explicit_rollback_sequence")
             .unwrap()
             .unwrap()
             .1
-            .current,
-        initial
+            .called
     );
 
-    let committed = engine.nextval("explicit_rollback_sequence").unwrap();
+    let after_nextval_rollback = engine.nextval("explicit_rollback_sequence").unwrap();
+    assert_eq!(after_nextval_rollback, initial + 1);
     engine.begin().unwrap();
     assert_eq!(engine.setval("explicit_rollback_sequence", 99).unwrap(), 99);
     engine.rollback().unwrap();
-    assert_eq!(
-        engine.currval("explicit_rollback_sequence").unwrap(),
-        committed
-    );
+    assert_eq!(engine.currval("explicit_rollback_sequence").unwrap(), 99);
     assert_eq!(
         engine
             .sequence_state("explicit_rollback_sequence")
@@ -334,37 +329,37 @@ fn assert_explicit_sequence_currval_rollback(engine: &Engine) -> i64 {
             .unwrap()
             .1
             .current,
-        committed
+        99
     );
 
     engine.begin().unwrap();
     engine.savepoint("sequence_point").unwrap();
-    assert_eq!(
-        engine.nextval("explicit_rollback_sequence").unwrap(),
-        committed + 1
-    );
+    assert_eq!(engine.nextval("explicit_rollback_sequence").unwrap(), 100);
     engine.rollback_to_savepoint("sequence_point").unwrap();
-    assert_eq!(
-        engine.currval("explicit_rollback_sequence").unwrap(),
-        committed
-    );
+    assert_eq!(engine.currval("explicit_rollback_sequence").unwrap(), 100);
     engine.rollback().unwrap();
+    assert_eq!(engine.currval("explicit_rollback_sequence").unwrap(), 100);
     assert_eq!(
-        engine.currval("explicit_rollback_sequence").unwrap(),
-        committed
+        engine
+            .sequence_state("explicit_rollback_sequence")
+            .unwrap()
+            .unwrap()
+            .1
+            .current,
+        100
     );
-    committed
+    100
 }
 
 #[test]
-fn sequence_currval_is_restored_by_transactions_and_savepoints() {
+fn sequence_values_and_currval_survive_transactions_and_savepoints() {
     let memory = Engine::new();
-    assert_explicit_sequence_currval_rollback(&memory);
+    assert_sequence_values_survive_rollback(&memory);
 
     let directory = tempdir().unwrap();
     let database = directory.path().join("sequence-currval-rollback.sqlite");
     let persistent = Engine::open(&database).unwrap();
-    let committed = assert_explicit_sequence_currval_rollback(&persistent);
+    let retained = assert_sequence_values_survive_rollback(&persistent);
     drop(persistent);
 
     let reopened = Engine::open(&database).unwrap();
@@ -376,6 +371,6 @@ fn sequence_currval_is_restored_by_transactions_and_savepoints() {
             .unwrap()
             .1
             .current,
-        committed
+        retained
     );
 }

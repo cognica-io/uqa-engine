@@ -10,8 +10,8 @@
 
 use super::{
     failed_transaction_error, BackendTransactionMode, ConstraintModeState, Engine,
-    EngineDataSnapshot, NontransactionalColumnStats, SQLError, SessionStateSnapshot,
-    StorageBackendError, StorageSavepointId, TransactionCharacteristicsState,
+    EngineDataSnapshot, NontransactionalColumnStats, NontransactionalSequenceValues, SQLError,
+    SessionStateSnapshot, StorageBackendError, StorageSavepointId, TransactionCharacteristicsState,
     TransactionDirtyState, TransactionFrame, TransactionIntent, TransactionRelationStates,
     TransactionStatus,
 };
@@ -300,6 +300,7 @@ impl Engine {
             deferred_constraint_trigger_events,
             constraint_modes,
             nontransactional_column_stats: NontransactionalColumnStats::new(),
+            nontransactional_sequence_values: NontransactionalSequenceValues::new(),
         });
         self.update_statement_row_lock_baseline(snapshot_change_baseline);
         Ok(())

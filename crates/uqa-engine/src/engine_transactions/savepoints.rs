@@ -132,6 +132,7 @@ impl Engine {
             sqlstate: "25P01".into(),
             message: "ROLLBACK TO SAVEPOINT can only be used in transaction blocks".into(),
         })?;
+        let nontransactional_sequence_values = frame.nontransactional_sequence_values.clone();
         let storage_savepoint = frame.savepoints[position].storage_savepoint;
         if let Some(backend) = self.storage.backend.as_ref().filter(|_| !deferred) {
             backend
@@ -167,7 +168,12 @@ impl Engine {
         {
             cleanup_errors.push(format!("ANALYZE statistics cache restore: {error}"));
         }
-        self.restore_session_state(&savepoint.session_snapshot);
+        self.restore_session_state_preserving_sequences(
+            &savepoint.session_snapshot,
+            &nontransactional_sequence_values,
+            false,
+            &mut cleanup_errors,
+        );
         let keep_mark = savepoint.lock_mark;
         frame.row_changes.clone_from(&savepoint.row_changes);
         frame

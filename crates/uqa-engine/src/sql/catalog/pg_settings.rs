@@ -22,6 +22,7 @@ pub(super) fn build_pg_settings(
         ("TimeZone", "Locale and formatting"),
         ("work_mem", "Resource usage"),
         ("session_replication_role", "Replication"),
+        ("plpgsql.check_asserts", "Customized Options"),
         ("search_path", "Client connection defaults"),
         (
             "default_transaction_isolation",
@@ -43,57 +44,83 @@ pub(super) fn build_pg_settings(
         .into_iter()
         .map(|(name, category)| {
             let setting = session.show_variable(name)?;
-            let replication_role = name == "session_replication_role";
-            let enumvals = if replication_role {
-                catalog_array(
-                    ["origin", "replica", "local"]
-                        .into_iter()
-                        .map(str_value)
-                        .collect(),
-                    "session_replication_role enum values",
-                )?
-            } else {
-                Value::Null
-            };
-            Ok(row([
-                ("name", str_value(name)),
-                ("setting", str_value(setting.as_str())),
-                ("unit", Value::Null),
-                ("category", str_value(category)),
-                ("short_desc", str_value(name)),
-                ("extra_desc", Value::Null),
-                (
-                    "context",
-                    str_value(if replication_role {
-                        "superuser"
-                    } else {
-                        "user"
-                    }),
-                ),
-                (
-                    "vartype",
-                    str_value(if replication_role { "enum" } else { "string" }),
-                ),
-                ("source", str_value("default")),
-                ("min_val", Value::Null),
-                ("max_val", Value::Null),
-                ("enumvals", enumvals),
-                (
-                    "boot_val",
-                    str_value(if replication_role {
-                        "origin"
-                    } else {
-                        setting.as_str()
-                    }),
-                ),
-                (
-                    "reset_val",
-                    str_value(if replication_role { "origin" } else { &setting }),
-                ),
-                ("sourcefile", Value::Null),
-                ("sourceline", Value::Null),
-                ("pending_restart", bool_value(false)),
-            ]))
+            build_pg_setting_row(name, category, &setting)
         })
         .collect()
+}
+
+fn build_pg_setting_row(name: &str, category: &str, setting: &str) -> Result<ResultRow, SQLError> {
+    let replication_role = name == "session_replication_role";
+    let check_asserts = name == "plpgsql.check_asserts";
+    let enumvals = if replication_role {
+        catalog_array(
+            ["origin", "replica", "local"]
+                .into_iter()
+                .map(str_value)
+                .collect(),
+            "session_replication_role enum values",
+        )?
+    } else {
+        Value::Null
+    };
+    Ok(row([
+        ("name", str_value(name)),
+        ("setting", str_value(setting)),
+        ("unit", Value::Null),
+        ("category", str_value(category)),
+        (
+            "short_desc",
+            str_value(if check_asserts {
+                "Perform checks given in ASSERT statements."
+            } else {
+                name
+            }),
+        ),
+        ("extra_desc", Value::Null),
+        (
+            "context",
+            str_value(if replication_role {
+                "superuser"
+            } else {
+                "user"
+            }),
+        ),
+        (
+            "vartype",
+            str_value(if replication_role {
+                "enum"
+            } else if check_asserts {
+                "bool"
+            } else {
+                "string"
+            }),
+        ),
+        ("source", str_value("default")),
+        ("min_val", Value::Null),
+        ("max_val", Value::Null),
+        ("enumvals", enumvals),
+        (
+            "boot_val",
+            str_value(if replication_role {
+                "origin"
+            } else if check_asserts {
+                "on"
+            } else {
+                setting
+            }),
+        ),
+        (
+            "reset_val",
+            str_value(if replication_role {
+                "origin"
+            } else if check_asserts {
+                "on"
+            } else {
+                setting
+            }),
+        ),
+        ("sourcefile", Value::Null),
+        ("sourceline", Value::Null),
+        ("pending_restart", bool_value(false)),
+    ]))
 }

@@ -18,7 +18,7 @@ use uqa_sql::ast::{
     ColumnType, CreateFunction, CursorDirection, DropFunctionStmt, Expr, FetchCursorStmt,
     FunctionBinding, FunctionReturns, Statement,
 };
-use uqa_sql::expr::{cast_value, truthy, value_type_name};
+use uqa_sql::expr::{cast_value, cast_value_from, coercion_type_name, value_type_name};
 use uqa_sql::plpgsql::{
     bind_expr, bind_statement, condition_sqlstate, condition_sqlstates, IntoTarget, PLpgSQLBlock,
     PLpgSQLCursorArgument, PLpgSQLCursorCount, PLpgSQLCursorOpen, PLpgSQLDatum, PLpgSQLFunction,
