@@ -8,9 +8,10 @@
 
 use super::{
     bind_expr, bind_statement, coerce_routine_value, eval_lowered_expression,
-    execute_compiled_statement, BTreeSet, CreateFunction, DatumResolver, Engine, Expr, Flow,
-    FunctionReturns, HashMap, Interpreter, PLpgSQLBlock, PLpgSQLDatum, PLpgSQLFunction,
-    RoutineOutcome, SQLError, SQLResult, Statement, Value,
+    eval_lowered_expression_with_type, execute_compiled_statement, BTreeSet, ColumnType,
+    CreateFunction, DatumResolver, Engine, Expr, Flow, FunctionReturns, HashMap, Interpreter,
+    PLpgSQLBlock, PLpgSQLDatum, PLpgSQLFunction, RoutineOutcome, SQLError, SQLResult, Statement,
+    Value,
 };
 
 impl<'a> Interpreter<'a> {
@@ -247,6 +248,14 @@ impl<'a> Interpreter<'a> {
     pub(super) fn eval_expr(&self, expr: &Expr) -> Result<Value, SQLError> {
         let bound = bind_expr(expr, &mut self.resolver())?;
         eval_lowered_expression(self.engine, &bound, None, &[])
+    }
+
+    pub(super) fn eval_expr_with_type(
+        &self,
+        expr: &Expr,
+    ) -> Result<(Value, Option<ColumnType>), SQLError> {
+        let bound = bind_expr(expr, &mut self.resolver())?;
+        eval_lowered_expression_with_type(self.engine, &bound, None, &[])
     }
 
     pub(super) fn exec_query(&self, statement: &Statement) -> Result<SQLResult, SQLError> {

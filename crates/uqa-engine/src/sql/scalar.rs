@@ -152,8 +152,20 @@ pub(super) fn eval_lowered_expression(
     row: Option<&ResultRow>,
     params: &[SQLParam],
 ) -> Result<Value, SQLError> {
+    eval_lowered_expression_with_type(engine, expression, row, params).map(|(value, _)| value)
+}
+
+/// Evaluate a standalone expression while retaining its declared SQL type.
+/// Procedural statements such as `FOREACH` need the type because domains and
+/// true arrays can share the same runtime value carrier.
+pub(super) fn eval_lowered_expression_with_type(
+    engine: &Engine,
+    expression: &uqa_sql::ast::Expr,
+    row: Option<&ResultRow>,
+    params: &[SQLParam],
+) -> Result<(Value, Option<uqa_sql::ast::ColumnType>), SQLError> {
     let mut expression = ExpressionPlan::lower(expression.clone());
-    uqa_execution::scalar_type_with_resolver(
+    let declared_type = uqa_execution::scalar_type_with_resolver(
         &expression.scalar,
         &RowSchema::default(),
         params,
@@ -170,7 +182,8 @@ pub(super) fn eval_lowered_expression(
     let context = PhysicalEvalContext::new(row, params)
         .with_function_hook(&hook)
         .with_subquery_runner(&hook);
-    eval_physical(&expression, &context)
+    let value = eval_physical(&expression, &context)?;
+    Ok((value, declared_type))
 }
 
 /// Evaluate a catalog expression against a row while preserving the declared

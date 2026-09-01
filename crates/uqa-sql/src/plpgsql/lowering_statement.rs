@@ -217,6 +217,22 @@ pub(super) fn lower_stmt(raw: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLp
             body: lower_optional_stmt_list(stmt, "body", datums)?,
         });
     }
+    if let Some(stmt) = raw.get("PLpgSQL_stmt_foreach_a") {
+        // Zero-valued varno and slice fields are omitted from the JSON dump.
+        let target = json_usize_or_zero(stmt, "varno")?;
+        if datums.get(target).is_none() {
+            return Err(SQLError::Internal(format!(
+                "PL/pgSQL FOREACH target references missing datum {target}"
+            )));
+        }
+        return Ok(PLpgSQLStmt::ForeachArray {
+            label: json_optional_str(stmt, "label")?,
+            target,
+            slice: json_usize_or_zero(stmt, "slice")?,
+            expr: lower_expr(require(stmt, "expr")?)?,
+            body: lower_optional_stmt_list(stmt, "body", datums)?,
+        });
+    }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_fors") {
         let target = lower_into_target(require(stmt, "var")?, datums)?;
         let query = lower_full_statement(require(stmt, "query")?)?;

@@ -7,8 +7,9 @@
 //! Loop and return control-flow execution.
 
 use super::{
-    coerce_routine_value, result_row_values, to_i64_value, Expr, Flow, FunctionReturns,
-    Interpreter, LoopSignal, PLpgSQLReturnValue, PLpgSQLStmt, SQLError, SQLResult, Value,
+    canonical_routine_type_name, coerce_routine_value, result_row_values, to_i64_value,
+    value_type_name, ArrayValue, ColumnType, Engine, Expr, Flow, FunctionReturns, Interpreter,
+    LoopSignal, PLpgSQLDatum, PLpgSQLReturnValue, PLpgSQLStmt, SQLError, SQLResult, Value,
 };
 
 impl Interpreter<'_> {
@@ -101,6 +102,90 @@ impl Interpreter<'_> {
         }
         self.set_found(iterated);
         Ok(outcome)
+    }
+
+    pub(super) fn exec_foreach_array(
+        &mut self,
+        label: Option<&str>,
+        target: usize,
+        slice: usize,
+        expr: &Expr,
+        body: &[PLpgSQLStmt],
+    ) -> Result<Flow, SQLError> {
+        let (value, declared_type) = self.eval_expr_with_type(expr)?;
+        if matches!(value, Value::Null) {
+            return Err(SQLError::Routine {
+                sqlstate: "22004".into(),
+                message: "FOREACH expression must not be null".into(),
+            });
+        }
+        if !declared_type.as_ref().is_some_and(foreach_array_type) {
+            let type_name = declared_type.as_ref().map_or_else(
+                || value_type_name(&value).to_string(),
+                ColumnType::regtype_name,
+            );
+            return Err(SQLError::Routine {
+                sqlstate: "42804".into(),
+                message: format!("FOREACH expression must yield an array, not type {type_name}"),
+            });
+        }
+        let array = foreach_array_value(value, declared_type.as_ref())?;
+        let dimensions = array.dimensions().len();
+        if slice > dimensions {
+            return Err(SQLError::Routine {
+                sqlstate: "2202E".into(),
+                message: format!(
+                    "slice dimension ({slice}) is out of the valid range 0..{dimensions}"
+                ),
+            });
+        }
+        let target_is_array = self.foreach_target_is_array(target)?;
+        if slice > 0 && !target_is_array {
+            return Err(SQLError::Routine {
+                sqlstate: "42804".into(),
+                message: "FOREACH ... SLICE loop variable must be of an array type".into(),
+            });
+        }
+        if slice == 0 && target_is_array {
+            return Err(SQLError::Routine {
+                sqlstate: "42804".into(),
+                message: "FOREACH loop variable must not be of an array type".into(),
+            });
+        }
+
+        let values = foreach_iteration_values(&array, slice)?;
+        let mut iterated = false;
+        let mut outcome = Flow::Normal;
+        for value in values {
+            iterated = true;
+            self.assign_foreach_target(target, value)?;
+            match self.exec_loop_body(label, body)? {
+                LoopSignal::Continue => {}
+                LoopSignal::Break => break,
+                LoopSignal::Propagate(flow) => {
+                    outcome = flow;
+                    break;
+                }
+            }
+        }
+        self.set_found(iterated);
+        Ok(outcome)
+    }
+
+    fn foreach_target_is_array(&self, target: usize) -> Result<bool, SQLError> {
+        let datum = self.datums.get(target).ok_or_else(|| {
+            SQLError::Internal(format!(
+                "PL/pgSQL FOREACH references missing datum {target}"
+            ))
+        })?;
+        Ok(match datum {
+            PLpgSQLDatum::Var(variable) => {
+                foreach_declaration_is_array(self.engine, &variable.type_name)
+            }
+            PLpgSQLDatum::Rec { .. } | PLpgSQLDatum::RecField { .. } | PLpgSQLDatum::Row { .. } => {
+                false
+            }
+        })
     }
 
     pub(super) fn eval_loop_bound(&self, expr: &Expr, which: &str) -> Result<i64, SQLError> {
@@ -276,4 +361,100 @@ impl Interpreter<'_> {
         }
         Ok(())
     }
+}
+
+fn foreach_array_type(ty: &ColumnType) -> bool {
+    matches!(
+        ty,
+        ColumnType::Array(_)
+            | ColumnType::AnyArray
+            | ColumnType::Int2Vector
+            | ColumnType::OidVector
+    )
+}
+
+fn foreach_declaration_is_array(engine: &Engine, type_name: &str) -> bool {
+    let canonical = canonical_routine_type_name(type_name);
+    if matches!(canonical.as_str(), "anyarray" | "anycompatiblearray") {
+        return true;
+    }
+    if let Some(ty) = crate::sql::resolve_catalog_column_type(engine, &canonical)
+        .or_else(|| ColumnType::from_sql_name(&canonical).ok())
+    {
+        return foreach_array_type(&ty);
+    }
+    canonical.ends_with("[]")
+}
+
+fn foreach_array_value(
+    value: Value,
+    declared_type: Option<&ColumnType>,
+) -> Result<ArrayValue, SQLError> {
+    match value {
+        Value::Array(array) => Ok(array),
+        Value::List(elements)
+            if declared_type
+                .is_some_and(|ty| matches!(ty, ColumnType::Int2Vector | ColumnType::OidVector)) =>
+        {
+            let array = if elements.is_empty() {
+                ArrayValue::try_new(elements)
+            } else {
+                ArrayValue::with_lower_bounds(elements, vec![0])
+            };
+            array.ok_or_else(|| SQLError::Internal("invalid PostgreSQL vector dimensions".into()))
+        }
+        other => Err(SQLError::Internal(format!(
+            "PL/pgSQL FOREACH array type has invalid runtime value {}",
+            value_type_name(&other)
+        ))),
+    }
+}
+
+fn foreach_iteration_values(array: &ArrayValue, slice: usize) -> Result<Vec<Value>, SQLError> {
+    if slice == 0 {
+        let mut values = Vec::new();
+        flatten_foreach_elements(array.elements(), &mut values);
+        return Ok(values);
+    }
+    let prefix_dimensions = array.dimensions().len() - slice;
+    let mut slices = Vec::new();
+    collect_foreach_slices(array.elements(), prefix_dimensions, &mut slices)?;
+    let lower_bounds = array.lower_bounds()[prefix_dimensions..].to_vec();
+    slices
+        .into_iter()
+        .map(|elements| {
+            ArrayValue::with_lower_bounds(elements, lower_bounds.clone())
+                .map(Value::Array)
+                .ok_or_else(|| SQLError::Internal("invalid PL/pgSQL FOREACH array slice".into()))
+        })
+        .collect()
+}
+
+fn flatten_foreach_elements(elements: &[Value], output: &mut Vec<Value>) {
+    for element in elements {
+        match element {
+            Value::List(nested) => flatten_foreach_elements(nested, output),
+            value => output.push(value.clone()),
+        }
+    }
+}
+
+fn collect_foreach_slices(
+    elements: &[Value],
+    prefix_dimensions: usize,
+    output: &mut Vec<Vec<Value>>,
+) -> Result<(), SQLError> {
+    if prefix_dimensions == 0 {
+        output.push(elements.to_vec());
+        return Ok(());
+    }
+    for element in elements {
+        let Value::List(nested) = element else {
+            return Err(SQLError::Internal(
+                "PL/pgSQL FOREACH array dimensions do not match storage".into(),
+            ));
+        };
+        collect_foreach_slices(nested, prefix_dimensions - 1, output)?;
+    }
+    Ok(())
 }

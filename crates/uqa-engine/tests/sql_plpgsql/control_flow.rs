@@ -156,6 +156,180 @@ fn loops_with_exit_and_continue() {
 }
 
 #[test]
+fn foreach_array_elements_use_storage_order_control_flow_and_found() {
+    let eng = engine();
+    exec(
+        &eng,
+        "CREATE FUNCTION foreach_elements(items integer[]) RETURNS text AS $$
+         DECLARE item integer; out_text text := ''; prior boolean;
+         BEGIN
+           PERFORM 1;
+           prior := FOUND;
+           <<walk>>
+           FOREACH item SLICE 0 IN ARRAY items LOOP
+             CONTINUE walk WHEN item = 2;
+             EXIT walk WHEN item = 4;
+             out_text := out_text || coalesce(item::text, 'NULL') || ',';
+           END LOOP walk;
+           RETURN out_text || '|found=' || FOUND::text || '|prior=' || prior::text;
+         END;
+         $$ LANGUAGE plpgsql",
+    );
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT foreach_elements('[0:1][5:6]={{1,2},{3,4}}'::integer[]) AS v",
+        ),
+        Value::Str("1,3,|found=true|prior=true".into())
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT foreach_elements(ARRAY[]::integer[]) AS v",),
+        Value::Str("|found=false|prior=true".into())
+    );
+}
+
+#[test]
+fn foreach_array_slices_preserve_dimensions_and_lower_bounds() {
+    let eng = engine();
+    exec(
+        &eng,
+        "CREATE FUNCTION foreach_slice_one(items integer[]) RETURNS text AS $$
+         DECLARE item integer[]; out_text text := '';
+         BEGIN
+           FOREACH item SLICE 1 IN ARRAY items LOOP
+             out_text := out_text || array_dims(item) || '=' || item::text || ';';
+           END LOOP;
+           RETURN out_text || '|found=' || FOUND::text;
+         END;
+         $$ LANGUAGE plpgsql",
+    );
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT foreach_slice_one('[0:1][5:6]={{1,2},{3,4}}'::integer[]) AS v",
+        ),
+        Value::Str("[5:6]=[5:6]={1,2};[5:6]=[5:6]={3,4};|found=true".into())
+    );
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT foreach_slice_one('[3:4]={7,8}'::integer[]) AS v",
+        ),
+        Value::Str("[3:4]=[3:4]={7,8};|found=true".into())
+    );
+
+    exec(
+        &eng,
+        "CREATE FUNCTION foreach_slice_two(items integer[]) RETURNS text AS $$
+         DECLARE item integer[]; out_text text := '';
+         BEGIN
+           FOREACH item SLICE 2 IN ARRAY items LOOP
+             out_text := out_text || array_dims(item) || '=' || item::text || ';';
+           END LOOP;
+           RETURN out_text || '|found=' || FOUND::text;
+         END;
+         $$ LANGUAGE plpgsql",
+    );
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT foreach_slice_two('[0:1][5:6]={{1,2},{3,4}}'::integer[]) AS v",
+        ),
+        Value::Str("[0:1][5:6]=[0:1][5:6]={{1,2},{3,4}};|found=true".into())
+    );
+}
+
+#[test]
+fn foreach_array_validates_expression_dimensions_and_target_type() {
+    let eng = engine();
+    exec(
+        &eng,
+        "CREATE FUNCTION foreach_null(items integer[]) RETURNS integer AS $$
+         DECLARE item integer;
+         BEGIN FOREACH item IN ARRAY items LOOP NULL; END LOOP; RETURN 0; END;
+         $$ LANGUAGE plpgsql",
+    );
+    let err = exec_err(&eng, "SELECT foreach_null(NULL::integer[]) AS v");
+    assert_eq!(err.sqlstate(), Some("22004"));
+    assert!(
+        err.to_string()
+            .contains("FOREACH expression must not be null"),
+        "got: {err}"
+    );
+
+    exec(
+        &eng,
+        "CREATE FUNCTION foreach_nonarray() RETURNS integer AS $$
+         DECLARE item integer;
+         BEGIN FOREACH item IN ARRAY 42 LOOP NULL; END LOOP; RETURN 0; END;
+         $$ LANGUAGE plpgsql",
+    );
+    let err = exec_err(&eng, "SELECT foreach_nonarray() AS v");
+    assert_eq!(err.sqlstate(), Some("42804"));
+    assert!(
+        err.to_string()
+            .contains("FOREACH expression must yield an array, not type integer"),
+        "got: {err}"
+    );
+
+    exec(
+        &eng,
+        "CREATE FUNCTION foreach_too_deep(items integer[]) RETURNS integer AS $$
+         DECLARE item integer[];
+         BEGIN FOREACH item SLICE 2 IN ARRAY items LOOP NULL; END LOOP; RETURN 0; END;
+         $$ LANGUAGE plpgsql",
+    );
+    let err = exec_err(&eng, "SELECT foreach_too_deep(ARRAY[1,2]) AS v");
+    assert_eq!(err.sqlstate(), Some("2202E"));
+    assert!(
+        err.to_string()
+            .contains("slice dimension (2) is out of the valid range 0..1"),
+        "got: {err}"
+    );
+
+    exec(
+        &eng,
+        "CREATE FUNCTION foreach_slice_scalar(items integer[]) RETURNS integer AS $$
+         DECLARE item integer;
+         BEGIN FOREACH item SLICE 1 IN ARRAY items LOOP NULL; END LOOP; RETURN 0; END;
+         $$ LANGUAGE plpgsql",
+    );
+    let err = exec_err(&eng, "SELECT foreach_slice_scalar(ARRAY[1,2]) AS v");
+    assert_eq!(err.sqlstate(), Some("42804"));
+    assert!(
+        err.to_string()
+            .contains("FOREACH ... SLICE loop variable must be of an array type"),
+        "got: {err}"
+    );
+
+    exec(
+        &eng,
+        "CREATE FUNCTION foreach_array_element(items integer[]) RETURNS integer AS $$
+         DECLARE item integer[];
+         BEGIN FOREACH item IN ARRAY items LOOP NULL; END LOOP; RETURN 0; END;
+         $$ LANGUAGE plpgsql",
+    );
+    let err = exec_err(
+        &eng,
+        "SELECT foreach_array_element(ARRAY[]::integer[]) AS v",
+    );
+    assert_eq!(err.sqlstate(), Some("42804"));
+    assert!(
+        err.to_string()
+            .contains("FOREACH loop variable must not be of an array type"),
+        "got: {err}"
+    );
+
+    let err = exec_err(&eng, "SELECT foreach_slice_scalar(ARRAY[]::integer[]) AS v");
+    assert_eq!(err.sqlstate(), Some("2202E"));
+    assert!(
+        err.to_string()
+            .contains("slice dimension (1) is out of the valid range 0..0"),
+        "got: {err}"
+    );
+}
+
+#[test]
 fn labeled_loops_and_blocks() {
     let eng = engine();
     exec(

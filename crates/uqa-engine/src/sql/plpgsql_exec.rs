@@ -33,7 +33,7 @@ use crate::engine_user_functions::{
 use crate::{Engine, SQLTableFunctionResult};
 
 use super::plan_executor::UnifiedPlanExecutor;
-use super::scalar::eval_lowered_expression;
+use super::scalar::{eval_lowered_expression, eval_lowered_expression_with_type};
 use super::{execute_compiled_statement, optimize_engine_plan};
 
 mod blocks;

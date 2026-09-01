@@ -92,6 +92,43 @@ impl Interpreter<'_> {
         }
     }
 
+    /// Assign one `FOREACH` element to either a scalar/record datum or a
+    /// comma-separated row target. Composite row fields are assigned by
+    /// position, with missing attributes becoming NULL.
+    pub(super) fn assign_foreach_target(
+        &mut self,
+        idx: usize,
+        value: Value,
+    ) -> Result<(), SQLError> {
+        let datum = self.datums.get(idx).cloned().ok_or_else(|| {
+            SQLError::Internal(format!("PL/pgSQL FOREACH references missing datum {idx}"))
+        })?;
+        let PLpgSQLDatum::Row { fields } = datum else {
+            return self.assign_datum(idx, value);
+        };
+        let values = match value {
+            Value::Record(fields) => fields
+                .into_iter()
+                .map(|(_, field_value)| field_value)
+                .collect::<Vec<_>>(),
+            Value::Row(values) => values,
+            Value::Null => Vec::new(),
+            _ => {
+                return Err(SQLError::Routine {
+                    sqlstate: "42804".into(),
+                    message: "cannot assign non-composite value to a row variable".into(),
+                });
+            }
+        };
+        for (field_index, field) in fields.iter().enumerate() {
+            self.assign_datum(
+                field.varno,
+                values.get(field_index).cloned().unwrap_or(Value::Null),
+            )?;
+        }
+        Ok(())
+    }
+
     /// Assign a query result row (or NULLs) to an INTO target.
     pub(super) fn assign_into(
         &mut self,

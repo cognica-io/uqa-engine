@@ -122,7 +122,9 @@ fn collect_fori_vars_stmts(stmts: &[PLpgSQLStmt], out: &mut std::collections::BT
                 out.insert(*var);
                 collect_fori_vars_stmts(body, out);
             }
-            PLpgSQLStmt::ForQuery { body, .. } => collect_fori_vars_stmts(body, out),
+            PLpgSQLStmt::ForQuery { body, .. } | PLpgSQLStmt::ForeachArray { body, .. } => {
+                collect_fori_vars_stmts(body, out);
+            }
             _ => {}
         }
     }
@@ -322,6 +324,14 @@ pub enum PLpgSQLStmt {
         label: Option<String>,
         target: IntoTarget,
         query: Statement,
+        body: Vec<PLpgSQLStmt>,
+    },
+    /// `FOREACH target [SLICE n] IN ARRAY expression LOOP`.
+    ForeachArray {
+        label: Option<String>,
+        target: usize,
+        slice: usize,
+        expr: Expr,
         body: Vec<PLpgSQLStmt>,
     },
     /// `EXIT` (`is_exit`) or `CONTINUE`, optionally labelled and

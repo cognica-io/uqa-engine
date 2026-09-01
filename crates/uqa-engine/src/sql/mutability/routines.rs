@@ -333,6 +333,21 @@ fn plpgsql_statement_may_mutate_engine(
                 visiting_routines,
                 classification,
             )?),
+        PLpgSQLStmt::ForeachArray { expr, body, .. } => Ok(plpgsql_expression_may_mutate_engine(
+            engine,
+            expr,
+            visiting_views,
+            visiting_routines,
+            classification,
+        )?
+            || plpgsql_statement_list_may_mutate_engine(
+                engine,
+                datums,
+                body,
+                visiting_views,
+                visiting_routines,
+                classification,
+            )?),
         PLpgSQLStmt::Exit { cond, .. } => cond.as_ref().map_or(Ok(false), |condition| {
             plpgsql_expression_may_mutate_engine(
                 engine,

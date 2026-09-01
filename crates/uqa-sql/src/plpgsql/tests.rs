@@ -303,6 +303,52 @@ fn representative_parser_output_lowers_without_silent_defaults() {
 }
 
 #[test]
+fn pg18_foreach_array_statements_preserve_targets_slices_labels_and_bodies() {
+    let parsed = parse_plpgsql_text(
+        "CREATE FUNCTION foreach_shape(items integer[]) RETURNS text LANGUAGE plpgsql AS $$\n\
+         DECLARE item integer; piece integer[]; out_text text := '';\n\
+         BEGIN\n\
+           FOREACH item IN ARRAY items LOOP out_text := out_text || item; END LOOP;\n\
+           <<slice_loop>> FOREACH piece SLICE 1 IN ARRAY items LOOP EXIT slice_loop; END LOOP slice_loop;\n\
+           RETURN out_text;\n\
+         END $$;",
+    )
+    .unwrap();
+
+    let loops = parsed
+        .action
+        .body
+        .iter()
+        .filter_map(|statement| match statement {
+            PLpgSQLStmt::ForeachArray {
+                label,
+                target,
+                slice,
+                body,
+                ..
+            } => Some((label.as_deref(), *target, *slice, body)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(loops.len(), 2);
+    assert_eq!(loops[0].0, None);
+    assert_eq!(loops[0].2, 0);
+    assert_eq!(parsed.datums[loops[0].1].name(), Some("item"));
+    assert_eq!(loops[0].3.len(), 1);
+    assert_eq!(loops[1].0, Some("slice_loop"));
+    assert_eq!(loops[1].2, 1);
+    assert_eq!(parsed.datums[loops[1].1].name(), Some("piece"));
+    assert!(matches!(
+        loops[1].3.as_slice(),
+        [PLpgSQLStmt::Exit {
+            is_exit: true,
+            label: Some(label),
+            cond: None,
+        }] if label == "slice_loop"
+    ));
+}
+
+#[test]
 fn omitted_zero_datum_references_remain_valid_but_malformed_values_fail() {
     let datums = vec![scalar_datum("target")];
     let assignment = serde_json::json!({
@@ -321,6 +367,45 @@ fn omitted_zero_datum_references_remain_valid_but_malformed_values_fail() {
     assert!(matches!(
         lower_stmt(&diagnostics, &datums).unwrap(),
         PLpgSQLStmt::GetDiagnostics { items } if items == vec![("ROW_COUNT".into(), 0)]
+    ));
+
+    let foreach = serde_json::json!({
+        "PLpgSQL_stmt_foreach_a": {
+            "expr": json_expr("ARRAY[1]", 2),
+            "body": []
+        }
+    });
+    assert!(matches!(
+        lower_stmt(&foreach, &datums).unwrap(),
+        PLpgSQLStmt::ForeachArray {
+            target: 0,
+            slice: 0,
+            ..
+        }
+    ));
+
+    let missing_foreach_target = serde_json::json!({
+        "PLpgSQL_stmt_foreach_a": {
+            "varno": 1,
+            "expr": json_expr("ARRAY[1]", 2),
+            "body": []
+        }
+    });
+    assert!(matches!(
+        lower_stmt(&missing_foreach_target, &datums),
+        Err(SQLError::Internal(message)) if message.contains("missing datum 1")
+    ));
+
+    let negative_foreach_slice = serde_json::json!({
+        "PLpgSQL_stmt_foreach_a": {
+            "slice": -1,
+            "expr": json_expr("ARRAY[1]", 2),
+            "body": []
+        }
+    });
+    assert!(matches!(
+        lower_stmt(&negative_foreach_slice, &datums),
+        Err(SQLError::Internal(message)) if message.contains("slice")
     ));
 
     for bad in [

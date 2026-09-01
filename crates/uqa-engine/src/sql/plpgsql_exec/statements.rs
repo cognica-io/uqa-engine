@@ -129,6 +129,13 @@ impl Interpreter<'_> {
                 self.set_found(iterated);
                 Ok(outcome)
             }
+            PLpgSQLStmt::ForeachArray {
+                label,
+                target,
+                slice,
+                expr,
+                body,
+            } => self.exec_foreach_array(label.as_deref(), *target, *slice, expr, body),
             PLpgSQLStmt::Exit {
                 is_exit,
                 label,
