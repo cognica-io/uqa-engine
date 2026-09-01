@@ -112,6 +112,79 @@ fn initial_restore_eagerly_loads_column_statistics() {
 }
 
 #[test]
+fn initial_restore_promotes_legacy_column_keys_to_named_constraints() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("legacy-column-keys.db");
+    {
+        let engine = Engine::open(&path).unwrap();
+        engine
+            .sql(
+                "CREATE TABLE legacy_jobs (\
+                 job_id TEXT PRIMARY KEY, message_id TEXT NOT NULL UNIQUE, payload TEXT NOT NULL)",
+                &[],
+            )
+            .unwrap();
+        engine
+            .sql(
+                "INSERT INTO legacy_jobs VALUES ('job-1', 'message-1', 'old')",
+                &[],
+            )
+            .unwrap();
+    }
+
+    // Old catalogs kept these declarations only in the per-column flags and
+    // had no typed table-key entries to carry durable constraint names.
+    {
+        let catalog = Catalog::open(ManagedConnection::open(&path).unwrap()).unwrap();
+        let mut table = catalog
+            .load_tables()
+            .unwrap()
+            .into_iter()
+            .find(|table| table.relation.name == "legacy_jobs")
+            .unwrap();
+        let columns: Vec<uqa_sql::ast::ColumnDef> =
+            serde_json::from_str(&table.columns_json).unwrap();
+        assert!(columns.iter().any(|column| column.primary_key));
+        assert!(columns.iter().any(|column| column.unique));
+        table.constraints_json =
+            serde_json::to_string(&uqa_sql::ast::TableConstraintSet::default()).unwrap();
+        catalog.save_table(&table).unwrap();
+    }
+
+    {
+        let engine = Engine::open(&path).unwrap();
+        let constraints = engine.try_key_constraints("legacy_jobs").unwrap();
+        assert_eq!(constraints.len(), 2);
+        assert!(constraints.iter().any(|constraint| {
+            constraint.kind == uqa_sql::ast::TableKeyConstraintKind::PrimaryKey
+                && constraint.columns == ["job_id"]
+                && constraint.name.as_deref() == Some("legacy_jobs_pkey")
+        }));
+        assert!(constraints.iter().any(|constraint| {
+            constraint.kind == uqa_sql::ast::TableKeyConstraintKind::Unique
+                && constraint.columns == ["message_id"]
+                && constraint.name.as_deref() == Some("legacy_jobs_message_id_key")
+        }));
+        engine
+            .sql(
+                "INSERT INTO legacy_jobs VALUES ('job-2', 'message-1', 'new') \
+                 ON CONFLICT (message_id) DO UPDATE SET payload = EXCLUDED.payload",
+                &[],
+            )
+            .unwrap();
+    }
+
+    let reopened = Engine::open(&path).unwrap();
+    let rows = reopened
+        .sql("SELECT job_id, payload FROM legacy_jobs", &[])
+        .unwrap();
+    assert_eq!(rows.rows.len(), 1);
+    assert_eq!(rows.rows[0]["job_id"], Value::Str("job-1".into()));
+    assert_eq!(rows.rows[0]["payload"], Value::Str("new".into()));
+    reopened.sql("DROP TABLE legacy_jobs", &[]).unwrap();
+}
+
+#[test]
 fn independently_opened_backend_pairs_share_row_locks_for_the_same_database() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("shared-backend-row-locks.db");

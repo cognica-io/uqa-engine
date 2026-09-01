@@ -23,6 +23,13 @@ pub(crate) fn materialize_constraint_metadata(
     columns: &mut [uqa_sql::ast::ColumnDef],
     constraints: &mut uqa_sql::ast::TableConstraintSet,
 ) -> StorageBackendResult<bool> {
+    // Releases predating typed table-key persistence stored column-level
+    // PRIMARY KEY and UNIQUE declarations only as ColumnDef flags. Catalog
+    // consumers now expose keys from TableConstraintSet, where every durable
+    // constraint must have a name. Promote the legacy flags before assigning
+    // generated names so opening such a database cannot synthesize anonymous
+    // constraints that fail the next catalog publication.
+    let mut changed = promote_legacy_column_key_constraints(columns, constraints);
     let mut used = BTreeSet::new();
     for column in columns.iter() {
         record_constraint_name(&mut used, column.not_null_name.as_deref())?;
@@ -45,7 +52,6 @@ pub(crate) fn materialize_constraint_metadata(
         record_constraint_name(&mut used, constraint.name.as_deref())?;
     }
 
-    let mut changed = false;
     let mut column_object_ids = BTreeSet::new();
     for column in columns.iter_mut() {
         if column
@@ -116,6 +122,42 @@ pub(crate) fn materialize_constraint_metadata(
     }
     changed |= synchronize_partition_inherited_foreign_key_ids(constraints);
     Ok(changed)
+}
+
+fn promote_legacy_column_key_constraints(
+    columns: &[uqa_sql::ast::ColumnDef],
+    constraints: &mut uqa_sql::ast::TableConstraintSet,
+) -> bool {
+    let mut changed = false;
+    for column in columns {
+        for (present, kind) in [
+            (
+                column.primary_key,
+                uqa_sql::ast::TableKeyConstraintKind::PrimaryKey,
+            ),
+            (column.unique, uqa_sql::ast::TableKeyConstraintKind::Unique),
+        ] {
+            if !present
+                || constraints.key_constraints.iter().any(|constraint| {
+                    constraint.kind == kind
+                        && constraint.columns.as_slice() == [column.name.as_str()]
+                })
+            {
+                continue;
+            }
+            constraints
+                .key_constraints
+                .push(uqa_sql::ast::TableKeyConstraint {
+                    name: None,
+                    kind,
+                    columns: vec![column.name.clone()],
+                    nulls_not_distinct: false,
+                    without_overlaps: false,
+                });
+            changed = true;
+        }
+    }
+    changed
 }
 
 pub(crate) fn foreign_keys_match_without_object_id(

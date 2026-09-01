@@ -14,6 +14,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Promoted legacy column-only `PRIMARY KEY` and `UNIQUE` flags into named durable table-key constraints during initial catalog restore, preventing a later catalog query, transaction commit, or unrelated `DROP TABLE` from failing because an upgraded persistent table exposed an anonymous constraint.
 - Corrected stateful PostgreSQL 18 oracle schema substitution inside string literals so catalog assertions inspect the intended schema instead of a quoted placeholder.
 - Rejected unauthorized routine replacement and explicit routine drops before mutation, required a SET-enabled path for ownership transfer, and prevented `SECURITY DEFINER` calls from changing the effective session role.
 - Kept null-accepting predicates on the null-extended side of an outer join above the join instead of pushing them into a source scan and manufacturing false unmatched rows.
