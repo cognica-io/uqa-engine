@@ -134,9 +134,9 @@ END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 ```
 
-The implemented PL/pgSQL surface includes declarations, assignment, `IF` and `CASE`, basic loops, `WHILE`, integer and query `FOR`, labeled blocks and exits, `RETURN`, `RETURN NEXT`, `RETURN QUERY`, `PERFORM`, static SQL, dynamic `EXECUTE`, nested blocks, recursive calls with a depth limit, diagnostics, exception handlers, and bound cursors covered by the routine tests.
+The implemented PL/pgSQL surface includes declarations, assignment, `IF` and `CASE`, basic loops, `WHILE`, integer and query `FOR`, labeled blocks and exits, `RETURN`, `RETURN NEXT`, `RETURN QUERY`, `PERFORM`, static SQL, dynamic `EXECUTE`, nested blocks, recursive calls with a depth limit, diagnostics, exception handlers, and cursors covered by the routine tests.
 
-Bound PL/pgSQL cursors support `CURSOR [(arguments)] FOR query`, positional or named `OPEN` arguments, repeated `FETCH NEXT ... INTO`, `FOUND`, and `CLOSE`. An opened cursor is a session portal: a routine may return its `refcursor` name, and a later routine in the same session and transaction may accept that name and continue fetching. Dynamic `OPEN ... FOR`, PL/pgSQL `MOVE`, and PL/pgSQL fetch directions other than `NEXT` remain unsupported.
+PL/pgSQL cursors support bound `CURSOR [(arguments)] FOR query` declarations with positional or named `OPEN` arguments, unbound static `OPEN ... FOR query`, dynamic `OPEN ... FOR EXECUTE ... USING` for query plans, explicit `SCROLL` and `NO SCROLL`, directional single-row `FETCH ... INTO`, `MOVE` directions and counts including `ALL`, `FOUND`, `ROW_COUNT`, and `CLOSE`. An opened cursor is a session portal: a routine may return its `refcursor` name, and a later routine in the same session and transaction may accept that name and continue fetching. PostgreSQL row-returning command forms such as `EXPLAIN`, `SHOW`, and data-modification statements with `RETURNING`, plus exact volatile-expression execution timing, remain open.
 
 This is a deliberate subset. Validate every routine body during migration instead of assuming all PostgreSQL PL/pgSQL statements or diagnostics exist.
 

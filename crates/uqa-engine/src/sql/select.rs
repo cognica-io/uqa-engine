@@ -127,6 +127,7 @@ struct SetOperationRowConsumer {
     schema: uqa_execution::RowSchema,
     offset: Cell<u64>,
     remaining: Cell<Option<u64>>,
+    begun: Cell<bool>,
     stopped: Cell<bool>,
 }
 
@@ -143,6 +144,7 @@ impl SetOperationRowConsumer {
             schema,
             offset: Cell::new(offset),
             remaining: Cell::new(limit),
+            begun: Cell::new(false),
             stopped: Cell::new(limit == Some(0)),
         }
     }
@@ -166,7 +168,11 @@ impl QueryRowConsumer for SetOperationRowConsumer {
                 self.columns.len()
             )));
         }
-        self.downstream.begin(engine, &self.columns, &self.schema)
+        if self.begun.replace(true) {
+            Ok(())
+        } else {
+            self.downstream.begin(engine, &self.columns, &self.schema)
+        }
     }
 
     fn consume(

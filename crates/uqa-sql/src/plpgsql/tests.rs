@@ -44,9 +44,14 @@ fn pg18_bound_cursor_named_arguments_lower_in_declaration_order() {
     };
     let definition = cursor.cursor.as_ref().expect("bound cursor definition");
     assert!(definition.argument_row.is_some());
+    assert_eq!(definition.scroll, None);
     assert!(matches!(definition.query, Statement::Select(_)));
 
-    let PLpgSQLStmt::OpenCursor { cursor, arguments } = &parsed.action.body[0] else {
+    let PLpgSQLStmt::OpenCursor {
+        cursor,
+        open: PLpgSQLCursorOpen::Bound { arguments },
+    } = &parsed.action.body[0]
+    else {
         panic!("expected OPEN as the first statement");
     };
     assert_eq!(*cursor, cursor_index);
@@ -63,8 +68,8 @@ fn pg18_bound_cursor_named_arguments_lower_in_declaration_order() {
         parsed.action.body[1],
         PLpgSQLStmt::FetchCursor {
             cursor,
-            direction: 0,
-            count: 1,
+            direction: CursorDirection::Forward,
+            count: PLpgSQLCursorCount::Constant(1),
             ..
         } if cursor == cursor_index
     ));
@@ -77,6 +82,72 @@ fn pg18_bound_cursor_named_arguments_lower_in_declaration_order() {
         PLpgSQLStmt::Return {
             value: Some(PLpgSQLReturnValue::Datum(index))
         } if index == 5
+    ));
+}
+
+#[test]
+fn pg18_dynamic_open_fetch_directions_and_move_lower_structurally() {
+    let parsed = parse_plpgsql_text(
+        "CREATE FUNCTION cursor_controls() RETURNS integer LANGUAGE plpgsql AS $$
+         DECLARE c refcursor; value integer;
+         BEGIN
+           OPEN c SCROLL FOR SELECT x FROM generate_series(1, 3) AS g(x);
+           FETCH LAST FROM c INTO value;
+           MOVE FORWARD 1 + 1 FROM c;
+           CLOSE c;
+           OPEN c NO SCROLL FOR EXECUTE 'SELECT $1' USING 7;
+           FETCH RELATIVE -1 FROM c INTO value;
+           CLOSE c;
+           RETURN value;
+         END
+         $$;",
+    )
+    .unwrap();
+
+    assert!(matches!(
+        &parsed.action.body[0],
+        PLpgSQLStmt::OpenCursor {
+            open: PLpgSQLCursorOpen::Static {
+                scroll: Some(true),
+                ..
+            },
+            ..
+        }
+    ));
+    assert!(matches!(
+        &parsed.action.body[1],
+        PLpgSQLStmt::FetchCursor {
+            direction: CursorDirection::Absolute,
+            count: PLpgSQLCursorCount::Constant(-1),
+            ..
+        }
+    ));
+    assert!(matches!(
+        &parsed.action.body[2],
+        PLpgSQLStmt::MoveCursor {
+            direction: CursorDirection::Forward,
+            count: PLpgSQLCursorCount::Expression(_),
+            ..
+        }
+    ));
+    assert!(matches!(
+        &parsed.action.body[4],
+        PLpgSQLStmt::OpenCursor {
+            open: PLpgSQLCursorOpen::Dynamic {
+                params,
+                scroll: Some(false),
+                ..
+            },
+            ..
+        } if params.len() == 1
+    ));
+    assert!(matches!(
+        &parsed.action.body[5],
+        PLpgSQLStmt::FetchCursor {
+            direction: CursorDirection::Relative,
+            count: PLpgSQLCursorCount::Expression(_),
+            ..
+        }
     ));
 }
 

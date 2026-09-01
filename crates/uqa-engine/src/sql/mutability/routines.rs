@@ -368,40 +368,67 @@ fn plpgsql_statement_may_mutate_engine(
             visiting_routines,
             classification,
         ),
-        PLpgSQLStmt::OpenCursor {
-            cursor, arguments, ..
-        } => {
+        PLpgSQLStmt::OpenCursor { cursor, open } => {
             if classification.procedural_state_requires_transaction {
                 return Ok(true);
             }
-            if plpgsql_expressions_may_mutate_engine(
-                engine,
-                arguments.iter().map(|argument| &argument.expr),
-                visiting_views,
-                visiting_routines,
-                classification,
-            )? {
+            match open {
+                uqa_sql::plpgsql::PLpgSQLCursorOpen::Bound { arguments } => {
+                    if plpgsql_expressions_may_mutate_engine(
+                        engine,
+                        arguments.iter().map(|argument| &argument.expr),
+                        visiting_views,
+                        visiting_routines,
+                        classification,
+                    )? {
+                        return Ok(true);
+                    }
+                    let query = datums.get(*cursor).and_then(|datum| match datum {
+                        uqa_sql::plpgsql::PLpgSQLDatum::Var(variable) => {
+                            variable.cursor.as_ref().map(|cursor| &cursor.query)
+                        }
+                        _ => None,
+                    });
+                    query.map_or(Ok(false), |query| {
+                        lowered_statement_may_mutate_engine(
+                            engine,
+                            query.clone(),
+                            visiting_views,
+                            visiting_routines,
+                            classification,
+                        )
+                    })
+                }
+                uqa_sql::plpgsql::PLpgSQLCursorOpen::Static { query, .. } => {
+                    lowered_statement_may_mutate_engine(
+                        engine,
+                        *query.clone(),
+                        visiting_views,
+                        visiting_routines,
+                        classification,
+                    )
+                }
+                uqa_sql::plpgsql::PLpgSQLCursorOpen::Dynamic { .. } => Ok(true),
+            }
+        }
+        PLpgSQLStmt::FetchCursor { count, .. } | PLpgSQLStmt::MoveCursor { count, .. } => {
+            if classification.procedural_state_requires_transaction {
                 return Ok(true);
             }
-            let query = datums.get(*cursor).and_then(|datum| match datum {
-                uqa_sql::plpgsql::PLpgSQLDatum::Var(variable) => {
-                    variable.cursor.as_ref().map(|cursor| &cursor.query)
+            match count {
+                uqa_sql::plpgsql::PLpgSQLCursorCount::Constant(_) => Ok(false),
+                uqa_sql::plpgsql::PLpgSQLCursorCount::Expression(expression) => {
+                    plpgsql_expression_may_mutate_engine(
+                        engine,
+                        expression,
+                        visiting_views,
+                        visiting_routines,
+                        classification,
+                    )
                 }
-                _ => None,
-            });
-            query.map_or(Ok(false), |query| {
-                lowered_statement_may_mutate_engine(
-                    engine,
-                    query.clone(),
-                    visiting_views,
-                    visiting_routines,
-                    classification,
-                )
-            })
+            }
         }
-        PLpgSQLStmt::FetchCursor { .. } | PLpgSQLStmt::CloseCursor { .. } => {
-            Ok(classification.procedural_state_requires_transaction)
-        }
+        PLpgSQLStmt::CloseCursor { .. } => Ok(classification.procedural_state_requires_transaction),
         PLpgSQLStmt::GetDiagnostics { .. } => Ok(false),
     }
 }

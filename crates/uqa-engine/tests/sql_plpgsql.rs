@@ -44,6 +44,8 @@ fn engine() -> Engine {
 mod catalog_lifecycle;
 #[path = "sql_plpgsql/control_flow.rs"]
 mod control_flow;
+#[path = "sql_plpgsql/cursors.rs"]
+mod cursors;
 #[path = "sql_plpgsql/diagnostics.rs"]
 mod diagnostics;
 #[path = "sql_plpgsql/dynamic_recursion.rs"]

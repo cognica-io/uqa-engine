@@ -8,8 +8,8 @@
 
 use super::{
     condition_sqlstate, ensure_single_tag, expect_tag, json_bool_or_false, json_kind,
-    json_optional_i64, json_usize_or_zero, lower_block, lower_expr, lower_full_statement,
-    normalize_plpgsql_type, optional_array, require, require_nonempty_str,
+    json_optional_i64, json_usize_or_zero, lower_block, lower_cursor_scroll_options, lower_expr,
+    lower_full_statement, normalize_plpgsql_type, optional_array, require, require_nonempty_str,
     validate_assignable_datum, CreateFunction, FunctionBody, FunctionParamMode, FunctionReturns,
     JSONValue, PLpgSQLCursor, PLpgSQLDatum, PLpgSQLFunction, PLpgSQLRowField, PLpgSQLVar, Result,
     RoutineColumnTypeReference, SQLError,
@@ -287,6 +287,7 @@ pub(super) fn lower_datum(raw: &JSONValue) -> Result<PLpgSQLDatum> {
                         )));
                     }
                 },
+                scroll: lower_cursor_scroll_options(var, "cursor declaration")?,
             })
         } else {
             if var.get("cursor_explicit_argrow").is_some() {

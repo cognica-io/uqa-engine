@@ -203,8 +203,8 @@ impl Interpreter<'_> {
                 self.set_found(row_count > 0);
                 Ok(Flow::Normal)
             }
-            PLpgSQLStmt::OpenCursor { cursor, arguments } => {
-                self.exec_open_cursor(*cursor, arguments)?;
+            PLpgSQLStmt::OpenCursor { cursor, open } => {
+                self.exec_open_cursor(*cursor, open)?;
                 Ok(Flow::Normal)
             }
             PLpgSQLStmt::FetchCursor {
@@ -213,7 +213,15 @@ impl Interpreter<'_> {
                 direction,
                 count,
             } => {
-                self.exec_fetch_cursor(*cursor, target, *direction, *count)?;
+                self.exec_fetch_cursor(*cursor, target, *direction, count)?;
+                Ok(Flow::Normal)
+            }
+            PLpgSQLStmt::MoveCursor {
+                cursor,
+                direction,
+                count,
+            } => {
+                self.exec_move_cursor(*cursor, *direction, count)?;
                 Ok(Flow::Normal)
             }
             PLpgSQLStmt::CloseCursor { cursor } => {

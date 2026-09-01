@@ -27,8 +27,8 @@ use serde_json::Value as JSONValue;
 use uqa_core::Value;
 
 use crate::ast::{
-    CreateFunction, Expr, FromClause, FunctionBody, FunctionParamMode, FunctionReturns, MergeWhen,
-    Projection, RoutineColumnTypeReference, SelectStmt, Statement, CTE,
+    CreateFunction, CursorDirection, Expr, FromClause, FunctionBody, FunctionParamMode,
+    FunctionReturns, MergeWhen, Projection, RoutineColumnTypeReference, SelectStmt, Statement, CTE,
 };
 use crate::error::{Result, SQLError};
 
@@ -182,12 +182,38 @@ pub struct PLpgSQLVar {
 pub struct PLpgSQLCursor {
     pub query: Statement,
     pub argument_row: Option<usize>,
+    /// Explicit declaration scroll mode. `None` leaves scrollability query-dependent.
+    pub scroll: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
 pub struct PLpgSQLCursorArgument {
     pub name: Option<String>,
     pub expr: Expr,
+}
+
+/// Query source selected by one `OPEN` statement.
+#[derive(Debug, Clone)]
+pub enum PLpgSQLCursorOpen {
+    Bound {
+        arguments: Vec<PLpgSQLCursorArgument>,
+    },
+    Static {
+        query: Box<Statement>,
+        scroll: Option<bool>,
+    },
+    Dynamic {
+        query: Expr,
+        params: Vec<Expr>,
+        scroll: Option<bool>,
+    },
+}
+
+/// Constant or run-time expression controlling cursor movement.
+#[derive(Debug, Clone)]
+pub enum PLpgSQLCursorCount {
+    Constant(i64),
+    Expression(Expr),
 }
 
 /// `name -> datum` slot of a row target.
@@ -344,13 +370,18 @@ pub enum PLpgSQLStmt {
     },
     OpenCursor {
         cursor: usize,
-        arguments: Vec<PLpgSQLCursorArgument>,
+        open: PLpgSQLCursorOpen,
     },
     FetchCursor {
         cursor: usize,
         target: IntoTarget,
-        direction: i64,
-        count: i64,
+        direction: CursorDirection,
+        count: PLpgSQLCursorCount,
+    },
+    MoveCursor {
+        cursor: usize,
+        direction: CursorDirection,
+        count: PLpgSQLCursorCount,
     },
     CloseCursor {
         cursor: usize,
@@ -390,7 +421,7 @@ use json_validation::{
     validate_assignable_datum, validate_record_datum, validate_scalar_datum,
 };
 use lowering_expression::{lower_expr, lower_expr_list, lower_full_statement};
-use lowering_statement::lower_block;
+use lowering_statement::{lower_block, lower_cursor_scroll_options};
 use parsing::{lower_row_fields, normalize_condition};
 
 pub use binding::{bind_expr, bind_select, bind_statement, ResolvedVariable, VariableResolver};

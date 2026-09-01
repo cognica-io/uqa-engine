@@ -66,43 +66,6 @@ impl Engine {
         origin
     }
 
-    pub(crate) fn open_session_portal(
-        &self,
-        name: String,
-        result: SQLResult,
-    ) -> Result<(), SQLError> {
-        self.open_session_portal_with_options(name, result, false, false)
-    }
-
-    pub(crate) fn open_session_portal_with_options(
-        &self,
-        name: String,
-        result: SQLResult,
-        scrollable: bool,
-        holdable: bool,
-    ) -> Result<(), SQLError> {
-        let columns = result.columns.clone();
-        let column_types = result.column_types.clone();
-        let mut portals = self.session.portals.lock();
-        if portals.contains_key(&name) {
-            return Err(cursor_error(&name, "already exists", "42P03"));
-        }
-        portals.insert(
-            name,
-            SessionPortalState {
-                data: SessionPortalData::Result(result),
-                columns,
-                column_types,
-                transaction_origin: 0,
-                position: SessionPortalPosition::BeforeFirst,
-                scrollable,
-                holdable,
-                _binary: false,
-            },
-        );
-        Ok(())
-    }
-
     pub(crate) fn open_pending_session_portal(
         &self,
         declaration: SessionPortalDeclaration,
@@ -227,24 +190,6 @@ impl Engine {
             return Err(cursor_error(name, "already exists", "42P03"));
         }
         Ok(())
-    }
-
-    pub(crate) fn fetch_session_portal_next(
-        &self,
-        name: &str,
-    ) -> Result<(Vec<String>, Option<Vec<Value>>), SQLError> {
-        let result = self.fetch_session_portal(&FetchCursorStmt {
-            name: name.to_string(),
-            direction: CursorDirection::Forward,
-            count: 1,
-            move_only: false,
-        })?;
-        let values = result.rows.first().map(|_| {
-            (0..result.columns.len())
-                .map(|column| result.value_at(0, column).cloned().unwrap_or(Value::Null))
-                .collect()
-        });
-        Ok((result.columns, values))
     }
 
     pub(crate) fn fetch_session_portal(

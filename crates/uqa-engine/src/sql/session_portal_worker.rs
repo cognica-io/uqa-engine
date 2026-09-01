@@ -17,6 +17,12 @@ use crate::{
 
 use super::{query_has_row_locks, select};
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PortalDeclarationContext {
+    Sql,
+    PLpgSQL,
+}
+
 pub(super) fn declare_session_portal(
     engine: &Engine,
     params: &[SQLParam],
@@ -26,13 +32,81 @@ pub(super) fn declare_session_portal(
     hold: bool,
     query: &QueryPlan,
 ) -> Result<SQLResult, SQLError> {
-    if !hold && !engine.in_transaction_block() {
+    prepare_session_portal(
+        engine,
+        params,
+        name,
+        binary,
+        scroll,
+        hold,
+        query,
+        PortalDeclarationContext::Sql,
+    )?;
+    Ok(SQLResult::empty())
+}
+
+pub(super) fn open_plpgsql_session_portal(
+    engine: &Engine,
+    params: &[SQLParam],
+    name: &str,
+    scroll: Option<bool>,
+    query: &QueryPlan,
+) -> Result<(), SQLError> {
+    prepare_session_portal(
+        engine,
+        params,
+        name,
+        false,
+        scroll,
+        false,
+        query,
+        PortalDeclarationContext::PLpgSQL,
+    )
+}
+
+pub(super) fn ensure_plpgsql_session_portal_available(
+    engine: &Engine,
+    name: &str,
+) -> Result<(), SQLError> {
+    engine
+        .ensure_session_portal_available(name)
+        .map_err(|error| {
+            if error.sqlstate() == Some("42P03") {
+                SQLError::Routine {
+                    sqlstate: "42P03".into(),
+                    message: format!("cursor \"{name}\" already in use"),
+                }
+            } else {
+                error
+            }
+        })
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "keeps SQL and PL/pgSQL portal contracts explicit"
+)]
+fn prepare_session_portal(
+    engine: &Engine,
+    params: &[SQLParam],
+    name: &str,
+    binary: bool,
+    scroll: Option<bool>,
+    hold: bool,
+    query: &QueryPlan,
+    context: PortalDeclarationContext,
+) -> Result<(), SQLError> {
+    if context == PortalDeclarationContext::Sql && !hold && !engine.in_transaction_block() {
         return Err(SQLError::Routine {
             sqlstate: "25P01".into(),
             message: "DECLARE CURSOR can only be used in transaction blocks".into(),
         });
     }
-    engine.ensure_session_portal_available(name)?;
+    if context == PortalDeclarationContext::PLpgSQL {
+        ensure_plpgsql_session_portal_available(engine, name)?;
+    } else {
+        engine.ensure_session_portal_available(name)?;
+    }
     let has_row_locks = query_has_row_locks(query);
     if has_row_locks && hold {
         return Err(SQLError::Routine {
@@ -43,7 +117,11 @@ pub(super) fn declare_session_portal(
     if has_row_locks && scroll == Some(true) {
         return Err(SQLError::Routine {
             sqlstate: "0A000".into(),
-            message: "DECLARE SCROLL CURSOR ... FOR UPDATE is not supported".into(),
+            message: if context == PortalDeclarationContext::PLpgSQL {
+                "DECLARE SCROLL CURSOR ... FOR UPDATE/SHARE is not supported".into()
+            } else {
+                "DECLARE SCROLL CURSOR ... FOR UPDATE is not supported".into()
+            },
         });
     }
     select::lock_query_relations(engine, query)?;
@@ -60,7 +138,7 @@ pub(super) fn declare_session_portal(
         holdable: hold,
         binary,
     })?;
-    Ok(SQLResult::empty())
+    Ok(())
 }
 
 struct SessionPortalRowConsumer {

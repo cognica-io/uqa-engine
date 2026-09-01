@@ -12,8 +12,9 @@ use super::{
     json_optional_str, json_optional_usize, json_usize_or_zero, lower_expr, lower_expr_list,
     lower_full_statement, lower_row_fields, normalize_condition, optional_array, require,
     require_i64, require_nonempty_str, validate_assignable_datum, validate_record_datum,
-    validate_scalar_datum, IntoTarget, JSONValue, PLpgSQLBlock, PLpgSQLDatum, PLpgSQLExceptionArm,
-    PLpgSQLReturnValue, PLpgSQLStmt, RaiseLevel, Result, SQLError,
+    validate_scalar_datum, CursorDirection, IntoTarget, JSONValue, PLpgSQLBlock,
+    PLpgSQLCursorCount, PLpgSQLCursorOpen, PLpgSQLDatum, PLpgSQLExceptionArm, PLpgSQLReturnValue,
+    PLpgSQLStmt, RaiseLevel, Result, SQLError,
 };
 
 pub(super) fn lower_block(block: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLpgSQLBlock> {
@@ -358,35 +359,92 @@ pub(super) fn lower_stmt(raw: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLp
     if let Some(stmt) = raw.get("PLpgSQL_stmt_open") {
         let cursor = json_usize_or_zero(stmt, "curvar")?;
         validate_cursor_datum(datums, cursor, "OPEN")?;
-        if stmt.get("query").is_some() || stmt.get("dynquery").is_some() {
-            return Err(SQLError::Unsupported(
-                "PL/pgSQL OPEN FOR query cursors".into(),
-            ));
-        }
-        if !matches!(
+        let bound = matches!(
             datums.get(cursor),
             Some(PLpgSQLDatum::Var(variable)) if variable.cursor.is_some()
-        ) {
-            return Err(SQLError::Unsupported(
-                "PL/pgSQL OPEN without FOR requires a bound cursor".into(),
+        );
+        let query = stmt.get("query");
+        let dynquery = stmt.get("dynquery");
+        let argquery = stmt.get("argquery");
+        let forms = usize::from(query.is_some())
+            + usize::from(dynquery.is_some())
+            + usize::from(argquery.is_some());
+        if forms > 1 {
+            return Err(SQLError::Internal(
+                "PL/pgSQL OPEN contains multiple query forms".into(),
             ));
         }
-        return Ok(PLpgSQLStmt::OpenCursor {
-            cursor,
-            arguments: lower_cursor_arguments(stmt.get("argquery"))?,
-        });
+        let open = if let Some(query) = query {
+            if bound {
+                return Err(SQLError::Internal(
+                    "PL/pgSQL bound cursor OPEN contains a static query".into(),
+                ));
+            }
+            PLpgSQLCursorOpen::Static {
+                query: Box::new(lower_full_statement(query)?),
+                scroll: lower_cursor_scroll_options(stmt, "OPEN")?,
+            }
+        } else if let Some(query) = dynquery {
+            if bound {
+                return Err(SQLError::Internal(
+                    "PL/pgSQL bound cursor OPEN contains a dynamic query".into(),
+                ));
+            }
+            PLpgSQLCursorOpen::Dynamic {
+                query: lower_expr(query)?,
+                params: lower_expr_list(stmt.get("params"))?,
+                scroll: lower_cursor_scroll_options(stmt, "OPEN")?,
+            }
+        } else {
+            if !bound {
+                return Err(SQLError::Unsupported(
+                    "PL/pgSQL OPEN without FOR requires a bound cursor".into(),
+                ));
+            }
+            PLpgSQLCursorOpen::Bound {
+                arguments: lower_cursor_arguments(argquery)?,
+            }
+        };
+        return Ok(PLpgSQLStmt::OpenCursor { cursor, open });
     }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_fetch") {
-        if json_bool_or_false(stmt, "is_move")? {
-            return Err(SQLError::Unsupported("PL/pgSQL MOVE cursor".into()));
-        }
         let cursor = json_usize_or_zero(stmt, "curvar")?;
-        validate_cursor_datum(datums, cursor, "FETCH")?;
+        let is_move = json_bool_or_false(stmt, "is_move")?;
+        validate_cursor_datum(datums, cursor, if is_move { "MOVE" } else { "FETCH" })?;
+        let direction = lower_cursor_direction(require_i64(
+            stmt,
+            "direction",
+            if is_move {
+                "MOVE direction"
+            } else {
+                "FETCH direction"
+            },
+        )?)?;
+        let count = match stmt.get("expr") {
+            Some(expr) => PLpgSQLCursorCount::Expression(lower_expr(expr)?),
+            None => PLpgSQLCursorCount::Constant(require_i64(
+                stmt,
+                "how_many",
+                if is_move { "MOVE count" } else { "FETCH count" },
+            )?),
+        };
+        if is_move {
+            if stmt.get("target").is_some() {
+                return Err(SQLError::Internal(
+                    "PL/pgSQL MOVE unexpectedly contains a target".into(),
+                ));
+            }
+            return Ok(PLpgSQLStmt::MoveCursor {
+                cursor,
+                direction,
+                count,
+            });
+        }
         return Ok(PLpgSQLStmt::FetchCursor {
             cursor,
             target: lower_into_target(require(stmt, "target")?, datums)?,
-            direction: require_i64(stmt, "direction", "FETCH direction")?,
-            count: require_i64(stmt, "how_many", "FETCH count")?,
+            direction,
+            count,
         });
     }
     if let Some(stmt) = raw.get("PLpgSQL_stmt_close") {
@@ -478,6 +536,43 @@ fn validate_cursor_datum(datums: &[PLpgSQLDatum], index: usize, context: &str) -
         ))),
         None => Err(SQLError::Internal(format!(
             "PL/pgSQL {context} references missing cursor datum {index}"
+        ))),
+    }
+}
+
+const CURSOR_OPT_SCROLL: i64 = 0x0002;
+const CURSOR_OPT_NO_SCROLL: i64 = 0x0004;
+const CURSOR_OPT_FAST_PLAN: i64 = 0x0100;
+
+pub(super) fn lower_cursor_scroll_options(node: &JSONValue, context: &str) -> Result<Option<bool>> {
+    let options = require_i64(node, "cursor_options", &format!("{context} cursor options"))?;
+    let unknown = options & !(CURSOR_OPT_SCROLL | CURSOR_OPT_NO_SCROLL | CURSOR_OPT_FAST_PLAN);
+    if unknown != 0 {
+        return Err(SQLError::Internal(format!(
+            "PL/pgSQL {context} has unknown cursor options 0x{unknown:x}"
+        )));
+    }
+    match (
+        options & CURSOR_OPT_SCROLL != 0,
+        options & CURSOR_OPT_NO_SCROLL != 0,
+    ) {
+        (true, false) => Ok(Some(true)),
+        (false, true) => Ok(Some(false)),
+        (false, false) => Ok(None),
+        (true, true) => Err(SQLError::Internal(
+            "PL/pgSQL {context} is both SCROLL and NO SCROLL".into(),
+        )),
+    }
+}
+
+fn lower_cursor_direction(direction: i64) -> Result<CursorDirection> {
+    match direction {
+        0 => Ok(CursorDirection::Forward),
+        1 => Ok(CursorDirection::Backward),
+        2 => Ok(CursorDirection::Absolute),
+        3 => Ok(CursorDirection::Relative),
+        other => Err(SQLError::Internal(format!(
+            "PL/pgSQL cursor has invalid direction {other}"
         ))),
     }
 }

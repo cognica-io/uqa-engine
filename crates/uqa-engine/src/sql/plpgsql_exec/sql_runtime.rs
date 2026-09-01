@@ -79,6 +79,15 @@ impl Interpreter<'_> {
         query: &Expr,
         params: &[Expr],
     ) -> Result<SQLResult, SQLError> {
+        let (text, bound_params) = self.eval_dynamic_sql(query, params)?;
+        crate::sql::execute_nested(self.engine, &text, &bound_params)
+    }
+
+    pub(super) fn eval_dynamic_sql(
+        &self,
+        query: &Expr,
+        params: &[Expr],
+    ) -> Result<(String, Vec<SQLParam>), SQLError> {
         let text = match self.eval_expr(query)? {
             Value::Str(text) => text,
             Value::Null => {
@@ -97,7 +106,7 @@ impl Interpreter<'_> {
         for param in params {
             bound_params.push(SQLParam::Scalar(self.eval_expr(param)?));
         }
-        crate::sql::execute_nested(self.engine, &text, &bound_params)
+        Ok((text, bound_params))
     }
 
     /// Post-process an embedded SQL statement's result: `ROW_COUNT`,

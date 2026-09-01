@@ -15,24 +15,26 @@ use std::sync::Arc;
 
 use uqa_core::{ArrayValue, Value};
 use uqa_sql::ast::{
-    ColumnType, CreateFunction, DropFunctionStmt, Expr, FunctionBinding, FunctionReturns, Statement,
+    ColumnType, CreateFunction, CursorDirection, DropFunctionStmt, Expr, FetchCursorStmt,
+    FunctionBinding, FunctionReturns, Statement,
 };
 use uqa_sql::expr::{cast_value, truthy, value_type_name};
 use uqa_sql::plpgsql::{
     bind_expr, bind_statement, condition_sqlstate, condition_sqlstates, IntoTarget, PLpgSQLBlock,
-    PLpgSQLCursorArgument, PLpgSQLDatum, PLpgSQLFunction, PLpgSQLReturnValue, PLpgSQLRowField,
-    PLpgSQLStmt, RaiseLevel, ResolvedVariable, VariableResolver,
+    PLpgSQLCursorArgument, PLpgSQLCursorCount, PLpgSQLCursorOpen, PLpgSQLDatum, PLpgSQLFunction,
+    PLpgSQLReturnValue, PLpgSQLRowField, PLpgSQLStmt, RaiseLevel, ResolvedVariable,
+    VariableResolver,
 };
-use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult};
+use uqa_sql::{compile, ResultRow, SQLError, SQLParam, SQLResult};
 
 use crate::engine_user_functions::{
     canonical_routine_type_name, routine_local_name, CompiledFunctionBody, SQLUserFunction,
 };
 use crate::{Engine, SQLTableFunctionResult};
 
-use super::execute_compiled_statement;
 use super::plan_executor::UnifiedPlanExecutor;
 use super::scalar::eval_lowered_expression;
+use super::{execute_compiled_statement, optimize_engine_plan};
 
 mod blocks;
 mod control_flow;
