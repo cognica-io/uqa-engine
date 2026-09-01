@@ -134,7 +134,7 @@ END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 ```
 
-The implemented PL/pgSQL surface includes declarations, assignment, `IF` and `CASE`, basic loops, `WHILE`, integer, static-query, dynamic-query, and bound-cursor `FOR`, array `FOREACH`, labeled blocks and exits, `RETURN`, `RETURN NEXT`, `RETURN QUERY`, `PERFORM`, static SQL, dynamic `EXECUTE`, nested blocks, recursive calls with a depth limit, diagnostics, exception handlers, and cursors covered by the routine tests.
+The implemented PL/pgSQL surface includes declarations, assignment, `IF` and `CASE`, basic loops, `WHILE`, integer, static-query, dynamic-query, and bound-cursor `FOR`, array `FOREACH`, labeled blocks and exits, `RETURN`, `RETURN NEXT`, `RETURN QUERY`, `PERFORM`, static SQL, dynamic `EXECUTE`, nested blocks, recursive calls with a depth limit, diagnostics, exception handlers, assertions, and cursors covered by the routine tests.
 
 ### Query FOR loops
 
@@ -195,6 +195,27 @@ END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 
 SELECT manual_foreach_sum(ARRAY[1, 2, 3]);
+```
+
+### Assertions
+
+The implemented syntax is `ASSERT condition [, message];`. The condition uses PL/pgSQL assignment-style Boolean coercion. A true condition is a no-op, while false or NULL raises `assert_failure` with SQLSTATE `P0004`. The optional message is evaluated only on failure and coerced to text; an omitted or NULL message becomes `assertion failed`.
+
+A successful assertion does not change `FOUND` or `ROW_COUNT`. An exception handler can catch `assert_failure` by name, while `WHEN OTHERS` excludes it as in PostgreSQL 18. Sequence calls and other nontransactional sequence effects evaluated by a failing assertion remain visible after the handler's subtransaction rollback.
+
+`plpgsql.check_asserts` is a user-settable Boolean setting that defaults to `on` and is exposed through `pg_settings`. When it is `off`, the assertion skips both its condition and message without evaluating either expression. A routine-local `SET plpgsql.check_asserts = off` applies only while that routine executes.
+
+```sql execute
+CREATE FUNCTION manual_assert_positive(value INTEGER)
+RETURNS INTEGER
+AS $$
+BEGIN
+    ASSERT value > 0, 'value must be positive';
+    RETURN value;
+END;
+$$ LANGUAGE plpgsql;
+
+SELECT manual_assert_positive(3);
 ```
 
 PL/pgSQL cursors support bound `CURSOR [(arguments)] FOR query` declarations with positional or named `OPEN` arguments, unbound static `OPEN ... FOR query`, dynamic `OPEN ... FOR EXECUTE ... USING`, explicit `SCROLL` and `NO SCROLL`, directional single-row `FETCH ... INTO`, `MOVE` directions and counts including `ALL`, `FOUND`, `ROW_COUNT`, and `CLOSE`. Static and dynamic cursor plans may be relational queries, `SHOW`, `EXPLAIN`, `CALL` with output parameters, or `INSERT`, `UPDATE`, `DELETE`, and `MERGE` with `RETURNING`; a mutation command without a result row is rejected before it can change data. Query cursors use query-dependent default scrollability, while command cursors default to `NO SCROLL`; PostgreSQL 18's explicit-`SCROLL` DML behavior for `INSERT`, `UPDATE`, and `DELETE`, which retains the returned row count while exposing `NULL` values, is preserved, `CALL` output cursors may scroll explicitly, and explicit-`SCROLL` `MERGE` cursors fail with SQLSTATE `0A000`.

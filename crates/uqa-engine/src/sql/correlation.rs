@@ -523,6 +523,14 @@ fn relation_columns(
     {
         return Ok(columns.clone());
     }
+    let catalog = engine.catalog_read_view();
+    let resolution = engine.session_execution_view().relation_name_resolution();
+    if let Some(columns) = super::virtual_relation_schema(&catalog, &resolution, name)? {
+        return Ok(RelationColumns {
+            names: columns.into_iter().map(|(name, _)| name).collect(),
+            complete: true,
+        });
+    }
     if let Ok(columns) = engine.try_table_columns(name) {
         return Ok(RelationColumns {
             names: columns.into_iter().collect(),

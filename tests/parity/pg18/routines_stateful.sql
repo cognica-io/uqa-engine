@@ -713,3 +713,104 @@ CREATE FUNCTION sf_bound_cursor_for_reuse() RETURNS text LANGUAGE plpgsql AS $$ 
 -- @case bound_cursor_for_closes_and_reuses_name rows
 SELECT sf_bound_cursor_for_reuse() AS first_call, sf_bound_cursor_for_reuse() AS second_call;
 -- @end
+
+-- PL/pgSQL ASSERT uses assignment-style Boolean coercion, leaves diagnostics unchanged, evaluates messages only on failure, and preserves sequence effects across exception rollback.
+-- @case create_assert_true_condition_sequence ok
+CREATE SEQUENCE sf_assert_true_condition_sequence START WITH 1;
+-- @end
+
+-- @case create_assert_true_message_sequence ok
+CREATE SEQUENCE sf_assert_true_message_sequence START WITH 1;
+-- @end
+
+-- @case create_assert_true_report ok
+CREATE FUNCTION sf_assert_true_report() RETURNS text LANGUAGE plpgsql AS $$ DECLARE before_found boolean; before_count integer; after_count integer; BEGIN PERFORM 1; before_found := FOUND; GET DIAGNOSTICS before_count = ROW_COUNT; ASSERT nextval('sf_assert_true_condition_sequence') > 0, nextval('sf_assert_true_message_sequence'); GET DIAGNOSTICS after_count = ROW_COUNT; RETURN before_found || ':' || FOUND || ':' || before_count || ':' || after_count; END $$;
+-- @end
+
+-- @case assert_true_preserves_state rows
+SELECT sf_assert_true_report() AS value;
+-- @end
+
+-- @case assert_true_message_is_lazy rows
+SELECT sequencename, last_value FROM pg_catalog.pg_sequences WHERE schemaname = current_schema() AND sequencename IN ('sf_assert_true_condition_sequence', 'sf_assert_true_message_sequence') ORDER BY sequencename;
+-- @end
+
+-- @case create_assert_false_condition_sequence ok
+CREATE SEQUENCE sf_assert_false_condition_sequence START WITH 1;
+-- @end
+
+-- @case create_assert_false_message_sequence ok
+CREATE SEQUENCE sf_assert_false_message_sequence START WITH 1;
+-- @end
+
+-- @case create_assert_caught_report ok
+CREATE FUNCTION sf_assert_caught_report() RETURNS text LANGUAGE plpgsql AS $$ BEGIN ASSERT nextval('sf_assert_false_condition_sequence') < 0, nextval('sf_assert_false_message_sequence'); RETURN 'missed'; EXCEPTION WHEN assert_failure THEN RETURN SQLSTATE || ':' || SQLERRM; END $$;
+-- @end
+
+-- @case assert_named_handler_result rows
+SELECT sf_assert_caught_report() AS value;
+-- @end
+
+-- @case assert_exception_preserves_sequences rows
+SELECT sequencename, last_value FROM pg_catalog.pg_sequences WHERE schemaname = current_schema() AND sequencename IN ('sf_assert_false_condition_sequence', 'sf_assert_false_message_sequence') ORDER BY sequencename;
+-- @end
+
+-- @case create_assert_message_report ok
+CREATE FUNCTION sf_assert_message_report() RETURNS text LANGUAGE plpgsql AS $$ DECLARE output text := ''; BEGIN BEGIN ASSERT false; EXCEPTION WHEN assert_failure THEN output := SQLSTATE || ':' || SQLERRM; END; BEGIN ASSERT false, 'custom failure'; EXCEPTION WHEN assert_failure THEN output := output || '|' || SQLERRM; END; BEGIN ASSERT NULL::boolean, NULL::text; EXCEPTION WHEN assert_failure THEN output := output || '|' || SQLERRM; END; BEGIN ASSERT false, 42; EXCEPTION WHEN assert_failure THEN output := output || '|' || SQLERRM; END; RETURN output; END $$;
+-- @end
+
+-- @case assert_messages_and_null_condition rows
+SELECT sf_assert_message_report() AS value;
+-- @end
+
+-- @case create_assert_others_report ok
+CREATE FUNCTION sf_assert_others_report() RETURNS text LANGUAGE plpgsql AS $$ BEGIN BEGIN ASSERT false; EXCEPTION WHEN OTHERS THEN RETURN 'caught'; END; RETURN 'missed'; END $$;
+-- @end
+
+-- @case assert_failure_excluded_from_others error
+SELECT sf_assert_others_report();
+-- @end
+
+-- @case create_assert_off_condition_sequence ok
+CREATE SEQUENCE sf_assert_off_condition_sequence START WITH 1;
+-- @end
+
+-- @case create_assert_off_message_sequence ok
+CREATE SEQUENCE sf_assert_off_message_sequence START WITH 1;
+-- @end
+
+-- @case create_assert_disabled_report ok
+CREATE FUNCTION sf_assert_disabled_report() RETURNS integer LANGUAGE plpgsql SET plpgsql.check_asserts = off AS $$ BEGIN ASSERT nextval('sf_assert_off_condition_sequence') < 0, nextval('sf_assert_off_message_sequence'); RETURN 7; END $$;
+-- @end
+
+-- @case assert_disabled_skips_expressions rows
+SELECT sf_assert_disabled_report() AS value;
+-- @end
+
+-- @case assert_disabled_leaves_sequences_uncalled rows
+SELECT sequencename, last_value FROM pg_catalog.pg_sequences WHERE schemaname = current_schema() AND sequencename IN ('sf_assert_off_condition_sequence', 'sf_assert_off_message_sequence') ORDER BY sequencename;
+-- @end
+
+-- @case create_assert_setting_report ok
+CREATE FUNCTION sf_assert_setting_report() RETURNS text LANGUAGE plpgsql AS $$ BEGIN RETURN (SELECT setting || '|' || category || '|' || short_desc || '|' || context || '|' || vartype || '|' || source || '|' || boot_val || '|' || reset_val FROM pg_catalog.pg_settings WHERE name = 'plpgsql.check_asserts'); END $$;
+-- @end
+
+-- @case assert_setting_metadata rows
+SELECT sf_assert_setting_report() AS value;
+-- @end
+
+-- @case assert_setting_accepts_boolean_prefix ok
+LOAD 'plpgsql'; SET plpgsql.check_asserts = of;
+-- @end
+
+-- @case assert_setting_rejects_ambiguous_prefix error
+LOAD 'plpgsql'; SET plpgsql.check_asserts = o;
+-- @end
+
+-- @case create_plpgsql_boolean_coercion_report ok
+CREATE FUNCTION sf_plpgsql_boolean_coercion_report() RETURNS text LANGUAGE plpgsql AS $$ BEGIN IF 'false' THEN RETURN 'bad'; ELSIF 'yes' THEN RETURN 'ok'; END IF; RETURN 'missed'; END $$;
+-- @end
+
+-- @case plpgsql_boolean_coercion_result rows
+SELECT sf_plpgsql_boolean_coercion_report() AS value;
+-- @end

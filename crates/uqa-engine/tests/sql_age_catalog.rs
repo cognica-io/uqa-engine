@@ -70,22 +70,20 @@ fn age_session(engine: &Engine) {
 }
 
 #[test]
-fn load_accepts_the_age_library_and_rejects_others_like_postgres() {
+fn load_accepts_embedded_libraries_and_rejects_others_like_postgres() {
     let engine = Engine::new();
     for sql in [
         "LOAD 'age'",
         "LOAD 'age.so'",
         "LOAD '$libdir/age'",
         "LOAD '$libdir/age.so'",
+        "LOAD 'plpgsql'",
+        "LOAD 'plpgsql.so'",
+        "LOAD '$libdir/plpgsql'",
+        "LOAD '$libdir/plpgsql.so'",
     ] {
         assert!(exec(&engine, sql).rows.is_empty(), "{sql}");
     }
-    assert_age_error(
-        &engine,
-        "LOAD 'plpgsql'",
-        "58P01",
-        "could not access file \"$libdir/plpgsql\": No such file or directory",
-    );
     assert_age_error(
         &engine,
         "LOAD '/opt/lib/age.so'",

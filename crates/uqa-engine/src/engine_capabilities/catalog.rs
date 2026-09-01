@@ -161,6 +161,15 @@ impl CatalogReadView {
             .collect()
     }
 
+    pub(crate) fn sequence_states(&self) -> Vec<(String, crate::SequenceState)> {
+        self.snapshot
+            .durable
+            .sequences
+            .iter()
+            .map(|(identity, state)| (identity.qualified_name(), *state))
+            .collect()
+    }
+
     pub(crate) fn views_of_kind(
         &self,
         kind: crate::StoredViewKind,

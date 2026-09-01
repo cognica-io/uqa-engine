@@ -18,22 +18,36 @@ pub(in crate::sql::catalog) fn build_pg_sequences(
     catalog: &CatalogReadView,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows = catalog
-        .sequences()
+        .sequence_states()
         .into_iter()
-        .map(|(name, _)| {
+        .map(|(name, state)| {
             let (schema, sequence) = split_schema_name(&name)?;
+            let ascending = state.increment > 0;
             Ok(row([
                 ("schemaname", str_value(schema)),
                 ("sequencename", str_value(sequence)),
                 ("sequenceowner", str_value(current_user_name())),
                 ("data_type", str_value("bigint")),
-                ("start_value", Value::Null),
-                ("min_value", Value::Null),
-                ("max_value", Value::Null),
-                ("increment_by", Value::Null),
+                ("start_value", Value::Int(state.start)),
+                (
+                    "min_value",
+                    Value::Int(if ascending { 1 } else { i64::MIN }),
+                ),
+                (
+                    "max_value",
+                    Value::Int(if ascending { i64::MAX } else { -1 }),
+                ),
+                ("increment_by", Value::Int(state.increment)),
                 ("cycle", bool_value(false)),
                 ("cache_size", Value::Int(1)),
-                ("last_value", Value::Null),
+                (
+                    "last_value",
+                    if state.called {
+                        Value::Int(state.current)
+                    } else {
+                        Value::Null
+                    },
+                ),
             ]))
         })
         .collect::<Result<Vec<_>, SQLError>>()?;

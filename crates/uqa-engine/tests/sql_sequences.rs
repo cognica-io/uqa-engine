@@ -98,6 +98,58 @@ fn sequence_setval_via_sql_updates_currval() {
 }
 
 #[test]
+fn pg_sequences_reports_sequence_state_across_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("pg-sequences.sqlite");
+    {
+        let engine = Engine::open(&database).unwrap();
+        engine
+            .sql(
+                "CREATE SEQUENCE catalog_sequence START 10 INCREMENT 5;
+                 CREATE SEQUENCE descending_sequence START -2 INCREMENT -3",
+                &[],
+            )
+            .unwrap();
+        let before = engine
+            .sql(
+                "SELECT start_value, min_value, max_value, increment_by, cycle, cache_size, last_value
+                 FROM pg_catalog.pg_sequences WHERE sequencename = 'catalog_sequence'",
+                &[],
+            )
+            .unwrap();
+        assert_eq!(before.rows[0]["start_value"], Value::Int(10));
+        assert_eq!(before.rows[0]["min_value"], Value::Int(1));
+        assert_eq!(before.rows[0]["max_value"], Value::Int(i64::MAX));
+        assert_eq!(before.rows[0]["increment_by"], Value::Int(5));
+        assert_eq!(before.rows[0]["cycle"], Value::Bool(false));
+        assert_eq!(before.rows[0]["cache_size"], Value::Int(1));
+        assert_eq!(before.rows[0]["last_value"], Value::Null);
+        let descending = engine
+            .sql(
+                "SELECT start_value, min_value, max_value, increment_by
+                 FROM pg_catalog.pg_sequences WHERE sequencename = 'descending_sequence'",
+                &[],
+            )
+            .unwrap();
+        assert_eq!(descending.rows[0]["start_value"], Value::Int(-2));
+        assert_eq!(descending.rows[0]["min_value"], Value::Int(i64::MIN));
+        assert_eq!(descending.rows[0]["max_value"], Value::Int(-1));
+        assert_eq!(descending.rows[0]["increment_by"], Value::Int(-3));
+        assert_eq!(engine.nextval("catalog_sequence").unwrap(), 10);
+    }
+
+    let reopened = Engine::open(&database).unwrap();
+    let after = reopened
+        .sql(
+            "SELECT last_value FROM pg_catalog.pg_sequences
+             WHERE sequencename = 'catalog_sequence'",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(after.rows[0]["last_value"], Value::Int(10));
+}
+
+#[test]
 fn discard_sequences_clears_currval_without_dropping_definition() {
     let eng = Engine::new();
     eng.sql("CREATE SEQUENCE kept START 3", &[]).unwrap();

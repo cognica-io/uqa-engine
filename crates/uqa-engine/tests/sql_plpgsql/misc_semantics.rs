@@ -84,6 +84,21 @@ fn scalar_subquery_expressions_inside_body() {
          $$ LANGUAGE plpgsql",
     );
     assert_eq!(scalar(&eng, "SELECT count_plus(10) AS v"), Value::Int(13));
+
+    exec(
+        &eng,
+        "CREATE FUNCTION assert_setting_scalar() RETURNS text AS $$
+         BEGIN
+           RETURN (SELECT setting || '|' || vartype
+                   FROM pg_catalog.pg_settings
+                   WHERE name = 'plpgsql.check_asserts');
+         END;
+         $$ LANGUAGE plpgsql",
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT assert_setting_scalar() AS v"),
+        Value::Str("on|bool".into())
+    );
 }
 
 #[test]

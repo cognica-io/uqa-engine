@@ -222,7 +222,7 @@ SELECT to_regclass('pg_catalog.pg_type') AS relation_oid,
 
 ## Sequence functions
 
-`nextval`, `currval`, and `setval` operate on named sequences. `currval` requires the sequence to have produced or received a value in the relevant session context. `pg_proc` exposes their PostgreSQL 18 OIDs, signatures, volatility, parallel-safety, strictness, and source identities, so their `regproc` output uses the PostgreSQL routine names.
+`nextval`, `currval`, and two-argument `setval` operate on named sequences. A value allocated by `nextval` or installed by `setval` is not reclaimed by a failed statement, PL/pgSQL exception subtransaction, transaction rollback, or savepoint rollback; the durable sequence state survives reopen. `currval` reflects the latest such value only in the session that produced or installed it, including after rollback, and a new session has no `currval` until it calls `nextval` or `setval`. `pg_sequences` reports the configured start and increment, default bounds, default cycle and cache values, and a NULL `last_value` until the sequence is first called. `pg_proc` exposes the sequence functions' PostgreSQL 18 OIDs, signatures, volatility, parallel-safety, strictness, and source identities, so their `regproc` output uses the PostgreSQL routine names.
 
 ## Aggregate functions
 

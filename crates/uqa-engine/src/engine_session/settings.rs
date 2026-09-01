@@ -14,10 +14,7 @@ impl Engine {
         self.session.state.read().search_path.clone()
     }
 
-    /// `LOAD 'library'`. The engine embeds the extension surfaces it
-    /// supports, so loading Apache AGE succeeds as a no-op through every
-    /// spelling `PostgreSQL` resolves against `$libdir`; any other library
-    /// fails exactly like a missing shared object.
+    /// `LOAD 'library'`. The engine embeds Apache AGE and PL/pgSQL, so loading either succeeds as a no-op through every spelling `PostgreSQL` resolves against `$libdir`; any other library fails exactly like a missing shared object.
     pub fn load_library(&self, library: &str) -> Result<(), SQLError> {
         let requested = library.strip_prefix("$libdir/").unwrap_or(library);
         let base = requested.strip_suffix(".so").unwrap_or(requested);

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "1b305c3d27443e85c9d5310ebaa296f6f777b2830619269bd4b5af1eb3438834",
+  "fixture_sha256": "aeea181a58e5ea65a52209d567f88539e0c27e8675ff72da96e0b71e8f7d6a8d",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -1099,6 +1099,168 @@
         [
           "1:sf_query_for_reuse",
           "1:sf_query_for_reuse"
+        ]
+      ]
+    },
+    {
+      "name": "create_assert_true_condition_sequence",
+      "kind": "ok"
+    },
+    {
+      "name": "create_assert_true_message_sequence",
+      "kind": "ok"
+    },
+    {
+      "name": "create_assert_true_report",
+      "kind": "ok"
+    },
+    {
+      "name": "assert_true_preserves_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "true:true:1:1"
+        ]
+      ]
+    },
+    {
+      "name": "assert_true_message_is_lazy",
+      "kind": "rows",
+      "rows": [
+        [
+          "sf_assert_true_condition_sequence",
+          "1"
+        ],
+        [
+          "sf_assert_true_message_sequence",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "create_assert_false_condition_sequence",
+      "kind": "ok"
+    },
+    {
+      "name": "create_assert_false_message_sequence",
+      "kind": "ok"
+    },
+    {
+      "name": "create_assert_caught_report",
+      "kind": "ok"
+    },
+    {
+      "name": "assert_named_handler_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "P0004:1"
+        ]
+      ]
+    },
+    {
+      "name": "assert_exception_preserves_sequences",
+      "kind": "rows",
+      "rows": [
+        [
+          "sf_assert_false_condition_sequence",
+          "1"
+        ],
+        [
+          "sf_assert_false_message_sequence",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "create_assert_message_report",
+      "kind": "ok"
+    },
+    {
+      "name": "assert_messages_and_null_condition",
+      "kind": "rows",
+      "rows": [
+        [
+          "P0004:assertion failed|custom failure|assertion failed|42"
+        ]
+      ]
+    },
+    {
+      "name": "create_assert_others_report",
+      "kind": "ok"
+    },
+    {
+      "name": "assert_failure_excluded_from_others",
+      "kind": "error",
+      "sqlstate": "P0004"
+    },
+    {
+      "name": "create_assert_off_condition_sequence",
+      "kind": "ok"
+    },
+    {
+      "name": "create_assert_off_message_sequence",
+      "kind": "ok"
+    },
+    {
+      "name": "create_assert_disabled_report",
+      "kind": "ok"
+    },
+    {
+      "name": "assert_disabled_skips_expressions",
+      "kind": "rows",
+      "rows": [
+        [
+          "7"
+        ]
+      ]
+    },
+    {
+      "name": "assert_disabled_leaves_sequences_uncalled",
+      "kind": "rows",
+      "rows": [
+        [
+          "sf_assert_off_condition_sequence",
+          null
+        ],
+        [
+          "sf_assert_off_message_sequence",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "create_assert_setting_report",
+      "kind": "ok"
+    },
+    {
+      "name": "assert_setting_metadata",
+      "kind": "rows",
+      "rows": [
+        [
+          "on|Customized Options|Perform checks given in ASSERT statements.|user|bool|default|on|on"
+        ]
+      ]
+    },
+    {
+      "name": "assert_setting_accepts_boolean_prefix",
+      "kind": "ok"
+    },
+    {
+      "name": "assert_setting_rejects_ambiguous_prefix",
+      "kind": "error",
+      "sqlstate": "22023"
+    },
+    {
+      "name": "create_plpgsql_boolean_coercion_report",
+      "kind": "ok"
+    },
+    {
+      "name": "plpgsql_boolean_coercion_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "ok"
         ]
       ]
     }
