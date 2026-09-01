@@ -85,6 +85,7 @@ impl Engine {
                 });
             }
             let query_schema = crate::sql::bind_catalog_query_routines(engine, &mut plan, params)?;
+            crate::sql::reject_stored_query_regrole_constants(engine, &mut plan)?;
             let output_columns = create_view_output_columns(&query_schema, column_names)?;
             for column in &output_columns {
                 crate::sql::validate_postgres_column_name(column)?;

@@ -825,3 +825,38 @@ SELECT '1e-16384'::jsonb
 SELECT '[1e131072]'::jsonb
 SELECT '{"n":1e131072}'::jsonb
 SELECT '1e131071'::jsonb > '0'::jsonb, '0e200000'::jsonb = '0'::jsonb, json_typeof('1e200000'::json)
+-- to_reg* catalog lookups
+SELECT to_regclass('pg_catalog.pg_type')::text, to_regclass('pg_type')::text, to_regclass('missing') IS NULL, pg_typeof(to_regclass('pg_type'))::text
+SELECT to_regproc('casefold')::text, to_regproc('pg_catalog.casefold')::text, to_regproc('lower') IS NULL, to_regproc('missing') IS NULL, pg_typeof(to_regproc('casefold'))::text
+SELECT to_regprocedure('casefold(text)')::text, to_regprocedure('pg_catalog.casefold(text)')::text, to_regprocedure('casefold') IS NULL, to_regprocedure('missing(integer)') IS NULL, pg_typeof(to_regprocedure('casefold(text)'))::text
+SELECT to_regnamespace('pg_catalog')::text, to_regnamespace('missing') IS NULL, to_regnamespace('one.two') IS NULL, pg_typeof(to_regnamespace('public'))::text
+SELECT to_regrole(current_user)::oid = (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = current_user), to_regrole(current_user)::text = current_user::text, pg_typeof(to_regrole(current_user))::text
+SELECT to_regtype('integer')::text, to_regtype('pg_catalog.int4')::text, to_regtype('integer[]')::text, to_regtype('integer ARRAY')::text, to_regtype('varchar(10)')::text, to_regtype('"integer"') IS NULL, to_regtype('missing') IS NULL, pg_typeof(to_regtype('integer'))::text
+SELECT current_user::text::regrole::oid = to_regrole(current_user)::oid, (ARRAY[current_user::text::regrole]::regrole[])[1] = to_regrole(current_user), pg_typeof(current_user::text::regrole)::text, pg_typeof(ARRAY[current_user::text::regrole]::regrole[])::text
+SELECT to_regclass(NULL), to_regproc(NULL), to_regprocedure(NULL), to_regnamespace(NULL), to_regrole(NULL), to_regtype(NULL)
+SELECT to_regproc('23')::oid, to_regprocedure('23')::oid, to_regclass('23')::oid, to_regnamespace('23')::oid, to_regrole('23')::oid, to_regtype('23')::oid
+SELECT to_regproc('00023')::oid, to_regprocedure('00023')::oid, to_regclass('00023')::oid, to_regnamespace('00023')::oid, to_regrole('00023')::oid, to_regtype('00023')::oid
+SELECT to_regproc('-')::oid, to_regprocedure('-')::oid, to_regclass('-')::oid, to_regnamespace('-')::oid, to_regrole('-')::oid, to_regtype('-')::oid
+SELECT to_regproc('09') IS NULL, to_regprocedure('09') IS NULL, to_regclass('09') IS NULL, to_regnamespace('09') IS NULL, to_regrole('09') IS NULL, to_regtype('09') IS NULL
+SELECT to_regrole('missing') IS NULL, to_regrole('one.two') IS NULL, to_regrole('"unterminated') IS NULL, to_regrole('4294967296') IS NULL
+SELECT to_regclass('one.two.three')
+SELECT to_regproc('one.two.three')
+SELECT to_regprocedure('one.two.three()')
+SELECT to_regtype('one.two.three')
+SELECT to_regclass('one.two.three.four')
+SELECT to_regproc('one.two.three.four')
+SELECT to_regprocedure('one.two.three.four()')
+SELECT to_regtype('one.two.three.four')
+SELECT to_regtype('integer[')
+SELECT to_regclass(1)
+SELECT to_regproc()
+SELECT to_regnamespace(value => 'public')
+SELECT 'missing_regrole'::regrole
+SELECT '09'::regrole
+SELECT '4294967296'::regrole
+SELECT 'one.two'::regrole
+SELECT '{missing_regrole}'::regrole[]
+SELECT oid, typname, typnamespace, typlen, typbyval, typtype, typcategory, typispreferred, typdelim, typrelid, typelem, typarray, typinput::oid, typoutput::oid, typreceive::oid, typsend::oid, typalign, typstorage, typcollation FROM pg_catalog.pg_type WHERE oid IN (4096, 4097) ORDER BY oid
+SELECT oid, proname, prorettype, proargtypes::text, proisstrict, provolatile, proparallel, proleakproof, prosrc, proargnames IS NULL FROM pg_catalog.pg_proc WHERE oid IN (4092, 4094, 4095, 4098) ORDER BY oid
+SELECT oid, proname, prorettype, proargtypes::text, proisstrict, provolatile, proparallel, proleakproof, prosrc, proargnames IS NULL FROM pg_catalog.pg_proc WHERE proname IN ('to_regclass', 'to_regproc', 'to_regprocedure', 'to_regnamespace', 'to_regrole', 'to_regtype') ORDER BY oid
+SELECT routine_name, data_type, type_udt_schema, type_udt_name, is_deterministic, external_language FROM information_schema.routines WHERE routine_name IN ('to_regclass', 'to_regproc', 'to_regprocedure', 'to_regnamespace', 'to_regrole', 'to_regtype') ORDER BY routine_name

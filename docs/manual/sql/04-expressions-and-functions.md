@@ -35,7 +35,7 @@ WHERE value LIKE 'a!_b' ESCAPE '!';
 
 For the implemented fixed-signature built-ins documented below, ordinary expressions and generated expressions use one PostgreSQL 18-style candidate-selection contract. Unqualified calls combine visible SQL user functions with `pg_catalog` candidates according to `search_path`; qualified names, exact and implicit matches, preferred types, unknown-category selection, domain base types, named arguments, defaults, and stored bindings use the same resolver. This contract is limited to the listed implemented signatures and does not imply support for PostgreSQL's complete built-in, polymorphic, operator, cast, or `pg_proc` matrix.
 
-The shared fixed-signature registry covers `casefold`, `reverse`, `md5`, `crc32`, `crc32c`, the documented one-argument length family, `gamma`, `lgamma`, `json_strip_nulls`, `jsonb_strip_nulls`, `to_bin`, `to_hex`, `to_oct`, the unit and range `random` functions, and the documented UUID generation and extraction functions. Polymorphic array transformations retain their specialized type-substitution path.
+The shared fixed-signature registry covers `casefold`, `reverse`, `md5`, `crc32`, `crc32c`, the documented one-argument length family, `gamma`, `lgamma`, `json_strip_nulls`, `jsonb_strip_nulls`, `to_bin`, `to_hex`, `to_oct`, `to_regproc`, `to_regprocedure`, `to_regclass`, `to_regnamespace`, `to_regrole`, `to_regtype`, the unit and range `random` functions, and the documented UUID generation and extraction functions. Polymorphic array transformations retain their specialized type-substitution path.
 
 ## Text functions
 
@@ -187,6 +187,34 @@ SELECT lower('[1,5)'::int4range) AS lower_bound,
 ## Session and identity functions
 
 Implemented helpers include `current_database`, `current_catalog`, `current_user`, `session_user`, `current_schema`, `current_schemas`, `typeof`, and `pg_typeof`. `current_schema` and `current_schemas` follow the session `search_path`.
+
+### Catalog lookup functions
+
+```text
+to_regproc(text) -> regproc
+to_regprocedure(text) -> regprocedure
+to_regclass(text) -> regclass
+to_regnamespace(text) -> regnamespace
+to_regrole(text) -> regrole
+to_regtype(text) -> regtype
+```
+
+The input is a PostgreSQL object name or type spelling. `to_regclass` resolves a relation, `to_regnamespace` resolves a schema, `to_regrole` resolves one global unqualified role, `to_regproc` resolves a unique visible routine name without selecting an overload, `to_regprocedure` requires a routine name followed by an exact input-type signature, and `to_regtype` accepts PostgreSQL type aliases, qualification, typmods, and array bounds while returning the underlying catalog type identity. Object-name components follow PostgreSQL's `reg*` identifier-string rules, so reserved words and non-whitespace punctuation do not require SQL-statement quoting in the text value; quoted components preserve case and doubled quotes, while unquoted components use PostgreSQL case folding and identifier-length clipping. Type spellings use PostgreSQL's dedicated type-name parser.
+
+Each function returns the catalog OID in its declared `reg*` alias; relation, routine, and type lookups use `search_path` when the input is unqualified, while roles are global and qualified role names return NULL. A missing object returns NULL; an ambiguous `to_regproc` name or a signature-less `to_regprocedure` name also returns NULL. An all-digit input uses PostgreSQL's OID input syntax, including its leading-zero octal form, without requiring the OID to identify an existing object, and `-` denotes OID 0. Text output follows the corresponding `reg*` carrier, including visible-name qualification, role identifier quoting, PostgreSQL built-in type aliases, and decimal output for an unresolved nonzero OID.
+
+These lookups do not mutate state. They are strict, stable, parallel-safe, and not leakproof, so a NULL input returns NULL and the functions are rejected in generated-column expressions that require immutability. `pg_catalog.pg_proc` exposes PostgreSQL 18 OIDs 3494, 3479, 3495, 4086, 4093, and 3493 for the functions in the syntax order above, and `information_schema.routines` exposes their exact `reg*` return aliases.
+
+Malformed relation, routine, namespace, or role names are soft lookup failures and return NULL. A cross-database relation, routine, or type name reports SQLSTATE `0A000`; a malformed type specification reports `42601`; and unsupported argument types, names, or arities report `42883`. Qualified namespace and role inputs do not name an object and return NULL. Direct text-to-`regrole` and text-to-`regrole[]` casts instead use the hard input contract: a missing role reports `42704`, malformed OID syntax reports `22P02`, an out-of-range OID reports `22003`, and malformed or qualified role names report `42602`; table writes resolve names to durable OID carriers, so later role removal changes text output to the stored decimal OID rather than corrupting the value.
+
+PostgreSQL does not permit a non-NULL scalar `regrole` constant to be retained in a column default, `CHECK` constraint, generated expression, partition key, view or materialized-view definition, routine parameter default or SQL-standard body, trigger `WHEN` condition, or rule condition or action; such DDL reports `0A000` after applying the hard input errors above. A runtime conversion through `text` or `oid`, a numeric or NULL `regrole` constant, a `regrole[]` constant, and a SQL source-string routine body remain valid because they do not retain that scalar constant dependency.
+
+```sql execute
+SELECT to_regclass('pg_catalog.pg_type') AS relation_oid,
+       to_regprocedure('casefold(text)') AS routine_oid,
+       to_regrole(current_user) AS role_oid,
+       to_regtype('integer[]') AS type_oid;
+```
 
 ## Spatial helpers
 

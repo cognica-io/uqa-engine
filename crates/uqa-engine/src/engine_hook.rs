@@ -27,6 +27,18 @@ impl uqa_sql::expr::EngineHook for Engine {
         crate::sql::resolve_regprocedure_oid(self, name)
     }
 
+    fn resolve_regrole(&self, name: &str) -> std::result::Result<Option<i64>, SQLError> {
+        crate::sql::resolve_regrole_oid(self, name)
+    }
+
+    fn resolve_regobject(
+        &self,
+        ty: &uqa_sql::ast::ColumnType,
+        name: &str,
+    ) -> std::result::Result<Option<i64>, SQLError> {
+        crate::sql::resolve_regobject_oid(self, ty, name)
+    }
+
     fn resolve_regtype_output(
         &self,
         ty: &uqa_sql::ast::ColumnType,

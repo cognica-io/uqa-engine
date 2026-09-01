@@ -435,7 +435,9 @@ pub(in crate::sql) fn run_insert_inner(
                 let value =
                     eval_mutation_expr(read_engine, &snapshot_scope, &row[i], None, params)?;
                 match view_rule_insert_column_type(engine, stmt, i)? {
-                    Some(ty) => Some(crate::sql::convert_value_to_column_type(value, &ty)?),
+                    Some(ty) => Some(crate::sql::convert_value_to_column_type_with_engine(
+                        engine, value, &ty,
+                    )?),
                     None => Some(value),
                 }
             } else {

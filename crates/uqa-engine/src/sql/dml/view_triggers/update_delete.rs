@@ -58,7 +58,7 @@ fn evaluate_view_update_assignments(
                 params,
             )?
         };
-        pending.new[position] = coerce_view_value(target, position, value)?;
+        pending.new[position] = coerce_view_value(engine, target, position, value)?;
         pending
             .evaluated_assignments
             .insert(assignment.column.clone());

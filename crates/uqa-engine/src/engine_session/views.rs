@@ -375,6 +375,7 @@ impl Engine {
         let relation = RelationIdentity::from_legacy_name(&name)
             .map_err(|err| SQLError::Internal(format!("invalid canonical view name: {err}")))?;
         let query_schema = crate::sql::bind_catalog_query_routines(self, &mut plan, params)?;
+        crate::sql::reject_stored_query_regrole_constants(self, &mut plan)?;
         let output_columns = create_view_output_columns(&query_schema, column_names)?;
         let replacement_schema = named_view_schema(&query_schema, &output_columns)?;
         let existing_kind = self

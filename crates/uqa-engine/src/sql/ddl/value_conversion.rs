@@ -30,7 +30,7 @@ pub(in crate::sql) fn coerce_to_column_type(
     let Some(def) = cols.iter().find(|c| c.name == column) else {
         return Ok(value);
     };
-    convert_value_to_column_type(value, &def.ty)
+    convert_value_to_column_type_with_engine(engine, value, &def.ty)
 }
 
 pub(super) fn coerce_json_value(value: Value, jsonb: bool) -> Result<Value, SQLError> {
@@ -77,12 +77,12 @@ pub(super) fn rewrite_column_values_to_type(
                 &schema,
                 &[],
             )?;
-            convert_value_to_column_type(value, target_ty)?
+            convert_value_to_column_type_with_engine(engine, value, target_ty)?
         } else {
             let Some(value) = doc.get(column).cloned() else {
                 continue;
             };
-            convert_declared_value_to_column_type(value, source_ty, target_ty)?
+            convert_declared_value_to_column_type(engine, value, source_ty, target_ty)?
         };
         let mut updates: BTreeMap<String, Value> = BTreeMap::new();
         updates.insert(column.to_string(), converted.clone());
@@ -99,16 +99,17 @@ pub(super) fn rewrite_column_values_to_type(
 }
 
 fn convert_declared_value_to_column_type(
+    engine: &Engine,
     value: Value,
     source_ty: &ColumnType,
     target_ty: &ColumnType,
 ) -> Result<Value, SQLError> {
     match (source_ty, target_ty) {
         (ColumnType::Domain { base, .. }, target) => {
-            convert_declared_value_to_column_type(value, base, target)
+            convert_declared_value_to_column_type(engine, value, base, target)
         }
         (source, ColumnType::Domain { base, .. }) => {
-            convert_declared_value_to_column_type(value, source, base)
+            convert_declared_value_to_column_type(engine, value, source, base)
         }
         (ColumnType::Array(source), ColumnType::Array(target)) => {
             let Value::Array(array) = value else {
@@ -119,7 +120,8 @@ fn convert_declared_value_to_column_type(
             };
             let source = array_scalar_type(source);
             let target = array_scalar_type(target);
-            let converted = convert_declared_array_elements(array.elements(), source, target)?;
+            let converted =
+                convert_declared_array_elements(engine, array.elements(), source, target)?;
             ArrayValue::with_lower_bounds(converted, array.lower_bounds().to_vec())
                 .map(Value::Array)
                 .ok_or_else(|| {
@@ -163,6 +165,7 @@ fn convert_declared_value_to_column_type(
                     | ColumnType::Regprocedure
                     | ColumnType::Regclass
                     | ColumnType::Regnamespace
+                    | ColumnType::Regrole
                     | ColumnType::Regtype
             ) =>
         {
@@ -177,8 +180,37 @@ fn convert_declared_value_to_column_type(
                 column_type_name(target_ty)
             )))
         }
-        _ => convert_value_to_column_type(value, target_ty),
+        _ => convert_value_to_column_type_with_engine(engine, value, target_ty),
     }
+}
+
+fn type_requires_catalog_resolution(ty: &ColumnType) -> bool {
+    match ty {
+        ColumnType::Regrole => true,
+        ColumnType::Array(element) | ColumnType::Domain { base: element, .. } => {
+            type_requires_catalog_resolution(element)
+        }
+        _ => false,
+    }
+}
+
+pub(crate) fn convert_value_to_column_type_with_engine(
+    engine: &Engine,
+    value: Value,
+    ty: &ColumnType,
+) -> Result<Value, SQLError> {
+    if matches!(value, Value::Null) {
+        return Ok(Value::Null);
+    }
+    if type_requires_catalog_resolution(ty) {
+        return uqa_sql::expr::cast_value_with_type_resolution(
+            &value,
+            None,
+            &uqa_sql::expr::coercion_type_name(ty),
+            Some(engine),
+        );
+    }
+    convert_value_to_column_type(value, ty)
 }
 
 #[expect(
@@ -326,6 +358,21 @@ pub(crate) fn convert_value_to_column_type(
             Value::Int(_) | Value::Str(_) => value,
             other => Value::Str(value_to_text(&other)),
         }),
+        ColumnType::Regrole => match value {
+            Value::Int(value) => u32::try_from(value)
+                .map(|value| Value::Int(i64::from(value)))
+                .map_err(|_| {
+                    SQLError::TypeMismatch(format!(
+                        "value {value} is out of range for type regrole"
+                    ))
+                }),
+            Value::Str(_) | Value::FixedChar(_) => Err(SQLError::Internal(
+                "regrole name conversion requires catalog resolution".into(),
+            )),
+            other => Err(SQLError::TypeMismatch(format!(
+                "cannot cast {other:?} to regrole"
+            ))),
+        },
         ColumnType::Int2Vector => convert_value_to_column_type(
             value,
             &ColumnType::Array(Box::new(ColumnType::SmallInteger)),
@@ -421,6 +468,7 @@ fn convert_array_elements(
 }
 
 fn convert_declared_array_elements(
+    engine: &Engine,
     elements: &[Value],
     source_type: &ColumnType,
     target_type: &ColumnType,
@@ -430,9 +478,12 @@ fn convert_declared_array_elements(
         .cloned()
         .map(|element| match element {
             Value::List(nested) => {
-                convert_declared_array_elements(&nested, source_type, target_type).map(Value::List)
+                convert_declared_array_elements(engine, &nested, source_type, target_type)
+                    .map(Value::List)
             }
-            scalar => convert_declared_value_to_column_type(scalar, source_type, target_type),
+            scalar => {
+                convert_declared_value_to_column_type(engine, scalar, source_type, target_type)
+            }
         })
         .collect()
 }
@@ -513,6 +564,7 @@ pub(in crate::sql) fn column_type_name(ty: &ColumnType) -> &str {
         ColumnType::Regprocedure => "regprocedure",
         ColumnType::Regclass => "regclass",
         ColumnType::Regnamespace => "regnamespace",
+        ColumnType::Regrole => "regrole",
         ColumnType::Regtype => "regtype",
         ColumnType::PgNodeTree => "pg_node_tree",
         ColumnType::AclItem => "aclitem",

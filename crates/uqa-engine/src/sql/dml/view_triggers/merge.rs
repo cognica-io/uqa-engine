@@ -455,7 +455,7 @@ fn evaluate_view_assignment(
     } else {
         eval_mutation_expr(engine, ctes, expression, Some(row), params)?
     };
-    coerce_view_value(target, position, value)
+    coerce_view_value(engine, target, position, value)
 }
 
 struct ViewMergeActionContext<'a> {

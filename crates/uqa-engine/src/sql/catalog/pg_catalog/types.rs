@@ -64,6 +64,7 @@ pub(in crate::sql::catalog) fn build_pg_type() -> Vec<ResultRow> {
         ),
         (ColumnType::Regtype, "N", false, "b"),
         (ColumnType::Regnamespace, "N", false, "b"),
+        (ColumnType::Regrole, "N", false, "b"),
         (ColumnType::AnyArray, "P", false, "p"),
         (ColumnType::Uuid, "U", false, "b"),
         (ColumnType::JsonB, "U", false, "b"),

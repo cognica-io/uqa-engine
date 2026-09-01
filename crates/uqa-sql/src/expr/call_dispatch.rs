@@ -141,10 +141,19 @@ fn eval_function_call_inner(
             .unwrap_or_else(|| "uqa".to_string());
         return Ok(Value::Str(user));
     }
-    if lower == "to_regclass" {
+    let regobject_type = match lower {
+        "to_regproc" => Some(crate::ast::ColumnType::Regproc),
+        "to_regprocedure" => Some(crate::ast::ColumnType::Regprocedure),
+        "to_regclass" => Some(crate::ast::ColumnType::Regclass),
+        "to_regnamespace" => Some(crate::ast::ColumnType::Regnamespace),
+        "to_regrole" => Some(crate::ast::ColumnType::Regrole),
+        "to_regtype" => Some(crate::ast::ColumnType::Regtype),
+        _ => None,
+    };
+    if let Some(regobject_type) = regobject_type {
         let [value] = evaluated.as_slice() else {
             return Err(SQLError::BadArity {
-                name: "to_regclass".into(),
+                name: lower.into(),
                 expected: "1".into(),
                 actual: evaluated.len(),
             });
@@ -154,16 +163,15 @@ fn eval_function_call_inner(
             Value::Str(name) | Value::FixedChar(name) => name,
             value => {
                 return Err(SQLError::TypeMismatch(format!(
-                    "to_regclass requires text, got {}",
+                    "{lower} requires text, got {}",
                     value_type_name(value)
                 )));
             }
         };
         let oid = ctx
             .engine
-            .map(|engine| engine.resolve_regclass(name))
-            .transpose()
-            .map_err(SQLError::Internal)?
+            .map(|engine| engine.resolve_regobject(&regobject_type, name))
+            .transpose()?
             .flatten();
         return Ok(oid.map_or(Value::Null, Value::Int));
     }

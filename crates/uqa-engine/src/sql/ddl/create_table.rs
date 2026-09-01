@@ -14,7 +14,9 @@ use super::{
 use crate::sql::generated::prepare_generated_columns;
 use uqa_sql::ast::{AutoIncrementKind, AutoIncrementOwner, Expr};
 
-use super::constraint_validation::{resolve_foreign_key_parent, validate_foreign_key_definition};
+use super::constraint_validation::{
+    resolve_foreign_key_parent, validate_check_expression, validate_foreign_key_definition,
+};
 
 // -------------------------------------------------------------------------
 
@@ -59,10 +61,25 @@ fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResu
     }
     prepare_create_table_hierarchy(engine, &mut c)?;
     materialize_implicit_sequences(engine, &mut c)?;
-    for column in &c.columns {
+    let check_columns = c.columns.clone();
+    for column in &mut c.columns {
         if let Some(default) = &column.default {
-            validate_default_expression(engine, default)?;
+            validate_default_expression(engine, default, &column.ty)?;
         }
+        if let Some(check) = &mut column.check {
+            validate_check_expression(engine, &c.name, &c.qualifier, &check_columns, check)?;
+            crate::sql::reject_stored_regrole_constants(engine, check, None)?;
+        }
+    }
+    for check in &mut c.checks {
+        validate_check_expression(
+            engine,
+            &c.name,
+            &c.qualifier,
+            &check_columns,
+            &mut check.expr,
+        )?;
+        crate::sql::reject_stored_regrole_constants(engine, &check.expr, None)?;
     }
     for foreign_key in &mut c.foreign_keys {
         if !foreign_key.period {

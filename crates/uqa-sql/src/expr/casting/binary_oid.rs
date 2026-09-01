@@ -68,6 +68,18 @@ pub(super) fn cast_regnamespace(value: &Value, source_ty: Option<&str>) -> Resul
     }
 }
 
+pub(super) fn cast_regrole(value: &Value, source_ty: Option<&str>) -> Result<Value> {
+    let source = canonical_cast_source(source_ty, value);
+    match (source.as_str(), value) {
+        (
+            "unknown" | "text" | "varchar" | "bpchar" | "name" | "regrole",
+            Value::Str(text) | Value::FixedChar(text),
+        ) => Ok(Value::Str(text.clone())),
+        (_, Value::Int(_)) => cast_oid(value, source_ty),
+        _ => Err(undefined_cast(&source, "regrole")),
+    }
+}
+
 pub(super) fn cast_xid(value: &Value, source_ty: Option<&str>) -> Result<Value> {
     let source = canonical_cast_source(source_ty, value);
     match (source.as_str(), value) {

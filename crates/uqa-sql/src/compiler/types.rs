@@ -14,6 +14,248 @@ use crate::error::{Result, SQLError};
 
 use super::tree::extract_string;
 
+/// Parser-normalized type identity used by `PostgreSQL`'s `regtype` and `regprocedure` input functions. Components retain the parser's distinction between aliases such as unquoted `integer` (normalized to `pg_catalog.int4`) and a quoted type named `"integer"`; type modifiers are intentionally omitted because these aliases identify a base catalog type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedRegtypeName {
+    pub names: Vec<String>,
+    pub array_dimensions: usize,
+}
+
+/// Parser-normalized routine name and optional exact input-type signature used by `PostgreSQL`'s `regproc` and `regprocedure` input functions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedRegprocedureName {
+    pub names: Vec<String>,
+    pub argument_types: Option<Vec<ParsedRegtypeName>>,
+}
+
+const POSTGRES_IDENTIFIER_MAX_BYTES: usize = 63;
+const POSTGRES_FUNCTION_MAX_ARGUMENTS: usize = 100;
+
+fn scanner_isspace(byte: u8) -> bool {
+    matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c)
+}
+
+fn truncate_postgres_identifier(mut identifier: String) -> String {
+    if identifier.len() <= POSTGRES_IDENTIFIER_MAX_BYTES {
+        return identifier;
+    }
+    let mut end = POSTGRES_IDENTIFIER_MAX_BYTES;
+    while !identifier.is_char_boundary(end) {
+        end -= 1;
+    }
+    identifier.truncate(end);
+    identifier
+}
+
+/// Parse the dotted identifier strings consumed by `PostgreSQL`'s `reg*` input functions. This follows `SplitIdentifierString`: surrounding component whitespace is ignored, quoted components collapse doubled quotes without case folding, unquoted components extend to a dot or whitespace and use ASCII case folding, and every component is clipped to `PostgreSQL`'s 63-byte identifier limit.
+#[must_use]
+pub fn parse_regobject_name(input: &str) -> Option<Vec<String>> {
+    let bytes = input.as_bytes();
+    let mut offset = 0usize;
+    while bytes.get(offset).is_some_and(|byte| scanner_isspace(*byte)) {
+        offset += 1;
+    }
+    if offset == bytes.len() {
+        return None;
+    }
+
+    let mut names = Vec::new();
+    loop {
+        let component = if bytes[offset] == b'"' {
+            offset += 1;
+            let mut quoted = String::new();
+            loop {
+                let relative = bytes[offset..].iter().position(|byte| *byte == b'"')?;
+                let quote = offset + relative;
+                quoted.push_str(&input[offset..quote]);
+                offset = quote + 1;
+                if bytes.get(offset) == Some(&b'"') {
+                    quoted.push('"');
+                    offset += 1;
+                    continue;
+                }
+                break;
+            }
+            quoted
+        } else {
+            let start = offset;
+            while bytes
+                .get(offset)
+                .is_some_and(|byte| *byte != b'.' && !scanner_isspace(*byte))
+            {
+                offset += 1;
+            }
+            if offset == start {
+                return None;
+            }
+            input[start..offset].to_ascii_lowercase()
+        };
+        names.push(truncate_postgres_identifier(component));
+
+        while bytes.get(offset).is_some_and(|byte| scanner_isspace(*byte)) {
+            offset += 1;
+        }
+        match bytes.get(offset) {
+            None => return Some(names),
+            Some(b'.') => {
+                offset += 1;
+                while bytes.get(offset).is_some_and(|byte| scanner_isspace(*byte)) {
+                    offset += 1;
+                }
+                if offset == bytes.len() {
+                    return None;
+                }
+            }
+            Some(_) => return None,
+        }
+    }
+}
+
+/// Parse exactly one `PostgreSQL` type-name string without accepting adjacent SQL expressions. `None` is the soft-failure shape used for inputs such as an empty string or `SETOF integer`; lexical and type-name syntax errors are retained for the caller.
+pub fn parse_regtype_name(input: &str) -> Result<Option<ParsedRegtypeName>> {
+    if input.bytes().all(scanner_isspace) {
+        return Ok(None);
+    }
+    let parsed = pg_query::parse_with_mode(input, pg_query::ParseMode::TypeName)?;
+    let [raw] = parsed.protobuf.stmts.as_slice() else {
+        return Ok(None);
+    };
+    let Some(NodeEnum::List(names)) = raw.stmt.as_ref().and_then(|node| node.node.as_ref()) else {
+        return Ok(None);
+    };
+    let names = names
+        .items
+        .iter()
+        .map(extract_string)
+        .collect::<Result<Vec<_>>>()?;
+    if names.is_empty() {
+        return Ok(None);
+    }
+    let scanned = pg_query::scan(input)?;
+    let tokens = scanned
+        .tokens
+        .iter()
+        .filter_map(|token| pg_query::protobuf::Token::try_from(token.token).ok())
+        .collect::<Vec<_>>();
+    if tokens.contains(&pg_query::protobuf::Token::Setof) {
+        return Ok(None);
+    }
+    let bracket_dimensions = tokens
+        .iter()
+        .filter(|token| **token == pg_query::protobuf::Token::Ascii91)
+        .count();
+    let array_dimensions = bracket_dimensions.max(usize::from(
+        tokens.contains(&pg_query::protobuf::Token::Array),
+    ));
+    Ok(Some(ParsedRegtypeName {
+        names,
+        array_dimensions,
+    }))
+}
+
+/// Parse one routine-name string with either an omitted signature (`regproc`) or an exact signature (`regprocedure`). The caller owns the soft-error and cross-database policy because the two SQL input functions intentionally differ from ordinary DDL.
+pub fn parse_regprocedure_name(input: &str) -> Result<Option<ParsedRegprocedureName>> {
+    let mut in_quote = false;
+    let left_parenthesis = input.bytes().enumerate().find_map(|(offset, byte)| {
+        if byte == b'"' {
+            in_quote = !in_quote;
+            None
+        } else if byte == b'(' && !in_quote {
+            Some(offset)
+        } else {
+            None
+        }
+    });
+    let Some(left_parenthesis) = left_parenthesis else {
+        return Ok(
+            parse_regobject_name(input).map(|names| ParsedRegprocedureName {
+                names,
+                argument_types: None,
+            }),
+        );
+    };
+    let Some(names) = parse_regobject_name(&input[..left_parenthesis]) else {
+        return Ok(None);
+    };
+
+    let bytes = input.as_bytes();
+    let mut end = bytes.len();
+    while end > left_parenthesis + 1 && scanner_isspace(bytes[end - 1]) {
+        end -= 1;
+    }
+    if end <= left_parenthesis + 1 || bytes[end - 1] != b')' {
+        return Err(SQLError::Parse(format!(
+            "expected a right parenthesis in routine identity \"{input}\""
+        )));
+    }
+    let arguments = &input[left_parenthesis + 1..end - 1];
+    let argument_bytes = arguments.as_bytes();
+    let mut argument_types = Vec::new();
+    let mut offset = 0usize;
+    let mut had_comma = false;
+    loop {
+        while argument_bytes
+            .get(offset)
+            .is_some_and(|byte| scanner_isspace(*byte))
+        {
+            offset += 1;
+        }
+        if offset == argument_bytes.len() {
+            if had_comma {
+                return Err(SQLError::Parse(format!(
+                    "expected a type name in routine identity \"{input}\""
+                )));
+            }
+            break;
+        }
+
+        let start = offset;
+        let mut quoted = false;
+        let mut nesting = 0i32;
+        while let Some(byte) = argument_bytes.get(offset).copied() {
+            if byte == b'"' {
+                quoted = !quoted;
+            } else if byte == b',' && !quoted && nesting == 0 {
+                break;
+            } else if !quoted {
+                match byte {
+                    b'(' | b'[' => nesting += 1,
+                    b')' | b']' => nesting -= 1,
+                    _ => {}
+                }
+            }
+            offset += 1;
+        }
+        if quoted || nesting != 0 {
+            return Err(SQLError::Parse(format!(
+                "improper type name in routine identity \"{input}\""
+            )));
+        }
+        let mut type_end = offset;
+        while type_end > start && scanner_isspace(argument_bytes[type_end - 1]) {
+            type_end -= 1;
+        }
+        let Some(type_name) = parse_regtype_name(&arguments[start..type_end])? else {
+            return Ok(None);
+        };
+        if argument_types.len() == POSTGRES_FUNCTION_MAX_ARGUMENTS {
+            return Err(SQLError::Parse(format!(
+                "too many arguments in routine identity \"{input}\""
+            )));
+        }
+        argument_types.push(type_name);
+        had_comma = argument_bytes.get(offset) == Some(&b',');
+        if had_comma {
+            offset += 1;
+        }
+    }
+
+    Ok(Some(ParsedRegprocedureName {
+        names,
+        argument_types: Some(argument_types),
+    }))
+}
+
 pub(super) fn compile_foreign_key_action(raw: &str) -> Result<crate::ast::ForeignKeyAction> {
     use crate::ast::ForeignKeyAction;
     match raw.as_bytes().first().copied() {
@@ -215,6 +457,7 @@ pub(super) fn compile_pg_type_name(
         "regprocedure" => Ok(ColumnType::Regprocedure),
         "regclass" => Ok(ColumnType::Regclass),
         "regnamespace" => Ok(ColumnType::Regnamespace),
+        "regrole" => Ok(ColumnType::Regrole),
         "regtype" => Ok(ColumnType::Regtype),
         "pg_node_tree" => Ok(ColumnType::PgNodeTree),
         "aclitem" => Ok(ColumnType::AclItem),

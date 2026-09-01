@@ -315,6 +315,12 @@ fn builtin_binding_is_non_immutable(binding: &FunctionBinding) -> bool {
                 | "pg_get_triggerdef"
                 | "pg_get_ruledef"
                 | "pg_has_role"
+                | "to_regproc"
+                | "to_regprocedure"
+                | "to_regclass"
+                | "to_regnamespace"
+                | "to_regrole"
+                | "to_regtype"
         )
     )
 }
@@ -528,6 +534,20 @@ fn overloads(name: &str) -> Option<Vec<BuiltinFunctionOverload>> {
             ),
         ],
         "casefold" => vec![overload(&local, &[ColumnType::Text], ColumnType::Text)],
+        "to_regproc" => vec![overload(&local, &[ColumnType::Text], ColumnType::Regproc)],
+        "to_regprocedure" => vec![overload(
+            &local,
+            &[ColumnType::Text],
+            ColumnType::Regprocedure,
+        )],
+        "to_regclass" => vec![overload(&local, &[ColumnType::Text], ColumnType::Regclass)],
+        "to_regnamespace" => vec![overload(
+            &local,
+            &[ColumnType::Text],
+            ColumnType::Regnamespace,
+        )],
+        "to_regrole" => vec![overload(&local, &[ColumnType::Text], ColumnType::Regrole)],
+        "to_regtype" => vec![overload(&local, &[ColumnType::Text], ColumnType::Regtype)],
         "pg_get_expr" => vec![
             overload(
                 &local,
@@ -617,6 +637,12 @@ fn local_name(name: &str) -> Option<String> {
             | "uuidv4"
             | "uuidv7"
             | "casefold"
+            | "to_regproc"
+            | "to_regprocedure"
+            | "to_regclass"
+            | "to_regnamespace"
+            | "to_regrole"
+            | "to_regtype"
             | "pg_get_expr"
             | "pg_get_partkeydef"
             | "pg_get_triggerdef"

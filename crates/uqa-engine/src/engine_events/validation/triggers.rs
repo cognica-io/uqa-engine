@@ -369,6 +369,6 @@ impl Engine {
             }
             Some(_) => {}
         }
-        Ok(())
+        crate::sql::reject_stored_regrole_constants(self, condition, None)
     }
 }

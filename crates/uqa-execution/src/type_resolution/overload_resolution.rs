@@ -255,6 +255,7 @@ pub fn routine_type_accepts_implicit_cast(actual: &str, declared: &str) -> bool 
                 | "regclass"
                 | "regnamespace"
                 | "regproc"
+                | "regrole"
                 | "regtype",
         ) | (
             "int4",
@@ -266,6 +267,7 @@ pub fn routine_type_accepts_implicit_cast(actual: &str, declared: &str) -> bool 
                 | "regclass"
                 | "regnamespace"
                 | "regproc"
+                | "regrole"
                 | "regtype",
         ) | (
             "int8",
@@ -276,10 +278,15 @@ pub fn routine_type_accepts_implicit_cast(actual: &str, declared: &str) -> bool 
                 | "regclass"
                 | "regnamespace"
                 | "regproc"
+                | "regrole"
                 | "regtype",
-        ) | ("oid", "regclass" | "regnamespace" | "regproc" | "regtype")
-            | ("regclass" | "regnamespace" | "regproc" | "regtype", "oid")
-            | ("numeric", "float4" | "float8")
+        ) | (
+            "oid",
+            "regclass" | "regnamespace" | "regproc" | "regrole" | "regtype",
+        ) | (
+            "regclass" | "regnamespace" | "regproc" | "regrole" | "regtype",
+            "oid",
+        ) | ("numeric", "float4" | "float8")
             | ("float4", "float8")
             | ("bpchar", "varchar" | "name" | "text")
             | ("varchar", "bpchar" | "name" | "text" | "regclass")
@@ -301,7 +308,7 @@ pub fn routine_type_category(type_name: &str) -> char {
         "bool" => 'B',
         "date" | "time" | "timetz" | "timestamp" | "timestamptz" => 'D',
         "int2" | "int4" | "int8" | "float4" | "float8" | "numeric" | "oid" | "regclass"
-        | "regnamespace" | "regproc" | "regtype" => 'N',
+        | "regnamespace" | "regproc" | "regrole" | "regtype" => 'N',
         "int2vector" | "oidvector" => 'A',
         "anyarray" | "record" => 'P',
         "bpchar" | "name" | "text" | "varchar" => 'S',

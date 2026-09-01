@@ -404,6 +404,7 @@ pub(super) fn rule_returning_columns(
 }
 
 pub(super) fn capture_rule_returning_result(
+    engine: &Engine,
     result: SQLResult,
     columns: &[uqa_sql::ast::ColumnDef],
     source_rows: Option<&[RuleRowImage]>,
@@ -431,7 +432,7 @@ pub(super) fn capture_rule_returning_result(
                             "rewrite-rule RETURNING provider lost a positional value".into(),
                         )
                     })?;
-                crate::sql::convert_value_to_column_type(value, &column.ty)
+                crate::sql::convert_value_to_column_type_with_engine(engine, value, &column.ty)
             })
             .collect::<Result<Vec<_>, SQLError>>()
     };

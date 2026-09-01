@@ -203,12 +203,13 @@ fn target_row(
 }
 
 fn coerce_view_value(
+    engine: &Engine,
     target: &ViewDmlTarget,
     position: usize,
     value: Value,
 ) -> Result<Value, SQLError> {
     match target.types[position].as_ref() {
-        Some(ty) => crate::sql::convert_value_to_column_type(value, ty),
+        Some(ty) => crate::sql::convert_value_to_column_type_with_engine(engine, value, ty),
         None => Ok(value),
     }
 }
@@ -332,7 +333,7 @@ fn evaluate_insert_rule_column(
     } else {
         Value::Null
     };
-    let value = coerce_view_value(target, target_position, value)?;
+    let value = coerce_view_value(engine, target, target_position, value)?;
     values[target_position] = Some(value.clone());
     Ok(value)
 }

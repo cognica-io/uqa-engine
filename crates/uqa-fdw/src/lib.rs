@@ -86,6 +86,7 @@ pub enum ColumnType {
     Regprocedure,
     Regclass,
     Regnamespace,
+    Regrole,
     Regtype,
     PgNodeTree,
     AclItem,

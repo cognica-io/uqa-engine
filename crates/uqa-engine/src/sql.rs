@@ -57,6 +57,7 @@ mod plan_executor;
 mod planning;
 mod plpgsql_exec;
 mod read_only;
+mod regrole_dependencies;
 mod row_functions;
 mod rules;
 mod scalar;
@@ -94,7 +95,8 @@ use aggregates::{
 use catalog::build_info_schema_rows;
 pub(crate) use catalog::{
     resolve_age_label_relation_name, resolve_catalog_column_type, resolve_regclass_oid,
-    resolve_regprocedure_oid, resolve_regtype_output, runtime_constraints, RegtypeOutputCatalog,
+    resolve_regobject_oid, resolve_regprocedure_oid, resolve_regrole_oid, resolve_regtype_output,
+    runtime_constraints, RegtypeOutputCatalog,
 };
 pub(in crate::sql) use catalog::{virtual_relation_accepts_row_lock, virtual_relation_schema};
 use ddl::{
@@ -104,7 +106,8 @@ use ddl::{
     value_to_text, CreateTableAsExecution,
 };
 pub(crate) use ddl::{
-    convert_value_to_column_type, validate_postgres_column_name, validate_vector_dimensions,
+    convert_value_to_column_type, convert_value_to_column_type_with_engine,
+    validate_postgres_column_name, validate_vector_dimensions,
 };
 use dml::{index_vectors_for_type, run_delete, run_insert, run_merge, run_update};
 use from_rows::{build_join_spill_with_ctes, engine_func_intercept, ColumnPrune, QualifierFilters};
@@ -115,6 +118,10 @@ pub(in crate::sql) use hierarchy::{
     validate_new_partition_bound,
 };
 use plan_executor::UnifiedPlanExecutor;
+pub(crate) use regrole_dependencies::{
+    reject_stored_plan_regrole_constants, reject_stored_query_regrole_constants,
+    reject_stored_regrole_constants, StoredRegroleConstants,
+};
 use row_functions::{
     execute_function, execute_function_with_top_k, execute_tree_entries, expect_column_name,
     expect_optional_graph_value, graph_betweenness_entries, graph_hits_entries,

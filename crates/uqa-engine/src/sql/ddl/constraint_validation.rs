@@ -4,10 +4,117 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Shared CREATE/ALTER validation for table foreign keys.
+//! Shared CREATE/ALTER validation for table constraints.
 
 use super::{ColumnType, Engine, SQLError};
-use uqa_sql::ast::{ColumnDef, ForeignKey, TableKeyConstraint};
+use uqa_core::Value;
+use uqa_sql::ast::{ColumnDef, Expr, ForeignKey, TableKeyConstraint};
+use uqa_sql::plpgsql::{bind_expr, ResolvedVariable, VariableResolver};
+
+struct CheckConditionTypeResolver<'a> {
+    table: &'a str,
+    qualifier: &'a str,
+    columns: &'a [ColumnDef],
+}
+
+impl CheckConditionTypeResolver<'_> {
+    fn column(&self, name: &str) -> Result<ResolvedVariable, SQLError> {
+        let definition = self
+            .columns
+            .iter()
+            .find(|column| column.name == name)
+            .ok_or_else(|| SQLError::UnknownColumn(name.to_string()))?;
+        Ok(ResolvedVariable {
+            value: Value::Null,
+            declared_type: Some(definition.ty.sql_name()),
+        })
+    }
+
+    fn qualifier_matches(&self, qualifier: &str) -> bool {
+        qualifier == self.qualifier
+            || qualifier == self.table
+            || self
+                .table
+                .rsplit_once('.')
+                .is_some_and(|(_, local)| qualifier == local)
+    }
+}
+
+impl VariableResolver for CheckConditionTypeResolver<'_> {
+    fn resolve_name(&mut self, name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
+        self.column(name).map(Some)
+    }
+
+    fn resolve_qualified(
+        &mut self,
+        qualifier: &str,
+        column: &str,
+    ) -> Result<Option<ResolvedVariable>, SQLError> {
+        if !self.qualifier_matches(qualifier) {
+            return Err(SQLError::UnknownTable(qualifier.to_string()));
+        }
+        self.column(column).map(Some)
+    }
+
+    fn resolve_param(&mut self, _index: usize) -> Result<Option<ResolvedVariable>, SQLError> {
+        Ok(None)
+    }
+}
+
+fn is_boolean_type(ty: &ColumnType) -> bool {
+    match ty {
+        ColumnType::Boolean => true,
+        ColumnType::Domain { base, .. } => is_boolean_type(base),
+        _ => false,
+    }
+}
+
+pub(super) fn validate_check_expression(
+    engine: &Engine,
+    table: &str,
+    qualifier: &str,
+    columns: &[ColumnDef],
+    expression: &mut Expr,
+) -> Result<(), SQLError> {
+    let bound = bind_expr(
+        expression,
+        &mut CheckConditionTypeResolver {
+            table,
+            qualifier,
+            columns,
+        },
+    )?;
+    let lowered = uqa_planner::ExpressionPlan::lower(bound);
+    if !lowered.subqueries.is_empty() {
+        return Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: "cannot use subquery in check constraint".into(),
+        });
+    }
+    match uqa_execution::common_context_expression_type(
+        &lowered.scalar,
+        &uqa_execution::RowSchema::default(),
+        &[],
+        Some(engine),
+    )? {
+        Some(ty) if !is_boolean_type(&ty) => Err(SQLError::TypeMismatch(format!(
+            "argument of CHECK must be type boolean, not type {}",
+            ty.sql_name()
+        ))),
+        None => {
+            if let Expr::Literal(value @ (Value::Str(_) | Value::FixedChar(_))) = expression {
+                *value = uqa_sql::expr::cast_value(value, "boolean")?;
+            } else {
+                *expression = Expr::Cast {
+                    expr: Box::new(expression.clone()),
+                    ty: "boolean".into(),
+                };
+            }
+            Ok(())
+        }
+        Some(_) => Ok(()),
+    }
+}
 
 pub(super) fn validate_foreign_key_definition(
     local_table: &str,

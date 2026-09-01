@@ -74,6 +74,7 @@
       "ddl.view-column-aliases",
       "functions.identified-pg18-additions",
       "functions.fixed-builtin-overload-resolution",
+      "functions.to-reg-object-lookups",
       "routines.scalar-domain-overload-resolution",
       "routines.procedure-call-overload-resolution",
       "routines.table-setof-overload-resolution",
@@ -337,6 +338,14 @@
       "postgresql_reference": "PostgreSQL 18.4 with Apache AGE live fixed-signature built-in results, declared return types, qualification, overload errors, SQLSTATEs, generated-expression validation and binding, implemented pg_proc rows, and PostgreSQL function type-resolution rules",
       "uqa_test": "cargo test -p uqa-execution --lib type_resolution::; cargo test -p uqa-engine --test integration engine_functions::pg18_semantics::; cargo test -p uqa-engine --test integration engine_catalog::sql_generated_columns::fixed_builtin_resolution; cargo test -p uqa-engine --test integration postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata; tests/parity/pg18/probes.sql",
       "supported_version": "PostgreSQL 18.4 candidate selection for the implemented fixed-signature casefold, reverse, hash, checksum, string and binary length, gamma, JSON null-stripping, integer-base conversion, random, and UUID generation and extraction subset, including qualification, visible SQL user-function candidates, exact and implicit matches, preferred and unknown categories, domain base types, named and default slots, declared return types, durable generated-expression bindings where volatility permits, and exact pg_proc identities including unit random() (1598), to_hex(integer|bigint) (2089 and 2090), gen_random_uuid() (3432), casefold(text) (6412), uuidv4() (6428), and uuidv7() / uuidv7(interval) (6429 and 6430)",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "functions.to-reg-object-lookups",
+      "postgresql_reference": "PostgreSQL 18.4 with Apache AGE live to_regproc, to_regprocedure, to_regclass, to_regnamespace, to_regrole, and to_regtype results, declared scalar and array aliases, role catalog transactions, search-path and overload behavior, parser-normalized names, soft and hard failures, stored scalar-regrole dependency rules and error precedence, errors, SQLSTATEs, pg_type rows, pg_proc rows, information_schema.routines metadata, and tests/parity/pg18/roles_stateful.expected.json",
+      "uqa_test": "cargo test -p uqa-execution --lib type_resolution::; cargo test -p uqa-engine --test integration to_reg_lookups; python3 tests/parity/pg18/run_diff.py; python3 tests/parity/pg18/run_routines_stateful.py --suite roles",
+      "supported_version": "PostgreSQL 18.4 to_regproc(text), to_regprocedure(text), to_regclass(text), to_regnamespace(text), to_regrole(text), and to_regtype(text) lookup semantics for objects represented by UQA Engine catalogs, including exact reg* scalar and array identities and output, PostgreSQL identifier-string parsing for reserved words, punctuation, whitespace, quoting, case folding and 63-byte clipping, dedicated type-name parsing for aliases, typmods and arrays, decimal, leading-zero octal and zero OID forms without existence checks, qualification, search-path, and global-role visibility, user-routine overloads, NULL propagation, missing and ambiguous soft failures, direct regrole and regrole[] hard input, durable role OID storage across rollback, reopen, and role removal, scalar regrole constant rejection across stored DDL after exact hard-input validation with runtime text or oid conversions, numeric and NULL constants, arrays, and SQL source-string bodies retained as allowed forms, cross-database, overqualification, malformed-name, and malformed-type SQLSTATEs, fixed built-in shadowing, stable generated-expression rejection, exact regrole and _regrole type and I/O identities, and exact pg_proc and information_schema.routines metadata",
       "status": "verified",
       "open_issue": null
     },

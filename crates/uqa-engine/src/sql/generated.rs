@@ -64,6 +64,11 @@ pub(in crate::sql) fn prepare_generated_columns(
         bind_generation_column_references(&mut prepared.expression, qualifier);
         let (expression_type, function_dependencies) =
             typing::infer_generation_expression(engine, &snapshot, &mut prepared.expression)?;
+        crate::sql::reject_stored_regrole_constants(
+            engine,
+            &prepared.expression,
+            Some(&column.ty),
+        )?;
         if let typing::GenerationType::UnknownLiteral(value) = &expression_type {
             convert_value_to_column_type(uqa_core::Value::Str(value.clone()), &column.ty)?;
         } else if !typing::generation_type_assignable_to(&expression_type, &column.ty) {

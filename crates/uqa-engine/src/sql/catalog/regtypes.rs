@@ -10,10 +10,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, LazyLock};
 
 use uqa_core::Value;
-use uqa_sql::ast::{ColumnType, Statement};
+use uqa_sql::ast::ColumnType;
 use uqa_sql::{ResultRow, SQLError};
 
-use crate::{Engine, RelationIdentity};
+use crate::Engine;
 
 use super::pg_catalog::build_pg_type;
 use super::pg_namespace::build_pg_namespace;
@@ -68,85 +68,382 @@ pub(crate) fn resolve_catalog_column_type(engine: &Engine, type_name: &str) -> O
     resolved
 }
 
-pub(crate) fn resolve_regclass_oid(engine: &Engine, name: &str) -> Result<Option<i64>, String> {
-    if let Some((oid, _, _)) = resolve_virtual_regclass(engine, name)? {
+fn cross_database_reference(name: &str) -> SQLError {
+    SQLError::Unsupported(format!(
+        "cross-database references are not implemented: {name}"
+    ))
+}
+
+fn qualified_name_list(names: &[String]) -> String {
+    names.join(".")
+}
+
+enum NumericRegobjectOid {
+    NotNumeric,
+    Valid(i64),
+    InvalidSyntax,
+    OutOfRange,
+}
+
+fn numeric_regobject_oid(input: &str) -> NumericRegobjectOid {
+    if input == "-" {
+        return NumericRegobjectOid::Valid(0);
+    }
+    if input.is_empty() || !input.bytes().all(|byte| byte.is_ascii_digit()) {
+        return NumericRegobjectOid::NotNumeric;
+    }
+    let radix = if input.len() > 1 && input.starts_with('0') {
+        8
+    } else {
+        10
+    };
+    match u32::from_str_radix(input, radix) {
+        Ok(oid) => NumericRegobjectOid::Valid(i64::from(oid)),
+        Err(error) if matches!(error.kind(), std::num::IntErrorKind::InvalidDigit) => {
+            NumericRegobjectOid::InvalidSyntax
+        }
+        Err(_) => NumericRegobjectOid::OutOfRange,
+    }
+}
+
+fn lookup_regclass_oid(engine: &Engine, name: &str) -> Result<Option<i64>, SQLError> {
+    match numeric_regobject_oid(name) {
+        NumericRegobjectOid::Valid(oid) => return Ok(Some(oid)),
+        NumericRegobjectOid::InvalidSyntax | NumericRegobjectOid::OutOfRange => return Ok(None),
+        NumericRegobjectOid::NotNumeric => {}
+    }
+    let Some(names) = uqa_sql::parse_regobject_name(name) else {
+        return Ok(None);
+    };
+    let (schema, local) = relation_name(&names)?;
+    if let Some((oid, _, _)) = resolve_virtual_regclass(engine, schema, local)? {
         return Ok(Some(oid));
     }
+    let reference = schema.map_or_else(
+        || uqa_sql::expr::quote_ident(local),
+        |schema| qualified_name(schema, local),
+    );
     let Some((canonical, kind)) = engine
-        .try_resolve_relation_kind(name)
-        .map_err(|error| error.to_string())?
+        .try_resolve_relation_kind(&reference)
+        .map_err(|error| SQLError::Internal(error.to_string()))?
     else {
         return Ok(None);
     };
-    let (schema, relation) =
-        helpers::oids::split_schema_name(&canonical).map_err(|error| error.to_string())?;
+    let (schema, relation) = helpers::oids::split_schema_name(&canonical)?;
     if kind == "table" {
         return super::table_relation_oid(engine, &canonical)
             .map(Some)
-            .map_err(|error| error.to_string());
+            .map_err(|error| SQLError::Internal(error.to_string()));
     }
     let relkind = match kind {
         "view" => "v",
         "materialized view" => "m",
         "sequence" => "S",
         "foreign table" => "f",
-        other => return Err(format!("unknown relation kind `{other}` for `{canonical}`")),
+        other => {
+            return Err(SQLError::Internal(format!(
+                "unknown relation kind `{other}` for `{canonical}`"
+            )));
+        }
     };
     Ok(Some(helpers::oids::relation_oid(
         relkind, &schema, &relation,
     )))
 }
 
-pub(crate) fn resolve_regprocedure_oid(engine: &Engine, name: &str) -> Result<Option<i64>, String> {
-    let Ok(mut statements) = uqa_sql::compile(&format!("DROP FUNCTION {name}")) else {
-        return Ok(None);
-    };
-    if statements.len() != 1 {
-        return Ok(None);
+pub(crate) fn resolve_regclass_oid(engine: &Engine, name: &str) -> Result<Option<i64>, String> {
+    lookup_regclass_oid(engine, name).map_err(|error| error.to_string())
+}
+
+fn parse_regprocedure_name(
+    name: &str,
+) -> Result<Option<uqa_sql::ParsedRegprocedureName>, SQLError> {
+    match uqa_sql::parse_regprocedure_name(name) {
+        Ok(parsed) => Ok(parsed),
+        Err(_) => Ok(None),
     }
-    let Statement::DropFunction(statement) = statements.remove(0) else {
+}
+
+fn object_name(names: &[String]) -> Result<(Option<&str>, &str), SQLError> {
+    match names {
+        [local] => Ok((None, local)),
+        [schema, local] => Ok((Some(schema), local)),
+        [_, _, _] => Err(cross_database_reference(&qualified_name_list(names))),
+        _ => Err(SQLError::Parse(format!(
+            "improper qualified name (too many dotted names): {}",
+            qualified_name_list(names)
+        ))),
+    }
+}
+
+fn relation_name(names: &[String]) -> Result<(Option<&str>, &str), SQLError> {
+    match names {
+        [local] => Ok((None, local)),
+        [schema, local] => Ok((Some(schema), local)),
+        [_, _, _] => Err(cross_database_reference(&format!(
+            "\"{}\"",
+            qualified_name_list(names)
+        ))),
+        _ => Err(SQLError::Parse(format!(
+            "improper relation name (too many dotted names): {}",
+            qualified_name_list(names)
+        ))),
+    }
+}
+
+fn type_oid_in_schema(
+    catalog: &RegtypeOutputCatalog,
+    schema: &str,
+    local: &str,
+    array_dimensions: usize,
+) -> Option<i64> {
+    let namespace_oid = catalog
+        .namespaces
+        .iter()
+        .find_map(|(oid, name)| (name == schema).then_some(*oid))?;
+    let (oid, entry) = catalog
+        .types
+        .iter()
+        .find(|(_, entry)| entry.namespace_oid == namespace_oid && entry.name == local)?;
+    if array_dimensions == 0 || entry.element_oid != 0 {
+        return Some(*oid);
+    }
+    (entry.array_oid != 0).then_some(entry.array_oid)
+}
+
+fn parsed_regtype_oid(
+    engine: &Engine,
+    catalog: &RegtypeOutputCatalog,
+    parsed: &uqa_sql::ParsedRegtypeName,
+) -> Result<Option<i64>, SQLError> {
+    let (schema, local) = object_name(&parsed.names)?;
+    if let Some(schema) = schema {
+        return Ok(type_oid_in_schema(
+            catalog,
+            schema,
+            local,
+            parsed.array_dimensions,
+        ));
+    }
+    for schema in engine
+        .current_schema_names(true)
+        .map_err(|error| SQLError::Internal(error.to_string()))?
+    {
+        if let Some(oid) = type_oid_in_schema(catalog, &schema, local, parsed.array_dimensions) {
+            return Ok(Some(oid));
+        }
+    }
+    Ok(None)
+}
+
+fn lookup_regprocedure_oid(engine: &Engine, name: &str) -> Result<Option<i64>, SQLError> {
+    match numeric_regobject_oid(name) {
+        NumericRegobjectOid::Valid(oid) => return Ok(Some(oid)),
+        NumericRegobjectOid::InvalidSyntax | NumericRegobjectOid::OutOfRange => return Ok(None),
+        NumericRegobjectOid::NotNumeric => {}
+    }
+    let Some(parsed) = parse_regprocedure_name(name)? else {
         return Ok(None);
     };
-    let [item] = statement.items.as_slice() else {
+    let Some(argument_types) = parsed.argument_types.as_ref() else {
         return Ok(None);
     };
-    let Some(argument_types) = item.arg_types.as_ref() else {
-        return Ok(None);
-    };
-    let Ok((schema, local)) = RelationIdentity::parse_reference(&item.name) else {
-        return Ok(None);
-    };
+    let (schema, local) = object_name(&parsed.names)?;
+    let catalog = regtype_output_catalog(engine)?;
     let argument_oids = argument_types
         .iter()
-        .map(|type_name| {
-            resolve_catalog_column_type(engine, type_name).map_or_else(
-                || helpers::type_metadata::routine_type_oid(type_name),
-                |ty| helpers::type_metadata::pg_type_oid(&ty),
-            )
-        })
-        .collect::<Vec<_>>();
-    let catalog = regtype_output_catalog(engine).map_err(|error| error.to_string())?;
+        .map(|type_name| parsed_regtype_oid(engine, &catalog, type_name))
+        .collect::<Result<Option<Vec<_>>, _>>()?;
+    let Some(argument_oids) = argument_oids else {
+        return Ok(None);
+    };
     let find_in_schema = |schema: &str| {
-        let namespace_oid = helpers::oids::schema_oid(schema);
+        let namespace_oid = catalog
+            .namespaces
+            .iter()
+            .find_map(|(oid, name)| (name == schema).then_some(*oid))?;
         catalog.procs.iter().find_map(|(oid, entry)| {
             (entry.namespace_oid == namespace_oid
-                && entry.name == local
+                && entry.name == *local
                 && entry.argument_types == argument_oids)
                 .then_some(*oid)
         })
     };
     if let Some(schema) = schema {
-        return Ok(find_in_schema(&schema));
+        return Ok(find_in_schema(schema));
     }
     for schema in engine
         .current_schema_names(true)
-        .map_err(|error| error.to_string())?
+        .map_err(|error| SQLError::Internal(error.to_string()))?
     {
         if let Some(oid) = find_in_schema(&schema) {
             return Ok(Some(oid));
         }
     }
     Ok(None)
+}
+
+pub(crate) fn resolve_regprocedure_oid(engine: &Engine, name: &str) -> Result<Option<i64>, String> {
+    lookup_regprocedure_oid(engine, name).map_err(|error| error.to_string())
+}
+
+fn lookup_regproc_oid(engine: &Engine, name: &str) -> Result<Option<i64>, SQLError> {
+    match numeric_regobject_oid(name) {
+        NumericRegobjectOid::Valid(oid) => return Ok(Some(oid)),
+        NumericRegobjectOid::InvalidSyntax | NumericRegobjectOid::OutOfRange => return Ok(None),
+        NumericRegobjectOid::NotNumeric => {}
+    }
+    let Some(names) = uqa_sql::parse_regobject_name(name) else {
+        return Ok(None);
+    };
+    let (schema, local) = object_name(&names)?;
+    let catalog = regtype_output_catalog(engine)?;
+    if let Some(schema) = schema {
+        let Some(namespace_oid) = catalog
+            .namespaces
+            .iter()
+            .find_map(|(oid, name)| (name == schema).then_some(*oid))
+        else {
+            return Ok(None);
+        };
+        let mut matches = catalog.procs.iter().filter_map(|(oid, entry)| {
+            (entry.namespace_oid == namespace_oid && entry.name == *local).then_some(*oid)
+        });
+        let first = matches.next();
+        return Ok(first.filter(|_| matches.next().is_none()));
+    }
+
+    let mut visible = BTreeMap::<Vec<i64>, i64>::new();
+    for schema in engine
+        .current_schema_names(true)
+        .map_err(|error| SQLError::Internal(error.to_string()))?
+    {
+        let Some(namespace_oid) = catalog
+            .namespaces
+            .iter()
+            .find_map(|(oid, name)| (name == &schema).then_some(*oid))
+        else {
+            continue;
+        };
+        for (oid, entry) in &catalog.procs {
+            if entry.namespace_oid == namespace_oid && entry.name == *local {
+                visible.entry(entry.argument_types.clone()).or_insert(*oid);
+            }
+        }
+    }
+    let mut matches = visible.into_values();
+    let first = matches.next();
+    Ok(first.filter(|_| matches.next().is_none()))
+}
+
+fn lookup_regnamespace_oid(engine: &Engine, name: &str) -> Result<Option<i64>, SQLError> {
+    match numeric_regobject_oid(name) {
+        NumericRegobjectOid::Valid(oid) => return Ok(Some(oid)),
+        NumericRegobjectOid::InvalidSyntax | NumericRegobjectOid::OutOfRange => return Ok(None),
+        NumericRegobjectOid::NotNumeric => {}
+    }
+    let Some(names) = uqa_sql::parse_regobject_name(name) else {
+        return Ok(None);
+    };
+    let [name] = names.as_slice() else {
+        return Ok(None);
+    };
+    let catalog = regtype_output_catalog(engine)?;
+    Ok(catalog
+        .namespaces
+        .iter()
+        .find_map(|(oid, schema)| (schema == name).then_some(*oid)))
+}
+
+fn lookup_regtype_oid(engine: &Engine, name: &str) -> Result<Option<i64>, SQLError> {
+    match numeric_regobject_oid(name) {
+        NumericRegobjectOid::Valid(oid) => return Ok(Some(oid)),
+        NumericRegobjectOid::InvalidSyntax | NumericRegobjectOid::OutOfRange => return Ok(None),
+        NumericRegobjectOid::NotNumeric => {}
+    }
+    let Some(parsed) = uqa_sql::parse_regtype_name(name)? else {
+        return Ok(None);
+    };
+    let catalog = regtype_output_catalog(engine)?;
+    parsed_regtype_oid(engine, &catalog, &parsed)
+}
+
+enum ParsedRegroleInput {
+    Oid(i64),
+    Name(String),
+}
+
+fn parse_regrole_input(input: &str) -> Result<ParsedRegroleInput, SQLError> {
+    match numeric_regobject_oid(input) {
+        NumericRegobjectOid::Valid(oid) => return Ok(ParsedRegroleInput::Oid(oid)),
+        NumericRegobjectOid::InvalidSyntax => {
+            return Err(SQLError::Routine {
+                sqlstate: "22P02".into(),
+                message: format!("invalid input syntax for type oid: \"{input}\""),
+            });
+        }
+        NumericRegobjectOid::OutOfRange => {
+            return Err(SQLError::Routine {
+                sqlstate: "22003".into(),
+                message: format!("value \"{input}\" is out of range for type oid"),
+            });
+        }
+        NumericRegobjectOid::NotNumeric => {}
+    }
+    let names = uqa_sql::parse_regobject_name(input).ok_or_else(|| SQLError::Routine {
+        sqlstate: "42602".into(),
+        message: "invalid name syntax".into(),
+    })?;
+    let [name] = names.as_slice() else {
+        return Err(SQLError::Routine {
+            sqlstate: "42602".into(),
+            message: "invalid name syntax".into(),
+        });
+    };
+    Ok(ParsedRegroleInput::Name(name.clone()))
+}
+
+pub(crate) fn resolve_regrole_oid(engine: &Engine, input: &str) -> Result<Option<i64>, SQLError> {
+    match parse_regrole_input(input)? {
+        ParsedRegroleInput::Oid(oid) => Ok(Some(oid)),
+        ParsedRegroleInput::Name(name) => {
+            let catalog = engine.catalog_read_view();
+            let oid = catalog
+                .roles()
+                .find_map(|role| (role.name == name).then_some(role.oid));
+            oid.map(Some).ok_or_else(|| SQLError::Routine {
+                sqlstate: "42704".into(),
+                message: format!("role \"{}\" does not exist", name.replace('"', "\"\"")),
+            })
+        }
+    }
+}
+
+fn lookup_regrole_oid(engine: &Engine, name: &str) -> Result<Option<i64>, SQLError> {
+    match resolve_regrole_oid(engine, name) {
+        Ok(oid) => Ok(oid),
+        Err(SQLError::Routine { .. }) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+pub(crate) fn resolve_regobject_oid(
+    engine: &Engine,
+    ty: &ColumnType,
+    name: &str,
+) -> Result<Option<i64>, SQLError> {
+    match ty {
+        ColumnType::Regproc => lookup_regproc_oid(engine, name),
+        ColumnType::Regprocedure => lookup_regprocedure_oid(engine, name),
+        ColumnType::Regclass => lookup_regclass_oid(engine, name),
+        ColumnType::Regnamespace => lookup_regnamespace_oid(engine, name),
+        ColumnType::Regrole => lookup_regrole_oid(engine, name),
+        ColumnType::Regtype => lookup_regtype_oid(engine, name),
+        _ => Err(SQLError::Internal(format!(
+            "unsupported regobject lookup type `{}`",
+            ty.sql_name()
+        ))),
+    }
 }
 
 const VIRTUAL_REGCLASSES: &[(&str, &str, i64)] = &[
@@ -191,22 +488,18 @@ const VIRTUAL_REGCLASSES: &[(&str, &str, i64)] = &[
 
 fn resolve_virtual_regclass(
     engine: &Engine,
-    name: &str,
-) -> Result<Option<(i64, &'static str, &'static str)>, String> {
-    let normalized = name.trim().to_ascii_lowercase();
-    if let Some((schema, local)) = normalized.rsplit_once('.') {
+    schema: Option<&str>,
+    local: &str,
+) -> Result<Option<(i64, &'static str, &'static str)>, SQLError> {
+    if let Some(schema) = schema {
         return Ok(VIRTUAL_REGCLASSES
             .iter()
             .find(|(candidate_schema, candidate_local, _)| {
-                *candidate_schema == schema.trim_matches('"')
-                    && *candidate_local == local.trim_matches('"')
+                *candidate_schema == schema && *candidate_local == local
             })
             .map(|(schema, local, oid)| (*oid, *schema, *local)));
     }
-    let local = normalized.trim_matches('"');
-    let Some(visible_schema) =
-        visible_relation_schema(engine, local).map_err(|error| error.to_string())?
-    else {
+    let Some(visible_schema) = visible_relation_schema(engine, local)? else {
         return Ok(None);
     };
     Ok(VIRTUAL_REGCLASSES
@@ -248,6 +541,8 @@ struct RegtypeCatalogEntry {
     namespace_oid: i64,
     overloaded: bool,
     argument_types: Vec<i64>,
+    array_oid: i64,
+    element_oid: i64,
 }
 
 /// One immutable catalog snapshot shared by every `reg*` value formatted until catalog state changes.
@@ -283,6 +578,8 @@ impl RegtypeOutputCatalog {
                         namespace_oid: catalog_int(&row, "relnamespace")?,
                         overloaded: false,
                         argument_types: Vec::new(),
+                        array_oid: 0,
+                        element_oid: 0,
                     },
                 ))
             })
@@ -319,6 +616,8 @@ impl RegtypeOutputCatalog {
                             "pg_proc row {oid} has a malformed proargtypes value"
                         ))
                     })?,
+                    array_oid: 0,
+                    element_oid: 0,
                 },
             );
         }
@@ -338,6 +637,8 @@ impl RegtypeOutputCatalog {
                         namespace_oid: catalog_int(&row, "typnamespace")?,
                         overloaded: false,
                         argument_types: Vec::new(),
+                        array_oid: catalog_int(&row, "typarray").unwrap_or(0),
+                        element_oid: catalog_int(&row, "typelem").unwrap_or(0),
                     },
                 ))
             })
@@ -575,6 +876,14 @@ fn format_regtype(
     ))
 }
 
+fn format_regrole(engine: &Engine, oid: i64) -> Option<String> {
+    let catalog = engine.catalog_read_view();
+    let name = catalog
+        .roles()
+        .find_map(|role| (role.oid == oid).then(|| uqa_sql::expr::quote_ident(&role.name)));
+    name
+}
+
 pub(crate) fn resolve_regtype_output(
     engine: &Engine,
     ty: &ColumnType,
@@ -586,6 +895,7 @@ pub(crate) fn resolve_regtype_output(
             | ColumnType::Regprocedure
             | ColumnType::Regclass
             | ColumnType::Regnamespace
+            | ColumnType::Regrole
             | ColumnType::Regtype
     ) {
         return Ok(None);
@@ -598,6 +908,7 @@ pub(crate) fn resolve_regtype_output(
         ColumnType::Regnamespace => {
             Ok(namespace_name(&catalog, oid).map(uqa_sql::expr::quote_ident))
         }
+        ColumnType::Regrole => Ok(format_regrole(engine, oid)),
         ColumnType::Regtype => format_regtype(engine, &catalog, oid),
         _ => unreachable!(),
     };

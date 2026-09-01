@@ -8,14 +8,14 @@
 
 use std::borrow::Cow;
 
-use uqa_core::Value;
+use uqa_core::{ArrayValue, Value};
 
 use crate::ast::{ColumnType, InternalColumnRef};
 use crate::error::{Result, SQLError};
 use crate::params::SQLParam;
 use crate::result::ResultRow;
 
-use super::casting::cast_value_from;
+use super::casting::{cast_value_from, parse_pg_array_literal};
 use super::conversion::{array_value_to_string, value_to_string};
 
 #[must_use]
@@ -25,6 +25,59 @@ pub fn coercion_type_name(ty: &ColumnType) -> String {
         ColumnType::Array(element) => format!("{}[]", coercion_type_name(element)),
         _ => ty.sql_name(),
     }
+}
+
+fn regrole_array_type(ty: &ColumnType) -> bool {
+    match ty {
+        ColumnType::Array(element) => {
+            matches!(element.as_ref(), ColumnType::Regrole) || regrole_array_type(element)
+        }
+        _ => false,
+    }
+}
+
+fn array_leaf_type(ty: &ColumnType) -> &ColumnType {
+    match ty {
+        ColumnType::Array(element) => array_leaf_type(element),
+        _ => ty,
+    }
+}
+
+fn cast_regrole_array_elements(
+    values: &[Value],
+    source_ty: Option<&str>,
+    engine: Option<&dyn EngineHook>,
+) -> Result<Vec<Value>> {
+    values
+        .iter()
+        .map(|value| match value {
+            Value::List(nested) => {
+                cast_regrole_array_elements(nested, source_ty, engine).map(Value::List)
+            }
+            value => cast_value_with_type_resolution(value, source_ty, "regrole", engine),
+        })
+        .collect()
+}
+
+fn cast_regrole_array(
+    value: &Value,
+    source_ty: Option<&ColumnType>,
+    engine: Option<&dyn EngineHook>,
+) -> Result<Value> {
+    let array = match value {
+        Value::Array(array) => array.clone(),
+        Value::Str(text) => parse_pg_array_literal(text)?,
+        other => {
+            return Err(SQLError::TypeMismatch(format!(
+                "CAST AS regrole[]: expected array, got {other:?}"
+            )));
+        }
+    };
+    let source_name = source_ty.map(array_leaf_type).map(ColumnType::sql_name);
+    let elements = cast_regrole_array_elements(array.elements(), source_name.as_deref(), engine)?;
+    ArrayValue::with_lower_bounds(elements, array.lower_bounds().to_vec())
+        .map(Value::Array)
+        .ok_or_else(|| SQLError::TypeMismatch("array dimensions changed during cast".into()))
 }
 
 /// Engine-side hook that scalar function evaluation calls for stateful
@@ -69,6 +122,25 @@ pub trait EngineHook {
     /// Resolve an exact routine signature to the OID carrier used by `regprocedure`.
     fn resolve_regprocedure(&self, _name: &str) -> std::result::Result<Option<i64>, String> {
         Ok(None)
+    }
+
+    /// Resolve a `regrole` input while preserving hard input errors for direct casts.
+    fn resolve_regrole(&self, _name: &str) -> Result<Option<i64>> {
+        Ok(None)
+    }
+
+    /// Resolve the text argument of one `PostgreSQL` `to_reg*` lookup function. The engine override owns catalog visibility and the lookup function's NULL-versus-error boundary; the default preserves the two historical hooks for embedders that only implement `regclass` or `regprocedure`.
+    fn resolve_regobject(&self, ty: &ColumnType, name: &str) -> Result<Option<i64>> {
+        match ty {
+            ColumnType::Regclass => self.resolve_regclass(name).map_err(SQLError::Internal),
+            ColumnType::Regprocedure => self.resolve_regprocedure(name).map_err(SQLError::Internal),
+            ColumnType::Regrole => self.resolve_regrole(name),
+            ColumnType::Regproc | ColumnType::Regnamespace | ColumnType::Regtype => Ok(None),
+            _ => Err(SQLError::Internal(format!(
+                "unsupported regobject lookup type `{}`",
+                ty.sql_name()
+            ))),
+        }
     }
 
     /// Resolve one OID-backed alias type to its `PostgreSQL` text output.
@@ -159,6 +231,7 @@ pub fn format_regtype_value(
                 | ColumnType::Regprocedure
                 | ColumnType::Regclass
                 | ColumnType::Regnamespace
+                | ColumnType::Regrole
                 | ColumnType::Regtype
         ) {
             return Ok(None);
@@ -178,6 +251,7 @@ pub fn format_regtype_value(
             | ColumnType::Regprocedure
             | ColumnType::Regclass
             | ColumnType::Regnamespace
+            | ColumnType::Regrole
             | ColumnType::Regtype
     ) {
         return Ok(None);
@@ -238,6 +312,13 @@ pub fn cast_value_with_type_resolution(
         || Cow::Borrowed(target_ty),
         |ty| Cow::Owned(coercion_type_name(ty)),
     );
+    let target_column_type = resolved_target
+        .clone()
+        .or_else(|| ColumnType::from_sql_name(&target_ty).ok());
+    if target_column_type.as_ref().is_some_and(regrole_array_type) {
+        let source_column_type = source_ty.and_then(|name| ColumnType::from_sql_name(name).ok());
+        return cast_regrole_array(value, source_column_type.as_ref(), engine);
+    }
     if target_ty.eq_ignore_ascii_case("text") {
         if let Some(source_ty) = source_ty.and_then(|source| ColumnType::from_sql_name(source).ok())
         {
@@ -267,6 +348,17 @@ pub fn cast_value_with_type_resolution(
                 .ok_or_else(|| SQLError::Routine {
                     sqlstate: "42883".into(),
                     message: format!("function {name} does not exist"),
+                });
+        }
+    }
+    if target_ty.eq_ignore_ascii_case("regrole") {
+        if let (Some(engine), Value::Str(name) | Value::FixedChar(name)) = (engine, value) {
+            return engine
+                .resolve_regrole(name)?
+                .map(Value::Int)
+                .ok_or_else(|| SQLError::Routine {
+                    sqlstate: "42704".into(),
+                    message: format!("role \"{name}\" does not exist"),
                 });
         }
     }

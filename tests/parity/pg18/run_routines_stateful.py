@@ -75,6 +75,7 @@ ROLE_PLACEHOLDERS = {
     "__UQA_ROLE_ACL_MEMBER__": "acl_member",
     "__UQA_ROLE_ACL_LEAF__": "acl_leaf",
     "__UQA_ROLE_ACL_TAIL__": "acl_tail",
+    "__UQA_ROLE_REGROLE__": "regrole",
 }
 ORACLE_SERVER_VERSION_NUM = "180004"
 CASE_START = re.compile(r"^-- @case ([a-z0-9_]+) (ok|rows|error)$")

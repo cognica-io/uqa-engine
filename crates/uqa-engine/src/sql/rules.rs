@@ -307,6 +307,7 @@ impl PreparedRuleBatch {
                         )
                     })?;
                     let captured = capture_rule_returning_result(
+                        engine,
                         result,
                         definitions,
                         captures_source_context.then_some(self.rows.as_slice()),

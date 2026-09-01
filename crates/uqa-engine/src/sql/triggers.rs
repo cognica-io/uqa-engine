@@ -372,6 +372,7 @@ fn positional_trigger_record(
 }
 
 fn normalize_instead_of_trigger_record(
+    engine: &Engine,
     columns: &[(String, uqa_sql::ast::ColumnType)],
     value: Value,
 ) -> Result<Option<Vec<Value>>> {
@@ -394,7 +395,8 @@ fn normalize_instead_of_trigger_record(
     columns
         .iter()
         .map(|(name, ty)| {
-            crate::sql::convert_value_to_column_type(
+            crate::sql::convert_value_to_column_type_with_engine(
+                engine,
                 fields.get(name).cloned().unwrap_or(Value::Null),
                 ty,
             )
@@ -444,7 +446,7 @@ pub(super) fn fire_instead_of_row_triggers(
             },
             None,
         )?;
-        let Some(values) = normalize_instead_of_trigger_record(&columns, returned)? else {
+        let Some(values) = normalize_instead_of_trigger_record(engine, &columns, returned)? else {
             return Ok(None);
         };
         if event != TriggerEvent::Delete {
@@ -456,7 +458,7 @@ pub(super) fn fire_instead_of_row_triggers(
     } else {
         new
     };
-    normalize_instead_of_trigger_record(&columns, final_record)
+    normalize_instead_of_trigger_record(engine, &columns, final_record)
 }
 
 pub(crate) fn fire_statement_triggers(

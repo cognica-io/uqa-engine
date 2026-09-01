@@ -173,7 +173,7 @@ impl Engine {
             }
             Some(_) => {}
         }
-        Ok(())
+        crate::sql::reject_stored_regrole_constants(self, condition, None)
     }
 
     fn canonicalize_rule_action_target(&self, action: &mut Statement) -> Result<(), SQLError> {
@@ -271,7 +271,12 @@ impl Engine {
                     event: definition.event,
                 },
             )?;
-            if let Some(schema) = crate::sql::analyze_rule_action_returning_schema(self, bound)? {
+            let schema = crate::sql::analyze_rule_action_returning_schema(self, bound.clone())?;
+            let mut stored_plan = uqa_planner::UnifiedPlan::lower_with(bound, &|name: &str| {
+                self.has_registered_aggregate_function(name)
+            });
+            crate::sql::reject_stored_plan_regrole_constants(self, &mut stored_plan)?;
+            if let Some(schema) = schema {
                 validate_rule_returning_shape(&schema, &columns)?;
             }
         }

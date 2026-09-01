@@ -38,6 +38,10 @@ mod tree;
 mod types;
 
 pub use dispatch::{compile, plan_only_for_test};
+pub use types::{
+    parse_regobject_name, parse_regprocedure_name, parse_regtype_name, ParsedRegprocedureName,
+    ParsedRegtypeName,
+};
 
 pub(crate) fn compile_pg_expression(node: &Node) -> Result<Expr> {
     compile_expr(node)

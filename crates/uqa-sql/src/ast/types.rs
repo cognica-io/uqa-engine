@@ -55,6 +55,8 @@ pub enum ColumnType {
     Regclass,
     /// `PostgreSQL` namespace object identifier (`pg_catalog.regnamespace`).
     Regnamespace,
+    /// `PostgreSQL` role object identifier (`pg_catalog.regrole`).
+    Regrole,
     Regtype,
     PgNodeTree,
     AclItem,
@@ -114,6 +116,7 @@ pub(crate) fn builtin_array_element_name(type_name: &str) -> Option<&'static str
         "_regproc" => "regproc",
         "_regprocedure" => "regprocedure",
         "_regclass" => "regclass",
+        "_regrole" => "regrole",
         "_text" => "text",
         "_refcursor" => "refcursor",
         "_oid" => "oid",
@@ -273,6 +276,7 @@ impl ColumnType {
             "regprocedure" => Ok(Self::Regprocedure),
             "regclass" => Ok(Self::Regclass),
             "regnamespace" => Ok(Self::Regnamespace),
+            "regrole" => Ok(Self::Regrole),
             "regtype" => Ok(Self::Regtype),
             "pg_node_tree" => Ok(Self::PgNodeTree),
             "aclitem" => Ok(Self::AclItem),
@@ -346,6 +350,7 @@ impl ColumnType {
             Self::Regprocedure => "regprocedure".into(),
             Self::Regclass => "regclass".into(),
             Self::Regnamespace => "regnamespace".into(),
+            Self::Regrole => "regrole".into(),
             Self::Regtype => "regtype".into(),
             Self::PgNodeTree => "pg_node_tree".into(),
             Self::AclItem => "aclitem".into(),

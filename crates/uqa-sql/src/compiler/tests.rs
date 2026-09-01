@@ -14,6 +14,95 @@ fn bundled_parser_is_postgresql_18_4() {
 }
 
 #[test]
+fn regobject_input_parsers_preserve_postgresql_name_and_type_identity() {
+    assert_eq!(
+        parse_regobject_name("  Select . \"Mixed.Name\" . a-b  "),
+        Some(vec!["select".into(), "Mixed.Name".into(), "a-b".into()])
+    );
+    assert_eq!(
+        parse_regobject_name("\"a\"\"b\""),
+        Some(vec!["a\"b".into()])
+    );
+    assert_eq!(parse_regobject_name("a b"), None);
+    assert_eq!(parse_regobject_name("a."), None);
+    assert_eq!(
+        parse_regobject_name(&"A".repeat(64)),
+        Some(vec!["a".repeat(63)])
+    );
+    assert_eq!(
+        parse_regobject_name(&format!("{}é", "A".repeat(62))),
+        Some(vec!["a".repeat(62)])
+    );
+
+    assert_eq!(
+        parse_regtype_name("integer[][]").unwrap(),
+        Some(ParsedRegtypeName {
+            names: vec!["pg_catalog".into(), "int4".into()],
+            array_dimensions: 2,
+        })
+    );
+    assert_eq!(
+        parse_regtype_name("\"integer\"").unwrap(),
+        Some(ParsedRegtypeName {
+            names: vec!["integer".into()],
+            array_dimensions: 0,
+        })
+    );
+    assert_eq!(
+        parse_regtype_name("integer ARRAY").unwrap(),
+        Some(ParsedRegtypeName {
+            names: vec!["pg_catalog".into(), "int4".into()],
+            array_dimensions: 1,
+        })
+    );
+    assert_eq!(parse_regtype_name("SETOF integer").unwrap(), None);
+    assert!(parse_regtype_name("integer, text").is_err());
+
+    let parsed = parse_regprocedure_name("app.\"Mixed\"(integer, \"integer\"[], varchar(10))")
+        .unwrap()
+        .unwrap();
+    assert_eq!(parsed.names, ["app", "Mixed"]);
+    assert_eq!(
+        parsed.argument_types,
+        Some(vec![
+            ParsedRegtypeName {
+                names: vec!["pg_catalog".into(), "int4".into()],
+                array_dimensions: 0,
+            },
+            ParsedRegtypeName {
+                names: vec!["integer".into()],
+                array_dimensions: 1,
+            },
+            ParsedRegtypeName {
+                names: vec!["pg_catalog".into(), "varchar".into()],
+                array_dimensions: 0,
+            },
+        ])
+    );
+    assert_eq!(
+        parse_regprocedure_name("app.f").unwrap().unwrap(),
+        ParsedRegprocedureName {
+            names: vec!["app".into(), "f".into()],
+            argument_types: None,
+        }
+    );
+    assert_eq!(
+        parse_regprocedure_name("app.f()").unwrap().unwrap(),
+        ParsedRegprocedureName {
+            names: vec!["app".into(), "f".into()],
+            argument_types: Some(Vec::new()),
+        }
+    );
+    assert_eq!(
+        parse_regprocedure_name("app.select(integer)")
+            .unwrap()
+            .unwrap()
+            .names,
+        ["app", "select"]
+    );
+}
+
+#[test]
 fn transaction_control_preserves_postgresql_modes_and_chaining() {
     use crate::ast::{TransactionCharacteristics, TransactionIsolationLevel, TransactionStmt};
 

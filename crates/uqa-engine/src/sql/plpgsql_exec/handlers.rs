@@ -481,8 +481,8 @@ fn coerce_anonymous_record_value(
     let Some(target) = target else {
         return super::coerce_routine_value(engine, value, type_name);
     };
-    crate::sql::ddl::convert_value_to_column_type(value.clone(), &target).map_err(|error| {
-        match error {
+    crate::sql::ddl::convert_value_to_column_type_with_engine(engine, value.clone(), &target)
+        .map_err(|error| match error {
             SQLError::TypeMismatch(message) if message.starts_with("value too long for type ") => {
                 SQLError::Routine {
                     sqlstate: "22001".into(),
@@ -490,8 +490,7 @@ fn coerce_anonymous_record_value(
                 }
             }
             other => other,
-        }
-    })
+        })
 }
 
 fn anonymous_record_shape_error() -> SQLError {

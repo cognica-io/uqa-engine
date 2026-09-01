@@ -154,7 +154,8 @@ pub(in crate::sql::dml) fn run_view_insert_inner(
         let mut new = vec![Value::Null; target.columns.len()];
         for (input_position, target_position) in positions.iter().copied().enumerate() {
             if let Some(value) = input.get(input_position) {
-                new[target_position] = coerce_view_value(&target, target_position, value.clone())?;
+                new[target_position] =
+                    coerce_view_value(engine, &target, target_position, value.clone())?;
             }
         }
         proposed_rows.push(new);

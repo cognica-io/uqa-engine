@@ -38,7 +38,10 @@ pub(super) use value_conversion::{
     coerce_to_column_type, column_type_name, core_value_to_json, json_table_arg,
     json_table_value_to_text, json_to_core_value, value_to_text,
 };
-pub(crate) use value_conversion::{convert_value_to_column_type, validate_vector_dimensions};
+pub(crate) use value_conversion::{
+    convert_value_to_column_type, convert_value_to_column_type_with_engine,
+    validate_vector_dimensions,
+};
 
 use drop::ddl_storage_error;
 use value_conversion::rewrite_column_values_to_type;

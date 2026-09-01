@@ -13,7 +13,7 @@ use super::{
 };
 
 #[test]
-fn regclass_scalar_and_array_names_preserve_type_identity() {
+fn reg_alias_scalar_and_array_names_preserve_type_identity() {
     assert_eq!(
         ColumnType::from_sql_name("pg_catalog.regclass").unwrap(),
         ColumnType::Regclass
@@ -32,6 +32,15 @@ fn regclass_scalar_and_array_names_preserve_type_identity() {
         ColumnType::Array(Box::new(ColumnType::Regprocedure))
     );
     assert_eq!(ColumnType::Regprocedure.sql_name(), "regprocedure");
+    assert_eq!(
+        ColumnType::from_sql_name("pg_catalog.regrole").unwrap(),
+        ColumnType::Regrole
+    );
+    assert_eq!(
+        ColumnType::from_sql_name("_regrole").unwrap(),
+        ColumnType::Array(Box::new(ColumnType::Regrole))
+    );
+    assert_eq!(ColumnType::Regrole.sql_name(), "regrole");
 }
 
 #[test]

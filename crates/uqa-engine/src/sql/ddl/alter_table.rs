@@ -196,13 +196,29 @@ fn run_alter_table_action(
                 )));
             }
             if let Some(default) = &column.default {
-                validate_default_expression(engine, default)?;
+                validate_default_expression(engine, default, &column.ty)?;
             }
             let mut candidate_columns = engine
                 .try_describe_table(&stmt.table)
                 .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN", error))?
                 .ok_or_else(|| SQLError::UnknownTable(stmt.table.clone()))?;
             candidate_columns.push(column.clone());
+            let check_columns = candidate_columns.clone();
+            if let Some(check) = &mut column.check {
+                super::constraint_validation::validate_check_expression(
+                    engine,
+                    &stmt.table,
+                    &stmt.qualifier,
+                    &check_columns,
+                    check,
+                )?;
+                crate::sql::reject_stored_regrole_constants(engine, check, None)?;
+                candidate_columns
+                    .last_mut()
+                    .expect("new column candidate exists")
+                    .check
+                    .clone_from(&column.check);
+            }
             let key_constraints = engine
                 .try_key_constraints(&stmt.table)
                 .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN", error))?;
@@ -331,7 +347,7 @@ fn run_alter_table_action(
                 .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
         }
         AlterTableAction::AddCheckConstraint { constraint } => {
-            add_check_constraint(engine, &stmt.table, constraint)?;
+            add_check_constraint(engine, &stmt.table, &stmt.qualifier, constraint)?;
         }
         AlterTableAction::AddForeignKeyConstraint { constraint } => {
             add_foreign_key_constraint(engine, &stmt.table, &stmt.qualifier, constraint)?;
@@ -447,7 +463,11 @@ fn run_alter_table_action(
         }
         AlterTableAction::SetDefault { name, default } => {
             reject_default_change_on_generated_column(engine, &stmt.table, &name)?;
-            validate_default_expression(engine, &default)?;
+            let target = engine
+                .column_type(&stmt.table, &name)
+                .map_err(|error| ddl_storage_error("ALTER COLUMN SET DEFAULT", error))?
+                .ok_or_else(|| SQLError::UnknownColumn(format!("{}.{name}", stmt.table)))?;
+            validate_default_expression(engine, &default, &target)?;
             if !engine
                 .set_column_default(&stmt.table, &name, Some(default))
                 .map_err(|err| ddl_storage_error("ALTER COLUMN SET DEFAULT", err))?

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "0a636ea959dd96e36bb6d632c9e53053a8364873f1d0e61c5cfc84c100ec0039",
+  "fixture_sha256": "95a159a5cea6897a4ee6417f19e693ebed0779bd60e82818e97a8c3a8586b18a",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -83,6 +83,252 @@
     {
       "name": "create_acl_tail",
       "kind": "ok"
+    },
+    {
+      "name": "create_regrole_target",
+      "kind": "ok"
+    },
+    {
+      "name": "create_regrole_storage",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_regrole_storage",
+      "kind": "ok"
+    },
+    {
+      "name": "stored_regrole_uses_role_oid",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "drop_stored_regrole_target",
+      "kind": "ok"
+    },
+    {
+      "name": "dropped_regrole_renders_numeric",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "regrole_default_constant_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "regrole_default_missing_role_precedence",
+      "kind": "error",
+      "sqlstate": "42704"
+    },
+    {
+      "name": "regrole_default_bad_oid_precedence",
+      "kind": "error",
+      "sqlstate": "22P02"
+    },
+    {
+      "name": "regrole_default_bad_name_precedence",
+      "kind": "error",
+      "sqlstate": "42602"
+    },
+    {
+      "name": "regrole_check_constant_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "regrole_check_missing_column_left",
+      "kind": "error",
+      "sqlstate": "42703"
+    },
+    {
+      "name": "regrole_check_missing_column_right",
+      "kind": "error",
+      "sqlstate": "42703"
+    },
+    {
+      "name": "regrole_check_nonboolean",
+      "kind": "error",
+      "sqlstate": "42804"
+    },
+    {
+      "name": "regrole_generated_constant_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "regrole_view_constant_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "regrole_materialized_view_constant_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "create_regrole_alter_target",
+      "kind": "ok"
+    },
+    {
+      "name": "regrole_alter_default_constant_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "regrole_add_column_default_constant_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "regrole_add_check_constant_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "regrole_add_check_missing_column",
+      "kind": "error",
+      "sqlstate": "42703"
+    },
+    {
+      "name": "regrole_function_parameter_default_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "regrole_procedure_parameter_default_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "regrole_standard_body_constant_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "regrole_missing_language_precedes_default_input",
+      "kind": "error",
+      "sqlstate": "42704"
+    },
+    {
+      "name": "regrole_bad_result_precedes_dependency",
+      "kind": "error",
+      "sqlstate": "42P13"
+    },
+    {
+      "name": "regrole_bad_standard_body_precedes_dependency",
+      "kind": "error",
+      "sqlstate": "42703"
+    },
+    {
+      "name": "regrole_bad_body_role_precedes_dependency",
+      "kind": "error",
+      "sqlstate": "42704"
+    },
+    {
+      "name": "regrole_plpgsql_standard_body_precedes_dependency",
+      "kind": "error",
+      "sqlstate": "42P13"
+    },
+    {
+      "name": "regrole_dependency_precedes_source_body_parse",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "regrole_partition_key_constant_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "regrole_partition_missing_column_precedes_dependency",
+      "kind": "error",
+      "sqlstate": "42703"
+    },
+    {
+      "name": "create_regrole_event_source",
+      "kind": "ok"
+    },
+    {
+      "name": "create_regrole_event_sink",
+      "kind": "ok"
+    },
+    {
+      "name": "create_regrole_event_trigger",
+      "kind": "ok"
+    },
+    {
+      "name": "regrole_trigger_when_constant_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "regrole_rule_condition_constant_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "regrole_rule_action_constant_rejected",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "create_allowed_regrole_defaults",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_allowed_regrole_defaults",
+      "kind": "ok"
+    },
+    {
+      "name": "allowed_regrole_defaults_evaluate",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "create_allowed_regrole_view",
+      "kind": "ok"
+    },
+    {
+      "name": "allowed_regrole_view_evaluates",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t",
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "create_regrole_source_body",
+      "kind": "ok"
+    },
+    {
+      "name": "regrole_source_body_evaluates",
+      "kind": "rows",
+      "rows": [
+        [
+          "t"
+        ]
+      ]
     },
     {
       "name": "limited_creator_creates_managed_role",

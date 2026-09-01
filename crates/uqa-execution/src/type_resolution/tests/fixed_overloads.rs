@@ -416,6 +416,48 @@ fn fixed_builtin_binding_uses_typed_sql_parameters_across_families() {
             vec!["uuid"],
             ColumnType::SmallInteger,
         ),
+        (
+            "to_regproc",
+            vec![param(Value::Str("casefold".into()))],
+            None,
+            vec!["text"],
+            ColumnType::Regproc,
+        ),
+        (
+            "to_regprocedure",
+            vec![param(Value::Str("casefold(text)".into()))],
+            None,
+            vec!["text"],
+            ColumnType::Regprocedure,
+        ),
+        (
+            "to_regclass",
+            vec![param(Value::Str("pg_type".into()))],
+            None,
+            vec!["text"],
+            ColumnType::Regclass,
+        ),
+        (
+            "to_regnamespace",
+            vec![param(Value::Str("pg_catalog".into()))],
+            None,
+            vec!["text"],
+            ColumnType::Regnamespace,
+        ),
+        (
+            "to_regrole",
+            vec![param(Value::Str("uqa".into()))],
+            None,
+            vec!["text"],
+            ColumnType::Regrole,
+        ),
+        (
+            "to_regtype",
+            vec![param(Value::Str("integer".into()))],
+            None,
+            vec!["text"],
+            ColumnType::Regtype,
+        ),
     ] {
         let expression = ScalarExpr::Func {
             name: function.into(),

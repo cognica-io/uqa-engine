@@ -576,7 +576,11 @@ fn partition_operator_class(strategy: PartitionStrategy, ty: &ColumnType) -> i64
                 3_124
             }
         }
-        ColumnType::Oid | ColumnType::Regclass | ColumnType::Regnamespace | ColumnType::Regtype => {
+        ColumnType::Oid
+        | ColumnType::Regclass
+        | ColumnType::Regnamespace
+        | ColumnType::Regrole
+        | ColumnType::Regtype => {
             if hash {
                 10_031
             } else {

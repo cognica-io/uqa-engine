@@ -753,7 +753,9 @@ fn eval_view_rule_update_assignment(
             )));
         };
         return match schema.column_type(position) {
-            Some(ty) => crate::sql::convert_value_to_column_type(value, ty).map(Some),
+            Some(ty) => {
+                crate::sql::convert_value_to_column_type_with_engine(engine, value, ty).map(Some)
+            }
             None => Ok(Some(value)),
         };
     }

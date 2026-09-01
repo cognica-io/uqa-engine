@@ -229,11 +229,20 @@ pub(super) fn ensure_constraint_name_available(
 pub(super) fn add_check_constraint(
     engine: &Engine,
     table: &str,
+    qualifier: &str,
     mut constraint: uqa_sql::ast::TableCheck,
 ) -> Result<(), SQLError> {
     let should_validate = constraint.validated;
     constraint.validated = false;
     let (mut columns, mut constraints) = table_constraint_state(engine, table)?;
+    super::super::constraint_validation::validate_check_expression(
+        engine,
+        table,
+        qualifier,
+        &columns,
+        &mut constraint.expr,
+    )?;
+    crate::sql::reject_stored_regrole_constants(engine, &constraint.expr, None)?;
     ensure_constraint_name_available(&columns, &constraints, constraint.name.as_deref(), table)?;
     constraints.checks.push(constraint);
     materialize_constraint_candidate(engine, table, &mut columns, &mut constraints)?;

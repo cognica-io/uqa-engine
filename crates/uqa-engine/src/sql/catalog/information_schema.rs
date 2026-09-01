@@ -15,7 +15,7 @@ use super::helpers::information_schema_types::{
 };
 use super::helpers::oids::{current_user_name, split_schema_name, stable_oid};
 use super::helpers::rows::{catalog_name, catalog_ordinal, int_value, row, str_value};
-use super::helpers::type_metadata::catalog_type_name;
+use super::helpers::type_metadata::{catalog_regtype_name, catalog_type_name};
 use super::helpers::views::{all_schema_names, view_columns_for};
 use crate::engine_capabilities::{CatalogReadView, RelationNameResolution};
 use crate::engine_user_functions::routine_signature_types;
@@ -386,6 +386,7 @@ pub(super) fn build_info_routines(catalog: &CatalogReadView) -> Result<Vec<Resul
         .iter()
         .flat_map(|group| group.iter())
         .map(|routine| {
+            let regtype_name = catalog_regtype_name(routine.return_type);
             row([
                 ("specific_catalog", catalog_name()),
                 ("specific_schema", str_value("pg_catalog")),
@@ -414,6 +415,15 @@ pub(super) fn build_info_routines(catalog: &CatalogReadView) -> Result<Vec<Resul
                     "data_type",
                     str_value(catalog_type_name(routine.return_type)),
                 ),
+                (
+                    "type_udt_catalog",
+                    regtype_name.map_or(Value::Null, |_| catalog_name()),
+                ),
+                (
+                    "type_udt_schema",
+                    regtype_name.map_or(Value::Null, |_| str_value("pg_catalog")),
+                ),
+                ("type_udt_name", regtype_name.map_or(Value::Null, str_value)),
                 ("routine_body", str_value("EXTERNAL")),
                 ("routine_definition", Value::Null),
                 ("external_name", Value::Null),

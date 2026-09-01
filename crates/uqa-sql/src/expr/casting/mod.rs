@@ -89,7 +89,9 @@ pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<V
             }
             Ok(Value::Decimal(value))
         }
-        "regproc" | "regprocedure" | "regtype" if matches!(v, Value::Int(_)) => Ok(v.clone()),
+        "regproc" | "regprocedure" | "regrole" | "regtype" if matches!(v, Value::Int(_)) => {
+            Ok(v.clone())
+        }
         "text"
         | "refcursor"
         | "pg_catalog.refcursor"
@@ -107,7 +109,10 @@ pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<V
                     vector_value_to_string(v).unwrap_or_else(|| value_to_string(v))
                 }
                 (
-                    Some("regproc" | "regprocedure" | "regclass" | "regnamespace" | "regtype"),
+                    Some(
+                        "regproc" | "regprocedure" | "regclass" | "regnamespace" | "regrole"
+                        | "regtype",
+                    ),
                     Value::Int(0),
                 ) => "-".into(),
                 _ => value_to_string(v),
@@ -119,6 +124,7 @@ pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<V
         "oid" | "pg_catalog.oid" => cast_oid(v, source_ty),
         "regclass" | "pg_catalog.regclass" => cast_regclass(v, source_ty),
         "regnamespace" | "pg_catalog.regnamespace" => cast_regnamespace(v, source_ty),
+        "regrole" | "pg_catalog.regrole" => cast_regrole(v, source_ty),
         "xid" | "pg_catalog.xid" => cast_xid(v, source_ty),
         "\"char\"" => {
             let text = value_to_string(v);
@@ -492,7 +498,8 @@ pub(super) fn cast_boolean(v: &Value) -> Result<Value> {
 use array::cast_array_elements;
 pub use array::{array_dimensions, parse_pg_array_literal};
 use binary_oid::{
-    bytea_to_integer, cast_bytea, cast_oid, cast_regclass, cast_regnamespace, cast_xid,
+    bytea_to_integer, cast_bytea, cast_oid, cast_regclass, cast_regnamespace, cast_regrole,
+    cast_xid,
 };
 use temporal::{cast_date, cast_temporal, TemporalCastTarget};
 

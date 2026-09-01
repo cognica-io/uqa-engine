@@ -6,13 +6,14 @@
 
 //! PostgreSQL-compatible validation for column default expressions.
 
-use super::{Engine, SQLError};
+use super::{ColumnType, Engine, SQLError};
 use uqa_execution::RowSchema;
 use uqa_sql::ast::Expr;
 
 pub(super) fn validate_default_expression(
     engine: &Engine,
     expression: &Expr,
+    target: &ColumnType,
 ) -> Result<(), SQLError> {
     let plan = uqa_planner::ExpressionPlan::lower(expression.clone());
     if !plan.subqueries.is_empty() {
@@ -40,7 +41,7 @@ pub(super) fn validate_default_expression(
         ));
     }
     uqa_execution::scalar_type_with_resolver(&plan.scalar, &RowSchema::default(), &[], engine)?;
-    Ok(())
+    crate::sql::reject_stored_regrole_constants(engine, expression, Some(target))
 }
 
 fn default_error(sqlstate: &str, message: &str) -> SQLError {

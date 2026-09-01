@@ -77,6 +77,195 @@ CREATE ROLE __UQA_ROLE_ACL_LEAF__;
 CREATE ROLE __UQA_ROLE_ACL_TAIL__;
 -- @end
 
+-- regrole values carry role OIDs, follow the live role catalog when rendered, and do not retain a dependency on a dropped role.
+-- @case create_regrole_target ok
+CREATE ROLE __UQA_ROLE_REGROLE__;
+-- @end
+
+-- @case create_regrole_storage ok
+CREATE TABLE __UQA_STATEFUL_SCHEMA__.regrole_storage(owner regrole, owners regrole[]);
+-- @end
+
+-- @case insert_regrole_storage ok
+INSERT INTO __UQA_STATEFUL_SCHEMA__.regrole_storage VALUES ('__UQA_ROLE_REGROLE__', ARRAY['__UQA_ROLE_REGROLE__'::regrole]);
+-- @end
+
+-- @case stored_regrole_uses_role_oid rows
+SELECT owner::oid = (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = '__UQA_ROLE_REGROLE__'), owners[1]::oid = owner::oid, owner::text = '__UQA_ROLE_REGROLE__' FROM __UQA_STATEFUL_SCHEMA__.regrole_storage;
+-- @end
+
+-- @case drop_stored_regrole_target ok
+DROP ROLE __UQA_ROLE_REGROLE__;
+-- @end
+
+-- @case dropped_regrole_renders_numeric rows
+SELECT owner::text = owner::oid::text, owners[1]::text = owners[1]::oid::text, to_regrole('__UQA_ROLE_REGROLE__') IS NULL FROM __UQA_STATEFUL_SCHEMA__.regrole_storage;
+-- @end
+
+-- PostgreSQL rejects non-NULL scalar regrole constants in stored expressions after resolving their input syntax and role identity.
+-- @case regrole_default_constant_rejected error
+CREATE TABLE __UQA_STATEFUL_SCHEMA__.regrole_default_constant(owner regrole DEFAULT '__UQA_ROLE_PARENT__');
+-- @end
+
+-- @case regrole_default_missing_role_precedence error
+CREATE TABLE __UQA_STATEFUL_SCHEMA__.regrole_default_missing(owner regrole DEFAULT 'uqa_pg18_regrole_missing');
+-- @end
+
+-- @case regrole_default_bad_oid_precedence error
+CREATE TABLE __UQA_STATEFUL_SCHEMA__.regrole_default_bad_oid(owner regrole DEFAULT '09');
+-- @end
+
+-- @case regrole_default_bad_name_precedence error
+CREATE TABLE __UQA_STATEFUL_SCHEMA__.regrole_default_bad_name(owner regrole DEFAULT 'one.two');
+-- @end
+
+-- @case regrole_check_constant_rejected error
+CREATE TABLE __UQA_STATEFUL_SCHEMA__.regrole_check_constant(owner regrole CHECK (owner <> '23'::regrole));
+-- @end
+
+-- CHECK name and result-type analysis precede stored regrole dependency rejection.
+-- @case regrole_check_missing_column_left error
+CREATE TABLE __UQA_STATEFUL_SCHEMA__.regrole_check_missing_left(owner regrole, CHECK (missing_column IS NULL AND owner <> '23'::regrole));
+-- @end
+
+-- @case regrole_check_missing_column_right error
+CREATE TABLE __UQA_STATEFUL_SCHEMA__.regrole_check_missing_right(owner regrole, CHECK (owner <> '23'::regrole AND missing_column IS NULL));
+-- @end
+
+-- @case regrole_check_nonboolean error
+CREATE TABLE __UQA_STATEFUL_SCHEMA__.regrole_check_nonboolean(owner regrole CHECK ('23'::regrole));
+-- @end
+
+-- @case regrole_generated_constant_rejected error
+CREATE TABLE __UQA_STATEFUL_SCHEMA__.regrole_generated_constant(owner regrole GENERATED ALWAYS AS ('23') STORED);
+-- @end
+
+-- @case regrole_view_constant_rejected error
+CREATE VIEW __UQA_STATEFUL_SCHEMA__.regrole_view_constant AS SELECT '23'::regrole AS owner;
+-- @end
+
+-- @case regrole_materialized_view_constant_rejected error
+CREATE MATERIALIZED VIEW __UQA_STATEFUL_SCHEMA__.regrole_materialized_view_constant AS SELECT '23'::regrole AS owner;
+-- @end
+
+-- @case create_regrole_alter_target ok
+CREATE TABLE __UQA_STATEFUL_SCHEMA__.regrole_alter_target(owner regrole);
+-- @end
+
+-- @case regrole_alter_default_constant_rejected error
+ALTER TABLE __UQA_STATEFUL_SCHEMA__.regrole_alter_target ALTER COLUMN owner SET DEFAULT '23';
+-- @end
+
+-- @case regrole_add_column_default_constant_rejected error
+ALTER TABLE __UQA_STATEFUL_SCHEMA__.regrole_alter_target ADD COLUMN backup regrole DEFAULT '23';
+-- @end
+
+-- @case regrole_add_check_constant_rejected error
+ALTER TABLE __UQA_STATEFUL_SCHEMA__.regrole_alter_target ADD CONSTRAINT owner_not_23 CHECK (owner <> '23'::regrole);
+-- @end
+
+-- @case regrole_add_check_missing_column error
+ALTER TABLE __UQA_STATEFUL_SCHEMA__.regrole_alter_target ADD CHECK (owner <> '23'::regrole AND missing_column IS NULL);
+-- @end
+
+-- @case regrole_function_parameter_default_rejected error
+CREATE FUNCTION __UQA_STATEFUL_SCHEMA__.regrole_parameter_default(value regrole DEFAULT '23') RETURNS oid LANGUAGE SQL IMMUTABLE AS 'SELECT value::oid';
+-- @end
+
+-- @case regrole_procedure_parameter_default_rejected error
+CREATE PROCEDURE __UQA_STATEFUL_SCHEMA__.regrole_procedure_default(value regrole DEFAULT '23') LANGUAGE SQL AS 'SELECT value::oid';
+-- @end
+
+-- @case regrole_standard_body_constant_rejected error
+CREATE FUNCTION __UQA_STATEFUL_SCHEMA__.regrole_standard_body() RETURNS regrole LANGUAGE SQL IMMUTABLE RETURN '23'::regrole;
+-- @end
+
+-- Routine language, declaration, and SQL-standard body analysis precede dependency rejection, while hard regrole input errors retain their parse-time position.
+-- @case regrole_missing_language_precedes_default_input error
+CREATE FUNCTION __UQA_STATEFUL_SCHEMA__.regrole_missing_language(value regrole DEFAULT '09') RETURNS integer LANGUAGE no_such_language AS 'SELECT 1';
+-- @end
+
+-- @case regrole_bad_result_precedes_dependency error
+CREATE FUNCTION __UQA_STATEFUL_SCHEMA__.regrole_bad_result(value regrole DEFAULT '23') RETURNS anyelement LANGUAGE SQL AS 'SELECT 1';
+-- @end
+
+-- @case regrole_bad_standard_body_precedes_dependency error
+CREATE FUNCTION __UQA_STATEFUL_SCHEMA__.regrole_bad_standard_body(value regrole DEFAULT '23') RETURNS integer LANGUAGE SQL RETURN missing_column + ('23'::regrole)::oid;
+-- @end
+
+-- @case regrole_bad_body_role_precedes_dependency error
+CREATE FUNCTION __UQA_STATEFUL_SCHEMA__.regrole_bad_body_role(value regrole DEFAULT '23') RETURNS regrole LANGUAGE SQL RETURN 'uqa_pg18_regrole_missing'::regrole;
+-- @end
+
+-- @case regrole_plpgsql_standard_body_precedes_dependency error
+CREATE FUNCTION __UQA_STATEFUL_SCHEMA__.regrole_plpgsql_standard(value regrole DEFAULT '23') RETURNS integer LANGUAGE plpgsql RETURN 1;
+-- @end
+
+-- @case regrole_dependency_precedes_source_body_parse error
+CREATE FUNCTION __UQA_STATEFUL_SCHEMA__.regrole_bad_source(value regrole DEFAULT '23') RETURNS integer LANGUAGE SQL AS 'SELECT +';
+-- @end
+
+-- @case regrole_partition_key_constant_rejected error
+CREATE TABLE __UQA_STATEFUL_SCHEMA__.regrole_partition_key(owner regrole) PARTITION BY HASH (((owner::oid::bigint + ('23'::regrole)::oid::bigint)));
+-- @end
+
+-- @case regrole_partition_missing_column_precedes_dependency error
+CREATE TABLE __UQA_STATEFUL_SCHEMA__.regrole_partition_missing(owner regrole) PARTITION BY HASH (((missing_column + ('23'::regrole)::oid)));
+-- @end
+
+-- @case create_regrole_event_source ok
+CREATE TABLE __UQA_STATEFUL_SCHEMA__.regrole_event_source(owner regrole);
+-- @end
+
+-- @case create_regrole_event_sink ok
+CREATE TABLE __UQA_STATEFUL_SCHEMA__.regrole_event_sink(owner regrole);
+-- @end
+
+-- @case create_regrole_event_trigger ok
+CREATE FUNCTION __UQA_STATEFUL_SCHEMA__.regrole_event_trigger() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NEW; END';
+-- @end
+
+-- @case regrole_trigger_when_constant_rejected error
+CREATE TRIGGER regrole_constant_trigger BEFORE INSERT ON __UQA_STATEFUL_SCHEMA__.regrole_event_source FOR EACH ROW WHEN (NEW.owner <> '23'::regrole) EXECUTE FUNCTION __UQA_STATEFUL_SCHEMA__.regrole_event_trigger();
+-- @end
+
+-- @case regrole_rule_condition_constant_rejected error
+CREATE RULE regrole_constant_condition AS ON INSERT TO __UQA_STATEFUL_SCHEMA__.regrole_event_source WHERE NEW.owner <> '23'::regrole DO NOTHING;
+-- @end
+
+-- @case regrole_rule_action_constant_rejected error
+CREATE RULE regrole_constant_action AS ON INSERT TO __UQA_STATEFUL_SCHEMA__.regrole_event_source DO ALSO INSERT INTO __UQA_STATEFUL_SCHEMA__.regrole_event_sink VALUES ('23'::regrole);
+-- @end
+
+-- Runtime text conversion, numeric and NULL constants, arrays, and SQL source-string bodies remain valid stored expressions.
+-- @case create_allowed_regrole_defaults ok
+CREATE TABLE __UQA_STATEFUL_SCHEMA__.allowed_regrole_defaults(owner regrole DEFAULT ('23'::text)::regrole, owners regrole[] DEFAULT '{23}'::regrole[]);
+-- @end
+
+-- @case insert_allowed_regrole_defaults ok
+INSERT INTO __UQA_STATEFUL_SCHEMA__.allowed_regrole_defaults VALUES (DEFAULT, DEFAULT);
+-- @end
+
+-- @case allowed_regrole_defaults_evaluate rows
+SELECT owner::oid = 23, owners[1]::oid = 23 FROM __UQA_STATEFUL_SCHEMA__.allowed_regrole_defaults;
+-- @end
+
+-- @case create_allowed_regrole_view ok
+CREATE VIEW __UQA_STATEFUL_SCHEMA__.allowed_regrole_view AS SELECT ('23'::text)::regrole AS runtime_owner, 10::regrole AS numeric_owner, NULL::regrole AS nullable_owner, '{23}'::regrole[] AS owners;
+-- @end
+
+-- @case allowed_regrole_view_evaluates rows
+SELECT runtime_owner::oid = 23, numeric_owner::oid = 10, nullable_owner IS NULL, owners[1]::oid = 23 FROM __UQA_STATEFUL_SCHEMA__.allowed_regrole_view;
+-- @end
+
+-- @case create_regrole_source_body ok
+CREATE FUNCTION __UQA_STATEFUL_SCHEMA__.regrole_source_body() RETURNS regrole LANGUAGE SQL IMMUTABLE AS 'SELECT ''23''::regrole';
+-- @end
+
+-- @case regrole_source_body_evaluates rows
+SELECT __UQA_STATEFUL_SCHEMA__.regrole_source_body()::oid = 23;
+-- @end
+
 -- A CREATEROLE user receives ADMIN on roles it creates, but may delegate only the global attributes it already holds.
 -- @case limited_creator_creates_managed_role ok
 SET ROLE __UQA_ROLE_LIMITED_CREATOR__; CREATE ROLE __UQA_ROLE_MANAGED__ CREATEROLE; RESET ROLE;

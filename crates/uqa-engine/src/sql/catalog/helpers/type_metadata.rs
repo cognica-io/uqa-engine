@@ -29,7 +29,25 @@ pub(in crate::sql::catalog) fn catalog_type_name(oid: i64) -> &'static str {
         2277 => "anyarray",
         2950 => "uuid",
         3802 => "jsonb",
+        24 => "regproc",
+        2202 => "regprocedure",
+        2205 => "regclass",
+        2206 => "regtype",
+        4089 => "regnamespace",
+        4096 => "regrole",
         _ => "USER-DEFINED",
+    }
+}
+
+pub(in crate::sql::catalog) fn catalog_regtype_name(oid: i64) -> Option<&'static str> {
+    match oid {
+        24 => Some("regproc"),
+        2202 => Some("regprocedure"),
+        2205 => Some("regclass"),
+        2206 => Some("regtype"),
+        4089 => Some("regnamespace"),
+        4096 => Some("regrole"),
+        _ => None,
     }
 }
 
@@ -62,6 +80,7 @@ pub(in crate::sql::catalog) fn pg_type_oid(ty: &ColumnType) -> i64 {
         ColumnType::Regprocedure => 2202,
         ColumnType::Regclass => 2205,
         ColumnType::Regnamespace => 4089,
+        ColumnType::Regrole => 4096,
         ColumnType::Regtype => 2206,
         ColumnType::PgNodeTree => 194,
         ColumnType::AclItem => 1033,
@@ -109,6 +128,7 @@ pub(in crate::sql::catalog) fn pg_type_oid(ty: &ColumnType) -> i64 {
             ColumnType::Regprocedure => 2207,
             ColumnType::Regclass => 2210,
             ColumnType::Regnamespace => 4090,
+            ColumnType::Regrole => 4097,
             ColumnType::Regtype => 2211,
             ColumnType::PgNodeTree => 0,
             ColumnType::AclItem => 1034,
@@ -271,6 +291,7 @@ pub(in crate::sql::catalog) fn pg_type_len(ty: &ColumnType) -> i64 {
         | ColumnType::Regprocedure
         | ColumnType::Regclass
         | ColumnType::Regnamespace
+        | ColumnType::Regrole
         | ColumnType::Regtype => 4,
         ColumnType::BigInteger => 8,
         ColumnType::Boolean | ColumnType::InternalChar => 1,
@@ -300,6 +321,7 @@ pub(in crate::sql::catalog) fn pg_type_by_value(ty: &ColumnType) -> bool {
             | ColumnType::Regprocedure
             | ColumnType::Regclass
             | ColumnType::Regnamespace
+            | ColumnType::Regrole
             | ColumnType::Regtype
             | ColumnType::Real
             | ColumnType::DoublePrecision
@@ -484,6 +506,7 @@ pub(in crate::sql::catalog) fn pg_type_routine_oids(ty: &ColumnType) -> PgTypeRo
         ColumnType::Regprocedure => PgTypeRoutineOids::new(2212, 2213, 2446, 2447),
         ColumnType::Regclass => PgTypeRoutineOids::new(2218, 2219, 2452, 2453),
         ColumnType::Regnamespace => PgTypeRoutineOids::new(4084, 4085, 4087, 4088),
+        ColumnType::Regrole => PgTypeRoutineOids::new(4098, 4092, 4094, 4095),
         ColumnType::Text => PgTypeRoutineOids::new(46, 47, 2414, 2415),
         ColumnType::RefCursor => PgTypeRoutineOids::new(46, 47, 2414, 2415),
         ColumnType::Oid => PgTypeRoutineOids::new(1798, 1799, 2418, 2419),

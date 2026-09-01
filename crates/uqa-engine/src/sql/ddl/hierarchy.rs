@@ -245,7 +245,10 @@ fn validate_partition_keys(engine: &Engine, table: &CreateTable) -> Result<(), S
         .map(|column| column.name.as_str())
         .collect::<BTreeSet<_>>();
     for key in &spec.keys {
-        if let uqa_sql::ast::Expr::Column(column) = key {
+        let scalar = uqa_planner::ExpressionPlan::lower(key.clone()).scalar;
+        let mut referenced_columns = BTreeSet::new();
+        scalar.collect_columns(&mut referenced_columns);
+        for column in referenced_columns {
             if !column_names.contains(column.as_str()) {
                 return Err(SQLError::Routine {
                     sqlstate: "42703".into(),
@@ -254,5 +257,9 @@ fn validate_partition_keys(engine: &Engine, table: &CreateTable) -> Result<(), S
             }
         }
     }
-    crate::sql::validate_hash_partition_spec(engine, spec, &table.columns)
+    crate::sql::validate_hash_partition_spec(engine, spec, &table.columns)?;
+    for key in &spec.keys {
+        crate::sql::reject_stored_regrole_constants(engine, key, None)?;
+    }
+    Ok(())
 }

@@ -87,3 +87,5 @@ mod strings_and_bytea;
 mod temporal;
 #[path = "pg18_semantics/three_valued_logic.rs"]
 mod three_valued_logic;
+#[path = "pg18_semantics/to_reg_lookups.rs"]
+mod to_reg_lookups;

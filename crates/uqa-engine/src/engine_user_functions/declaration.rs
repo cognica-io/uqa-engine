@@ -243,6 +243,22 @@ fn validate_routine_declaration(engine: &Engine, def: &CreateFunction) -> Result
     validate_routine_output_types(def, &inputs)
 }
 
+fn routine_parameter_regrole_constants(
+    engine: &Engine,
+    def: &CreateFunction,
+) -> crate::sql::StoredRegroleConstants {
+    let mut constants = crate::sql::StoredRegroleConstants::default();
+    for parameter in &def.params {
+        let Some(default) = parameter.default.as_ref() else {
+            continue;
+        };
+        let target = crate::sql::resolve_catalog_column_type(engine, &parameter.type_name)
+            .or_else(|| ColumnType::from_sql_name(&parameter.type_name).ok());
+        constants.collect_expression(default, target.as_ref());
+    }
+    constants
+}
+
 fn validate_variadic_declaration(engine: &Engine, def: &CreateFunction) -> Result<(), SQLError> {
     let variadic_positions = def
         .params
@@ -431,35 +447,51 @@ fn compile_function_body_inner(
     def: &CreateFunction,
     upgrade_legacy_dispatches: bool,
 ) -> Result<CompiledFunctionBody, SQLError> {
+    if !matches!(def.language.as_str(), "plpgsql" | "sql") {
+        return Err(SQLError::Routine {
+            sqlstate: "42704".into(),
+            message: format!("language \"{}\" does not exist", def.language),
+        });
+    }
+    if def.language == "plpgsql" && matches!(def.body, FunctionBody::Statements(_)) {
+        return Err(routine_definition_error(
+            "inline SQL function body only valid for language SQL",
+        ));
+    }
+    let mut stored_regrole_constants = routine_parameter_regrole_constants(engine, def);
+    stored_regrole_constants.validate_inputs(engine)?;
     validate_routine_declaration(engine, def)?;
     match def.language.as_str() {
         "plpgsql" => {
-            if matches!(def.body, FunctionBody::Statements(_)) {
-                return Err(SQLError::Unsupported(
-                    "LANGUAGE plpgsql with a SQL-standard body".into(),
-                ));
-            }
+            stored_regrole_constants.reject(engine)?;
             let mut function = uqa_sql::plpgsql::parse_function(def)?;
             resolve_plpgsql_datum_types(engine, &mut function)?;
             Ok(CompiledFunctionBody::PLpgSQL(function))
         }
         "sql" => {
             let (statements, bind_catalog_dependencies) = match &def.body {
-                FunctionBody::Source(source) => (uqa_sql::compile(source)?, false),
+                FunctionBody::Source(source) => {
+                    stored_regrole_constants.reject(engine)?;
+                    (uqa_sql::compile(source)?, false)
+                }
                 FunctionBody::Statements(statements) => (statements.clone(), true),
             };
-            Ok(CompiledFunctionBody::SQL(compile_sql_routine_plans(
+            let mut plans = compile_sql_routine_plans(
                 engine,
                 def,
                 statements,
                 bind_catalog_dependencies,
                 upgrade_legacy_dispatches && matches!(def.body, FunctionBody::Statements(_)),
-            )?))
+            )?;
+            if bind_catalog_dependencies {
+                for plan in &mut plans {
+                    stored_regrole_constants.collect_plan(plan);
+                }
+                stored_regrole_constants.reject(engine)?;
+            }
+            Ok(CompiledFunctionBody::SQL(plans))
         }
-        other => Err(SQLError::Routine {
-            sqlstate: "42704".into(),
-            message: format!("language \"{other}\" does not exist"),
-        }),
+        _ => unreachable!("routine language was validated above"),
     }
 }
 

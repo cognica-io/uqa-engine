@@ -300,7 +300,6 @@ pub(super) fn builtin_function_type_inner(
         "current_database" | "current_catalog" | "current_schema" | "current_user"
         | "session_user" => Ok(Some(ColumnType::Name)),
         "current_schemas" => Ok(Some(ColumnType::Array(Box::new(ColumnType::Name)))),
-        "to_regclass" => Ok(Some(ColumnType::Regclass)),
         _ => resolve_extension_function_type(
             resolver,
             original_name,
