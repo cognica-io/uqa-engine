@@ -200,9 +200,8 @@ fn eval_function_call_inner(
         return Err(unknown_function_error(lower, &call_args));
     }
 
-    // Sequence functions mutate engine state and therefore precede pure
-    // built-in dispatch.
-    if matches!(lower, "nextval" | "currval" | "setval") {
+    // Sequence functions use engine-owned session state and therefore precede pure built-in dispatch.
+    if matches!(lower, "nextval" | "currval" | "lastval" | "setval") {
         return eval_sequence_function(lower, &evaluated, ctx);
     }
     if let Some(engine) = ctx

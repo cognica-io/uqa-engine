@@ -311,6 +311,38 @@ fn command_text_uses_one_implicit_transaction_for_multiple_statements() {
 }
 
 #[test]
+fn command_text_distinguishes_implicit_discard_from_explicit_begin() {
+    let engine = Engine::new();
+    let mut session = Session {
+        engine,
+        db_path: None,
+        db_key: None,
+        location: ":memory:".into(),
+        history: Vec::new(),
+        history_path: None,
+        show_timing: false,
+        expanded: false,
+        copy_text: false,
+        output_path: None,
+    };
+    let mut out = Vec::new();
+    session
+        .execute_command_text_with_history(
+            "CREATE SEQUENCE command_discard_sequence; SELECT nextval('command_discard_sequence'); DISCARD SEQUENCES;",
+            &mut out,
+            false,
+        )
+        .unwrap();
+    assert!(session.engine.lastval().is_err());
+
+    let error = session
+        .execute_command_text_with_history("BEGIN; DISCARD SEQUENCES;", &mut out, false)
+        .unwrap_err();
+    assert!(error.starts_with("25001:"), "{error}");
+    session.engine.sql("ROLLBACK", &[]).unwrap();
+}
+
+#[test]
 fn terminator_detection_waits_for_dollar_quote_close() {
     assert!(!contains_statement_terminator(
         "CREATE FUNCTION f() AS $$ BEGIN RETURN 1;"

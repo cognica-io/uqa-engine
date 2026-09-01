@@ -4,8 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `CREATE SEQUENCE` / `ALTER SEQUENCE` + `nextval` / `currval` /
-//! `setval` round-trips.
+//! `CREATE SEQUENCE` / `ALTER SEQUENCE` + `nextval` / `currval` / `lastval` / `setval` round-trips.
 
 use uqa_core::Value;
 use uqa_engine::Engine;
@@ -51,6 +50,82 @@ fn sequence_currval_via_sql() {
     eng.sql("SELECT nextval('s2') AS v", &[]).unwrap();
     let result = eng.sql("SELECT currval('s2') AS v", &[]).unwrap();
     assert_eq!(result.rows[0]["v"], Value::Int(10));
+}
+
+#[test]
+fn lastval_tracks_the_sequence_most_recently_advanced_by_nextval() {
+    let engine = Engine::new();
+    engine
+        .sql("CREATE SEQUENCE first_ids START 10", &[])
+        .unwrap();
+    engine
+        .sql("CREATE SEQUENCE second_ids START 100", &[])
+        .unwrap();
+
+    let undefined = engine.sql("SELECT lastval()", &[]).unwrap_err();
+    assert_eq!(undefined.sqlstate(), Some("55000"));
+    assert!(undefined
+        .to_string()
+        .contains("lastval is not yet defined in this session"));
+
+    engine.sql("SELECT setval('first_ids', 20)", &[]).unwrap();
+    assert_eq!(
+        engine.sql("SELECT lastval()", &[]).unwrap_err().sqlstate(),
+        Some("55000")
+    );
+
+    assert_eq!(engine.nextval("first_ids").unwrap(), 21);
+    assert_eq!(engine.lastval().unwrap(), 21);
+    engine.setval("first_ids", 50).unwrap();
+    assert_eq!(engine.lastval().unwrap(), 50);
+
+    engine.setval("second_ids", 200).unwrap();
+    assert_eq!(engine.currval("second_ids").unwrap(), 200);
+    assert_eq!(engine.lastval().unwrap(), 50);
+    assert_eq!(engine.nextval("second_ids").unwrap(), 201);
+    assert_eq!(engine.lastval().unwrap(), 201);
+    engine
+        .setval_with_is_called("second_ids", 300, false)
+        .unwrap();
+    assert_eq!(engine.lastval().unwrap(), 201);
+}
+
+#[test]
+fn lastval_survives_rollback_and_is_cleared_by_discard_sequences() {
+    let engine = Engine::new();
+    engine
+        .sql("CREATE SEQUENCE rollback_first START 10", &[])
+        .unwrap();
+    engine
+        .sql("CREATE SEQUENCE rollback_second START 100", &[])
+        .unwrap();
+    assert_eq!(engine.nextval("rollback_first").unwrap(), 10);
+
+    engine.begin().unwrap();
+    assert_eq!(engine.nextval("rollback_second").unwrap(), 100);
+    engine.rollback().unwrap();
+    assert_eq!(engine.lastval().unwrap(), 100);
+
+    engine.begin().unwrap();
+    engine.savepoint("last_value_point").unwrap();
+    assert_eq!(engine.nextval("rollback_first").unwrap(), 11);
+    engine.rollback_to_savepoint("last_value_point").unwrap();
+    assert_eq!(engine.lastval().unwrap(), 11);
+    engine.rollback().unwrap();
+    assert_eq!(engine.lastval().unwrap(), 11);
+
+    engine.sql("DISCARD SEQUENCES", &[]).unwrap();
+    assert_eq!(
+        engine.sql("SELECT lastval()", &[]).unwrap_err().sqlstate(),
+        Some("55000")
+    );
+    assert_eq!(
+        engine
+            .sql("SELECT currval('rollback_first')", &[])
+            .unwrap_err()
+            .sqlstate(),
+        Some("55000")
+    );
 }
 
 #[test]
@@ -112,6 +187,7 @@ fn sequence_function_signatures_match_postgres_overloads() {
     );
 
     for sql in [
+        "SELECT lastval(1)",
         "SELECT setval('signature_sequence', 6, 1)",
         "SELECT setval('signature_sequence', 6.5)",
         "SELECT setval('signature_sequence'::name, 6)",
@@ -470,6 +546,13 @@ fn assert_rolled_back_recreation_keeps_the_original_sequence(engine: &Engine) {
         .create_sequence("incarnation_ids", 10, 1, false)
         .unwrap();
     assert_eq!(engine.nextval("incarnation_ids").unwrap(), 10);
+    assert_eq!(engine.lastval().unwrap(), 10);
+
+    engine.begin().unwrap();
+    assert!(engine.drop_sequence("incarnation_ids").unwrap());
+    engine.rollback().unwrap();
+    assert_eq!(engine.currval("incarnation_ids").unwrap(), 10);
+    assert_eq!(engine.lastval().unwrap(), 10);
 
     engine.begin().unwrap();
     assert!(engine.drop_sequence("incarnation_ids").unwrap());
@@ -480,7 +563,9 @@ fn assert_rolled_back_recreation_keeps_the_original_sequence(engine: &Engine) {
     engine.rollback().unwrap();
 
     assert_eq!(engine.currval("incarnation_ids").unwrap(), 10);
+    assert!(engine.lastval().is_err());
     assert_eq!(engine.nextval("incarnation_ids").unwrap(), 11);
+    assert_eq!(engine.lastval().unwrap(), 11);
 }
 
 #[test]

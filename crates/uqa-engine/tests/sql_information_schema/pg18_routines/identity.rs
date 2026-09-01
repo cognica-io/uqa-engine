@@ -13,7 +13,7 @@ fn postgresql_18_regtype_aliases_use_catalog_aware_text_output() {
         .sql(
             "SELECT (0::regproc)::text AS zero_proc, (0::regclass)::text AS zero_class, \
                     (0::regnamespace)::text AS zero_namespace, (0::regtype)::text AS zero_type, \
-                    (1574::regproc)::text AS sequence_proc_name, (1598::regproc)::text AS proc_name, \
+                    (1574::regproc)::text AS sequence_proc_name, (2559::regproc)::text AS lastval_proc_name, (1598::regproc)::text AS proc_name, \
                     (1259::regclass)::text AS class_name, \
                     (11::regnamespace)::text AS namespace_name, (23::regtype)::text AS type_name, \
                     (999999::regclass)::text AS missing_name, 'pg_class'::regclass AS class_oid, \
@@ -27,6 +27,7 @@ fn postgresql_18_regtype_aliases_use_catalog_aware_text_output() {
         assert_eq!(row[column], Value::Str("-".into()), "{column}");
     }
     assert_eq!(row["sequence_proc_name"], Value::Str("nextval".into()));
+    assert_eq!(row["lastval_proc_name"], Value::Str("lastval".into()));
     assert_eq!(row["proc_name"], Value::Str("pg_catalog.random".into()));
     assert_eq!(row["class_name"], Value::Str("pg_class".into()));
     assert_eq!(row["namespace_name"], Value::Str("pg_catalog".into()));
@@ -37,40 +38,6 @@ fn postgresql_18_regtype_aliases_use_catalog_aware_text_output() {
     assert_eq!(
         row["proc_array"],
         Value::Str("{-,pg_catalog.random,999999}".into())
-    );
-
-    let sequence_routines = engine
-        .sql(
-            "SELECT oid, proname, prorettype, proargtypes, proisstrict, provolatile, proparallel, prosrc FROM pg_proc WHERE oid IN (1574, 1575, 1576, 1765) ORDER BY oid",
-            &[],
-        )
-        .unwrap();
-    assert_eq!(sequence_routines.rows.len(), 4);
-    assert_eq!(
-        sequence_routines.rows[0]["proname"],
-        Value::Str("nextval".into())
-    );
-    assert_eq!(
-        sequence_routines.rows[1]["proname"],
-        Value::Str("currval".into())
-    );
-    for row in &sequence_routines.rows {
-        assert_eq!(row["prorettype"], Value::Int(20));
-        assert_eq!(row["proisstrict"], Value::Bool(true));
-        assert_eq!(row["provolatile"], Value::Str("v".into()));
-        assert_eq!(row["proparallel"], Value::Str("u".into()));
-    }
-    assert_eq!(
-        sequence_routines.rows[0]["proargtypes"],
-        Value::List(vec![Value::Int(2205)])
-    );
-    assert_eq!(
-        sequence_routines.rows[2]["proargtypes"],
-        Value::List(vec![Value::Int(2205), Value::Int(20)])
-    );
-    assert_eq!(
-        sequence_routines.rows[3]["proargtypes"],
-        Value::List(vec![Value::Int(2205), Value::Int(20), Value::Int(16)])
     );
 
     let mut copy = Vec::new();
@@ -109,6 +76,56 @@ fn postgresql_18_regtype_aliases_use_catalog_aware_text_output() {
     assert_eq!(
         shadowed.rows[0]["catalog_name"],
         Value::Str("pg_catalog.pg_class".into())
+    );
+}
+
+#[test]
+fn postgresql_18_sequence_routine_identities_match_catalog() {
+    let engine = Engine::new();
+    let sequence_routines = engine
+        .sql(
+            "SELECT oid, proname, prorettype, proargtypes, proisstrict, provolatile, proparallel, prosrc FROM pg_proc WHERE oid IN (1574, 1575, 1576, 1765, 2559) ORDER BY oid",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(sequence_routines.rows.len(), 5);
+    assert_eq!(
+        sequence_routines.rows[0]["proname"],
+        Value::Str("nextval".into())
+    );
+    assert_eq!(
+        sequence_routines.rows[1]["proname"],
+        Value::Str("currval".into())
+    );
+    for row in &sequence_routines.rows {
+        assert_eq!(row["prorettype"], Value::Int(20));
+        assert_eq!(row["proisstrict"], Value::Bool(true));
+        assert_eq!(row["provolatile"], Value::Str("v".into()));
+        assert_eq!(row["proparallel"], Value::Str("u".into()));
+    }
+    assert_eq!(
+        sequence_routines.rows[0]["proargtypes"],
+        Value::List(vec![Value::Int(2205)])
+    );
+    assert_eq!(
+        sequence_routines.rows[2]["proargtypes"],
+        Value::List(vec![Value::Int(2205), Value::Int(20)])
+    );
+    assert_eq!(
+        sequence_routines.rows[3]["proargtypes"],
+        Value::List(vec![Value::Int(2205), Value::Int(20), Value::Int(16)])
+    );
+    assert_eq!(
+        sequence_routines.rows[4]["proname"],
+        Value::Str("lastval".into())
+    );
+    assert_eq!(
+        sequence_routines.rows[4]["proargtypes"],
+        Value::List(Vec::new())
+    );
+    assert_eq!(
+        sequence_routines.rows[4]["prosrc"],
+        Value::Str("lastval".into())
     );
 }
 

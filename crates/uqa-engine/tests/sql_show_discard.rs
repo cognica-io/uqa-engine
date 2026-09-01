@@ -260,3 +260,21 @@ fn discard_temp_drops_temporary_relations_and_rejects_transaction_blocks() {
     assert_eq!(error.sqlstate(), Some("25001"));
     eng.sql("ROLLBACK", &[]).unwrap();
 }
+
+#[test]
+fn discard_distinguishes_a_simple_query_batch_from_explicit_begin() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE SEQUENCE discard_batch_sequence; \
+             SELECT nextval('discard_batch_sequence'); \
+             DISCARD SEQUENCES",
+            &[],
+        )
+        .unwrap();
+    assert!(engine.currval("discard_batch_sequence").is_err());
+
+    let error = engine.sql("BEGIN; DISCARD SEQUENCES", &[]).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("25001"));
+    engine.sql("ROLLBACK", &[]).unwrap();
+}

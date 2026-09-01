@@ -462,6 +462,9 @@ impl Session {
                 if record_history {
                     self.record_statement(&statement)?;
                 }
+                self.engine
+                    .promote_simple_query_transaction()
+                    .map_err(|error| format!("{}: {error}", error.sqlstate().unwrap_or("XX000")))?;
                 if let Some(uqa_sql::ast::TransactionStmt::BeginWithCharacteristics(options)) =
                     transaction
                 {
@@ -481,7 +484,7 @@ impl Session {
                 && !implicit_segment_open
             {
                 self.engine
-                    .sql("BEGIN", &[])
+                    .begin_simple_query_transaction()
                     .map_err(|error| format!("{}: {error}", error.sqlstate().unwrap_or("XX000")))?;
                 implicit_segment_open = true;
             }

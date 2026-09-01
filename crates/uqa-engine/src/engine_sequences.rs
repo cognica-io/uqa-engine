@@ -17,6 +17,8 @@ enum SequenceValueError {
     WrongKind { name: String, kind: &'static str },
     #[error("currval of sequence \"{0}\" is not yet defined in this session")]
     CurrvalUndefined(String),
+    #[error("lastval is not yet defined in this session")]
+    LastvalUndefined,
     #[error("setval: value {value} is out of bounds for sequence \"{name}\" ({min}..{max})")]
     SetvalOutOfBounds {
         name: String,
@@ -53,7 +55,7 @@ impl SequenceValueError {
         let sqlstate = match self {
             Self::Undefined(_) => "42P01",
             Self::WrongKind { .. } => "42809",
-            Self::CurrvalUndefined(_) => "55000",
+            Self::CurrvalUndefined(_) | Self::LastvalUndefined => "55000",
             Self::SetvalOutOfBounds { .. } => "22003",
             Self::Exhausted { .. } => "2200H",
             Self::ReadOnly(_) => "25006",
@@ -652,6 +654,37 @@ impl Engine {
             .filter(|current| current.object_id == object_id)
             .map(|current| current.value)
             .ok_or(SequenceValueError::CurrvalUndefined(name))
+    }
+
+    pub fn lastval(&self) -> Result<i64, String> {
+        self.lastval_inner().map_err(|error| error.to_string())
+    }
+
+    pub(crate) fn lastval_sql(&self) -> Result<i64, SQLError> {
+        self.lastval_inner()
+            .map_err(SequenceValueError::into_sql_error)
+    }
+
+    fn lastval_inner(&self) -> Result<i64, SequenceValueError> {
+        self.refresh_sequences_from_catalog().map_err(|error| {
+            SequenceValueError::Internal(format!("load sequence catalog: {error}"))
+        })?;
+        let object_ids = self.durable.sequence_object_ids.read();
+        let session = self.session.state.read();
+        let last = session
+            .last_sequence
+            .as_ref()
+            .ok_or(SequenceValueError::LastvalUndefined)?;
+        if object_ids.get(&last.relation).copied() != Some(last.object_id) {
+            return Err(SequenceValueError::LastvalUndefined);
+        }
+        session
+            .sequence_currvals
+            .get(&last.relation)
+            .copied()
+            .filter(|current| current.object_id == last.object_id)
+            .map(|current| current.value)
+            .ok_or(SequenceValueError::LastvalUndefined)
     }
 
     pub fn setval(&self, name: &str, value: i64) -> Result<i64, String> {

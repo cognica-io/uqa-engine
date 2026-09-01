@@ -973,6 +973,83 @@ CREATE TABLE setval_observations(name text PRIMARY KEY, value bigint, flag boole
 CREATE TABLE setval_not_sequence(id integer);
 -- @end
 
+-- lastval follows the sequence most recently advanced by nextval, reads that sequence's current session value, and retains its reference across rollback boundaries.
+-- @case create_lastval_fixture ok
+CREATE SEQUENCE lastval_first_sequence START WITH 10;
+CREATE SEQUENCE lastval_second_sequence START WITH 100;
+CREATE SEQUENCE lastval_setval_only_sequence START WITH 500;
+CREATE SEQUENCE lastval_transaction_sequence START WITH 200;
+CREATE SEQUENCE lastval_discard_sequence START WITH 300;
+CREATE TABLE lastval_observations(name text PRIMARY KEY, value bigint NOT NULL);
+-- @end
+
+-- @case lastval_initial_state error
+SELECT lastval();
+-- @end
+
+-- setval alone defines currval for its target but does not select a sequence for lastval.
+-- @case lastval_setval_only_does_not_define error
+SELECT setval('lastval_setval_only_sequence', 550), lastval();
+-- @end
+
+-- @case lastval_sequence_selection ok
+INSERT INTO lastval_observations VALUES ('first_next', nextval('lastval_first_sequence'));
+INSERT INTO lastval_observations VALUES ('last_after_first_next', lastval());
+INSERT INTO lastval_observations VALUES ('second_setval', setval('lastval_second_sequence', 200));
+INSERT INTO lastval_observations VALUES ('last_after_other_setval', lastval());
+INSERT INTO lastval_observations VALUES ('first_setval', setval('lastval_first_sequence', 50));
+INSERT INTO lastval_observations VALUES ('last_after_selected_setval', lastval());
+INSERT INTO lastval_observations VALUES ('second_next', nextval('lastval_second_sequence'));
+INSERT INTO lastval_observations VALUES ('last_after_second_next', lastval());
+INSERT INTO lastval_observations VALUES ('second_setval_false', setval('lastval_second_sequence', 300, false));
+INSERT INTO lastval_observations VALUES ('last_after_false_setval', lastval());
+-- @end
+
+-- @case lastval_sequence_selection_result rows
+SELECT name, value FROM lastval_observations WHERE name IN ('first_next', 'last_after_first_next', 'second_setval', 'last_after_other_setval', 'first_setval', 'last_after_selected_setval', 'second_next', 'last_after_second_next', 'second_setval_false', 'last_after_false_setval') ORDER BY name;
+-- @end
+
+-- @case lastval_rollback_semantics ok
+BEGIN;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.lastval_observations VALUES ('rolled_back_transaction_next', nextval('__UQA_STATEFUL_SCHEMA__.lastval_transaction_sequence'));
+ROLLBACK;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.lastval_observations VALUES ('last_after_transaction_rollback', lastval());
+BEGIN;
+SAVEPOINT lastval_point;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.lastval_observations VALUES ('rolled_back_savepoint_next', nextval('__UQA_STATEFUL_SCHEMA__.lastval_transaction_sequence'));
+ROLLBACK TO SAVEPOINT lastval_point;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.lastval_observations VALUES ('last_after_savepoint_rollback', lastval());
+COMMIT;
+DO $$
+BEGIN
+    BEGIN
+        PERFORM nextval('__UQA_STATEFUL_SCHEMA__.lastval_transaction_sequence');
+        RAISE EXCEPTION 'caught lastval failure';
+    EXCEPTION WHEN OTHERS THEN
+        INSERT INTO __UQA_STATEFUL_SCHEMA__.lastval_observations VALUES ('last_after_exception_rollback', lastval());
+    END;
+END
+$$;
+-- @end
+
+-- @case lastval_rollback_semantics_result rows
+SELECT name, value FROM lastval_observations WHERE name IN ('last_after_transaction_rollback', 'last_after_savepoint_rollback', 'last_after_exception_rollback') ORDER BY name;
+-- @end
+
+-- @case lastval_discard_sequences error
+SELECT nextval('lastval_discard_sequence');
+DISCARD SEQUENCES;
+SELECT lastval();
+-- @end
+
+-- @case lastval_invalid_arity error
+SELECT lastval(1);
+-- @end
+
+-- @case lastval_pg_proc_identity rows
+SELECT oid, proname, prorettype, proargtypes::text, proisstrict, provolatile, proparallel, prosrc FROM pg_catalog.pg_proc WHERE oid = 2559;
+-- @end
+
 -- @case setval_false_session_semantics ok
 INSERT INTO setval_observations VALUES ('initial_next', nextval('setval_is_called_sequence'), NULL);
 INSERT INTO setval_observations VALUES ('false_return', setval('setval_is_called_sequence', 42, false), NULL);

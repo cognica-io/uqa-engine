@@ -87,6 +87,11 @@ fn cast_regrole_array(
 pub trait EngineHook {
     fn nextval(&self, name: &str) -> Result<i64>;
     fn currval(&self, name: &str) -> Result<i64>;
+    fn lastval(&self) -> Result<i64> {
+        Err(SQLError::Unsupported(
+            "lastval requires an engine hook implementation".into(),
+        ))
+    }
     fn setval(&self, name: &str, value: i64, is_called: bool) -> Result<i64>;
 
     fn call_scalar_function(&self, _name: &str, _args: &[Value]) -> Option<Result<Value>> {

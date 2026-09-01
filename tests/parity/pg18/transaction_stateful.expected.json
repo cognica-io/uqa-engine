@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "d7de36b2c647bc2680266e8731524803ed8f3a37367e5f874a3a69de8c7c406d",
+  "fixture_sha256": "e8653e760c7afd48a22e58c2779bac000b588c62c309f99018f2dee21fe29772",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -948,6 +948,118 @@
     {
       "name": "create_setval_is_called_fixture",
       "kind": "ok"
+    },
+    {
+      "name": "create_lastval_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "lastval_initial_state",
+      "kind": "error",
+      "sqlstate": "55000"
+    },
+    {
+      "name": "lastval_setval_only_does_not_define",
+      "kind": "error",
+      "sqlstate": "55000"
+    },
+    {
+      "name": "lastval_sequence_selection",
+      "kind": "ok"
+    },
+    {
+      "name": "lastval_sequence_selection_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "first_next",
+          "10"
+        ],
+        [
+          "first_setval",
+          "50"
+        ],
+        [
+          "last_after_false_setval",
+          "201"
+        ],
+        [
+          "last_after_first_next",
+          "10"
+        ],
+        [
+          "last_after_other_setval",
+          "10"
+        ],
+        [
+          "last_after_second_next",
+          "201"
+        ],
+        [
+          "last_after_selected_setval",
+          "50"
+        ],
+        [
+          "second_next",
+          "201"
+        ],
+        [
+          "second_setval",
+          "200"
+        ],
+        [
+          "second_setval_false",
+          "300"
+        ]
+      ]
+    },
+    {
+      "name": "lastval_rollback_semantics",
+      "kind": "ok"
+    },
+    {
+      "name": "lastval_rollback_semantics_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "last_after_exception_rollback",
+          "202"
+        ],
+        [
+          "last_after_savepoint_rollback",
+          "201"
+        ],
+        [
+          "last_after_transaction_rollback",
+          "200"
+        ]
+      ]
+    },
+    {
+      "name": "lastval_discard_sequences",
+      "kind": "error",
+      "sqlstate": "55000"
+    },
+    {
+      "name": "lastval_invalid_arity",
+      "kind": "error",
+      "sqlstate": "42883"
+    },
+    {
+      "name": "lastval_pg_proc_identity",
+      "kind": "rows",
+      "rows": [
+        [
+          "2559",
+          "lastval",
+          "20",
+          "",
+          "t",
+          "v",
+          "u",
+          "lastval"
+        ]
+      ]
     },
     {
       "name": "setval_false_session_semantics",

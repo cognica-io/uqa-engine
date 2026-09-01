@@ -298,7 +298,7 @@ impl Engine {
     pub fn discard(&self, target: uqa_sql::ast::DiscardTarget) -> Result<(), SQLError> {
         use uqa_sql::ast::DiscardTarget;
         let _statement = self.runtime.statement_gate.lock();
-        if self.transaction_depth() != 0 {
+        if self.in_explicit_transaction_block() {
             return Err(SQLError::Routine {
                 sqlstate: "25001".into(),
                 message: "DISCARD cannot run inside a transaction block".into(),
@@ -399,6 +399,7 @@ impl Engine {
         {
             session.last_sequence = None;
         }
+        drop(session);
         if !temporary_tables.is_empty() {
             self.note_table_catalog_changed();
         }

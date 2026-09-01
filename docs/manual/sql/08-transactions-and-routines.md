@@ -81,7 +81,7 @@ SHOW timezone;
 
 `SET ROLE name` changes `current_user` for the session while preserving `session_user`; `RESET ROLE`, `SET ROLE NONE`, and `SET ROLE DEFAULT` restore the session identity. The embedded connection starts as the durable bootstrap superuser role `uqa`, so it may assume any defined role. A non-superuser session may assume a directly or transitively granted role only through membership edges whose `SET` option is true. A successful `SET ROLE` executed by a `SECURITY INVOKER` routine remains visible to the session, while an error restores the prior identity and any `SET ROLE` attempted inside a `SECURITY DEFINER` context fails with `42501`, including through a nested invoker.
 
-`DISCARD ALL`, `DISCARD PLANS`, and `DISCARD SEQUENCES` reset their implemented session state. `DISCARD TEMP` removes the session's temporary tables, views, sequences, and sequence state; PostgreSQL rejects it inside a transaction, and UQA Engine does the same.
+`DISCARD ALL`, `DISCARD PLANS`, and `DISCARD SEQUENCES` reset their implemented session state. `DISCARD TEMP` removes the session's temporary tables, views, sequences, and sequence state. PostgreSQL and UQA Engine reject `DISCARD` after an explicit `BEGIN`, while permitting it in the implicit transaction segment that encloses a multi-statement simple-query message.
 
 `LOAD 'age'` (also `age.so`, `$libdir/age`, and `$libdir/age.so`) succeeds without side effects because the Apache AGE surface is embedded; any other library name fails as `could not access file "$libdir/name": No such file or directory` (`58P01`). See [Graph SQL and Cypher](07-graph.md) for the AGE session bootstrap.
 

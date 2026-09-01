@@ -9,8 +9,8 @@ use super::{
     FixedTransactionSnapshot, NontransactionalColumnStats, NontransactionalSequenceValues,
     SQLError, SQLParam, SQLResult, SessionLastSequenceReference, SessionStateSnapshot,
     StorageBackendError, StorageBackendResult, StorageSavepointId, TransactionCharacteristicsState,
-    TransactionDirtyState, TransactionFrame, TransactionIntent, TransactionRelationStates,
-    TransactionRowChange, TransactionSavepoint, TransactionStatus,
+    TransactionDirtyState, TransactionFrame, TransactionFrameKind, TransactionIntent,
+    TransactionRelationStates, TransactionRowChange, TransactionSavepoint, TransactionStatus,
 };
 
 mod backend;

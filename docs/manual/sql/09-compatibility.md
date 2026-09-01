@@ -102,7 +102,7 @@ The `pg_proc` and `information_schema.routines` surfaces expose the PostgreSQL 1
 
 Known mutable settings are `search_path`, `client_encoding`, `datestyle`, `timezone`, and `work_mem`. Unknown or unsupported settings return an error rather than becoming ignored server configuration.
 
-`DISCARD TEMP` removes the current session's temporary tables, views, sequences, and sequence state, and is rejected inside a transaction as PostgreSQL requires.
+`DISCARD TEMP` removes the current session's temporary tables, views, sequences, and sequence state. It is rejected after an explicit `BEGIN` and permitted inside a multi-statement simple query's implicit transaction segment, as PostgreSQL requires.
 
 `LOAD` accepts the Apache AGE library names (`age`, `age.so`, `$libdir/age`, `$libdir/age.so`) as no-ops because the AGE surface is embedded; every other library fails as a missing `$libdir` file because the engine loads no shared objects.
 

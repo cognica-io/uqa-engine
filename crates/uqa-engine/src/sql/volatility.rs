@@ -50,6 +50,7 @@ pub(super) fn function_volatility(
             | "array_sample"
             | "nextval"
             | "currval"
+            | "lastval"
             | "setval"
             | "now"
             | "current_date"

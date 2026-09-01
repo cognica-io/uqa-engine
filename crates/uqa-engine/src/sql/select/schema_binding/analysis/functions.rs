@@ -216,6 +216,7 @@ fn sequence_function_signature_matches(
 ) -> Result<Option<bool>, SQLError> {
     let parameter_types: &[&str] = match name {
         "nextval" | "currval" => &["regclass"],
+        "lastval" => &[],
         "setval" if args.len() == 2 => &["regclass", "int8"],
         "setval" => &["regclass", "int8", "bool"],
         _ => return Ok(None),

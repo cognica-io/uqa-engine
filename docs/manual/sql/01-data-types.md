@@ -36,7 +36,7 @@ UQA Engine has PostgreSQL 18-compatible type names mapped to the value carriers 
 
 `SMALLINT`, `INTEGER`, and `BIGINT` retain distinct declared identities and enforce PostgreSQL's signed 16-bit, 32-bit, and 64-bit ranges at casts, writes, schema rewrites, and supported migration boundaries. `OID` casts preserve the source integer width, including PostgreSQL's sign-extension behavior for negative `SMALLINT` and `INTEGER`, while negative `BIGINT` to `OID` raises `22003`; `XID` accepts its PostgreSQL text input but rejects integer and OID cast sources with `42846`.
 
-Serial declarations allocate generated integer identities. Sequence functions `nextval`, `currval`, and `setval` are available, and standalone sequences can be created explicitly. Identity-owned sequence syntax is not implemented.
+Serial declarations allocate generated integer identities. Sequence functions `nextval`, `currval`, `lastval`, and `setval` are available, and standalone sequences can be created explicitly. Identity-owned sequence syntax is not implemented.
 
 ## Floating point
 

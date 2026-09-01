@@ -4,7 +4,10 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{failed_transaction_error, Engine, SQLError, TransactionFrame, TransactionStatus};
+use super::{
+    failed_transaction_error, Engine, SQLError, TransactionFrame, TransactionFrameKind,
+    TransactionStatus,
+};
 use uqa_sql::ast::TransactionStmt;
 
 impl Engine {
@@ -76,7 +79,7 @@ impl Engine {
             &mut stack,
             characteristics.read_only,
             true,
-            true,
+            TransactionFrameKind::ImplicitStatement,
             characteristics,
         )
     }
@@ -162,7 +165,7 @@ impl Engine {
                     guard,
                     characteristics.read_only,
                     outer,
-                    false,
+                    TransactionFrameKind::ExplicitBlock,
                     characteristics,
                 )
             }
@@ -173,7 +176,7 @@ impl Engine {
                     guard,
                     characteristics.read_only,
                     outer,
-                    false,
+                    TransactionFrameKind::ExplicitBlock,
                     characteristics,
                 )
             }
@@ -218,7 +221,7 @@ impl Engine {
             stack,
             characteristics.read_only,
             true,
-            false,
+            TransactionFrameKind::ExplicitBlock,
             characteristics,
         )
     }

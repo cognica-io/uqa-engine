@@ -355,6 +355,10 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         self.engine.currval_sql(name)
     }
 
+    fn lastval(&self) -> std::result::Result<i64, SQLError> {
+        self.engine.lastval_sql()
+    }
+
     fn setval(
         &self,
         name: &str,

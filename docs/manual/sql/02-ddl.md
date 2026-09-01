@@ -323,6 +323,7 @@ CTAS creates and populates a table from a query, preserves the query's declared 
 CREATE SEQUENCE ticket_ids START WITH 1000 INCREMENT BY 1;
 SELECT nextval('ticket_ids');
 SELECT currval('ticket_ids');
+SELECT lastval();
 SELECT setval('ticket_ids', 2000);
 SELECT setval('ticket_ids', 2500, false);
 ALTER SEQUENCE ticket_ids RESTART WITH 3000;

@@ -329,6 +329,7 @@ pub(crate) fn builtin_function_dispatch_name(name: &str) -> String {
                         | "setseed"
                         | "nextval"
                         | "currval"
+                        | "lastval"
                         | "setval"
                         | "current_schema"
                         | "current_schemas"

@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Implemented PostgreSQL 18 `lastval()` with exact session selection, `setval` interaction, rollback and exception persistence, `DISCARD SEQUENCES`, durable sequence-lifecycle identity, `pg_proc` metadata, and simple-query transaction behavior, verified by the 149-case transaction-state oracle.
 - Implemented PostgreSQL 18 three-argument `setval(regclass, bigint, boolean)` with exact called-state, `currval`, strict NULL, default-bound, relation-kind, read-only transaction, failed-statement, PL/pgSQL exception, rollback, savepoint, persistent reopen, `pg_sequences`, and function-signature behavior, verified by the 139-case transaction-state oracle.
 - Implemented PostgreSQL 18 PL/pgSQL `COMMIT` and `ROLLBACK` with `AND CHAIN` and `AND NO CHAIN` for standalone procedures and anonymous blocks, including direct nested invocation, fresh transaction segments, retained local variables and chained characteristics, exact atomic-context errors, query-loop holdability, command-loop rejection, cursor cleanup, durable reopen behavior, and a 114-case stateful oracle.
 - Verified PostgreSQL 18 `RETURNING` current, `OLD`, and `NEW` row images across ordinary and partitioned `INSERT`, `UPDATE`, `DELETE`, `ON CONFLICT`, and every `MERGE` mutation action, including BEFORE-trigger mutation and suppression, immutable original old images, non-retroactive AFTER-trigger writes, generated values, cross-leaf movement, and physical `tableoid` identities in the live stateful oracle.

@@ -343,7 +343,13 @@ fn pinned_reader_defers_sibling_catalog_epochs_until_transaction_end() {
         let characteristics = reader.default_transaction_characteristics();
         let mut stack = reader.session.transactions.lock();
         reader
-            .begin_transaction_frame(&mut stack, true, true, false, characteristics)
+            .begin_transaction_frame(
+                &mut stack,
+                true,
+                true,
+                TransactionFrameKind::ExplicitBlock,
+                characteristics,
+            )
             .unwrap();
     }
     assert!(!reader.has_schema("later").unwrap());

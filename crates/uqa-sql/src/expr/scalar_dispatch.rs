@@ -28,6 +28,7 @@ pub(super) fn eval_sequence_function(
     })?;
     let (valid_arity, expected) = match name {
         "nextval" | "currval" => (args.len() == 1, "1"),
+        "lastval" => (args.is_empty(), "0"),
         "setval" => (matches!(args.len(), 2 | 3), "2 or 3"),
         other => {
             return Err(SQLError::Unsupported(format!(
@@ -45,11 +46,12 @@ pub(super) fn eval_sequence_function(
     if args.iter().any(|argument| matches!(argument, Value::Null)) {
         return Ok(Value::Null);
     }
-    let seq_name = value_to_string(&args[0]);
     let value = match name {
-        "nextval" => engine.nextval(&seq_name),
-        "currval" => engine.currval(&seq_name),
+        "nextval" => engine.nextval(&value_to_string(&args[0])),
+        "currval" => engine.currval(&value_to_string(&args[0])),
+        "lastval" => engine.lastval(),
         "setval" => {
+            let seq_name = value_to_string(&args[0]);
             let n = to_i64(&args[1])?;
             let is_called = match args.get(2) {
                 None => true,

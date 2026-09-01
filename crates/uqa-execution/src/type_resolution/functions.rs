@@ -206,9 +206,8 @@ pub(super) fn builtin_function_type_inner(
             explicit_variadic,
             resolver,
         ),
-        "count" | "row_number" | "rank" | "dense_rank" | "nextval" | "currval" | "setval" => {
-            Ok(Some(ColumnType::BigInteger))
-        }
+        "count" | "row_number" | "rank" | "dense_rank" | "nextval" | "currval" | "lastval"
+        | "setval" => Ok(Some(ColumnType::BigInteger)),
         "sum" => Ok(first().and_then(|ty| aggregate_sum_type(&ty))),
         "avg" => Ok(first().and_then(|ty| aggregate_average_type(&ty))),
         "stddev" | "stddev_samp" | "stddev_pop" | "variance" | "var_samp" | "var_pop" => {

@@ -12,8 +12,8 @@ use super::{
     failed_transaction_error, BackendTransactionMode, ConstraintModeState, Engine,
     EngineDataSnapshot, NontransactionalColumnStats, NontransactionalSequenceValues, SQLError,
     SessionStateSnapshot, StorageBackendError, StorageSavepointId, TransactionCharacteristicsState,
-    TransactionDirtyState, TransactionFrame, TransactionIntent, TransactionRelationStates,
-    TransactionStatus,
+    TransactionDirtyState, TransactionFrame, TransactionFrameKind, TransactionIntent,
+    TransactionRelationStates, TransactionStatus,
 };
 
 impl Engine {
@@ -78,7 +78,7 @@ impl Engine {
             &mut stack,
             characteristics.read_only,
             true,
-            false,
+            TransactionFrameKind::ExplicitBlock,
             characteristics,
         )
     }
@@ -125,6 +125,14 @@ impl Engine {
             .lock()
             .last()
             .is_some_and(|frame| !frame.implicit_statement)
+    }
+
+    pub(crate) fn in_explicit_transaction_block(&self) -> bool {
+        self.session
+            .transactions
+            .lock()
+            .last()
+            .is_some_and(|frame| frame.explicit_transaction_block)
     }
 
     /// Tear down engine state cleanly, rolling back open transaction frames
@@ -178,12 +186,13 @@ impl Engine {
             &mut stack,
             read_only || characteristics.read_only,
             true,
-            true,
+            TransactionFrameKind::ImplicitStatement,
             characteristics,
         )
     }
 
-    pub(crate) fn begin_implicit_transaction_block(&self) -> Result<(), SQLError> {
+    /// Start the implicit transaction segment owned by a multi-statement simple-query message.
+    pub fn begin_simple_query_transaction(&self) -> Result<(), SQLError> {
         let _statement = self.runtime.statement_gate.lock();
         let mut stack = self.session.transactions.lock();
         if !stack.is_empty() {
@@ -196,17 +205,19 @@ impl Engine {
             &mut stack,
             characteristics.read_only,
             true,
-            false,
+            TransactionFrameKind::SimpleQuery,
             characteristics,
         )
     }
 
-    pub(crate) fn promote_implicit_transaction_block(&self) -> Result<(), SQLError> {
+    /// Promote the current simple-query transaction to an explicit block after `BEGIN`.
+    pub fn promote_simple_query_transaction(&self) -> Result<(), SQLError> {
         let mut stack = self.session.transactions.lock();
         let frame = stack.last_mut().ok_or_else(|| {
             SQLError::Internal("promote implicit transaction without an open frame".into())
         })?;
         frame.implicit_statement = false;
+        frame.explicit_transaction_block = true;
         Ok(())
     }
 
@@ -215,7 +226,7 @@ impl Engine {
         stack: &mut Vec<TransactionFrame>,
         read_only: bool,
         defer_write_lock: bool,
-        implicit_statement: bool,
+        kind: TransactionFrameKind,
         mut characteristics: TransactionCharacteristicsState,
     ) -> Result<(), SQLError> {
         // A PostgreSQL subtransaction cannot relax the enclosing transaction's read-only mode. This is also the invariant relied on by PL/pgSQL EXCEPTION blocks, which use nested engine frames as subtransactions.
@@ -271,8 +282,14 @@ impl Engine {
             BackendTransactionMode::Writer
         };
         let relation_states_at_begin = self.transaction_relation_states();
+        let (implicit_statement, explicit_transaction_block) = match kind {
+            TransactionFrameKind::ExplicitBlock => (false, true),
+            TransactionFrameKind::ImplicitStatement => (true, false),
+            TransactionFrameKind::SimpleQuery => (false, false),
+        };
         stack.push(TransactionFrame {
             implicit_statement,
+            explicit_transaction_block,
             storage_savepoint,
             intent: if read_only {
                 TransactionIntent::ReadOnly

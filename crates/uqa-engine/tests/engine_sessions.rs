@@ -573,6 +573,7 @@ fn currval_does_not_follow_a_recreated_sequence_with_the_same_name() {
         .unwrap();
     assert_eq!(stale_session.nextval("session_ids").unwrap(), 10);
     assert_eq!(stale_session.currval("session_ids").unwrap(), 10);
+    assert_eq!(stale_session.lastval().unwrap(), 10);
 
     let ddl_session = Engine::open(&path).unwrap();
     assert!(ddl_session.drop_sequence("session_ids").unwrap());
@@ -581,8 +582,10 @@ fn currval_does_not_follow_a_recreated_sequence_with_the_same_name() {
         .unwrap());
 
     assert!(stale_session.currval("session_ids").is_err());
+    assert!(stale_session.lastval().is_err());
     assert_eq!(stale_session.nextval("session_ids").unwrap(), 100);
     assert_eq!(stale_session.currval("session_ids").unwrap(), 100);
+    assert_eq!(stale_session.lastval().unwrap(), 100);
 }
 
 #[test]

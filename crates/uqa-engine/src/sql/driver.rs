@@ -123,7 +123,7 @@ fn execute_uncached_or_snapshot_scoped(
                 // PostgreSQL promotes the simple-query message's implicit
                 // transaction to an explicit block. The preceding statements
                 // stay uncommitted; a later COMMIT or ROLLBACK controls them.
-                engine.promote_implicit_transaction_block()?;
+                engine.promote_simple_query_transaction()?;
                 if let Some(uqa_sql::ast::TransactionStmt::BeginWithCharacteristics(options)) =
                     transaction
                 {
@@ -140,7 +140,7 @@ fn execute_uncached_or_snapshot_scoped(
                 && engine.transaction_depth() == 0
                 && !implicit_segment_open
             {
-                engine.begin_implicit_transaction_block()?;
+                engine.begin_simple_query_transaction()?;
                 implicit_segment_open = true;
             }
             let (initial_plan, cached_optimized_plan) = if is_single_statement {
