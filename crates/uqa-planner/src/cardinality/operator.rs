@@ -30,7 +30,7 @@ impl CardinalityEstimator {
             OperatorTree::VectorSimilarity { threshold, .. } => {
                 n * Self::vector_selectivity(f64::from(*threshold), stats.dimensions)
             }
-            OperatorTree::KNN { k, .. } => *k as f64,
+            OperatorTree::KNN { k, .. } => (*k as f64).min(n),
             OperatorTree::Filter {
                 field,
                 predicate,

@@ -180,39 +180,17 @@ fn lock_source_plan_relations(
         SourcePlan::Subquery { body, .. } => {
             lock_query_plan_relations(engine, body, visible_ctes, locked, visiting_views)
         }
-        SourcePlan::Function { relation, .. } => {
-            lock_table_function_relation(engine, relation.as_deref(), locked)
+        SourcePlan::Function { relations, .. } => {
+            lock_table_function_relations(engine, relations.as_ref(), locked)
         }
         SourcePlan::FunctionGroup { functions, .. } => {
             for function in functions {
-                lock_table_function_relation(engine, function.relation.as_deref(), locked)?;
+                lock_table_function_relations(engine, function.relations.as_ref(), locked)?;
             }
             Ok(())
         }
         SourcePlan::Values { .. } => Ok(()),
     }
-}
-
-fn lock_table_function_relation(
-    engine: &Engine,
-    relation: Option<&str>,
-    locked: &mut std::collections::BTreeSet<String>,
-) -> Result<(), SQLError> {
-    let Some(relation) = relation else {
-        return Ok(());
-    };
-    let Some(table) = engine.try_resolve_table_name(relation).map_err(|error| {
-        SQLError::Internal(format!(
-            "resolve table-function relation `{relation}`: {error}"
-        ))
-    })?
-    else {
-        return Ok(());
-    };
-    if locked.insert(table.clone()) {
-        engine.lock_relation(&table, crate::row_locks::RelationLockMode::AccessShare)?;
-    }
-    Ok(())
 }
 
 /// Resolve cursor row-lock targets without opening or pulling the query. `PostgreSQL` performs these declaration-time checks even though expression evaluation and tuple locking wait until FETCH.
@@ -469,7 +447,9 @@ fn source_contains_join_alias(source: &SourcePlan, target: &str) -> bool {
 
 mod execution;
 mod null_rejection;
+mod targets;
 use null_rejection::reduce_null_rejected_outer_joins_to_fixpoint;
+use targets::lock_table_function_relations;
 
 fn merge_lock_wait(left: LockWait, right: LockWait) -> LockWait {
     match (left, right) {

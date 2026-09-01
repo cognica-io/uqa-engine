@@ -159,13 +159,15 @@ impl DocumentStore for PortalSnapshotProbeStore {
 fn cursor_snapshots_only_referenced_tables_without_holding_the_catalog_lock() {
     let eng = Engine::new();
     eng.sql(
-        "CREATE TABLE portal_used (id INTEGER, embedding VECTOR(2)); CREATE TABLE portal_unrelated (id INTEGER); CREATE SCHEMA portal_shadow; CREATE TABLE portal_shadow.portal_used (id INTEGER, embedding VECTOR(2)); INSERT INTO portal_used VALUES (1, ARRAY[1.0, 0.0]); INSERT INTO portal_unrelated VALUES (2); INSERT INTO portal_shadow.portal_used VALUES (10, ARRAY[1.0, 0.0]), (11, ARRAY[0.9, 0.1])",
+        "CREATE TABLE portal_used (id INTEGER, embedding VECTOR(2)); CREATE TABLE portal_right (id INTEGER, archived_embedding VECTOR(2)); CREATE TABLE portal_unrelated (id INTEGER); CREATE SCHEMA portal_shadow; CREATE TABLE portal_shadow.portal_used (id INTEGER, embedding VECTOR(2)); INSERT INTO portal_used VALUES (1, ARRAY[1.0, 0.0]); INSERT INTO portal_right VALUES (101, ARRAY[1.0, 0.0]); INSERT INTO portal_unrelated VALUES (2); INSERT INTO portal_shadow.portal_used VALUES (10, ARRAY[1.0, 0.0]), (11, ARRAY[0.9, 0.1])",
         &[],
     )
     .unwrap();
     let used = PortalSnapshotProbeStore::from_table(&eng, "portal_used");
+    let right = PortalSnapshotProbeStore::from_table(&eng, "portal_right");
     let unrelated = PortalSnapshotProbeStore::from_table(&eng, "portal_unrelated");
     let used_calls = Arc::clone(&used.doc_id_calls);
+    let right_calls = Arc::clone(&right.doc_id_calls);
     let unrelated_calls = Arc::clone(&unrelated.doc_id_calls);
     let used_catalog_was_unlocked = Arc::clone(&used.catalog_was_unlocked);
     *eng.table("portal_used")
@@ -178,11 +180,17 @@ fn cursor_snapshots_only_referenced_tables_without_holding_the_catalog_lock() {
         .expect("portal_unrelated")
         .document_store
         .write() = Box::new(unrelated);
+    *eng.table("portal_right")
+        .unwrap()
+        .expect("portal_right")
+        .document_store
+        .write() = Box::new(right);
 
     eng.sql("BEGIN", &[]).unwrap();
     eng.sql("DECLARE constant_cursor CURSOR FOR SELECT 1", &[])
         .unwrap();
     assert_eq!(used_calls.load(std::sync::atomic::Ordering::Relaxed), 0);
+    assert_eq!(right_calls.load(std::sync::atomic::Ordering::Relaxed), 0);
     assert_eq!(
         unrelated_calls.load(std::sync::atomic::Ordering::Relaxed),
         0
@@ -194,6 +202,7 @@ fn cursor_snapshots_only_referenced_tables_without_holding_the_catalog_lock() {
     )
     .unwrap();
     assert_eq!(used_calls.load(std::sync::atomic::Ordering::Relaxed), 1);
+    assert_eq!(right_calls.load(std::sync::atomic::Ordering::Relaxed), 0);
     assert_eq!(
         unrelated_calls.load(std::sync::atomic::Ordering::Relaxed),
         0
@@ -208,11 +217,12 @@ fn cursor_snapshots_only_referenced_tables_without_holding_the_catalog_lock() {
     );
 
     eng.sql(
-        "DECLARE operator_cursor CURSOR FOR SELECT left_doc_id FROM vector_similarity_join(portal_used, knn_match(embedding, ARRAY[1.0, 0.0], 1), knn_match(embedding, ARRAY[1.0, 0.0], 1), 0.8)",
+        "DECLARE operator_cursor CURSOR FOR SELECT left_doc_id FROM vector_similarity_join(portal_used, knn_match(embedding, ARRAY[1.0, 0.0], 1), portal_right, knn_match(archived_embedding, ARRAY[1.0, 0.0], 1), 0.8)",
         &[],
     )
     .unwrap();
     assert_eq!(used_calls.load(std::sync::atomic::Ordering::Relaxed), 2);
+    assert_eq!(right_calls.load(std::sync::atomic::Ordering::Relaxed), 1);
     assert_eq!(
         unrelated_calls.load(std::sync::atomic::Ordering::Relaxed),
         0

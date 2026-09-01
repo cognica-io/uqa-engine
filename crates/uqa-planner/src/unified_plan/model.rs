@@ -160,7 +160,7 @@ pub struct TableFunctionPlan {
     #[serde(default)]
     pub output_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub relation: Option<String>,
+    pub relations: Option<uqa_sql::ast::OperatorJoinRelations>,
     pub args: Vec<ScalarExpr>,
     pub column_aliases: Vec<String>,
     pub column_types: Vec<String>,
@@ -210,7 +210,7 @@ pub enum SourcePlan {
         #[serde(default)]
         output_name: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        relation: Option<String>,
+        relations: Option<uqa_sql::ast::OperatorJoinRelations>,
         args: Vec<ScalarExpr>,
         alias: Option<String>,
         column_aliases: Vec<String>,

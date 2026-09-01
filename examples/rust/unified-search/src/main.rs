@@ -175,6 +175,7 @@ fn show_typed_operator_joins(engine: &Engine) -> Result<(), Box<dyn std::error::
            FROM vector_similarity_join( \
                     papers, \
                     knn_match(embedding, ARRAY[1.0, 0.0, 0.0], 4), \
+                    papers, \
                     knn_match(embedding, ARRAY[1.0, 0.0, 0.0], 4), \
                     0.80 \
                 ) AS pairs \
@@ -192,6 +193,7 @@ fn show_typed_operator_joins(engine: &Engine) -> Result<(), Box<dyn std::error::
                FROM cross_paradigm_join( \
                         papers, \
                         graph_pagerank('{GRAPH}'), \
+                        papers, \
                         venue IS NOT NULL \
                     ) AS pairs \
                JOIN papers AS p ON p.id = pairs.right_doc_id \

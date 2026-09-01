@@ -10,24 +10,24 @@ use super::{
     compile_expr, compile_select, extract_strings, range_var_name, render_relation_component, Expr,
     FromClause, JoinKind, Node, NodeEnum, Result, SQLError,
 };
-use crate::ast::TableFunction;
+use crate::ast::{OperatorJoinRelations, TableFunction};
 
-fn compile_relation_argument(node: &Node, function_name: &str) -> Result<String> {
+fn compile_relation_argument(node: &Node, function_name: &str, side: &str) -> Result<String> {
     let Some(NodeEnum::ColumnRef(reference)) = node.node.as_ref() else {
         return Err(SQLError::TypeMismatch(format!(
-            "{function_name}.relation must be a table identifier, not a scalar value"
+            "{function_name}.{side}_relation must be a table identifier, not a scalar value"
         )));
     };
     let mut parts = Vec::with_capacity(reference.fields.len());
     for field in &reference.fields {
         let Some(NodeEnum::String(name)) = field.node.as_ref() else {
             return Err(SQLError::TypeMismatch(format!(
-                "{function_name}.relation must be a table identifier"
+                "{function_name}.{side}_relation must be a table identifier"
             )));
         };
         if name.sval.is_empty() {
             return Err(SQLError::TypeMismatch(format!(
-                "{function_name}.relation contains an empty identifier"
+                "{function_name}.{side}_relation contains an empty identifier"
             )));
         }
         parts.push(render_relation_component(&name.sval));
@@ -35,7 +35,7 @@ fn compile_relation_argument(node: &Node, function_name: &str) -> Result<String>
     match parts.len() {
         1 | 2 => Ok(parts.join(".")),
         _ => Err(SQLError::Unsupported(format!(
-            "{function_name}.relation: cross-database relation names are not supported"
+            "{function_name}.{side}_relation: cross-database relation names are not supported"
         ))),
     }
 }
@@ -95,15 +95,24 @@ fn compile_table_function(call: &Node, column_definitions: &[Node]) -> Result<Ta
             )));
         }
     };
-    let relation = if crate::registry::is_operator_join_table_function(&name) {
-        let relation_node = raw_call.args.first().ok_or_else(|| SQLError::BadArity {
+    let relations = if crate::registry::is_operator_join_table_function(&name) {
+        let left_node = raw_call.args.first().ok_or_else(|| SQLError::BadArity {
             name: name.clone(),
-            expected: "a relation identifier followed by operator operands".into(),
+            expected: "left relation and operand followed by right relation and operand".into(),
             actual: 0,
         })?;
-        let relation = compile_relation_argument(relation_node, &name)?;
+        let right_node = raw_call.args.get(2).ok_or_else(|| SQLError::BadArity {
+            name: name.clone(),
+            expected: "left relation and operand followed by right relation and operand".into(),
+            actual: raw_call.args.len(),
+        })?;
+        let relations = OperatorJoinRelations {
+            left: compile_relation_argument(left_node, &name, "left")?,
+            right: compile_relation_argument(right_node, &name, "right")?,
+        };
+        args.remove(2);
         args.remove(0);
-        Some(relation)
+        Some(relations)
     } else {
         None
     };
@@ -111,7 +120,7 @@ fn compile_table_function(call: &Node, column_definitions: &[Node]) -> Result<Ta
     Ok(TableFunction {
         name,
         output_name,
-        relation,
+        relations,
         args,
         column_aliases: column_definitions
             .iter()
@@ -139,7 +148,7 @@ fn compile_range_function_members(node: &Node) -> Result<Vec<TableFunction>> {
                 Ok(TableFunction {
                     name: "pg_catalog.unnest".into(),
                     output_name: "unnest".into(),
-                    relation: None,
+                    relations: None,
                     args: vec![compile_expr(argument)?],
                     column_aliases: Vec::new(),
                     column_types: Vec::new(),
@@ -308,7 +317,7 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
             Ok(FromClause::Function {
                 name: function.name,
                 output_name: function.output_name,
-                relation: function.relation,
+                relations: function.relations,
                 args: function.args,
                 alias,
                 column_aliases: if coldef_aliases.is_empty() {

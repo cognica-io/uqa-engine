@@ -335,6 +335,7 @@ fn bench_operator_joins(c: &mut Criterion) {
              FROM vector_similarity_join(\
                  operator_docs,\
                  knn_match(embedding, ARRAY[1.0, 0.0, 0.0, 0.0], 32),\
+                 operator_docs,\
                  knn_match(embedding, ARRAY[1.0, 0.0, 0.0, 0.0], 32),\
                  0.8\
              )",
@@ -346,6 +347,7 @@ fn bench_operator_joins(c: &mut Criterion) {
                  operator_docs,\
                  category = 'cat_1' AND \
                      knn_match(embedding, ARRAY[1.0, 0.0, 0.0, 0.0], 32),\
+                 operator_docs,\
                  category = 'cat_1' AND \
                      knn_match(embedding, ARRAY[1.0, 0.0, 0.0, 0.0], 32)\
              )",
@@ -356,6 +358,7 @@ fn bench_operator_joins(c: &mut Criterion) {
              FROM vector_similarity_join(\
                  operator_docs,\
                  knn_match(embedding, ARRAY[1.0, 0.0, 0.0, 0.0], 32),\
+                 operator_docs,\
                  knn_match(embedding, ARRAY[1.0, 0.0, 0.0, 0.0], 32),\
                  0.8\
              ) AS pairs \

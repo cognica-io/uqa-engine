@@ -48,6 +48,59 @@ fn query_requires_transaction(engine: &Engine, sql: &str) -> bool {
 }
 
 #[test]
+fn operator_join_estimate_uses_each_relation_cardinality() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE estimate_left (id INTEGER PRIMARY KEY, embedding VECTOR(2)); \
+             CREATE TABLE estimate_right (id INTEGER PRIMARY KEY, archived_embedding VECTOR(2)); \
+             INSERT INTO estimate_left VALUES (1, ARRAY[1.0, 0.0]); \
+             INSERT INTO estimate_right VALUES \
+                 (101, ARRAY[1.0, 0.0]), \
+                 (102, ARRAY[1.0, 0.0]), \
+                 (103, ARRAY[1.0, 0.0]), \
+                 (104, ARRAY[1.0, 0.0]), \
+                 (105, ARRAY[1.0, 0.0])",
+            &[],
+        )
+        .unwrap();
+    let mut statements = compile(
+        "SELECT * FROM vector_similarity_join(\
+             estimate_left,\
+             knn_match(embedding, ARRAY[1.0, 0.0], 10),\
+             estimate_right,\
+             knn_match(archived_embedding, ARRAY[1.0, 0.0], 10),\
+             -1.0\
+         )",
+    )
+    .unwrap();
+    let UnifiedPlan::Query(query) = lower_statement(&engine, statements.remove(0)) else {
+        panic!("operator join did not lower to a query");
+    };
+    let uqa_planner::RelationalPlan::QueryBlock(block) = query.root else {
+        panic!("operator join query did not lower to a query block");
+    };
+    let Some(uqa_planner::SourcePlan::Function {
+        name,
+        relations,
+        args,
+        ..
+    }) = block.from
+    else {
+        panic!("operator join did not lower to a function source");
+    };
+    let estimate = crate::operator_tree_bridge::estimate_operator_join_table_function(
+        &engine,
+        &name,
+        relations.as_ref(),
+        &args,
+        &[],
+    )
+    .unwrap();
+    assert_eq!(estimate.output_rows, 5.0);
+}
+
+#[test]
 fn runtime_registered_callbacks_are_writer_classified() {
     let engine = Engine::new();
     engine

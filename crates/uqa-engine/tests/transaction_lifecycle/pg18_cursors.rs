@@ -6,6 +6,9 @@
 
 use super::*;
 
+#[path = "pg18_cursors/relation_locks.rs"]
+mod relation_locks;
+
 #[test]
 fn pg18_sql_cursor_requires_a_block_and_uses_postgresql_sqlstates() {
     let engine = Engine::new();
@@ -319,71 +322,6 @@ fn pg18_cursor_keeps_declare_time_relation_bindings_and_forwards_notices() {
         vec![("NOTICE".into(), "from cursor".into())]
     );
     engine.sql("ROLLBACK", &[]).unwrap();
-}
-
-#[test]
-fn pg18_cursor_declaration_holds_access_share_until_transaction_end() {
-    let directory = tempfile::tempdir().unwrap();
-    let root = Engine::open(&directory.path().join("cursor-relation-lock.db")).unwrap();
-    root.sql("CREATE TABLE cursor_locked_relation (id INTEGER)", &[])
-        .unwrap();
-    let ddl = root.new_session().unwrap();
-
-    root.sql("BEGIN", &[]).unwrap();
-    root.sql(
-        "DECLARE relation_lock_cursor CURSOR FOR SELECT id FROM cursor_locked_relation",
-        &[],
-    )
-    .unwrap();
-    let (sender, receiver) = std::sync::mpsc::channel();
-    let ddl_thread = std::thread::spawn(move || {
-        sender
-            .send(ddl.sql("DROP TABLE cursor_locked_relation", &[]))
-            .unwrap();
-    });
-    assert!(
-        receiver
-            .recv_timeout(std::time::Duration::from_millis(100))
-            .is_err(),
-        "DROP TABLE passed a cursor's AccessShare relation lock"
-    );
-    root.sql("ROLLBACK", &[]).unwrap();
-    receiver
-        .recv_timeout(std::time::Duration::from_secs(5))
-        .expect("DROP TABLE remained blocked after cursor transaction end")
-        .unwrap();
-    ddl_thread.join().unwrap();
-
-    root.sql(
-        "CREATE TABLE cursor_locked_operator_relation (id INTEGER PRIMARY KEY, embedding VECTOR(2))",
-        &[],
-    )
-    .unwrap();
-    let operator_ddl = root.new_session().unwrap();
-    root.sql("BEGIN", &[]).unwrap();
-    root.sql(
-        "DECLARE operator_relation_lock_cursor CURSOR FOR SELECT left_doc_id FROM vector_similarity_join(cursor_locked_operator_relation, knn_match(embedding, ARRAY[1.0, 0.0], 1), knn_match(embedding, ARRAY[1.0, 0.0], 1), 0.8)",
-        &[],
-    )
-    .unwrap();
-    let (operator_sender, operator_receiver) = std::sync::mpsc::channel();
-    let operator_ddl_thread = std::thread::spawn(move || {
-        operator_sender
-            .send(operator_ddl.sql("DROP TABLE cursor_locked_operator_relation", &[]))
-            .unwrap();
-    });
-    assert!(
-        operator_receiver
-            .recv_timeout(std::time::Duration::from_millis(100))
-            .is_err(),
-        "DROP TABLE passed an operator cursor's AccessShare relation lock"
-    );
-    root.sql("ROLLBACK", &[]).unwrap();
-    operator_receiver
-        .recv_timeout(std::time::Duration::from_secs(5))
-        .expect("operator relation DROP TABLE remained blocked after cursor transaction end")
-        .unwrap();
-    operator_ddl_thread.join().unwrap();
 }
 
 #[test]

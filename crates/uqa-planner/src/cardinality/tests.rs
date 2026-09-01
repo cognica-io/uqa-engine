@@ -94,6 +94,18 @@ fn vector_threshold_uses_continuous_dimension_aware_tail() {
 }
 
 #[test]
+fn knn_cardinality_cannot_exceed_the_relation() {
+    let stats = IndexStats::new(5);
+    let estimator = CardinalityEstimator::new();
+    let operator = OperatorTree::KNN {
+        query_vector: vec![1.0, 0.0],
+        k: 10,
+        field: "embedding".into(),
+    };
+    assert_eq!(estimator.estimate(&operator, &stats), 5.0);
+}
+
+#[test]
 fn vector_join_threshold_uses_the_same_continuous_tail_model() {
     let operand = || OperatorTree::KNN {
         query_vector: vec![1.0; 64],

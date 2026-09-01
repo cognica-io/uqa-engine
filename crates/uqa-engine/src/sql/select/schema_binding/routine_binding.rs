@@ -8,7 +8,7 @@
 
 use super::{
     cte_references_own_name, expr_contains_subquery, extend_cte_generated_schema,
-    extend_recursive_cte_binding_schema, operator_join_relation_schema, ordered_plan_ctes,
+    extend_recursive_cte_binding_schema, operator_join_relation_schemas, ordered_plan_ctes,
     overlay_outer_schema, rename_schema, CteScope, QueryPlan, RelationalPlan, RowSchema, SQLError,
     SQLParam, ScalarExpr, SchemaScope, SourcePlan,
 };
@@ -385,21 +385,31 @@ impl SchemaScope {
             }
             SourcePlan::Function {
                 name,
-                relation,
+                relations,
                 args,
                 ..
             } => {
                 let local = crate::sql::builtin_function_dispatch_name(name);
-                let input = if crate::operator_tree_bridge::is_operator_join_table_function(&local)
-                {
-                    operator_join_relation_schema(
+                if crate::operator_tree_bridge::is_operator_join_table_function(&local) {
+                    let (left, right) = operator_join_relation_schemas(
                         &self.catalog,
                         &self.resolution,
-                        relation.as_deref(),
-                    )?
-                } else {
-                    outer.cloned().unwrap_or_default()
-                };
+                        relations.as_ref(),
+                    )?;
+                    let constant = RowSchema::default();
+                    for (position, expression) in args.iter_mut().enumerate() {
+                        let input = match position {
+                            0 => &left,
+                            1 => &right,
+                            _ => &constant,
+                        };
+                        self.bind_scalar_routines_for_storage(
+                            engine, expression, input, subqueries, params, outer,
+                        )?;
+                    }
+                    return Ok(());
+                }
+                let input = outer.cloned().unwrap_or_default();
                 for expression in args {
                     self.bind_scalar_routines_for_storage(
                         engine, expression, &input, subqueries, params, outer,
@@ -410,16 +420,26 @@ impl SchemaScope {
             SourcePlan::FunctionGroup { functions, .. } => {
                 for function in functions {
                     let local = crate::sql::builtin_function_dispatch_name(&function.name);
-                    let input =
-                        if crate::operator_tree_bridge::is_operator_join_table_function(&local) {
-                            operator_join_relation_schema(
-                                &self.catalog,
-                                &self.resolution,
-                                function.relation.as_deref(),
-                            )?
-                        } else {
-                            outer.cloned().unwrap_or_default()
-                        };
+                    if crate::operator_tree_bridge::is_operator_join_table_function(&local) {
+                        let (left, right) = operator_join_relation_schemas(
+                            &self.catalog,
+                            &self.resolution,
+                            function.relations.as_ref(),
+                        )?;
+                        let constant = RowSchema::default();
+                        for (position, expression) in function.args.iter_mut().enumerate() {
+                            let input = match position {
+                                0 => &left,
+                                1 => &right,
+                                _ => &constant,
+                            };
+                            self.bind_scalar_routines_for_storage(
+                                engine, expression, input, subqueries, params, outer,
+                            )?;
+                        }
+                        continue;
+                    }
+                    let input = outer.cloned().unwrap_or_default();
                     for expression in &mut function.args {
                         self.bind_scalar_routines_for_storage(
                             engine, expression, &input, subqueries, params, outer,

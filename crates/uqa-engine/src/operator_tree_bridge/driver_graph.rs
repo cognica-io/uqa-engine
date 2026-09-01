@@ -143,6 +143,16 @@ impl EngineDriver<'_> {
     ) -> DriverResult<GeneralizedPostingList> {
         let left = self.execute_posting_node(left)?;
         let right = self.execute_posting_node(right)?;
+        self.join_graph_postings(&left, &right, label, graph)
+    }
+
+    pub(super) fn join_graph_postings(
+        &self,
+        left: &PostingList,
+        right: &PostingList,
+        label: Option<&str>,
+        graph: &str,
+    ) -> DriverResult<GeneralizedPostingList> {
         self.with_graph(graph, |store| {
             let mut op = uqa_joins::GraphJoin::new(left.entries(), right.entries(), store, graph);
             if let Some(label) = label {

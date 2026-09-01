@@ -414,7 +414,7 @@ impl SourcePlan {
             FromClause::Function {
                 name,
                 output_name,
-                relation,
+                relations,
                 args,
                 alias,
                 column_aliases,
@@ -424,7 +424,7 @@ impl SourcePlan {
                 name,
                 binding: None,
                 output_name,
-                relation,
+                relations,
                 args: args
                     .into_iter()
                     .map(|expr| lower_scalar_expression(expr, aggregates, subqueries))
@@ -446,7 +446,7 @@ impl SourcePlan {
                         name: function.name,
                         binding: None,
                         output_name: function.output_name,
-                        relation: function.relation,
+                        relations: function.relations,
                         args: function
                             .args
                             .into_iter()

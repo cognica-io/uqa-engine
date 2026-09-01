@@ -41,7 +41,7 @@ pub(in crate::sql) use sources::{
     with_query_table_pseudo_columns,
 };
 
-use catalog_sources::operator_join_relation_schema;
+use catalog_sources::operator_join_relation_schemas;
 use cte_controls::{extend_recursive_cte_binding_schema, hide_recursive_generated_schema};
 use projection::{projection_star_columns, rename_schema};
 use scope::merge_types;
@@ -627,7 +627,7 @@ impl SchemaScope {
                 name,
                 binding,
                 output_name,
-                relation,
+                relations,
                 args,
                 alias,
                 column_aliases,
@@ -636,16 +636,18 @@ impl SchemaScope {
                 ..
             } => {
                 let lower = crate::sql::builtin_function_dispatch_name(name);
-                let input = if crate::operator_tree_bridge::is_operator_join_table_function(&lower)
-                {
-                    operator_join_relation_schema(
-                        &self.catalog,
-                        &self.resolution,
-                        relation.as_deref(),
-                    )?
-                } else {
-                    outer.cloned().unwrap_or_default()
-                };
+                let operator_join =
+                    crate::operator_tree_bridge::is_operator_join_table_function(&lower);
+                let operator_inputs = operator_join
+                    .then(|| {
+                        operator_join_relation_schemas(
+                            &self.catalog,
+                            &self.resolution,
+                            relations.as_ref(),
+                        )
+                    })
+                    .transpose()?;
+                let input = outer.cloned().unwrap_or_default();
                 let type_resolver = self.query_function_type_resolver_for_subqueries(
                     routines,
                     args.iter().any(expr_contains_subquery),
@@ -654,7 +656,22 @@ impl SchemaScope {
                     params,
                     Some(&input),
                 )?;
-                let user_function = if self.validate_references {
+                let user_function = if let Some((left, right)) = operator_inputs.as_ref() {
+                    if self.validate_references {
+                        let constant = RowSchema::default();
+                        for (position, argument) in args.iter().enumerate() {
+                            let schema = match position {
+                                0 => left,
+                                1 => right,
+                                _ => &constant,
+                            };
+                            self.validate_expression_references(
+                                routines, argument, schema, None, subqueries, params,
+                            )?;
+                        }
+                    }
+                    None
+                } else if self.validate_references {
                     self.validate_table_function_source(
                         routines,
                         analysis::TableFunctionSourceValidation {
@@ -878,21 +895,20 @@ impl SchemaScope {
             SourcePlan::Function {
                 name,
                 binding,
-                relation,
+                relations,
                 args,
                 ..
             } => {
                 let lower = crate::sql::builtin_function_dispatch_name(name);
-                let input = if crate::operator_tree_bridge::is_operator_join_table_function(&lower)
-                {
-                    operator_join_relation_schema(
+                if crate::operator_tree_bridge::is_operator_join_table_function(&lower) {
+                    operator_join_relation_schemas(
                         &self.catalog,
                         &self.resolution,
-                        relation.as_deref(),
-                    )?
-                } else {
-                    outer.cloned().unwrap_or_default()
-                };
+                        relations.as_ref(),
+                    )?;
+                    return self.bind_source(routines, source, subqueries, params, outer);
+                }
+                let input = outer.cloned().unwrap_or_default();
                 let resolver = self.query_function_type_resolver_for_subqueries(
                     routines,
                     args.iter().any(expr_contains_subquery),

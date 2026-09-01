@@ -63,7 +63,7 @@ impl uqa_execution::LateralSource for EngineLateralSource<'_> {
             name,
             binding,
             output_name,
-            relation,
+            relations,
             args,
             alias,
             column_aliases,
@@ -101,7 +101,7 @@ impl uqa_execution::LateralSource for EngineLateralSource<'_> {
                     .map(|resolved| &resolved.binding)
                     .or(binding.as_ref()),
                 output_name,
-                relation: relation.as_deref(),
+                relations: relations.as_ref(),
                 args,
                 alias: alias.as_deref(),
                 column_aliases,

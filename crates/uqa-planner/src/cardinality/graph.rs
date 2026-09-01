@@ -148,7 +148,7 @@ impl CardinalityEstimator {
     /// Estimate the spherical-cap tail probability for cosine similarity.
     /// Random unit vectors in `dimensions` coordinates have an asymptotically
     /// normal dot product with variance `1 / dimensions`.
-    pub(super) fn vector_selectivity(threshold: f64, dimensions: u32) -> f64 {
+    pub fn vector_selectivity(threshold: f64, dimensions: u32) -> f64 {
         if threshold <= -1.0 {
             return 1.0;
         }

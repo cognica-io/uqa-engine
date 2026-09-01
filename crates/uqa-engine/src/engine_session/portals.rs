@@ -6,6 +6,7 @@
 
 //! Session portal lifecycle shared by PL/pgSQL routine activations.
 
+mod binding;
 mod fetch;
 
 use crate::{
@@ -17,6 +18,7 @@ use crate::{
     SessionPortalTransactionOverlay, SessionPortalViewSnapshots, StorageContext, TableState, Value,
     VectorIndex,
 };
+use binding::bind_session_portal_function_relations;
 use fetch::{
     ensure_portal_rows_for_fetch, fetch_indices, materialize_portal_to_end, select_portal_rows,
 };
@@ -862,13 +864,13 @@ fn collect_session_portal_source_dependencies(
         SourcePlan::Function {
             name,
             binding,
-            relation,
+            relations,
             ..
         } => collect_session_portal_function_dependencies(
             engine,
             name,
             binding.as_ref(),
-            relation.as_deref(),
+            relations.as_ref(),
             dependencies,
             visiting_views,
             visiting_routines,
@@ -879,7 +881,7 @@ fn collect_session_portal_source_dependencies(
                     engine,
                     &function.name,
                     function.binding.as_ref(),
-                    function.relation.as_deref(),
+                    function.relations.as_ref(),
                     dependencies,
                     visiting_views,
                     visiting_routines,
@@ -895,13 +897,15 @@ fn collect_session_portal_function_dependencies(
     engine: &Engine,
     name: &str,
     binding: Option<&uqa_sql::ast::FunctionBinding>,
-    relation: Option<&str>,
+    relations: Option<&uqa_sql::ast::OperatorJoinRelations>,
     dependencies: &mut SessionPortalTableDependencies,
     visiting_views: &mut std::collections::BTreeSet<String>,
     visiting_routines: &mut std::collections::BTreeSet<String>,
 ) -> Result<(), SQLError> {
-    if let Some(relation) = relation {
-        collect_session_portal_function_relation_dependency(engine, relation, dependencies)?;
+    if let Some(relations) = relations {
+        for relation in [&relations.left, &relations.right] {
+            collect_session_portal_function_relation_dependency(engine, relation, dependencies)?;
+        }
     }
     collect_session_portal_routine_dependencies(
         engine,
@@ -1087,34 +1091,17 @@ fn bind_session_portal_source_plan(
         SourcePlan::Subquery { body, .. } => {
             bind_session_portal_query_relations(engine, body, visible_ctes)
         }
-        SourcePlan::Function { relation, .. } => {
-            bind_session_portal_function_relation(engine, relation)
+        SourcePlan::Function { relations, .. } => {
+            bind_session_portal_function_relations(engine, relations)
         }
         SourcePlan::FunctionGroup { functions, .. } => {
             for function in functions {
-                bind_session_portal_function_relation(engine, &mut function.relation)?;
+                bind_session_portal_function_relations(engine, &mut function.relations)?;
             }
             Ok(())
         }
         SourcePlan::Values { .. } => Ok(()),
     }
-}
-
-fn bind_session_portal_function_relation(
-    engine: &Engine,
-    relation: &mut Option<String>,
-) -> Result<(), SQLError> {
-    let Some(requested) = relation.clone() else {
-        return Ok(());
-    };
-    if let Some(canonical) = engine.try_resolve_table_name(&requested).map_err(|error| {
-        SQLError::Internal(format!(
-            "bind cursor table-function relation `{requested}` at DECLARE: {error}"
-        ))
-    })? {
-        *relation = Some(canonical);
-    }
-    Ok(())
 }
 
 impl Engine {

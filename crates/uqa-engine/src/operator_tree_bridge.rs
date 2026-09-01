@@ -72,6 +72,8 @@ mod lowering_constants;
 mod lowering_fusion;
 mod lowering_graph;
 mod lowering_retrieval;
+mod operator_join_estimation;
+mod operator_join_execution;
 mod optimizer_binding;
 mod posting_utils;
 mod tree_introspection;
@@ -101,6 +103,8 @@ use lowering_retrieval::{
     validate_checked_retrieval_call_tree, validate_operator_function_arity,
     validate_probability_signal_contract,
 };
+pub(crate) use operator_join_estimation::estimate_operator_join_table_function;
+pub(crate) use operator_join_execution::execute_operator_join_table_function;
 use optimizer_binding::{engine_query_optimizer, operator_tree_paradigm, scored_term_count};
 use posting_utils::{
     fuse_signal_batches_with, fuse_signals_with, numeric_score, posting_list_to_scored,
@@ -125,6 +129,14 @@ struct WeightedPathExecution<'a> {
     predicate: &'a uqa_operators::PathWeightPredicate,
     predicate_selectivity: f64,
     score: f64,
+}
+
+#[derive(Clone, Copy)]
+struct HybridJoinFields<'a> {
+    left_structured: &'a str,
+    left_vector: &'a str,
+    right_structured: &'a str,
+    right_vector: &'a str,
 }
 
 #[derive(Clone, Copy)]
@@ -665,21 +677,24 @@ fn const_join_threshold(
 fn lower_operator_join_table_function(
     engine: &Engine,
     name: &str,
-    relation: Option<&str>,
+    relations: Option<&uqa_sql::ast::OperatorJoinRelations>,
     args: &[ScalarExpr],
     params: &[SQLParam],
-) -> DriverResult<(String, OperatorTree)> {
+) -> DriverResult<(uqa_sql::ast::OperatorJoinRelations, OperatorTree)> {
     let expected = match name {
-        "text_similarity_join" | "vector_similarity_join" => 4,
-        "graph_join" => 5,
-        "hybrid_join" | "cross_paradigm_join" => 3,
+        "text_similarity_join" | "vector_similarity_join" => 5,
+        "graph_join" => 6,
+        "hybrid_join" | "cross_paradigm_join" => 4,
         _ => {
             return Err(SQLError::Unsupported(format!(
                 "operator join table function `{name}`"
             )))
         }
     };
-    let actual = args.len() + usize::from(relation.is_some());
+    let relations = relations.ok_or_else(|| {
+        SQLError::TypeMismatch(format!("{name} requires left and right table identifiers"))
+    })?;
+    let actual = args.len() + 2;
     if actual != expected {
         return Err(SQLError::BadArity {
             name: name.to_string(),
@@ -687,11 +702,6 @@ fn lower_operator_join_table_function(
             actual,
         });
     }
-    let table = relation.ok_or_else(|| {
-        SQLError::TypeMismatch(format!(
-            "{name}.relation must be supplied as a table identifier"
-        ))
-    })?;
     let left = lower_join_operand(engine, &args[0], params, name)?;
     let right = lower_join_operand(engine, &args[1], params, name)?;
     let tree = match name {
@@ -729,35 +739,7 @@ fn lower_operator_join_table_function(
         },
         _ => unreachable!("operator join name validated above"),
     };
-    Ok((table.to_string(), tree))
-}
-
-pub(crate) fn estimate_operator_join_table_function(
-    engine: &Engine,
-    name: &str,
-    relation: Option<&str>,
-    args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> DriverResult<uqa_planner::LocalAccessEstimate> {
-    let (table, tree) = lower_operator_join_table_function(engine, name, relation, args, params)?;
-    estimate_operator_tree_access(engine, &table, tree, false)
-}
-
-/// Execute a tuple-producing operator join exposed as a SQL table function.
-pub(crate) fn execute_operator_join_table_function(
-    engine: &Engine,
-    name: &str,
-    relation: Option<&str>,
-    args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> DriverResult<GeneralizedPostingList> {
-    let (table, tree) = lower_operator_join_table_function(engine, name, relation, args, params)?;
-    match execute_operator_tree_in_execution(engine, &table, params, &tree)? {
-        OperatorOutput::Generalized(result) => Ok(result),
-        OperatorOutput::Posting(_) | OperatorOutput::Graph(_) => Err(SQLError::Internal(format!(
-            "{name} did not produce generalized tuple rows"
-        ))),
-    }
+    Ok((relations.clone(), tree))
 }
 
 fn centrality_kind(name: &str) -> Option<&'static str> {

@@ -252,7 +252,7 @@ impl<'a> SetProjection<'a> {
             name: &call.name,
             binding: call.binding.as_ref(),
             output_name: &call.name,
-            relation: None,
+            relations: None,
             args: &call.args,
             alias: None,
             column_aliases: &[],

@@ -9,7 +9,8 @@
 use super::{
     first_structured_field, require_graph_name, require_shared_structured_field,
     require_shared_vector_field, require_text_field, require_vector_field, DriverResult,
-    EngineDriver, GeneralizedPostingList, OperatorTree, PostingEntry, PostingList, SQLError,
+    EngineDriver, GeneralizedPostingList, HybridJoinFields, OperatorTree, PostingEntry,
+    PostingList, SQLError,
 };
 
 impl EngineDriver<'_> {
@@ -28,8 +29,27 @@ impl EngineDriver<'_> {
         let right_field = require_text_field(right, "TextSimilarityJoin.right")?;
         let left_source = self.execute_posting_node(left)?;
         let right_source = self.execute_posting_node(right)?;
-        let left = self.prepare_join_operand(&left_source, &left_field, "_join_text")?;
-        let right = self.prepare_join_operand(&right_source, &right_field, "_join_text")?;
+        self.join_text_similarity_postings(
+            self,
+            &left_source,
+            &left_field,
+            &right_source,
+            &right_field,
+            threshold,
+        )
+    }
+
+    pub(super) fn join_text_similarity_postings(
+        &self,
+        right_driver: &EngineDriver<'_>,
+        left_source: &PostingList,
+        left_field: &str,
+        right_source: &PostingList,
+        right_field: &str,
+        threshold: f64,
+    ) -> DriverResult<GeneralizedPostingList> {
+        let left = self.prepare_join_operand(left_source, left_field, "_join_text")?;
+        let right = right_driver.prepare_join_operand(right_source, right_field, "_join_text")?;
         uqa_joins::TextSimilarityJoin::new(
             left.entries(),
             right.entries(),
@@ -56,8 +76,27 @@ impl EngineDriver<'_> {
         let right_field = require_vector_field(right, "VectorSimilarityJoin.right")?;
         let left_source = self.execute_posting_node(left)?;
         let right_source = self.execute_posting_node(right)?;
-        let left = self.prepare_join_operand(&left_source, &left_field, "_join_vector")?;
-        let right = self.prepare_join_operand(&right_source, &right_field, "_join_vector")?;
+        self.join_vector_similarity_postings(
+            self,
+            &left_source,
+            &left_field,
+            &right_source,
+            &right_field,
+            threshold,
+        )
+    }
+
+    pub(super) fn join_vector_similarity_postings(
+        &self,
+        right_driver: &EngineDriver<'_>,
+        left_source: &PostingList,
+        left_field: &str,
+        right_source: &PostingList,
+        right_field: &str,
+        threshold: f64,
+    ) -> DriverResult<GeneralizedPostingList> {
+        let left = self.prepare_join_operand(left_source, left_field, "_join_vector")?;
+        let right = right_driver.prepare_join_operand(right_source, right_field, "_join_vector")?;
         uqa_joins::VectorSimilarityJoin::new(
             left.entries(),
             right.entries(),
@@ -78,14 +117,37 @@ impl EngineDriver<'_> {
         let vector_field = require_shared_vector_field(left, right, "HybridJoin")?;
         let left_result = self.execute_posting_node(left)?;
         let right_result = self.execute_posting_node(right)?;
+        self.join_hybrid_postings(
+            self,
+            &left_result,
+            &right_result,
+            HybridJoinFields {
+                left_structured: &structured_field.0,
+                left_vector: &vector_field.0,
+                right_structured: &structured_field.1,
+                right_vector: &vector_field.1,
+            },
+        )
+    }
+
+    pub(super) fn join_hybrid_postings(
+        &self,
+        right_driver: &EngineDriver<'_>,
+        left_result: &PostingList,
+        right_result: &PostingList,
+        fields: HybridJoinFields<'_>,
+    ) -> DriverResult<GeneralizedPostingList> {
         let left_keyed =
-            self.prepare_join_operand(&left_result, &structured_field.0, "_join_key")?;
+            self.prepare_join_operand(left_result, fields.left_structured, "_join_key")?;
         let left_result =
-            self.prepare_join_operand(&left_keyed, &vector_field.0, "_join_vector")?;
-        let right_keyed =
-            self.prepare_join_operand(&right_result, &structured_field.1, "_join_key")?;
+            self.prepare_join_operand(&left_keyed, fields.left_vector, "_join_vector")?;
+        let right_keyed = right_driver.prepare_join_operand(
+            right_result,
+            fields.right_structured,
+            "_join_key",
+        )?;
         let right_result =
-            self.prepare_join_operand(&right_keyed, &vector_field.1, "_join_vector")?;
+            right_driver.prepare_join_operand(&right_keyed, fields.right_vector, "_join_vector")?;
         uqa_joins::HybridJoin::new(
             left_result.entries(),
             right_result.entries(),
@@ -112,14 +174,33 @@ impl EngineDriver<'_> {
         let doc_field = first_structured_field(right).unwrap_or_else(|| vertex_field.clone());
         let left_result = self.execute_posting_node(left)?;
         let right_source = self.execute_posting_node(right)?;
+        self.join_cross_paradigm_postings(
+            self,
+            &left_result,
+            &right_source,
+            &graph,
+            &vertex_field,
+            &doc_field,
+        )
+    }
+
+    pub(super) fn join_cross_paradigm_postings(
+        &self,
+        right_driver: &EngineDriver<'_>,
+        left_result: &PostingList,
+        right_source: &PostingList,
+        graph: &str,
+        vertex_field: &str,
+        doc_field: &str,
+    ) -> DriverResult<GeneralizedPostingList> {
         let right_result =
-            self.prepare_join_operand(&right_source, &doc_field, "_join_document")?;
-        self.with_graph(&graph, |store| {
+            right_driver.prepare_join_operand(right_source, doc_field, "_join_document")?;
+        self.with_graph(graph, |store| {
             uqa_joins::CrossParadigmJoin::new(
                 left_result.entries(),
                 right_result.entries(),
                 store,
-                &vertex_field,
+                vertex_field,
                 "_join_document",
             )
             .execute()

@@ -7,27 +7,40 @@
 //! Engine-independent catalog source binding.
 
 use uqa_execution::RowSchema;
+use uqa_sql::ast::OperatorJoinRelations;
 use uqa_sql::SQLError;
 
 use crate::engine_capabilities::{CatalogReadView, RelationNameResolution};
 
 use super::analysis;
 
-/// Bind an operator join's relation argument as the input schema for its retrieval expressions.
-pub(super) fn operator_join_relation_schema(
+/// Bind both operator-join relations independently so each retrieval operand has its own namespace.
+pub(super) fn operator_join_relation_schemas(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
-    relation: Option<&str>,
-) -> Result<RowSchema, SQLError> {
-    let relation = relation.ok_or_else(|| {
-        SQLError::TypeMismatch("operator join relation must be a table identifier".into())
+    relations: Option<&OperatorJoinRelations>,
+) -> Result<(RowSchema, RowSchema), SQLError> {
+    let relations = relations.ok_or_else(|| {
+        SQLError::TypeMismatch("operator join requires left and right table identifiers".into())
     })?;
+    Ok((
+        relation_schema(catalog, resolution, &relations.left, "left")?,
+        relation_schema(catalog, resolution, &relations.right, "right")?,
+    ))
+}
+
+fn relation_schema(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    relation: &str,
+    side: &str,
+) -> Result<RowSchema, SQLError> {
     let resolved = catalog
         .table_name_resolved(resolution, relation)?
         .ok_or_else(|| SQLError::UnknownTable(relation.to_string()))?;
     let identity = crate::RelationIdentity::from_legacy_name(&resolved).map_err(|error| {
         SQLError::Internal(format!(
-            "decode operator join relation `{resolved}` schema: {error}"
+            "decode operator join {side} relation `{resolved}` schema: {error}"
         ))
     })?;
     let table = catalog
@@ -53,7 +66,7 @@ mod tests {
 
     use uqa_sql::ast::{ColumnDef, ColumnType};
 
-    use super::operator_join_relation_schema;
+    use super::operator_join_relation_schemas;
     use crate::engine_capabilities::{
         CatalogReadView, CatalogTableSnapshot, RelationNameResolution,
     };
@@ -83,15 +96,27 @@ mod tests {
             check_no_inherit: false,
             references: None,
         };
-        let catalog = CatalogReadView::fixture(BTreeMap::from([(
-            RelationIdentity::new("app", "documents"),
-            CatalogTableSnapshot::fixture(vec![column]),
-        )]));
+        let catalog = CatalogReadView::fixture(BTreeMap::from([
+            (
+                RelationIdentity::new("app", "documents"),
+                CatalogTableSnapshot::fixture(vec![column.clone()]),
+            ),
+            (
+                RelationIdentity::new("app", "archive"),
+                CatalogTableSnapshot::fixture(vec![column]),
+            ),
+        ]));
         let resolution =
             RelationNameResolution::fixture(vec!["app".into()], "pg_temp_fixture".into());
-        let schema =
-            operator_join_relation_schema(&catalog, &resolution, Some("documents")).unwrap();
-        assert!(schema.has_qualified_column("documents", "id"));
-        assert_eq!(schema.column_type(0), Some(&ColumnType::BigInteger));
+        let relations = uqa_sql::ast::OperatorJoinRelations {
+            left: "documents".into(),
+            right: "archive".into(),
+        };
+        let (left, right) =
+            operator_join_relation_schemas(&catalog, &resolution, Some(&relations)).unwrap();
+        assert!(left.has_qualified_column("documents", "id"));
+        assert!(right.has_qualified_column("archive", "id"));
+        assert_eq!(left.column_type(0), Some(&ColumnType::BigInteger));
+        assert_eq!(right.column_type(0), Some(&ColumnType::BigInteger));
     }
 }

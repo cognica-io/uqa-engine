@@ -82,7 +82,7 @@ An accelerated retrieval leaf consumes its search expression. Field names remain
 
 In a join block, each table keeps its relation identity while its relation-local `WHERE` predicates are lowered through the same `OperatorTree`, `QueryOptimizer`, cardinality estimator, and cost model used by execution. For example, literal `knn_match(embedding, query, 3)` contributes an estimated support of three rows, clamped by the table cardinality, rather than a generic percentage. Text document frequencies, analyzed column distinct counts, vector dimensions, graph statistics, and executable access costs remain attached to that relation when DPccp compares join orders.
 
-Tuple-producing operator joins are SQL table-function sources. `text_similarity_join`, `vector_similarity_join`, `graph_join`, `hybrid_join`, and `cross_paradigm_join` lower to `OperatorTree` join nodes, execute as `GeneralizedPostingList`, expose `left_doc_id`, `right_doc_id`, and `_score`, and can participate in a larger relational join when given an alias. Their first SQL argument is compiled into a dedicated relation reference rather than a scalar expression, so catalog binding, `search_path`, stored-view dependencies, and optimizer statistics use the same relation identity as an ordinary table source.
+Tuple-producing operator joins are SQL table-function sources. `text_similarity_join`, `vector_similarity_join`, `graph_join`, `hybrid_join`, and `cross_paradigm_join` lower to `OperatorTree` join nodes, execute as `GeneralizedPostingList`, expose `left_doc_id`, `right_doc_id`, and `_score`, and can participate in a larger relational join when given an alias. Their first and third SQL arguments are compiled into independent relation references rather than scalar expressions. Each adjacent operand therefore uses its own schema, catalog binding, `search_path` resolution, stored-view dependency, row lock, statement snapshot, optimizer statistics, and physical driver.
 
 ## Plan-native optimization
 
@@ -118,7 +118,7 @@ $$
 \end{cases}
 $$
 
-Let `L` and `R` be estimated operand cardinalities, `N` the table cardinality, `V` the graph vertex count, `d_bar` the average out-degree, and `s_label` the edge-label selectivity. Typed operator joins use the following cardinality models; no four-tier vector threshold table is involved.
+Let `L` and `R` be the independently estimated operand cardinalities, let `N=max(N_L,N_R)` be the larger relation cardinality used as the equality-domain estimate, let `V` be the graph vertex count, let `d_bar` be the average out-degree, and let `s_label` be the edge-label selectivity. Typed operator joins use the following cardinality models; no four-tier vector threshold table is involved.
 
 $$
 \begin{aligned}

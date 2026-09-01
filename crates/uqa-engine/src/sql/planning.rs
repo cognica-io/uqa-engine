@@ -59,7 +59,7 @@ impl uqa_planner::SourceStatistics for EngineSourceStatistics<'_> {
     ) -> Option<uqa_planner::LocalAccessEstimate> {
         let uqa_planner::SourcePlan::Function {
             name,
-            relation,
+            relations,
             args,
             ..
         } = source
@@ -80,7 +80,7 @@ impl uqa_planner::SourceStatistics for EngineSourceStatistics<'_> {
         match crate::operator_tree_bridge::estimate_operator_join_table_function(
             self.engine,
             &lower,
-            relation.as_deref(),
+            relations.as_ref(),
             args,
             &[],
         ) {

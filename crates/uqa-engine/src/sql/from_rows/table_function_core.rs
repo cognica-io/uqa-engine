@@ -45,7 +45,7 @@ pub(in crate::sql) struct TableFunctionCall<'a> {
     pub(in crate::sql) name: &'a str,
     pub(in crate::sql) binding: Option<&'a uqa_sql::ast::FunctionBinding>,
     pub(in crate::sql) output_name: &'a str,
-    pub(in crate::sql) relation: Option<&'a str>,
+    pub(in crate::sql) relations: Option<&'a uqa_sql::ast::OperatorJoinRelations>,
     pub(in crate::sql) args: &'a [ScalarExpr],
     pub(in crate::sql) alias: Option<&'a str>,
     pub(in crate::sql) column_aliases: &'a [String],

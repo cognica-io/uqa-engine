@@ -23,7 +23,7 @@
     },
     {
       "path": "crates/uqa-engine/src/engine_session/portals.rs",
-      "baseline_lines": 1164,
+      "baseline_lines": 1151,
       "owner": "uqa-engine session portal lifecycle",
       "responsibility_groups": ["portal binding", "portal execution", "snapshot ownership", "portal cleanup"],
       "target_modules": ["crates/uqa-engine/src/engine_session/portals/binding.rs", "crates/uqa-engine/src/engine_session/portals/execution.rs", "crates/uqa-engine/src/engine_session/portals/snapshots.rs", "crates/uqa-engine/src/engine_session/portals/lifecycle.rs"],
@@ -55,10 +55,10 @@
     },
     {
       "path": "crates/uqa-engine/src/operator_tree_bridge.rs",
-      "baseline_lines": 1184,
+      "baseline_lines": 1166,
       "owner": "uqa-engine operator-tree bridge",
       "responsibility_groups": ["logical lowering", "retrieval lowering", "schema translation", "execution adaptation"],
-      "target_modules": ["crates/uqa-engine/src/operator_tree_bridge/lowering.rs", "crates/uqa-engine/src/operator_tree_bridge/lowering_retrieval.rs", "crates/uqa-engine/src/operator_tree_bridge/schema.rs", "crates/uqa-engine/src/operator_tree_bridge/execution.rs"],
+      "target_modules": ["crates/uqa-engine/src/operator_tree_bridge/lowering.rs", "crates/uqa-engine/src/operator_tree_bridge/lowering_retrieval.rs", "crates/uqa-engine/src/operator_tree_bridge/schema.rs", "crates/uqa-engine/src/operator_tree_bridge/execution.rs", "crates/uqa-engine/src/operator_tree_bridge/operator_join_estimation.rs", "crates/uqa-engine/src/operator_tree_bridge/operator_join_execution.rs"],
       "migration_state": "planned"
     },
     {
@@ -159,7 +159,7 @@
     },
     {
       "path": "crates/uqa-engine/src/sql/select/row_locking.rs",
-      "baseline_lines": 1143,
+      "baseline_lines": 1123,
       "owner": "uqa-engine SELECT row-lock planning and execution",
       "responsibility_groups": ["lock clause validation", "lock target resolution", "lock operator attachment", "null-rejection and execution"],
       "target_modules": ["crates/uqa-engine/src/sql/select/row_locking/validation.rs", "crates/uqa-engine/src/sql/select/row_locking/targets.rs", "crates/uqa-engine/src/sql/select/row_locking/execution.rs", "crates/uqa-engine/src/sql/select/row_locking/null_rejection.rs"],
@@ -223,10 +223,10 @@
     },
     {
       "path": "crates/uqa-engine/tests/operator_tree_full_surface.rs",
-      "baseline_lines": 1099,
+      "baseline_lines": 1088,
       "owner": "uqa-engine operator-tree surface tests",
       "responsibility_groups": ["relational operators", "retrieval operators", "graph operators", "validation and result shape"],
-      "target_modules": ["crates/uqa-engine/tests/operator_tree_full_surface/relational.rs", "crates/uqa-engine/tests/operator_tree_full_surface/retrieval.rs", "crates/uqa-engine/tests/operator_tree_full_surface/graph.rs"],
+      "target_modules": ["crates/uqa-engine/tests/operator_tree_full_surface/relational.rs", "crates/uqa-engine/tests/operator_tree_full_surface/retrieval.rs", "crates/uqa-engine/tests/operator_tree_full_surface/graph.rs", "crates/uqa-engine/tests/operator_tree_full_surface/cross_relation_joins.rs"],
       "migration_state": "planned"
     },
     {
@@ -287,10 +287,10 @@
     },
     {
       "path": "crates/uqa-engine/tests/transaction_lifecycle/pg18_cursors.rs",
-      "baseline_lines": 1155,
+      "baseline_lines": 1093,
       "owner": "uqa-engine PostgreSQL 18 cursor lifecycle tests",
       "responsibility_groups": ["DECLARE and FETCH", "cursor movement", "transaction visibility", "errors and close behavior"],
-      "target_modules": ["crates/uqa-engine/tests/transaction_lifecycle/pg18_cursors/declaration.rs", "crates/uqa-engine/tests/transaction_lifecycle/pg18_cursors/movement.rs", "crates/uqa-engine/tests/transaction_lifecycle/pg18_cursors/transactions.rs"],
+      "target_modules": ["crates/uqa-engine/tests/transaction_lifecycle/pg18_cursors/declaration.rs", "crates/uqa-engine/tests/transaction_lifecycle/pg18_cursors/movement.rs", "crates/uqa-engine/tests/transaction_lifecycle/pg18_cursors/transactions.rs", "crates/uqa-engine/tests/transaction_lifecycle/pg18_cursors/relation_locks.rs"],
       "migration_state": "planned"
     },
     {

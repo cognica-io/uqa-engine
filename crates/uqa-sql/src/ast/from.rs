@@ -76,11 +76,9 @@ pub enum FromClause {
         name: String,
         /// Local function identifier used as `PostgreSQL`'s default output column label. Kept separate from the catalog-qualified lookup name so quoted identifiers containing `.` remain indivisible.
         output_name: String,
-        /// Catalog relation bound to a relation-aware table function.
-        /// Kept separate from scalar arguments so name resolution,
-        /// dependency tracking, and planning never treat it as text data.
+        /// Catalog relations bound to a tuple-producing operator join, kept separate from scalar arguments so each operand retains its own name-resolution, dependency, planning, and execution context.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        relation: Option<String>,
+        relations: Option<OperatorJoinRelations>,
         args: Vec<Expr>,
         alias: Option<String>,
         column_aliases: Vec<String>,
@@ -136,12 +134,19 @@ pub struct TableFunction {
     pub name: String,
     pub output_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub relation: Option<String>,
+    pub relations: Option<OperatorJoinRelations>,
     pub args: Vec<Expr>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub column_aliases: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub column_types: Vec<String>,
+}
+
+/// The two independently bound catalog relations consumed by an operator-join table function.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperatorJoinRelations {
+    pub left: String,
+    pub right: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

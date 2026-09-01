@@ -24,7 +24,7 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
         name,
         binding,
         output_name,
-        relation,
+        relations,
         args,
         alias,
         column_aliases,
@@ -50,7 +50,7 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
         let tuples = crate::operator_tree_bridge::execute_operator_join_table_function(
             engine,
             &lower,
-            relation,
+            relations,
             args,
             context.params,
         )?;

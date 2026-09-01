@@ -162,14 +162,14 @@ Never treat highlighted text as trusted HTML solely because the engine inserted 
 
 ## Operator joins as SQL sources
 
-Five tuple-producing join operators are exposed in `FROM`. Their first argument is a table identifier, not a string value, and both operand expressions are lowered and executed against that relation through the ordinary `OperatorTree` optimizer. Unqualified and schema-qualified identifiers use the same catalog and `search_path` resolution as ordinary table references. The result has columns `left_doc_id BIGINT`, `right_doc_id BIGINT`, and `_score DOUBLE PRECISION`; a table-function column alias list may rename them.
+Five tuple-producing join operators are exposed in `FROM`. The first and third arguments are table identifiers, not string values: the expression immediately after each identifier is bound, optimized, costed, and executed against that relation. Unqualified and schema-qualified identifiers use the same catalog and `search_path` resolution as ordinary table references. The result has columns `left_doc_id BIGINT`, `right_doc_id BIGINT`, and `_score DOUBLE PRECISION`; a table-function column alias list may rename them. Repeat the same relation identifier in both positions for a self-join.
 
 ### Shared contract
 
 | Contract part | Definition |
 | --- | --- |
-| Syntax | `join_function(relation_identifier, left_expression, right_expression [, options...])` as a `FROM` source |
-| Arguments | `relation_identifier` is SQL grammar and cannot be quoted as a string or replaced by a value parameter; the remaining operands are expressions bound to that relation |
+| Syntax | `join_function(left_relation, left_expression, right_relation, right_expression [, options...])` as a `FROM` source |
+| Arguments | Each relation is an SQL identifier and cannot be quoted as a string or replaced by a value parameter; each operand is bound only to its adjacent relation |
 | Result | A relation with `left_doc_id BIGINT`, `right_doc_id BIGINT`, and `_score DOUBLE PRECISION`; pair identity is preserved |
 | Effects | Read-only; the source participates in ordinary relational planning and cost estimation |
 | Errors | Wrong arity, an unresolvable relation or field, invalid threshold ranges, incompatible operand shapes, malformed or non-finite vectors, and unsupported scalar placement are rejected |
@@ -177,23 +177,25 @@ Five tuple-producing join operators are exposed in `FROM`. Their first argument 
 
 | Function | Join contract |
 | --- | --- |
-| `text_similarity_join(relation, left, right, threshold)` | Jaccard similarity over the text fields named by the operands; `threshold` is in `[0, 1]` |
-| `vector_similarity_join(relation, left, right, threshold)` | Cosine similarity over the vector fields named by the operands; `threshold` is in `[-1, 1]` |
-| `graph_join(relation, left, right, label, graph)` | Directed graph-edge join from left identities to right identities; `label` is a string or `NULL` |
-| `hybrid_join(relation, left, right)` | Structured equijoin followed by cosine similarity of at least `0.5` over the shared structured and vector fields identified by the operands |
-| `cross_paradigm_join(relation, left, right)` | Graph-vertex-property to document-field equijoin; the left operand identifies one graph and the operands identify the property fields |
+| `text_similarity_join(left_relation, left, right_relation, right, threshold)` | Jaccard similarity over the text fields named by the operands; `threshold` is in `[0, 1]` |
+| `vector_similarity_join(left_relation, left, right_relation, right, threshold)` | Cosine similarity over the vector fields named by the operands; `threshold` is in `[-1, 1]` |
+| `graph_join(left_relation, left, right_relation, right, label, graph)` | Directed graph-edge join from left identities to right identities; `label` is a string or `NULL` |
+| `hybrid_join(left_relation, left, right_relation, right)` | Structured equijoin followed by cosine similarity of at least `0.5`; the structured and vector field names may differ between relations |
+| `cross_paradigm_join(left_relation, left, right_relation, right)` | Graph-vertex-property to document-field equijoin; the left operand identifies one graph and the operands identify the property fields |
 
-The following query creates vector-pair tuples and then joins their left identities back to ordinary SQL rows. Because `pairs` is an aliased, fully bound source, its optimized cardinality and access cost participate in DPccp with `passages`.
+The following query compares live passages with an archive whose vector column has a different name, then joins both identities back to ordinary SQL rows. Because `pairs` is an aliased, fully bound source, its independently estimated operand cardinalities and access costs participate in DPccp with the ordinary relations.
 
 ```sql
-SELECT pairs.left_doc_id, pairs.right_doc_id, pairs._score, p.title
+SELECT pairs.left_doc_id, pairs.right_doc_id, pairs._score, p.title, a.title AS archived_title
 FROM vector_similarity_join(
     passages,
     knn_match(embedding, ARRAY[1.0, 0.0, 0.0, 0.0], 100),
-    knn_match(embedding, ARRAY[0.8, 0.1, 0.1, 0.0], 100),
+    archived_passages,
+    knn_match(archived_embedding, ARRAY[0.8, 0.1, 0.1, 0.0], 100),
     0.85
 ) AS pairs
 JOIN passages AS p ON p.id = pairs.left_doc_id
+JOIN archived_passages AS a ON a.id = pairs.right_doc_id
 ORDER BY pairs._score DESC, pairs.left_doc_id, pairs.right_doc_id;
 ```
 
@@ -207,14 +209,16 @@ WITH close_pairs AS (
     FROM vector_similarity_join(
         passages,
         knn_match(embedding, ARRAY[1.0, 0.0, 0.0, 0.0], 100),
-        knn_match(embedding, ARRAY[0.8, 0.1, 0.1, 0.0], 100),
+        archived_passages,
+        knn_match(archived_embedding, ARRAY[0.8, 0.1, 0.1, 0.0], 100),
         0.85
     )
     WHERE _score >= 0.90
 )
-SELECT close_pairs.left_doc_id, close_pairs.right_doc_id, p.title
+SELECT close_pairs.left_doc_id, close_pairs.right_doc_id, p.title, a.title AS archived_title
 FROM close_pairs
 JOIN passages AS p ON p.id = close_pairs.left_doc_id
+JOIN archived_passages AS a ON a.id = close_pairs.right_doc_id
 ORDER BY close_pairs.left_doc_id, close_pairs.right_doc_id;
 ```
 

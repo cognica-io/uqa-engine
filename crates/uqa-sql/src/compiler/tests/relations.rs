@@ -241,11 +241,12 @@ fn join_using_and_natural_metadata_survive_compilation() {
 }
 
 #[test]
-fn operator_join_relation_is_compiled_as_an_identifier() {
+fn operator_join_relations_are_compiled_as_identifiers() {
     let Statement::Select(select) = first(
         "SELECT * FROM vector_similarity_join(\
              app.passages,\
              knn_match(embedding, ARRAY[1.0, 0.0], 6),\
+             archive.passages,\
              knn_match(embedding, ARRAY[0.8, 0.2], 6),\
              0.8\
          ) AS pairs",
@@ -254,7 +255,7 @@ fn operator_join_relation_is_compiled_as_an_identifier() {
     };
     let Some(FromClause::Function {
         name,
-        relation,
+        relations,
         args,
         alias,
         ..
@@ -263,28 +264,58 @@ fn operator_join_relation_is_compiled_as_an_identifier() {
         panic!("not a table function");
     };
     assert_eq!(name, "vector_similarity_join");
-    assert_eq!(relation.as_deref(), Some("app.passages"));
+    let relations = relations.expect("operator join relations");
+    assert_eq!(relations.left, "app.passages");
+    assert_eq!(relations.right, "archive.passages");
     assert_eq!(args.len(), 3);
     assert_eq!(alias.as_deref(), Some("pairs"));
 }
 
 #[test]
-fn operator_join_relation_rejects_scalar_values() {
-    for relation in ["'passages'", "$1", "lower('passages')"] {
-        let sql = format!(
-            "SELECT * FROM vector_similarity_join(\
-                 {relation},\
-                 knn_match(embedding, ARRAY[1.0, 0.0], 6),\
-                 knn_match(embedding, ARRAY[0.8, 0.2], 6),\
-                 0.8\
-             )"
-        );
-        let error = compile(&sql).expect_err(&sql);
-        assert!(
-            matches!(&error, SQLError::TypeMismatch(message) if message.contains("relation must be a table identifier")),
-            "unexpected error for {sql}: {error}"
-        );
+fn operator_join_relations_reject_scalar_values() {
+    for invalid in ["'passages'", "$1", "lower('passages')"] {
+        for sql in [
+            format!(
+                "SELECT * FROM vector_similarity_join(\
+                     {invalid},\
+                     knn_match(embedding, ARRAY[1.0, 0.0], 6),\
+                     archive,\
+                     knn_match(embedding, ARRAY[0.8, 0.2], 6),\
+                     0.8\
+                 )"
+            ),
+            format!(
+                "SELECT * FROM vector_similarity_join(\
+                     passages,\
+                     knn_match(embedding, ARRAY[1.0, 0.0], 6),\
+                     {invalid},\
+                     knn_match(embedding, ARRAY[0.8, 0.2], 6),\
+                     0.8\
+                 )"
+            ),
+        ] {
+            let error = compile(&sql).expect_err(&sql);
+            assert!(
+                matches!(&error, SQLError::TypeMismatch(message) if message.contains("relation must be a table identifier")),
+                "unexpected error for {sql}: {error}"
+            );
+        }
     }
+}
+
+#[test]
+fn operator_join_rejects_the_removed_single_relation_signature() {
+    let sql = "SELECT * FROM vector_similarity_join(\
+                   passages,\
+                   knn_match(embedding, ARRAY[1.0, 0.0], 6),\
+                   knn_match(embedding, ARRAY[0.8, 0.2], 6),\
+                   0.8\
+               )";
+    let error = compile(sql).expect_err("single-relation operator join signature must be rejected");
+    assert!(
+        matches!(&error, SQLError::TypeMismatch(message) if message.contains("right_relation must be a table identifier")),
+        "unexpected error: {error}"
+    );
 }
 
 #[test]
@@ -292,10 +323,13 @@ fn ordinary_table_function_keeps_scalar_identifier_arguments() {
     let Statement::Select(select) = first("SELECT * FROM unnest(items) AS value") else {
         panic!("not SELECT");
     };
-    let Some(FromClause::Function { relation, args, .. }) = select.from else {
+    let Some(FromClause::Function {
+        relations, args, ..
+    }) = select.from
+    else {
         panic!("not a table function");
     };
-    assert!(relation.is_none());
+    assert!(relations.is_none());
     assert!(matches!(args.as_slice(), [Expr::Column(name)] if name == "items"));
 }
 

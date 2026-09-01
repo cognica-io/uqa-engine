@@ -159,7 +159,7 @@ The API applies the same exact single-prior log-odds contract as automatic SQL. 
 
 ## 9. Join retrieval supports without leaving SQL
 
-`vector_similarity_join` treats two retrieval expressions as pair-producing operands. It retains each pair as `(left_doc_id, right_doc_id)`, computes cosine similarity from the vector field named by each operand, and exposes the similarity as `_score`.
+`vector_similarity_join` treats two relation-local retrieval expressions as pair-producing operands. It retains each pair as `(left_doc_id, right_doc_id)`, computes cosine similarity from the vector field named by each operand, and exposes the similarity as `_score`. This tutorial repeats `passages` to request a self-join; use a different third argument to compare another table.
 
 ```sql
 SELECT pairs.left_doc_id,
@@ -169,6 +169,7 @@ SELECT pairs.left_doc_id,
 FROM vector_similarity_join(
     passages,
     knn_match(embedding, ARRAY[1.0, 0.0, 0.0, 0.0], 6),
+    passages,
     knn_match(embedding, ARRAY[0.75, 0.05, 0.65, 0.00], 6),
     0.80
 ) AS pairs

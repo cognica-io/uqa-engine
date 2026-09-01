@@ -195,15 +195,16 @@ pub(super) fn bind_source_plan_relations<E>(
         SourcePlan::Function {
             name,
             output_name,
-            relation,
+            relations,
             ..
         } => {
             if output_name.is_empty() {
                 *output_name = RelationIdentity::parse_reference(name)
                     .map_or_else(|_| name.clone(), |(_, function)| function);
             }
-            if let Some(relation) = relation {
-                *relation = resolve(relation)?;
+            if let Some(relations) = relations {
+                relations.left = resolve(&relations.left)?;
+                relations.right = resolve(&relations.right)?;
             }
         }
         SourcePlan::FunctionGroup { functions, .. } => {
@@ -212,8 +213,9 @@ pub(super) fn bind_source_plan_relations<E>(
                     function.output_name = RelationIdentity::parse_reference(&function.name)
                         .map_or_else(|_| function.name.clone(), |(_, name)| name);
                 }
-                if let Some(relation) = &mut function.relation {
-                    *relation = resolve(relation)?;
+                if let Some(relations) = &mut function.relations {
+                    relations.left = resolve(&relations.left)?;
+                    relations.right = resolve(&relations.right)?;
                 }
             }
         }
@@ -251,15 +253,18 @@ pub(super) fn source_plan_references_relation(
         uqa_planner::SourcePlan::Subquery { body, .. } => {
             query_plan_references_relation(body, target, ctes)
         }
-        uqa_planner::SourcePlan::Function { relation, .. } => relation
-            .as_ref()
-            .is_some_and(|relation| relation_reference_matches(relation, target)),
+        uqa_planner::SourcePlan::Function { relations, .. } => {
+            relations.as_ref().is_some_and(|relations| {
+                relation_reference_matches(&relations.left, target)
+                    || relation_reference_matches(&relations.right, target)
+            })
+        }
         uqa_planner::SourcePlan::FunctionGroup { functions, .. } => {
             functions.iter().any(|function| {
-                function
-                    .relation
-                    .as_ref()
-                    .is_some_and(|relation| relation_reference_matches(relation, target))
+                function.relations.as_ref().is_some_and(|relations| {
+                    relation_reference_matches(&relations.left, target)
+                        || relation_reference_matches(&relations.right, target)
+                })
             })
         }
         uqa_planner::SourcePlan::Values { .. } => false,

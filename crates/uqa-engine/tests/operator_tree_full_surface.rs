@@ -19,6 +19,9 @@ use uqa_planner::executor::{OperatorOutput, OperatorTreeDriver};
 use uqa_planner::QueryOptimizer;
 use uqa_scoring::Scorer;
 
+#[path = "operator_tree_full_surface/cross_relation_joins.rs"]
+mod cross_relation_joins;
+
 fn fixture() -> Engine {
     let engine = Engine::new();
     engine
@@ -56,6 +59,9 @@ fn fixture() -> Engine {
         vertex
             .properties
             .insert("category".into(), Value::Str(category.into()));
+        vertex
+            .properties
+            .insert("archive_category".into(), Value::Str(category.into()));
         vertex.properties.insert("value".into(), Value::Int(value));
         engine.add_graph_vertex(vertex, "social").unwrap();
     }
@@ -622,6 +628,7 @@ fn operator_join_table_functions_lower_and_execute_from_sql() {
              FROM text_similarity_join(\
                  docs,\
                  text_match(title, 'rust'),\
+                 docs,\
                  text_match(title, 'rust'),\
                  0.2\
              )",
@@ -633,6 +640,7 @@ fn operator_join_table_functions_lower_and_execute_from_sql() {
              FROM vector_similarity_join(\
                  docs,\
                  knn_match(embedding, ARRAY[1.0, 0.0], 3),\
+                 docs,\
                  knn_match(embedding, ARRAY[1.0, 0.0], 3),\
                  0.8\
              )",
@@ -644,6 +652,7 @@ fn operator_join_table_functions_lower_and_execute_from_sql() {
              FROM graph_join(\
                  docs,\
                  graph_pagerank('social'),\
+                 docs,\
                  graph_pagerank('social'),\
                  'follows',\
                  'social'\
@@ -656,6 +665,7 @@ fn operator_join_table_functions_lower_and_execute_from_sql() {
              FROM hybrid_join(\
                  docs,\
                  category = 'A' AND knn_match(embedding, ARRAY[1.0, 0.0], 3),\
+                 docs,\
                  category = 'A' AND knn_match(embedding, ARRAY[1.0, 0.0], 3)\
              )",
             4,
@@ -666,6 +676,7 @@ fn operator_join_table_functions_lower_and_execute_from_sql() {
              FROM cross_paradigm_join(\
                  docs,\
                  graph_pagerank('social'),\
+                 docs,\
                  category IS NOT NULL\
              )",
             5,
@@ -686,6 +697,7 @@ fn operator_join_table_functions_validate_thresholds() {
              FROM vector_similarity_join(\
                  docs,\
                  knn_match(embedding, ARRAY[1.0, 0.0], 3),\
+                 docs,\
                  knn_match(embedding, ARRAY[1.0, 0.0], 3),\
                  2.0\
              )",
@@ -723,6 +735,7 @@ fn operator_join_relation_uses_catalog_name_resolution() {
              FROM vector_similarity_join(\
                  search_scope.scoped_docs,\
                  knn_match(embedding, ARRAY[1.0, 0.0], 1),\
+                 search_scope.scoped_docs,\
                  knn_match(embedding, ARRAY[1.0, 0.0], 1),\
                  0.8\
              )",
@@ -740,6 +753,7 @@ fn operator_join_relation_uses_catalog_name_resolution() {
              FROM vector_similarity_join(\
                  scoped_docs,\
                  knn_match(embedding, ARRAY[1.0, 0.0], 1),\
+                 scoped_docs,\
                  knn_match(embedding, ARRAY[1.0, 0.0], 1),\
                  0.8\
              )",
@@ -747,35 +761,6 @@ fn operator_join_relation_uses_catalog_name_resolution() {
         )
         .unwrap();
     assert_eq!(unqualified.rows, qualified.rows);
-}
-
-#[test]
-fn operator_join_relation_is_tracked_as_a_view_dependency() {
-    let engine = fixture();
-    engine
-        .sql(
-            "CREATE VIEW doc_pairs AS \
-             SELECT left_doc_id, right_doc_id \
-             FROM vector_similarity_join(\
-                 docs,\
-                 knn_match(embedding, ARRAY[1.0, 0.0], 3),\
-                 knn_match(embedding, ARRAY[1.0, 0.0], 3),\
-                 0.8\
-             )",
-            &[],
-        )
-        .unwrap();
-    assert_eq!(
-        engine
-            .sql("SELECT left_doc_id FROM doc_pairs", &[])
-            .unwrap()
-            .rows
-            .len(),
-        5
-    );
-
-    let error = engine.sql("DROP TABLE docs", &[]).unwrap_err();
-    assert!(error.to_string().contains("public.doc_pairs"), "{error}");
 }
 
 #[test]
@@ -788,6 +773,7 @@ fn operator_join_result_can_be_nested_relationally() {
                  FROM vector_similarity_join(\
                      docs,\
                      knn_match(embedding, ARRAY[1.0, 0.0], 3),\
+                     docs,\
                      knn_match(embedding, ARRAY[1.0, 0.0], 3),\
                      0.8\
                  )\
@@ -810,6 +796,7 @@ fn operator_join_sources_participate_in_two_way_dpccp() {
                       FROM vector_similarity_join(\
                           docs,\
                           knn_match(embedding, ARRAY[1.0, 0.0], 3),\
+                          docs,\
                           knn_match(embedding, ARRAY[1.0, 0.0], 3),\
                           0.8\
                       ) AS pairs \
@@ -827,6 +814,7 @@ fn operator_join_sources_participate_in_two_way_dpccp() {
                               JOIN vector_similarity_join(\
                                   docs,\
                                   knn_match(embedding, ARRAY[1.0, 0.0], 3),\
+                                  docs,\
                                   knn_match(embedding, ARRAY[1.0, 0.0], 3),\
                                   0.8\
                               ) AS pairs ON d.id = pairs.left_doc_id";
@@ -862,6 +850,7 @@ fn operator_join_sources_participate_in_three_way_dpccp() {
                          FROM vector_similarity_join(\
                              docs,\
                              knn_match(embedding, ARRAY[1.0, 0.0], 3),\
+                             docs,\
                              knn_match(embedding, ARRAY[1.0, 0.0], 3),\
                              0.8\
                          ) AS pairs \

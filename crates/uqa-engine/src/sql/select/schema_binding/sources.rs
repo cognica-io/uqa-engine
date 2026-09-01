@@ -34,7 +34,7 @@ pub(super) fn table_function_member_source(function: &TableFunctionPlan) -> Sour
         name: function.name.clone(),
         binding: function.binding.clone(),
         output_name: function.output_name.clone(),
-        relation: function.relation.clone(),
+        relations: function.relations.clone(),
         args: function.args.clone(),
         alias: None,
         column_aliases: function.column_aliases.clone(),
