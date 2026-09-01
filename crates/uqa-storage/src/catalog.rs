@@ -387,6 +387,9 @@ pub struct SequenceOwner {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SequenceRow {
     pub relation: RelationIdentity,
+    /// SQL role that owns the sequence. Legacy catalogs predate roles and therefore belong to the bootstrap role.
+    #[serde(default = "default_sequence_role_owner")]
+    pub role_owner: String,
     /// Stable identity of this sequence incarnation. Dropping and recreating the same qualified name must allocate a different value.
     #[serde(default)]
     pub object_id: [u8; 16],
@@ -404,6 +407,10 @@ pub struct SequenceRow {
     pub owner: Option<SequenceOwner>,
     #[serde(default)]
     pub options: SequenceOptions,
+}
+
+fn default_sequence_role_owner() -> String {
+    "uqa".into()
 }
 
 /// One atomic sequence reservation. `first_value` is returned immediately, while the remaining values through `last_value` belong to the allocating session.

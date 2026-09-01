@@ -95,7 +95,7 @@ fn catalog_read_view_keeps_all_live_projection_families_on_one_snapshot() {
     assert!(current
         .sequences()
         .iter()
-        .any(|(name, _, _)| name == "public.snapshot_sequence"));
+        .any(|(name, _, _, _)| name == "public.snapshot_sequence"));
     assert!(current
         .views_of_kind(StoredViewKind::View)
         .iter()

@@ -391,6 +391,10 @@ impl Engine {
             .sequence_persistence
             .write()
             .retain(|relation, _| !temporary_sequences.contains(relation));
+        self.durable
+            .sequence_security
+            .write()
+            .retain(|relation, _| !temporary_sequences.contains(relation));
         let mut session = self.session.state.write();
         session
             .sequence_currvals

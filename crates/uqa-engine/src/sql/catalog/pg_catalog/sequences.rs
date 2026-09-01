@@ -11,7 +11,7 @@ use uqa_sql::{ResultRow, SQLError};
 
 use crate::engine_capabilities::CatalogReadView;
 
-use super::super::helpers::oids::{current_user_name, split_schema_name};
+use super::super::helpers::oids::split_schema_name;
 use super::super::helpers::rows::{bool_value, row, str_value};
 
 pub(in crate::sql::catalog) fn build_pg_sequences(
@@ -20,12 +20,12 @@ pub(in crate::sql::catalog) fn build_pg_sequences(
     let mut rows = catalog
         .sequence_states()
         .into_iter()
-        .map(|(name, state)| {
+        .map(|(name, state, role_owner)| {
             let (schema, sequence) = split_schema_name(&name)?;
             Ok(row([
                 ("schemaname", str_value(schema)),
                 ("sequencename", str_value(sequence)),
-                ("sequenceowner", str_value(current_user_name())),
+                ("sequenceowner", str_value(role_owner)),
                 ("data_type", str_value(state.data_type.sql_name())),
                 ("start_value", Value::Int(state.start)),
                 ("min_value", Value::Int(state.min_value)),

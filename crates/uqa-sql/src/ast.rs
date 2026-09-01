@@ -189,6 +189,9 @@ pub enum AlterTableAction {
     SetPersistence {
         persistence: RelationPersistence,
     },
+    ChangeOwner {
+        owner: String,
+    },
     SetSchema {
         schema: String,
     },

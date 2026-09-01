@@ -89,6 +89,8 @@ pub(super) struct StoredColumnStats {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct StoredSequence {
+    #[serde(default = "legacy_sequence_role_owner")]
+    pub(super) role_owner: String,
     #[serde(default)]
     pub(super) object_id: [u8; 16],
     #[serde(default)]
@@ -112,4 +114,8 @@ pub(super) const fn legacy_sequence_called() -> bool {
 
 pub(super) fn legacy_sequence_persistence() -> String {
     "p".into()
+}
+
+pub(super) fn legacy_sequence_role_owner() -> String {
+    "uqa".into()
 }

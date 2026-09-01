@@ -10,6 +10,7 @@ use super::{
     BTreeMap, CatalogFacade, Engine, RelationIdentity, SequenceDataType, SequenceOptions,
     SequenceRow, SequenceState, StorageBackendError, StorageBackendResult, SEQUENCES_METADATA_KEY,
 };
+use crate::engine_state::SequenceSecurity;
 
 impl Engine {
     pub(crate) fn sequence_row(
@@ -17,10 +18,12 @@ impl Engine {
         object_id: [u8; 16],
         state: SequenceState,
         persistence: uqa_sql::ast::RelationPersistence,
+        role_owner: &str,
     ) -> StorageBackendResult<SequenceRow> {
         Ok(SequenceRow {
             relation: RelationIdentity::from_legacy_name(name)
                 .map_err(StorageBackendError::Other)?,
+            role_owner: role_owner.into(),
             object_id,
             definition_generation: state.definition_generation,
             start: state.start,
@@ -74,6 +77,7 @@ impl Engine {
                         crate::new_sequence_object_id()?,
                         state,
                         uqa_sql::ast::RelationPersistence::Permanent,
+                        "uqa",
                     )?)?;
                 }
                 catalog.set_metadata(SEQUENCES_METADATA_KEY, "{}")?;
@@ -154,6 +158,14 @@ impl Engine {
             .filter(|(relation, _)| temporary_persistence.contains_key(*relation))
             .map(|(relation, object_id)| (relation.clone(), *object_id))
             .collect::<BTreeMap<_, _>>();
+        let mut security = self
+            .durable
+            .sequence_security
+            .read()
+            .iter()
+            .filter(|(relation, _)| temporary_persistence.contains_key(*relation))
+            .map(|(relation, security)| (relation.clone(), security.clone()))
+            .collect::<BTreeMap<_, _>>();
         let mut seen_object_ids = object_ids
             .values()
             .copied()
@@ -161,6 +173,11 @@ impl Engine {
         let mut persistence = temporary_persistence;
         for row in rows {
             let name = row.relation.qualified_name();
+            if row.role_owner.is_empty() {
+                return Err(StorageBackendError::Other(format!(
+                    "corrupt sequence `{name}` has an empty role owner"
+                )));
+            }
             if row.object_id == [0; 16] {
                 return Err(StorageBackendError::Other(format!(
                     "corrupt sequence `{name}` has no object identity"
@@ -181,14 +198,17 @@ impl Engine {
                     )))
                 }
             };
+            let role_owner = row.role_owner.clone();
             let (relation, state) = Self::sequence_state_from_row(row)?;
             persistence.insert(relation.clone(), stored);
             object_ids.insert(relation.clone(), object_id);
+            security.insert(relation.clone(), SequenceSecurity { role_owner });
             sequences.insert(relation, state);
         }
         *self.durable.sequences.write() = sequences;
         *self.durable.sequence_object_ids.write() = object_ids;
         *self.durable.sequence_persistence.write() = persistence;
+        *self.durable.sequence_security.write() = security;
         Ok(())
     }
 

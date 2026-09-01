@@ -188,8 +188,8 @@ impl Catalog {
                 .map(|owner| owner.dependency.catalog_code());
             tx.execute(
                 "INSERT INTO _sequences
-                    (schema_name, relation_name, kind, object_id, definition_generation, start, increment, current, called, persistence, data_type, min_value, max_value, cycle, cache_size, owner_table_object_id, owner_column_object_id, owner_dependency)
-                 VALUES (?1, ?2, 'sequence', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+                    (schema_name, relation_name, kind, object_id, definition_generation, start, increment, current, called, persistence, data_type, min_value, max_value, cycle, cache_size, owner_table_object_id, owner_column_object_id, owner_dependency, role_owner)
+                 VALUES (?1, ?2, 'sequence', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
                 params![
                     sequence.relation.schema,
                     sequence.relation.name,
@@ -208,6 +208,7 @@ impl Catalog {
                     owner_table.as_ref().map(<[u8; 16]>::as_slice),
                     owner_column.as_ref().map(<[u8; 16]>::as_slice),
                     owner_dependency,
+                    sequence.role_owner,
                 ],
             )?;
             tx.commit()?;
@@ -227,7 +228,7 @@ impl Catalog {
                 "UPDATE _sequences
                     SET object_id = ?3, definition_generation = ?4, start = ?5, increment = ?6, current = ?7, called = ?8, persistence = ?9,
                         data_type = ?10, min_value = ?11, max_value = ?12, cycle = ?13, cache_size = ?14,
-                        owner_table_object_id = ?15, owner_column_object_id = ?16, owner_dependency = ?17
+                        owner_table_object_id = ?15, owner_column_object_id = ?16, owner_dependency = ?17, role_owner = ?18
                   WHERE schema_name = ?1 AND relation_name = ?2",
                 params![
                     sequence.relation.schema,
@@ -247,6 +248,7 @@ impl Catalog {
                     owner_table.as_ref().map(<[u8; 16]>::as_slice),
                     owner_column.as_ref().map(<[u8; 16]>::as_slice),
                     owner_dependency,
+                    sequence.role_owner,
                 ],
             )? != 0)
         })
@@ -330,7 +332,7 @@ impl Catalog {
         self.conn.with(|connection| {
             let mut statement = connection.prepare(
                 "SELECT schema_name, relation_name, object_id, definition_generation, start, increment, current, called, persistence,
-                        data_type, min_value, max_value, cycle, cache_size, owner_table_object_id, owner_column_object_id, owner_dependency
+                        data_type, min_value, max_value, cycle, cache_size, owner_table_object_id, owner_column_object_id, owner_dependency, role_owner
                        FROM _sequences ORDER BY schema_name, relation_name",
             )?;
             let rows = statement.query_map([], |row| {
@@ -352,6 +354,7 @@ impl Catalog {
                     row.get::<_, Option<Vec<u8>>>(14)?,
                     row.get::<_, Option<Vec<u8>>>(15)?,
                     row.get::<_, Option<String>>(16)?,
+                    row.get::<_, String>(17)?,
                 ))
             })?;
             let mut sequences = Vec::new();
@@ -374,6 +377,7 @@ impl Catalog {
                     owner_table_object_id,
                     owner_column_object_id,
                     owner_dependency,
+                    role_owner,
                 ) = row?;
                 let relation = RelationIdentity::new(schema, name);
                 let object_id: [u8; 16] = object_id.try_into().map_err(|value: Vec<u8>| {
@@ -393,6 +397,7 @@ impl Catalog {
                         ))
                     })?;
                 sequences.push(SequenceRow {
+                    role_owner,
                     owner: decode_sequence_owner(
                         &relation,
                         owner_table_object_id,

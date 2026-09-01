@@ -231,6 +231,14 @@ impl Engine {
             .filter(|(relation, _)| temporary_sequence_persistence.contains_key(*relation))
             .map(|(relation, object_id)| (relation.clone(), *object_id))
             .collect::<BTreeMap<_, _>>();
+        let temporary_sequence_security = self
+            .durable
+            .sequence_security
+            .read()
+            .iter()
+            .filter(|(relation, _)| temporary_sequence_persistence.contains_key(*relation))
+            .map(|(relation, security)| (relation.clone(), security.clone()))
+            .collect::<BTreeMap<_, _>>();
         self.durable.restore(&latest.durable.snapshot());
         self.durable.views.write().extend(temporary_views);
         self.durable.sequences.write().extend(temporary_sequences);
@@ -242,6 +250,10 @@ impl Engine {
             .sequence_persistence
             .write()
             .extend(temporary_sequence_persistence);
+        self.durable
+            .sequence_security
+            .write()
+            .extend(temporary_sequence_security);
         let previous_versions = self.swap_seen_catalog_versions(target_versions);
         let rollback = || {
             *self.storage.tables.write() = previous_tables.clone();

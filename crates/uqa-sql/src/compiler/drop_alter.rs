@@ -144,21 +144,35 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                 "ALTER SEQUENCE SET persistence command body is malformed".into(),
             ));
         };
-        let persistence = match command.subtype() {
-            AlterTableType::AtSetLogged => RelationPersistence::Permanent,
-            AlterTableType::AtSetUnLogged => RelationPersistence::Unlogged,
+        let mut alter = AlterSequence {
+            name: table,
+            if_exists,
+            ..AlterSequence::default()
+        };
+        match command.subtype() {
+            AlterTableType::AtSetLogged => {
+                alter.persistence = Some(RelationPersistence::Permanent);
+            }
+            AlterTableType::AtSetUnLogged => {
+                alter.persistence = Some(RelationPersistence::Unlogged);
+            }
+            AlterTableType::AtChangeOwner => {
+                let owner = command.newowner.as_ref().ok_or_else(|| {
+                    SQLError::Internal("ALTER SEQUENCE OWNER TO without owner".into())
+                })?;
+                alter.role_owner = Some(super::routines::compile_role_spec(
+                    owner,
+                    false,
+                    "ALTER SEQUENCE OWNER TO",
+                )?);
+            }
             other => {
                 return Err(SQLError::Unsupported(format!(
                     "ALTER SEQUENCE action {other:?} is not supported"
                 )))
             }
-        };
-        return Ok(Statement::AlterSequence(AlterSequence {
-            name: table,
-            if_exists,
-            persistence: Some(persistence),
-            ..AlterSequence::default()
-        }));
+        }
+        return Ok(Statement::AlterSequence(alter));
     }
     if matches!(
         stmt.objtype(),
@@ -244,6 +258,18 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
             AlterTableType::AtSetUnLogged => AlterTableAction::SetPersistence {
                 persistence: RelationPersistence::Unlogged,
             },
+            AlterTableType::AtChangeOwner => {
+                let owner = cmd.newowner.as_ref().ok_or_else(|| {
+                    SQLError::Internal("ALTER TABLE OWNER TO without owner".into())
+                })?;
+                AlterTableAction::ChangeOwner {
+                    owner: super::routines::compile_role_spec(
+                        owner,
+                        false,
+                        "ALTER TABLE OWNER TO",
+                    )?,
+                }
+            }
             AlterTableType::AtEnableTrig
             | AlterTableType::AtEnableAlwaysTrig
             | AlterTableType::AtEnableReplicaTrig

@@ -215,6 +215,9 @@ pub struct AlterSequence {
     /// `SET LOGGED` or `SET UNLOGGED`. Temporary is never a valid requested target state.
     #[serde(default)]
     pub persistence: Option<RelationPersistence>,
+    /// `OWNER TO role`, distinct from column ownership expressed by `OWNED BY`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role_owner: Option<String>,
     /// `RENAME TO` or `SET SCHEMA`, kept distinct from definition changes.
     #[serde(default)]
     pub lifecycle: SequenceLifecycle,

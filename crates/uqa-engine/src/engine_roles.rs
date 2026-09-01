@@ -506,6 +506,21 @@ impl Engine {
                 });
             }
         }
+        let sequence_security = self.durable.sequence_security.read();
+        for name in &names {
+            if let Some((relation, _)) = sequence_security
+                .iter()
+                .find(|(_, security)| security.role_owner == *name)
+            {
+                return Err(SQLError::Routine {
+                    sqlstate: "2BP01".into(),
+                    message: format!(
+                        "role \"{name}\" cannot be dropped because some objects depend on it: sequence {}",
+                        relation.qualified_name()
+                    ),
+                });
+            }
+        }
         let routines = self.durable.sql_user_functions.read();
         for name in &names {
             if let Some(dependent) = routines.values().flatten().find_map(|function| {
@@ -538,6 +553,7 @@ impl Engine {
         self.persist_role_memberships_snapshot(&next_memberships)?;
         *roles = next_roles;
         *memberships = next_memberships;
+        drop(sequence_security);
         drop(routines);
         drop(memberships);
         drop(roles);

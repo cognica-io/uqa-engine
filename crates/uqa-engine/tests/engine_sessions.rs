@@ -745,6 +745,7 @@ fn opening_an_engine_assigns_legacy_sequence_object_identities() {
     catalog.save_schema("public").unwrap();
     assert!(catalog
         .create_sequence_row(&SequenceRow {
+            role_owner: "uqa".into(),
             relation: RelationIdentity::new("public", "legacy_ids"),
             object_id: [0; 16],
             definition_generation: [0; 16],

@@ -98,6 +98,7 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
     catalog
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "controlled"),
+            role_owner: "sequence_owner".into(),
             object_id,
             definition_generation: object_id,
             start: 1,
@@ -126,6 +127,7 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
     assert_eq!(uncalled.current, 7);
     assert!(!uncalled.called);
     assert_eq!(uncalled.owner, Some(owner));
+    assert_eq!(uncalled.role_owner, "sequence_owner");
     assert_eq!(
         catalog
             .next_sequence_value("public.controlled", object_id)
@@ -155,6 +157,7 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
     catalog
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "cycling"),
+            role_owner: "uqa".into(),
             object_id: cycling_id,
             definition_generation: cycling_id,
             start: 5,
@@ -192,6 +195,7 @@ fn sequence_rename_moves_catalog_identity_and_value_atomically() {
     catalog
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "ids"),
+            role_owner: "uqa".into(),
             object_id,
             definition_generation: [18; 16],
             start: 1,
@@ -234,6 +238,7 @@ fn sequence_rename_moves_catalog_identity_and_value_atomically() {
     catalog
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "occupied"),
+            role_owner: "uqa".into(),
             object_id: [19; 16],
             definition_generation: [19; 16],
             start: 1,
@@ -263,6 +268,7 @@ fn sequence_reservations_are_atomic_and_stop_at_the_configured_bound() {
     catalog
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "cached"),
+            role_owner: "uqa".into(),
             object_id,
             definition_generation: generation,
             start: 1,
@@ -386,6 +392,7 @@ fn relation_namespace_migration_rejects_alias_and_cross_kind_collisions() {
                 .put(
                     &single_str_key(TAG_SEQUENCE, "public.docs").unwrap(),
                     &encode_value(&StoredSequence {
+                        role_owner: "uqa".into(),
                         object_id: [0; 16],
                         definition_generation: [0; 16],
                         start: 1,

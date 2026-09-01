@@ -73,6 +73,7 @@ impl KeyValueCatalog {
         batch.put(
             &key,
             &encode_value(&StoredSequence {
+                role_owner: sequence.role_owner.clone(),
                 object_id: sequence.object_id,
                 definition_generation: sequence.definition_generation,
                 start: sequence.start,
@@ -101,6 +102,7 @@ impl KeyValueCatalog {
         self.store.put(
             &key,
             &encode_value(&StoredSequence {
+                role_owner: sequence.role_owner.clone(),
                 object_id: sequence.object_id,
                 definition_generation: sequence.definition_generation,
                 start: sequence.start,
@@ -175,6 +177,7 @@ impl KeyValueCatalog {
                 let stored: StoredSequence = decode_value(&value)?;
                 Ok(SequenceRow {
                     relation,
+                    role_owner: stored.role_owner,
                     object_id: stored.object_id,
                     definition_generation: stored.definition_generation,
                     start: stored.start,

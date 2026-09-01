@@ -75,6 +75,7 @@ impl Engine {
             || alter.cache_size.is_some()
             || alter.ownership != SequenceOwnership::Unchanged
             || alter.persistence.is_some()
+            || alter.role_owner.is_some()
         {
             return Err(SQLError::Internal(
                 "ALTER SEQUENCE name lifecycle cannot contain definition changes".into(),
@@ -195,9 +196,11 @@ impl Engine {
         let mut sequences = self.durable.sequences.write();
         let mut object_ids = self.durable.sequence_object_ids.write();
         let mut persistence = self.durable.sequence_persistence.write();
+        let mut security = self.durable.sequence_security.write();
         if !sequences.contains_key(source)
             || !object_ids.contains_key(source)
             || !persistence.contains_key(source)
+            || !security.contains_key(source)
         {
             return Err(SQLError::Internal(format!(
                 "sequence registry entry `{}` disappeared during rename",
@@ -207,6 +210,7 @@ impl Engine {
         if sequences.contains_key(target)
             || object_ids.contains_key(target)
             || persistence.contains_key(target)
+            || security.contains_key(target)
         {
             return Err(SQLError::Internal(format!(
                 "sequence registry target `{}` appeared during rename",
@@ -222,9 +226,13 @@ impl Engine {
         let stored_persistence = persistence
             .remove(source)
             .expect("preflighted sequence persistence must exist");
+        let stored_security = security
+            .remove(source)
+            .expect("preflighted sequence security must exist");
         sequences.insert(target.clone(), state);
         object_ids.insert(target.clone(), object_id);
         persistence.insert(target.clone(), stored_persistence);
+        security.insert(target.clone(), stored_security);
         Ok(())
     }
 }

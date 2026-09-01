@@ -341,6 +341,7 @@ ALTER SEQUENCE archived_ticket_ids SET SCHEMA archive;
 ```sql execute
 CREATE SCHEMA sequence_archive;
 CREATE SEQUENCE sequence_lifecycle_ids CACHE 3;
+ALTER SEQUENCE sequence_lifecycle_ids OWNER TO CURRENT_USER;
 SELECT nextval('sequence_lifecycle_ids');
 ALTER SEQUENCE sequence_lifecycle_ids RENAME TO renamed_sequence_lifecycle_ids;
 ALTER SEQUENCE renamed_sequence_lifecycle_ids SET SCHEMA sequence_archive;
@@ -348,6 +349,8 @@ SELECT nextval('sequence_archive.renamed_sequence_lifecycle_ids');
 ```
 
 Rename and schema-move operations preserve the sequence's `pg_class.oid`, numeric and literal `regclass` bindings, reserved cache block, `currval`, and `lastval` in the current session and in sessions that observe the new name later. They rewrite implemented column-default, serial and identity, and stored-view dependencies to the new qualified name, remain durable across reopen, and follow transaction and savepoint rollback without reclaiming values already returned by `nextval`. A serial or identity sequence may be renamed and `pg_get_serial_sequence` follows it, but moving an owned sequence to another schema reports `0A000`. Moving a sequence to its current schema is a no-op. A missing sequence reports `42P01`, another relation kind reports `42809`, a target-name collision reports `42P07`, a missing target schema reports `3F000`, and a read-only transaction reports `25006` before target lookup; `IF EXISTS` converts only a missing source into a notice.
+
+The role active at `CREATE SEQUENCE` owns the sequence. Sequence definition, persistence, name, namespace, and drop operations require the current user to be a superuser or to inherit the owning role. `ALTER SEQUENCE name OWNER TO role` and its historical `ALTER TABLE` spelling require that authority, an existing target role, and a SET-enabled path to the target role; an independently owned serial or identity sequence rejects role transfer with `0A000`. A transfer changes `pg_class.relowner` and `pg_sequences.sequenceowner` without changing the stable relation OID, definition generation, value or session cache, and it follows transaction, savepoint, temporary-object, rename, and durable-reopen lifecycle. SQL role owners prevent `DROP ROLE` until the sequence is reassigned or removed. Sequence `USAGE`, `SELECT`, and `UPDATE` grants, their inquiry helpers, and the target-schema privilege checks associated with ownership and namespace changes remain open compatibility bugs.
 
 `OWNED BY` requires the sequence and its ordinary, inherited, or partitioned owner table to be in the same schema. It records an automatic dependency without creating or changing the column default, survives table and column renames through stable object identities, appears through `pg_get_serial_sequence(text, text)`, and causes an owner-column or owner-table drop to remove the sequence. If another default or view depends on that sequence, an owner drop with `RESTRICT` reports `2BP01`, while `CASCADE` removes the dependent default and complete view closure. Multiple sequences may own one column. `TRUNCATE ... CONTINUE IDENTITY` preserves their values, while `TRUNCATE ... RESTART IDENTITY` restarts them. `OWNED BY NONE` detaches the dependency; assigning a new owner moves it. These changes follow statement, transaction, savepoint, and durable-reopen semantics.
 

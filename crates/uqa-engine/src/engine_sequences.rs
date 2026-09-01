@@ -9,6 +9,7 @@ use super::{
     SequenceOwnerDependency, SequenceRestart, SequenceState, StorageBackendError,
     StorageBackendResult,
 };
+use crate::engine_state::SequenceSecurity;
 use uqa_sql::ast::RelationPersistence;
 
 impl Engine {
@@ -220,6 +221,7 @@ impl Engine {
             return Self::sequence_create_collision(&name, if_not_exists);
         }
         state.owner = self.resolve_sequence_ownership(&name, ownership)?;
+        let role_owner = self.current_user_name();
         let object_id = crate::new_sequence_object_id().map_err(|error| {
             SQLError::Internal(format!("allocate sequence `{name}` identity: {error}"))
         })?;
@@ -232,9 +234,10 @@ impl Engine {
         } else if let Some(catalog) = self.storage.catalog.as_ref() {
             let created = catalog
                 .create_sequence_row(
-                    &Self::sequence_row(&name, object_id, state, persistence).map_err(|error| {
-                        SQLError::Internal(format!("build sequence catalog row: {error}"))
-                    })?,
+                    &Self::sequence_row(&name, object_id, state, persistence, &role_owner)
+                        .map_err(|error| {
+                            SQLError::Internal(format!("build sequence catalog row: {error}"))
+                        })?,
                 )
                 .map_err(|error| {
                     SQLError::Internal(format!("persist sequence catalog: {error}"))
@@ -259,7 +262,11 @@ impl Engine {
         self.durable
             .sequence_persistence
             .write()
-            .insert(relation, persistence);
+            .insert(relation.clone(), persistence);
+        self.durable
+            .sequence_security
+            .write()
+            .insert(relation, SequenceSecurity { role_owner });
         self.note_catalog_registry_changed();
         Ok(true)
     }
@@ -318,6 +325,12 @@ impl Engine {
         };
         let relation = Self::resolved_relation_identity(&name)
             .map_err(|error| SQLError::Internal(format!("resolve sequence `{name}`: {error}")))?;
+        if let Some(role_owner) = alter.role_owner.as_deref() {
+            Self::validate_sequence_role_owner_shape(alter)?;
+            self.alter_sequence_role_owner_inner(&name, &relation, role_owner)?;
+            return Ok(true);
+        }
+        self.ensure_sequence_owner(&name, &relation)?;
         let persistence = self
             .durable
             .sequence_persistence
@@ -449,6 +462,7 @@ impl Engine {
 
     fn sequence_alter_is_persistence_only(alter: &uqa_sql::ast::AlterSequence) -> bool {
         alter.persistence.is_some()
+            && alter.role_owner.is_none()
             && alter.restart == SequenceRestart::Unchanged
             && alter.increment.is_none()
             && alter.start.is_none()
@@ -458,6 +472,28 @@ impl Engine {
             && alter.cycle.is_none()
             && alter.cache_size.is_none()
             && alter.ownership == uqa_sql::ast::SequenceOwnership::Unchanged
+    }
+
+    fn validate_sequence_role_owner_shape(
+        alter: &uqa_sql::ast::AlterSequence,
+    ) -> Result<(), SQLError> {
+        if alter.restart != SequenceRestart::Unchanged
+            || alter.increment.is_some()
+            || alter.start.is_some()
+            || alter.data_type.is_some()
+            || alter.min_value != SequenceBound::Unchanged
+            || alter.max_value != SequenceBound::Unchanged
+            || alter.cycle.is_some()
+            || alter.cache_size.is_some()
+            || alter.ownership != uqa_sql::ast::SequenceOwnership::Unchanged
+            || alter.persistence.is_some()
+            || alter.lifecycle != uqa_sql::ast::SequenceLifecycle::Unchanged
+        {
+            return Err(SQLError::Internal(
+                "ALTER SEQUENCE OWNER TO cannot contain another action".into(),
+            ));
+        }
+        Ok(())
     }
 
     pub(crate) fn persist_sequence_state_replacement(
@@ -470,15 +506,23 @@ impl Engine {
         invalidate_current_cache: bool,
     ) -> Result<(), SQLError> {
         let temporary = persistence == uqa_sql::ast::RelationPersistence::Temporary;
+        let role_owner = self
+            .durable
+            .sequence_security
+            .read()
+            .get(relation)
+            .map(|security| security.role_owner.clone())
+            .ok_or_else(|| {
+                SQLError::Internal(format!("sequence `{name}` has no security metadata"))
+            })?;
         if !temporary {
             if let Some(catalog) = self.storage.catalog.as_ref() {
                 if !catalog
                     .replace_sequence_row(
-                        &Self::sequence_row(name, object_id, state, persistence).map_err(
-                            |error| {
+                        &Self::sequence_row(name, object_id, state, persistence, &role_owner)
+                            .map_err(|error| {
                                 SQLError::Internal(format!("build sequence catalog row: {error}"))
-                            },
-                        )?,
+                            })?,
                     )
                     .map_err(|error| {
                         SQLError::Internal(format!("persist sequence catalog: {error}"))
@@ -672,6 +716,7 @@ impl Engine {
                 let relation = Self::resolved_relation_identity(name).map_err(|error| {
                     SQLError::Internal(format!("resolve sequence `{name}`: {error}"))
                 })?;
+                self.ensure_sequence_owner(name, &relation)?;
                 let owner = self
                     .durable
                     .sequences
@@ -797,6 +842,7 @@ impl Engine {
             self.durable.sequences.write().remove(&relation);
             self.durable.sequence_object_ids.write().remove(&relation);
             self.durable.sequence_persistence.write().remove(&relation);
+            self.durable.sequence_security.write().remove(&relation);
             let mut session = self.session.state.write();
             session
                 .sequence_currvals

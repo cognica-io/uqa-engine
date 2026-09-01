@@ -114,6 +114,30 @@ fn sequence_ownership_preserves_target_names_and_none_actions() {
 }
 
 #[test]
+fn sequence_role_owner_preserves_direct_and_historical_syntax() {
+    let Statement::AlterSequence(direct) = first("ALTER SEQUENCE app.ids OWNER TO next_owner")
+    else {
+        panic!("not ALTER SEQUENCE");
+    };
+    assert_eq!(direct.name, "app.ids");
+    assert_eq!(direct.role_owner.as_deref(), Some("next_owner"));
+
+    let Statement::AlterTable(historical) = first("ALTER TABLE app.ids OWNER TO CURRENT_USER")
+    else {
+        panic!("not ALTER TABLE");
+    };
+    assert!(matches!(
+        historical.actions.as_slice(),
+        [crate::ast::AlterTableAction::ChangeOwner { owner }] if owner == "CURRENT_USER"
+    ));
+
+    let Statement::AlterSequence(public) = first("ALTER SEQUENCE ids OWNER TO PUBLIC") else {
+        panic!("not ALTER SEQUENCE");
+    };
+    assert_eq!(public.role_owner.as_deref(), Some("public"));
+}
+
+#[test]
 fn create_table_with_vector_column() {
     let stmt = first("CREATE TABLE docs (id INTEGER PRIMARY KEY, title TEXT, embedding VECTOR(4))");
     let Statement::CreateTable(ct) = stmt else {

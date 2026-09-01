@@ -96,6 +96,7 @@ mod engine_search;
 mod engine_sequence_catalog;
 mod engine_sequence_lifecycle;
 mod engine_sequence_ownership;
+mod engine_sequence_security;
 mod engine_sequence_values;
 mod engine_sequences;
 mod engine_session;

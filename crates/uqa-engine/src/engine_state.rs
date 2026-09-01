@@ -26,6 +26,11 @@ pub(super) struct StorageContext {
     pub(super) provider: Option<Arc<dyn uqa_storage::PersistentStorageProvider>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SequenceSecurity {
+    pub(crate) role_owner: String,
+}
+
 impl StorageContext {
     pub(super) fn memory() -> Self {
         Self {
@@ -102,6 +107,7 @@ pub(super) struct DurableCatalogState {
     pub(super) sequence_object_ids: RwLock<BTreeMap<RelationIdentity, [u8; 16]>>,
     pub(super) sequence_persistence:
         RwLock<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
+    pub(super) sequence_security: RwLock<BTreeMap<RelationIdentity, SequenceSecurity>>,
     pub(super) named_analyzers: RwLock<BTreeMap<String, String>>,
     pub(super) table_field_analyzers: RwLock<TableFieldAnalyzerRegistry>,
     pub(super) foreign_servers: RwLock<BTreeMap<String, uqa_fdw::ForeignServer>>,
@@ -135,6 +141,7 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) sequences: BTreeMap<RelationIdentity, SequenceState>,
     pub(super) sequence_object_ids: BTreeMap<RelationIdentity, [u8; 16]>,
     pub(super) sequence_persistence: BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>,
+    pub(super) sequence_security: BTreeMap<RelationIdentity, SequenceSecurity>,
     pub(super) named_analyzers: BTreeMap<String, String>,
     pub(super) table_field_analyzers: TableFieldAnalyzerRegistry,
     pub(super) foreign_servers: BTreeMap<String, uqa_fdw::ForeignServer>,
@@ -165,6 +172,7 @@ impl DurableCatalogState {
             sequences: RwLock::new(BTreeMap::new()),
             sequence_object_ids: RwLock::new(BTreeMap::new()),
             sequence_persistence: RwLock::new(BTreeMap::new()),
+            sequence_security: RwLock::new(BTreeMap::new()),
             named_analyzers: RwLock::new(BTreeMap::new()),
             table_field_analyzers: RwLock::new(BTreeMap::new()),
             foreign_servers: RwLock::new(BTreeMap::new()),
@@ -193,6 +201,7 @@ impl DurableCatalogState {
             sequences: self.sequences.read().clone(),
             sequence_object_ids: self.sequence_object_ids.read().clone(),
             sequence_persistence: self.sequence_persistence.read().clone(),
+            sequence_security: self.sequence_security.read().clone(),
             named_analyzers: self.named_analyzers.read().clone(),
             table_field_analyzers: self.table_field_analyzers.read().clone(),
             foreign_servers: self.foreign_servers.read().clone(),
@@ -217,6 +226,7 @@ impl DurableCatalogState {
         *self.sequences.write() = snapshot.sequences.clone();
         *self.sequence_object_ids.write() = snapshot.sequence_object_ids.clone();
         *self.sequence_persistence.write() = snapshot.sequence_persistence.clone();
+        *self.sequence_security.write() = snapshot.sequence_security.clone();
         *self.named_analyzers.write() = snapshot.named_analyzers.clone();
         *self.table_field_analyzers.write() = snapshot.table_field_analyzers.clone();
         *self.foreign_servers.write() = snapshot.foreign_servers.clone();

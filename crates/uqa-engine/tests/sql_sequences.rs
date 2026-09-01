@@ -21,6 +21,8 @@ mod name_lifecycle;
 mod ownership;
 #[path = "sql_sequences/persistence.rs"]
 mod persistence;
+#[path = "sql_sequences/security.rs"]
+mod security;
 
 fn regclass_reference(expression: &Expr) -> Option<&str> {
     match expression {

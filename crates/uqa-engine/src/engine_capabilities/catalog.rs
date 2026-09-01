@@ -142,7 +142,9 @@ impl CatalogReadView {
         self.snapshot.durable.role_memberships.values()
     }
 
-    pub(crate) fn sequences(&self) -> Vec<(String, uqa_sql::ast::RelationPersistence, [u8; 16])> {
+    pub(crate) fn sequences(
+        &self,
+    ) -> Vec<(String, uqa_sql::ast::RelationPersistence, [u8; 16], String)> {
         self.snapshot
             .durable
             .sequences
@@ -162,17 +164,32 @@ impl CatalogReadView {
                         .get(identity)
                         .copied()
                         .unwrap_or_default(),
+                    self.snapshot
+                        .durable
+                        .sequence_security
+                        .get(identity)
+                        .map_or_else(|| "uqa".into(), |security| security.role_owner.clone()),
                 )
             })
             .collect()
     }
 
-    pub(crate) fn sequence_states(&self) -> Vec<(String, crate::SequenceState)> {
+    pub(crate) fn sequence_states(&self) -> Vec<(String, crate::SequenceState, String)> {
         self.snapshot
             .durable
             .sequences
             .iter()
-            .map(|(identity, state)| (identity.qualified_name(), *state))
+            .map(|(identity, state)| {
+                (
+                    identity.qualified_name(),
+                    *state,
+                    self.snapshot
+                        .durable
+                        .sequence_security
+                        .get(identity)
+                        .map_or_else(|| "uqa".into(), |security| security.role_owner.clone()),
+                )
+            })
             .collect()
     }
 

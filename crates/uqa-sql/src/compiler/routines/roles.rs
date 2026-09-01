@@ -9,7 +9,7 @@ use super::{
     Statement,
 };
 
-fn compile_role_spec(
+pub(in crate::compiler) fn compile_role_spec(
     role: &pg_query::protobuf::RoleSpec,
     allow_public: bool,
     context: &str,
@@ -21,7 +21,7 @@ fn compile_role_spec(
             Ok("CURRENT_USER".into())
         }
         RoleSpecType::RolespecSessionUser => Ok("SESSION_USER".into()),
-        RoleSpecType::RolespecPublic if allow_public => Ok("PUBLIC".into()),
+        RoleSpecType::RolespecPublic => Ok(if allow_public { "PUBLIC" } else { "public" }.into()),
         other => Err(SQLError::Unsupported(format!(
             "{context}: role specification {other:?} is not supported"
         ))),

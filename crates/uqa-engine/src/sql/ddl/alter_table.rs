@@ -143,6 +143,9 @@ fn run_alter_sequence_with_table_syntax(
                 schema: schema.clone(),
             };
         }
+        [AlterTableAction::ChangeOwner { owner }] => {
+            alter.role_owner = Some(owner.clone());
+        }
         _ => {
             return Err(SQLError::Routine {
                 sqlstate: "42809".into(),
@@ -213,6 +216,11 @@ fn run_alter_table_action(
         engine.ensure_no_pending_trigger_events(&stmt.table, "ALTER TABLE")?;
     }
     match action {
+        AlterTableAction::ChangeOwner { .. } => {
+            return Err(SQLError::Unsupported(
+                "ALTER TABLE OWNER TO is not supported for tables".into(),
+            ));
+        }
         action @ (AlterTableAction::AddInheritance { .. }
         | AlterTableAction::DropInheritance { .. }
         | AlterTableAction::AttachPartition { .. }
