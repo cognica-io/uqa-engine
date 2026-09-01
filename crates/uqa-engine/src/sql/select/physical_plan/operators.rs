@@ -216,7 +216,15 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                         None,
                     )?;
                 } else {
-                    // Without ordering or row expansion, Limit may stop the child before unused target expressions are evaluated.
+                    // PostgreSQL evaluates the target list before OFFSET discards rows, while LIMIT must still stop before the next unused target row is evaluated. A one-row pull boundary preserves both requirements.
+                    if statement.limit.is_some() || statement.offset.is_some() {
+                        operator = Box::new(RowAtATime::new(operator));
+                    }
+                    operator = Box::new(Project::with_target_evaluator(
+                        operator,
+                        projections,
+                        Arc::clone(&evaluator),
+                    ));
                     operator = attach_order_limit(
                         operator,
                         statement,
@@ -230,11 +238,6 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                             statement, ctes, false,
                         )),
                     )?;
-                    operator = Box::new(Project::with_target_evaluator(
-                        operator,
-                        projections,
-                        evaluator,
-                    ));
                 }
             } else {
                 let (mut physical, output) =

@@ -44,6 +44,7 @@ CREATE TABLE cursor_divisors(divisor integer NOT NULL);
 INSERT INTO cursor_divisors VALUES (0);
 CREATE TABLE cursor_observations(name text PRIMARY KEY, observed bigint NOT NULL);
 CREATE SEQUENCE incremental_cursor_sequence START WITH 1;
+CREATE SEQUENCE offset_cursor_sequence START WITH 1;
 CREATE SEQUENCE snapshot_cursor_sequence START WITH 1;
 CREATE SEQUENCE hold_cursor_sequence START WITH 1;
 CREATE TABLE own_cursor_source(id integer PRIMARY KEY, value integer NOT NULL);
@@ -410,6 +411,23 @@ COMMIT;
 
 -- @case cursor_execution_is_incremental_result rows
 SELECT name, observed FROM cursor_observations WHERE name LIKE 'incremental_%' ORDER BY name;
+-- @end
+
+-- OFFSET evaluates discarded target rows, while LIMIT prevents evaluation beyond the bounded output.
+-- @case cursor_offset_projection_timing ok
+INSERT INTO cursor_observations VALUES ('offset_seed', nextval('offset_cursor_sequence'));
+BEGIN;
+DECLARE offset_cursor CURSOR FOR SELECT nextval('offset_cursor_sequence') AS value FROM generate_series(1, 5) OFFSET 2 LIMIT 2;
+MOVE FORWARD 1 FROM offset_cursor;
+INSERT INTO cursor_observations VALUES ('offset_after_one', currval('offset_cursor_sequence'));
+MOVE FORWARD ALL FROM offset_cursor;
+INSERT INTO cursor_observations VALUES ('offset_after_all', currval('offset_cursor_sequence'));
+CLOSE offset_cursor;
+COMMIT;
+-- @end
+
+-- @case cursor_offset_projection_timing_result rows
+SELECT name, observed FROM cursor_observations WHERE name LIKE 'offset_%' ORDER BY name;
 -- @end
 
 -- A READ COMMITTED cursor keeps the snapshot captured by DECLARE even after the declaring transaction writes.

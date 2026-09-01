@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "a57c9c4c0b4f78b8106ac1a048fe5dbecf7eeb26e1c0ce39d5cc3f92c509cd5f",
+  "fixture_sha256": "c069f70916d66960a0ce5b8f2ecc23491a59d46c5ffee5b3c5dc8d53988fa49a",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -247,6 +247,28 @@
         ],
         [
           "incremental_seed",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "cursor_offset_projection_timing",
+      "kind": "ok"
+    },
+    {
+      "name": "cursor_offset_projection_timing_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "offset_after_all",
+          "5"
+        ],
+        [
+          "offset_after_one",
+          "4"
+        ],
+        [
+          "offset_seed",
           "1"
         ]
       ]

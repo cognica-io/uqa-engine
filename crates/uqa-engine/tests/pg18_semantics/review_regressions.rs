@@ -71,6 +71,29 @@ fn compiler_owned_dispatch_does_not_reserve_user_function_names() {
     );
 }
 
+#[test]
+fn offset_evaluates_discarded_target_rows_before_limit() {
+    let eng = engine();
+    assert_sqlstate(
+        &eng,
+        "SELECT 1 / (value - 1) FROM generate_series(1, 3) AS values(value) OFFSET 1 LIMIT 1",
+        "22012",
+    );
+    eng.sql("CREATE SEQUENCE offset_projection_sequence", &[])
+        .unwrap();
+    assert_eq!(
+        scalar(
+            &eng,
+            "SELECT nextval('offset_projection_sequence') FROM generate_series(1, 5) OFFSET 2 LIMIT 1"
+        ),
+        Value::Int(3)
+    );
+    assert_eq!(
+        scalar(&eng, "SELECT currval('offset_projection_sequence')"),
+        Value::Int(3)
+    );
+}
+
 fn assert_ordinary_metadata_named_columns(eng: &Engine) {
     eng.sql(
         "CREATE TABLE metadata_named_columns (

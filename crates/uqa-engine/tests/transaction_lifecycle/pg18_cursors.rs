@@ -150,6 +150,51 @@ fn pg18_sql_cursor_executes_on_first_fetch_and_uses_bounded_portal_storage() {
 }
 
 #[test]
+fn pg18_cursor_evaluates_offset_target_rows_and_stops_at_limit() {
+    let engine = Engine::new();
+    engine
+        .sql("CREATE SEQUENCE offset_cursor_sequence; BEGIN", &[])
+        .unwrap();
+    engine
+        .sql(
+            "DECLARE offset_cursor CURSOR FOR SELECT nextval('offset_cursor_sequence') AS value FROM generate_series(1, 4) OFFSET 2 LIMIT 1",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        integer_column(
+            &engine.sql("FETCH FROM offset_cursor", &[]).unwrap(),
+            "value"
+        ),
+        [3]
+    );
+    assert_eq!(
+        integer_column(
+            &engine
+                .sql("SELECT currval('offset_cursor_sequence') AS value", &[])
+                .unwrap(),
+            "value"
+        ),
+        [3]
+    );
+    assert!(engine
+        .sql("FETCH ALL FROM offset_cursor", &[])
+        .unwrap()
+        .rows
+        .is_empty());
+    assert_eq!(
+        integer_column(
+            &engine
+                .sql("SELECT currval('offset_cursor_sequence') AS value", &[])
+                .unwrap(),
+            "value"
+        ),
+        [3]
+    );
+    engine.sql("ROLLBACK", &[]).unwrap();
+}
+
+#[test]
 fn pg18_cursor_declaration_validates_relations_without_evaluating_rows() {
     let engine = Engine::new();
     engine
