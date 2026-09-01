@@ -75,9 +75,9 @@ The executable dependency policy is stored in [`scripts/workspace-dependency-pol
 
 | Crate | Ownership |
 | --- | --- |
-| `uqa-core` | Values, document sets, relations, posting lists, ranked views, generalized postings, predicates, and shared graph value types |
+| `uqa-core` | Values, exact decimal representation and operations, document sets, relations, posting lists, ranked views, generalized postings, predicates, and shared graph value types |
 | `uqa-analysis` | Character filters, tokenizers, token filters, analyzers, stemming, and highlighting primitives |
-| `uqa-storage` | Backend-neutral document, inverted, vector, tensor, B-tree, block-max, spatial, catalog, and Key/Value contracts |
+| `uqa-storage` | Backend-neutral document, inverted, vector, tensor, B-tree, block-max, spatial, catalog, ordered catalog-version migration, and Key/Value contracts |
 | `uqa-storage-sqlite` | SQLite implementation of the ordered Key/Value contract |
 | `uqa-storage-redb` | redb implementation and persistent session provider |
 | `uqa-scoring` | BM25, Bayesian BM25, score domains, calibration, learning, WAND, and Block-Max WAND |
@@ -86,8 +86,8 @@ The executable dependency policy is stored in [`scripts/workspace-dependency-pol
 | `uqa-graph` | Named graph stores, Cypher, RPQ automata, graph algebra, centrality, temporal traversal, and graph indexes |
 | `uqa-joins` | Relational and cross-paradigm join algorithms |
 | `uqa-pg-query` | Imported PostgreSQL 18 `libpg_query` pin used through the `pg_query` library name |
-| `uqa-sql` | `uqa-pg-query` frontend, SQL AST, statement compiler, scalar IR definitions, and syntax registry |
-| `uqa-execution` | Pull-based physical rows, batches, spill structures, sorting, grouping, windows, and joins |
+| `uqa-sql` | `uqa-pg-query` frontend, SQL AST, statement compiler, syntax registry, value-expression dispatch, and PostgreSQL-compatible value casting |
+| `uqa-execution` | Pull-based physical rows, physical scalar IR and evaluation, routine type resolution, batches, spill structures, distinctness, sorting, grouping, windows, and joins |
 | `uqa-planner` | Cardinality, cost, DPccp join ordering, unified-plan optimization, and physical access selection |
 | `uqa-engine` | Composition, SQL lifecycle, sessions, transactions, restore, publication, and public API |
 | `uqa` | Application facade over `uqa-engine` with the core `Value` type re-exported |
@@ -157,11 +157,17 @@ All INSERT, UPDATE, DELETE, and MERGE entry points use one mutation-command boun
 | Area | Entry point |
 | --- | --- |
 | Core carriers | [`crates/uqa-core/src/lib.rs`](../../../crates/uqa-core/src/lib.rs) |
+| Exact decimal value | [`crates/uqa-core/src/types/decimal`](../../../crates/uqa-core/src/types/decimal) |
 | SQL compiler | [`crates/uqa-sql/src/compiler.rs`](../../../crates/uqa-sql/src/compiler.rs) |
+| SQL value expressions and casting | [`crates/uqa-sql/src/expr`](../../../crates/uqa-sql/src/expr) |
 | Planner | [`crates/uqa-planner/src/lib.rs`](../../../crates/uqa-planner/src/lib.rs) |
 | Query optimizer | [`crates/uqa-planner/src/query_optimizer.rs`](../../../crates/uqa-planner/src/query_optimizer.rs) |
 | Execution | [`crates/uqa-execution/src/lib.rs`](../../../crates/uqa-execution/src/lib.rs) |
+| Physical scalar evaluation | [`crates/uqa-execution/src/scalar`](../../../crates/uqa-execution/src/scalar) |
 | Physical scalar traversal | [`crates/uqa-execution/src/scalar/traversal.rs`](../../../crates/uqa-execution/src/scalar/traversal.rs) |
+| Routine signature resolution | [`crates/uqa-execution/src/type_resolution/routine_signature`](../../../crates/uqa-execution/src/type_resolution/routine_signature) |
+| DISTINCT execution | [`crates/uqa-execution/src/distinct`](../../../crates/uqa-execution/src/distinct) |
+| Hash-join execution | [`crates/uqa-execution/src/join`](../../../crates/uqa-execution/src/join) |
 | Engine composition | [`crates/uqa-engine/src/lib.rs`](../../../crates/uqa-engine/src/lib.rs) |
 | Engine capability adapters | [`crates/uqa-engine/src/engine_capabilities.rs`](../../../crates/uqa-engine/src/engine_capabilities.rs) |
 | Statement catalog snapshot | [`crates/uqa-engine/src/engine_capabilities/catalog.rs`](../../../crates/uqa-engine/src/engine_capabilities/catalog.rs) |
@@ -175,6 +181,8 @@ All INSERT, UPDATE, DELETE, and MERGE entry points use one mutation-command boun
 | Query evaluation scopes | [`crates/uqa-engine/src/sql/select/evaluation.rs`](../../../crates/uqa-engine/src/sql/select/evaluation.rs) |
 | Physical query construction | [`crates/uqa-engine/src/sql/select/physical_plan.rs`](../../../crates/uqa-engine/src/sql/select/physical_plan.rs) |
 | Storage contracts | [`crates/uqa-storage/src/lib.rs`](../../../crates/uqa-storage/src/lib.rs) |
+| SQLite catalog migrations | [`crates/uqa-storage/src/sqlite/catalog/migration`](../../../crates/uqa-storage/src/sqlite/catalog/migration) |
+| Exact WAND and Block-Max WAND | [`crates/uqa-scoring/src/wand`](../../../crates/uqa-scoring/src/wand) |
 | Graph runtime | [`crates/uqa-graph/src/lib.rs`](../../../crates/uqa-graph/src/lib.rs) |
 
 The longer [system architecture design](../../design/architecture.md) records detailed performance paths and design rationale.

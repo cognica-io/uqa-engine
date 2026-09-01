@@ -9,9 +9,10 @@
 use num_bigint::BigInt;
 use num_traits::Zero;
 
+use super::arithmetic::divide_round_away_from_zero;
+use super::transcendental::{rounded_decimal_product, select_decimal_power_scale};
 use super::{
-    decimal_digit_count, divide_round_away_from_zero, pow10, rounded_decimal_product,
-    select_decimal_power_scale, DecimalRepr, DecimalValue, MAX_DISPLAY_SCALE, MAX_INTEGER_DIGITS,
+    decimal_digit_count, pow10, DecimalRepr, DecimalValue, MAX_DISPLAY_SCALE, MAX_INTEGER_DIGITS,
 };
 
 const MAX_GROUP_WEIGHT: i32 = i16::MAX as i32;

@@ -103,6 +103,18 @@ cargo test -p uqa-engine --test integration engine_queries::sql_row_locks_rechec
 
 The library filters exercise immutable catalog snapshots, relation-name resolution, a deterministic complete-query binder fixture without `Engine`, physical construction from a bound plan and explicit runtime capabilities, complete physical-scalar traversal, exactly-one transaction-frame selection, transaction-scope and lock-guard cleanup, wait cancellation, deadlock detection, change epochs and update chains, overlay cleanup, and strict round trips and malformed-input rejection for prepared mutation spill rows. The integration filters execute virtual catalog reads against session state, persistent schema lifecycle, memory and persistent transactions, savepoints, failed transaction state, sibling writer waits, independent-process locks and deadlocks, and every DML command family through the same protocol, so none of this evidence is compile-only.
 
+Lower-crate ownership changes run each affected crate's one complete unit-and-integration surface, including registered benchmark targets, before downstream engine verification:
+
+```sh
+cargo test -p uqa-core --all-targets
+cargo test -p uqa-sql --all-targets
+cargo test -p uqa-execution --all-targets
+cargo test -p uqa-scoring --all-targets
+cargo test -p uqa-storage --all-targets
+```
+
+These surfaces cover decimal parsing, formatting, arithmetic, conversion, comparison, expression dispatch and casting, routine matching, scalar evaluation, in-memory and forced-spill DISTINCT and hash joins, WAND exactness, every SQLite catalog-version migration, failure rollback, and close-and-reopen restoration. Public facade paths remain exercised by downstream workspace compilation and the engine integration target.
+
 ## Exactness oracles
 
 WAND and Block-Max WAND output is compared with exhaustive BM25 over the same postings and parameters. Approximate vector indexes are compared with brute-force cosine top-K. Join algorithms are compared with a simpler semantic path or property-generated expected result. Graph codec round trips compare complete payload, not only support identities.

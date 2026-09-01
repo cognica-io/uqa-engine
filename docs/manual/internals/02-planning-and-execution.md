@@ -66,7 +66,7 @@ Catalog projection is split by virtual-relation family under [`sql/catalog/pg_ca
 
 Schema binding keeps scope, source, projection, routine/type, CTE, and catalog-source owners under [`sql/select/schema_binding/`](../../../crates/uqa-engine/src/sql/select/schema_binding). A deterministic fixture binds a complete query against `CatalogReadView` and `RoutineResolution` without constructing `Engine`. Evaluation keeps CTE lifetime, subquery cache, row-lock state, callbacks, and type resolution under [`sql/select/evaluation/`](../../../crates/uqa-engine/src/sql/select/evaluation), while physical construction keeps projection, aggregation, ordering, limits, row locking, operator assembly, and output finishing under [`sql/select/physical_plan/`](../../../crates/uqa-engine/src/sql/select/physical_plan).
 
-Reusable physical-scalar traversal is owned by [`uqa-execution/src/scalar/traversal.rs`](../../../crates/uqa-execution/src/scalar/traversal.rs). SELECT expression-shape and volatility checks use that traversal instead of maintaining incomplete recursive copies. Engine-specific planner statistics implement the narrow `SourceStatistics` contract and preserve the first callback failure instead of substituting guessed statistics.
+Reusable physical-scalar traversal is owned by [`uqa-execution/src/scalar/traversal.rs`](../../../crates/uqa-execution/src/scalar/traversal.rs). The surrounding [`scalar`](../../../crates/uqa-execution/src/scalar) owner separates physical IR, subquery protocol, evaluation context, call-argument validation, and evaluator operations. SELECT expression-shape and volatility checks use the shared traversal instead of maintaining incomplete recursive copies. Engine-specific planner statistics implement the narrow `SourceStatistics` contract and preserve the first callback failure instead of substituting guessed statistics.
 
 ## Access path selection
 
@@ -166,6 +166,8 @@ Physical relational operators are pull-based and exchange batches of dynamic `Va
 
 Sort, distinct, set operations, ordered aggregates, windows, grouping output, joins, and result materialization account against `work_mem`. When a blocking structure exceeds its budget, it uses the execution spill layer instead of retaining unbounded process memory.
 
+[`distinct`](../../../crates/uqa-execution/src/distinct) keeps canonical row encoding, the in-memory seen set, the spill-backed set, and the operator wrapper as separate owners. [`join`](../../../crates/uqa-execution/src/join) likewise separates the row store, direct in-memory index, canonical disk-capable index, and hash-join driver; these modules share the spill layer without hiding spill transitions inside key policy.
+
 Spill format version 1 keeps rows positional: each batch records its exact physical width, logical-column and hidden `(qualifier, column)` alias-to-slot layout, internal-attribute layout, wildcard-hidden positions, and structural score sources once, followed by physical values, while indexed random-access spill retains that exact layout in its owner and writes only row values plus offsets. Spill paths do not construct or serialize `ResultRow` maps, and temporary spill files have no cross-version compatibility contract.
 
 Single-consumer derived-table projections can remain pull pipelines. Repeatable, volatile, blocking, or otherwise unsafe derived tables retain materialization, and repeatable CTE readers use `SharedSpill`.
@@ -173,6 +175,8 @@ Single-consumer derived-table projections can remain pull pipelines. Repeatable,
 ## Hash joins and spill
 
 Eligible unique-key inner joins hash borrowed physical slots and retain positions into the build row store. Hash matches are verified against original slots. If the direct structure exceeds its budget, execution rebuilds the canonical encoded-key index and uses the disk-spill path. General and outer hash joins use the exact encoded path, with right and full match state kept within bounded storage.
+
+Routine call mapping, polymorphic substitution, variadic planning, coercion targets, and ranked matches remain under [`uqa-execution/src/type_resolution/routine_signature`](../../../crates/uqa-execution/src/type_resolution/routine_signature). They consume execution's shared common-type and overload-ranking policy; moving that subtree alone to `uqa-sql` would invert the existing `uqa-execution` to `uqa-sql` dependency or duplicate the policy, so a crate move requires a separately proven movement of the complete typing-policy bundle.
 
 ## Score cutoff optimization
 

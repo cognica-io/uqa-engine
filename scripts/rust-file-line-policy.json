@@ -6,14 +6,6 @@
   ],
   "oversized_files": [
     {
-      "path": "crates/uqa-core/src/types/decimal.rs",
-      "baseline_lines": 1331,
-      "owner": "uqa-core decimal value semantics",
-      "responsibility_groups": ["representation and normalization", "parsing and formatting", "arithmetic", "conversion and comparison"],
-      "target_modules": ["crates/uqa-core/src/types/decimal/representation.rs", "crates/uqa-core/src/types/decimal/parse.rs", "crates/uqa-core/src/types/decimal/arithmetic.rs", "crates/uqa-core/src/types/decimal/conversion.rs"],
-      "migration_state": "planned"
-    },
-    {
       "path": "crates/uqa-engine/src/engine_events/validation.rs",
       "baseline_lines": 1446,
       "owner": "uqa-engine trigger and rule definition validation",
@@ -302,30 +294,6 @@
       "migration_state": "planned"
     },
     {
-      "path": "crates/uqa-execution/src/distinct.rs",
-      "baseline_lines": 1288,
-      "owner": "uqa-execution DISTINCT operator",
-      "responsibility_groups": ["canonical row encoding", "in-memory set", "spill set", "operator lifecycle"],
-      "target_modules": ["crates/uqa-execution/src/distinct/codec.rs", "crates/uqa-execution/src/distinct/memory.rs", "crates/uqa-execution/src/distinct/spill.rs", "crates/uqa-execution/src/distinct/operator.rs"],
-      "migration_state": "planned"
-    },
-    {
-      "path": "crates/uqa-execution/src/join.rs",
-      "baseline_lines": 1401,
-      "owner": "uqa-execution hash join",
-      "responsibility_groups": ["row storage", "in-memory index", "disk index and spill", "join driver"],
-      "target_modules": ["crates/uqa-execution/src/join/rows.rs", "crates/uqa-execution/src/join/memory_index.rs", "crates/uqa-execution/src/join/disk_index.rs", "crates/uqa-execution/src/join/hash_join.rs"],
-      "migration_state": "planned"
-    },
-    {
-      "path": "crates/uqa-execution/src/scalar.rs",
-      "baseline_lines": 1122,
-      "owner": "uqa-execution scalar physical evaluation",
-      "responsibility_groups": ["scalar IR", "subquery protocol", "evaluation context", "call validation and evaluator"],
-      "target_modules": ["crates/uqa-execution/src/scalar/traversal.rs", "crates/uqa-execution/src/scalar/ir.rs", "crates/uqa-execution/src/scalar/subquery.rs", "crates/uqa-execution/src/scalar/context.rs", "crates/uqa-execution/src/scalar/evaluator.rs"],
-      "migration_state": "in-progress"
-    },
-    {
       "path": "crates/uqa-execution/src/spill.rs",
       "baseline_lines": 1049,
       "owner": "uqa-execution spill storage",
@@ -334,27 +302,11 @@
       "migration_state": "planned"
     },
     {
-      "path": "crates/uqa-execution/src/type_resolution/routine_signature.rs",
-      "baseline_lines": 1459,
-      "owner": "uqa-execution routine signature resolution",
-      "responsibility_groups": ["argument mapping", "polymorphic substitution", "variadic planning", "coercion ranking"],
-      "target_modules": ["crates/uqa-execution/src/type_resolution/routine_signature/mapping.rs", "crates/uqa-execution/src/type_resolution/routine_signature/polymorphic.rs", "crates/uqa-execution/src/type_resolution/routine_signature/variadic.rs", "crates/uqa-execution/src/type_resolution/routine_signature/ranking.rs"],
-      "migration_state": "planned"
-    },
-    {
       "path": "crates/uqa-execution/src/type_resolution/tests.rs",
       "baseline_lines": 1026,
       "owner": "uqa-execution type-resolution unit tests",
       "responsibility_groups": ["common types", "polymorphic routines", "variadic routines", "coercion diagnostics"],
       "target_modules": ["crates/uqa-execution/src/type_resolution/tests/common.rs", "crates/uqa-execution/src/type_resolution/tests/polymorphic.rs", "crates/uqa-execution/src/type_resolution/tests/variadic.rs"],
-      "migration_state": "planned"
-    },
-    {
-      "path": "crates/uqa-scoring/src/wand.rs",
-      "baseline_lines": 1470,
-      "owner": "uqa-scoring WAND retrieval",
-      "responsibility_groups": ["cursor state", "upper-bound computation", "WAND loop", "Block-Max WAND loop", "diagnostics"],
-      "target_modules": ["crates/uqa-scoring/src/wand/cursor.rs", "crates/uqa-scoring/src/wand/bounds.rs", "crates/uqa-scoring/src/wand/wand.rs", "crates/uqa-scoring/src/wand/block_max.rs"],
       "migration_state": "planned"
     },
     {
@@ -371,22 +323,6 @@
       "owner": "uqa-sql routine compiler",
       "responsibility_groups": ["function compilation", "procedure compilation", "routine arguments", "routine body and attributes"],
       "target_modules": ["crates/uqa-sql/src/compiler/routines/function.rs", "crates/uqa-sql/src/compiler/routines/procedure.rs", "crates/uqa-sql/src/compiler/routines/arguments.rs"],
-      "migration_state": "planned"
-    },
-    {
-      "path": "crates/uqa-sql/src/expr.rs",
-      "baseline_lines": 1493,
-      "owner": "uqa-sql scalar expression evaluation",
-      "responsibility_groups": ["evaluation context and lookup", "call dispatch", "argument normalization", "builtin execution", "type diagnostics"],
-      "target_modules": ["crates/uqa-sql/src/expr/context.rs", "crates/uqa-sql/src/expr/calls.rs", "crates/uqa-sql/src/expr/arguments.rs", "crates/uqa-sql/src/expr/builtins.rs"],
-      "migration_state": "planned"
-    },
-    {
-      "path": "crates/uqa-sql/src/expr/casting.rs",
-      "baseline_lines": 1418,
-      "owner": "uqa-sql PostgreSQL value casting",
-      "responsibility_groups": ["scalar and numeric casts", "OID and binary casts", "array casts", "temporal casts", "range and multirange casts"],
-      "target_modules": ["crates/uqa-sql/src/expr/casting/scalar.rs", "crates/uqa-sql/src/expr/casting/binary.rs", "crates/uqa-sql/src/expr/casting/array.rs", "crates/uqa-sql/src/expr/casting/temporal.rs", "crates/uqa-sql/src/expr/casting/range.rs"],
       "migration_state": "planned"
     },
     {
@@ -427,14 +363,6 @@
       "owner": "uqa-storage key-value backend tests",
       "responsibility_groups": ["documents", "indexes", "transactions", "failure and reopen behavior"],
       "target_modules": ["crates/uqa-storage/src/key_value/tests/documents.rs", "crates/uqa-storage/src/key_value/tests/indexes.rs", "crates/uqa-storage/src/key_value/tests/transactions.rs"],
-      "migration_state": "planned"
-    },
-    {
-      "path": "crates/uqa-storage/src/sqlite/catalog/migration.rs",
-      "baseline_lines": 1154,
-      "owner": "uqa-storage SQLite catalog migration",
-      "responsibility_groups": ["migration registry", "version dispatch", "catalog-version steps", "reopen validation"],
-      "target_modules": ["crates/uqa-storage/src/sqlite/catalog/migration/registry.rs", "crates/uqa-storage/src/sqlite/catalog/migration/steps.rs", "crates/uqa-storage/src/sqlite/catalog/migration/validation.rs"],
       "migration_state": "planned"
     },
     {

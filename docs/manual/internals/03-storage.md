@@ -112,7 +112,7 @@ sequenceDiagram
 
 ## Migrations
 
-Provider open runs required schema and posting-format migrations before table and index handles are restored. The clustered-posting migration is bounded, atomic, idempotent, and validates output before recording its format marker. Failure retains the legacy representation and leaves no partial new representation.
+Provider open runs required schema and posting-format migrations before table and index handles are restored. [`migration/registry.rs`](../../../crates/uqa-storage/src/sqlite/catalog/migration/registry.rs) is the single ordered dispatcher, while [`migration/steps/`](../../../crates/uqa-storage/src/sqlite/catalog/migration/steps) gives every catalog version its own SQL or data-dependent owner and records the version only after that step commits. The clustered-posting migration is bounded, atomic, idempotent, and validates output before recording its format marker. Failure retains the legacy representation and leaves no partial new representation.
 
 An application upgrade should test open, restore, query, mutation, close, and reopen against a copy of production-shaped data. Storage compatibility is a release boundary even when the public SQL remains unchanged.
 
@@ -128,6 +128,8 @@ The [compressed VFS security contract](../../design/compressed-vfs-security.md) 
 | --- | --- |
 | Storage traits | [`crates/uqa-storage/src/lib.rs`](../../../crates/uqa-storage/src/lib.rs) |
 | SQLite catalog | [`crates/uqa-storage/src/sqlite`](../../../crates/uqa-storage/src/sqlite) |
+| SQLite migration dispatcher | [`crates/uqa-storage/src/sqlite/catalog/migration/registry.rs`](../../../crates/uqa-storage/src/sqlite/catalog/migration/registry.rs) |
+| SQLite catalog-version steps | [`crates/uqa-storage/src/sqlite/catalog/migration/steps`](../../../crates/uqa-storage/src/sqlite/catalog/migration/steps) |
 | SQLite Key/Value store | [`crates/uqa-storage-sqlite/src/lib.rs`](../../../crates/uqa-storage-sqlite/src/lib.rs) |
 | redb provider | [`crates/uqa-storage-redb/src/lib.rs`](../../../crates/uqa-storage-redb/src/lib.rs) |
 | Engine open and restore | [`crates/uqa-engine/src/engine_open`](../../../crates/uqa-engine/src/engine_open) |

@@ -2,7 +2,7 @@
 
 Status: Active architecture refactoring plan
 
-Current implementation position: Phase 0 through Phase 4 are complete. The checked-in transition ratchet now inventories 55 files at or above 1,000 physical lines, immutable statement catalog snapshots and four narrow capabilities govern the read path, catalog projection, schema binding, evaluation scopes, physical construction, mutation, transactions, and locks have responsibility-owned modules, every DML command and action family uses one typed mutation protocol, the facade roots and sole dispatcher remain reduced without adding an execution path, and Phase 5 lower-crate decomposition is next.
+Current implementation position: Phase 0 through Phase 5 are complete. The checked-in transition ratchet now inventories 46 files at or above 1,000 physical lines, immutable statement catalog snapshots and four narrow capabilities govern the read path, catalog projection, schema binding, evaluation scopes, physical construction, mutation, transactions, locks, and the selected lower-crate hotspots have responsibility-owned modules, every DML command and action family uses one typed mutation protocol, the facade roots and sole dispatcher remain reduced without adding an execution path, and Phase 6 test consolidation and final ceiling work is next.
 
 Update rule: Update this plan whenever a listed structural hotspot, capability boundary, crate responsibility, line-budget gate, test ownership rule, rollout phase, or completion metric changes. A file move or line-count reduction is not complete evidence unless the resulting owner, dependency direction, behavior contract, and focused tests satisfy this plan.
 
@@ -215,19 +215,41 @@ The structural ratchet now reports 55 files at or above 1,000 physical lines, wi
 
 The current library target reports 222 passed with no failures, and the single `uqa-engine` integration executable reports 2,067 passed, two ignored, and no failures across 2,069 discovered tests. Focused verification reports 9 transaction-owner tests, 18 lock-manager tests, one native sidecar-owner test, 58 transaction-lifecycle integration tests, 44 SQL row-lock tests, and 85 row-lock recheck, independent-process, deadlock, and writer-order tests, all passing. The current release `usql` was executed against Docker PostgreSQL 18.4 with Apache AGE 1.8.0: all 797 differential probes matched, and the complete stateful matrix matched routines 129/129, roles 136/136, constraints 162/162, type-temporal 49/49, triggers 584/584, rules 194/194, and transactions 61/61.
 
-### 3.6 Phase status at the current implementation
+### 3.6 Phase 5 boundary measurement
+
+The Phase 5 boundary was measured on 2026-09-01 with `bash scripts/measure-rust-refactoring.sh`. `cloc 2.08` reports 1,427 Rust files, 404,834 code lines, 19,551 comment lines, and 27,414 blank lines under `crates/`; the hand-maintained report excludes imported `uqa-pg-query` and reports 1,422 files, 436,508 physical lines, 46 inventoried files, and no file above 1,500 lines. The largest governed file is now `uqa-engine/src/sql/dml/constraints.rs` at 1,466 physical lines.
+
+| Boundary | Rust files | Physical lines or current size |
+| --- | ---: | ---: |
+| `uqa-core` | 30 | 7,832; decimal root 184 and largest child 428 |
+| `uqa-sql` | 113 | 37,321; expression root 111, new expression owners at most 410, casting root 496, and casting children at most 328 |
+| `uqa-execution` | 96 | 29,393; scalar root 147, routine root 316, DISTINCT root 188, and join root 822 |
+| `uqa-scoring` | 47 | 10,028; WAND root 28 and largest child 484 |
+| `uqa-storage` | 181 | 40,364; migration root 30, registry 101, and 25 ordered version modules at most 514 |
+
+`uqa-sql` expression evaluation now separates context and lookup, named and variadic call arguments, dispatch, builtins, diagnostics, and the evaluator; casting separates the scalar and range facade, OID and binary conversions, arrays, temporal values, legacy vectors, and focused tests. `uqa-execution` scalar evaluation separates its IR facade, traversal, subquery protocol, context, call validation, evaluator, and tests; DISTINCT separates canonical encoding, memory and spill sets, and its wrapper; hash joins separate row storage, direct indexing, canonical disk-capable indexing, nested loops, and the driver. WAND separates common result and bound validation, materialized and persistent cursor loops, diagnostics, and exactness tests. Decimal separates representation and normalization, parsing and formatting, arithmetic, sampling, transcendental power, conversion, comparison, and serde behavior.
+
+Routine call mapping, polymorphic substitution, variadic planning, coercion targeting, and ranked results remain in `uqa-execution` after dependency proof. The subtree imports execution-owned common-type and overload-ranking policy; those owners also contain `RowSchema`, `ScalarExpr`, and resolver adapters. Moving only routine matching to `uqa-sql` would create a reverse dependency or duplicate policy, so no crate edge changed and the complete typing-policy bundle remains a separately provable future move rather than a hidden P5 shortcut.
+
+SQLite catalog migration now has one ordered dispatcher and one module for every version from 1 through 25. SQL-only steps own their SQL, data-dependent steps own their rewrite and idempotence checks, the schema-version marker is written only after the selected action succeeds, and migration, rollback, fresh-open, upgrade, and close-and-reopen tests pass.
+
+The structural ratchet now reports 46 files at or above 1,000 physical lines, with counts of 23 at or above 1,200, 14 at or above 1,350, 10 at or above 1,400, three at or above 1,450, and none above 1,500. Nine former lower-crate hotspots left the inventory. The workspace dependency policy remains at 94 runtime edges across 30 crates, the integration harness remains 218 direct sources in 18 targets across 18 crates, and the three root lint allowances remain explicit Phase 6 debt.
+
+All affected crate unit, single integration, and registered benchmark targets pass; Clippy passes for `uqa-core`, `uqa-sql`, `uqa-execution`, `uqa-scoring`, and `uqa-storage` with warnings denied; every workspace target and downstream consumer compiles; and the single `uqa-engine` integration executable reports 2,067 passed, two ignored, and no failures across 2,069 discovered tests. The current release `usql` was built from this tree and executed against Docker PostgreSQL 18.4 with Apache AGE 1.8.0: all 797 differential probes matched, and the complete stateful matrix matched routines 129/129, roles 136/136, constraints 162/162, type-temporal 49/49, triggers 584/584, rules 194/194, and transactions 61/61.
+
+### 3.7 Phase status at the current implementation
 
 | Phase | Status | Current evidence |
 | --- | --- | --- |
-| Phase 0: structural ratchet | Complete | The exact transition ratchet inventories 55 current files, rejects growth and new 1,000-line files, all six inherited 1,500-line violations are responsibility-split, the root lint debt is explicitly counted, and the fixed runner has clean and warm timing baselines. |
+| Phase 0: structural ratchet | Complete | The exact transition ratchet inventories 46 current files, rejects growth and new 1,000-line files, all six inherited 1,500-line violations are responsibility-split, the root lint debt is explicitly counted, and the fixed runner has clean and warm timing baselines. |
 | Phase 1: capability boundaries and facade roots | Complete | Four narrow capabilities exist without an `Engine` escape hatch; `pg_namespace`, `pg_settings`, and `CREATE SCHEMA` prove read and write paths; the ownership checker enforces the selected leaves and adapters; `lib.rs`, `sql.rs`, and the sole executor are 863, 334, and 557 physical lines. |
 | Phase 2: catalog and read path | Complete | One immutable statement snapshot drives catalog projection, relation resolution, binding, filter pushdown, virtual and local scans, evaluation scopes, and physical construction; catalog, binder, evaluation, physical-plan, and scalar-traversal owners have focused tests; the capability policy, full integration target, release-`usql` differential probes, and all stateful PostgreSQL 18.4 with AGE suites pass. |
 | Phase 3: mutation path | Complete | Every DML command and action family uses one transaction entry and the shared typed candidate, overlay, lock, row-image, prepared-action, event, and publication protocol; superseded command-specific lifecycle and codec paths are absent; policy, unit, full integration, release-`usql` differential, and the complete affected PostgreSQL 18.4 with AGE matrix pass. |
 | Phase 4: transactions and locks | Complete | Transaction frames, implicit scopes, savepoints, snapshots, backend transitions, publication, and failure cleanup have explicit owners; row identities, grants, relation locks, waits, cleanup, change publication, and native sidecar responsibilities have explicit owners and scoped cleanup; all central files are below 1,000 lines and focused memory, persistent, sibling-session, independent-process, deadlock, timeout, cancellation, rollback, and panic-cleanup tests pass. |
-| Phase 5: lower crates | Preliminary scalar traversal split only; broader phase not complete | `uqa-execution/src/scalar/traversal.rs` now owns complete physical-scalar walking and the root is 1,122 lines, but `uqa-sql/src/expr.rs`, routine resolution, joins, distinct, scoring WAND, storage migration, decimal, and the remaining scalar responsibilities have not passed their exit gates. |
-| Phase 6: tests and final ceiling | Broader phase not started; initial hotspot resolved | `uqa-engine/tests` contains 86,889 physical lines across 238 files and 237 nested module declarations, and the single integration executable discovers 2,069 tests. The 3,486-line automatic-view source is now seven behavior modules of at most 826 lines, but other inventoried test sources and the final 1,000-line hard ceiling remain Phase 6 work. |
+| Phase 5: lower crates | Complete | SQL expression and casting, scalar execution, routine matching, DISTINCT, joins, WAND, SQLite migration, and decimal responsibilities have explicit owners; public facade paths remain compatible, no dependency edge changed, focused and downstream tests pass, and the transition inventory fell from 55 to 46 files. |
+| Phase 6: tests and final ceiling | Broader phase not started; initial hotspot resolved | `uqa-engine/tests` contains 86,889 physical lines across 238 files and 237 nested module declarations, and the single integration executable discovers 2,069 tests. The 3,486-line automatic-view source is now seven behavior modules of at most 826 lines, but 46 inventoried sources, other oversized tests, the three root lint allowances, and the final 1,000-line hard ceiling remain Phase 6 work. |
 
-The implementation sequence now moves to Phase 5. The completed transaction-and-lock bundle leaves CI topology unchanged: the harness checker still reports 218 direct integration sources in 18 targets across 18 crates, `UnifiedPlanExecutor` remains the only dispatcher, and the full `uqa-engine` integration target plus focused transaction, savepoint, row-lock, cancellation, deadlock, independent-process, and writer-order tests pass.
+The implementation sequence now moves to Phase 6. The completed lower-crate bundle leaves CI topology and dependency direction unchanged: the harness checker reports 218 direct integration sources in 18 targets across 18 crates, the dependency checker reports 94 runtime edges across 30 crates, `UnifiedPlanExecutor` remains the only dispatcher, and focused lower-crate, full `uqa-engine`, release-`usql`, and Docker PostgreSQL 18.4 with AGE verification pass.
 
 ## 4. Findings and root problems
 
@@ -255,11 +277,11 @@ The largest command, transaction, and lock roots do not merely contain many simi
 
 Splitting these files at arbitrary line positions would hide the issue. Each resulting module must own one state transition or one projection family and expose a small typed boundary.
 
-### 4.4 Lower-crate ownership is partially blurred
+### 4.4 Lower-crate ownership follows the proven dependency direction
 
-`uqa-execution` currently owns physical rows and operators, but it also owns the full SQL type-resolution tree and routine-signature matching. Some resolution code needs `RowSchema`, while much of the common-type, polymorphic, variadic, and fixed-overload policy is independent of physical execution. The split must follow dependency direction: pure SQL typing policy moves to `uqa-sql` when it can depend only on SQL AST and core values; row-schema adapters remain with planning or execution until a lower neutral interface exists.
+`uqa-execution` owns physical rows and operators together with the current common-type, overload-ranking, and routine-signature bundle. The routine subtree itself uses SQL AST carriers, but its matching and polymorphic modules import execution-owned `base_type`, `common_type`, canonical type naming, implicit-cast policy, and ranked-match contracts; the common-type owner also contains `RowSchema`, `ScalarExpr`, and resolver adapters. P5 therefore split call mapping, polymorphic substitution, variadic planning, coercion targets, ranked results, and tests in place. A later move to `uqa-sql` must first separate and move the complete pure typing-policy bundle without introducing the forbidden `uqa-sql` to `uqa-execution` reverse edge or duplicating policy.
 
-Similarly, `uqa-execution/src/scalar/traversal.rs` now owns complete scalar-tree inspection, but `scalar.rs` still combines the physical IR, subquery protocol, evaluation context, function-call argument validation, and evaluator; `join.rs` combines row storage, in-memory indexing, disk indexing, and the hash-join driver; `uqa-sql/src/expr/casting.rs` combines scalar, binary, array, range, and temporal conversion; and `uqa-scoring/src/wand.rs` combines cursor mechanics, bounds, and search execution. These are module-level ownership problems first and crate moves only where the dependency graph proves a better owner.
+The selected module-level ownership problems are resolved. Scalar traversal, subquery protocol, context, call validation, and evaluation are separate; join row storage and index forms are separate from the driver; DISTINCT encoding and memory or spill state are separate from the wrapper; SQL expression dispatch and casting families are separate; WAND cursor models and diagnostics are separate; SQLite catalog versions have independent owners behind one dispatcher; and decimal representation, operations, conversions, comparison, and text forms are separate. Remaining lower-crate files in the transition inventory are Phase 6 ceiling work rather than an alternate implementation of these owners.
 
 ### 4.5 Test consolidation controls executables but not test complexity
 
@@ -412,17 +434,17 @@ Exit gate: No central transaction or lock file exceeds the final limit, cleanup 
 
 The lower-crate work follows dependency order and is grouped by semantic owner rather than one PR per file:
 
-| Current hotspot | Required ownership split |
+| Former hotspot | Implemented ownership |
 | --- | --- |
-| `uqa-execution/src/scalar.rs` | Scalar physical IR and traversal, subquery protocol/result, evaluation context, call-argument validation, and evaluator operations. |
-| `uqa-execution/src/type_resolution/routine_signature.rs` | Call mapping, polymorphic-family substitution, variadic planning, coercion targets, and ranked match result; move pure SQL policy downward only after dependency proof. |
-| `uqa-execution/src/join.rs` | Row store, direct in-memory index, canonical/disk index, spill transition, and hash-join driver. |
-| `uqa-execution/src/distinct.rs` | Canonical row encoding/hash, memory set, spill set, and operator wrapper. |
-| `uqa-sql/src/expr.rs` | Evaluation context and row lookup, call dispatch, named/variadic argument normalization, builtin execution, and value type diagnostics. |
-| `uqa-sql/src/expr/casting.rs` | Scalar/numeric, OID and binary, array, temporal, and range/multirange conversion. |
-| `uqa-scoring/src/wand.rs` | Cursor state, bound computation, WAND loop, Block-Max WAND loop, and diagnostics. |
-| `uqa-storage/src/sqlite/catalog/migration.rs` | Migration registry plus one module per catalog-version step, with a single ordered dispatcher and reopen fixtures. |
-| `uqa-core/src/types/decimal.rs` | Representation and normalization, parsing/formatting, arithmetic, conversion, and comparison. |
+| `uqa-execution/src/scalar.rs` | [`scalar/`](../../crates/uqa-execution/src/scalar) owns the IR facade, traversal, subquery protocol, context, call validation, evaluator, and tests. |
+| `uqa-execution/src/type_resolution/routine_signature.rs` | [`routine_signature/`](../../crates/uqa-execution/src/type_resolution/routine_signature) owns mapping, polymorphic substitution, matching and ranking, and tests; the dependency proof keeps the complete policy bundle in execution. |
+| `uqa-execution/src/join.rs` | [`join/`](../../crates/uqa-execution/src/join) owns row storage, direct indexing, canonical disk-capable indexing, nested loops, driver, and tests. |
+| `uqa-execution/src/distinct.rs` | [`distinct/`](../../crates/uqa-execution/src/distinct) owns canonical encoding, memory state, spill state, wrapper, and tests. |
+| `uqa-sql/src/expr.rs` | [`expr/`](../../crates/uqa-sql/src/expr) owns context and lookup, dispatch, argument normalization, builtin execution, diagnostics, and evaluator operations. |
+| `uqa-sql/src/expr/casting.rs` | [`expr/casting/`](../../crates/uqa-sql/src/expr/casting) owns the scalar and range facade, OID and binary, array, temporal, legacy-vector conversions, and tests. |
+| `uqa-scoring/src/wand.rs` | [`wand/`](../../crates/uqa-scoring/src/wand) owns common bounds and results, materialized and persistent cursors and loops, diagnostics, and tests. |
+| `uqa-storage/src/sqlite/catalog/migration.rs` | [`migration/`](../../crates/uqa-storage/src/sqlite/catalog/migration) owns access and shape repair, one dispatcher, and 25 ordered version modules with reopen fixtures. |
+| `uqa-core/src/types/decimal.rs` | [`decimal/`](../../crates/uqa-core/src/types/decimal) owns representation and normalization, parsing and formatting, arithmetic, sampling and transcendental operations, conversion, comparison, power, and serde. |
 
 Exit gate: Each lower crate matches its documented ownership, no reverse dependency is introduced, public re-exports preserve compatibility, and focused crate tests plus cross-crate engine tests pass.
 

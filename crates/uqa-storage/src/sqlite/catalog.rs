@@ -47,13 +47,11 @@ mod foreign_indexes;
 mod graph;
 mod migration;
 mod models_scoring;
-mod schema_migrations;
 mod schema_tables;
 mod sequences_views;
 mod stats;
 
 use migration::{decode_catalog_id, encode_catalog_id, migration_relation};
-use schema_migrations::MIGRATIONS;
 
 #[cfg(test)]
 mod tests;

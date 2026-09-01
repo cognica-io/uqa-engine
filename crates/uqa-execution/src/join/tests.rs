@@ -4,6 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use std::io::{Seek, SeekFrom, Write};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 

@@ -52,6 +52,8 @@ For one field-bound score-ordered text leaf, the planner creates `TextTopKPlan`.
 
 WAND and Block-Max WAND skip only when an upper bound proves that a candidate cannot enter the current top-K. Therefore they are exact top-K algorithms under valid bounds. A write atomically invalidates persisted block bounds, and a validity change causes safe fallback.
 
+[`uqa-scoring/src/wand`](../../../crates/uqa-scoring/src/wand) separates shared result and bound validation, materialized posting-list cursors, persistent score cursors, the WAND and Block-Max WAND loops for each cursor model, and diagnostics. The root preserves the public scorer and result paths while each execution model owns its own cursor transitions.
+
 Boolean and fusion parents do not receive child text top-K pushdown because truncating one child can change the parent support and ranking.
 
 ## Posting cursor behavior
@@ -111,6 +113,7 @@ Approximate vector quality uses exact brute-force identities as the ground truth
 | Analysis | [`crates/uqa-analysis/src/lib.rs`](../../../crates/uqa-analysis/src/lib.rs) |
 | Analyzer catalog | [`crates/uqa-engine/src/engine_analyzers.rs`](../../../crates/uqa-engine/src/engine_analyzers.rs) |
 | Scoring | [`crates/uqa-scoring/src/lib.rs`](../../../crates/uqa-scoring/src/lib.rs) |
+| WAND and Block-Max WAND | [`crates/uqa-scoring/src/wand`](../../../crates/uqa-scoring/src/wand) |
 | Fusion | [`crates/uqa-fusion/src/lib.rs`](../../../crates/uqa-fusion/src/lib.rs) |
 | Operator algebra | [`crates/uqa-operators/src/lib.rs`](../../../crates/uqa-operators/src/lib.rs) |
 | Engine search | [`crates/uqa-engine/src/engine_search`](../../../crates/uqa-engine/src/engine_search) |
