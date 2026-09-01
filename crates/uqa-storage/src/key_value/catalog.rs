@@ -195,17 +195,22 @@ impl CatalogFacade for KeyValueCatalog {
         self.load_sequence_rows_impl()
     }
 
-    fn next_sequence_value(&self, name: &str) -> StorageBackendResult<Option<i64>> {
-        self.next_sequence_value_impl(name)
+    fn next_sequence_value(
+        &self,
+        name: &str,
+        object_id: [u8; 16],
+    ) -> StorageBackendResult<Option<i64>> {
+        self.next_sequence_value_impl(name, object_id)
     }
 
     fn set_sequence_value(
         &self,
         name: &str,
+        object_id: [u8; 16],
         value: i64,
         called: bool,
     ) -> StorageBackendResult<Option<i64>> {
-        self.set_sequence_value_impl(name, value, called)
+        self.set_sequence_value_impl(name, object_id, value, called)
     }
 
     fn save_view(&self, view: &ViewRow) -> StorageBackendResult<()> {

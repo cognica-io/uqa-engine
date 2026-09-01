@@ -7,10 +7,10 @@
 use super::{
     BTreeSet, BackendTransactionMode, ConstraintModeState, Engine, EngineDataSnapshot,
     FixedTransactionSnapshot, NontransactionalColumnStats, NontransactionalSequenceValues,
-    SQLError, SQLParam, SQLResult, SessionStateSnapshot, StorageBackendError, StorageBackendResult,
-    StorageSavepointId, TransactionCharacteristicsState, TransactionDirtyState, TransactionFrame,
-    TransactionIntent, TransactionRelationStates, TransactionRowChange, TransactionSavepoint,
-    TransactionStatus,
+    SQLError, SQLParam, SQLResult, SessionLastSequenceReference, SessionStateSnapshot,
+    StorageBackendError, StorageBackendResult, StorageSavepointId, TransactionCharacteristicsState,
+    TransactionDirtyState, TransactionFrame, TransactionIntent, TransactionRelationStates,
+    TransactionRowChange, TransactionSavepoint, TransactionStatus,
 };
 
 mod backend;

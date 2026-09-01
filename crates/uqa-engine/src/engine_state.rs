@@ -99,6 +99,7 @@ pub(super) struct DurableCatalogState {
     pub(super) schemas: RwLock<BTreeSet<String>>,
     pub(super) path_indexes: RwLock<BTreeMap<String, uqa_graph::PathIndex>>,
     pub(super) sequences: RwLock<BTreeMap<RelationIdentity, SequenceState>>,
+    pub(super) sequence_object_ids: RwLock<BTreeMap<RelationIdentity, [u8; 16]>>,
     pub(super) sequence_persistence:
         RwLock<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
     pub(super) named_analyzers: RwLock<BTreeMap<String, String>>,
@@ -132,6 +133,7 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) schemas: BTreeSet<String>,
     pub(super) path_indexes: BTreeMap<String, uqa_graph::PathIndex>,
     pub(super) sequences: BTreeMap<RelationIdentity, SequenceState>,
+    pub(super) sequence_object_ids: BTreeMap<RelationIdentity, [u8; 16]>,
     pub(super) sequence_persistence: BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>,
     pub(super) named_analyzers: BTreeMap<String, String>,
     pub(super) table_field_analyzers: TableFieldAnalyzerRegistry,
@@ -161,6 +163,7 @@ impl DurableCatalogState {
             schemas: RwLock::new(BTreeSet::from(["public".to_string()])),
             path_indexes: RwLock::new(BTreeMap::new()),
             sequences: RwLock::new(BTreeMap::new()),
+            sequence_object_ids: RwLock::new(BTreeMap::new()),
             sequence_persistence: RwLock::new(BTreeMap::new()),
             named_analyzers: RwLock::new(BTreeMap::new()),
             table_field_analyzers: RwLock::new(BTreeMap::new()),
@@ -188,6 +191,7 @@ impl DurableCatalogState {
             schemas: self.schemas.read().clone(),
             path_indexes: self.path_indexes.read().clone(),
             sequences: self.sequences.read().clone(),
+            sequence_object_ids: self.sequence_object_ids.read().clone(),
             sequence_persistence: self.sequence_persistence.read().clone(),
             named_analyzers: self.named_analyzers.read().clone(),
             table_field_analyzers: self.table_field_analyzers.read().clone(),
@@ -211,6 +215,7 @@ impl DurableCatalogState {
         self.schemas.write().clone_from(&snapshot.schemas);
         *self.path_indexes.write() = snapshot.path_indexes.clone();
         *self.sequences.write() = snapshot.sequences.clone();
+        *self.sequence_object_ids.write() = snapshot.sequence_object_ids.clone();
         *self.sequence_persistence.write() = snapshot.sequence_persistence.clone();
         *self.named_analyzers.write() = snapshot.named_analyzers.clone();
         *self.table_field_analyzers.write() = snapshot.table_field_analyzers.clone();
@@ -249,6 +254,7 @@ impl SessionContext {
             temporary_namespace_allocated: false,
             session_vars: BTreeMap::new(),
             sequence_currvals: BTreeMap::new(),
+            last_sequence: None,
             prepared: BTreeMap::new(),
             sql_statement_cache: SQLStatementCache::default(),
             portal_names: BTreeSet::new(),

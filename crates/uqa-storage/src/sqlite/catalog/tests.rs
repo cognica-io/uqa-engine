@@ -277,12 +277,48 @@ fn migration_25_adds_persistent_table_object_identities() {
 }
 
 #[test]
+fn migration_26_adds_persistent_sequence_object_identities() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let current = Catalog::open(connection.clone()).unwrap();
+    current
+        .create_sequence_row(&SequenceRow {
+            relation: RelationIdentity::new("public", "legacy_sequence_object"),
+            object_id: [7; 16],
+            start: 1,
+            increment: 1,
+            current: 1,
+            called: false,
+            persistence: "p".into(),
+        })
+        .unwrap();
+    drop(current);
+    connection
+        .with(|database| {
+            database.execute("ALTER TABLE _sequences DROP COLUMN object_id", [])?;
+            database.execute(
+                "UPDATE _metadata SET value = '25' WHERE key = 'schema_version'",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+    let upgraded = Catalog::open(connection).unwrap();
+    let mut sequence = upgraded.load_sequence_rows().unwrap().remove(0);
+    assert_eq!(sequence.object_id, [0; 16]);
+    sequence.object_id = [9; 16];
+    assert!(upgraded.replace_sequence_row(&sequence).unwrap());
+    assert_eq!(upgraded.load_sequence_rows().unwrap()[0].object_id, [9; 16]);
+}
+
+#[test]
 fn migration_18_preserves_legacy_sequence_sentinel_semantics() {
     let connection = ManagedConnection::open_in_memory().unwrap();
     let current = Catalog::open(connection.clone()).unwrap();
     current
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "legacy_uncalled"),
+            object_id: [18; 16],
             start: 1,
             increment: 1,
             current: 0,
@@ -310,7 +346,7 @@ fn migration_18_preserves_legacy_sequence_sentinel_semantics() {
     );
     assert_eq!(
         upgraded
-            .next_sequence_value("public.legacy_uncalled")
+            .next_sequence_value("public.legacy_uncalled", row.object_id)
             .unwrap(),
         Some(1)
     );
@@ -331,9 +367,11 @@ fn migration_18_preserves_legacy_sequence_sentinel_semantics() {
 fn sequence_set_value_preserves_the_next_allocation_state() {
     let connection = ManagedConnection::open_in_memory().unwrap();
     let catalog = Catalog::open(connection).unwrap();
+    let object_id = [7; 16];
     catalog
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "controlled"),
+            object_id,
             start: 1,
             increment: 2,
             current: 1,
@@ -344,7 +382,13 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
 
     assert_eq!(
         catalog
-            .set_sequence_value("public.controlled", 7, false)
+            .next_sequence_value("public.controlled", [8; 16])
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        catalog
+            .set_sequence_value("public.controlled", object_id, 7, false)
             .unwrap(),
         Some(7)
     );
@@ -352,21 +396,27 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
     assert_eq!(uncalled.current, 7);
     assert!(!uncalled.called);
     assert_eq!(
-        catalog.next_sequence_value("public.controlled").unwrap(),
+        catalog
+            .next_sequence_value("public.controlled", object_id)
+            .unwrap(),
         Some(7)
     );
     assert_eq!(
-        catalog.next_sequence_value("public.controlled").unwrap(),
+        catalog
+            .next_sequence_value("public.controlled", object_id)
+            .unwrap(),
         Some(9)
     );
     assert_eq!(
         catalog
-            .set_sequence_value("public.controlled", 20, true)
+            .set_sequence_value("public.controlled", object_id, 20, true)
             .unwrap(),
         Some(20)
     );
     assert_eq!(
-        catalog.next_sequence_value("public.controlled").unwrap(),
+        catalog
+            .next_sequence_value("public.controlled", object_id)
+            .unwrap(),
         Some(22)
     );
 }
@@ -378,6 +428,7 @@ fn migration_23_moves_sequence_persistence_into_typed_rows() {
     current
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "unlogged_ids"),
+            object_id: [23; 16],
             start: 1,
             increment: 1,
             current: 1,

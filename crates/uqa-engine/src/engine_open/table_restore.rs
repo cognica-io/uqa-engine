@@ -234,7 +234,8 @@ impl Engine {
         Self::migrate_table_identities(catalog)?;
         Self::repair_dangling_hierarchy_parents(catalog)?;
         Self::migrate_constraint_names_from_metadata(catalog)?;
-        Self::migrate_legacy_sequences_from_metadata(catalog)
+        Self::migrate_legacy_sequences_from_metadata(catalog)?;
+        Self::migrate_sequence_identities(catalog)
     }
 
     fn migrate_table_identities(catalog: &dyn CatalogFacade) -> StorageBackendResult<()> {

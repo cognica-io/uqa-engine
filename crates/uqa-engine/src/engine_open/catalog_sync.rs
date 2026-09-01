@@ -223,9 +223,21 @@ impl Engine {
             .filter(|(relation, _)| temporary_sequence_persistence.contains_key(*relation))
             .map(|(relation, state)| (relation.clone(), *state))
             .collect::<BTreeMap<_, _>>();
+        let temporary_sequence_object_ids = self
+            .durable
+            .sequence_object_ids
+            .read()
+            .iter()
+            .filter(|(relation, _)| temporary_sequence_persistence.contains_key(*relation))
+            .map(|(relation, object_id)| (relation.clone(), *object_id))
+            .collect::<BTreeMap<_, _>>();
         self.durable.restore(&latest.durable.snapshot());
         self.durable.views.write().extend(temporary_views);
         self.durable.sequences.write().extend(temporary_sequences);
+        self.durable
+            .sequence_object_ids
+            .write()
+            .extend(temporary_sequence_object_ids);
         self.durable
             .sequence_persistence
             .write()

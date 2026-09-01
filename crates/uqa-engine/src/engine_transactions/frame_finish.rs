@@ -8,9 +8,9 @@
 
 use super::{
     Engine, NontransactionalColumnStats, NontransactionalSequenceValues, SQLError,
-    SessionStateSnapshot, StorageBackendError, StorageBackendResult, StorageSavepointId,
-    TransactionDirtyState, TransactionFrame, TransactionIntent, TransactionRelationStates,
-    TransactionStatus,
+    SessionLastSequenceReference, SessionStateSnapshot, StorageBackendError, StorageBackendResult,
+    StorageSavepointId, TransactionDirtyState, TransactionFrame, TransactionIntent,
+    TransactionRelationStates, TransactionStatus,
 };
 
 impl Engine {
@@ -434,25 +434,29 @@ impl Engine {
         }
         let persistent = {
             let sequences = self.durable.sequences.read();
+            let object_ids = self.durable.sequence_object_ids.read();
             let persistence = self.durable.sequence_persistence.read();
             values
                 .iter()
                 .filter(|(relation, _)| sequences.contains_key(*relation))
+                .filter(|(relation, value)| {
+                    object_ids.get(*relation).copied() == Some(value.object_id)
+                })
                 .filter(|(relation, _)| {
                     persistence.get(*relation).copied().unwrap_or_default()
                         != uqa_sql::ast::RelationPersistence::Temporary
                 })
                 .filter(|(_, value)| !value.autonomous)
-                .map(|(relation, value)| (relation.qualified_name(), *value))
+                .map(|(relation, value)| (relation.qualified_name(), value.object_id, *value))
                 .collect::<Vec<_>>()
         };
         if persistent.is_empty() {
             return Ok(());
         }
         let persist = |catalog: &dyn uqa_storage::CatalogFacade| -> StorageBackendResult<()> {
-            for (name, value) in &persistent {
+            for (name, object_id, value) in &persistent {
                 if catalog
-                    .set_sequence_value(name, value.current, value.called)?
+                    .set_sequence_value(name, *object_id, value.current, value.called)?
                     .is_none()
                 {
                     return Err(StorageBackendError::Other(format!(
@@ -492,8 +496,18 @@ impl Engine {
         values: &NontransactionalSequenceValues,
     ) {
         let mut sequences = self.durable.sequences.write();
+        let object_ids = self.durable.sequence_object_ids.read();
         let mut session = self.session.state.write();
+        if let Some((relation, value)) = values.iter().find(|(_, value)| value.defines_lastval) {
+            session.last_sequence = Some(SessionLastSequenceReference {
+                relation: relation.clone(),
+                object_id: value.object_id,
+            });
+        }
         for (relation, value) in values {
+            if object_ids.get(relation).copied() != Some(value.object_id) {
+                continue;
+            }
             let Some(sequence) = sequences.get_mut(relation) else {
                 continue;
             };

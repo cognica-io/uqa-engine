@@ -50,6 +50,7 @@ impl KeyValueCatalog {
         batch.put(
             &key,
             &encode_value(&StoredSequence {
+                object_id: sequence.object_id,
                 start: sequence.start,
                 increment: sequence.increment,
                 current: sequence.current,
@@ -74,6 +75,7 @@ impl KeyValueCatalog {
         self.store.put(
             &key,
             &encode_value(&StoredSequence {
+                object_id: sequence.object_id,
                 start: sequence.start,
                 increment: sequence.increment,
                 current: sequence.current,
@@ -109,6 +111,7 @@ impl KeyValueCatalog {
                 let stored: StoredSequence = decode_value(&value)?;
                 Ok(SequenceRow {
                     relation,
+                    object_id: stored.object_id,
                     start: stored.start,
                     increment: stored.increment,
                     current: stored.current,
@@ -121,7 +124,11 @@ impl KeyValueCatalog {
         Ok(rows)
     }
 
-    pub(super) fn next_sequence_value_impl(&self, name: &str) -> StorageBackendResult<Option<i64>> {
+    pub(super) fn next_sequence_value_impl(
+        &self,
+        name: &str,
+        object_id: [u8; 16],
+    ) -> StorageBackendResult<Option<i64>> {
         let _guard = self.sequence_lock.lock();
         let relation =
             RelationIdentity::from_legacy_name(name).map_err(StorageBackendError::Other)?;
@@ -130,6 +137,9 @@ impl KeyValueCatalog {
             return Ok(None);
         };
         let mut stored: StoredSequence = decode_value(&value)?;
+        if stored.object_id != object_id {
+            return Ok(None);
+        }
         if stored.called {
             stored.current = stored
                 .current
@@ -148,6 +158,7 @@ impl KeyValueCatalog {
     pub(super) fn set_sequence_value_impl(
         &self,
         name: &str,
+        object_id: [u8; 16],
         value: i64,
         called: bool,
     ) -> StorageBackendResult<Option<i64>> {
@@ -159,6 +170,9 @@ impl KeyValueCatalog {
             return Ok(None);
         };
         let mut stored: StoredSequence = decode_value(&encoded)?;
+        if stored.object_id != object_id {
+            return Ok(None);
+        }
         stored.current = value;
         stored.called = called;
         self.store.put(&key, &encode_value(&stored)?)?;

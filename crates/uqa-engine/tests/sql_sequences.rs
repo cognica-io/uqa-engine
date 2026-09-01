@@ -465,6 +465,33 @@ fn sequence_state_survives_reopen() {
     );
 }
 
+fn assert_rolled_back_recreation_keeps_the_original_sequence(engine: &Engine) {
+    engine
+        .create_sequence("incarnation_ids", 10, 1, false)
+        .unwrap();
+    assert_eq!(engine.nextval("incarnation_ids").unwrap(), 10);
+
+    engine.begin().unwrap();
+    assert!(engine.drop_sequence("incarnation_ids").unwrap());
+    assert!(engine
+        .create_sequence("incarnation_ids", 100, 1, false)
+        .unwrap());
+    assert_eq!(engine.nextval("incarnation_ids").unwrap(), 100);
+    engine.rollback().unwrap();
+
+    assert_eq!(engine.currval("incarnation_ids").unwrap(), 10);
+    assert_eq!(engine.nextval("incarnation_ids").unwrap(), 11);
+}
+
+#[test]
+fn nontransactional_values_do_not_cross_sequence_incarnations() {
+    assert_rolled_back_recreation_keeps_the_original_sequence(&Engine::new());
+
+    let directory = tempfile::tempdir().unwrap();
+    let persistent = Engine::open(&directory.path().join("sequence-incarnation.sqlite")).unwrap();
+    assert_rolled_back_recreation_keeps_the_original_sequence(&persistent);
+}
+
 #[test]
 fn column_default_sequence_binding_does_not_follow_search_path_changes() {
     let eng = Engine::new();

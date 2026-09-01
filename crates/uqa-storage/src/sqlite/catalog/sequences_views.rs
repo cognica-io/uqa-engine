@@ -30,11 +30,12 @@ impl Catalog {
             Self::claim_relation(&tx, &sequence.relation, RelationKind::Sequence)?;
             tx.execute(
                 "INSERT INTO _sequences
-                    (schema_name, relation_name, kind, start, increment, current, called, persistence)
-                 VALUES (?1, ?2, 'sequence', ?3, ?4, ?5, ?6, ?7)",
+                    (schema_name, relation_name, kind, object_id, start, increment, current, called, persistence)
+                 VALUES (?1, ?2, 'sequence', ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![
                     sequence.relation.schema,
                     sequence.relation.name,
+                    sequence.object_id.as_slice(),
                     sequence.start,
                     sequence.increment,
                     sequence.current,
@@ -51,11 +52,12 @@ impl Catalog {
         self.conn.with(|connection| {
             Ok(connection.execute(
                 "UPDATE _sequences
-                    SET start = ?3, increment = ?4, current = ?5, called = ?6, persistence = ?7
+                    SET object_id = ?3, start = ?4, increment = ?5, current = ?6, called = ?7, persistence = ?8
                   WHERE schema_name = ?1 AND relation_name = ?2",
                 params![
                     sequence.relation.schema,
                     sequence.relation.name,
+                    sequence.object_id.as_slice(),
                     sequence.start,
                     sequence.increment,
                     sequence.current,
@@ -86,25 +88,41 @@ impl Catalog {
     pub fn load_sequence_rows(&self) -> Result<Vec<SequenceRow>> {
         self.conn.with(|connection| {
             let mut statement = connection.prepare(
-                "SELECT schema_name, relation_name, start, increment, current, called, persistence
+                "SELECT schema_name, relation_name, object_id, start, increment, current, called, persistence
                        FROM _sequences ORDER BY schema_name, relation_name",
             )?;
             let rows = statement.query_map([], |row| {
-                Ok(SequenceRow {
-                    relation: RelationIdentity::new(
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                    ),
-                    start: row.get(2)?,
-                    increment: row.get(3)?,
-                    current: row.get(4)?,
-                    called: row.get(5)?,
-                    persistence: row.get(6)?,
-                })
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Vec<u8>>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, bool>(6)?,
+                    row.get::<_, String>(7)?,
+                ))
             })?;
             let mut sequences = Vec::new();
             for row in rows {
-                sequences.push(row?);
+                let (schema, name, object_id, start, increment, current, called, persistence) =
+                    row?;
+                let object_id: [u8; 16] = object_id.try_into().map_err(|value: Vec<u8>| {
+                    SQLiteError::StorageBackend(format!(
+                        "corrupt sequence `{}.{name}` object identity has {} bytes",
+                        schema,
+                        value.len()
+                    ))
+                })?;
+                sequences.push(SequenceRow {
+                    relation: RelationIdentity::new(schema, name),
+                    object_id,
+                    start,
+                    increment,
+                    current,
+                    called,
+                    persistence,
+                });
             }
             Ok(sequences)
         })
@@ -113,7 +131,7 @@ impl Catalog {
     /// Allocate one sequence value inside `SQLite` itself. `UPDATE RETURNING`
     /// is a single atomic statement, so no engine-side read/modify/write cache
     /// can race another connection.
-    pub fn next_sequence_value(&self, name: &str) -> Result<Option<i64>> {
+    pub fn next_sequence_value(&self, name: &str, object_id: [u8; 16]) -> Result<Option<i64>> {
         let relation = migration_relation(name)?;
         self.conn.with_mut(|connection| {
             let tx = connection.savepoint()?;
@@ -124,25 +142,40 @@ impl Catalog {
                                            ELSE current + increment END,
                             called = 1
                       WHERE schema_name = ?1 AND relation_name = ?2
+                        AND object_id = ?5
                         AND (called = 0
                              OR (increment > 0 AND current <= ?3 - increment)
                              OR (increment < 0 AND current >= ?4 - increment))
                       RETURNING current",
-                    params![relation.schema, relation.name, i64::MAX, i64::MIN],
+                    params![
+                        relation.schema,
+                        relation.name,
+                        i64::MAX,
+                        i64::MIN,
+                        object_id.as_slice()
+                    ],
                     |row| row.get(0),
                 )
                 .optional()?;
             if value.is_none() {
-                let exists = tx
+                let stored_object_id = tx
                     .query_row(
-                        "SELECT 1 FROM _sequences
+                        "SELECT object_id FROM _sequences
                           WHERE schema_name = ?1 AND relation_name = ?2",
                         params![relation.schema, relation.name],
-                        |_| Ok(()),
+                        |row| row.get::<_, Vec<u8>>(0),
                     )
                     .optional()?
-                    .is_some();
-                if exists {
+                    .map(|value| {
+                        <[u8; 16]>::try_from(value).map_err(|value: Vec<u8>| {
+                            SQLiteError::StorageBackend(format!(
+                                "corrupt sequence `{name}` object identity has {} bytes",
+                                value.len()
+                            ))
+                        })
+                    })
+                    .transpose()?;
+                if stored_object_id.is_some_and(|stored| stored == object_id) {
                     return Err(SQLiteError::StorageBackend(format!(
                         "sequence `{name}` overflow"
                     )));
@@ -153,14 +186,26 @@ impl Catalog {
         })
     }
 
-    pub fn set_sequence_value(&self, name: &str, value: i64, called: bool) -> Result<Option<i64>> {
+    pub fn set_sequence_value(
+        &self,
+        name: &str,
+        object_id: [u8; 16],
+        value: i64,
+        called: bool,
+    ) -> Result<Option<i64>> {
         let relation = migration_relation(name)?;
         self.conn.with(|connection| {
             Ok(connection
                 .query_row(
-                    "UPDATE _sequences SET current = ?3, called = ?4
-                     WHERE schema_name = ?1 AND relation_name = ?2 RETURNING current",
-                    params![relation.schema, relation.name, value, called],
+                    "UPDATE _sequences SET current = ?4, called = ?5
+                     WHERE schema_name = ?1 AND relation_name = ?2 AND object_id = ?3 RETURNING current",
+                    params![
+                        relation.schema,
+                        relation.name,
+                        object_id.as_slice(),
+                        value,
+                        called
+                    ],
                     |row| row.get(0),
                 )
                 .optional()?)

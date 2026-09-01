@@ -313,6 +313,7 @@ impl Engine {
                 session.session_vars.clear();
                 session.prepared.clear();
                 session.sequence_currvals.clear();
+                session.last_sequence = None;
                 session.sql_statement_cache.clear();
                 session.search_path = vec!["public".to_string()];
                 let session_user = session.session_user.clone();
@@ -327,6 +328,7 @@ impl Engine {
             }
             DiscardTarget::Sequences => {
                 session.sequence_currvals.clear();
+                session.last_sequence = None;
             }
             DiscardTarget::Temp => {}
         }
@@ -379,14 +381,24 @@ impl Engine {
             .write()
             .retain(|relation, _| !temporary_sequences.contains(relation));
         self.durable
+            .sequence_object_ids
+            .write()
+            .retain(|relation, _| !temporary_sequences.contains(relation));
+        self.durable
             .sequence_persistence
             .write()
             .retain(|relation, _| !temporary_sequences.contains(relation));
-        self.session
-            .state
-            .write()
+        let mut session = self.session.state.write();
+        session
             .sequence_currvals
             .retain(|relation, _| !temporary_sequences.contains(relation));
+        if session
+            .last_sequence
+            .as_ref()
+            .is_some_and(|last| temporary_sequences.contains(&last.relation))
+        {
+            session.last_sequence = None;
+        }
         if !temporary_tables.is_empty() {
             self.note_table_catalog_changed();
         }

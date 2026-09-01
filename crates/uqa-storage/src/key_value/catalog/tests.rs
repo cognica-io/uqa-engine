@@ -57,11 +57,15 @@ fn relation_namespace_migration_is_one_batch_and_moves_public_data() {
         catalog.load_tables().unwrap()[0].relation,
         RelationIdentity::new("public", "docs")
     );
+    let sequence = &catalog.load_sequence_rows().unwrap()[0];
+    assert_eq!(sequence.relation, RelationIdentity::new("public", "seq"));
+    assert_eq!(sequence.object_id, [0; 16]);
     assert_eq!(
-        catalog.load_sequence_rows().unwrap()[0].relation,
-        RelationIdentity::new("public", "seq")
+        catalog
+            .next_sequence_value("public.seq", sequence.object_id)
+            .unwrap(),
+        Some(1)
     );
-    assert_eq!(catalog.next_sequence_value("public.seq").unwrap(), Some(1));
     assert_eq!(
         catalog.load_views().unwrap()[0].relation,
         RelationIdentity::new("public", "report")
@@ -84,10 +88,12 @@ fn relation_namespace_migration_is_one_batch_and_moves_public_data() {
 fn sequence_set_value_preserves_the_next_allocation_state() {
     let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
     let catalog = KeyValueCatalog::new(store);
+    let object_id = [7; 16];
     catalog.save_schema("public").unwrap();
     catalog
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "controlled"),
+            object_id,
             start: 1,
             increment: 2,
             current: 1,
@@ -98,7 +104,13 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
 
     assert_eq!(
         catalog
-            .set_sequence_value("public.controlled", 7, false)
+            .next_sequence_value("public.controlled", [8; 16])
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        catalog
+            .set_sequence_value("public.controlled", object_id, 7, false)
             .unwrap(),
         Some(7)
     );
@@ -106,21 +118,27 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
     assert_eq!(uncalled.current, 7);
     assert!(!uncalled.called);
     assert_eq!(
-        catalog.next_sequence_value("public.controlled").unwrap(),
+        catalog
+            .next_sequence_value("public.controlled", object_id)
+            .unwrap(),
         Some(7)
     );
     assert_eq!(
-        catalog.next_sequence_value("public.controlled").unwrap(),
+        catalog
+            .next_sequence_value("public.controlled", object_id)
+            .unwrap(),
         Some(9)
     );
     assert_eq!(
         catalog
-            .set_sequence_value("public.controlled", 20, true)
+            .set_sequence_value("public.controlled", object_id, 20, true)
             .unwrap(),
         Some(20)
     );
     assert_eq!(
-        catalog.next_sequence_value("public.controlled").unwrap(),
+        catalog
+            .next_sequence_value("public.controlled", object_id)
+            .unwrap(),
         Some(22)
     );
 }
@@ -193,6 +211,7 @@ fn relation_namespace_migration_rejects_alias_and_cross_kind_collisions() {
                 .put(
                     &single_str_key(TAG_SEQUENCE, "public.docs").unwrap(),
                     &encode_value(&StoredSequence {
+                        object_id: [0; 16],
                         start: 1,
                         increment: 1,
                         current: 0,

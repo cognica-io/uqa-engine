@@ -255,11 +255,25 @@ type FixedTransactionCatalogBaseline = BTreeMap<[u8; 16], (RelationIdentity, Vec
 type NontransactionalColumnStats = Vec<NontransactionalColumnStatsEntry>;
 type NontransactionalSequenceValues = BTreeMap<RelationIdentity, NontransactionalSequenceValue>;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct SessionSequenceValue {
+    object_id: [u8; 16],
+    value: i64,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct SessionLastSequenceReference {
+    relation: RelationIdentity,
+    object_id: [u8; 16],
+}
+
 #[derive(Clone, Copy)]
 struct NontransactionalSequenceValue {
+    object_id: [u8; 16],
     current: i64,
     called: bool,
-    session_currval: Option<i64>,
+    session_currval: Option<SessionSequenceValue>,
+    defines_lastval: bool,
     autonomous: bool,
 }
 
@@ -458,13 +472,14 @@ struct TransactionSavepoint {
     constraint_modes: ConstraintModeState,
 }
 
-/// Lightweight SQL-session state that follows transaction/savepoint rollback for every backend. It is intentionally separate from the database-sized memory-engine snapshot so persistent sessions receive identical SET, search-path, PREPARE, and statement-cache semantics. Sequence `currval` entries produced after the snapshot are reapplied because sequence functions are nontransactional in `PostgreSQL`.
+/// Lightweight SQL-session state that follows transaction/savepoint rollback for every backend. It is intentionally separate from the database-sized memory-engine snapshot so persistent sessions receive identical SET, search-path, PREPARE, and statement-cache semantics. Sequence `currval` and last-used entries produced after the snapshot are reapplied because sequence functions are nontransactional in `PostgreSQL`.
 #[derive(Clone, Default)]
 struct SessionStateSnapshot {
     search_path: Vec<String>,
     temporary_namespace_allocated: bool,
     session_vars: BTreeMap<String, String>,
-    sequence_currvals: BTreeMap<RelationIdentity, i64>,
+    sequence_currvals: BTreeMap<RelationIdentity, SessionSequenceValue>,
+    last_sequence: Option<SessionLastSequenceReference>,
     prepared: BTreeMap<String, PreparedStatementPlan>,
     sql_statement_cache: SQLStatementCache,
     /// Names of portals that existed at this transaction or savepoint boundary. Rollback removes portals created later without rewinding cursor positions or resurrecting closed portals.
@@ -728,10 +743,10 @@ fn next_table_lifecycle_id() -> u64 {
         .expect("table lifecycle id space exhausted")
 }
 
-fn new_nonzero_table_identity(kind: &str) -> StorageBackendResult<[u8; 16]> {
+fn new_nonzero_catalog_identity(owner: &str, kind: &str) -> StorageBackendResult<[u8; 16]> {
     let mut identity = [0_u8; 16];
     getrandom::fill(&mut identity)
-        .map_err(|error| StorageBackendError::Other(format!("allocate table {kind}: {error}")))?;
+        .map_err(|error| StorageBackendError::Other(format!("allocate {owner} {kind}: {error}")))?;
     if identity == [0; 16] {
         identity[15] = 1;
     }
@@ -739,11 +754,15 @@ fn new_nonzero_table_identity(kind: &str) -> StorageBackendResult<[u8; 16]> {
 }
 
 fn new_table_object_id() -> StorageBackendResult<[u8; 16]> {
-    new_nonzero_table_identity("object identity")
+    new_nonzero_catalog_identity("table", "object identity")
 }
 
 fn new_table_storage_generation() -> StorageBackendResult<[u8; 16]> {
-    new_nonzero_table_identity("storage generation")
+    new_nonzero_catalog_identity("table", "storage generation")
+}
+
+fn new_sequence_object_id() -> StorageBackendResult<[u8; 16]> {
+    new_nonzero_catalog_identity("sequence", "object identity")
 }
 
 fn normalize_analyzer_config_value(value: &mut serde_json::Value) {

@@ -15,7 +15,7 @@ use std::time::Duration;
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLFunctionOptions, SQLFunctionVolatility, ScoringMode};
 use uqa_sql::SQLError;
-use uqa_storage::{Catalog, ManagedConnection};
+use uqa_storage::{Catalog, ManagedConnection, RelationIdentity, SequenceRow};
 
 fn scalar_int(engine: &Engine, sql: &str, column: &str) -> i64 {
     match engine.sql(sql, &[]).unwrap().rows[0].get(column) {
@@ -561,6 +561,56 @@ fn currval_is_owned_by_the_logical_session() {
     assert_eq!(second.currval("session_ids").unwrap(), 11);
     assert_eq!(first.currval("session_ids").unwrap(), 10);
     assert!(root.currval("session_ids").is_err());
+}
+
+#[test]
+fn currval_does_not_follow_a_recreated_sequence_with_the_same_name() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("sequence-incarnation.db");
+    let stale_session = Engine::open(&path).unwrap();
+    stale_session
+        .sql("CREATE SEQUENCE public.session_ids START 10", &[])
+        .unwrap();
+    assert_eq!(stale_session.nextval("session_ids").unwrap(), 10);
+    assert_eq!(stale_session.currval("session_ids").unwrap(), 10);
+
+    let ddl_session = Engine::open(&path).unwrap();
+    assert!(ddl_session.drop_sequence("session_ids").unwrap());
+    assert!(ddl_session
+        .create_sequence("session_ids", 100, 1, false)
+        .unwrap());
+
+    assert!(stale_session.currval("session_ids").is_err());
+    assert_eq!(stale_session.nextval("session_ids").unwrap(), 100);
+    assert_eq!(stale_session.currval("session_ids").unwrap(), 100);
+}
+
+#[test]
+fn opening_an_engine_assigns_legacy_sequence_object_identities() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("legacy-sequence-identity.db");
+    let catalog = Catalog::open(ManagedConnection::open(&path).unwrap()).unwrap();
+    catalog.save_schema("public").unwrap();
+    assert!(catalog
+        .create_sequence_row(&SequenceRow {
+            relation: RelationIdentity::new("public", "legacy_ids"),
+            object_id: [0; 16],
+            start: 5,
+            increment: 1,
+            current: 5,
+            called: false,
+            persistence: "p".into(),
+        })
+        .unwrap());
+    drop(catalog);
+
+    let engine = Engine::open(&path).unwrap();
+    assert_eq!(engine.nextval("legacy_ids").unwrap(), 5);
+    drop(engine);
+
+    let catalog = Catalog::open(ManagedConnection::open(&path).unwrap()).unwrap();
+    let sequence = catalog.load_sequence_rows().unwrap().remove(0);
+    assert_ne!(sequence.object_id, [0; 16]);
 }
 
 #[test]

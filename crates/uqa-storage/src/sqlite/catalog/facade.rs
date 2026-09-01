@@ -176,17 +176,24 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::load_sequence_rows(self))
     }
 
-    fn next_sequence_value(&self, name: &str) -> StorageBackendResult<Option<i64>> {
-        into_storage_result(Catalog::next_sequence_value(self, name))
+    fn next_sequence_value(
+        &self,
+        name: &str,
+        object_id: [u8; 16],
+    ) -> StorageBackendResult<Option<i64>> {
+        into_storage_result(Catalog::next_sequence_value(self, name, object_id))
     }
 
     fn set_sequence_value(
         &self,
         name: &str,
+        object_id: [u8; 16],
         value: i64,
         called: bool,
     ) -> StorageBackendResult<Option<i64>> {
-        into_storage_result(Catalog::set_sequence_value(self, name, value, called))
+        into_storage_result(Catalog::set_sequence_value(
+            self, name, object_id, value, called,
+        ))
     }
 
     fn save_view(&self, view: &ViewRow) -> StorageBackendResult<()> {

@@ -126,6 +126,7 @@ pub(super) fn collect_sequence_migrations(
             old_key: Some(key),
             row: SequenceRow {
                 relation,
+                object_id: stored.object_id,
                 start: stored.start,
                 increment: stored.increment,
                 current: stored.current,
@@ -150,6 +151,7 @@ pub(super) fn collect_sequence_migrations(
                 old_key: None,
                 row: SequenceRow {
                     relation,
+                    object_id: [0; 16],
                     start: state.start,
                     increment: state.increment,
                     current: state.current,
@@ -340,6 +342,7 @@ pub(super) fn put_sequence_migrations(
         batch.put(
             &key,
             &encode_value(&StoredSequence {
+                object_id: sequence.row.object_id,
                 start: sequence.row.start,
                 increment: sequence.row.increment,
                 current: sequence.row.current,

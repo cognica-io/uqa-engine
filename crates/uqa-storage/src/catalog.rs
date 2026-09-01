@@ -331,6 +331,9 @@ pub struct ColumnStatsRow {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SequenceRow {
     pub relation: RelationIdentity,
+    /// Stable identity of this sequence incarnation. Dropping and recreating the same qualified name must allocate a different value.
+    #[serde(default)]
+    pub object_id: [u8; 16],
     pub start: i64,
     pub increment: i64,
     pub current: i64,
@@ -387,10 +390,15 @@ pub trait CatalogFacade: Send + Sync {
     fn replace_sequence_row(&self, sequence: &SequenceRow) -> StorageBackendResult<bool>;
     fn drop_sequence_row(&self, name: &str) -> StorageBackendResult<bool>;
     fn load_sequence_rows(&self) -> StorageBackendResult<Vec<SequenceRow>>;
-    fn next_sequence_value(&self, name: &str) -> StorageBackendResult<Option<i64>>;
+    fn next_sequence_value(
+        &self,
+        name: &str,
+        object_id: [u8; 16],
+    ) -> StorageBackendResult<Option<i64>>;
     fn set_sequence_value(
         &self,
         name: &str,
+        object_id: [u8; 16],
         value: i64,
         called: bool,
     ) -> StorageBackendResult<Option<i64>>;
