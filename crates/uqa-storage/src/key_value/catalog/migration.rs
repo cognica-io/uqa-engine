@@ -133,6 +133,7 @@ pub(super) fn collect_sequence_migrations(
                 current: stored.current,
                 called: stored.called,
                 persistence: stored.persistence,
+                owner: stored.owner,
                 options: stored.options,
             },
         });
@@ -160,6 +161,7 @@ pub(super) fn collect_sequence_migrations(
                     current: state.current,
                     called: true,
                     persistence: "p".into(),
+                    owner: None,
                     options: SequenceOptions::default(),
                 },
             });
@@ -353,6 +355,7 @@ pub(super) fn put_sequence_migrations(
                 current: sequence.row.current,
                 called: sequence.row.called,
                 persistence: sequence.row.persistence,
+                owner: sequence.row.owner,
                 options: sequence.row.options,
             })?,
         )?;

@@ -115,20 +115,9 @@ impl Engine {
             self.persist_next_id(table_name).map_err(|error| {
                 SQLError::Internal(format!("persist TRUNCATE identity: {error}"))
             })?;
-            let owned_sequences = t
-                .columns
-                .read()
-                .iter()
-                .filter_map(|column| {
-                    let provenance = column.auto_increment.as_ref()?;
-                    let owner = provenance.owner.as_ref()?;
-                    if owner.table == table_name && owner.column == column.name {
-                        provenance.sequence.clone()
-                    } else {
-                        None
-                    }
-                })
-                .collect::<std::collections::BTreeSet<_>>();
+            let owned_sequences = self
+                .sequence_names_owned_by_tables(&std::collections::BTreeSet::from([t.object_id()]))
+                .map_err(|error| SQLError::Internal(format!("load owned sequences: {error}")))?;
             for sequence in owned_sequences {
                 self.restart_owned_sequence(&sequence).map_err(|error| {
                     SQLError::Internal(format!("restart owned sequence `{sequence}`: {error}"))

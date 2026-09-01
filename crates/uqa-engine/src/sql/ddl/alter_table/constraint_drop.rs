@@ -338,7 +338,7 @@ pub(super) fn drop_column_cascade(
         drop_constraint_dependency(engine, &referrer, &name)?;
     }
     engine
-        .try_drop_column(table, column)
+        .try_drop_column_cascade(table, column)
         .map_err(|error| ddl_storage_error("ALTER TABLE DROP COLUMN CASCADE", error))?;
     Ok(())
 }
@@ -351,6 +351,20 @@ pub(super) fn drop_column_restrict(
 ) -> Result<(), SQLError> {
     if !ensure_drop_column_exists(engine, table, column, if_exists)? {
         return Ok(());
+    }
+    let sequence_dependents = engine
+        .owned_sequence_dependents_for_column(table, column)
+        .map_err(|error| {
+            ddl_storage_error("ALTER TABLE DROP COLUMN dependency preflight", error)
+        })?;
+    if !sequence_dependents.is_empty() {
+        return Err(constraint_error(
+            "2BP01",
+            format!(
+                "cannot drop column {column} of table {table} because other objects depend on its owned sequence: {}",
+                sequence_dependents.join(", ")
+            ),
+        ));
     }
     if let Some((referrer, constraint)) = foreign_keys_referencing_column(engine, table, column)?
         .into_iter()

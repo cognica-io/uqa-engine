@@ -202,6 +202,9 @@ fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResu
         )
         .map_err(|err| ddl_storage_error("CREATE TABLE constraints", err))?;
     engine
+        .attach_implicit_sequence_owners(&c.name)
+        .map_err(|err| ddl_storage_error("CREATE TABLE sequence ownership", err))?;
+    engine
         .install_table_hierarchy(&c.name, c.hierarchy.clone())
         .map_err(|err| ddl_storage_error("CREATE TABLE hierarchy", err))?;
     engine

@@ -59,6 +59,61 @@ fn sequence_options_do_not_truncate_or_ignore_values() {
 }
 
 #[test]
+fn sequence_ownership_preserves_target_names_and_none_actions() {
+    let Statement::CreateSequence(sequence) =
+        first("CREATE SEQUENCE app.s OWNED BY app.\"Owner\".\"Mixed\"")
+    else {
+        panic!("not CREATE SEQUENCE");
+    };
+    assert_eq!(
+        sequence.ownership,
+        crate::ast::SequenceOwnership::Column {
+            table: "app.\"Owner\"".into(),
+            column: "Mixed".into(),
+        }
+    );
+
+    let Statement::CreateSequence(unowned) = first("CREATE SEQUENCE free_ids OWNED BY NONE") else {
+        panic!("not unowned CREATE SEQUENCE");
+    };
+    assert_eq!(unowned.ownership, crate::ast::SequenceOwnership::Unowned);
+
+    let Statement::AlterSequence(alter) = first("ALTER SEQUENCE s OWNED BY owner_table.id") else {
+        panic!("not ALTER SEQUENCE");
+    };
+    assert_eq!(
+        alter.ownership,
+        crate::ast::SequenceOwnership::Column {
+            table: "owner_table".into(),
+            column: "id".into(),
+        }
+    );
+    let Statement::AlterSequence(detach) = first("ALTER SEQUENCE s OWNED BY NONE") else {
+        panic!("not detached ALTER SEQUENCE");
+    };
+    assert_eq!(detach.ownership, crate::ast::SequenceOwnership::Unowned);
+
+    assert_eq!(
+        compile("CREATE SEQUENCE invalid_owner OWNED BY owner_table")
+            .unwrap_err()
+            .sqlstate(),
+        Some("42601")
+    );
+    assert_eq!(
+        compile("CREATE SEQUENCE duplicate_owner OWNED BY owner_table.id OWNED BY NONE")
+            .unwrap_err()
+            .sqlstate(),
+        Some("42601")
+    );
+    assert_eq!(
+        compile("CREATE SEQUENCE cross_database OWNED BY database.app.owner_table.id")
+            .unwrap_err()
+            .sqlstate(),
+        Some("0A000")
+    );
+}
+
+#[test]
 fn create_table_with_vector_column() {
     let stmt = first("CREATE TABLE docs (id INTEGER PRIMARY KEY, title TEXT, embedding VECTOR(4))");
     let Statement::CreateTable(ct) = stmt else {

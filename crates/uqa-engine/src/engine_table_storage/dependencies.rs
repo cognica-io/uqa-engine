@@ -153,7 +153,7 @@ impl Engine {
         )))
     }
 
-    pub(super) fn table_entries(&self) -> Vec<(String, Arc<TableState>)> {
+    pub(crate) fn table_entries(&self) -> Vec<(String, Arc<TableState>)> {
         self.storage
             .tables
             .read()
@@ -296,6 +296,45 @@ impl Engine {
                 .collect::<Vec<_>>()
                 .join("`, `")
         )))
+    }
+
+    /// Retire the legacy name-based owner marker after an explicit `ALTER SEQUENCE ... OWNED BY` action. Generation provenance and the bound sequence reference remain on the original SERIAL or identity column, while the stable dependency stored on the sequence becomes authoritative for lifecycle operations.
+    pub(crate) fn clear_auto_increment_owner_markers(
+        &self,
+        sequence: &str,
+    ) -> StorageBackendResult<()> {
+        let target =
+            RelationIdentity::from_legacy_name(sequence).map_err(StorageBackendError::Other)?;
+        let mut catalog_changed = false;
+        for (table_name, table) in self.table_entries() {
+            let mut columns = table.columns.read().clone();
+            let mut changed = false;
+            for column in &mut columns {
+                let Some(provenance) = column.auto_increment.as_mut() else {
+                    continue;
+                };
+                if provenance.owner.is_some()
+                    && provenance.sequence.as_deref().is_some_and(|reference| {
+                        stored_relation_reference_matches(reference, &target)
+                    })
+                {
+                    provenance.owner = None;
+                    changed = true;
+                }
+            }
+            if !changed {
+                continue;
+            }
+            if self.is_persistent() {
+                self.try_save_table_schema_with_columns(&table_name, &table, &columns)?;
+            }
+            *table.columns.write() = columns;
+            catalog_changed = true;
+        }
+        if catalog_changed {
+            self.note_table_catalog_changed();
+        }
+        Ok(())
     }
 
     /// Remove schema-expression dependencies requested by `DROP SEQUENCE CASCADE` and always detach serial ownership metadata whose sequence is being removed.

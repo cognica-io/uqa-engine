@@ -36,8 +36,8 @@ pub use btree_index::BTreeIndex;
 pub use catalog::{
     sequence_value_reservation, CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow,
     EdgeRow, ForeignTableRow, GraphSnapshot, GraphVertexRow, RelationIdentity, RelationKind,
-    SequenceOptions, SequenceReservationResult, SequenceRow, SequenceValueReservation, TableSchema,
-    VectorFieldSchema, ViewRow,
+    SequenceOptions, SequenceOwner, SequenceOwnerDependency, SequenceReservationResult,
+    SequenceRow, SequenceValueReservation, TableSchema, VectorFieldSchema, ViewRow,
 };
 pub use clustered_postings::{
     MaterializedPostingCursor, PostingCursor, PostingScore, POSTING_CLUSTER_DOCS,

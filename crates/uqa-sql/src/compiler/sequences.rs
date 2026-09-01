@@ -7,7 +7,8 @@
 //! CREATE/ALTER SEQUENCE lowering and option validation.
 
 use super::{
-    compile_pg_type_name, range_var_name, relation_persistence, NodeEnum, Result, SQLError,
+    compile_pg_type_name, extract_string, range_var_name, relation_persistence,
+    render_relation_component, NodeEnum, Result, SQLError,
 };
 use crate::ast::ColumnType;
 
@@ -33,6 +34,7 @@ pub(super) fn compile_create_sequence(
     let mut max_value = None;
     let mut cycle = false;
     let mut cache_size = 1;
+    let mut ownership = crate::ast::SequenceOwnership::Unchanged;
     let mut seen = std::collections::BTreeSet::new();
     for opt in &stmt.options {
         let Some(NodeEnum::DefElem(elem)) = opt.node.as_ref() else {
@@ -68,6 +70,9 @@ pub(super) fn compile_create_sequence(
             "cache" => {
                 cache_size = compile_sequence_integer_option(elem, "CREATE SEQUENCE")?;
             }
+            "owned_by" => {
+                ownership = compile_sequence_ownership(elem, "CREATE SEQUENCE")?;
+            }
             other => {
                 return Err(SQLError::Unsupported(format!(
                     "CREATE SEQUENCE option `{other}` is not supported"
@@ -89,6 +94,7 @@ pub(super) fn compile_create_sequence(
         max_value: Some(max_value),
         cycle,
         cache_size,
+        ownership,
     })
 }
 
@@ -156,6 +162,9 @@ pub(super) fn compile_alter_sequence(
             "cache" => {
                 alter.cache_size = Some(compile_sequence_integer_option(elem, "ALTER SEQUENCE")?);
             }
+            "owned_by" => {
+                alter.ownership = compile_sequence_ownership(elem, "ALTER SEQUENCE")?;
+            }
             other => {
                 return Err(SQLError::Unsupported(format!(
                     "ALTER SEQUENCE option `{other}` is not supported"
@@ -164,6 +173,49 @@ pub(super) fn compile_alter_sequence(
         }
     }
     Ok(alter)
+}
+
+fn compile_sequence_ownership(
+    elem: &pg_query::protobuf::DefElem,
+    statement: &str,
+) -> Result<crate::ast::SequenceOwnership> {
+    let Some(NodeEnum::List(list)) = elem
+        .arg
+        .as_ref()
+        .and_then(|argument| argument.node.as_ref())
+    else {
+        return Err(SQLError::Internal(format!(
+            "{statement} contains a malformed OWNED BY option"
+        )));
+    };
+    let parts = list
+        .items
+        .iter()
+        .map(extract_string)
+        .collect::<Result<Vec<_>>>()?;
+    match parts.as_slice() {
+        [none] if none == "none" => Ok(crate::ast::SequenceOwnership::Unowned),
+        [_] | [] => Err(SQLError::Routine {
+            sqlstate: "42601".into(),
+            message: "invalid OWNED BY option; specify OWNED BY table.column or OWNED BY NONE"
+                .into(),
+        }),
+        [table, column] => Ok(crate::ast::SequenceOwnership::Column {
+            table: render_relation_component(table),
+            column: column.clone(),
+        }),
+        [schema, table, column] => Ok(crate::ast::SequenceOwnership::Column {
+            table: format!(
+                "{}.{}",
+                render_relation_component(schema),
+                render_relation_component(table)
+            ),
+            column: column.clone(),
+        }),
+        _ => Err(SQLError::Unsupported(
+            "cross-database references are not implemented: OWNED BY".into(),
+        )),
+    }
 }
 
 fn conflicting_sequence_options() -> SQLError {

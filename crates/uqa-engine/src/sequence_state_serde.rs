@@ -34,6 +34,8 @@ impl<'de> serde::Deserialize<'de> for SequenceState {
             cache_size: i64,
             #[serde(default)]
             definition_generation: [u8; 16],
+            #[serde(default)]
+            owner: Option<super::SequenceOwner>,
         }
 
         let representation = Representation::deserialize(deserializer)?;
@@ -61,6 +63,7 @@ impl<'de> serde::Deserialize<'de> for SequenceState {
             cycle: representation.cycle,
             cache_size: representation.cache_size,
             definition_generation: representation.definition_generation,
+            owner: representation.owner,
         })
     }
 }

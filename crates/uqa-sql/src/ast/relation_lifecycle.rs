@@ -76,6 +76,8 @@ pub struct CreateSequence {
     pub cycle: bool,
     #[serde(default = "default_sequence_cache_size")]
     pub cache_size: i64,
+    #[serde(default)]
+    pub ownership: SequenceOwnership,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -131,6 +133,18 @@ pub enum SequenceBound {
     Value(i64),
 }
 
+/// `OWNED BY` action carried by `CREATE SEQUENCE` and `ALTER SEQUENCE`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SequenceOwnership {
+    /// No ownership clause was specified. On `CREATE SEQUENCE` this creates an unowned sequence; on `ALTER SEQUENCE` it preserves the current dependency.
+    #[default]
+    Unchanged,
+    /// Explicit `OWNED BY NONE`.
+    Unowned,
+    /// A table relation and one of its columns. The engine resolves both names to stable catalog object identities before persisting the dependency.
+    Column { table: String, column: String },
+}
+
 fn deserialize_sequence_restart<'de, D>(deserializer: D) -> Result<SequenceRestart, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -182,4 +196,6 @@ pub struct AlterSequence {
     #[serde(default)]
     pub cycle: Option<bool>,
     pub cache_size: Option<i64>,
+    #[serde(default)]
+    pub ownership: SequenceOwnership,
 }

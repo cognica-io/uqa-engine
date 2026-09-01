@@ -101,6 +101,8 @@ pub(super) struct StoredSequence {
     #[serde(default = "legacy_sequence_persistence")]
     pub(super) persistence: String,
     #[serde(default)]
+    pub(super) owner: Option<crate::catalog::SequenceOwner>,
+    #[serde(default)]
     pub(super) options: crate::catalog::SequenceOptions,
 }
 

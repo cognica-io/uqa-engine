@@ -93,6 +93,8 @@ mod engine_open;
 mod engine_relations;
 mod engine_roles;
 mod engine_search;
+mod engine_sequence_catalog;
+mod engine_sequence_ownership;
 mod engine_sequence_values;
 mod engine_sequences;
 mod engine_session;
@@ -136,10 +138,10 @@ use uqa_storage::{
     HNSWIndexParams, IVFIndex, IVFIndexParams, InvertedIndex, ManagedConnection,
     MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex, PersistentStorageBackend,
     PersistentStorageProvider, PersistentStorageSession, RelationIdentity,
-    SQLiteCompressedContainerAnchor, SQLiteStorageProvider, SequenceOptions,
-    SequenceReservationResult, SequenceRow, StorageBackendError, StorageBackendResult,
-    StorageSavepointId, TableSchema, VectorFieldSchema, VectorIndex, VectorIndexOpenMode,
-    VectorIndexSpec, ViewRow,
+    SQLiteCompressedContainerAnchor, SQLiteStorageProvider, SequenceOptions, SequenceOwner,
+    SequenceOwnerDependency, SequenceReservationResult, SequenceRow, StorageBackendError,
+    StorageBackendResult, StorageSavepointId, TableSchema, VectorFieldSchema, VectorIndex,
+    VectorIndexOpenMode, VectorIndexSpec, ViewRow,
 };
 
 pub use sql::{SQLCursor, SQLCursorSummary};
@@ -345,6 +347,8 @@ pub struct SequenceState {
     pub cache_size: i64,
     #[serde(default)]
     pub definition_generation: [u8; 16],
+    #[serde(default)]
+    pub owner: Option<SequenceOwner>,
 }
 
 const fn sequence_state_called_default() -> bool {

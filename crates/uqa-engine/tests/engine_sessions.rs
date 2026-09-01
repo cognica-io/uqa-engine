@@ -680,6 +680,7 @@ fn opening_an_engine_assigns_legacy_sequence_object_identities() {
             called: false,
             persistence: "p".into(),
             options: SequenceOptions::default(),
+            owner: None,
         })
         .unwrap());
     drop(catalog);

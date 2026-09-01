@@ -100,10 +100,29 @@ impl Engine {
         self.with_implicit_storage_transaction(|engine| engine.try_drop_column_inner(table, column))
     }
 
+    pub(crate) fn try_drop_column_cascade(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> StorageBackendResult<bool> {
+        self.with_implicit_storage_transaction(|engine| {
+            engine.try_drop_column_inner_with_sequence_cascade(table, column, true)
+        })
+    }
+
     pub(crate) fn try_drop_column_inner(
         &self,
         table: &str,
         column: &str,
+    ) -> StorageBackendResult<bool> {
+        self.try_drop_column_inner_with_sequence_cascade(table, column, false)
+    }
+
+    fn try_drop_column_inner_with_sequence_cascade(
+        &self,
+        table: &str,
+        column: &str,
+        cascade: bool,
     ) -> StorageBackendResult<bool> {
         let Some(table_name) = self.resolve_table_ddl_target(table, "ALTER TABLE DROP COLUMN")?
         else {
@@ -120,18 +139,19 @@ impl Engine {
         {
             return Ok(false);
         }
-        let owned_sequence = t.columns.read().iter().find_map(|candidate| {
-            if candidate.name != column {
-                return None;
-            }
-            let provenance = candidate.auto_increment.as_ref()?;
-            let owner = provenance.owner.as_ref()?;
-            if owner.table == table_name && owner.column == column {
-                provenance.sequence.clone()
-            } else {
-                None
-            }
-        });
+        let column_object_id = t
+            .columns
+            .read()
+            .iter()
+            .find(|candidate| candidate.name == column)
+            .and_then(|candidate| candidate.object_id)
+            .ok_or_else(|| {
+                StorageBackendError::Other(format!(
+                    "column `{table_name}`.`{column}` has no object identity"
+                ))
+            })?;
+        let owned_sequences =
+            self.sequence_names_owned_by_column(t.object_id(), column_object_id)?;
         self.preflight_drop_column_dependencies(&table_name, column)?;
         Self::value_indexes_clear(&t);
         {
@@ -197,8 +217,8 @@ impl Engine {
             }
             self.try_save_table_schema(&table_name, &t)?;
         }
-        if let Some(sequence) = owned_sequence {
-            self.drop_owned_sequence(&sequence)?;
+        for sequence in owned_sequences {
+            self.drop_owned_sequence(&sequence, cascade)?;
         }
         self.mark_column_stats_dirty(&table_name, &t)?;
         self.refresh_value_indexes_for_table(&table_name)?;

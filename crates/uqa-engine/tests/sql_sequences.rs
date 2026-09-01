@@ -15,6 +15,8 @@ use uqa_storage::ManagedConnection;
 mod cache;
 #[path = "sql_sequences/lifecycle.rs"]
 mod lifecycle;
+#[path = "sql_sequences/ownership.rs"]
+mod ownership;
 
 fn regclass_reference(expression: &Expr) -> Option<&str> {
     match expression {

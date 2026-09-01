@@ -208,6 +208,7 @@ fn migration_26_adds_persistent_sequence_object_identities() {
             called: false,
             persistence: "p".into(),
             options: SequenceOptions::default(),
+            owner: None,
         })
         .unwrap();
     drop(current);
@@ -245,6 +246,7 @@ fn migration_27_adds_postgresql_sequence_defaults() {
             called: false,
             persistence: "p".into(),
             options: SequenceOptions::default(),
+            owner: None,
         })
         .unwrap();
     drop(current);
@@ -291,6 +293,7 @@ fn migration_27_preserves_options_when_columns_precede_the_version_marker() {
                 cycle: true,
                 cache_size: 7,
             },
+            owner: None,
         })
         .unwrap();
     drop(current);
@@ -330,6 +333,7 @@ fn migration_28_adds_sequence_cache_and_definition_generation() {
                 cache_size: 7,
                 ..SequenceOptions::default()
             },
+            owner: None,
         })
         .unwrap();
     drop(current);
@@ -372,6 +376,7 @@ fn migration_28_preserves_cache_state_when_columns_precede_the_version_marker() 
                 cache_size: 9,
                 ..SequenceOptions::default()
             },
+            owner: None,
         })
         .unwrap();
     drop(current);
@@ -392,6 +397,92 @@ fn migration_28_preserves_cache_state_when_columns_precede_the_version_marker() 
 }
 
 #[test]
+fn migration_29_adds_sequence_owner_columns() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let current = Catalog::open(connection.clone()).unwrap();
+    current
+        .create_sequence_row(&SequenceRow {
+            relation: RelationIdentity::new("public", "legacy_owner"),
+            object_id: [32; 16],
+            definition_generation: [33; 16],
+            start: 1,
+            increment: 1,
+            current: 1,
+            called: false,
+            persistence: "p".into(),
+            options: SequenceOptions::default(),
+            owner: Some(crate::catalog::SequenceOwner {
+                table_object_id: [34; 16],
+                column_object_id: [35; 16],
+                dependency: crate::catalog::SequenceOwnerDependency::Automatic,
+            }),
+        })
+        .unwrap();
+    drop(current);
+    connection
+        .with(|database| {
+            database.execute("ALTER TABLE _sequences DROP COLUMN owner_dependency", [])?;
+            database.execute(
+                "ALTER TABLE _sequences DROP COLUMN owner_column_object_id",
+                [],
+            )?;
+            database.execute(
+                "ALTER TABLE _sequences DROP COLUMN owner_table_object_id",
+                [],
+            )?;
+            database.execute(
+                "UPDATE _metadata SET value = '28' WHERE key = 'schema_version'",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+    let upgraded = Catalog::open(connection).unwrap();
+    let sequence = upgraded.load_sequence_rows().unwrap().remove(0);
+    assert_eq!(sequence.owner, None);
+}
+
+#[test]
+fn migration_29_preserves_owner_when_columns_precede_the_version_marker() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let current = Catalog::open(connection.clone()).unwrap();
+    let owner = crate::catalog::SequenceOwner {
+        table_object_id: [36; 16],
+        column_object_id: [37; 16],
+        dependency: crate::catalog::SequenceOwnerDependency::Internal,
+    };
+    current
+        .create_sequence_row(&SequenceRow {
+            relation: RelationIdentity::new("public", "already_migrated_owner"),
+            object_id: [38; 16],
+            definition_generation: [39; 16],
+            start: 1,
+            increment: 1,
+            current: 1,
+            called: false,
+            persistence: "p".into(),
+            options: SequenceOptions::default(),
+            owner: Some(owner),
+        })
+        .unwrap();
+    drop(current);
+    connection
+        .with(|database| {
+            database.execute(
+                "UPDATE _metadata SET value = '28' WHERE key = 'schema_version'",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+    let upgraded = Catalog::open(connection).unwrap();
+    let sequence = upgraded.load_sequence_rows().unwrap().remove(0);
+    assert_eq!(sequence.owner, Some(owner));
+}
+
+#[test]
 fn migration_18_preserves_legacy_sequence_sentinel_semantics() {
     let connection = ManagedConnection::open_in_memory().unwrap();
     let current = Catalog::open(connection.clone()).unwrap();
@@ -406,6 +497,7 @@ fn migration_18_preserves_legacy_sequence_sentinel_semantics() {
             called: false,
             persistence: "p".into(),
             options: SequenceOptions::default(),
+            owner: None,
         })
         .unwrap();
     drop(current);
@@ -460,6 +552,7 @@ fn migration_23_moves_sequence_persistence_into_typed_rows() {
             called: false,
             persistence: "u".into(),
             options: SequenceOptions::default(),
+            owner: None,
         })
         .unwrap();
     drop(current);

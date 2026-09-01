@@ -1250,6 +1250,173 @@ CREATE SEQUENCE sequence_cache_zero CACHE 0;
 ALTER SEQUENCE sequence_cache_basic CACHE 0;
 -- @end
 
+-- Sequence ownership uses automatic or internal dependencies keyed by stable table and column identity. Renames retain the link, owner drops remove the sequence, and only RESTART IDENTITY resets owned sequences.
+-- @case create_sequence_owner_fixture ok
+CREATE TABLE sequence_owner_table(id bigint, other bigint);
+CREATE SEQUENCE sequence_owned_ids START WITH 10 OWNED BY sequence_owner_table.id;
+CREATE SEQUENCE sequence_detached_ids OWNED BY sequence_owner_table.other;
+-- @end
+
+-- @case sequence_owner_lookup_and_default rows
+SELECT pg_get_serial_sequence('sequence_owner_table', 'id') = current_schema() || '.sequence_owned_ids', (SELECT column_default FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'sequence_owner_table' AND column_name = 'id');
+-- @end
+
+-- @case sequence_owner_initial_value rows
+SELECT nextval('sequence_owned_ids');
+-- @end
+
+-- @case sequence_owner_continue_identity ok
+TRUNCATE sequence_owner_table CONTINUE IDENTITY;
+-- @end
+
+-- @case sequence_owner_after_continue rows
+SELECT nextval('sequence_owned_ids');
+-- @end
+
+-- @case sequence_owner_restart_identity ok
+TRUNCATE sequence_owner_table RESTART IDENTITY;
+-- @end
+
+-- @case sequence_owner_after_restart rows
+SELECT nextval('sequence_owned_ids');
+-- @end
+
+-- @case sequence_owner_missing_table error
+CREATE SEQUENCE sequence_owner_missing_table OWNED BY missing_owner.id;
+-- @end
+
+-- @case sequence_owner_missing_column error
+CREATE SEQUENCE sequence_owner_missing_column OWNED BY sequence_owner_table.missing;
+-- @end
+
+-- @case sequence_owner_wrong_schema error
+CREATE TEMP SEQUENCE sequence_owner_wrong_schema OWNED BY sequence_owner_table.id;
+-- @end
+
+-- @case sequence_owner_wrong_relation_kind error
+CREATE SEQUENCE sequence_owner_wrong_kind OWNED BY sequence_owned_ids.last_value;
+-- @end
+
+-- @case sequence_owner_create_if_exists_skips_owner_lookup ok
+CREATE SEQUENCE IF NOT EXISTS sequence_owned_ids OWNED BY missing_owner.id;
+-- @end
+
+-- @case sequence_owner_alter_if_exists_skips_owner_lookup ok
+ALTER SEQUENCE IF EXISTS sequence_owner_missing OWNED BY missing_owner.id;
+-- @end
+
+-- @case sequence_owner_rename_and_detach ok
+ALTER SEQUENCE sequence_owned_ids OWNED BY sequence_owner_table.other;
+ALTER SEQUENCE sequence_detached_ids OWNED BY NONE;
+ALTER TABLE sequence_owner_table RENAME TO renamed_sequence_owner;
+ALTER TABLE renamed_sequence_owner RENAME COLUMN other TO renamed_other;
+ALTER TABLE renamed_sequence_owner DROP COLUMN id;
+-- @end
+
+-- @case sequence_owner_after_rename rows
+SELECT pg_get_serial_sequence('renamed_sequence_owner', 'renamed_other') = current_schema() || '.sequence_owned_ids', to_regclass('sequence_owned_ids') IS NOT NULL, to_regclass('sequence_detached_ids') IS NOT NULL;
+-- @end
+
+-- @case sequence_owner_column_drop ok
+ALTER TABLE renamed_sequence_owner DROP COLUMN renamed_other;
+-- @end
+
+-- @case sequence_owner_after_column_drop rows
+SELECT to_regclass('sequence_owned_ids') IS NULL, to_regclass('sequence_detached_ids') IS NOT NULL;
+-- @end
+
+-- @case sequence_owner_transaction_fixture ok
+CREATE TABLE sequence_attach_owner(id bigint);
+CREATE SEQUENCE sequence_attach_ids;
+-- @end
+
+-- @case sequence_owner_transaction_rollback ok
+BEGIN;
+ALTER SEQUENCE __UQA_STATEFUL_SCHEMA__.sequence_attach_ids OWNED BY __UQA_STATEFUL_SCHEMA__.sequence_attach_owner.id;
+ROLLBACK;
+DROP TABLE __UQA_STATEFUL_SCHEMA__.sequence_attach_owner;
+-- @end
+
+-- @case sequence_owner_transaction_rollback_result rows
+SELECT to_regclass('sequence_attach_ids') IS NOT NULL;
+-- @end
+
+-- @case sequence_owner_direct_drop ok
+CREATE TABLE sequence_direct_owner(id bigint);
+CREATE SEQUENCE sequence_direct_ids OWNED BY sequence_direct_owner.id;
+DROP SEQUENCE sequence_direct_ids;
+-- @end
+
+-- @case sequence_owner_direct_drop_result rows
+SELECT to_regclass('sequence_direct_owner') IS NOT NULL, to_regclass('sequence_direct_ids') IS NULL;
+-- @end
+
+-- @case create_sequence_owner_cascade_fixture ok
+CREATE TABLE sequence_cascade_table_owner(id bigint);
+CREATE SEQUENCE sequence_cascade_table_ids OWNED BY sequence_cascade_table_owner.id;
+CREATE TABLE sequence_cascade_table_dependent(value bigint DEFAULT nextval('sequence_cascade_table_ids'));
+CREATE VIEW sequence_cascade_table_view AS SELECT nextval('sequence_cascade_table_ids') AS value;
+-- @end
+
+-- @case sequence_owner_table_drop_restrict error
+DROP TABLE sequence_cascade_table_owner RESTRICT;
+-- @end
+
+-- @case sequence_owner_table_drop_restrict_result rows
+SELECT to_regclass('sequence_cascade_table_owner') IS NOT NULL, to_regclass('sequence_cascade_table_ids') IS NOT NULL, to_regclass('sequence_cascade_table_view') IS NOT NULL, (SELECT column_default IS NOT NULL FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'sequence_cascade_table_dependent' AND column_name = 'value');
+-- @end
+
+-- @case sequence_owner_table_drop_cascade ok
+DROP TABLE sequence_cascade_table_owner CASCADE;
+-- @end
+
+-- @case sequence_owner_table_drop_cascade_result rows
+SELECT to_regclass('sequence_cascade_table_owner') IS NULL, to_regclass('sequence_cascade_table_ids') IS NULL, to_regclass('sequence_cascade_table_view') IS NULL, to_regclass('sequence_cascade_table_dependent') IS NOT NULL, (SELECT column_default IS NULL FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'sequence_cascade_table_dependent' AND column_name = 'value');
+-- @end
+
+-- @case create_sequence_owner_column_cascade_fixture ok
+CREATE TABLE sequence_cascade_column_owner(id bigint, retained bigint);
+CREATE SEQUENCE sequence_cascade_column_ids OWNED BY sequence_cascade_column_owner.id;
+CREATE TABLE sequence_cascade_column_dependent(value bigint DEFAULT nextval('sequence_cascade_column_ids'));
+CREATE VIEW sequence_cascade_column_view AS SELECT nextval('sequence_cascade_column_ids') AS value;
+-- @end
+
+-- @case sequence_owner_column_drop_restrict error
+ALTER TABLE sequence_cascade_column_owner DROP COLUMN id RESTRICT;
+-- @end
+
+-- @case sequence_owner_column_drop_cascade ok
+ALTER TABLE sequence_cascade_column_owner DROP COLUMN id CASCADE;
+-- @end
+
+-- @case sequence_owner_column_drop_cascade_result rows
+SELECT to_regclass('sequence_cascade_column_owner') IS NOT NULL, to_regclass('sequence_cascade_column_ids') IS NULL, to_regclass('sequence_cascade_column_view') IS NULL, to_regclass('sequence_cascade_column_dependent') IS NOT NULL, (SELECT column_default IS NULL FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'sequence_cascade_column_dependent' AND column_name = 'value');
+-- @end
+
+-- @case create_identity_owner_fixture ok
+CREATE TABLE sequence_identity_owner(id bigint GENERATED BY DEFAULT AS IDENTITY);
+-- @end
+
+-- @case sequence_identity_owner_lookup rows
+SELECT pg_get_serial_sequence('sequence_identity_owner', 'id') = current_schema() || '.sequence_identity_owner_id_seq';
+-- @end
+
+-- @case sequence_identity_owner_detach error
+ALTER SEQUENCE sequence_identity_owner_id_seq OWNED BY NONE;
+-- @end
+
+-- @case sequence_identity_owner_direct_drop error
+DROP SEQUENCE sequence_identity_owner_id_seq CASCADE;
+-- @end
+
+-- @case sequence_identity_owner_column_drop ok
+ALTER TABLE sequence_identity_owner DROP COLUMN id;
+-- @end
+
+-- @case sequence_identity_owner_column_drop_result rows
+SELECT to_regclass('sequence_identity_owner_id_seq') IS NULL;
+-- @end
+
 -- DROP SEQUENCE resolves every target before mutation, preserves transactional catalog and session state, and applies PostgreSQL dependency direction for defaults, views, and serial ownership.
 -- @case create_drop_sequence_fixture ok
 CREATE SEQUENCE drop_sequence_atomic;

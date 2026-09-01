@@ -128,7 +128,30 @@ impl Engine {
         let canonical_names = self.canonical_drop_table_names(names)?;
         let (target_names, targets) = Self::drop_target_sets(&canonical_names)?;
         let entries = self.table_entries();
-        self.drop_table_restrict_dependents(&canonical_names, &target_names, &targets, &entries)
+        let mut dependents = self.drop_table_restrict_dependents(
+            &canonical_names,
+            &target_names,
+            &targets,
+            &entries,
+        )?;
+        for sequence in self.owned_sequences_for_drop(&target_names, &entries)? {
+            dependents.extend(
+                self.sequence_schema_expression_dependents(&sequence)?
+                    .into_iter()
+                    .filter(|(table, _)| !target_names.contains(table))
+                    .map(|(table, column)| {
+                        format!("default or generated expression on {table}.{column}")
+                    }),
+            );
+            dependents.extend(
+                self.views_depending_on_sequence(&sequence)?
+                    .into_iter()
+                    .map(|view| format!("view {view}")),
+            );
+        }
+        dependents.sort_unstable();
+        dependents.dedup();
+        Ok(dependents)
     }
 
     fn ensure_no_drop_restrict_dependents(
@@ -150,27 +173,16 @@ impl Engine {
     }
 
     fn owned_sequences_for_drop(
+        &self,
         target_names: &std::collections::BTreeSet<String>,
         entries: &[(String, Arc<TableState>)],
-    ) -> std::collections::BTreeSet<String> {
-        entries
+    ) -> StorageBackendResult<std::collections::BTreeSet<String>> {
+        let table_object_ids = entries
             .iter()
             .filter(|(table, _)| target_names.contains(table))
-            .flat_map(|(table, state)| {
-                state
-                    .columns
-                    .read()
-                    .iter()
-                    .filter_map(|column| {
-                        let provenance = column.auto_increment.as_ref()?;
-                        let owner = provenance.owner.as_ref()?;
-                        (owner.table == *table && owner.column == column.name)
-                            .then(|| provenance.sequence.clone())
-                            .flatten()
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .collect()
+            .map(|(_, state)| state.object_id())
+            .collect::<std::collections::BTreeSet<_>>();
+        self.sequence_names_owned_by_tables(&table_object_ids)
     }
 
     pub(super) fn try_drop_tables_inner(
@@ -194,7 +206,7 @@ impl Engine {
         // Finish every dependency check before mutating a referrer or target.
         self.ensure_no_drop_view_dependencies(&canonical_names)?;
         Self::ensure_drop_targets_unreferenced(&target_names, &targets, &entries)?;
-        let owned_sequences = Self::owned_sequences_for_drop(&target_names, &entries);
+        let owned_sequences = self.owned_sequences_for_drop(&target_names, &entries)?;
 
         let mut inbound = Vec::new();
         let mut updates = Vec::new();
@@ -266,7 +278,7 @@ impl Engine {
         self.prune_constraint_modes()
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         for sequence in owned_sequences {
-            self.drop_owned_sequence(&sequence)?;
+            self.drop_owned_sequence(&sequence, cascade)?;
         }
         Ok(())
     }

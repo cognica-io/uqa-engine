@@ -320,17 +320,23 @@ CTAS creates and populates a table from a query, preserves the query's declared 
 ## Sequences
 
 ```sql
-CREATE SEQUENCE ticket_ids AS integer START WITH 1000 INCREMENT BY 1 MINVALUE 1000 MAXVALUE 999999 CACHE 64 CYCLE;
+CREATE TABLE tickets (ticket_id integer);
+CREATE SEQUENCE ticket_ids AS integer START WITH 1000 INCREMENT BY 1 MINVALUE 1000 MAXVALUE 999999 CACHE 64 CYCLE OWNED BY tickets.ticket_id;
 SELECT nextval('ticket_ids');
 SELECT currval('ticket_ids');
 SELECT lastval();
 SELECT setval('ticket_ids', 2000);
 SELECT setval('ticket_ids', 2500, false);
+SELECT pg_get_serial_sequence('tickets', 'ticket_id');
 ALTER SEQUENCE ticket_ids MAXVALUE 2000000 CACHE 128 NO CYCLE RESTART WITH 3000;
-DROP SEQUENCE ticket_ids;
+ALTER SEQUENCE ticket_ids OWNED BY NONE;
 ```
 
-`CREATE SEQUENCE` and `ALTER SEQUENCE` support `AS smallint`, `AS integer`, and `AS bigint`; positive or negative nonzero increments; `START [ WITH ]`; `RESTART [ WITH ]`; `MINVALUE`, `MAXVALUE`, `NO MINVALUE`, and `NO MAXVALUE`; positive `CACHE` sizes; and `CYCLE` or `NO CYCLE` for ordinary, temporary, and unlogged sequences. Type and direction determine PostgreSQL's default start and bounds, explicit bounds are validated against the declared type, a noncycling sequence reports `2200H` without advancing past a bound, and a cycling sequence wraps directly to the opposite bound. A cache reservation stops at the configured bound instead of wrapping within the same block; the next reservation wraps when cycling is enabled. Temporary sequences live in `pg_temp`, participate in `DISCARD TEMP`, and do not survive a reopen; unlogged sequence state survives a clean reopen, while crash-recovery reset semantics remain open. The two-argument `setval` marks the installed value as called, while the three-argument form accepts `false` to make the next `nextval` return the installed value exactly. Explicit `OWNED BY` and identity ownership options are not implemented.
+`CREATE SEQUENCE` and `ALTER SEQUENCE` support `AS smallint`, `AS integer`, and `AS bigint`; positive or negative nonzero increments; `START [ WITH ]`; `RESTART [ WITH ]`; `MINVALUE`, `MAXVALUE`, `NO MINVALUE`, and `NO MAXVALUE`; positive `CACHE` sizes; `CYCLE` or `NO CYCLE`; and `OWNED BY table.column` or `OWNED BY NONE` for ordinary, temporary, and unlogged sequences. Type and direction determine PostgreSQL's default start and bounds, explicit bounds are validated against the declared type, a noncycling sequence reports `2200H` without advancing past a bound, and a cycling sequence wraps directly to the opposite bound. A cache reservation stops at the configured bound instead of wrapping within the same block; the next reservation wraps when cycling is enabled. Temporary sequences live in `pg_temp`, participate in `DISCARD TEMP`, and do not survive a reopen; unlogged sequence state survives a clean reopen, while crash-recovery reset semantics remain open. The two-argument `setval` marks the installed value as called, while the three-argument form accepts `false` to make the next `nextval` return the installed value exactly.
+
+`OWNED BY` requires the sequence and its ordinary, inherited, or partitioned owner table to be in the same schema. It records an automatic dependency without creating or changing the column default, survives table and column renames through stable object identities, appears through `pg_get_serial_sequence(text, text)`, and causes an owner-column or owner-table drop to remove the sequence. If another default or view depends on that sequence, an owner drop with `RESTRICT` reports `2BP01`, while `CASCADE` removes the dependent default and complete view closure. Multiple sequences may own one column. `TRUNCATE ... CONTINUE IDENTITY` preserves their values, while `TRUNCATE ... RESTART IDENTITY` restarts them. `OWNED BY NONE` detaches the dependency; assigning a new owner moves it. These changes follow statement, transaction, savepoint, and durable-reopen semantics.
+
+`SERIAL` columns use the same automatic dependency, so their sequence may be reassigned or detached and may be dropped directly subject to ordinary default-expression dependencies. Identity columns use an internal dependency: their generated sequence cannot be reassigned with `ALTER SEQUENCE ... OWNED BY` or dropped directly even with `CASCADE`, and dropping the identity column removes it.
 
 Sequence definition changes are transactional. A successful `ALTER SEQUENCE`, including a same-value `CACHE` change, invalidates outstanding blocks in every session. An allocation made after an uncommitted `ALTER SEQUENCE` or `RESTART` follows that definition's transaction or savepoint ownership, while an earlier reservation against the retained definition remains nontransactional; rolling the change back restores the retained definition but does not restore its abandoned session cache. The affected session `currval` and `lastval` still retain the most recently returned value across rollback, matching PostgreSQL 18.
 

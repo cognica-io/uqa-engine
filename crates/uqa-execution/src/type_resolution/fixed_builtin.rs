@@ -312,6 +312,7 @@ fn builtin_binding_is_non_immutable(binding: &FunctionBinding) -> bool {
                 | "uuidv7"
                 | "pg_get_expr"
                 | "pg_get_partkeydef"
+                | "pg_get_serial_sequence"
                 | "pg_get_triggerdef"
                 | "pg_get_ruledef"
                 | "pg_has_role"
@@ -561,6 +562,11 @@ fn overloads(name: &str) -> Option<Vec<BuiltinFunctionOverload>> {
             ),
         ],
         "pg_get_partkeydef" => vec![overload(&local, &[ColumnType::Oid], ColumnType::Text)],
+        "pg_get_serial_sequence" => vec![overload(
+            &local,
+            &[ColumnType::Text, ColumnType::Text],
+            ColumnType::Text,
+        )],
         "pg_get_triggerdef" | "pg_get_ruledef" => vec![
             overload(&local, &[ColumnType::Oid], ColumnType::Text),
             overload(
@@ -645,6 +651,7 @@ fn local_name(name: &str) -> Option<String> {
             | "to_regtype"
             | "pg_get_expr"
             | "pg_get_partkeydef"
+            | "pg_get_serial_sequence"
             | "pg_get_triggerdef"
             | "pg_get_ruledef"
             | "pg_has_role"

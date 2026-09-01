@@ -89,6 +89,11 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
     let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
     let catalog = KeyValueCatalog::new(store);
     let object_id = [7; 16];
+    let owner = crate::catalog::SequenceOwner {
+        table_object_id: [5; 16],
+        column_object_id: [6; 16],
+        dependency: crate::catalog::SequenceOwnerDependency::Internal,
+    };
     catalog.save_schema("public").unwrap();
     catalog
         .create_sequence_row(&SequenceRow {
@@ -101,6 +106,7 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
             called: false,
             persistence: "p".into(),
             options: SequenceOptions::default(),
+            owner: Some(owner),
         })
         .unwrap();
 
@@ -119,6 +125,7 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
     let uncalled = catalog.load_sequence_rows().unwrap().remove(0);
     assert_eq!(uncalled.current, 7);
     assert!(!uncalled.called);
+    assert_eq!(uncalled.owner, Some(owner));
     assert_eq!(
         catalog
             .next_sequence_value("public.controlled", object_id)
@@ -162,6 +169,7 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
                 cycle: true,
                 cache_size: 1,
             },
+            owner: None,
         })
         .unwrap();
     for expected in [5, 2, 5, 2] {
@@ -197,6 +205,7 @@ fn sequence_reservations_are_atomic_and_stop_at_the_configured_bound() {
                 cache_size: 5,
                 ..SequenceOptions::default()
             },
+            owner: None,
         })
         .unwrap();
 
@@ -314,6 +323,7 @@ fn relation_namespace_migration_rejects_alias_and_cross_kind_collisions() {
                         called: true,
                         persistence: "p".into(),
                         options: SequenceOptions::default(),
+                        owner: None,
                     })
                     .unwrap(),
                 )

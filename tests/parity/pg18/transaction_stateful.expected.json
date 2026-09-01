@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "82ec114c29bc9729b450555722b897259637d085f18bac7282c031cf0bb4274b",
+  "fixture_sha256": "71d1948a176498ce84a66b0e77d1b4e0048c5897fa1a1ff25a5b1ed7b24025e2",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -1396,6 +1396,243 @@
       "name": "sequence_cache_zero_alter",
       "kind": "error",
       "sqlstate": "22023"
+    },
+    {
+      "name": "create_sequence_owner_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_owner_lookup_and_default",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "sequence_owner_initial_value",
+      "kind": "rows",
+      "rows": [
+        [
+          "10"
+        ]
+      ]
+    },
+    {
+      "name": "sequence_owner_continue_identity",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_owner_after_continue",
+      "kind": "rows",
+      "rows": [
+        [
+          "11"
+        ]
+      ]
+    },
+    {
+      "name": "sequence_owner_restart_identity",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_owner_after_restart",
+      "kind": "rows",
+      "rows": [
+        [
+          "10"
+        ]
+      ]
+    },
+    {
+      "name": "sequence_owner_missing_table",
+      "kind": "error",
+      "sqlstate": "42P01"
+    },
+    {
+      "name": "sequence_owner_missing_column",
+      "kind": "error",
+      "sqlstate": "42703"
+    },
+    {
+      "name": "sequence_owner_wrong_schema",
+      "kind": "error",
+      "sqlstate": "55000"
+    },
+    {
+      "name": "sequence_owner_wrong_relation_kind",
+      "kind": "error",
+      "sqlstate": "42809"
+    },
+    {
+      "name": "sequence_owner_create_if_exists_skips_owner_lookup",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_owner_alter_if_exists_skips_owner_lookup",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_owner_rename_and_detach",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_owner_after_rename",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "sequence_owner_column_drop",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_owner_after_column_drop",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "sequence_owner_transaction_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_owner_transaction_rollback",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_owner_transaction_rollback_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "sequence_owner_direct_drop",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_owner_direct_drop_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "create_sequence_owner_cascade_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_owner_table_drop_restrict",
+      "kind": "error",
+      "sqlstate": "2BP01"
+    },
+    {
+      "name": "sequence_owner_table_drop_restrict_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t",
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "sequence_owner_table_drop_cascade",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_owner_table_drop_cascade_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t",
+          "t",
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "create_sequence_owner_column_cascade_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_owner_column_drop_restrict",
+      "kind": "error",
+      "sqlstate": "2BP01"
+    },
+    {
+      "name": "sequence_owner_column_drop_cascade",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_owner_column_drop_cascade_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t",
+          "t",
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "create_identity_owner_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_identity_owner_lookup",
+      "kind": "rows",
+      "rows": [
+        [
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "sequence_identity_owner_detach",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "sequence_identity_owner_direct_drop",
+      "kind": "error",
+      "sqlstate": "2BP01"
+    },
+    {
+      "name": "sequence_identity_owner_column_drop",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_identity_owner_column_drop_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "t"
+        ]
+      ]
     },
     {
       "name": "create_drop_sequence_fixture",

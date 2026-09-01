@@ -80,6 +80,7 @@ impl KeyValueCatalog {
                 current: sequence.current,
                 called: sequence.called,
                 persistence: sequence.persistence.clone(),
+                owner: sequence.owner,
                 options: concrete_sequence_options(sequence),
             })?,
         )?;
@@ -107,6 +108,7 @@ impl KeyValueCatalog {
                 current: sequence.current,
                 called: sequence.called,
                 persistence: sequence.persistence.clone(),
+                owner: sequence.owner,
                 options: concrete_sequence_options(sequence),
             })?,
         )?;
@@ -145,6 +147,7 @@ impl KeyValueCatalog {
                     current: stored.current,
                     called: stored.called,
                     persistence: stored.persistence,
+                    owner: stored.owner,
                     options: stored.options,
                 })
             })

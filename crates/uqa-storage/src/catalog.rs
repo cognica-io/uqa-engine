@@ -356,6 +356,34 @@ impl Default for SequenceOptions {
     }
 }
 
+/// Dependency strength of a sequence owner. Ordinary `OWNED BY` and `SERIAL` use an automatic dependency, while an identity column owns its sequence through an internal dependency that cannot be reassigned or dropped directly.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SequenceOwnerDependency {
+    #[default]
+    Automatic,
+    Internal,
+}
+
+impl SequenceOwnerDependency {
+    #[must_use]
+    pub const fn catalog_code(self) -> &'static str {
+        match self {
+            Self::Automatic => "a",
+            Self::Internal => "i",
+        }
+    }
+}
+
+/// Stable owner identity for a sequence dependency. Names are deliberately excluded so table and column renames do not require dependency rewrites.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SequenceOwner {
+    pub table_object_id: [u8; 16],
+    pub column_object_id: [u8; 16],
+    #[serde(default)]
+    pub dependency: SequenceOwnerDependency,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SequenceRow {
     pub relation: RelationIdentity,
@@ -372,6 +400,8 @@ pub struct SequenceRow {
     pub called: bool,
     /// `PostgreSQL` `pg_class.relpersistence` code. Durable sequence rows accept only permanent (`p`) and unlogged (`u`) values.
     pub persistence: String,
+    #[serde(default)]
+    pub owner: Option<SequenceOwner>,
     #[serde(default)]
     pub options: SequenceOptions,
 }
