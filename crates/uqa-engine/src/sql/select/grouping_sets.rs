@@ -74,6 +74,10 @@ fn expression_identity(
     })
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves SELECT schema and row identity"
+)]
 fn normalize_expression(
     engine: &Engine,
     expression: ScalarExpr,

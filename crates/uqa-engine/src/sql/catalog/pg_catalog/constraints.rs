@@ -16,6 +16,10 @@ use super::super::helpers::oids::{schema_oid, stable_oid};
 use super::super::helpers::rows::{bool_value, catalog_array, int_value, row, str_value};
 use super::table_relation_oid_from;
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves catalog column and OID order"
+)]
 pub(in crate::sql::catalog) fn build_pg_constraint(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,

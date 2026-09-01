@@ -39,7 +39,6 @@
     clippy::option_if_let_else,
     clippy::similar_names,
     clippy::needless_pass_by_value,
-    clippy::too_many_lines,
     clippy::unnecessary_wraps,
     dead_code,
     unused_imports,

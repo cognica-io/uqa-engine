@@ -19,6 +19,10 @@ use super::MAX_VALUE_DEPTH;
 
 const ROW_METADATA_LOCK_ORIGINS: u64 = 1;
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "binary decoding validates tags, widths, and bounds before allocation"
+)]
 pub(crate) fn decode_batch(record: &[u8]) -> ExecResult<Batch> {
     let mut reader = BinaryReader::new(record);
     let physical_width = reader.read_count("schema physical width", 1)?;
@@ -320,6 +324,10 @@ impl<'a> BinaryReader<'a> {
         Ok(origins)
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "binary decoding validates tags, widths, and bounds before allocation"
+    )]
     fn read_value(&mut self, depth: usize) -> ExecResult<Value> {
         if depth > MAX_VALUE_DEPTH {
             return Err(spill_error("spill value nesting exceeds 128 levels"));

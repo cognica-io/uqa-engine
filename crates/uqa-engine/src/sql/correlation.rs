@@ -178,6 +178,10 @@ pub(super) fn query_depends_on_outer_row(
     query_has_external_reference(engine, plan, &mut Vec::new())
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves scope and subquery identity"
+)]
 fn query_has_external_reference(
     engine: &Engine,
     plan: &QueryPlan,
@@ -322,6 +326,10 @@ fn query_has_external_reference(
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves scope and subquery identity"
+)]
 fn source_scope(
     engine: &Engine,
     source: &SourcePlan,

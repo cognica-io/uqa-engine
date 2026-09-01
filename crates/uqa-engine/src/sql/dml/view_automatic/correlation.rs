@@ -201,6 +201,10 @@ struct CorrelatedRewriteContext<'a> {
     outer: &'a RowSchema,
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves scope and subquery identity"
+)]
 fn rewrite_correlated_query(
     context: &CorrelatedRewriteContext<'_>,
     query: &mut QueryPlan,

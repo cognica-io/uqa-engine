@@ -11,6 +11,10 @@ use super::{
     Result, SQLError,
 };
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "ordered PostgreSQL lowering preserves syntax and error precedence"
+)]
 pub(super) fn compile_merge(stmt: &pg_query::protobuf::MergeStmt) -> Result<crate::ast::MergeStmt> {
     use crate::ast::{MergeStmt, MergeWhen};
     use pg_query::protobuf::{CmdType, MergeMatchKind};

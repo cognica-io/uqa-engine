@@ -31,6 +31,7 @@ pub(in crate::sql) fn run_update(
     })
 }
 
+#[expect(clippy::too_many_lines, reason = "preserves DML lock and event order")]
 pub(in crate::sql) fn run_update_inner(
     engine: &Engine,
     stmt: &UpdatePlan,
@@ -578,7 +579,11 @@ struct PreparedUpdateRow {
     affected: bool,
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "keeps DML row-image inputs aligned"
+)]
+#[expect(clippy::too_many_lines, reason = "preserves DML lock and event order")]
 fn prepare_update_row(
     engine: &Engine,
     stmt: &UpdatePlan,

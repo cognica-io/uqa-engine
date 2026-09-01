@@ -9,7 +9,10 @@
 use super::*;
 
 impl Session {
-    #[allow(clippy::too_many_lines)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "preserves meta-command output contracts"
+    )]
     pub(super) fn handle_meta(&mut self, command: &str, out: &mut impl Write) -> PromptLineOutcome {
         let mut parts = command.trim().splitn(2, char::is_whitespace);
         let cmd = parts.next().unwrap_or("");

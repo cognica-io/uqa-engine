@@ -689,6 +689,10 @@ fn render_rule_relation(
     Ok(render_qualified_name(name))
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves catalog column and OID order"
+)]
 fn render_trigger_definition(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
@@ -855,6 +859,10 @@ fn render_trigger_condition(condition: &Expr, pretty: bool) -> String {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves catalog column and OID order"
+)]
 fn render_pretty_expr(expr: &Expr, parent_precedence: u8) -> String {
     let (precedence, rendered) = match expr {
         Expr::Or(items) => (

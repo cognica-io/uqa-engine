@@ -14,6 +14,10 @@ use super::{ProjectedExpr, ProjectedIntPredicate};
 use crate::scalar::scalar_integer_binary_width;
 use crate::{RowSchema, ScalarExpr};
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "predicate compiler exhaustively accepts or rejects each IR shape"
+)]
 pub(super) fn compile(
     expression: &ScalarExpr,
     schema: &RowSchema,

@@ -465,6 +465,7 @@ impl Engine {
     }
 
     #[napi(ts_return_type = "Promise<Array<SearchHit>>")]
+    // The N-API method mirrors the stable JavaScript positional signature; changing it would break existing callers.
     #[allow(clippy::too_many_arguments)]
     pub fn hybrid_search(
         &self,
@@ -496,6 +497,7 @@ impl Engine {
     }
 
     #[napi(ts_return_type = "Promise<Array<SearchHit>>")]
+    // The N-API method mirrors the stable JavaScript positional signature; changing it would break existing callers.
     #[allow(clippy::too_many_arguments)]
     pub fn robust_hybrid_search(
         &self,

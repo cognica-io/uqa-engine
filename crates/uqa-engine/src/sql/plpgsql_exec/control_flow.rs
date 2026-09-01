@@ -39,7 +39,7 @@ impl Interpreter<'_> {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "keeps PL/pgSQL context aligned")]
     pub(super) fn exec_fori(
         &mut self,
         label: Option<&str>,

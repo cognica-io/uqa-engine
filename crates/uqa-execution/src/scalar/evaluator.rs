@@ -20,6 +20,10 @@ use super::context::ScalarEvalContext;
 use super::{ScalarExpr, SubqueryId};
 
 /// Evaluate the physical scalar tree directly. No parser expression is reconstructed at this boundary.
+#[expect(
+    clippy::too_many_lines,
+    reason = "scalar evaluation keeps IR variants and callback errors exhaustive"
+)]
 pub fn eval_scalar(
     expression: &ScalarExpr,
     context: &ScalarEvalContext<'_>,

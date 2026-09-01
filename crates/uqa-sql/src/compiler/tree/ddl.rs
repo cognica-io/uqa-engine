@@ -21,6 +21,10 @@ struct TableNotNullConstraint {
     no_inherit: bool,
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "ordered PostgreSQL lowering preserves syntax and error precedence"
+)]
 pub(in crate::compiler) fn compile_create_table(
     stmt: &pg_query::protobuf::CreateStmt,
 ) -> Result<CreateTable> {
@@ -385,6 +389,10 @@ pub(in crate::compiler) fn key_constraint_label(kind: TableKeyConstraintKind) ->
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "ordered PostgreSQL lowering preserves syntax and error precedence"
+)]
 pub(in crate::compiler) fn compile_column_def(
     col: &pg_query::protobuf::ColumnDef,
 ) -> Result<ColumnDef> {

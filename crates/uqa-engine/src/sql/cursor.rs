@@ -111,6 +111,10 @@ pub(super) fn execute(
 }
 
 #[inline(never)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves cursor bounds and position"
+)]
 fn execute_uncached_or_snapshot_scoped(
     engine: &Engine,
     sql: &str,

@@ -33,6 +33,10 @@ pub(in crate::sql::catalog) fn catalog_type_name(oid: i64) -> &'static str {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves catalog column and OID order"
+)]
 pub(in crate::sql::catalog) fn pg_type_oid(ty: &ColumnType) -> i64 {
     match ty {
         ColumnType::SmallInteger => 21,

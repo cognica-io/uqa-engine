@@ -152,6 +152,8 @@ flowchart TD
 
 All INSERT, UPDATE, DELETE, and MERGE entry points use one mutation-command boundary for implicit transaction selection and one scoped command overlay for statement-visible staged rows. The shared DML protocol owns typed candidates, physical identities, lock outcomes, row images, deferred checks, prepared insert/rewrite/delete actions, trigger and referential event state, and publication batches; command modules retain SQL-specific selection and policy, while spill codecs are versioned at the command boundary and reject malformed or unknown layouts.
 
+Responsibility roots remain facades over semantic children rather than line-count fragments. SELECT execution, filter-pushdown subqueries, row-lock leaf validation, constraint rewriting and referencing, MERGE action execution, trigger transition tables, and indexed spill storage each have a dedicated owner. The repository rejects every hand-maintained Rust file at or above 1,000 physical lines and grants no root or module descendant-wide structural lint allowance; these guards preserve the implemented ownership map but do not replace its capability checks and behavior tests.
+
 ## Source entry points
 
 | Area | Entry point |
@@ -179,7 +181,14 @@ All INSERT, UPDATE, DELETE, and MERGE entry points use one mutation-command boun
 | Catalog projection policy | [`crates/uqa-engine/src/sql/catalog/helpers.rs`](../../../crates/uqa-engine/src/sql/catalog/helpers.rs) |
 | Schema binding | [`crates/uqa-engine/src/sql/select/schema_binding.rs`](../../../crates/uqa-engine/src/sql/select/schema_binding.rs) |
 | Query evaluation scopes | [`crates/uqa-engine/src/sql/select/evaluation.rs`](../../../crates/uqa-engine/src/sql/select/evaluation.rs) |
+| SELECT command execution | [`crates/uqa-engine/src/sql/select/execution.rs`](../../../crates/uqa-engine/src/sql/select/execution.rs) |
+| Filter-pushdown subqueries | [`crates/uqa-engine/src/sql/select/filter_pushdown/subqueries.rs`](../../../crates/uqa-engine/src/sql/select/filter_pushdown/subqueries.rs) |
+| Row-lock leaf validation | [`crates/uqa-engine/src/sql/select/row_locking/leaf_validation.rs`](../../../crates/uqa-engine/src/sql/select/row_locking/leaf_validation.rs) |
 | Physical query construction | [`crates/uqa-engine/src/sql/select/physical_plan.rs`](../../../crates/uqa-engine/src/sql/select/physical_plan.rs) |
+| Constraint rewrite and referencing policy | [`crates/uqa-engine/src/sql/dml/constraints/`](../../../crates/uqa-engine/src/sql/dml/constraints) |
+| MERGE action execution | [`crates/uqa-engine/src/sql/dml/merge/execution.rs`](../../../crates/uqa-engine/src/sql/dml/merge/execution.rs) |
+| Trigger transition tables | [`crates/uqa-engine/src/sql/triggers/transitions.rs`](../../../crates/uqa-engine/src/sql/triggers/transitions.rs) |
+| Indexed spill storage | [`crates/uqa-execution/src/spill/indexed/`](../../../crates/uqa-execution/src/spill/indexed) |
 | Storage contracts | [`crates/uqa-storage/src/lib.rs`](../../../crates/uqa-storage/src/lib.rs) |
 | SQLite catalog migrations | [`crates/uqa-storage/src/sqlite/catalog/migration`](../../../crates/uqa-storage/src/sqlite/catalog/migration) |
 | Exact WAND and Block-Max WAND | [`crates/uqa-scoring/src/wand`](../../../crates/uqa-scoring/src/wand) |

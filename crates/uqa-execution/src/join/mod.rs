@@ -150,7 +150,10 @@ enum UniqueHashIndex {
 }
 
 impl<'a> HashJoin<'a> {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "keeps join keys and schema aligned"
+    )]
     pub fn new(
         left: Box<dyn PhysicalOperator + 'a>,
         right: Box<dyn PhysicalOperator + 'a>,
@@ -174,7 +177,10 @@ impl<'a> HashJoin<'a> {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "keeps join keys and schema aligned"
+    )]
     pub fn new_with_work_mem(
         left: Box<dyn PhysicalOperator + 'a>,
         right: Box<dyn PhysicalOperator + 'a>,
@@ -200,7 +206,10 @@ impl<'a> HashJoin<'a> {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "keeps join keys and schema aligned"
+    )]
     pub fn new_with_work_mem_and_predicate(
         left: Box<dyn PhysicalOperator + 'a>,
         right: Box<dyn PhysicalOperator + 'a>,
@@ -271,7 +280,10 @@ impl<'a> HashJoin<'a> {
     /// Construct a hash join while preparing supported residual predicates
     /// against its composite output schema. Parameters and constant LIKE
     /// patterns are folded exactly once before any candidate row is probed.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "keeps join keys and schema aligned"
+    )]
     pub fn try_new_with_work_mem_and_predicate(
         left: Box<dyn PhysicalOperator + 'a>,
         right: Box<dyn PhysicalOperator + 'a>,
@@ -344,6 +356,10 @@ impl<'a> HashJoin<'a> {
         Ok(index)
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "join driver keeps key layout, NULL policy, and output order aligned"
+    )]
     fn open_build_left(&mut self, state_budget: usize, output_budget: usize) -> ExecResult<()> {
         debug_assert!(matches!(self.kind, JoinKind::Inner));
         let left_budget = state_budget / 2;
@@ -606,6 +622,10 @@ impl PhysicalOperator for HashJoin<'_> {
         self.estimated_cardinality
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "join driver keeps key layout, NULL policy, and output order aligned"
+    )]
     fn open(&mut self) -> ExecResult<()> {
         self.output = None;
         self.streaming_unique = None;

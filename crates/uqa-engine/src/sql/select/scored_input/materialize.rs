@@ -304,6 +304,10 @@ impl ScoredDocumentSource {
         self.for_each_snapshot_entry(entries, visitor)
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "preserves SELECT schema and row identity"
+    )]
     fn for_each_snapshot_entry(
         &self,
         entries: &[ScoredEntry],

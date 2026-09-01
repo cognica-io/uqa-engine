@@ -576,6 +576,10 @@ mod unified_plan_tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "covers commit and rollback plan epochs"
+    )]
     fn committed_table_data_invalidates_sibling_statement_plans_but_rollback_does_not() {
         let dir = tempfile::tempdir().expect("temporary database directory");
         let root = Engine::open(&dir.path().join("statement-data-epoch.db"))

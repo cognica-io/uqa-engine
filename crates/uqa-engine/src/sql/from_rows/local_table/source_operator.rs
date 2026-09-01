@@ -43,7 +43,6 @@ pub(in crate::sql) fn build_join_operator_with_recheck_pins<'a>(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 /// Recursively assemble a source tree while tracking tuple-recheck paths.
 pub(super) fn build_join_operator_with_ctes_at_path<'a>(
     engine: &'a Engine,

@@ -58,6 +58,10 @@ pub(in crate::sql) fn expr_has_unqualified_column(expr: &ScalarExpr) -> bool {
     found
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves SELECT schema and row identity"
+)]
 pub(in crate::sql) fn qualify_unqualified_columns(
     expr: &ScalarExpr,
     qualifier: &str,

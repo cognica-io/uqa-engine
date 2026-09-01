@@ -60,6 +60,10 @@ pub fn builtin_function_argument_targets(
     targets
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "type resolution preserves candidate order and ambiguity diagnostics atomically"
+)]
 pub(super) fn builtin_function_type_inner(
     name: &str,
     binding: Option<&FunctionBinding>,

@@ -5,7 +5,7 @@
 # Copyright (c) 2023-2026 Cognica, Inc.
 #
 
-"""Enforce the transition ratchet for hand-maintained Rust source files."""
+"""Enforce the physical-line ceiling for hand-maintained Rust source files."""
 
 from __future__ import annotations
 
@@ -22,19 +22,11 @@ from typing import Any
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 POLICY_PATH = ROOT / "scripts" / "rust-file-line-policy.json"
 REPORT_THRESHOLDS = (1000, 1200, 1350, 1400, 1450, 1501)
-ENTRY_FIELDS = {
-    "path",
-    "baseline_lines",
-    "owner",
-    "responsibility_groups",
-    "target_modules",
-    "migration_state",
-}
-MIGRATION_STATES = {"planned", "in-progress"}
+POLICY_FIELDS = {"schema_version", "line_limit", "excluded_roots"}
 
 
 class PolicyError(RuntimeError):
-    """The line inventory or current tree violates the transition policy."""
+    """The line policy or current tree violates the hard ceiling."""
 
 
 def physical_line_count(path: pathlib.Path) -> int:
@@ -58,8 +50,10 @@ def load_policy(path: pathlib.Path) -> dict[str, Any]:
         policy = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise PolicyError(f"cannot read Rust line policy {path}: {error}") from error
-    if not isinstance(policy, dict) or policy.get("schema_version") != 1:
-        raise PolicyError("Rust line policy must use schema_version 1")
+    if not isinstance(policy, dict) or set(policy) != POLICY_FIELDS:
+        raise PolicyError(f"Rust line policy must contain exactly {sorted(POLICY_FIELDS)}")
+    if policy.get("schema_version") != 2:
+        raise PolicyError("Rust line policy must use schema_version 2")
     limit = policy.get("line_limit")
     if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
         raise PolicyError("line_limit must be a positive integer")
@@ -71,42 +65,6 @@ def load_policy(path: pathlib.Path) -> dict[str, Any]:
     ]
     if len(set(policy["excluded_roots"])) != len(policy["excluded_roots"]):
         raise PolicyError("excluded_roots contains duplicates")
-    entries = policy.get("oversized_files")
-    if not isinstance(entries, list):
-        raise PolicyError("oversized_files must be a list")
-    previous_path = ""
-    seen: set[str] = set()
-    for index, entry in enumerate(entries):
-        if not isinstance(entry, dict) or set(entry) != ENTRY_FIELDS:
-            raise PolicyError(
-                f"oversized_files[{index}] must contain exactly {sorted(ENTRY_FIELDS)}"
-            )
-        entry_path = normalized_relative_path(entry["path"], f"oversized_files[{index}].path")
-        if entry_path in seen:
-            raise PolicyError(f"duplicate oversized inventory path: {entry_path}")
-        if previous_path and entry_path < previous_path:
-            raise PolicyError("oversized_files must be sorted by path")
-        seen.add(entry_path)
-        previous_path = entry_path
-        baseline = entry["baseline_lines"]
-        if not isinstance(baseline, int) or isinstance(baseline, bool) or baseline < limit:
-            raise PolicyError(
-                f"{entry_path}: baseline_lines must be at least the {limit}-line inventory threshold"
-            )
-        if not isinstance(entry["owner"], str) or not entry["owner"].strip():
-            raise PolicyError(f"{entry_path}: owner must be a non-empty string")
-        for field in ("responsibility_groups", "target_modules"):
-            values = entry[field]
-            if (
-                not isinstance(values, list)
-                or not values
-                or any(not isinstance(value, str) or not value.strip() for value in values)
-            ):
-                raise PolicyError(f"{entry_path}: {field} must contain non-empty strings")
-        if entry["migration_state"] not in MIGRATION_STATES:
-            raise PolicyError(
-                f"{entry_path}: migration_state must be one of {sorted(MIGRATION_STATES)}"
-            )
     return policy
 
 
@@ -158,15 +116,18 @@ def report(root: pathlib.Path, lines: dict[str, int], limit: int) -> dict[str, A
         if path == "crates/uqa-engine/src/sql.rs"
         or path.startswith("crates/uqa-engine/src/sql/")
     ]
-    root_allowances = []
+    root_structural_allowances = []
     for path in (
         "crates/uqa-engine/src/sql.rs",
         "crates/uqa-execution/src/lib.rs",
         "crates/uqa-sql/src/lib.rs",
     ):
         absolute = root / path
-        if absolute.exists() and text_contains(absolute, r"#!\[allow\("):
-            root_allowances.append(path)
+        if absolute.exists() and text_contains(
+            absolute,
+            r"(?s)#!\[allow\([^]]*clippy::(?:too_many_lines|too_many_arguments|type_complexity|large_enum_variant)",
+        ):
+            root_structural_allowances.append(path)
 
     largest_path, largest_lines = max(lines.items(), key=lambda item: item[1])
     return {
@@ -203,7 +164,7 @@ def report(root: pathlib.Path, lines: dict[str, int], limit: int) -> dict[str, A
                 text_contains(root / path, r"(?m)^use super::\*;") for path in sql_paths
             ),
         },
-        "root_lint_allowances": root_allowances,
+        "root_structural_lint_allowances": root_structural_allowances,
     }
 
 
@@ -211,39 +172,15 @@ def verify(root: pathlib.Path, policy_path: pathlib.Path) -> dict[str, Any]:
     policy = load_policy(policy_path)
     limit = policy["line_limit"]
     lines = rust_file_lines(root, policy["excluded_roots"])
-    inventory = {entry["path"]: entry for entry in policy["oversized_files"]}
-    errors = []
-
-    for path, entry in inventory.items():
-        current = lines.get(path)
-        if current is None:
-            errors.append(f"inventory path is missing or excluded: {path}")
-        elif current < limit:
-            errors.append(
-                f"resolved inventory entry must be removed: {path} ({current} < {limit})"
-            )
-        elif current > entry["baseline_lines"]:
-            errors.append(
-                f"Rust file grew beyond its ratchet: {path} "
-                f"({current} > {entry['baseline_lines']})"
-            )
-        elif current < entry["baseline_lines"]:
-            errors.append(
-                f"lower the ratchet after shrinking: {path} "
-                f"(baseline {entry['baseline_lines']}, current {current})"
-            )
-
-    for path, current in lines.items():
-        if current >= limit and path not in inventory:
-            errors.append(
-                f"Rust file at or above {limit} lines is not inventoried: {path} ({current})"
-            )
+    errors = [
+        f"Rust file reaches or exceeds the {limit}-line ceiling: {path} ({current})"
+        for path, current in lines.items()
+        if current >= limit
+    ]
 
     if errors:
         raise PolicyError("\n".join(errors))
-    result = report(root, lines, limit)
-    result["inventoried_files"] = len(inventory)
-    return result
+    return report(root, lines, limit)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -270,9 +207,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         largest = result["largest_file"]
         print(
-            "Rust file transition ratchet OK "
-            f"({result['inventoried_files']} inventoried at or above "
-            f"{result['line_limit']} lines; largest {largest['path']} "
+            "Rust file hard ceiling OK "
+            f"(all files below {result['line_limit']} lines; largest {largest['path']} "
             f"at {largest['physical_lines']})"
         )
     return 0

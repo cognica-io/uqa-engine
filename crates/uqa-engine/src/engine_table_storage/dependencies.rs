@@ -331,7 +331,10 @@ impl Engine {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "keeps persisted write inputs aligned"
+    )]
     pub(super) fn persist_constraint_candidate_with_hierarchy(
         &self,
         name: &str,

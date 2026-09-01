@@ -12,6 +12,7 @@ use super::{
 };
 
 impl Interpreter<'_> {
+    #[expect(clippy::too_many_lines, reason = "preserves PL/pgSQL transition order")]
     pub(super) fn exec_stmt(&mut self, stmt: &PLpgSQLStmt) -> Result<Flow, SQLError> {
         self.engine.cancellation_token().check()?;
         match stmt {

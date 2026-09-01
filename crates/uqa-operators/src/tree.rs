@@ -15,8 +15,6 @@
 //! runtime, but the planner pre-rewrites an [`OperatorTree`] before
 //! handing it to the executor.
 
-#![allow(clippy::large_enum_variant)]
-
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -699,7 +697,10 @@ impl OperatorTree {
     /// The match is intentionally exhaustive so adding a child-bearing IR
     /// variant cannot silently create a traversal boundary in planners or
     /// engine catalog analysis.
-    #[allow(clippy::too_many_lines)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "preserves exhaustive IR variant order"
+    )]
     pub fn visit(&self, visitor: &mut impl FnMut(&OperatorTree)) {
         visitor(self);
         match self {

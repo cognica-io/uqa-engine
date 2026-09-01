@@ -48,6 +48,10 @@ fn compile_pattern_operands(
     function.args.iter().map(compile_expr).collect()
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "ordered PostgreSQL lowering preserves syntax and error precedence"
+)]
 pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Result<Expr> {
     use pg_query::protobuf::AExprKind;
     let kind = a.kind();

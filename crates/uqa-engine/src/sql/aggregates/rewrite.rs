@@ -54,6 +54,10 @@ fn aggregate_slot(relation: uqa_sql::ast::InternalRelationId, index: usize) -> S
     ScalarExpr::InternalColumn(relation.column(index))
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves aggregate NULL and type order"
+)]
 fn rewrite_aggregates(
     engine: &Engine,
     expr: &ScalarExpr,

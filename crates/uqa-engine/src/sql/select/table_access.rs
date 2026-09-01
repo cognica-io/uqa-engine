@@ -17,6 +17,10 @@ use super::{
 };
 use crate::sql::from_rows::SourceProjection;
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves SELECT schema and row identity"
+)]
 pub(in crate::sql) fn run_single_table_select_output(
     engine: &Engine,
     relation: SingleRelation<'_>,
@@ -406,6 +410,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::too_many_lines, reason = "covers projection pruning cases")]
     fn accelerated_retrieval_materializes_only_relational_dependencies() {
         let directory = tempdir().unwrap();
         let engine = Engine::open(&directory.path().join("projection.sqlite3")).unwrap();

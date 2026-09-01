@@ -35,6 +35,10 @@ pub(super) fn optimize_scalar_slot(expression: &mut ScalarExpr, config: &Optimiz
     *expression = optimized;
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "optimizer rewrite preserves exhaustive variants and fixed-point order"
+)]
 fn optimize_scalar(expression: ScalarExpr, config: &OptimizerConfig) -> ScalarExpr {
     let optimized = match expression {
         ScalarExpr::Array(items) => ScalarExpr::Array(

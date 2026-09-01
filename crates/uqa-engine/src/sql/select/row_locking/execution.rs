@@ -40,6 +40,10 @@ enum CandidateRecheckAdvance {
 impl LockRows<'_> {
     // Keep candidate acquisition separate from successor traversal so release optimization never merges their control-flow graphs.
     #[inline(never)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "preserves lock target and recheck order"
+    )]
     pub(super) fn lock_physical_row(
         &mut self,
         row: PhysicalRow,
@@ -372,6 +376,10 @@ impl LockRows<'_> {
     // This contention-only rebuild stays out of the per-row locking path.
     #[cold]
     #[inline(never)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "preserves lock target and recheck order"
+    )]
     fn run_candidate_recheck(
         &self,
         row: &PhysicalRow,

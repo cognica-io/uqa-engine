@@ -29,7 +29,10 @@ pub(super) struct StagedValuesInsertRow {
     pub(super) prepared_effect: bool,
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "keeps DML row-image inputs aligned"
+)]
 pub(super) fn prepare_values_insert_row(
     engine: &Engine,
     stmt: &InsertPlan,
@@ -136,6 +139,7 @@ pub(super) fn attach_prepared_insert_identity(
     }
 }
 
+#[expect(clippy::too_many_lines, reason = "preserves DML lock and event order")]
 pub(super) fn stage_prepared_insert_row(
     context: PreparedInsertRowContext<'_>,
     prepared: &mut PreparedInsertConflict,

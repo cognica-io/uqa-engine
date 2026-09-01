@@ -12,6 +12,10 @@ use super::{
     value_to_string, DecimalValue, Result, SQLError, Value,
 };
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "builtin dispatch preserves arity, NULL, and error precedence"
+)]
 pub(super) fn eval_math_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
     const NAMES: &[&str] = &[
         "sin",

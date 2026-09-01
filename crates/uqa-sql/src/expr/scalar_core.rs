@@ -14,6 +14,10 @@ use super::{
     ArrayValue, DecimalValue, Result, SQLError, Value,
 };
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "builtin dispatch preserves arity, NULL, and error precedence"
+)]
 pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
     const NAMES: &[&str] = &[
         "coalesce",

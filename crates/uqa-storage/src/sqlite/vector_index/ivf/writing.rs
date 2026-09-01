@@ -86,7 +86,10 @@ pub(super) fn write_untrained_meta(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "keeps persisted write inputs aligned"
+)]
 fn write_meta_values(
     connection: &rusqlite::Connection,
     persistent: &SQLiteVectorIndex,

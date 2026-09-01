@@ -27,6 +27,10 @@ pub(in crate::sql) struct EngineLateralSource<'a> {
 }
 
 impl uqa_execution::LateralSource for EngineLateralSource<'_> {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "preserves source schema and row identity"
+    )]
     fn rows_for(
         &mut self,
         left_row: &uqa_execution::OwnedPhysicalRow,
@@ -189,7 +193,6 @@ impl uqa_execution::LateralSource for EngineLateralSource<'_> {
 
 /// Build the engine-specific correlated source and execute it through the
 /// common physical `LateralJoin` operator.
-#[allow(clippy::too_many_arguments)]
 pub(in crate::sql) fn execute_lateral_subquery_output(
     engine: &Engine,
     plan: &QueryPlan,
@@ -212,6 +215,10 @@ fn execute_lateral_subquery_output_inner(
     execute_lateral_relational_root_output(engine, &plan.root, outer_row, params, &mut scoped_ctes)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves source schema and row identity"
+)]
 fn execute_lateral_relational_root_output(
     engine: &Engine,
     root: &RelationalPlan,

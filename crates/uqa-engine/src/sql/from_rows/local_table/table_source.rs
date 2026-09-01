@@ -18,6 +18,10 @@ use super::{
 use uqa_execution::PhysicalOperator;
 
 /// Build the physical operator for a table source.
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves source schema and row identity"
+)]
 pub(super) fn build_table_source_operator<'a>(
     engine: &'a Engine,
     from: &SourcePlan,

@@ -18,7 +18,10 @@ mod fixed;
 
 pub(super) use fixed::{bind_call as bind_fixed_builtin_call, FixedBuiltinCall};
 
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves builtin typing diagnostics"
+)]
 pub(super) fn infer_builtin_function(
     name: &str,
     argument_names: &[Option<String>],

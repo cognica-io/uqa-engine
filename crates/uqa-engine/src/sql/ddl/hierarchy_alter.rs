@@ -313,6 +313,10 @@ fn detach_partition(
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves DDL dependency and action order"
+)]
 fn validate_row_type(
     engine: &Engine,
     parent: &str,

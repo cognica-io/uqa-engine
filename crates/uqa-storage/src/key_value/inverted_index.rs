@@ -27,6 +27,12 @@ use crate::clustered_postings::{
 };
 use crate::PostingCursor;
 
+mod migration;
+mod mutation;
+
+use migration::{migrate_legacy_forward_postings, migrate_legacy_reverse_postings};
+use mutation::{accumulate_field_changes, merge_cluster_changes};
+
 const FORMAT_METADATA_KEY: &str = "inverted_index_format";
 const CLUSTERED_FORMAT_NAME: &str = "clustered-v1";
 const MIGRATION_PAGE_SIZE: usize = 1_024;
@@ -49,75 +55,6 @@ type KeyValueStagedDocuments = BTreeMap<DocId, KeyValueAnalyzedFields>;
 type KeyValueClusterChanges = BTreeMap<ClusterKey, BTreeMap<DocId, PostingChange>>;
 type KeyValueFieldChanges = BTreeMap<FieldName, (u64, u64)>;
 type KeyValueMergedClusters = Vec<(ClusterKey, Vec<ClusterPosting>)>;
-
-fn merge_cluster_changes(
-    entries: Vec<ClusterPosting>,
-    changes: BTreeMap<DocId, PostingChange>,
-) -> Vec<ClusterPosting> {
-    fn push_replacement(
-        entries: &mut Vec<ClusterPosting>,
-        doc_id: DocId,
-        replacement: PostingChange,
-    ) {
-        if let Some((doc_length, positions)) = replacement {
-            entries.push(ClusterPosting {
-                doc_id,
-                term_freq: positions.len() as u64,
-                doc_length,
-                positions,
-            });
-        }
-    }
-
-    let mut merged = Vec::with_capacity(entries.len().saturating_add(changes.len()));
-    let mut changes = changes.into_iter().peekable();
-    for entry in entries {
-        while changes
-            .peek()
-            .is_some_and(|(doc_id, _)| *doc_id < entry.doc_id)
-        {
-            let (doc_id, replacement) = changes.next().expect("peeked posting change exists");
-            push_replacement(&mut merged, doc_id, replacement);
-        }
-        if changes
-            .peek()
-            .is_some_and(|(doc_id, _)| *doc_id == entry.doc_id)
-        {
-            let (doc_id, replacement) = changes.next().expect("peeked posting change exists");
-            push_replacement(&mut merged, doc_id, replacement);
-        } else {
-            merged.push(entry);
-        }
-    }
-    for (doc_id, replacement) in changes {
-        push_replacement(&mut merged, doc_id, replacement);
-    }
-    merged
-}
-
-fn accumulate_field_changes(
-    field_changes: &mut KeyValueFieldChanges,
-    old_lengths: &BTreeMap<FieldName, u64>,
-    new_lengths: &BTreeMap<FieldName, u64>,
-) -> StorageBackendResult<()> {
-    let mut affected_fields = BTreeSet::new();
-    affected_fields.extend(old_lengths.keys().cloned());
-    affected_fields.extend(new_lengths.keys().cloned());
-    for field in affected_fields {
-        let (old_total, new_total) = field_changes.entry(field.clone()).or_default();
-        if let Some(length) = old_lengths.get(&field) {
-            *old_total = old_total
-                .checked_add(*length)
-                .ok_or_else(|| other_error("old field length overflow"))?;
-        }
-        if let Some(length) = new_lengths.get(&field) {
-            *new_total = new_total
-                .checked_add(*length)
-                .ok_or_else(|| other_error("new field length overflow"))?;
-        }
-    }
-    Ok(())
-}
 
 impl KeyValueInvertedIndex {
     pub fn new(
@@ -490,115 +427,6 @@ impl KeyValueInvertedIndex {
         }
         Ok(Box::new(ClusteredPostingCursor::new(clusters)?))
     }
-}
-
-fn migrate_legacy_forward_postings(store: &dyn KeyValueStore) -> StorageBackendResult<u64> {
-    let posting_prefix = key_with_tag(TAG_POSTING);
-    let mut after = None::<Vec<u8>>;
-    let mut group = None::<(String, String, String, u64, Vec<ClusterPosting>)>;
-    let mut posting_count = 0_u64;
-    loop {
-        let page =
-            store.scan_prefix_after(&posting_prefix, after.as_deref(), MIGRATION_PAGE_SIZE)?;
-        if page.is_empty() {
-            break;
-        }
-        for (key, value) in page {
-            after = Some(key.clone());
-            let (table, field, term, doc_id) = decode_legacy_posting_key(&key)?;
-            let positions = blob_to_positions(&value)?;
-            let doc_length = store
-                .get(&doc_length_key(&table, doc_id, &field)?)?
-                .map(|value| decode_u64_value(&value))
-                .transpose()?
-                .ok_or_else(|| {
-                    other_error(format!(
-                        "cannot migrate posting `{table}.{field}.{term}` for document {doc_id}: missing document length"
-                    ))
-                })?;
-            if !store.contains_key(&reverse_posting_key(&table, doc_id, &field, &term)?)? {
-                return Err(other_error(format!(
-                    "cannot migrate posting `{table}.{field}.{term}` for document {doc_id}: missing reverse posting"
-                )));
-            }
-            let posting_cluster = cluster_id(doc_id);
-            let same_group = group.as_ref().is_some_and(
-                |(group_table, group_field, group_term, group_cluster, _)| {
-                    group_table == &table
-                        && group_field == &field
-                        && group_term == &term
-                        && *group_cluster == posting_cluster
-                },
-            );
-            if !same_group {
-                if let Some(cluster) = group.take() {
-                    put_migrated_cluster(store, cluster)?;
-                }
-                group = Some((table, field, term, posting_cluster, Vec::new()));
-            }
-            group
-                .as_mut()
-                .expect("posting migration group exists")
-                .4
-                .push(ClusterPosting {
-                    doc_id,
-                    term_freq: positions.len() as u64,
-                    doc_length,
-                    positions,
-                });
-            posting_count = posting_count
-                .checked_add(1)
-                .ok_or_else(|| other_error("legacy posting count overflow"))?;
-            store.delete(&key)?;
-        }
-    }
-    if let Some(cluster) = group {
-        put_migrated_cluster(store, cluster)?;
-    }
-    Ok(posting_count)
-}
-
-fn migrate_legacy_reverse_postings(store: &dyn KeyValueStore) -> StorageBackendResult<u64> {
-    let reverse_prefix = key_with_tag(TAG_REVERSE_POSTING);
-    let mut after = None::<Vec<u8>>;
-    let mut group = None::<(String, DocId, FieldName, Vec<String>)>;
-    let mut reverse_count = 0_u64;
-    loop {
-        let page =
-            store.scan_prefix_after(&reverse_prefix, after.as_deref(), MIGRATION_PAGE_SIZE)?;
-        if page.is_empty() {
-            break;
-        }
-        for (key, _) in page {
-            after = Some(key.clone());
-            let (table, doc_id, field, term) = decode_legacy_reverse_key(&key)?;
-            let same_group =
-                group
-                    .as_ref()
-                    .is_some_and(|(group_table, group_doc_id, group_field, _)| {
-                        group_table == &table && *group_doc_id == doc_id && group_field == &field
-                    });
-            if !same_group {
-                if let Some(document) = group.take() {
-                    put_migrated_document(store, document)?;
-                }
-                group = Some((table, doc_id, field, Vec::new()));
-            }
-            group
-                .as_mut()
-                .expect("reverse posting migration group exists")
-                .3
-                .push(term);
-            reverse_count = reverse_count
-                .checked_add(1)
-                .ok_or_else(|| other_error("legacy reverse posting count overflow"))?;
-            store.delete(&key)?;
-        }
-    }
-    if let Some(document) = group {
-        put_migrated_document(store, document)?;
-    }
-    Ok(reverse_count)
 }
 
 impl InvertedIndex for KeyValueInvertedIndex {
@@ -1111,62 +939,4 @@ impl InvertedIndex for KeyValueInvertedIndex {
         }
         self.analyzer.clone()
     }
-}
-
-fn decode_legacy_posting_key(
-    key: &[u8],
-) -> StorageBackendResult<(String, FieldName, String, DocId)> {
-    let mut offset = 1;
-    let table = read_str(key, &mut offset)?;
-    let field = read_str(key, &mut offset)?;
-    let term = read_str(key, &mut offset)?;
-    let doc_id = read_u64(key, &mut offset)?;
-    if offset != key.len() {
-        return Err(other_error("invalid legacy posting key"));
-    }
-    Ok((table, field, term, doc_id))
-}
-
-fn decode_legacy_reverse_key(
-    key: &[u8],
-) -> StorageBackendResult<(String, DocId, FieldName, String)> {
-    let mut offset = 1;
-    let table = read_str(key, &mut offset)?;
-    let doc_id = read_u64(key, &mut offset)?;
-    let field = read_str(key, &mut offset)?;
-    let term = read_str(key, &mut offset)?;
-    if offset != key.len() {
-        return Err(other_error("invalid legacy reverse posting key"));
-    }
-    Ok((table, doc_id, field, term))
-}
-
-fn put_migrated_cluster(
-    store: &dyn KeyValueStore,
-    cluster: (String, FieldName, String, u64, Vec<ClusterPosting>),
-) -> StorageBackendResult<()> {
-    let (table, field, term, posting_cluster, entries) = cluster;
-    let (score_blob, positions_blob) = encode_cluster(&entries)?;
-    store.put(
-        &posting_cluster_score_key(&table, &field, &term, posting_cluster)?,
-        &score_blob,
-    )?;
-    store.put(
-        &posting_cluster_positions_key(&table, &field, &term, posting_cluster)?,
-        &positions_blob,
-    )
-}
-
-fn put_migrated_document(
-    store: &dyn KeyValueStore,
-    document: (String, DocId, FieldName, Vec<String>),
-) -> StorageBackendResult<()> {
-    let (table, doc_id, field, mut terms) = document;
-    // Length-prefixed key segments sort by encoded length before text bytes,
-    // while the shared terms codec requires ordinary lexical ordering.
-    terms.sort_unstable();
-    store.put(
-        &posting_document_key(&table, doc_id, &field)?,
-        &encode_terms(&terms)?,
-    )
 }

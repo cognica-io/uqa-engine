@@ -24,7 +24,10 @@ impl QueryOptimizer {
 /// Keeping this structural traversal exhaustive prevents a newly
 /// executable wrapper (join, graph embedding, progressive/deep fusion,
 /// and so on) from becoming an optimizer boundary by accident.
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves exhaustive IR variant order"
+)]
 pub(super) fn map_operator_children(
     op: OperatorTree,
     mut map: impl FnMut(OperatorTree) -> OperatorTree,

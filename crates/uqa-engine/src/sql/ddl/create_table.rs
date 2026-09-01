@@ -25,6 +25,10 @@ pub(in crate::sql) fn run_create_table(
     engine.transaction(move |engine| run_create_table_inner(engine, c))
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves DDL dependency and action order"
+)]
 fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResult, SQLError> {
     for column in &c.columns {
         super::validate_postgres_column_name(&column.name)?;

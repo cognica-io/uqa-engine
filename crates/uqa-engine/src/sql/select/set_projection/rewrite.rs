@@ -21,6 +21,10 @@ use super::{
 };
 use crate::sql::aggregates::{exprs_match, is_aggregate};
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves SELECT schema and row identity"
+)]
 pub(super) fn rewrite_set_calls(
     engine: &Engine,
     resolver: &dyn FunctionTypeResolver,
@@ -569,6 +573,10 @@ fn capture_aggregate_dependency(
     ScalarExpr::Position(position)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves SELECT schema and row identity"
+)]
 fn rewrite_aggregate_dependencies(
     engine: &Engine,
     group_by: &[ScalarExpr],

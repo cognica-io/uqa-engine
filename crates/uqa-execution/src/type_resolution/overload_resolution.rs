@@ -44,6 +44,10 @@ pub struct MatchedFunctionSignature {
 
 /// Match a call against one declared signature, including named arguments, omitted defaults, domain exactness, implicit casts, and preferred types.
 #[must_use]
+#[expect(
+    clippy::too_many_lines,
+    reason = "type resolution preserves candidate order and ambiguity diagnostics atomically"
+)]
 pub fn match_function_signature(
     parameters: &[FunctionParameterDescriptor],
     argument_names: &[Option<String>],

@@ -20,6 +20,10 @@ use uqa_core::ArrayValue;
 /// (RHS) with the `CtePlan` bound to the *new rows from the previous
 /// iteration* (working set), unioning the result back into the total.
 /// Caps at 1024 iterations to keep buggy queries from running away.
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves SELECT schema and row identity"
+)]
 pub(in crate::sql) fn materialize_recursive_cte(
     engine: &Engine,
     cte: &CtePlan,
@@ -417,7 +421,10 @@ struct RecursiveParentState {
     cycle_path: Option<Value>,
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "keeps SELECT scope inputs aligned"
+)]
 fn annotate_recursive_rows(
     base_rows: &uqa_execution::SharedSpill,
     generated_schema: &uqa_execution::RowSchema,
@@ -474,7 +481,10 @@ fn annotate_recursive_rows(
     ))
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "keeps SELECT scope inputs aligned"
+)]
 fn annotate_recursive_step_rows(
     step_rows: &uqa_execution::SharedSpill,
     base_schema: &uqa_execution::RowSchema,
@@ -585,7 +595,6 @@ fn annotate_recursive_step_rows(
     ))
 }
 
-#[allow(clippy::too_many_arguments)]
 fn annotate_recursive_row(
     base: &uqa_execution::OwnedPhysicalRow,
     cte: &CtePlan,

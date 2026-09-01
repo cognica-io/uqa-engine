@@ -50,7 +50,10 @@ pub(in crate::sql) fn execute_filter_physical_rows(
         .collect())
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "keeps SELECT scope inputs aligned"
+)]
 pub(in crate::sql) fn execute_query_block_operator_output<'a>(
     engine: &'a Engine,
     operator: Box<dyn PhysicalOperator + 'a>,
@@ -127,7 +130,14 @@ pub(super) fn attach_relational_filter<'a>(
     Ok(operator)
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "keeps SELECT scope inputs aligned"
+)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves SELECT schema and row identity"
+)]
 pub(super) fn finish_query_block_operator_output<'a>(
     engine: &'a Engine,
     mut operator: Box<dyn PhysicalOperator + 'a>,

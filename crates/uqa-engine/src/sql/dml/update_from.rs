@@ -19,6 +19,7 @@ use super::{
     UpdatePlan, ViewCheckContext,
 };
 
+#[expect(clippy::too_many_lines, reason = "preserves DML lock and event order")]
 pub(in crate::sql) fn run_update_from(
     engine: &Engine,
     read_engine: &Engine,

@@ -15,6 +15,10 @@ pub(super) fn default_expr_text(expr: Option<&Expr>) -> Value {
     expr.map_or(Value::Null, |expr| Value::Str(schema_expr_text(expr)))
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves catalog column and OID order"
+)]
 pub(super) fn schema_expr_text(expr: &Expr) -> String {
     match expr {
         Expr::Star => "*".into(),

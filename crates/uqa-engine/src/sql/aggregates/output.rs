@@ -42,6 +42,10 @@ struct AggregateExpressionPlan {
 }
 
 impl AggregateOutputPlan {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "preserves aggregate NULL and type order"
+    )]
     pub(super) fn compile(
         engine: &Engine,
         statement: &QueryBlockPlan,
@@ -160,7 +164,10 @@ impl AggregateOutputPlan {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "keeps execution context inputs aligned"
+)]
 pub(super) fn finish_group(
     engine: &Engine,
     statement: &QueryBlockPlan,

@@ -15,6 +15,10 @@ use super::sign::{
     apply_float_aware_numeric_sign, apply_truncated_special_sign, FloatFractionTruncation,
 };
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "ordered PostgreSQL format state machine preserves token precedence"
+)]
 pub(super) fn format_pg_number_picture(value: &Value, picture: NumericPicture) -> Result<String> {
     let NumericPicture {
         fill_mode,

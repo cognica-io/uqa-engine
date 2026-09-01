@@ -107,6 +107,10 @@ pub(super) fn compile_drop(stmt: &pg_query::protobuf::DropStmt) -> Result<Statem
 // ALTER TABLE { ADD COLUMN | DROP COLUMN | RENAME COLUMN | RENAME TO }
 // -------------------------------------------------------------------------
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "ordered PostgreSQL lowering preserves syntax and error precedence"
+)]
 pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> Result<Statement> {
     use pg_query::protobuf::{AlterTableType, DropBehavior, ObjectType};
     let relation = stmt

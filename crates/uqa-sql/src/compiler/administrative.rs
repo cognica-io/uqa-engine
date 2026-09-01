@@ -245,6 +245,10 @@ pub(super) fn compile_analyze(stmt: &pg_query::protobuf::VacuumStmt) -> Result<S
     Ok(Statement::Analyze { table })
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "ordered PostgreSQL lowering preserves syntax and error precedence"
+)]
 pub(super) fn compile_variable_set(
     stmt: &pg_query::protobuf::VariableSetStmt,
 ) -> Result<Statement> {

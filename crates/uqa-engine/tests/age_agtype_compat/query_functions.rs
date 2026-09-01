@@ -11,7 +11,10 @@ use super::*;
 // ---------------------------------------------------------------------
 
 #[test]
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "keeps named compatibility cases together"
+)]
 fn entity_functions_match_age() {
     let eng = engine_with_ground_truth_graph();
     let g = "gtruth";
@@ -192,7 +195,10 @@ fn aggregates_match_age() {
 // ---------------------------------------------------------------------
 
 #[test]
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "keeps named compatibility cases together"
+)]
 fn cypher_output_coerces_to_declared_sql_types() {
     let eng = Engine::new();
     exec(&eng, "SELECT create_graph('coerce')");

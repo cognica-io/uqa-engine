@@ -16,6 +16,10 @@ use super::{
 use uqa_execution::{HashJoin, LateralJoin, NestedLoopJoin, PhysicalOperator};
 
 /// Build the physical operator for a join source.
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves source schema and row identity"
+)]
 pub(super) fn build_join_source_operator<'a>(
     engine: &'a Engine,
     from: &SourcePlan,

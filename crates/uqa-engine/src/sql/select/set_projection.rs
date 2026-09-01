@@ -164,7 +164,10 @@ impl SetProjectionPlan {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "keeps SELECT scope inputs aligned"
+)]
 pub(in crate::sql) fn build_set_projection<'a>(
     mut operator: Box<dyn PhysicalOperator + 'a>,
     engine: &'a Engine,

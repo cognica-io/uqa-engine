@@ -198,6 +198,7 @@ fn specialized_definition(
 
 /// `LANGUAGE sql` body: run every statement; the last statement's
 /// result shapes the routine output.
+#[expect(clippy::too_many_lines, reason = "preserves PL/pgSQL transition order")]
 fn execute_sql_language(
     engine: &Engine,
     def: &CreateFunction,

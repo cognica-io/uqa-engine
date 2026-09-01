@@ -338,6 +338,10 @@ impl ScoredDocumentSource {
     }
 
     /// Build one physical scored source while optionally sharing the opaque score attribute with sibling scans that form one logical relation.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "preserves SELECT schema and row identity"
+    )]
     pub(in crate::sql) fn new_configured(
         table_name: &str,
         table: Arc<crate::TableState>,

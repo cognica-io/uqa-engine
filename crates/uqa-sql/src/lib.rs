@@ -18,7 +18,6 @@
     clippy::unnested_or_patterns,
     clippy::unnecessary_join,
     clippy::unnecessary_map_or,
-    clippy::too_many_lines,
     clippy::needless_return,
     clippy::redundant_closure,
     clippy::redundant_closure_for_method_calls,

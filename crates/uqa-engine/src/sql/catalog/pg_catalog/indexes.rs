@@ -93,7 +93,7 @@ pub(in crate::sql::catalog) fn catalog_index_relations(
     Ok(output)
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "keeps catalog metadata aligned")]
 fn append_partition_index_children(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,

@@ -91,6 +91,10 @@ pub(super) fn compile_type_name(col: &pg_query::protobuf::ColumnDef) -> Result<C
     compile_pg_type_name(type_name, &col.colname)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "ordered PostgreSQL lowering preserves syntax and error precedence"
+)]
 pub(super) fn compile_pg_type_name(
     type_name: &pg_query::protobuf::TypeName,
     column_name: &str,

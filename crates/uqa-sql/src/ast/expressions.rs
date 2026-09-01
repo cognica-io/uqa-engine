@@ -282,6 +282,10 @@ impl Expr {
     /// Upgrade compiler-owned function markers deserialized from catalogs
     /// written by releases through 0.1.6.
     #[doc(hidden)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "exhaustive AST migration preserves every serialized variant"
+    )]
     pub fn upgrade_legacy_serialized_dispatches(&mut self) -> bool {
         let mut changed = false;
         match self {
@@ -616,6 +620,10 @@ impl MergeWhen {
 impl Statement {
     /// Upgrade legacy compiler dispatch markers without reparsing SQL or changing catalog-bound relation identities.
     #[doc(hidden)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "exhaustive AST migration preserves every serialized variant"
+    )]
     pub fn upgrade_legacy_serialized_dispatches(&mut self) -> bool {
         match self {
             Self::Select(select) => select.upgrade_legacy_serialized_dispatches(),

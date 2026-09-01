@@ -14,6 +14,7 @@ use super::{
 };
 
 impl<'a> Interpreter<'a> {
+    #[expect(clippy::too_many_lines, reason = "preserves PL/pgSQL transition order")]
     pub(super) fn new(
         engine: &'a Engine,
         def: &'a CreateFunction,

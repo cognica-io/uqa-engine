@@ -11,6 +11,10 @@ use super::{
     ScalarOrder, ScalarWindowFrame, ScalarWindowSpec, WindowSpec,
 };
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "plan lowering preserves exhaustive variants and structural identities"
+)]
 pub(super) fn lower_scalar_expression(
     expression: Expr,
     aggregates: &dyn AggregateClassifier,

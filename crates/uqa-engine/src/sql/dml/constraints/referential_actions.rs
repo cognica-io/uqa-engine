@@ -17,6 +17,10 @@ use super::{
     ReferentialActionContext, ReferentialRewritePreparation, SQLError, SQLParam, Value,
 };
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves cascade lock and recheck order"
+)]
 pub(super) fn prepare_referenced_key_update_actions(
     engine: &Engine,
     table: &str,
@@ -228,6 +232,10 @@ pub(super) fn prepare_referenced_key_update_actions(
     Ok(actions)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves cascade lock and recheck order"
+)]
 pub(in crate::sql) fn prepare_referenced_key_delete_actions(
     engine: &Engine,
     parent_table: &str,

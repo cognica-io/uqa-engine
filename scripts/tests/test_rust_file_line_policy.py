@@ -30,32 +30,20 @@ def load_checker() -> object:
 CHECKER = load_checker()
 
 
-def entry(path: str, lines: int) -> dict[str, object]:
-    return {
-        "path": path,
-        "baseline_lines": lines,
-        "owner": "test owner",
-        "responsibility_groups": ["test responsibility"],
-        "target_modules": ["crates/example/src/target.rs"],
-        "migration_state": "planned",
-    }
-
-
 def write_lines(path: pathlib.Path, count: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("fn line() {}\n" * count, encoding="utf-8")
 
 
-def write_policy(root: pathlib.Path, entries: list[dict[str, object]]) -> pathlib.Path:
+def write_policy(root: pathlib.Path) -> pathlib.Path:
     path = root / "scripts" / "rust-file-line-policy.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "line_limit": 1000,
                 "excluded_roots": ["crates/imported"],
-                "oversized_files": entries,
             }
         ),
         encoding="utf-8",
@@ -64,57 +52,49 @@ def write_policy(root: pathlib.Path, entries: list[dict[str, object]]) -> pathli
 
 
 class RustFileLinePolicyTest(unittest.TestCase):
-    def test_accepts_exact_inventory_and_reports_metrics(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = pathlib.Path(temporary)
-            source = "crates/example/src/lib.rs"
-            write_lines(root / source, 1001)
-            policy = write_policy(root, [entry(source, 1001)])
-
-            result = CHECKER.verify(root, policy)
-
-            self.assertEqual(result["inventoried_files"], 1)
-            self.assertEqual(result["files_at_or_above_limit"], 1)
-            self.assertEqual(result["threshold_counts"]["1000"], 1)
-
-    def test_rejects_inventory_growth(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = pathlib.Path(temporary)
-            source = "crates/example/src/lib.rs"
-            write_lines(root / source, 1002)
-            policy = write_policy(root, [entry(source, 1001)])
-
-            with self.assertRaisesRegex(CHECKER.PolicyError, "grew beyond its ratchet"):
-                CHECKER.verify(root, policy)
-
-    def test_requires_lower_ratchet_after_shrink(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = pathlib.Path(temporary)
-            source = "crates/example/src/lib.rs"
-            write_lines(root / source, 1000)
-            policy = write_policy(root, [entry(source, 1001)])
-
-            with self.assertRaisesRegex(CHECKER.PolicyError, "lower the ratchet"):
-                CHECKER.verify(root, policy)
-
-    def test_requires_resolved_entry_removal(self) -> None:
+    def test_accepts_tree_below_ceiling_and_reports_metrics(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             source = "crates/example/src/lib.rs"
             write_lines(root / source, 999)
-            policy = write_policy(root, [entry(source, 1001)])
+            policy = write_policy(root)
 
-            with self.assertRaisesRegex(CHECKER.PolicyError, "must be removed"):
-                CHECKER.verify(root, policy)
+            result = CHECKER.verify(root, policy)
 
-    def test_rejects_new_file_at_inventory_threshold(self) -> None:
+            self.assertEqual(result["files_at_or_above_limit"], 0)
+            self.assertEqual(result["threshold_counts"]["1000"], 0)
+            self.assertEqual(result["largest_file"]["physical_lines"], 999)
+
+    def test_rejects_file_at_ceiling(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
-            source = "crates/example/src/new.rs"
+            source = "crates/example/src/lib.rs"
             write_lines(root / source, 1000)
-            policy = write_policy(root, [])
+            policy = write_policy(root)
 
-            with self.assertRaisesRegex(CHECKER.PolicyError, "is not inventoried"):
+            with self.assertRaisesRegex(CHECKER.PolicyError, "reaches or exceeds"):
+                CHECKER.verify(root, policy)
+
+    def test_rejects_file_above_ceiling(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            source = "crates/example/src/lib.rs"
+            write_lines(root / source, 1001)
+            policy = write_policy(root)
+
+            with self.assertRaisesRegex(CHECKER.PolicyError, "1001"):
+                CHECKER.verify(root, policy)
+
+    def test_rejects_obsolete_transition_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            write_lines(root / "crates/example/src/lib.rs", 10)
+            policy = write_policy(root)
+            value = json.loads(policy.read_text(encoding="utf-8"))
+            value["oversized_files"] = []
+            policy.write_text(json.dumps(value), encoding="utf-8")
+
+            with self.assertRaisesRegex(CHECKER.PolicyError, "must contain exactly"):
                 CHECKER.verify(root, policy)
 
     def test_ignores_imported_and_target_sources(self) -> None:
@@ -123,7 +103,7 @@ class RustFileLinePolicyTest(unittest.TestCase):
             write_lines(root / "crates/imported/src/generated.rs", 2000)
             write_lines(root / "fuzz/target/build/generated.rs", 2000)
             write_lines(root / "crates/example/src/lib.rs", 10)
-            policy = write_policy(root, [])
+            policy = write_policy(root)
 
             result = CHECKER.verify(root, policy)
 

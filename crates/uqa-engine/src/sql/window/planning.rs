@@ -63,6 +63,10 @@ pub(in crate::sql) fn expr_has_window(expr: &ScalarExpr) -> bool {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves partition peer and frame order"
+)]
 pub(super) fn rewrite_window_expr(
     expr: &ScalarExpr,
     slots: &mut Vec<WindowSlot>,

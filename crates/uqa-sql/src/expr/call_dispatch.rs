@@ -39,6 +39,10 @@ pub fn eval_builtin_function_call(
     eval_function_call_inner(name, call_args, ctx, false)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "builtin dispatch preserves arity, NULL, and error precedence"
+)]
 fn eval_function_call_inner(
     name: &str,
     call_args: Vec<(Option<String>, Value)>,

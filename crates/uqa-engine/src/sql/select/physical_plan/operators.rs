@@ -37,6 +37,10 @@ use super::projection::{
 use super::row_at_a_time::RowAtATime;
 use super::RelationalResjunk;
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves SELECT schema and row identity"
+)]
 pub(in crate::sql) fn build_relational_operator<'a>(
     engine: &'a Engine,
     mut operator: Box<dyn PhysicalOperator + 'a>,

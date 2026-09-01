@@ -25,6 +25,10 @@ impl UnifiedPlan {
 
     /// Lower a statement with engine-local aggregate classification.
     #[must_use]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "plan lowering preserves exhaustive variants and structural identities"
+    )]
     pub fn lower_with(statement: Statement, aggregates: &dyn AggregateClassifier) -> Self {
         match statement {
             Statement::Select(query) => {

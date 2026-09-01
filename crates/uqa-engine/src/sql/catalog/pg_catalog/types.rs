@@ -18,6 +18,10 @@ use super::super::helpers::type_metadata::{
     PgTypeRoutineOids,
 };
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves catalog column and OID order"
+)]
 pub(in crate::sql::catalog) fn build_pg_type() -> Vec<ResultRow> {
     let catalog_types = [
         (ColumnType::Boolean, "B", true, "b"),

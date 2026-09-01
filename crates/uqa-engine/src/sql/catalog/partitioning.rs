@@ -520,6 +520,10 @@ fn base_type(ty: &ColumnType) -> &ColumnType {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves catalog column and OID order"
+)]
 fn partition_operator_class(strategy: PartitionStrategy, ty: &ColumnType) -> i64 {
     let hash = strategy == PartitionStrategy::Hash;
     match base_type(ty) {

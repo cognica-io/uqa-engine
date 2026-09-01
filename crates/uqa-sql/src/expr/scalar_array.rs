@@ -37,6 +37,10 @@ pub(super) fn eval_dispatched_json_array_sort(args: &[Value]) -> Result<Value> {
     eval_array_function("array_sort", args, true)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "builtin dispatch preserves arity, NULL, and error precedence"
+)]
 fn eval_array_function(name: &str, args: &[Value], json_sort: bool) -> Result<Value> {
     (|| -> Result<Value> {
         match name {

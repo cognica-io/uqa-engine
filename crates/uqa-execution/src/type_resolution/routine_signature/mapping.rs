@@ -20,6 +20,10 @@ pub(super) struct StructuralMapping {
     pub(super) variadic_mode: RoutineVariadicMode,
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "type resolution preserves candidate order and ambiguity diagnostics atomically"
+)]
 pub(super) fn structural_mapping(
     parameters: &[RoutineParameterDescriptor],
     call: RoutineCallDescriptor<'_>,

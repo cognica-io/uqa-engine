@@ -113,9 +113,9 @@ The public SQL and API surface includes:
 
 Each crate exposes exactly one integration-test executable. Additional integration domains live as submodules of that target so test-process startup, linking, and CI scheduling do not grow with every feature.
 
-The 1,500-line Rust file check is a hard safety ceiling, not a design target. Split modules by ownership before they approach the ceiling when parsing, binding, planning, execution, persistence, or tests have separable responsibilities.
+Every hand-maintained Rust file must remain below 1,000 physical lines. The repository checker has no transition allowlist; imported `uqa-pg-query` sources remain excluded because they are synchronized through their own reviewed process. Split modules by ownership before they approach the ceiling when parsing, binding, planning, execution, persistence, or tests have separable responsibilities.
 
-[`0005-rust-workspace-refactoring.md`](0005-rust-workspace-refactoring.md) governs the active ownership refactoring, transition ratchet, capability boundaries, and final 1,000-line limit. Until that plan reaches its final gate, passing the 1,500-line emergency ceiling is not evidence that a module is adequately decomposed.
+[`0005-rust-workspace-refactoring.md`](0005-rust-workspace-refactoring.md) records the completed ownership refactoring, capability boundaries, test consolidation, and permanent line policy. Compliance with the line ceiling remains a guard rather than evidence that a module has one coherent owner.
 
 When work starts on a confirmed gap governed by a living plan, record it there as incomplete before implementation and promote it only after its stated verification evidence passes; branch names and pull-request descriptions are not substitutes for repository planning state.
 

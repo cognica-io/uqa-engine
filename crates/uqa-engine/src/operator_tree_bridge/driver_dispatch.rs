@@ -18,7 +18,10 @@ impl OperatorTreeDriver for EngineDriver<'_> {
     // Keep one exhaustive physical-dispatch match: adding an IR variant must
     // fail compilation here instead of falling through a category wildcard.
     #[allow(clippy::match_same_arms)]
-    #[allow(clippy::too_many_lines)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "preserves exhaustive IR variant order"
+    )]
     fn execute_node(&self, op: &OperatorTree) -> DriverResult<OperatorOutput> {
         let posting = match op {
             OperatorTree::Empty => Ok(PostingList::new()),

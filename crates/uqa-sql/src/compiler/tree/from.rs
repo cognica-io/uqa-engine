@@ -159,6 +159,10 @@ fn compile_range_function_members(node: &Node) -> Result<Vec<TableFunction>> {
     Ok(vec![compile_table_function(call, column_definitions)?])
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "ordered PostgreSQL lowering preserves syntax and error precedence"
+)]
 pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> {
     let Some(inner) = node.node.as_ref() else {
         return Err(SQLError::Internal("empty FROM node".into()));

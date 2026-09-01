@@ -346,6 +346,10 @@ fn scalar_introspection_does_not_resolve_builtin_aggregates_as_catalog_functions
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "covers the fixed overload family matrix"
+)]
 fn fixed_builtin_binding_uses_typed_sql_parameters_across_families() {
     let param = SQLParam::scalar;
     let int8 = i64::from(i32::MAX) + 1;

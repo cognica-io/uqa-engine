@@ -29,6 +29,7 @@ pub(in crate::sql) fn run_delete(
     })
 }
 
+#[expect(clippy::too_many_lines, reason = "preserves DML lock and event order")]
 pub(in crate::sql) fn run_delete_inner(
     engine: &Engine,
     stmt: &DeletePlan,

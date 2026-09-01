@@ -162,6 +162,7 @@ pub(in crate::sql) fn encode_prepared_document_rewrite(prepared: PreparedDocumen
     ]))
 }
 
+#[expect(clippy::too_many_lines, reason = "preserves DML lock and event order")]
 pub(in crate::sql) fn decode_prepared_document_rewrite(
     value: Value,
 ) -> Result<PreparedDocumentRewrite, SQLError> {

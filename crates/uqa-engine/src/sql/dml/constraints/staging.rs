@@ -30,6 +30,7 @@ pub(in crate::sql) fn stage_prepared_document_rewrite(
     )
 }
 
+#[expect(clippy::too_many_lines, reason = "preserves DML lock and event order")]
 pub(in crate::sql) fn stage_prepared_document_rewrite_with_parent(
     engine: &Engine,
     prepared: &mut PreparedDocumentRewrite,

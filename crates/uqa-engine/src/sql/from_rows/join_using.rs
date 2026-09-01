@@ -241,6 +241,10 @@ pub(in crate::sql) fn join_using_output_schema(
 }
 
 /// Add a parenthesized JOIN alias to the input-side schemas for null-rejection analysis. Merged FULL JOIN columns belong to neither side exclusively because their value is a coalesce of both inputs.
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves source schema and row identity"
+)]
 pub(in crate::sql) fn join_alias_input_schemas(
     kind: JoinKind,
     left: &RowSchema,

@@ -14,7 +14,10 @@ use super::{
 };
 
 impl<G: GraphStore> CypherExecutor<'_, G> {
-    #[allow(clippy::too_many_lines)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "preserves exhaustive Cypher dispatch"
+    )]
     pub(super) fn eval_function(
         &self,
         fc: &FunctionCall,

@@ -16,6 +16,10 @@ use super::call_dispatch::eval_builtin_function_call;
 use super::context::EvalContext;
 use super::{random, scalar_array, scalar_postgres, scalar_range};
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "builtin dispatch preserves arity, NULL, and error precedence"
+)]
 pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> Option<bool> {
     let normalized = normalized_function_name(name);
     match normalized.as_ref() {

@@ -279,7 +279,7 @@ fn construction_observation(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "names every workload control")]
 fn write_observations(
     path: &Path,
     manifest_path: &Path,

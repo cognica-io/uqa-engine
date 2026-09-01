@@ -15,6 +15,10 @@ enum CommandScanCandidate {
 }
 
 impl EngineTableRowSource {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "preserves source schema and row identity"
+    )]
     pub(super) fn next_command_physical_rows_batch(
         &mut self,
         max_rows: usize,

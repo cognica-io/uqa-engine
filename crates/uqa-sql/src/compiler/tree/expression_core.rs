@@ -38,6 +38,10 @@ pub(super) fn dispatched_call(dispatch: FunctionDispatch, args: Vec<Expr>) -> Ex
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "ordered PostgreSQL lowering preserves syntax and error precedence"
+)]
 pub(in crate::compiler) fn compile_expr(node: &Node) -> Result<Expr> {
     let Some(inner) = node.node.as_ref() else {
         return Err(SQLError::Internal("missing expr node".into()));
@@ -151,6 +155,10 @@ pub(in crate::compiler) fn compile_expr(node: &Node) -> Result<Expr> {
 }
 
 /// `expr[i]`, `expr[lo:hi]`, and chains thereof. The complete array-indirection group is lowered as one operation because `PostgreSQL` resolves all dimensions together and treats every dimension as a slice when any dimension contains a colon.
+#[expect(
+    clippy::too_many_lines,
+    reason = "ordered PostgreSQL lowering preserves syntax and error precedence"
+)]
 pub(in crate::compiler) fn compile_indirection(
     ind: &pg_query::protobuf::AIndirection,
 ) -> Result<Expr> {

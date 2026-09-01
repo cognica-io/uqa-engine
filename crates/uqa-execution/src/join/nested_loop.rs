@@ -38,7 +38,6 @@ pub struct NestedLoopJoin<'a> {
 }
 
 impl<'a> NestedLoopJoin<'a> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         left: Box<dyn PhysicalOperator + 'a>,
         right: Box<dyn PhysicalOperator + 'a>,
@@ -60,7 +59,10 @@ impl<'a> NestedLoopJoin<'a> {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "keeps join keys and schema aligned"
+    )]
     pub fn new_with_work_mem(
         left: Box<dyn PhysicalOperator + 'a>,
         right: Box<dyn PhysicalOperator + 'a>,

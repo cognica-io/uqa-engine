@@ -132,6 +132,10 @@ impl RowSchema {
     }
 
     /// Overlay an existing positional outer scope while preserving its complete structured lookup layout and sharing its physical value fragments.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "outer-scope merge keeps schema and value precedence aligned"
+    )]
     pub(crate) fn with_outer_schema(input: &Self, outer: &Self) -> Self {
         let outer_base = input.physical_width();
         let current_qualifiers = input

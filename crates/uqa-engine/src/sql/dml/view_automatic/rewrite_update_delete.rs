@@ -18,6 +18,10 @@ use super::{
     Engine, ExpressionScope, SQLError, TriggerEvent, UpdatePlan, ViewRuleUpdatePlan,
 };
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves view qualifier and row identity"
+)]
 pub(in crate::sql::dml) fn rewrite_update_to_base(
     engine: &Engine,
     statement: &UpdatePlan,
@@ -270,6 +274,10 @@ pub(in crate::sql::dml) fn rewrite_update_to_base(
     Ok(plan)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves view qualifier and row identity"
+)]
 pub(in crate::sql::dml) fn rewrite_delete_to_base(
     engine: &Engine,
     statement: &DeletePlan,

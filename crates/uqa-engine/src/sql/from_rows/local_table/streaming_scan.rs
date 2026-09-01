@@ -12,6 +12,10 @@ use super::{
     TABLE_OID_COLUMN, XMIN_COLUMN,
 };
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves source schema and row identity"
+)]
 pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
     engine: &Engine,
     source: &SourcePlan,

@@ -27,6 +27,10 @@ use super::super::helpers::views::view_columns_for;
 use super::table_relation_oid_from;
 use crate::sql::value_to_text;
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves catalog column and OID order"
+)]
 pub(in crate::sql::catalog) fn build_pg_attribute(
     engine: &Engine,
     catalog: &CatalogReadView,

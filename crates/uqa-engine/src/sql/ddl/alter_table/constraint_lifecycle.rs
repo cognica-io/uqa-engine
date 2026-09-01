@@ -481,6 +481,10 @@ fn validate_check_rows(
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves DDL dependency and action order"
+)]
 pub(super) fn alter_constraint(
     engine: &Engine,
     table: &str,

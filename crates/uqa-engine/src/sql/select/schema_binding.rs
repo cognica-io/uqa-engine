@@ -480,6 +480,10 @@ impl SchemaScope {
         alias_join_schema(&schema, alias, column_aliases)
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "preserves SELECT schema and row identity"
+    )]
     fn bind_source(
         &mut self,
         routines: &dyn RoutineResolution,

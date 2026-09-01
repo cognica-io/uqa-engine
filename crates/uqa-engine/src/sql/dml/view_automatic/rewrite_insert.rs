@@ -16,6 +16,10 @@ use super::{
     ExpressionScope, InsertPlan, SQLError, TriggerEvent, ViewRuleInsertPlan,
 };
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves view qualifier and row identity"
+)]
 pub(in crate::sql::dml) fn rewrite_insert_to_base(
     engine: &Engine,
     statement: &InsertPlan,

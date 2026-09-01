@@ -61,6 +61,10 @@ fn execute_with_context(
 }
 
 #[inline(never)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves statement transaction order"
+)]
 fn execute_uncached_or_snapshot_scoped(
     engine: &Engine,
     sql: &str,

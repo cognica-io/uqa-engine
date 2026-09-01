@@ -256,6 +256,10 @@ fn boolean_option(option: &VacuumOption) -> Result<bool, SQLError> {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves catalog and storage cleanup order"
+)]
 fn validate_options(options: &[VacuumOption]) -> Result<VacuumExecution, SQLError> {
     let mut analyze = false;
     let mut full = false;
@@ -366,6 +370,10 @@ fn validate_options(options: &[VacuumOption]) -> Result<VacuumExecution, SQLErro
     Ok(VacuumExecution { flags })
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves catalog and storage cleanup order"
+)]
 pub(super) fn run_vacuum(engine: &Engine, statement: &VacuumStmt) -> Result<SQLResult, SQLError> {
     if engine.transaction_depth() != 0 {
         return Err(SQLError::Routine {

@@ -19,6 +19,10 @@ pub(super) struct NumericPicture {
     pub(super) sign_format: NumericSignFormat,
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "ordered PostgreSQL format state machine preserves token precedence"
+)]
 pub(super) fn parse_numeric_picture(fmt: &str) -> Result<Option<NumericPicture>> {
     let mut fill_mode = false;
     let mut template = String::with_capacity(fmt.len());

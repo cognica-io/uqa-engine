@@ -117,6 +117,10 @@ pub(super) fn rewrite_source_scalars(
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "optimizer rewrite preserves exhaustive variants and fixed-point order"
+)]
 pub(super) fn rewrite_command_scalars(
     command: &mut CommandPlan,
     rewrite: &mut dyn FnMut(&mut ScalarExpr),

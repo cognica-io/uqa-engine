@@ -11,6 +11,10 @@ use super::{
 };
 
 /// Build a single-consumer derived-table projection as a pull pipeline. Blocking operators inside the query block retain their own bounded state, but a second `SharedSpill` boundary would eagerly exhaust that pipeline before the parent can apply demand such as `LIMIT`.
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves source schema and row identity"
+)]
 pub(super) fn try_build_streaming_subquery_operator<'a>(
     engine: &'a Engine,
     body: &uqa_planner::QueryPlan,

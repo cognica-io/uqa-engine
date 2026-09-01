@@ -14,6 +14,12 @@ use super::{
 };
 use crate::ast::FunctionDispatch;
 
+mod text;
+
+use text::{
+    invalid_regex_parameter, nonnegative_regex_parameter, positive_regex_parameter, regex_tail,
+};
+
 pub(super) fn eval_postgres_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
     const NAMES: &[&str] = &[
         "factorial",
@@ -76,6 +82,10 @@ pub(super) fn eval_dispatched_postgres_function(
     })
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "builtin dispatch preserves arity, NULL, and error precedence"
+)]
 fn eval_postgres_function(name: &str, args: &[Value]) -> Result<Value> {
     (|| -> Result<Value> {
         match name {
@@ -966,39 +976,4 @@ fn filled_array_elements(value: &Value, dimensions: &[usize]) -> Result<Vec<Valu
     let nested = filled_array_elements(value, &dimensions[1..])?;
     values.resize(length, Value::List(nested));
     Ok(values)
-}
-
-fn invalid_regex_parameter(name: &str, value: i64) -> SQLError {
-    SQLError::Routine {
-        sqlstate: "22023".into(),
-        message: format!("invalid value for parameter \"{name}\": {value}"),
-    }
-}
-
-fn positive_regex_parameter(value: Option<&Value>, default: usize, name: &str) -> Result<usize> {
-    let value = value.map(to_i64).transpose()?.unwrap_or(default as i64);
-    if value <= 0 {
-        return Err(invalid_regex_parameter(name, value));
-    }
-    Ok(usize::try_from(value).unwrap_or(usize::MAX))
-}
-
-fn nonnegative_regex_parameter(value: Option<&Value>, default: usize, name: &str) -> Result<usize> {
-    let value = value.map(to_i64).transpose()?.unwrap_or(default as i64);
-    if value < 0 {
-        return Err(invalid_regex_parameter(name, value));
-    }
-    Ok(usize::try_from(value).unwrap_or(usize::MAX))
-}
-
-fn regex_tail(string: &str, start: usize) -> Option<(&str, usize)> {
-    let base_chars = start.checked_sub(1)?;
-    if base_chars == 0 {
-        return Some((string, 0));
-    }
-    let byte_index = string
-        .char_indices()
-        .nth(base_chars)
-        .map(|(index, _)| index)?;
-    Some((&string[byte_index..], base_chars))
 }

@@ -330,7 +330,10 @@ impl<G: GraphStore> CypherExecutor<'_, G> {
         Ok(out)
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "keeps graph scope inputs aligned"
+    )]
     pub(super) fn push_reached_vertex(
         &self,
         out: &mut Vec<MatchState>,

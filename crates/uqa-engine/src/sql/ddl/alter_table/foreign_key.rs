@@ -17,6 +17,10 @@ pub(super) fn validate_foreign_key_definition(
     validate_foreign_key_definition_with_local_state(engine, table, None, None, foreign_key)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves DDL dependency and action order"
+)]
 pub(in crate::sql::ddl) fn validate_foreign_key_definition_with_local_state(
     engine: &Engine,
     table: &str,

@@ -37,6 +37,10 @@ pub fn bind_type_introspection_with_resolver(
     bind_type_introspection_inner(expression, schema, params, Some(resolver))
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "type resolution preserves candidate order and ambiguity diagnostics atomically"
+)]
 fn bind_type_introspection_inner(
     expression: ScalarExpr,
     schema: &RowSchema,

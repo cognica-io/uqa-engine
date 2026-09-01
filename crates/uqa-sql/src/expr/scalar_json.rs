@@ -13,6 +13,10 @@ use super::{
     strip_nulls, typed_json_value, value_to_json_text, value_to_string, Result, SQLError, Value,
 };
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "builtin dispatch preserves arity, NULL, and error precedence"
+)]
 pub(super) fn eval_json_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
     const NAMES: &[&str] = &[
         "json_build_object",

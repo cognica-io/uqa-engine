@@ -121,6 +121,10 @@ impl<'a> SetProjection<'a> {
         }
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "preserves SELECT schema and row identity"
+    )]
     fn call_state(
         &self,
         call: &SetFunctionCall,

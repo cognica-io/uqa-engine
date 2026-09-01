@@ -66,11 +66,15 @@ bash scripts/check-public-repository-hygiene.sh
 
 The dependency checker enforces crate layering. The harness checker prevents uncontrolled integration-test process growth. Benchmark coverage ensures workload entry points and semantic evidence remain represented. The capability checker loads `scripts/engine-capability-policy.json`, rejects `Engine` access in declared leaf modules, rejects undeclared or stale adapter exceptions, requires the capability module's data types to match its explicit inventory, rejects service traits, and prevents `Engine` data fields, aliases, function parameters or returns, dereferences, catch-all service names, and recovery methods. Header, line, and hygiene scripts enforce repository publication rules.
 
-The Rust line checker loads `scripts/rust-file-line-policy.json`. Every hand-maintained file at or above 1,000 physical lines must have an exact checked-in baseline, any shrink must lower or remove that baseline in the same change, and an unlisted file cannot reach 1,000 lines. Imported `uqa-pg-query` sources and build output under `target` remain excluded. Reproduce the `cloc`, physical-line, per-crate, SQL concentration, `Engine` coupling, and root-lint baseline together with:
+The Rust line checker loads `scripts/rust-file-line-policy.json` and rejects every hand-maintained Rust file at or above 1,000 physical lines. There is no transition inventory or per-file exception. Imported `uqa-pg-query` sources and build output under `target` remain excluded. Root and module declarations cannot grant descendant-wide structural Clippy allowances; an irreducible local exception must sit on the affected item and state its invariant. Reproduce the `cloc`, physical-line, per-crate, SQL concentration, `Engine` coupling, and root-allowance report together with:
 
 ```sh
 bash scripts/measure-rust-refactoring.sh
 ```
+
+The completed 2026-09-01 boundary uses `cloc 2.08`: `crates/` contains 1,490 Rust files, 406,927 code lines, 19,873 comment lines, and 27,566 blank lines. The hand-maintained report excludes imported `uqa-pg-query` and contains 1,485 files and 439,077 physical lines; no governed file reaches 1,000 lines, the largest is `uqa-sql/src/compiler/tree/select.rs` at 999 lines, `uqa-engine` contains 696 files and 236,259 physical lines, `uqa-engine/src/sql` contains 252 files and 90,420 physical lines, and the root structural-allowance report is empty.
+
+The completed boundary's full local evidence includes workspace check, Clippy, documentation, dependency audit, and all-target tests with every registered benchmark correctness gate. The single `uqa-engine` integration executable reports 2,068 passed, two explicitly ignored release-profile probes, and no failures. The release `usql` matches 797/797 differential probes and the routines 129/129, roles 136/136, constraints 162/162, type-temporal 49/49, triggers 584/584, rules 194/194, and transactions 61/61 stateful suites against the pinned Docker PostgreSQL 18.4 with Apache AGE 1.8.0 oracle.
 
 Use the consolidated `uqa-engine` integration target as the fixed compile/link runner. An empty target directory measures a clean offline build and link; rerunning the same command in that directory records the warm no-op baseline without creating another test executable:
 

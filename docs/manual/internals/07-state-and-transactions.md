@@ -21,6 +21,8 @@ The composition facade constructs narrow capabilities over these owners. `Catalo
 
 `UnifiedPlanExecutor` captures the session, query-runtime, and mutation capabilities at statement construction while retaining one exhaustive top-level plan match. `CteScope` captures one catalog and name-resolution snapshot and passes it through binding, filter pushdown, virtual and local scans, evaluation, and physical construction. Static catalog builders and pure query leaves therefore cannot access transaction mutation, locks, storage publication, or unrelated registries. SQL `CREATE SCHEMA` and the public schema facade share the same `MutationCoordinator` implementation, including persistence-before-publication and rollback behavior. Every DML entry chooses an implicit transaction only when no explicit transaction exists, and a scoped overlay makes staged insert, rewrite, delete, conflict, rule, trigger, referential, and partition effects visible to the rest of that command; dropping the scope always removes the overlay. The transaction stack, savepoint lifecycle, row-lock manager, and committed-change observation remain the transaction-and-concurrency owners described below.
 
+Session portal dependency discovery is owned by [`engine_session/portals/dependencies.rs`](../../../crates/uqa-engine/src/engine_session/portals/dependencies.rs), which recursively expands CTE, view, routine, hierarchy, and table-function dependencies before a portal is sealed. Rule and trigger definition validation are separate owners under [`engine_events/validation/`](../../../crates/uqa-engine/src/engine_events/validation), so catalog publication does not mix the two event contracts or bypass their relation and row-type checks.
+
 ## Session derivation
 
 ```mermaid
@@ -62,6 +64,8 @@ stateDiagram-v2
 An implicit statement transaction performs the same candidate, persistence, and publication ordering within one statement. An explicit transaction retains staged state across statements until commit or rollback.
 
 `Engine::transaction` gives one scoped owner the frame depth it opened. The owner commits on success, rolls back returned errors and panics, and performs a final rollback if it is dropped before either transition completes. `sql_batch` uses the same owner and commits its complete statement list or rolls the list back.
+
+Transaction coordination is decomposed under [`engine_transactions/`](../../../crates/uqa-engine/src/engine_transactions) into explicit control, implicit callbacks, savepoints, snapshots, backend transitions, publication, cleanup, characteristics, deferred checks, and row-lock session integration. Lock ownership is decomposed under [`row_locks/`](../../../crates/uqa-engine/src/row_locks) into identities, grants, relation locks, waits and deadlocks, release cleanup, change observation and publication, registry sharing, and the durable cross-process adapter. The roots define the lifecycle and shared types; no child or root reaches the 1,000-line ceiling or hides descendant structural warnings.
 
 ## Snapshot and restore
 

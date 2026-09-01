@@ -14,6 +14,10 @@ use super::functions::{
 use crate::engine_user_functions::RoutineResolution;
 use uqa_execution::{FunctionTypeResolver, RowSchema, ScalarFrameBound};
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves SELECT schema and row identity"
+)]
 pub(super) fn validate_expression(
     routines: &dyn RoutineResolution,
     expression: &ScalarExpr,

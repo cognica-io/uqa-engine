@@ -26,6 +26,10 @@ pub fn cast_value(v: &Value, ty: &str) -> Result<Value> {
 }
 
 /// Cast a value while preserving an explicitly declared source type when the runtime carrier erases it. `PostgreSQL` 18 integer-to-`bytea`/`oid` casts and `xid` cast rejection require the source's declared identity.
+#[expect(
+    clippy::too_many_lines,
+    reason = "cast matrix preserves source-target and error precedence"
+)]
 pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<Value> {
     if matches!(v, Value::Null) {
         return Ok(Value::Null);

@@ -17,6 +17,10 @@ use super::pg_catalog::{
 use super::{Engine, ResultRow, SQLError};
 use crate::engine_capabilities::{CatalogReadView, RelationNameResolution};
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves catalog column and OID order"
+)]
 pub(super) fn build_pg_class(
     engine: &Engine,
     catalog: &CatalogReadView,

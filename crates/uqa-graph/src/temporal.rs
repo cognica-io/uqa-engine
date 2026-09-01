@@ -345,7 +345,10 @@ impl<'a> TemporalPatternMatch<'a> {
         Ok(out)
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "keeps graph scope inputs aligned"
+    )]
     fn backtrack<G: GraphStore>(
         &self,
         store: &G,

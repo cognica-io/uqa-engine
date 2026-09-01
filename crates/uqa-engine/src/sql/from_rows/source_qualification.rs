@@ -613,6 +613,10 @@ pub(in crate::sql) struct TableFunctionTypeRequest<'a> {
     pub(in crate::sql) ordinality: bool,
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves source schema and row identity"
+)]
 pub(in crate::sql) fn table_function_column_types(
     routines: &dyn RoutineResolution,
     request: TableFunctionTypeRequest<'_>,

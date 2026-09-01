@@ -13,6 +13,10 @@ use super::{
 
 impl CardinalityEstimator {
     /// Estimate cardinality for cross-paradigm operators.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "cost boundary keeps paradigm terms and clamping in one formula"
+    )]
     pub(super) fn estimate_cross_paradigm(
         &self,
         op: &OperatorTree,

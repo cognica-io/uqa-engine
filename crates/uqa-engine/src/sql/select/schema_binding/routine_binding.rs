@@ -106,6 +106,10 @@ impl SchemaScope {
         result
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "preserves SELECT schema and row identity"
+    )]
     fn bind_root_routines_for_storage(
         &mut self,
         routines: &dyn RoutineResolution,
@@ -328,6 +332,10 @@ impl SchemaScope {
         self.bind_root(routines, root, params, outer, false)
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "preserves SELECT schema and row identity"
+    )]
     fn bind_source_routines_for_storage(
         &mut self,
         engine: &dyn RoutineResolution,
@@ -491,7 +499,10 @@ impl SchemaScope {
         failure.map_or(Ok(()), Err)
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "keeps execution context inputs aligned"
+    )]
     fn bind_scalar_function_for_storage(
         &mut self,
         engine: &dyn RoutineResolution,

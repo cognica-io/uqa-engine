@@ -24,6 +24,10 @@ use super::{
     RoutineTypeSubstitutions, RoutineVariadicMode, RoutineVariadicPlan,
 };
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "type resolution preserves candidate order and ambiguity diagnostics atomically"
+)]
 pub fn match_routine_signature(
     parameters: &[RoutineParameterDescriptor],
     call: RoutineCallDescriptor<'_>,

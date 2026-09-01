@@ -73,7 +73,10 @@ impl PyEngine {
     }
 
     #[pyo3(signature = (table, text_field, text_query, vector_field, query_vector, top_k=10, knn_pool=None))]
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "mirrors the stable binding signature"
+    )]
     fn hybrid_search(
         &self,
         py: Python<'_>,
@@ -109,7 +112,10 @@ impl PyEngine {
     }
 
     #[pyo3(signature = (table, text_field, text_query, vector_field, query_vector, top_k=10, knn_pool=None, alpha=0.5))]
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "mirrors the stable binding signature"
+    )]
     fn robust_hybrid_search(
         &self,
         py: Python<'_>,

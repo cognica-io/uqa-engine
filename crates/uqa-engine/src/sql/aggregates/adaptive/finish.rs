@@ -163,7 +163,10 @@ impl AdaptiveAggregateSet {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "keeps execution context inputs aligned"
+)]
 fn finish_merged_group(
     engine: &Engine,
     statement: &QueryBlockPlan,

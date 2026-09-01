@@ -398,7 +398,10 @@ fn format_interval(months: i32, days: i32, micros: i64) -> String {
 }
 
 /// Parse a `PostgreSQL` interval literal into `(months, days, micros)`.
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves temporal token error order"
+)]
 fn parse_interval_literal(input: &str) -> Option<TemporalValue> {
     #[derive(Default)]
     struct Acc {

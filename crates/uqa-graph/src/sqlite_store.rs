@@ -38,8 +38,6 @@
 //! );
 //! ```
 
-#![allow(clippy::too_many_lines)]
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use rusqlite::params;
@@ -186,6 +184,10 @@ impl SQLiteGraphStore {
         })
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one read transaction reconstructs a mutually consistent graph snapshot"
+    )]
     fn load_from_sqlite(&mut self) -> Result<(), SQLiteError> {
         let v = self.vtx_table.clone();
         let e = self.edge_table.clone();
@@ -329,6 +331,10 @@ impl SQLiteGraphStore {
     /// savepoint. The in-memory candidate is published only after this
     /// transaction commits, so a storage failure cannot create a state that
     /// appears successful until the next reopen.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one savepoint writes every graph registry before memory publication"
+    )]
     fn persist_snapshot(&self, snapshot: &MemoryGraphStore) -> Result<(), SQLiteError> {
         let graph_rows: Vec<(String, String)> = snapshot
             .graph_names()

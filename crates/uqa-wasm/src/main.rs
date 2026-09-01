@@ -186,7 +186,7 @@ fn dispatch_static(method: &str, args: &JSON) -> Result<JSON, String> {
     }
 }
 
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines, reason = "preserves WASM result dispatch")]
 fn dispatch_engine(engine: &Engine, method: &str, args: &JSON) -> Result<JSON, String> {
     match method {
         "sql" => {

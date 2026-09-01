@@ -12,6 +12,10 @@ use super::{
     CommandPlan, ConflictActionPlan, ExpressionPlan, MergeWhenPlan, OptimizerConfig,
 };
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "optimizer rewrite preserves exhaustive variants and fixed-point order"
+)]
 pub(super) fn optimize_command(
     command: &mut CommandPlan,
     config: &OptimizerConfig,

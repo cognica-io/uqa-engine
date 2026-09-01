@@ -17,6 +17,10 @@ use super::{
     ViewMutationCapabilities,
 };
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves view qualifier and row identity"
+)]
 pub(in crate::sql::dml) fn rewrite_merge_to_base(
     engine: &Engine,
     statement: &MergePlan,

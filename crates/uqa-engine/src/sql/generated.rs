@@ -133,6 +133,10 @@ fn contains_engine_defined_type(ty: &ColumnType) -> bool {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves generated coercion diagnostics"
+)]
 fn validate_generation_expression(
     engine: &Engine,
     qualifier: &str,

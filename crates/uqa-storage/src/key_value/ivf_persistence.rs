@@ -90,7 +90,10 @@ pub(super) fn load_revision(
     Ok(load_metadata(store, table, field)?.map(|metadata| metadata.revision))
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "keeps persisted write inputs aligned"
+)]
 pub(super) fn stage_snapshot(
     batch: &mut dyn KeyValueBatch,
     table: &str,

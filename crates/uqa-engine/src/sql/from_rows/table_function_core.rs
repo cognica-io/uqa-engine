@@ -112,6 +112,10 @@ pub(in crate::sql) fn build_table_function_row_stream_with_row(
 }
 
 #[allow(clippy::similar_names)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves source schema and row identity"
+)]
 fn build_table_function_value_row_stream_with_row(
     context: &SourceEvalContext<'_>,
     call: TableFunctionCall<'_>,

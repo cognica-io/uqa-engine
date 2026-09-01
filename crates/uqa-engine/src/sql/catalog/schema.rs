@@ -190,6 +190,10 @@ impl VirtualRelation {
         )
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "preserves catalog column and OID order"
+    )]
     pub(super) fn schema(self) -> Vec<(String, ColumnType)> {
         macro_rules! columns {
             ($($name:literal => $ty:expr),* $(,)?) => {

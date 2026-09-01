@@ -352,6 +352,10 @@ impl SourcePlan {
         }
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "plan lowering preserves exhaustive variants and structural identities"
+    )]
     pub(super) fn lower_with(
         source: FromClause,
         aggregates: &dyn AggregateClassifier,

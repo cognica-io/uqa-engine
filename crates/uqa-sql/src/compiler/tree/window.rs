@@ -282,6 +282,10 @@ fn window_error(sqlstate: &str, message: String) -> SQLError {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "ordered PostgreSQL lowering preserves syntax and error precedence"
+)]
 pub(in crate::compiler) fn compile_window_frame(
     w: &pg_query::protobuf::WindowDef,
 ) -> Result<Option<crate::ast::WindowFrame>> {

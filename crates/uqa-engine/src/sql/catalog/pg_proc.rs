@@ -6,7 +6,7 @@
 
 //! Virtual `pg_catalog.pg_proc` relation builder.
 
-use super::builtin_routines::PG18_BUILTIN_ROUTINES;
+use super::builtin_routines::PG18_BUILTIN_ROUTINE_GROUPS;
 use super::expression_text::schema_expr_text;
 use super::helpers::oids::{current_user_oid, schema_oid, split_schema_name, stable_oid};
 use super::helpers::rows::{
@@ -44,9 +44,14 @@ pub(super) fn user_routine_catalog_oid(function: &SQLUserFunction) -> i64 {
     )
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves catalog column and OID order"
+)]
 pub(super) fn build_pg_proc(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
-    let mut rows: Vec<ResultRow> = PG18_BUILTIN_ROUTINES
+    let mut rows: Vec<ResultRow> = PG18_BUILTIN_ROUTINE_GROUPS
         .iter()
+        .flat_map(|group| group.iter())
         .map(|routine| {
             Ok(row([
                 ("oid", int_value(routine.oid)),

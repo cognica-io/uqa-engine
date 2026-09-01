@@ -99,7 +99,7 @@ pub(in crate::sql::catalog) fn pg_class_row(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "keeps catalog metadata aligned")]
 pub(in crate::sql::catalog) fn pg_class_row_with_lifecycle(
     schema: &str,
     name: &str,
@@ -138,7 +138,7 @@ pub(in crate::sql::catalog) fn pg_class_row_with_lifecycle(
     row
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "keeps catalog metadata aligned")]
 pub(in crate::sql::catalog) fn pg_class_catalog_row(
     oid: i64,
     reltype: i64,

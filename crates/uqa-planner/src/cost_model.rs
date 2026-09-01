@@ -280,6 +280,10 @@ impl CostModel {
     }
 
     /// Estimate the cost of a subplan against `stats`.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "cost boundary keeps paradigm terms and clamping in one formula"
+    )]
     pub fn estimate(&self, op: &OperatorTree, stats: &IndexStats) -> f64 {
         let n = stats.total_docs as f64;
         match op {

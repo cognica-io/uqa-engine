@@ -308,6 +308,10 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         Ok(SQLResult::empty())
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "preserves SELECT schema and row identity"
+    )]
     fn execute_command(&self, command: &CommandPlan) -> Result<SQLResult, SQLError> {
         match command {
             CommandPlan::CreateTable(statement) => {

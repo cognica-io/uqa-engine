@@ -428,6 +428,10 @@ fn named_argument_value_owned(expression: ScalarExpr) -> ScalarExpr {
     expression
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "type resolution preserves candidate order and ambiguity diagnostics atomically"
+)]
 fn overloads(name: &str) -> Option<Vec<BuiltinFunctionOverload>> {
     let local = local_name(name)?;
     let overloads = match local.as_str() {

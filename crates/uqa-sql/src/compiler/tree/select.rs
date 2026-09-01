@@ -13,6 +13,7 @@ use super::{
 };
 use crate::ast::{CteCycleClause, CteMaterialization, CteSearchClause};
 
+#[expect(clippy::too_many_lines, reason = "preserves PostgreSQL lowering order")]
 pub(in crate::compiler) fn compile_select(
     stmt: &pg_query::protobuf::SelectStmt,
 ) -> Result<SelectStmt> {
@@ -503,6 +504,7 @@ pub(in crate::compiler) fn resolve_group_by_aliases(
         .collect()
 }
 
+#[expect(clippy::too_many_lines, reason = "preserves PostgreSQL lowering order")]
 pub(in crate::compiler) fn compile_group_clause(
     nodes: &[pg_query::protobuf::Node],
 ) -> Result<(Vec<Expr>, Vec<Vec<Expr>>)> {
@@ -804,6 +806,7 @@ pub(in crate::compiler) fn compile_set_op(
     })))
 }
 
+#[expect(clippy::too_many_lines, reason = "preserves PostgreSQL lowering order")]
 pub(in crate::compiler) fn compile_with_clause(
     wc: &pg_query::protobuf::WithClause,
 ) -> Result<Vec<CTE>> {

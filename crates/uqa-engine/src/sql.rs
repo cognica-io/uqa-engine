@@ -22,8 +22,7 @@
     clippy::items_after_statements,
     clippy::unnecessary_map_or,
     clippy::match_same_arms,
-    clippy::unnested_or_patterns,
-    clippy::too_many_lines
+    clippy::unnested_or_patterns
 )]
 
 use std::collections::{BTreeMap, BTreeSet};

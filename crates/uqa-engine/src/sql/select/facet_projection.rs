@@ -42,6 +42,10 @@ pub(in crate::sql) struct FacetExecution<'a> {
     pub(super) output_mode: QueryOutputMode,
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves SELECT schema and row identity"
+)]
 pub(in crate::sql) fn build_facet_output(
     engine: &Engine,
     table: &str,

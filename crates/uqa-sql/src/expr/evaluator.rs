@@ -20,6 +20,10 @@ use super::casting::negate_value;
 use super::context::{cast_value_with_type_resolution, EvalContext};
 
 /// Evaluate a value-producing AST expression against one row and parameter context.
+#[expect(
+    clippy::too_many_lines,
+    reason = "builtin dispatch preserves arity, NULL, and error precedence"
+)]
 pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
     match expr {
         Expr::Default => Err(SQLError::Internal(

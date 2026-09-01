@@ -13,6 +13,10 @@ use super::{
     to_i64, typeof_value, value_to_string, DecimalValue, Result, SQLError, TemporalValue, Value,
 };
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "builtin dispatch preserves arity, NULL, and error precedence"
+)]
 pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
     const NAMES: &[&str] = &[
         "now",

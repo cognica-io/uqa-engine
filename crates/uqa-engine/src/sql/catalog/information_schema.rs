@@ -6,7 +6,7 @@
 
 //! Virtual `information_schema` relation builders.
 
-use super::builtin_routines::PG18_BUILTIN_ROUTINES;
+use super::builtin_routines::PG18_BUILTIN_ROUTINE_GROUPS;
 use super::expression_text::{default_expr_text, schema_expr_text};
 use super::helpers::constraints::{constraint_catalog_rows, ConstraintCatalogKind};
 use super::helpers::information_schema_types::{
@@ -128,6 +128,10 @@ pub(super) fn build_info_tables(
     Ok(out)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves catalog column and OID order"
+)]
 fn information_schema_column_row(
     schema: String,
     table: String,
@@ -373,9 +377,14 @@ pub(super) fn build_info_views(
     Ok(rows)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves catalog column and OID order"
+)]
 pub(super) fn build_info_routines(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
-    let mut rows: Vec<ResultRow> = PG18_BUILTIN_ROUTINES
+    let mut rows: Vec<ResultRow> = PG18_BUILTIN_ROUTINE_GROUPS
         .iter()
+        .flat_map(|group| group.iter())
         .map(|routine| {
             row([
                 ("specific_catalog", catalog_name()),

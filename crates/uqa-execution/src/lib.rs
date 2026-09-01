@@ -44,7 +44,6 @@
     clippy::single_match_else,
     clippy::option_if_let_else,
     clippy::map_unwrap_or,
-    clippy::too_many_lines,
     clippy::filter_map_identity,
     clippy::needless_collect,
     clippy::explicit_iter_loop,

@@ -242,6 +242,10 @@ pub fn operator_name(op: &OperatorTree) -> String {
     .to_string()
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "executor exhaustively maps every operator variant and output carrier"
+)]
 fn explain_recursive(op: &OperatorTree, lines: &mut Vec<String>, indent: usize) {
     let prefix = "  ".repeat(indent);
     match op {

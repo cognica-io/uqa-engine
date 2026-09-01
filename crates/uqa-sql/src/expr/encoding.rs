@@ -19,6 +19,10 @@ pub(super) fn md5_hex(input: &[u8]) -> String {
 }
 
 #[allow(dead_code, clippy::many_single_char_names)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "canonical encoding keeps every SQL value tag in one dispatch"
+)]
 fn md5_compute(input: &[u8]) -> [u8; 16] {
     const S: [u32; 64] = [
         7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5,

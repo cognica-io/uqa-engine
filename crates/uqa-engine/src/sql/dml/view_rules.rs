@@ -330,6 +330,10 @@ fn project_view_rule_row_sides(
     })
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves view qualifier and row identity"
+)]
 pub(super) fn prepare_view_rule_batches(
     request: ViewRuleBatchRequest<'_>,
 ) -> Result<PreparedViewRuleBatches, SQLError> {

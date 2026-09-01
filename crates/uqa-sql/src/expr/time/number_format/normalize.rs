@@ -22,6 +22,10 @@ pub(super) struct NormalizedNumericFormat {
     pub(super) recognized_token: bool,
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "ordered PostgreSQL format state machine preserves token precedence"
+)]
 pub(super) fn normalize_numeric_format(fmt: &str) -> Result<NormalizedNumericFormat> {
     let mut picture = String::with_capacity(fmt.len());
     let mut literal_output = String::new();

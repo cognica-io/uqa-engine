@@ -81,6 +81,10 @@ pub trait VariableResolver {
 
 /// Rewrite an expression, substituting resolvable variable references
 /// with literals. References the resolver declines stay untouched.
+#[expect(
+    clippy::too_many_lines,
+    reason = "PL/pgSQL lowering preserves parser order and datum validation"
+)]
 pub fn bind_expr(expr: &Expr, r: &mut dyn VariableResolver) -> Result<Expr> {
     Ok(match expr {
         Expr::Column(name) => match r.rewrite_name(name)? {
@@ -429,6 +433,10 @@ pub(super) fn bind_from(from: &FromClause, r: &mut dyn VariableResolver) -> Resu
 /// Rewrite a full statement, substituting resolvable variables in
 /// every expression position. Statements without expression payloads
 /// pass through unchanged.
+#[expect(
+    clippy::too_many_lines,
+    reason = "PL/pgSQL lowering preserves parser order and datum validation"
+)]
 pub fn bind_statement(stmt: &Statement, r: &mut dyn VariableResolver) -> Result<Statement> {
     Ok(match stmt {
         Statement::Select(body) => Statement::Select(Box::new(bind_select(body, r)?)),

@@ -91,6 +91,10 @@ pub(super) fn lower_optional_stmt_list(
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "PL/pgSQL lowering preserves parser order and datum validation"
+)]
 pub(super) fn lower_stmt(raw: &JSONValue, datums: &[PLpgSQLDatum]) -> Result<PLpgSQLStmt> {
     ensure_single_tag(raw, "statement")?;
     if let Some(block) = raw.get("PLpgSQL_stmt_block") {

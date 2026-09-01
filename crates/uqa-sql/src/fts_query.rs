@@ -56,6 +56,10 @@ pub struct FTSToken {
     pub pos: usize,
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "FTS parser keeps token precedence in one state machine"
+)]
 pub fn tokenize(source: &str) -> Result<Vec<FTSToken>> {
     let mut tokens: Vec<FTSToken> = Vec::new();
     let bytes: Vec<char> = source.chars().collect();

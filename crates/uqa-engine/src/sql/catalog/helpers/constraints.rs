@@ -190,6 +190,10 @@ pub(super) struct PendingConstraintCatalogRow {
     pub(super) foreign_key: Option<ForeignKeyCatalogData>,
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves catalog column and OID order"
+)]
 pub(in crate::sql::catalog) fn constraint_catalog_rows(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,

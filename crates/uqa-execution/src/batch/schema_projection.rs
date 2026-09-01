@@ -260,6 +260,10 @@ impl RowSchema {
     /// `None` represents a logical or alias identity whose source was absent
     /// and therefore resolves to SQL NULL. Every physical slot is validated
     /// before the derived lookup indexes are constructed.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "projection keeps schema and physical column positions aligned"
+    )]
     pub(crate) fn from_physical_layout(layout: PhysicalLayout) -> ExecResult<Self> {
         let PhysicalLayout {
             columns,

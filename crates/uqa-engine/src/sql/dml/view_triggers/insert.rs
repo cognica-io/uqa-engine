@@ -14,6 +14,10 @@ use super::{
     SQLResult, ScalarExpr, Value,
 };
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves view qualifier and row identity"
+)]
 pub(in crate::sql::dml) fn run_view_insert_inner(
     engine: &Engine,
     stmt: &InsertPlan,

@@ -194,6 +194,10 @@ pub fn scalar_type_with_resolver(
     scalar_type_inner(expression, schema, params, Some(resolver))
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "type resolution preserves candidate order and ambiguity diagnostics atomically"
+)]
 pub(super) fn scalar_type_inner(
     expression: &ScalarExpr,
     schema: &RowSchema,

@@ -23,8 +23,7 @@
     clippy::needless_pass_by_value,
     clippy::similar_names,
     clippy::option_if_let_else,
-    clippy::single_match_else,
-    clippy::too_many_lines
+    clippy::single_match_else
 )]
 
 pub mod cross_paradigm;

@@ -9,6 +9,10 @@
 use super::{CreateTable, Engine, SQLError};
 use std::collections::BTreeSet;
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves DDL dependency and action order"
+)]
 pub(super) fn prepare_create_table_hierarchy(
     engine: &Engine,
     table: &mut CreateTable,

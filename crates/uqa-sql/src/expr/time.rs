@@ -91,6 +91,10 @@ pub(super) fn timestamp_plus_interval(
 /// Binary arithmetic when either operand is temporal. Handles the full
 /// `PostgreSQL` matrix used by the engine: date/int, date/date,
 /// temporal/interval, timestamp/timestamp, and interval scaling.
+#[expect(
+    clippy::too_many_lines,
+    reason = "temporal dispatch preserves PostgreSQL unit and error precedence"
+)]
 pub(super) fn temporal_arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
     use TemporalValue as T;
     match (a, b) {
@@ -392,6 +396,10 @@ fn decimal_scaled(value: f64, scale: u32) -> Value {
 /// `EXTRACT(field FROM x)` / `date_part(field, x)`. `as_numeric`
 /// selects EXTRACT's numeric result type (epoch/second render with a
 /// fixed scale); `date_part` keeps float8 semantics.
+#[expect(
+    clippy::too_many_lines,
+    reason = "temporal dispatch preserves PostgreSQL unit and error precedence"
+)]
 pub(super) fn extract_from_value(field: &str, value: &Value, as_numeric: bool) -> Result<Value> {
     if matches!(value, Value::Null) {
         return Ok(Value::Null);

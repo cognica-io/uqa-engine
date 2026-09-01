@@ -13,7 +13,14 @@ use super::{
 };
 use uqa_execution::{ExternalSort, PhysicalOperator, RowSchema, SortKey, SpillScan};
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "keeps execution context inputs aligned"
+)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves aggregate NULL and type order"
+)]
 pub(super) fn aggregate_sorted_input(
     engine: &Engine,
     statement: &QueryBlockPlan,

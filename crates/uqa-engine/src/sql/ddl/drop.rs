@@ -122,6 +122,10 @@ fn only_graph_namespaces(
     Ok(!names.is_empty())
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves DDL dependency and action order"
+)]
 fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError> {
     match stmt.kind {
         DropKind::Table => {

@@ -181,6 +181,10 @@ fn convert_declared_value_to_column_type(
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves DDL dependency and action order"
+)]
 pub(crate) fn convert_value_to_column_type(
     value: Value,
     ty: &ColumnType,

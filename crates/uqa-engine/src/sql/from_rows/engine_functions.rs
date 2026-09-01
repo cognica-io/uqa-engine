@@ -261,6 +261,10 @@ pub(in crate::sql) fn validate_score_projection_args(
 /// max_fragments, fragment_size])` projection. `field` can be either a
 /// bare column reference (looked up on the row) or a literal string;
 /// the rest of the args are scalar literals after evaluation.
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves source schema and row identity"
+)]
 pub(in crate::sql) fn run_uqa_highlight(
     row: &dyn RowLookup,
     args: &[ScalarExpr],

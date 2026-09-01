@@ -196,6 +196,10 @@ struct JoinPredicateBinding {
     pushable: bool,
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "join rewrite preserves predicate ownership and relation order atomically"
+)]
 fn reordered_inner_join_source(
     source: &SourcePlan,
     external_predicates: &[ScalarExpr],

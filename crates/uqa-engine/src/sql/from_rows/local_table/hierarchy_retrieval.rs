@@ -26,6 +26,10 @@ struct PhysicalRetrieval {
     recheck_pins: Option<Arc<Vec<RecheckDoc>>>,
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves source schema and row identity"
+)]
 pub(super) fn build_hierarchy_retrieval_operator<'a>(
     engine: &'a Engine,
     source: &SourcePlan,

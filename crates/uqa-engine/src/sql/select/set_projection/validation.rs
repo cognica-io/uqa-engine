@@ -178,6 +178,10 @@ pub(in crate::sql) fn projections_may_return_set(
     Ok(false)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves SELECT schema and row identity"
+)]
 pub(in crate::sql) fn expression_may_return_set(
     engine: &Engine,
     resolver: &dyn FunctionTypeResolver,
@@ -372,6 +376,10 @@ fn reject_set_descendant<'a>(
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves SELECT schema and row identity"
+)]
 fn validate_set_context(
     engine: &Engine,
     resolver: &dyn FunctionTypeResolver,

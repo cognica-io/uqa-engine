@@ -285,6 +285,10 @@ fn builtin_ntile(index: u64, rows: u64, buckets: i64) -> ExecResult<Value> {
     })?))
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "window execution preserves frame and peer ordering in one pass"
+)]
 fn emit_builtin_window_partition(
     partition: &mut crate::spill::IndexedSpill,
     spec: &WindowSpec,

@@ -23,6 +23,10 @@ use crate::sql::{
     DOC_ID_COLUMN, META_DOC_ID_COLUMN, META_QUALIFIER, META_SCORE_COLUMN, SCORE_COLUMN,
 };
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves SELECT schema and row identity"
+)]
 pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
     engine: &Engine,
     block: &QueryBlockPlan,
@@ -429,6 +433,10 @@ fn add_column_to_source_prune(source: &SourcePlan, column: &str, prune: &mut Col
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves SELECT schema and row identity"
+)]
 fn add_all_source_columns_to_prune(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
@@ -644,6 +652,10 @@ fn collect_from_prune_columns(
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves SELECT schema and row identity"
+)]
 fn collect_expr_prune_columns(
     expr: &ScalarExpr,
     scope: PruneScope<'_>,

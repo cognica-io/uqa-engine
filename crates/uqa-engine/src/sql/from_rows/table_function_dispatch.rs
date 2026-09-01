@@ -15,6 +15,10 @@ use super::{
 };
 
 #[allow(clippy::similar_names)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves source schema and row identity"
+)]
 pub(in crate::sql) fn build_table_function_rows_with_row(
     context: &SourceEvalContext<'_>,
     call: TableFunctionCall<'_>,

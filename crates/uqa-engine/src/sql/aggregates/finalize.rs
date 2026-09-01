@@ -20,6 +20,10 @@ pub(in crate::sql) fn aggregate_value(
     aggregate_value_with_args(name, acc, &[])
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves aggregate NULL and type order"
+)]
 pub(in crate::sql) fn aggregate_value_with_args(
     name: &str,
     acc: &AggregateAccumulator,

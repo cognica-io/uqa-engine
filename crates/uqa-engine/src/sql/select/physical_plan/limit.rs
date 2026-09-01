@@ -17,7 +17,10 @@ use super::super::{
 use super::ordering::resolve_order_expression;
 use super::projection::physical_work_mem_bytes;
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "keeps SELECT scope inputs aligned"
+)]
 pub(in crate::sql) fn attach_order_limit<'a>(
     mut operator: Box<dyn uqa_execution::PhysicalOperator + 'a>,
     statement: &QueryBlockPlan,
