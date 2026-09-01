@@ -11,6 +11,64 @@ use super::{
     SessionPortalPosition, SessionPortalState, Value,
 };
 
+fn realize_pending_command(
+    engine: &Engine,
+    state: &mut SessionPortalState,
+) -> Result<(), SQLError> {
+    let pending = std::mem::replace(
+        &mut state.data,
+        SessionPortalData::Result(SQLResult::empty()),
+    );
+    let SessionPortalData::PendingCommand {
+        command,
+        params,
+        null_returning_values,
+    } = pending
+    else {
+        state.data = pending;
+        return Ok(());
+    };
+    let execution = crate::sql::execute_nested_optimized_command(engine, &command, &params);
+    match execution {
+        Ok(mut result) => {
+            if null_returning_values {
+                result = nullify_result_values(result);
+            }
+            state.columns.clone_from(&result.columns);
+            state.column_types.clone_from(&result.column_types);
+            state.data = SessionPortalData::Result(result);
+            Ok(())
+        }
+        Err(error) => {
+            state.data = SessionPortalData::PendingCommand {
+                command,
+                params,
+                null_returning_values,
+            };
+            Err(error)
+        }
+    }
+}
+
+fn nullify_result_values(result: SQLResult) -> SQLResult {
+    let row_count = result.rows.len();
+    let mut rows = Vec::with_capacity(row_count);
+    for _ in 0..row_count {
+        let mut row = uqa_sql::ResultRow::new();
+        for column in &result.columns {
+            row.insert(column.clone(), Value::Null);
+        }
+        rows.push(row);
+    }
+    SQLResult {
+        positional_rows: Some(vec![vec![Value::Null; result.columns.len()]; row_count]),
+        columns: result.columns,
+        column_types: result.column_types,
+        rows,
+        affected_rows: result.affected_rows,
+    }
+}
+
 fn start_streaming_portal(engine: &Engine, state: &mut SessionPortalState) {
     let pending = std::mem::replace(
         &mut state.data,
@@ -114,6 +172,7 @@ pub(super) fn ensure_portal_rows_for_fetch(
     state: &mut SessionPortalState,
     mut direction: CursorDirection,
     mut count: i64,
+    move_only: bool,
 ) -> Result<(), SQLError> {
     if count < 0
         && matches!(
@@ -130,6 +189,17 @@ pub(super) fn ensure_portal_rows_for_fetch(
             CursorDirection::Backward => CursorDirection::Forward,
             _ => unreachable!(),
         };
+    }
+    if matches!(&state.data, SessionPortalData::PendingCommand { .. }) {
+        let requires_scroll = match direction {
+            CursorDirection::Backward => !(move_only && count == 0),
+            CursorDirection::Absolute | CursorDirection::Relative => count < 0,
+            CursorDirection::Forward => false,
+        };
+        if requires_scroll {
+            require_scroll(state)?;
+        }
+        return realize_pending_command(engine, state);
     }
     if count == 0 {
         return Ok(());
@@ -188,6 +258,7 @@ pub(super) fn materialize_portal_to_end(
     engine: &Engine,
     state: &mut SessionPortalState,
 ) -> Result<(), SQLError> {
+    realize_pending_command(engine, state)?;
     let streaming = std::mem::replace(
         &mut state.data,
         SessionPortalData::Result(SQLResult::empty()),
@@ -231,7 +302,7 @@ pub(super) fn materialize_portal_to_end(
 
 fn portal_row_count(state: &SessionPortalState) -> usize {
     match &state.data {
-        SessionPortalData::Pending { .. } => 0,
+        SessionPortalData::Pending { .. } | SessionPortalData::PendingCommand { .. } => 0,
         SessionPortalData::Result(result) => result.rows.len(),
         SessionPortalData::Indexed(result) => {
             usize::try_from(result.rows.len()).unwrap_or(usize::MAX)
@@ -445,11 +516,15 @@ pub(super) fn select_portal_rows(
     };
     match &mut state.data {
         SessionPortalData::Pending { .. }
+        | SessionPortalData::PendingCommand { .. }
         | SessionPortalData::Streaming {
             materialized: None, ..
         } if indices.is_empty() => Ok(empty()),
         SessionPortalData::Pending { .. } => Err(SQLError::Internal(
             "session portal remained pending during FETCH".into(),
+        )),
+        SessionPortalData::PendingCommand { .. } => Err(SQLError::Internal(
+            "session command portal remained pending during FETCH".into(),
         )),
         SessionPortalData::Result(result) => Ok(select_result_rows(result, indices)),
         SessionPortalData::Indexed(result)

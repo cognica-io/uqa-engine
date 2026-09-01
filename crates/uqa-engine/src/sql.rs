@@ -143,6 +143,16 @@ pub(crate) fn map_physical_exec_error(error: uqa_execution::ExecError) -> SQLErr
     select::physical_exec_error(error)
 }
 
+pub(crate) fn execute_nested_optimized_command(
+    engine: &Engine,
+    command: &uqa_planner::CommandPlan,
+    params: &[SQLParam],
+) -> Result<SQLResult, SQLError> {
+    UnifiedPlanExecutor::new_nested(engine, params).execute(&uqa_planner::UnifiedPlan::Command(
+        Box::new(command.clone()),
+    ))
+}
+
 pub(crate) fn call_bound_engine_builtin(
     engine: &Engine,
     binding: &uqa_sql::ast::FunctionBinding,

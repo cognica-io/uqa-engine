@@ -81,6 +81,8 @@ CREATE TABLE relation_oid_source(id integer);
 CREATE TABLE relation_oid_observation(original oid NOT NULL);
 INSERT INTO relation_oid_observation VALUES ('relation_oid_source'::regclass);
 CREATE TABLE cursor_routine_rows(id integer PRIMARY KEY);
+CREATE TABLE plpgsql_command_cursor_source(id integer PRIMARY KEY, value integer NOT NULL);
+INSERT INTO plpgsql_command_cursor_source VALUES (1, 10), (2, 20);
 CREATE FUNCTION cursor_insert_and_count(value integer) RETURNS integer LANGUAGE plpgsql VOLATILE AS $$
 DECLARE
     observed integer;
@@ -89,6 +91,47 @@ BEGIN
     SELECT count(*) INTO observed FROM cursor_routine_rows;
     INSERT INTO cursor_observations VALUES ('routine_' || value, observed);
     RETURN observed;
+END
+$$;
+CREATE FUNCTION plpgsql_command_cursor(fetch_it boolean) RETURNS text LANGUAGE plpgsql VOLATILE AS $$
+DECLARE
+    c refcursor;
+    fetched integer;
+BEGIN
+    OPEN c FOR UPDATE plpgsql_command_cursor_source AS source SET value = source.value + 1 RETURNING source.value;
+    IF fetch_it THEN
+        FETCH c INTO fetched;
+    END IF;
+    CLOSE c;
+    RETURN coalesce(fetched::text, 'closed');
+END
+$$;
+CREATE FUNCTION plpgsql_command_cursor_failure(fetch_it boolean) RETURNS text LANGUAGE plpgsql VOLATILE AS $$
+DECLARE
+    c refcursor;
+    fetched integer;
+BEGIN
+    OPEN c FOR UPDATE plpgsql_command_cursor_source AS source SET value = 1 / (source.id - 2) RETURNING source.value;
+    IF fetch_it THEN
+        FETCH c INTO fetched;
+    END IF;
+    CLOSE c;
+    RETURN 'ok';
+EXCEPTION WHEN OTHERS THEN
+    RETURN SQLSTATE || '|' || SQLERRM;
+END
+$$;
+CREATE FUNCTION plpgsql_dynamic_command_cursor(query_text text) RETURNS text LANGUAGE plpgsql VOLATILE AS $$
+DECLARE
+    c refcursor;
+    fetched text;
+BEGIN
+    OPEN c FOR EXECUTE query_text;
+    FETCH c INTO fetched;
+    CLOSE c;
+    RETURN coalesce(fetched, '<null>');
+EXCEPTION WHEN OTHERS THEN
+    RETURN SQLSTATE || '|' || SQLERRM;
 END
 $$;
 -- @end
@@ -344,6 +387,50 @@ COMMIT;
 
 -- @case cursor_volatile_routine_write_visibility_result rows
 SELECT name, observed FROM cursor_observations WHERE name LIKE 'routine_%' ORDER BY name;
+-- @end
+
+-- PL/pgSQL command cursors defer mutation until the portal is first run and execute the complete DML command for one fetched RETURNING row.
+-- @case plpgsql_command_cursor_open_is_execution_free rows
+SELECT plpgsql_command_cursor(false) AS fetched;
+-- @end
+
+-- @case plpgsql_command_cursor_open_state rows
+SELECT id, value FROM plpgsql_command_cursor_source ORDER BY id;
+-- @end
+
+-- @case plpgsql_command_cursor_fetch_executes rows
+SELECT plpgsql_command_cursor(true) AS fetched;
+-- @end
+
+-- @case plpgsql_command_cursor_fetch_state rows
+SELECT id, value FROM plpgsql_command_cursor_source ORDER BY id;
+-- @end
+
+-- A command execution error is raised by FETCH rather than OPEN, while closing an unread command cursor leaves the table unchanged.
+-- @case plpgsql_command_cursor_error_is_deferred rows
+SELECT plpgsql_command_cursor_failure(false) AS open_only;
+-- @end
+
+-- @case plpgsql_command_cursor_fetch_error rows
+SELECT plpgsql_command_cursor_failure(true) AS fetched;
+-- @end
+
+-- Dynamic command cursors accept row-returning DML, SHOW, and EXPLAIN and reject a command without a tuple result before it mutates data.
+-- @case plpgsql_dynamic_command_cursor_shapes rows
+SELECT 'insert' AS shape, plpgsql_dynamic_command_cursor('INSERT INTO plpgsql_command_cursor_source VALUES (3, 30)') AS result
+UNION ALL
+SELECT 'show', CASE WHEN replace(plpgsql_dynamic_command_cursor('SHOW search_path'), ' ', '') = current_schema() || ',pg_catalog' THEN 'current,pg_catalog' ELSE 'unexpected' END
+UNION ALL
+SELECT 'explain', CASE WHEN plpgsql_dynamic_command_cursor('EXPLAIN SELECT * FROM plpgsql_command_cursor_source') LIKE '42P11|%' THEN 'rejected' ELSE 'row' END
+ORDER BY shape;
+-- @end
+
+-- @case plpgsql_dynamic_returning_cursor rows
+SELECT plpgsql_dynamic_command_cursor('UPDATE plpgsql_command_cursor_source SET value = value + 1 WHERE id = 1 RETURNING value') AS result;
+-- @end
+
+-- @case plpgsql_dynamic_command_cursor_state rows
+SELECT id, value FROM plpgsql_command_cursor_source ORDER BY id;
 -- @end
 
 -- WITH HOLD reexecution at COMMIT uses the same DECLARE-time own-change image and restores the logical cursor position.

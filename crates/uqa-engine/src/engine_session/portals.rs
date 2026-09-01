@@ -12,11 +12,11 @@ mod fetch;
 use crate::{
     AnalyzerPhase, DocumentStore, Engine, EpochCoordinator, InvertedIndex, MemoryDocumentStore,
     MemoryInvertedIndex, MemoryVectorIndex, QueryRuntime, RelationIdentity, RuntimeExtensions,
-    SQLError, SQLResult, SessionPortalCatalogSnapshot, SessionPortalData, SessionPortalDeclaration,
-    SessionPortalMaterialization, SessionPortalPosition, SessionPortalRestart,
-    SessionPortalSQLFunctionSnapshots, SessionPortalState, SessionPortalTableSnapshots,
-    SessionPortalTransactionOverlay, SessionPortalViewSnapshots, StorageContext, TableState, Value,
-    VectorIndex,
+    SQLError, SQLResult, SessionPortalCatalogSnapshot, SessionPortalCommandDeclaration,
+    SessionPortalData, SessionPortalDeclaration, SessionPortalMaterialization,
+    SessionPortalPosition, SessionPortalRestart, SessionPortalSQLFunctionSnapshots,
+    SessionPortalState, SessionPortalTableSnapshots, SessionPortalTransactionOverlay,
+    SessionPortalViewSnapshots, StorageContext, TableState, Value, VectorIndex,
 };
 use binding::bind_session_portal_function_relations;
 use fetch::{
@@ -152,6 +152,44 @@ impl Engine {
         Ok(())
     }
 
+    pub(crate) fn open_pending_command_session_portal(
+        &self,
+        declaration: SessionPortalCommandDeclaration,
+    ) -> Result<(), SQLError> {
+        let SessionPortalCommandDeclaration {
+            name,
+            command,
+            params,
+            columns,
+            column_types,
+            scrollable,
+            null_returning_values,
+        } = declaration;
+        let transaction_origin = self.allocate_session_portal_transaction_origin();
+        let mut portals = self.session.portals.lock();
+        if portals.contains_key(&name) {
+            return Err(cursor_error(&name, "already exists", "42P03"));
+        }
+        portals.insert(
+            name,
+            SessionPortalState {
+                data: SessionPortalData::PendingCommand {
+                    command,
+                    params,
+                    null_returning_values,
+                },
+                columns,
+                column_types,
+                transaction_origin,
+                position: SessionPortalPosition::BeforeFirst,
+                scrollable,
+                holdable: false,
+                _binary: false,
+            },
+        );
+        Ok(())
+    }
+
     /// Capture the relation and catalog state visible at the start of a SQL statement. A `BEFORE STATEMENT` trigger executes inside the statement's transaction and may therefore change the live engine before the statement evaluates its source query. `PostgreSQL` keeps those changes outside the statement snapshot, so the remaining query work must read through an immutable query engine while trigger and row effects continue to use the live engine.
     pub(crate) fn capture_statement_snapshot_engine(&self) -> Result<Engine, SQLError> {
         let dependencies = SessionPortalTableDependencies::All;
@@ -203,7 +241,13 @@ impl Engine {
             .remove(&fetch.name)
             .ok_or_else(|| cursor_error(&fetch.name, "does not exist", "34000"))?;
         let result = (|| {
-            ensure_portal_rows_for_fetch(self, &mut state, fetch.direction, fetch.count)?;
+            ensure_portal_rows_for_fetch(
+                self,
+                &mut state,
+                fetch.direction,
+                fetch.count,
+                fetch.move_only,
+            )?;
             let indices = fetch_indices(&mut state, fetch.direction, fetch.count, fetch.move_only)?;
             if fetch.move_only {
                 return Ok(SQLResult::from_affected(indices.len() as u64));

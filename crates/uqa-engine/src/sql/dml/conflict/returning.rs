@@ -232,7 +232,15 @@ pub(in crate::sql) fn dml_statement_returning_schema(
     let uqa_planner::UnifiedPlan::Command(command) = plan else {
         return Ok(None);
     };
-    match command.as_ref() {
+    dml_command_returning_schema(engine, &command, &[])
+}
+
+pub(in crate::sql) fn dml_command_returning_schema(
+    engine: &Engine,
+    command: &uqa_planner::CommandPlan,
+    params: &[SQLParam],
+) -> Result<Option<RowSchema>, SQLError> {
+    match command {
         uqa_planner::CommandPlan::Insert(plan) => analyze_dml_returning_plan(
             engine,
             &plan.table,
@@ -242,6 +250,7 @@ pub(in crate::sql) fn dml_statement_returning_schema(
             &plan.ctes,
             None,
             &plan.subqueries,
+            params,
         ),
         uqa_planner::CommandPlan::Update(plan) => analyze_dml_returning_plan(
             engine,
@@ -252,6 +261,7 @@ pub(in crate::sql) fn dml_statement_returning_schema(
             &plan.ctes,
             plan.source.as_deref(),
             &plan.subqueries,
+            params,
         ),
         uqa_planner::CommandPlan::Delete(plan) => analyze_dml_returning_plan(
             engine,
@@ -262,6 +272,7 @@ pub(in crate::sql) fn dml_statement_returning_schema(
             &plan.ctes,
             plan.source.as_deref(),
             &plan.subqueries,
+            params,
         ),
         _ => Ok(None),
     }
@@ -280,6 +291,7 @@ fn analyze_dml_returning_plan(
     cte_plans: &[uqa_planner::CtePlan],
     source: Option<&uqa_planner::SourcePlan>,
     subqueries: &[uqa_planner::QueryPlan],
+    params: &[SQLParam],
 ) -> Result<Option<RowSchema>, SQLError> {
     if returning.is_empty() {
         return Ok(None);
@@ -291,7 +303,7 @@ fn analyze_dml_returning_plan(
     ctes.scalar_subqueries = subqueries.to_vec();
     let supplemental = source
         .map(|source| {
-            crate::sql::select::analyze_source_plan_schema(engine, source, &[], &ctes, None)
+            crate::sql::select::analyze_source_plan_schema(engine, source, params, &ctes, None)
         })
         .transpose()?;
     let star_schema = returning_target_schema(engine, table)?;
@@ -309,7 +321,7 @@ fn analyze_dml_returning_plan(
         &expression_schema,
         &star_schema,
         subqueries,
-        &[],
+        params,
         &ctes,
     )
     .map(Some)

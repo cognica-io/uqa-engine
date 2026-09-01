@@ -11,7 +11,7 @@ use super::{
     FetchCursorStmt, Interpreter, IntoTarget, PLpgSQLCursorArgument, PLpgSQLCursorCount,
     PLpgSQLCursorOpen, PLpgSQLDatum, PLpgSQLRowField, SQLError, Statement, Value,
 };
-use uqa_planner::{QueryPlan, UnifiedPlan};
+use uqa_planner::UnifiedPlan;
 
 impl Interpreter<'_> {
     pub(super) fn exec_open_cursor(
@@ -46,13 +46,13 @@ impl Interpreter<'_> {
                 (compile_cursor_statement(&text)?, params, *scroll)
             }
         };
-        let query = self.lower_cursor_query(query)?;
+        let plan = self.lower_cursor_plan(query)?;
         crate::sql::session_portal_worker::open_plpgsql_session_portal(
             self.engine,
             &params,
             &portal_name,
             scroll,
-            &query,
+            &plan,
         )?;
         self.values[cursor_index] = Value::Str(portal_name);
         Ok(())
@@ -201,20 +201,11 @@ impl Interpreter<'_> {
         query
     }
 
-    fn lower_cursor_query(&self, statement: Statement) -> Result<QueryPlan, SQLError> {
+    fn lower_cursor_plan(&self, statement: Statement) -> Result<UnifiedPlan, SQLError> {
         let plan = UnifiedPlan::lower_with(statement, &|name: &str| {
             self.engine.has_registered_aggregate_function(name)
         });
-        match optimize_engine_plan(self.engine, plan)? {
-            UnifiedPlan::Query(query) => Ok(*query),
-            UnifiedPlan::Command(command) => Err(SQLError::Routine {
-                sqlstate: "42P11".into(),
-                message: format!(
-                    "cannot open {} query as cursor",
-                    command.name().to_ascii_uppercase()
-                ),
-            }),
-        }
+        optimize_engine_plan(self.engine, plan)
     }
 
     fn eval_cursor_count(&self, count: &PLpgSQLCursorCount) -> Result<i64, SQLError> {

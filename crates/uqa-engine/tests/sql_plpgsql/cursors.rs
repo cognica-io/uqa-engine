@@ -209,3 +209,243 @@ fn duplicate_and_scroll_lock_open_errors_match_postgresql() {
         Value::Str("0A000|DECLARE SCROLL CURSOR ... FOR UPDATE/SHARE is not supported".into())
     );
 }
+
+#[test]
+fn row_returning_commands_execute_only_when_the_portal_runs() {
+    let engine = engine();
+    exec(
+        &engine,
+        "CREATE TABLE plpgsql_command_source(id integer PRIMARY KEY, value integer)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO plpgsql_command_source VALUES (1, 10), (2, 20)",
+    );
+    exec(
+        &engine,
+        "CREATE FUNCTION command_cursor_lifecycle(fetch_it boolean) RETURNS text LANGUAGE plpgsql AS $$
+         DECLARE c refcursor; fetched integer;
+         BEGIN
+           OPEN c FOR UPDATE plpgsql_command_source AS t
+             SET value = t.value + 1 RETURNING t.value;
+           IF fetch_it THEN
+             FETCH c INTO fetched;
+           END IF;
+           CLOSE c;
+           RETURN coalesce(fetched::text, 'closed');
+         END
+         $$",
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT command_cursor_lifecycle(false) AS value"),
+        Value::Str("closed".into())
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT sum(value) FROM plpgsql_command_source"),
+        Value::Int(30)
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT command_cursor_lifecycle(true) AS value"),
+        Value::Str("11".into())
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT sum(value) FROM plpgsql_command_source"),
+        Value::Int(32)
+    );
+
+    exec(
+        &engine,
+        "CREATE FUNCTION command_cursor_failure(fetch_it boolean) RETURNS text LANGUAGE plpgsql AS $$
+         DECLARE c refcursor; fetched integer;
+         BEGIN
+           OPEN c FOR UPDATE plpgsql_command_source AS t
+             SET value = 1 / (t.id - 2) RETURNING t.value;
+           IF fetch_it THEN FETCH c INTO fetched; END IF;
+           CLOSE c;
+           RETURN 'ok';
+         EXCEPTION WHEN OTHERS THEN
+           RETURN SQLSTATE || '|' || SQLERRM;
+         END
+         $$",
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT command_cursor_failure(false) AS value"),
+        Value::Str("ok".into())
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT command_cursor_failure(true) AS value"),
+        Value::Str("22012|division by zero".into())
+    );
+}
+
+#[test]
+fn returned_command_cursor_uses_the_first_fetch_statement_state() {
+    let engine = engine();
+    exec(
+        &engine,
+        "CREATE TABLE plpgsql_returned_command(id integer PRIMARY KEY, value integer)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO plpgsql_returned_command VALUES (1, 10), (2, 20)",
+    );
+    exec(
+        &engine,
+        "CREATE FUNCTION return_command_cursor() RETURNS refcursor LANGUAGE plpgsql AS $$
+         DECLARE c refcursor := 'returned command';
+         BEGIN
+           OPEN c FOR UPDATE plpgsql_returned_command AS t
+             SET value = t.value + 5 RETURNING t.id, t.value;
+           RETURN c;
+         END
+         $$",
+    );
+    exec(&engine, "BEGIN");
+    assert_eq!(
+        scalar(&engine, "SELECT return_command_cursor() AS value"),
+        Value::Str("returned command".into())
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT sum(value) FROM plpgsql_returned_command"),
+        Value::Int(30)
+    );
+    exec(
+        &engine,
+        "UPDATE plpgsql_returned_command SET value = 100 WHERE id = 2",
+    );
+    assert_eq!(
+        scalar(&engine, "FETCH NEXT FROM \"returned command\""),
+        Value::Int(1)
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT sum(value) FROM plpgsql_returned_command"),
+        Value::Int(120)
+    );
+    exec(&engine, "COMMIT");
+}
+
+#[test]
+fn dynamic_command_cursor_shapes_match_postgresql() {
+    let engine = engine();
+    exec(
+        &engine,
+        "CREATE TABLE plpgsql_dynamic_command(id integer PRIMARY KEY, value integer)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO plpgsql_dynamic_command VALUES (1, 10), (2, 20)",
+    );
+    exec(
+        &engine,
+        "CREATE FUNCTION run_command_cursor(query_text text) RETURNS text LANGUAGE plpgsql AS $$
+         DECLARE c refcursor; fetched text;
+         BEGIN
+           OPEN c FOR EXECUTE query_text;
+           FETCH c INTO fetched;
+           CLOSE c;
+           RETURN coalesce(fetched, '<null>');
+         EXCEPTION WHEN OTHERS THEN
+           RETURN SQLSTATE || '|' || SQLERRM;
+         END
+         $$",
+    );
+    assert_eq!(
+        scalar(
+            &engine,
+            "SELECT run_command_cursor('INSERT INTO plpgsql_dynamic_command VALUES (3, 30)') AS value"
+        ),
+        Value::Str("42P11|cannot open INSERT query as cursor".into())
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT count(*) FROM plpgsql_dynamic_command"),
+        Value::Int(2)
+    );
+    assert_eq!(
+        scalar(
+            &engine,
+            "SELECT run_command_cursor('UPDATE plpgsql_dynamic_command SET value = value + 1 WHERE id = 1 RETURNING value') AS value"
+        ),
+        Value::Str("11".into())
+    );
+    assert_eq!(
+        scalar(
+            &engine,
+            "SELECT run_command_cursor('DELETE FROM plpgsql_dynamic_command WHERE id = 2 RETURNING id') AS value"
+        ),
+        Value::Str("2".into())
+    );
+    assert_eq!(
+        scalar(
+            &engine,
+            "SELECT run_command_cursor('SHOW search_path') AS value"
+        ),
+        Value::Str("public".into())
+    );
+    let explain = scalar(
+        &engine,
+        "SELECT run_command_cursor('EXPLAIN SELECT * FROM plpgsql_dynamic_command') AS value",
+    );
+    assert!(
+        matches!(explain, Value::Str(ref value) if !value.starts_with("42P11|")),
+        "unexpected EXPLAIN cursor result: {explain:?}"
+    );
+}
+
+#[test]
+fn command_cursor_zero_move_and_scrolling_match_postgresql() {
+    let engine = engine();
+    exec(
+        &engine,
+        "CREATE TABLE plpgsql_dynamic_command(id integer PRIMARY KEY, value integer)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO plpgsql_dynamic_command VALUES (1, 10), (2, 20)",
+    );
+    exec(
+        &engine,
+        "CREATE FUNCTION command_cursor_controls(mode integer) RETURNS text LANGUAGE plpgsql AS $$
+         DECLARE c refcursor; fetched integer; moved bigint; report text; observed integer;
+         BEGIN
+           IF mode = 0 THEN
+             OPEN c FOR EXECUTE
+               'UPDATE plpgsql_dynamic_command SET value = value + 1 RETURNING value';
+             MOVE FORWARD 0 FROM c;
+             GET DIAGNOSTICS moved = ROW_COUNT;
+             report := format('%s/%s;', moved, FOUND);
+             SELECT min(value) INTO observed FROM plpgsql_dynamic_command;
+             CLOSE c;
+             RETURN report || observed::text;
+           ELSIF mode = 1 THEN
+             OPEN c FOR EXECUTE
+               'UPDATE plpgsql_dynamic_command SET value = value + 1 RETURNING value';
+             FETCH c INTO fetched;
+             BEGIN FETCH PRIOR FROM c INTO fetched;
+             EXCEPTION WHEN OTHERS THEN CLOSE c; RETURN SQLSTATE || '|' || SQLERRM;
+             END;
+           ELSE
+             OPEN c SCROLL FOR EXECUTE
+               'UPDATE plpgsql_dynamic_command SET value = value + 1 RETURNING value';
+             FETCH c INTO fetched;
+             report := format('%s/%s', fetched, FOUND);
+             CLOSE c;
+             RETURN report;
+           END IF;
+           CLOSE c;
+           RETURN 'no error';
+         END
+         $$",
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT command_cursor_controls(0) AS value"),
+        Value::Str("0/false;11".into())
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT command_cursor_controls(1) AS value"),
+        Value::Str("55000|cursor can only scan forward".into())
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT command_cursor_controls(2) AS value"),
+        Value::Str("/true".into())
+    );
+}

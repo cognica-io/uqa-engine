@@ -7,12 +7,12 @@
 //! Session portal row-streaming worker.
 
 use uqa_core::Value;
-use uqa_planner::QueryPlan;
+use uqa_planner::{CommandPlan, QueryPlan, UnifiedPlan};
 use uqa_sql::{SQLError, SQLParam, SQLResult};
 
 use crate::{
-    Engine, SessionPortalDeclaration, SessionPortalWorker, SessionPortalWorkerRequest,
-    SessionPortalWorkerResponse,
+    Engine, SessionPortalCommandDeclaration, SessionPortalDeclaration, SessionPortalWorker,
+    SessionPortalWorkerRequest, SessionPortalWorkerResponse,
 };
 
 use super::{query_has_row_locks, select};
@@ -50,18 +50,104 @@ pub(super) fn open_plpgsql_session_portal(
     params: &[SQLParam],
     name: &str,
     scroll: Option<bool>,
-    query: &QueryPlan,
+    plan: &UnifiedPlan,
 ) -> Result<(), SQLError> {
-    prepare_session_portal(
-        engine,
-        params,
-        name,
-        false,
-        scroll,
-        false,
-        query,
-        PortalDeclarationContext::PLpgSQL,
-    )
+    match plan {
+        UnifiedPlan::Query(query) => prepare_session_portal(
+            engine,
+            params,
+            name,
+            false,
+            scroll,
+            false,
+            query,
+            PortalDeclarationContext::PLpgSQL,
+        ),
+        UnifiedPlan::Command(command) => {
+            open_plpgsql_command_portal(engine, params, name, scroll, command)
+        }
+    }
+}
+
+fn open_plpgsql_command_portal(
+    engine: &Engine,
+    params: &[SQLParam],
+    name: &str,
+    scroll: Option<bool>,
+    command: &CommandPlan,
+) -> Result<(), SQLError> {
+    let schema = match command {
+        CommandPlan::Insert(_) | CommandPlan::Update(_) | CommandPlan::Delete(_) => {
+            super::dml::dml_command_returning_schema(engine, command, params)?
+        }
+        CommandPlan::ShowVariable { name } => {
+            engine.session_execution_view().show_variable(name)?;
+            Some(uqa_execution::RowSchema::with_types(
+                vec![name.clone()],
+                vec![Some(uqa_sql::ColumnType::Text)],
+            ))
+        }
+        CommandPlan::Explain { body, format, .. } => {
+            validate_explain_cursor_body(engine, params, body)?;
+            let result = select::run_explain(body, false, format.as_deref(), None)?;
+            Some(uqa_execution::RowSchema::with_types(
+                result.columns,
+                result.column_types,
+            ))
+        }
+        _ => None,
+    }
+    .ok_or_else(|| cannot_open_command_cursor(command))?;
+    let null_returning_values = scroll == Some(true)
+        && matches!(
+            command,
+            CommandPlan::Insert(_) | CommandPlan::Update(_) | CommandPlan::Delete(_)
+        );
+    engine.open_pending_command_session_portal(SessionPortalCommandDeclaration {
+        name: name.to_string(),
+        command: Box::new(command.clone()),
+        params: params.to_vec(),
+        columns: schema.columns().to_vec(),
+        column_types: schema.column_types().to_vec(),
+        scrollable: scroll.unwrap_or(false),
+        null_returning_values,
+    })
+}
+
+fn validate_explain_cursor_body(
+    engine: &Engine,
+    params: &[SQLParam],
+    body: &UnifiedPlan,
+) -> Result<(), SQLError> {
+    match body {
+        UnifiedPlan::Query(query) => {
+            select::lock_query_relations(engine, query)?;
+            let ctes = select::CteScope::new_for_current_routine(engine);
+            select::analyze_query_plan_schema(engine, query, params, &ctes, None)?;
+            Ok(())
+        }
+        UnifiedPlan::Command(command) => {
+            let _ = super::dml::dml_command_returning_schema(engine, command, params)?;
+            Ok(())
+        }
+    }
+}
+
+fn cannot_open_command_cursor(command: &CommandPlan) -> SQLError {
+    let tag = match command {
+        CommandPlan::Insert(_) => "INSERT",
+        CommandPlan::Update(_) => "UPDATE",
+        CommandPlan::Delete(_) => "DELETE",
+        CommandPlan::Merge(_) => "MERGE",
+        CommandPlan::Call { .. } => "CALL",
+        CommandPlan::ShowVariable { .. } => "SHOW",
+        CommandPlan::Explain { .. } => "EXPLAIN",
+        _ => command.name(),
+    };
+    SQLError::Routine {
+        sqlstate: "42P11".into(),
+        message: format!("cannot open {tag} query as cursor"),
+    }
 }
 
 pub(super) fn ensure_plpgsql_session_portal_available(

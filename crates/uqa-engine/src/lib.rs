@@ -488,6 +488,17 @@ pub(crate) struct SessionPortalDeclaration {
     binary: bool,
 }
 
+pub(crate) struct SessionPortalCommandDeclaration {
+    name: String,
+    command: Box<uqa_planner::CommandPlan>,
+    params: Vec<SQLParam>,
+    columns: Vec<String>,
+    column_types: Vec<Option<uqa_sql::ast::ColumnType>>,
+    scrollable: bool,
+    /// `PostgreSQL` 18 materializes one `NULL`-filled tuple for each row produced by a modifying command opened with explicit `SCROLL`.
+    null_returning_values: bool,
+}
+
 enum SessionPortalData {
     Pending {
         query: uqa_planner::QueryPlan,
@@ -497,6 +508,12 @@ enum SessionPortalData {
         sql_function_snapshots: SessionPortalSQLFunctionSnapshots,
         catalog_snapshot: SessionPortalCatalogSnapshot,
         restart: Option<SessionPortalRestart>,
+    },
+    PendingCommand {
+        command: Box<uqa_planner::CommandPlan>,
+        params: Vec<SQLParam>,
+        /// Preserve `PostgreSQL` 18's explicit-`SCROLL` DML tuple image while retaining the command's returned row count.
+        null_returning_values: bool,
     },
     Result(SQLResult),
     Indexed(SessionPortalMaterialization),

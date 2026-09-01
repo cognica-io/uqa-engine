@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "cab139befebbf4915cae85b829d9352ba8150ab6147311a063c4a98addb52231",
+  "fixture_sha256": "6a1039261c37cf09c1e610a82674aeba9ccd5f0a0bdd3aa838ef86c3963f3d8b",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -292,6 +292,111 @@
         [
           "routine_2",
           "2"
+        ]
+      ]
+    },
+    {
+      "name": "plpgsql_command_cursor_open_is_execution_free",
+      "kind": "rows",
+      "rows": [
+        [
+          "closed"
+        ]
+      ]
+    },
+    {
+      "name": "plpgsql_command_cursor_open_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "10"
+        ],
+        [
+          "2",
+          "20"
+        ]
+      ]
+    },
+    {
+      "name": "plpgsql_command_cursor_fetch_executes",
+      "kind": "rows",
+      "rows": [
+        [
+          "11"
+        ]
+      ]
+    },
+    {
+      "name": "plpgsql_command_cursor_fetch_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "11"
+        ],
+        [
+          "2",
+          "21"
+        ]
+      ]
+    },
+    {
+      "name": "plpgsql_command_cursor_error_is_deferred",
+      "kind": "rows",
+      "rows": [
+        [
+          "ok"
+        ]
+      ]
+    },
+    {
+      "name": "plpgsql_command_cursor_fetch_error",
+      "kind": "rows",
+      "rows": [
+        [
+          "22012|division by zero"
+        ]
+      ]
+    },
+    {
+      "name": "plpgsql_dynamic_command_cursor_shapes",
+      "kind": "rows",
+      "rows": [
+        [
+          "explain",
+          "row"
+        ],
+        [
+          "insert",
+          "42P11|cannot open INSERT query as cursor"
+        ],
+        [
+          "show",
+          "current,pg_catalog"
+        ]
+      ]
+    },
+    {
+      "name": "plpgsql_dynamic_returning_cursor",
+      "kind": "rows",
+      "rows": [
+        [
+          "12"
+        ]
+      ]
+    },
+    {
+      "name": "plpgsql_dynamic_command_cursor_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "12"
+        ],
+        [
+          "2",
+          "21"
         ]
       ]
     },
