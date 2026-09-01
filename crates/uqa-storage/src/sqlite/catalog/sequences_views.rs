@@ -8,8 +8,9 @@
 
 use super::{
     migration_relation, params, Catalog, OptionalExtension, RelationIdentity, RelationKind, Result,
-    SQLiteError, SequenceOptions, SequenceRow, ViewRow,
+    SQLiteError, SequenceOptions, SequenceReservationResult, SequenceRow, ViewRow,
 };
+use crate::catalog::sequence_value_reservation;
 
 fn concrete_sequence_options(sequence: &SequenceRow) -> SequenceOptions {
     let default_min = if sequence.increment > 0 { 1 } else { i64::MIN };
@@ -19,7 +20,99 @@ fn concrete_sequence_options(sequence: &SequenceRow) -> SequenceOptions {
         min_value: Some(sequence.options.min_value.unwrap_or(default_min)),
         max_value: Some(sequence.options.max_value.unwrap_or(default_max)),
         cycle: sequence.options.cycle,
+        cache_size: sequence.options.cache_size,
     }
+}
+
+fn reserve_sequence_values_in_connection(
+    connection: &rusqlite::Connection,
+    relation: &RelationIdentity,
+    object_id: [u8; 16],
+    definition_generation: [u8; 16],
+) -> Result<SequenceReservationResult> {
+    let stored = connection
+        .query_row(
+            "SELECT object_id, definition_generation, current, called, increment, min_value, max_value, cycle, cache_size
+               FROM _sequences WHERE schema_name = ?1 AND relation_name = ?2",
+            params![relation.schema, relation.name],
+            |row| {
+                Ok((
+                    row.get::<_, Vec<u8>>(0)?,
+                    row.get::<_, Vec<u8>>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, bool>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, bool>(7)?,
+                    row.get::<_, i64>(8)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((
+        stored_object_id,
+        stored_generation,
+        current,
+        called,
+        increment,
+        min,
+        max,
+        cycle,
+        cache_size,
+    )) = stored
+    else {
+        return Ok(SequenceReservationResult::Missing);
+    };
+    let stored_object_id: [u8; 16] = stored_object_id.try_into().map_err(|value: Vec<u8>| {
+        SQLiteError::StorageBackend(format!(
+            "corrupt sequence `{}` object identity has {} bytes",
+            relation.qualified_name(),
+            value.len()
+        ))
+    })?;
+    if stored_object_id != object_id {
+        return Ok(SequenceReservationResult::Missing);
+    }
+    let stored_generation: [u8; 16] = stored_generation.try_into().map_err(|value: Vec<u8>| {
+        SQLiteError::StorageBackend(format!(
+            "corrupt sequence `{}` definition generation has {} bytes",
+            relation.qualified_name(),
+            value.len()
+        ))
+    })?;
+    if stored_generation != definition_generation {
+        return Ok(SequenceReservationResult::DefinitionChanged);
+    }
+    if increment == 0 || cache_size <= 0 {
+        return Err(SQLiteError::StorageBackend(format!(
+            "corrupt sequence `{}` has increment {increment} and cache size {cache_size}",
+            relation.qualified_name()
+        )));
+    }
+    let Some(reservation) =
+        sequence_value_reservation(current, called, increment, min, max, cycle, cache_size)
+    else {
+        return Ok(SequenceReservationResult::Exhausted);
+    };
+    let updated = connection.execute(
+        "UPDATE _sequences SET current = ?5, called = 1
+          WHERE schema_name = ?1 AND relation_name = ?2 AND object_id = ?3 AND definition_generation = ?4",
+        params![
+            relation.schema,
+            relation.name,
+            object_id.as_slice(),
+            definition_generation.as_slice(),
+            reservation.last_value,
+        ],
+    )?;
+    if updated != 1 {
+        return Err(SQLiteError::StorageBackend(format!(
+            "sequence `{}` changed while reserving cached values",
+            relation.qualified_name()
+        )));
+    }
+    Ok(SequenceReservationResult::Reserved(reservation))
 }
 
 impl Catalog {
@@ -42,12 +135,13 @@ impl Catalog {
             let options = concrete_sequence_options(sequence);
             tx.execute(
                 "INSERT INTO _sequences
-                    (schema_name, relation_name, kind, object_id, start, increment, current, called, persistence, data_type, min_value, max_value, cycle)
-                 VALUES (?1, ?2, 'sequence', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                    (schema_name, relation_name, kind, object_id, definition_generation, start, increment, current, called, persistence, data_type, min_value, max_value, cycle, cache_size)
+                 VALUES (?1, ?2, 'sequence', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                 params![
                     sequence.relation.schema,
                     sequence.relation.name,
                     sequence.object_id.as_slice(),
+                    sequence.definition_generation.as_slice(),
                     sequence.start,
                     sequence.increment,
                     sequence.current,
@@ -57,6 +151,7 @@ impl Catalog {
                     options.min_value,
                     options.max_value,
                     options.cycle,
+                    options.cache_size,
                 ],
             )?;
             tx.commit()?;
@@ -69,13 +164,14 @@ impl Catalog {
             let options = concrete_sequence_options(sequence);
             Ok(connection.execute(
                 "UPDATE _sequences
-                    SET object_id = ?3, start = ?4, increment = ?5, current = ?6, called = ?7, persistence = ?8,
-                        data_type = ?9, min_value = ?10, max_value = ?11, cycle = ?12
+                    SET object_id = ?3, definition_generation = ?4, start = ?5, increment = ?6, current = ?7, called = ?8, persistence = ?9,
+                        data_type = ?10, min_value = ?11, max_value = ?12, cycle = ?13, cache_size = ?14
                   WHERE schema_name = ?1 AND relation_name = ?2",
                 params![
                     sequence.relation.schema,
                     sequence.relation.name,
                     sequence.object_id.as_slice(),
+                    sequence.definition_generation.as_slice(),
                     sequence.start,
                     sequence.increment,
                     sequence.current,
@@ -85,6 +181,7 @@ impl Catalog {
                     options.min_value,
                     options.max_value,
                     options.cycle,
+                    options.cache_size,
                 ],
             )? != 0)
         })
@@ -110,8 +207,8 @@ impl Catalog {
     pub fn load_sequence_rows(&self) -> Result<Vec<SequenceRow>> {
         self.conn.with(|connection| {
             let mut statement = connection.prepare(
-                "SELECT schema_name, relation_name, object_id, start, increment, current, called, persistence,
-                        data_type, min_value, max_value, cycle
+                "SELECT schema_name, relation_name, object_id, definition_generation, start, increment, current, called, persistence,
+                        data_type, min_value, max_value, cycle, cache_size
                        FROM _sequences ORDER BY schema_name, relation_name",
             )?;
             let rows = statement.query_map([], |row| {
@@ -119,15 +216,17 @@ impl Catalog {
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, Vec<u8>>(2)?,
-                    row.get::<_, i64>(3)?,
+                    row.get::<_, Vec<u8>>(3)?,
                     row.get::<_, i64>(4)?,
                     row.get::<_, i64>(5)?,
-                    row.get::<_, bool>(6)?,
-                    row.get::<_, String>(7)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, bool>(7)?,
                     row.get::<_, String>(8)?,
-                    row.get::<_, i64>(9)?,
+                    row.get::<_, String>(9)?,
                     row.get::<_, i64>(10)?,
-                    row.get::<_, bool>(11)?,
+                    row.get::<_, i64>(11)?,
+                    row.get::<_, bool>(12)?,
+                    row.get::<_, i64>(13)?,
                 ))
             })?;
             let mut sequences = Vec::new();
@@ -136,6 +235,7 @@ impl Catalog {
                     schema,
                     name,
                     object_id,
+                    definition_generation,
                     start,
                     increment,
                     current,
@@ -145,6 +245,7 @@ impl Catalog {
                     min_value,
                     max_value,
                     cycle,
+                    cache_size,
                 ) = row?;
                 let object_id: [u8; 16] = object_id.try_into().map_err(|value: Vec<u8>| {
                     SQLiteError::StorageBackend(format!(
@@ -153,9 +254,19 @@ impl Catalog {
                         value.len()
                     ))
                 })?;
+                let definition_generation: [u8; 16] = definition_generation
+                    .try_into()
+                    .map_err(|value: Vec<u8>| {
+                        SQLiteError::StorageBackend(format!(
+                            "corrupt sequence `{}.{name}` definition generation has {} bytes",
+                            schema,
+                            value.len()
+                        ))
+                    })?;
                 sequences.push(SequenceRow {
                     relation: RelationIdentity::new(schema, name),
                     object_id,
+                    definition_generation,
                     start,
                     increment,
                     current,
@@ -166,6 +277,7 @@ impl Catalog {
                         min_value: Some(min_value),
                         max_value: Some(max_value),
                         cycle,
+                        cache_size,
                     },
                 });
             }
@@ -173,64 +285,35 @@ impl Catalog {
         })
     }
 
-    /// Allocate one sequence value inside `SQLite` itself. `UPDATE RETURNING`
-    /// is a single atomic statement, so no engine-side read/modify/write cache
-    /// can race another connection.
-    pub fn next_sequence_value(&self, name: &str, object_id: [u8; 16]) -> Result<Option<i64>> {
+    pub fn reserve_sequence_values(
+        &self,
+        name: &str,
+        object_id: [u8; 16],
+        definition_generation: [u8; 16],
+    ) -> Result<SequenceReservationResult> {
         let relation = migration_relation(name)?;
         self.conn.with_mut(|connection| {
-            let tx = connection.savepoint()?;
-            let value = tx
-                .query_row(
-                    "UPDATE _sequences
-                        SET current = CASE
-                                WHEN called = 0 THEN current
-                                WHEN increment > 0 AND current <= max_value - increment
-                                    THEN current + increment
-                                WHEN increment < 0 AND current >= min_value - increment
-                                    THEN current + increment
-                                WHEN cycle != 0 AND increment > 0 THEN min_value
-                                WHEN cycle != 0 THEN max_value
-                                ELSE current
-                            END,
-                            called = 1
-                      WHERE schema_name = ?1 AND relation_name = ?2
-                        AND object_id = ?3
-                        AND (called = 0
-                             OR (increment > 0 AND current <= max_value - increment)
-                             OR (increment < 0 AND current >= min_value - increment)
-                             OR cycle != 0)
-                      RETURNING current",
-                    params![relation.schema, relation.name, object_id.as_slice()],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            if value.is_none() {
-                let stored_object_id = tx
-                    .query_row(
-                        "SELECT object_id FROM _sequences
-                          WHERE schema_name = ?1 AND relation_name = ?2",
-                        params![relation.schema, relation.name],
-                        |row| row.get::<_, Vec<u8>>(0),
-                    )
-                    .optional()?
-                    .map(|value| {
-                        <[u8; 16]>::try_from(value).map_err(|value: Vec<u8>| {
-                            SQLiteError::StorageBackend(format!(
-                                "corrupt sequence `{name}` object identity has {} bytes",
-                                value.len()
-                            ))
-                        })
-                    })
-                    .transpose()?;
-                if stored_object_id.is_some_and(|stored| stored == object_id) {
-                    return Err(SQLiteError::StorageBackend(format!(
-                        "sequence `{name}` exhausted"
-                    )));
-                }
+            if connection.is_autocommit() {
+                let tx = connection
+                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+                let result = reserve_sequence_values_in_connection(
+                    &tx,
+                    &relation,
+                    object_id,
+                    definition_generation,
+                )?;
+                tx.commit()?;
+                return Ok(result);
             }
+            let tx = connection.savepoint()?;
+            let result = reserve_sequence_values_in_connection(
+                &tx,
+                &relation,
+                object_id,
+                definition_generation,
+            )?;
             tx.commit()?;
-            Ok(value)
+            Ok(result)
         })
     }
 

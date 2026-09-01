@@ -94,6 +94,7 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "controlled"),
             object_id,
+            definition_generation: object_id,
             start: 1,
             increment: 2,
             current: 1,
@@ -148,6 +149,7 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "cycling"),
             object_id: cycling_id,
+            definition_generation: cycling_id,
             start: 5,
             increment: 3,
             current: 5,
@@ -158,6 +160,7 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
                 min_value: Some(2),
                 max_value: Some(5),
                 cycle: true,
+                cache_size: 1,
             },
         })
         .unwrap();
@@ -169,6 +172,70 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
             Some(expected)
         );
     }
+}
+
+#[test]
+fn sequence_reservations_are_atomic_and_stop_at_the_configured_bound() {
+    let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
+    let catalog = KeyValueCatalog::new(store);
+    let object_id = [11; 16];
+    let generation = [12; 16];
+    catalog.save_schema("public").unwrap();
+    catalog
+        .create_sequence_row(&SequenceRow {
+            relation: RelationIdentity::new("public", "cached"),
+            object_id,
+            definition_generation: generation,
+            start: 1,
+            increment: 1,
+            current: 1,
+            called: false,
+            persistence: "p".into(),
+            options: SequenceOptions {
+                min_value: Some(1),
+                max_value: Some(3),
+                cache_size: 5,
+                ..SequenceOptions::default()
+            },
+        })
+        .unwrap();
+
+    assert_eq!(
+        catalog
+            .reserve_sequence_values("public.cached", object_id, generation)
+            .unwrap(),
+        SequenceReservationResult::Reserved(crate::catalog::SequenceValueReservation {
+            first_value: 1,
+            last_value: 3,
+            count: 3,
+        })
+    );
+    assert_eq!(
+        catalog
+            .reserve_sequence_values("public.cached", object_id, generation)
+            .unwrap(),
+        SequenceReservationResult::Exhausted
+    );
+    let mut row = catalog.load_sequence_rows().unwrap().remove(0);
+    row.options.cycle = true;
+    row.definition_generation = [13; 16];
+    assert!(catalog.replace_sequence_row(&row).unwrap());
+    assert_eq!(
+        catalog
+            .reserve_sequence_values("public.cached", object_id, generation)
+            .unwrap(),
+        SequenceReservationResult::DefinitionChanged
+    );
+    assert_eq!(
+        catalog
+            .reserve_sequence_values("public.cached", object_id, [13; 16])
+            .unwrap(),
+        SequenceReservationResult::Reserved(crate::catalog::SequenceValueReservation {
+            first_value: 1,
+            last_value: 3,
+            count: 3,
+        })
+    );
 }
 
 #[test]
@@ -240,6 +307,7 @@ fn relation_namespace_migration_rejects_alias_and_cross_kind_collisions() {
                     &single_str_key(TAG_SEQUENCE, "public.docs").unwrap(),
                     &encode_value(&StoredSequence {
                         object_id: [0; 16],
+                        definition_generation: [0; 16],
                         start: 1,
                         increment: 1,
                         current: 0,

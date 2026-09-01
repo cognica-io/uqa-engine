@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "4f3f30313cbd7611c134c9d900f0558d4402cec90313fb45602497b1f8854fc9",
+  "fixture_sha256": "82ec114c29bc9729b450555722b897259637d085f18bac7282c031cf0bb4274b",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -1263,6 +1263,139 @@
           "10"
         ]
       ]
+    },
+    {
+      "name": "create_sequence_cache_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_cache_basic_semantics",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_cache_transaction_semantics",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_cache_alter_rollback",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_cache_semantics_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "alter_after_rollback",
+          "6",
+          "10",
+          "5"
+        ],
+        [
+          "basic_1",
+          "1",
+          "5",
+          "5"
+        ],
+        [
+          "basic_2",
+          "2",
+          "5",
+          "5"
+        ],
+        [
+          "cycle_1",
+          "1",
+          "3",
+          "5"
+        ],
+        [
+          "cycle_2",
+          "2",
+          "3",
+          "5"
+        ],
+        [
+          "cycle_3",
+          "3",
+          "3",
+          "5"
+        ],
+        [
+          "cycle_4",
+          "1",
+          "3",
+          "5"
+        ],
+        [
+          "discard_initial",
+          "1",
+          "10",
+          "5"
+        ],
+        [
+          "discard_next",
+          "6",
+          "10",
+          "5"
+        ],
+        [
+          "partial_1",
+          "1",
+          "3",
+          "5"
+        ],
+        [
+          "partial_2",
+          "2",
+          "3",
+          "5"
+        ],
+        [
+          "partial_3",
+          "3",
+          "3",
+          "5"
+        ],
+        [
+          "setval_initial",
+          "1",
+          "25",
+          "5"
+        ],
+        [
+          "setval_next",
+          "21",
+          "25",
+          "5"
+        ],
+        [
+          "setval_result",
+          "20",
+          "25",
+          "5"
+        ],
+        [
+          "transaction_after_rollback",
+          "4",
+          "5",
+          "5"
+        ]
+      ]
+    },
+    {
+      "name": "sequence_cache_partial_exhaustion",
+      "kind": "error",
+      "sqlstate": "2200H"
+    },
+    {
+      "name": "sequence_cache_zero_create",
+      "kind": "error",
+      "sqlstate": "22023"
+    },
+    {
+      "name": "sequence_cache_zero_alter",
+      "kind": "error",
+      "sqlstate": "22023"
     },
     {
       "name": "create_drop_sequence_fixture",

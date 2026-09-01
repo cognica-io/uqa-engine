@@ -32,7 +32,7 @@ pub(in crate::sql::catalog) fn build_pg_sequences(
                 ("max_value", Value::Int(state.max_value)),
                 ("increment_by", Value::Int(state.increment)),
                 ("cycle", bool_value(state.cycle)),
-                ("cache_size", Value::Int(1)),
+                ("cache_size", Value::Int(state.cache_size)),
                 (
                     "last_value",
                     if state.called {

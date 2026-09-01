@@ -1177,6 +1177,79 @@ UPDATE __UQA_STATEFUL_SCHEMA__.sequence_option_observations SET session_value = 
 SELECT name, value, session_value, last_session_value FROM sequence_option_observations WHERE name IN ('altered_before_outer_state', 'altered_before_outer_next') ORDER BY name;
 -- @end
 
+-- Sequence caches reserve bounded blocks durably while consumption, invalidation, and rollback behavior remain session-local.
+-- @case create_sequence_cache_fixture ok
+CREATE SEQUENCE sequence_cache_basic MINVALUE 1 MAXVALUE 20 CACHE 5;
+CREATE SEQUENCE sequence_cache_partial MINVALUE 1 MAXVALUE 3 CACHE 5 NO CYCLE;
+CREATE SEQUENCE sequence_cache_cycle MINVALUE 1 MAXVALUE 3 CACHE 5 CYCLE;
+CREATE SEQUENCE sequence_cache_transaction CACHE 5;
+CREATE SEQUENCE sequence_cache_alter CACHE 5;
+CREATE SEQUENCE sequence_cache_setval CACHE 5;
+CREATE SEQUENCE sequence_cache_discard CACHE 5;
+CREATE TABLE sequence_cache_observations(name text PRIMARY KEY, returned bigint, stored bigint, cache_size bigint);
+-- @end
+
+-- @case sequence_cache_basic_semantics ok
+INSERT INTO sequence_cache_observations(name, returned) VALUES ('basic_1', nextval('sequence_cache_basic'));
+INSERT INTO sequence_cache_observations(name, returned) VALUES ('basic_2', nextval('sequence_cache_basic'));
+UPDATE sequence_cache_observations SET stored = (SELECT last_value FROM pg_sequences WHERE schemaname = current_schema() AND sequencename = 'sequence_cache_basic'), cache_size = (SELECT pg_sequences.cache_size FROM pg_sequences WHERE schemaname = current_schema() AND sequencename = 'sequence_cache_basic') WHERE name LIKE 'basic_%';
+INSERT INTO sequence_cache_observations(name, returned) VALUES ('partial_1', nextval('sequence_cache_partial'));
+INSERT INTO sequence_cache_observations(name, returned) VALUES ('partial_2', nextval('sequence_cache_partial'));
+INSERT INTO sequence_cache_observations(name, returned) VALUES ('partial_3', nextval('sequence_cache_partial'));
+UPDATE sequence_cache_observations SET stored = (SELECT last_value FROM pg_sequences WHERE schemaname = current_schema() AND sequencename = 'sequence_cache_partial'), cache_size = (SELECT pg_sequences.cache_size FROM pg_sequences WHERE schemaname = current_schema() AND sequencename = 'sequence_cache_partial') WHERE name LIKE 'partial_%';
+INSERT INTO sequence_cache_observations(name, returned) VALUES ('cycle_1', nextval('sequence_cache_cycle'));
+INSERT INTO sequence_cache_observations(name, returned) VALUES ('cycle_2', nextval('sequence_cache_cycle'));
+INSERT INTO sequence_cache_observations(name, returned) VALUES ('cycle_3', nextval('sequence_cache_cycle'));
+INSERT INTO sequence_cache_observations(name, returned) VALUES ('cycle_4', nextval('sequence_cache_cycle'));
+UPDATE sequence_cache_observations SET stored = (SELECT last_value FROM pg_sequences WHERE schemaname = current_schema() AND sequencename = 'sequence_cache_cycle'), cache_size = (SELECT pg_sequences.cache_size FROM pg_sequences WHERE schemaname = current_schema() AND sequencename = 'sequence_cache_cycle') WHERE name LIKE 'cycle_%';
+INSERT INTO sequence_cache_observations(name, returned) VALUES ('setval_initial', nextval('sequence_cache_setval'));
+INSERT INTO sequence_cache_observations(name, returned) VALUES ('setval_result', setval('sequence_cache_setval', 20, true));
+INSERT INTO sequence_cache_observations(name, returned) VALUES ('setval_next', nextval('sequence_cache_setval'));
+UPDATE sequence_cache_observations SET stored = (SELECT last_value FROM pg_sequences WHERE schemaname = current_schema() AND sequencename = 'sequence_cache_setval'), cache_size = (SELECT pg_sequences.cache_size FROM pg_sequences WHERE schemaname = current_schema() AND sequencename = 'sequence_cache_setval') WHERE name LIKE 'setval_%';
+INSERT INTO sequence_cache_observations(name, returned) VALUES ('discard_initial', nextval('sequence_cache_discard'));
+DISCARD SEQUENCES;
+INSERT INTO sequence_cache_observations(name, returned) VALUES ('discard_next', nextval('sequence_cache_discard'));
+UPDATE sequence_cache_observations SET stored = (SELECT last_value FROM pg_sequences WHERE schemaname = current_schema() AND sequencename = 'sequence_cache_discard'), cache_size = (SELECT pg_sequences.cache_size FROM pg_sequences WHERE schemaname = current_schema() AND sequencename = 'sequence_cache_discard') WHERE name LIKE 'discard_%';
+-- @end
+
+-- @case sequence_cache_transaction_semantics ok
+BEGIN;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.sequence_cache_observations(name, returned) VALUES ('transaction_initial_rolled_back', nextval('__UQA_STATEFUL_SCHEMA__.sequence_cache_transaction'));
+SAVEPOINT sequence_cache_value_boundary;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.sequence_cache_observations(name, returned) VALUES ('transaction_savepoint_rolled_back', nextval('__UQA_STATEFUL_SCHEMA__.sequence_cache_transaction'));
+ROLLBACK TO SAVEPOINT sequence_cache_value_boundary;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.sequence_cache_observations(name, returned) VALUES ('transaction_outer_rolled_back', nextval('__UQA_STATEFUL_SCHEMA__.sequence_cache_transaction'));
+ROLLBACK;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.sequence_cache_observations(name, returned) VALUES ('transaction_after_rollback', nextval('__UQA_STATEFUL_SCHEMA__.sequence_cache_transaction'));
+UPDATE __UQA_STATEFUL_SCHEMA__.sequence_cache_observations SET stored = (SELECT last_value FROM pg_sequences WHERE schemaname = '__UQA_STATEFUL_SCHEMA__' AND sequencename = 'sequence_cache_transaction'), cache_size = (SELECT pg_sequences.cache_size FROM pg_sequences WHERE schemaname = '__UQA_STATEFUL_SCHEMA__' AND sequencename = 'sequence_cache_transaction') WHERE name = 'transaction_after_rollback';
+-- @end
+
+-- @case sequence_cache_alter_rollback ok
+BEGIN;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.sequence_cache_observations(name, returned) VALUES ('alter_initial_rolled_back', nextval('__UQA_STATEFUL_SCHEMA__.sequence_cache_alter'));
+ALTER SEQUENCE __UQA_STATEFUL_SCHEMA__.sequence_cache_alter CACHE 2;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.sequence_cache_observations(name, returned) VALUES ('alter_value_rolled_back', nextval('__UQA_STATEFUL_SCHEMA__.sequence_cache_alter'));
+ROLLBACK;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.sequence_cache_observations(name, returned) VALUES ('alter_after_rollback', nextval('__UQA_STATEFUL_SCHEMA__.sequence_cache_alter'));
+UPDATE __UQA_STATEFUL_SCHEMA__.sequence_cache_observations SET stored = (SELECT last_value FROM pg_sequences WHERE schemaname = '__UQA_STATEFUL_SCHEMA__' AND sequencename = 'sequence_cache_alter'), cache_size = (SELECT pg_sequences.cache_size FROM pg_sequences WHERE schemaname = '__UQA_STATEFUL_SCHEMA__' AND sequencename = 'sequence_cache_alter') WHERE name = 'alter_after_rollback';
+-- @end
+
+-- @case sequence_cache_semantics_result rows
+SELECT name, returned, stored, cache_size FROM sequence_cache_observations ORDER BY name;
+-- @end
+
+-- @case sequence_cache_partial_exhaustion error
+SELECT nextval('sequence_cache_partial');
+-- @end
+
+-- @case sequence_cache_zero_create error
+CREATE SEQUENCE sequence_cache_zero CACHE 0;
+-- @end
+
+-- @case sequence_cache_zero_alter error
+ALTER SEQUENCE sequence_cache_basic CACHE 0;
+-- @end
+
 -- DROP SEQUENCE resolves every target before mutation, preserves transactional catalog and session state, and applies PostgreSQL dependency direction for defaults, views, and serial ownership.
 -- @case create_drop_sequence_fixture ok
 CREATE SEQUENCE drop_sequence_atomic;

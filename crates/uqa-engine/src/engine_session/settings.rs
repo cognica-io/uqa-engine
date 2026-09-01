@@ -307,6 +307,9 @@ impl Engine {
         if matches!(target, DiscardTarget::All | DiscardTarget::Temp) {
             self.discard_temporary_relations();
         }
+        if matches!(target, DiscardTarget::All | DiscardTarget::Sequences) {
+            self.session.sequence_caches.lock().clear();
+        }
         let mut session = self.session.state.write();
         match target {
             DiscardTarget::All => {
@@ -400,6 +403,10 @@ impl Engine {
             session.last_sequence = None;
         }
         drop(session);
+        self.session
+            .sequence_caches
+            .lock()
+            .retain(|relation, _| !temporary_sequences.contains(relation));
         if !temporary_tables.is_empty() {
             self.note_table_catalog_changed();
         }

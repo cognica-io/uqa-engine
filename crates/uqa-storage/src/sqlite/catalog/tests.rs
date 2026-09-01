@@ -7,6 +7,7 @@
 use super::*;
 
 mod migration;
+mod version_migrations;
 
 fn fresh() -> Catalog {
     let mc = ManagedConnection::open_in_memory().unwrap();
@@ -90,361 +91,6 @@ fn catalog_facade_trait_object_round_trips_table() {
 }
 
 #[test]
-fn migration_is_idempotent() {
-    let mc = ManagedConnection::open_in_memory().unwrap();
-    let _cat1 = Catalog::open(mc.clone()).unwrap();
-    // Reopen on the same handle: should not re-run migrations or
-    // raise an error.
-    let _cat2 = Catalog::open(mc).unwrap();
-}
-
-#[test]
-fn migration_15_creates_document_blob_storage_for_existing_catalogs() {
-    let mc = ManagedConnection::open_in_memory().unwrap();
-    let _current = Catalog::open(mc.clone()).unwrap();
-    mc.with(|conn| {
-        conn.execute("DROP TABLE _document_blobs", [])?;
-        conn.execute(
-            "UPDATE _metadata SET value = '14' WHERE key = 'schema_version'",
-            [],
-        )?;
-        Ok(())
-    })
-    .unwrap();
-
-    let _upgraded = Catalog::open(mc.clone()).unwrap();
-    mc.with(|conn| {
-        let count: u32 = conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master
-             WHERE type = 'table' AND name = '_document_blobs'",
-            [],
-            |row| row.get(0),
-        )?;
-        assert_eq!(count, 1);
-        Ok(())
-    })
-    .unwrap();
-}
-
-#[test]
-fn migration_16_adds_backward_compatible_table_constraints() {
-    let mc = ManagedConnection::open_in_memory().unwrap();
-    let current = Catalog::open(mc.clone()).unwrap();
-    current
-        .save_table(&TableSchema {
-            relation: RelationIdentity::new("public", "legacy"),
-            object_id: [1; 16],
-            storage_generation: [1; 16],
-            analyzer_json: "{}".into(),
-            fts_fields: Vec::new(),
-            vector_fields: Vec::new(),
-            columns_json: "[]".into(),
-            constraints_json: String::new(),
-        })
-        .unwrap();
-    drop(current);
-    mc.with(|conn| {
-        conn.execute("ALTER TABLE _tables DROP COLUMN constraints", [])?;
-        conn.execute(
-            "UPDATE _metadata SET value = '15' WHERE key = 'schema_version'",
-            [],
-        )?;
-        Ok(())
-    })
-    .unwrap();
-
-    let upgraded = Catalog::open(mc).unwrap();
-    let schemas = upgraded.load_tables().unwrap();
-    assert_eq!(schemas.len(), 1);
-    assert_eq!(schemas[0].relation.qualified_name(), "public.legacy");
-    assert!(schemas[0].constraints_json.is_empty());
-}
-
-#[test]
-fn migration_24_adds_persistent_table_storage_generations() {
-    let mc = ManagedConnection::open_in_memory().unwrap();
-    let current = Catalog::open(mc.clone()).unwrap();
-    current
-        .save_table(&TableSchema {
-            relation: RelationIdentity::new("public", "legacy_generation"),
-            object_id: [7; 16],
-            storage_generation: [7; 16],
-            analyzer_json: "{}".into(),
-            fts_fields: Vec::new(),
-            vector_fields: Vec::new(),
-            columns_json: "[]".into(),
-            constraints_json: String::new(),
-        })
-        .unwrap();
-    drop(current);
-    mc.with(|connection| {
-        connection.execute("ALTER TABLE _tables DROP COLUMN storage_generation", [])?;
-        connection.execute(
-            "UPDATE _metadata SET value = '23' WHERE key = 'schema_version'",
-            [],
-        )?;
-        Ok(())
-    })
-    .unwrap();
-
-    let upgraded = Catalog::open(mc).unwrap();
-    let mut schema = upgraded.load_tables().unwrap().remove(0);
-    assert_eq!(schema.storage_generation, [0; 16]);
-    schema.storage_generation = [9; 16];
-    upgraded.save_table(&schema).unwrap();
-    assert_eq!(
-        upgraded.load_tables().unwrap()[0].storage_generation,
-        [9; 16]
-    );
-}
-
-#[test]
-fn migration_24_preserves_a_storage_generation_installed_before_its_version_marker() {
-    let mc = ManagedConnection::open_in_memory().unwrap();
-    let current = Catalog::open(mc.clone()).unwrap();
-    current
-        .save_table(&TableSchema {
-            relation: RelationIdentity::new("public", "early_generation"),
-            object_id: [11; 16],
-            storage_generation: [11; 16],
-            analyzer_json: "{}".into(),
-            fts_fields: Vec::new(),
-            vector_fields: Vec::new(),
-            columns_json: "[]".into(),
-            constraints_json: String::new(),
-        })
-        .unwrap();
-    drop(current);
-    mc.with(|connection| {
-        connection.execute(
-            "UPDATE _metadata SET value = '23' WHERE key = 'schema_version'",
-            [],
-        )?;
-        Ok(())
-    })
-    .unwrap();
-
-    let upgraded = Catalog::open(mc.clone()).unwrap();
-    assert_eq!(
-        upgraded.load_tables().unwrap()[0].storage_generation,
-        [11; 16]
-    );
-    mc.with(|connection| {
-        let version: String = connection.query_row(
-            "SELECT value FROM _metadata WHERE key = 'schema_version'",
-            [],
-            |row| row.get(0),
-        )?;
-        assert_eq!(version, CURRENT_SCHEMA_VERSION.to_string());
-        Ok(())
-    })
-    .unwrap();
-}
-
-#[test]
-fn migration_25_adds_persistent_table_object_identities() {
-    let mc = ManagedConnection::open_in_memory().unwrap();
-    let current = Catalog::open(mc.clone()).unwrap();
-    current
-        .save_table(&TableSchema {
-            relation: RelationIdentity::new("public", "legacy_object"),
-            object_id: [7; 16],
-            storage_generation: [8; 16],
-            analyzer_json: "{}".into(),
-            fts_fields: Vec::new(),
-            vector_fields: Vec::new(),
-            columns_json: "[]".into(),
-            constraints_json: String::new(),
-        })
-        .unwrap();
-    drop(current);
-    mc.with(|connection| {
-        connection.execute("ALTER TABLE _tables DROP COLUMN object_id", [])?;
-        connection.execute(
-            "UPDATE _metadata SET value = '24' WHERE key = 'schema_version'",
-            [],
-        )?;
-        Ok(())
-    })
-    .unwrap();
-
-    let upgraded = Catalog::open(mc).unwrap();
-    let mut schema = upgraded.load_tables().unwrap().remove(0);
-    assert_eq!(schema.object_id, [0; 16]);
-    schema.object_id = [9; 16];
-    upgraded.save_table(&schema).unwrap();
-    assert_eq!(upgraded.load_tables().unwrap()[0].object_id, [9; 16]);
-}
-
-#[test]
-fn migration_26_adds_persistent_sequence_object_identities() {
-    let connection = ManagedConnection::open_in_memory().unwrap();
-    let current = Catalog::open(connection.clone()).unwrap();
-    current
-        .create_sequence_row(&SequenceRow {
-            relation: RelationIdentity::new("public", "legacy_sequence_object"),
-            object_id: [7; 16],
-            start: 1,
-            increment: 1,
-            current: 1,
-            called: false,
-            persistence: "p".into(),
-            options: SequenceOptions::default(),
-        })
-        .unwrap();
-    drop(current);
-    connection
-        .with(|database| {
-            database.execute("ALTER TABLE _sequences DROP COLUMN object_id", [])?;
-            database.execute(
-                "UPDATE _metadata SET value = '25' WHERE key = 'schema_version'",
-                [],
-            )?;
-            Ok(())
-        })
-        .unwrap();
-
-    let upgraded = Catalog::open(connection).unwrap();
-    let mut sequence = upgraded.load_sequence_rows().unwrap().remove(0);
-    assert_eq!(sequence.object_id, [0; 16]);
-    sequence.object_id = [9; 16];
-    assert!(upgraded.replace_sequence_row(&sequence).unwrap());
-    assert_eq!(upgraded.load_sequence_rows().unwrap()[0].object_id, [9; 16]);
-}
-
-#[test]
-fn migration_27_adds_postgresql_sequence_defaults() {
-    let connection = ManagedConnection::open_in_memory().unwrap();
-    let current = Catalog::open(connection.clone()).unwrap();
-    current
-        .create_sequence_row(&SequenceRow {
-            relation: RelationIdentity::new("public", "legacy_descending_options"),
-            object_id: [27; 16],
-            start: -1,
-            increment: -3,
-            current: -1,
-            called: false,
-            persistence: "p".into(),
-            options: SequenceOptions::default(),
-        })
-        .unwrap();
-    drop(current);
-    connection
-        .with(|database| {
-            database.execute("ALTER TABLE _sequences DROP COLUMN cycle", [])?;
-            database.execute("ALTER TABLE _sequences DROP COLUMN max_value", [])?;
-            database.execute("ALTER TABLE _sequences DROP COLUMN min_value", [])?;
-            database.execute("ALTER TABLE _sequences DROP COLUMN data_type", [])?;
-            database.execute(
-                "UPDATE _metadata SET value = '26' WHERE key = 'schema_version'",
-                [],
-            )?;
-            Ok(())
-        })
-        .unwrap();
-
-    let upgraded = Catalog::open(connection).unwrap();
-    let sequence = upgraded.load_sequence_rows().unwrap().remove(0);
-    assert_eq!(sequence.options.data_type, "bigint");
-    assert_eq!(sequence.options.min_value, Some(i64::MIN));
-    assert_eq!(sequence.options.max_value, Some(-1));
-    assert!(!sequence.options.cycle);
-}
-
-#[test]
-fn migration_27_preserves_options_when_columns_precede_the_version_marker() {
-    let connection = ManagedConnection::open_in_memory().unwrap();
-    let current = Catalog::open(connection.clone()).unwrap();
-    current
-        .create_sequence_row(&SequenceRow {
-            relation: RelationIdentity::new("public", "already_migrated_options"),
-            object_id: [28; 16],
-            start: 3,
-            increment: 2,
-            current: 3,
-            called: false,
-            persistence: "p".into(),
-            options: SequenceOptions {
-                data_type: "integer".into(),
-                min_value: Some(2),
-                max_value: Some(9),
-                cycle: true,
-            },
-        })
-        .unwrap();
-    drop(current);
-    connection
-        .with(|database| {
-            database.execute(
-                "UPDATE _metadata SET value = '26' WHERE key = 'schema_version'",
-                [],
-            )?;
-            Ok(())
-        })
-        .unwrap();
-
-    let upgraded = Catalog::open(connection).unwrap();
-    let sequence = upgraded.load_sequence_rows().unwrap().remove(0);
-    assert_eq!(sequence.options.data_type, "integer");
-    assert_eq!(sequence.options.min_value, Some(2));
-    assert_eq!(sequence.options.max_value, Some(9));
-    assert!(sequence.options.cycle);
-}
-
-#[test]
-fn migration_18_preserves_legacy_sequence_sentinel_semantics() {
-    let connection = ManagedConnection::open_in_memory().unwrap();
-    let current = Catalog::open(connection.clone()).unwrap();
-    current
-        .create_sequence_row(&SequenceRow {
-            relation: RelationIdentity::new("public", "legacy_uncalled"),
-            object_id: [18; 16],
-            start: 1,
-            increment: 1,
-            current: 0,
-            called: false,
-            persistence: "p".into(),
-            options: SequenceOptions::default(),
-        })
-        .unwrap();
-    drop(current);
-    connection
-        .with(|conn| {
-            conn.execute("ALTER TABLE _sequences DROP COLUMN called", [])?;
-            conn.execute(
-                "UPDATE _metadata SET value = '17' WHERE key = 'schema_version'",
-                [],
-            )?;
-            Ok(())
-        })
-        .unwrap();
-
-    let upgraded = Catalog::open(connection.clone()).unwrap();
-    let row = upgraded.load_sequence_rows().unwrap().remove(0);
-    assert!(
-        row.called,
-        "legacy current values are already sentinel-adjusted"
-    );
-    assert_eq!(
-        upgraded
-            .next_sequence_value("public.legacy_uncalled", row.object_id)
-            .unwrap(),
-        Some(1)
-    );
-    connection
-        .with(|conn| {
-            let version: String = conn.query_row(
-                "SELECT value FROM _metadata WHERE key = 'schema_version'",
-                [],
-                |row| row.get(0),
-            )?;
-            assert_eq!(version, CURRENT_SCHEMA_VERSION.to_string());
-            Ok(())
-        })
-        .unwrap();
-}
-
-#[test]
 fn sequence_set_value_preserves_the_next_allocation_state() {
     let connection = ManagedConnection::open_in_memory().unwrap();
     let catalog = Catalog::open(connection).unwrap();
@@ -453,6 +99,7 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "controlled"),
             object_id,
+            definition_generation: object_id,
             start: 1,
             increment: 2,
             current: 1,
@@ -507,6 +154,7 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "cycling"),
             object_id: cycling_id,
+            definition_generation: cycling_id,
             start: 5,
             increment: 3,
             current: 5,
@@ -517,6 +165,7 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
                 min_value: Some(2),
                 max_value: Some(5),
                 cycle: true,
+                cache_size: 1,
             },
         })
         .unwrap();
@@ -531,273 +180,66 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
 }
 
 #[test]
-fn migration_23_moves_sequence_persistence_into_typed_rows() {
+fn sqlite_sequence_reservations_are_atomic_and_stop_at_the_configured_bound() {
     let connection = ManagedConnection::open_in_memory().unwrap();
-    let current = Catalog::open(connection.clone()).unwrap();
-    current
+    let catalog = Catalog::open(connection).unwrap();
+    let object_id = [11; 16];
+    let generation = [12; 16];
+    catalog
         .create_sequence_row(&SequenceRow {
-            relation: RelationIdentity::new("public", "unlogged_ids"),
-            object_id: [23; 16],
+            relation: RelationIdentity::new("public", "cached"),
+            object_id,
+            definition_generation: generation,
             start: 1,
             increment: 1,
             current: 1,
             called: false,
-            persistence: "u".into(),
-            options: SequenceOptions::default(),
-        })
-        .unwrap();
-    drop(current);
-    connection
-        .with(|conn| {
-            conn.execute("ALTER TABLE _sequences DROP COLUMN persistence", [])?;
-            conn.execute(
-                "INSERT OR REPLACE INTO _metadata(key, value) VALUES ('sequence-persistence:public.unlogged_ids', 'u')",
-                [],
-            )?;
-            conn.execute(
-                "UPDATE _metadata SET value = '22' WHERE key = 'schema_version'",
-                [],
-            )?;
-            Ok(())
+            persistence: "p".into(),
+            options: SequenceOptions {
+                min_value: Some(1),
+                max_value: Some(3),
+                cache_size: 5,
+                ..SequenceOptions::default()
+            },
         })
         .unwrap();
 
-    let upgraded = Catalog::open(connection.clone()).unwrap();
-    let rows = upgraded.load_sequence_rows().unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].persistence, "u");
     assert_eq!(
-        upgraded
-            .get_metadata("sequence-persistence:public.unlogged_ids")
+        catalog
+            .reserve_sequence_values("public.cached", object_id, generation)
             .unwrap(),
-        None
-    );
-}
-
-#[test]
-fn migration_19_creates_complete_hnsw_storage_schema() {
-    let connection = ManagedConnection::open_in_memory().unwrap();
-    let current = Catalog::open(connection.clone()).unwrap();
-    drop(current);
-    connection
-        .with(|conn| {
-            conn.execute_batch(
-                "DROP TABLE _hnsw_edges;
-                 DROP TABLE _hnsw_nodes;
-                 DROP TABLE _hnsw_indexes;
-                 UPDATE _metadata SET value = '18' WHERE key = 'schema_version';",
-            )?;
-            Ok(())
+        SequenceReservationResult::Reserved(crate::catalog::SequenceValueReservation {
+            first_value: 1,
+            last_value: 3,
+            count: 3,
         })
-        .unwrap();
-
-    let _upgraded = Catalog::open(connection.clone()).unwrap();
-    connection
-        .with(|conn| {
-            for table in ["_hnsw_indexes", "_hnsw_nodes", "_hnsw_edges"] {
-                let count: i64 = conn.query_row(
-                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
-                    [table],
-                    |row| row.get(0),
-                )?;
-                assert_eq!(count, 1, "missing HNSW migration table {table}");
-            }
-            let mut statement = conn.prepare("PRAGMA table_info(_hnsw_indexes)")?;
-            let columns = statement
-                .query_map([], |row| row.get::<_, String>(1))?
-                .collect::<rusqlite::Result<std::collections::BTreeSet<_>>>()?;
-            assert!(columns.contains("revision"));
-            assert!(columns.contains("format_version"));
-            let version: String = conn.query_row(
-                "SELECT value FROM _metadata WHERE key = 'schema_version'",
-                [],
-                |row| row.get(0),
-            )?;
-            assert_eq!(version, CURRENT_SCHEMA_VERSION.to_string());
-            Ok(())
-        })
-        .unwrap();
-}
-
-#[test]
-fn migration_20_repairs_only_hnsw_rows_backed_by_legacy_ivf_metadata() {
-    let connection = ManagedConnection::open_in_memory().unwrap();
-    let current = Catalog::open(connection.clone()).unwrap();
-    drop(current);
-    connection
-        .with(|conn| {
-            conn.execute_batch(
-                "INSERT INTO _catalog_indexes
-                     (name, index_type, table_name, columns, parameters)
-                 VALUES
-                     ('legacy_idx', 'hnsw', 'public.legacy', '[\"embedding\"]', '{}'),
-                     ('native_idx', 'hnsw', 'public.native', '[\"embedding\"]', '{}');
-                 INSERT INTO _ivf_indexes
-                     (table_name, field, dimensions, nlist, nprobe,
-                      train_threshold, state, trained_size,
-                      deletes_since_train, vector_count)
-                 VALUES
-                     ('public.legacy', 'embedding', 2, 100, 10,
-                      256, 'untrained', 0, 0, 0);
-                 INSERT INTO _hnsw_indexes
-                     (table_name, field, dimensions, m, ef_construction,
-                      ef_search, rebuild_threshold, seed, entry_node_id,
-                      max_level, next_node_id, live_count, deleted_count,
-                      revision, format_version)
-                 VALUES
-                     ('public.native', 'embedding', 2, 16, 200,
-                      64, 1000, '7', NULL, 0, 0, 0, 0, 1, 1);
-                 UPDATE _metadata SET value = '19'
-                  WHERE key = 'schema_version';",
-            )?;
-            Ok(())
-        })
-        .unwrap();
-
-    let upgraded = Catalog::open(connection.clone()).unwrap();
-    let rows = upgraded.load_catalog_indexes().unwrap();
-    assert_eq!(
-        rows.iter()
-            .find(|row| row.name == "legacy_idx")
-            .map(|row| row.index_type.as_str()),
-        Some("ivf")
     );
     assert_eq!(
-        rows.iter()
-            .find(|row| row.name == "native_idx")
-            .map(|row| row.index_type.as_str()),
-        Some("hnsw")
+        catalog
+            .reserve_sequence_values("public.cached", object_id, generation)
+            .unwrap(),
+        SequenceReservationResult::Exhausted
     );
-}
-
-#[test]
-fn migration_21_schedules_only_invalid_btree_fields_and_installs_guards() {
-    let connection = ManagedConnection::open_in_memory().unwrap();
-    let current = Catalog::open(connection.clone()).unwrap();
-    drop(current);
-    connection
-        .with(|conn| {
-            conn.execute_batch(
-                "INSERT INTO _documents (table_name, doc_id, body)
-                     VALUES
-                     ('public.engine_meta', 1, '{\"key\":\"missing\"}'),
-                     ('public.clean', 1, '{\"key\":\"kept\"}');
-                 INSERT INTO _btree_indexes (table_name, field)
-                     VALUES
-                     ('public.engine_meta', 'key'),
-                     ('public.clean', 'key');
-                 INSERT INTO _btree_index_entries
-                     (table_name, field, doc_id, value_json)
-                     VALUES
-                     ('public.clean', 'key', 1,
-                      '{\"type\":\"Str\",\"value\":\"kept\"}');
-                 DROP TRIGGER IF EXISTS _btree_documents_delete;
-                 DROP TRIGGER IF EXISTS _btree_entries_document_insert;
-                 DROP TRIGGER IF EXISTS _btree_entries_document_update;
-                 DROP TRIGGER IF EXISTS _btree_documents_doc_id_update;
-                 UPDATE _metadata SET value = '20'
-                  WHERE key = 'schema_version';",
-            )?;
-            Ok(())
+    let mut row = catalog.load_sequence_rows().unwrap().remove(0);
+    row.options.cycle = true;
+    row.definition_generation = [13; 16];
+    assert!(catalog.replace_sequence_row(&row).unwrap());
+    assert_eq!(
+        catalog
+            .reserve_sequence_values("public.cached", object_id, generation)
+            .unwrap(),
+        SequenceReservationResult::DefinitionChanged
+    );
+    assert_eq!(
+        catalog
+            .reserve_sequence_values("public.cached", object_id, [13; 16])
+            .unwrap(),
+        SequenceReservationResult::Reserved(crate::catalog::SequenceValueReservation {
+            first_value: 1,
+            last_value: 3,
+            count: 3,
         })
-        .unwrap();
-
-    let _upgraded = Catalog::open(connection.clone()).unwrap();
-    connection
-        .with(|conn| {
-            let definitions: i64 =
-                conn.query_row("SELECT COUNT(*) FROM _btree_indexes", [], |row| row.get(0))?;
-            let entries: i64 =
-                conn.query_row("SELECT COUNT(*) FROM _btree_index_entries", [], |row| {
-                    row.get(0)
-                })?;
-            assert_eq!(definitions, 2);
-            assert_eq!(entries, 1);
-            let kept: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM _btree_indexes
-                  WHERE table_name = 'public.clean' AND field = 'key'",
-                [],
-                |row| row.get(0),
-            )?;
-            assert_eq!(kept, 1);
-            let pending: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM _btree_index_repairs
-                  WHERE table_name = 'public.engine_meta' AND field = 'key'",
-                [],
-                |row| row.get(0),
-            )?;
-            assert_eq!(pending, 1);
-
-            let guards: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM sqlite_master
-                  WHERE type = 'trigger' AND name IN (
-                      '_btree_documents_delete',
-                      '_btree_entries_document_insert',
-                      '_btree_entries_document_update',
-                      '_btree_documents_doc_id_update'
-                  )",
-                [],
-                |row| row.get(0),
-            )?;
-            assert_eq!(guards, 4);
-
-            conn.pragma_update(None, "foreign_keys", "OFF")?;
-            conn.execute(
-                "DELETE FROM _documents
-                  WHERE table_name = 'public.clean' AND doc_id = 1",
-                [],
-            )?;
-            let cascaded: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM _btree_index_entries
-                  WHERE table_name = 'public.clean' AND doc_id = 1",
-                [],
-                |row| row.get(0),
-            )?;
-            assert_eq!(cascaded, 0);
-            Ok(())
-        })
-        .unwrap();
-}
-
-#[test]
-fn corrupt_schema_version_is_reported_instead_of_replaying_migrations() {
-    let mc = ManagedConnection::open_in_memory().unwrap();
-    let _current = Catalog::open(mc.clone()).unwrap();
-    mc.with(|conn| {
-        conn.execute(
-            "UPDATE _metadata SET value = 'not-a-version' WHERE key = 'schema_version'",
-            [],
-        )?;
-        Ok(())
-    })
-    .unwrap();
-
-    let error = Catalog::open(mc).err();
-    assert!(matches!(
-        error,
-        Some(SQLiteError::InvalidSchemaVersion(version)) if version == "not-a-version"
-    ));
-}
-
-#[test]
-fn future_schema_version_is_rejected() {
-    let mc = ManagedConnection::open_in_memory().unwrap();
-    let _current = Catalog::open(mc.clone()).unwrap();
-    let future = CURRENT_SCHEMA_VERSION + 1;
-    mc.with(|conn| {
-        conn.execute(
-            "UPDATE _metadata SET value = ?1 WHERE key = 'schema_version'",
-            [future.to_string()],
-        )?;
-        Ok(())
-    })
-    .unwrap();
-
-    assert!(matches!(
-        Catalog::open(mc).err(),
-        Some(SQLiteError::UnsupportedSchemaVersion { found, supported })
-            if found == future && supported == CURRENT_SCHEMA_VERSION
-    ));
+    );
 }
 
 #[test]

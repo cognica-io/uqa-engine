@@ -11,7 +11,7 @@ use super::*;
 #[test]
 fn sequence_options_do_not_truncate_or_ignore_values() {
     let Statement::CreateSequence(sequence) = first(
-        "CREATE SEQUENCE app.s AS integer INCREMENT BY 3 MINVALUE 2 MAXVALUE 10 START WITH 8 CYCLE",
+        "CREATE SEQUENCE app.s AS integer INCREMENT BY 3 MINVALUE 2 MAXVALUE 10 START WITH 8 CACHE 4 CYCLE",
     ) else {
         panic!("not CREATE SEQUENCE");
     };
@@ -21,6 +21,7 @@ fn sequence_options_do_not_truncate_or_ignore_values() {
     assert_eq!(sequence.max_value, Some(10));
     assert_eq!(sequence.start, 8);
     assert!(sequence.cycle);
+    assert_eq!(sequence.cache_size, 4);
 
     let Statement::CreateSequence(descending) = first(
         "CREATE SEQUENCE descending AS smallint INCREMENT -2 NO MINVALUE NO MAXVALUE NO CYCLE",
@@ -51,8 +52,10 @@ fn sequence_options_do_not_truncate_or_ignore_values() {
             .sqlstate(),
         Some("42601")
     );
-    let error = compile("CREATE SEQUENCE s CACHE 10").unwrap_err();
-    assert!(error.to_string().contains("not supported"));
+    let Statement::CreateSequence(cached) = first("CREATE SEQUENCE s CACHE 10") else {
+        panic!("not cached CREATE SEQUENCE");
+    };
+    assert_eq!(cached.cache_size, 10);
 }
 
 #[test]

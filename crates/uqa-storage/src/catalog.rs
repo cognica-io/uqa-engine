@@ -13,7 +13,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::backend::StorageBackendResult;
+use crate::backend::{StorageBackendError, StorageBackendResult};
 
 /// Durable identity of a SQL relation.
 ///
@@ -336,6 +336,12 @@ pub struct SequenceOptions {
     /// `None` is accepted only while decoding a legacy row and is resolved from its increment direction by the engine.
     pub max_value: Option<i64>,
     pub cycle: bool,
+    #[serde(default = "default_sequence_cache_size")]
+    pub cache_size: i64,
+}
+
+const fn default_sequence_cache_size() -> i64 {
+    1
 }
 
 impl Default for SequenceOptions {
@@ -345,6 +351,7 @@ impl Default for SequenceOptions {
             min_value: None,
             max_value: None,
             cycle: false,
+            cache_size: default_sequence_cache_size(),
         }
     }
 }
@@ -355,6 +362,9 @@ pub struct SequenceRow {
     /// Stable identity of this sequence incarnation. Dropping and recreating the same qualified name must allocate a different value.
     #[serde(default)]
     pub object_id: [u8; 16],
+    /// Changes for every successful `ALTER SEQUENCE` while remaining stable across value reservations and `setval`.
+    #[serde(default)]
+    pub definition_generation: [u8; 16],
     pub start: i64,
     pub increment: i64,
     pub current: i64,
@@ -364,6 +374,64 @@ pub struct SequenceRow {
     pub persistence: String,
     #[serde(default)]
     pub options: SequenceOptions,
+}
+
+/// One atomic sequence reservation. `first_value` is returned immediately, while the remaining values through `last_value` belong to the allocating session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SequenceValueReservation {
+    pub first_value: i64,
+    pub last_value: i64,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SequenceReservationResult {
+    Missing,
+    DefinitionChanged,
+    Exhausted,
+    Reserved(SequenceValueReservation),
+}
+
+/// Reserve up to `cache_size` values without crossing a sequence bound. Cycling is applied when selecting the first value of a new reservation, matching `PostgreSQL`'s boundary-truncated cache blocks.
+#[must_use]
+pub fn sequence_value_reservation(
+    current: i64,
+    called: bool,
+    increment: i64,
+    min_value: i64,
+    max_value: i64,
+    cycle: bool,
+    cache_size: i64,
+) -> Option<SequenceValueReservation> {
+    debug_assert_ne!(increment, 0);
+    debug_assert!(cache_size > 0);
+    let first_value = if called {
+        match current
+            .checked_add(increment)
+            .filter(|value| (min_value..=max_value).contains(value))
+        {
+            Some(value) => value,
+            None if cycle && increment > 0 => min_value,
+            None if cycle => max_value,
+            None => return None,
+        }
+    } else {
+        current
+    };
+    let distance = if increment > 0 {
+        i128::from(max_value) - i128::from(first_value)
+    } else {
+        i128::from(first_value) - i128::from(min_value)
+    };
+    let step = i128::from(increment).abs();
+    let available = distance / step + 1;
+    let count = available.min(i128::from(cache_size));
+    let last_value = i128::from(first_value) + i128::from(increment) * (count - 1);
+    Some(SequenceValueReservation {
+        first_value,
+        last_value: i64::try_from(last_value).expect("reserved sequence value stays in bounds"),
+        count: i64::try_from(count).expect("reservation count cannot exceed cache size"),
+    })
 }
 
 /// Engine-facing catalog facade for persistent metadata.
@@ -413,11 +481,42 @@ pub trait CatalogFacade: Send + Sync {
     fn replace_sequence_row(&self, sequence: &SequenceRow) -> StorageBackendResult<bool>;
     fn drop_sequence_row(&self, name: &str) -> StorageBackendResult<bool>;
     fn load_sequence_rows(&self) -> StorageBackendResult<Vec<SequenceRow>>;
+    fn reserve_sequence_values(
+        &self,
+        name: &str,
+        object_id: [u8; 16],
+        definition_generation: [u8; 16],
+    ) -> StorageBackendResult<SequenceReservationResult>;
+    /// Compatibility allocation API for callers that do not retain a session cache. A cached reservation's unused values are intentionally abandoned, just as when a `PostgreSQL` session disconnects.
     fn next_sequence_value(
         &self,
         name: &str,
         object_id: [u8; 16],
-    ) -> StorageBackendResult<Option<i64>>;
+    ) -> StorageBackendResult<Option<i64>> {
+        loop {
+            let relation =
+                RelationIdentity::from_legacy_name(name).map_err(StorageBackendError::Other)?;
+            let Some(row) = self
+                .load_sequence_rows()?
+                .into_iter()
+                .find(|row| row.relation == relation && row.object_id == object_id)
+            else {
+                return Ok(None);
+            };
+            match self.reserve_sequence_values(name, object_id, row.definition_generation)? {
+                SequenceReservationResult::Reserved(reservation) => {
+                    return Ok(Some(reservation.first_value));
+                }
+                SequenceReservationResult::DefinitionChanged => {}
+                SequenceReservationResult::Missing => return Ok(None),
+                SequenceReservationResult::Exhausted => {
+                    return Err(StorageBackendError::Other(format!(
+                        "sequence `{name}` exhausted"
+                    )));
+                }
+            }
+        }
+    }
     fn set_sequence_value(
         &self,
         name: &str,

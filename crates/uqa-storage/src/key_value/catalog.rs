@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::catalog::{
     CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignTableRow,
-    GraphSnapshot, RelationIdentity, RelationKind, SequenceOptions, SequenceRow, TableSchema,
-    ViewRow,
+    GraphSnapshot, RelationIdentity, RelationKind, SequenceOptions, SequenceReservationResult,
+    SequenceRow, TableSchema, ViewRow,
 };
 use crate::{StorageBackendError, StorageBackendResult};
 
@@ -196,12 +196,13 @@ impl CatalogFacade for KeyValueCatalog {
         self.load_sequence_rows_impl()
     }
 
-    fn next_sequence_value(
+    fn reserve_sequence_values(
         &self,
         name: &str,
         object_id: [u8; 16],
-    ) -> StorageBackendResult<Option<i64>> {
-        self.next_sequence_value_impl(name, object_id)
+        definition_generation: [u8; 16],
+    ) -> StorageBackendResult<SequenceReservationResult> {
+        self.reserve_sequence_values_impl(name, object_id, definition_generation)
     }
 
     fn set_sequence_value(

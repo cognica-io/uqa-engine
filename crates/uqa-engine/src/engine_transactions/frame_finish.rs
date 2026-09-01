@@ -182,10 +182,9 @@ impl Engine {
         {
             cleanup_errors.push(format!("ANALYZE statistics cache restore: {error}"));
         }
-        if let Some(snapshot) = session_snapshot.as_ref() {
+        if session_snapshot.is_some() {
             if let Err(error) = self.persist_nontransactional_sequence_values_after_rollback(
                 &nontransactional_sequence_values,
-                snapshot,
                 true,
             ) {
                 cleanup_errors.push(format!("sequence value restore: {error}"));
@@ -322,7 +321,6 @@ impl Engine {
         }
         if let Err(error) = self.persist_nontransactional_sequence_values_after_rollback(
             &nontransactional_sequence_values,
-            &session_snapshot,
             storage_savepoint.is_none(),
         ) {
             cleanup_errors.push(format!("sequence value restore: {error}"));
@@ -431,7 +429,6 @@ impl Engine {
     pub(super) fn persist_nontransactional_sequence_values_after_rollback(
         &self,
         values: &NontransactionalSequenceValues,
-        session_snapshot: &SessionStateSnapshot,
         outer: bool,
     ) -> StorageBackendResult<()> {
         if self.storage.catalog.is_none() {
@@ -449,9 +446,7 @@ impl Engine {
                 })
                 .filter_map(|(relation, history)| {
                     let object_id = object_ids.get(relation).copied()?;
-                    sequences.get(relation)?;
-                    let generation =
-                        session_snapshot.sequence_definition_generation(relation, object_id);
+                    let generation = sequences.get(relation)?.definition_generation;
                     let value = history.values_by_definition.get(&generation).copied()?;
                     (value.object_id == object_id && !value.autonomous)
                         .then(|| (relation.qualified_name(), value.object_id, value))
@@ -518,7 +513,12 @@ impl Engine {
             let Some(object_id) = object_ids.get(relation).copied() else {
                 continue;
             };
-            let generation = session.sequence_definition_generation(relation, object_id);
+            let Some(generation) = sequences
+                .get(relation)
+                .map(|sequence| sequence.definition_generation)
+            else {
+                continue;
+            };
             if let Some(value) = history
                 .values_by_definition
                 .get(&generation)
@@ -547,7 +547,7 @@ impl Engine {
         cleanup_errors: &mut Vec<String>,
     ) {
         if let Err(error) =
-            self.persist_nontransactional_sequence_values_after_rollback(values, snapshot, outer)
+            self.persist_nontransactional_sequence_values_after_rollback(values, outer)
         {
             cleanup_errors.push(format!("sequence value restore: {error}"));
         }

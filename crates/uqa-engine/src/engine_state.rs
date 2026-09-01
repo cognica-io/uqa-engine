@@ -234,6 +234,9 @@ pub(super) struct SessionContext {
     /// cannot observe a mixture of old and new search-path, sequence,
     /// prepared-plan, or statement-cache state.
     pub(super) state: RwLock<super::SessionStateSnapshot>,
+    /// `PostgreSQL` sequence reservations are session-local and nontransactional. They are intentionally kept outside `SessionStateSnapshot` so rollback never rewinds consumption or restores blocks discarded by `ALTER SEQUENCE`.
+    pub(super) sequence_caches:
+        Mutex<BTreeMap<super::RelationIdentity, super::SessionSequenceCache>>,
     /// `PostgreSQL`'s session PRNG is not transactional: failed statements and
     /// transaction or savepoint rollback leave every consumed draw in place.
     pub(super) random_state: Mutex<super::SessionRandomState>,
@@ -255,7 +258,6 @@ impl SessionContext {
             session_vars: BTreeMap::new(),
             sequence_currvals: BTreeMap::new(),
             last_sequence: None,
-            sequence_definitions: BTreeMap::new(),
             prepared: BTreeMap::new(),
             sql_statement_cache: SQLStatementCache::default(),
             portal_names: BTreeSet::new(),
@@ -264,6 +266,7 @@ impl SessionContext {
         };
         Self {
             state: RwLock::new(state),
+            sequence_caches: Mutex::new(BTreeMap::new()),
             random_state: Mutex::new(random_state),
             transactions: Mutex::new(Vec::new()),
             row_lock_statements: Mutex::new(Vec::new()),

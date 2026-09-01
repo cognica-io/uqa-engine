@@ -91,6 +91,8 @@ pub(super) struct StoredColumnStats {
 pub(super) struct StoredSequence {
     #[serde(default)]
     pub(super) object_id: [u8; 16],
+    #[serde(default)]
+    pub(super) definition_generation: [u8; 16],
     pub(super) start: i64,
     pub(super) increment: i64,
     pub(super) current: i64,

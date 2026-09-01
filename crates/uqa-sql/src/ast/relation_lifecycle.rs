@@ -74,6 +74,8 @@ pub struct CreateSequence {
     pub max_value: Option<i64>,
     #[serde(default)]
     pub cycle: bool,
+    #[serde(default = "default_sequence_cache_size")]
+    pub cache_size: i64,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -82,6 +84,10 @@ pub enum SequenceDataType {
     Integer,
     #[default]
     BigInt,
+}
+
+const fn default_sequence_cache_size() -> i64 {
+    1
 }
 
 impl SequenceDataType {
@@ -175,4 +181,5 @@ pub struct AlterSequence {
     pub max_value: SequenceBound,
     #[serde(default)]
     pub cycle: Option<bool>,
+    pub cache_size: Option<i64>,
 }

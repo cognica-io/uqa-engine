@@ -93,6 +93,7 @@ mod engine_open;
 mod engine_relations;
 mod engine_roles;
 mod engine_search;
+mod engine_sequence_values;
 mod engine_sequences;
 mod engine_session;
 mod engine_sql_registry;
@@ -104,6 +105,7 @@ mod engine_transactions;
 mod engine_truncate;
 mod engine_user_functions;
 mod row_locks;
+mod sequence_state_serde;
 mod value_index;
 
 pub(crate) use sql::dml::{
@@ -134,9 +136,10 @@ use uqa_storage::{
     HNSWIndexParams, IVFIndex, IVFIndexParams, InvertedIndex, ManagedConnection,
     MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex, PersistentStorageBackend,
     PersistentStorageProvider, PersistentStorageSession, RelationIdentity,
-    SQLiteCompressedContainerAnchor, SQLiteStorageProvider, SequenceOptions, SequenceRow,
-    StorageBackendError, StorageBackendResult, StorageSavepointId, TableSchema, VectorFieldSchema,
-    VectorIndex, VectorIndexOpenMode, VectorIndexSpec, ViewRow,
+    SQLiteCompressedContainerAnchor, SQLiteStorageProvider, SequenceOptions,
+    SequenceReservationResult, SequenceRow, StorageBackendError, StorageBackendResult,
+    StorageSavepointId, TableSchema, VectorFieldSchema, VectorIndex, VectorIndexOpenMode,
+    VectorIndexSpec, ViewRow,
 };
 
 pub use sql::{SQLCursor, SQLCursorSummary};
@@ -265,9 +268,12 @@ struct SessionSequenceValue {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-struct SessionSequenceDefinition {
+struct SessionSequenceCache {
     object_id: [u8; 16],
-    generation: [u8; 16],
+    definition_generation: [u8; 16],
+    next_value: i64,
+    remaining: i64,
+    autonomous: bool,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -335,6 +341,10 @@ pub struct SequenceState {
     pub min_value: i64,
     pub max_value: i64,
     pub cycle: bool,
+    #[serde(default = "sequence_cache_size_default")]
+    pub cache_size: i64,
+    #[serde(default)]
+    pub definition_generation: [u8; 16],
 }
 
 const fn sequence_state_called_default() -> bool {
@@ -343,53 +353,8 @@ const fn sequence_state_called_default() -> bool {
     true
 }
 
-impl<'de> serde::Deserialize<'de> for SequenceState {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(serde::Deserialize)]
-        struct Representation {
-            start: i64,
-            increment: i64,
-            current: i64,
-            #[serde(default = "sequence_state_called_default")]
-            called: bool,
-            #[serde(default)]
-            data_type: SequenceDataType,
-            #[serde(default)]
-            min_value: Option<i64>,
-            #[serde(default)]
-            max_value: Option<i64>,
-            #[serde(default)]
-            cycle: bool,
-        }
-
-        let representation = Representation::deserialize(deserializer)?;
-        let (type_min, type_max) = representation.data_type.bounds();
-        Ok(Self {
-            start: representation.start,
-            increment: representation.increment,
-            current: representation.current,
-            called: representation.called,
-            data_type: representation.data_type,
-            min_value: representation
-                .min_value
-                .unwrap_or(if representation.increment > 0 {
-                    1
-                } else {
-                    type_min
-                }),
-            max_value: representation
-                .max_value
-                .unwrap_or(if representation.increment > 0 {
-                    type_max
-                } else {
-                    -1
-                }),
-            cycle: representation.cycle,
-        })
-    }
+const fn sequence_cache_size_default() -> i64 {
+    1
 }
 
 #[derive(Clone, Copy, Default)]
@@ -557,26 +522,12 @@ struct SessionStateSnapshot {
     session_vars: BTreeMap<String, String>,
     sequence_currvals: BTreeMap<RelationIdentity, SessionSequenceValue>,
     last_sequence: Option<SessionLastSequenceReference>,
-    sequence_definitions: BTreeMap<RelationIdentity, SessionSequenceDefinition>,
     prepared: BTreeMap<String, PreparedStatementPlan>,
     sql_statement_cache: SQLStatementCache,
     /// Names of portals that existed at this transaction or savepoint boundary. Rollback removes portals created later without rewinding cursor positions or resurrecting closed portals.
     portal_names: BTreeSet<String>,
     current_user: String,
     session_user: String,
-}
-
-impl SessionStateSnapshot {
-    fn sequence_definition_generation(
-        &self,
-        relation: &RelationIdentity,
-        object_id: [u8; 16],
-    ) -> [u8; 16] {
-        self.sequence_definitions
-            .get(relation)
-            .filter(|definition| definition.object_id == object_id)
-            .map_or(object_id, |definition| definition.generation)
-    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

@@ -8,9 +8,11 @@
 
 use super::{
     decode_relation_key, decode_value, encode_value, key_with_tag, relation_key, KeyValueCatalog,
-    RelationIdentity, RelationKind, SequenceOptions, SequenceRow, StorageBackendError,
-    StorageBackendResult, StoredRelation, StoredSequence, TAG_RELATION, TAG_SEQUENCE,
+    RelationIdentity, RelationKind, SequenceOptions, SequenceReservationResult, SequenceRow,
+    StorageBackendError, StorageBackendResult, StoredRelation, StoredSequence, TAG_RELATION,
+    TAG_SEQUENCE,
 };
+use crate::catalog::sequence_value_reservation;
 
 fn concrete_sequence_options(sequence: &SequenceRow) -> SequenceOptions {
     let default_min = if sequence.increment > 0 { 1 } else { i64::MIN };
@@ -20,6 +22,7 @@ fn concrete_sequence_options(sequence: &SequenceRow) -> SequenceOptions {
         min_value: Some(sequence.options.min_value.unwrap_or(default_min)),
         max_value: Some(sequence.options.max_value.unwrap_or(default_max)),
         cycle: sequence.options.cycle,
+        cache_size: sequence.options.cache_size,
     }
 }
 
@@ -71,6 +74,7 @@ impl KeyValueCatalog {
             &key,
             &encode_value(&StoredSequence {
                 object_id: sequence.object_id,
+                definition_generation: sequence.definition_generation,
                 start: sequence.start,
                 increment: sequence.increment,
                 current: sequence.current,
@@ -97,6 +101,7 @@ impl KeyValueCatalog {
             &key,
             &encode_value(&StoredSequence {
                 object_id: sequence.object_id,
+                definition_generation: sequence.definition_generation,
                 start: sequence.start,
                 increment: sequence.increment,
                 current: sequence.current,
@@ -134,6 +139,7 @@ impl KeyValueCatalog {
                 Ok(SequenceRow {
                     relation,
                     object_id: stored.object_id,
+                    definition_generation: stored.definition_generation,
                     start: stored.start,
                     increment: stored.increment,
                     current: stored.current,
@@ -147,41 +153,48 @@ impl KeyValueCatalog {
         Ok(rows)
     }
 
-    pub(super) fn next_sequence_value_impl(
+    pub(super) fn reserve_sequence_values_impl(
         &self,
         name: &str,
         object_id: [u8; 16],
-    ) -> StorageBackendResult<Option<i64>> {
+        definition_generation: [u8; 16],
+    ) -> StorageBackendResult<SequenceReservationResult> {
         let _guard = self.sequence_lock.lock();
         let relation =
             RelationIdentity::from_legacy_name(name).map_err(StorageBackendError::Other)?;
         let key = relation_key(TAG_SEQUENCE, &relation)?;
         let Some(value) = self.store.get(&key)? else {
-            return Ok(None);
+            return Ok(SequenceReservationResult::Missing);
         };
         let mut stored: StoredSequence = decode_value(&value)?;
         if stored.object_id != object_id {
-            return Ok(None);
+            return Ok(SequenceReservationResult::Missing);
         }
-        if stored.called {
-            let (min_value, max_value) = sequence_bounds(&stored);
-            let next = stored.current.checked_add(stored.increment);
-            stored.current = match next.filter(|value| (min_value..=max_value).contains(value)) {
-                Some(value) => value,
-                None if stored.options.cycle && stored.increment > 0 => min_value,
-                None if stored.options.cycle => max_value,
-                None => {
-                    return Err(crate::StorageBackendError::Other(format!(
-                        "sequence `{name}` exhausted"
-                    )))
-                }
-            };
-        } else {
-            stored.called = true;
+        if stored.definition_generation != definition_generation {
+            return Ok(SequenceReservationResult::DefinitionChanged);
         }
-        let current = stored.current;
+        let (min_value, max_value) = sequence_bounds(&stored);
+        if stored.increment == 0 || stored.options.cache_size <= 0 {
+            return Err(StorageBackendError::Other(format!(
+                "corrupt sequence `{name}` has increment {} and cache size {}",
+                stored.increment, stored.options.cache_size
+            )));
+        }
+        let Some(reservation) = sequence_value_reservation(
+            stored.current,
+            stored.called,
+            stored.increment,
+            min_value,
+            max_value,
+            stored.options.cycle,
+            stored.options.cache_size,
+        ) else {
+            return Ok(SequenceReservationResult::Exhausted);
+        };
+        stored.current = reservation.last_value;
+        stored.called = true;
         self.store.put(&key, &encode_value(&stored)?)?;
-        Ok(Some(current))
+        Ok(SequenceReservationResult::Reserved(reservation))
     }
 
     pub(super) fn set_sequence_value_impl(

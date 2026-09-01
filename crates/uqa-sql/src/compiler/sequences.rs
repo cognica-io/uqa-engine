@@ -32,6 +32,7 @@ pub(super) fn compile_create_sequence(
     let mut min_value = None;
     let mut max_value = None;
     let mut cycle = false;
+    let mut cache_size = 1;
     let mut seen = std::collections::BTreeSet::new();
     for opt in &stmt.options {
         let Some(NodeEnum::DefElem(elem)) = opt.node.as_ref() else {
@@ -65,10 +66,7 @@ pub(super) fn compile_create_sequence(
             }
             "cycle" => cycle = compile_sequence_boolean_option(elem, "CREATE SEQUENCE")?,
             "cache" => {
-                compile_sequence_integer_option(elem, "CREATE SEQUENCE")?;
-                return Err(SQLError::Unsupported(
-                    "CREATE SEQUENCE option `cache` is not supported".into(),
-                ));
+                cache_size = compile_sequence_integer_option(elem, "CREATE SEQUENCE")?;
             }
             other => {
                 return Err(SQLError::Unsupported(format!(
@@ -90,6 +88,7 @@ pub(super) fn compile_create_sequence(
         min_value: Some(min_value),
         max_value: Some(max_value),
         cycle,
+        cache_size,
     })
 }
 
@@ -155,10 +154,7 @@ pub(super) fn compile_alter_sequence(
                 alter.cycle = Some(compile_sequence_boolean_option(elem, "ALTER SEQUENCE")?);
             }
             "cache" => {
-                compile_sequence_integer_option(elem, "ALTER SEQUENCE")?;
-                return Err(SQLError::Unsupported(
-                    "ALTER SEQUENCE option `cache` is not supported".into(),
-                ));
+                alter.cache_size = Some(compile_sequence_integer_option(elem, "ALTER SEQUENCE")?);
             }
             other => {
                 return Err(SQLError::Unsupported(format!(

@@ -539,6 +539,81 @@ fn sequence_values_are_unique_across_sessions_and_independent_opens() {
 }
 
 #[test]
+fn sequence_cache_blocks_are_session_local_and_definition_invalidations_are_global() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("session-sequence-cache.db");
+    let root = Engine::open(&path).unwrap();
+    root.sql("CREATE SEQUENCE cached_ids CACHE 5", &[]).unwrap();
+    let sibling = root.new_session().unwrap();
+
+    assert_eq!(root.nextval("cached_ids").unwrap(), 1);
+    assert_eq!(
+        root.sequence_state("cached_ids")
+            .unwrap()
+            .unwrap()
+            .1
+            .current,
+        5
+    );
+    sibling.setval("cached_ids", 15).unwrap();
+    assert_eq!(root.nextval("cached_ids").unwrap(), 2);
+    assert_eq!(
+        root.sequence_state("cached_ids")
+            .unwrap()
+            .unwrap()
+            .1
+            .current,
+        15
+    );
+
+    assert_eq!(sibling.nextval("cached_ids").unwrap(), 16);
+    assert_eq!(
+        sibling
+            .sequence_state("cached_ids")
+            .unwrap()
+            .unwrap()
+            .1
+            .current,
+        20
+    );
+    root.sql("ALTER SEQUENCE cached_ids CACHE 2", &[]).unwrap();
+    assert_eq!(root.nextval("cached_ids").unwrap(), 21);
+    assert_eq!(
+        root.sequence_state("cached_ids")
+            .unwrap()
+            .unwrap()
+            .1
+            .current,
+        22
+    );
+    assert_eq!(sibling.nextval("cached_ids").unwrap(), 23);
+    assert_eq!(
+        sibling
+            .sequence_state("cached_ids")
+            .unwrap()
+            .unwrap()
+            .1
+            .current,
+        24
+    );
+    assert_eq!(root.nextval("cached_ids").unwrap(), 22);
+
+    drop(sibling);
+    drop(root);
+    let reopened = Engine::open(&path).unwrap();
+    assert_eq!(reopened.nextval("cached_ids").unwrap(), 25);
+    assert_eq!(
+        reopened
+            .sequence_state("cached_ids")
+            .unwrap()
+            .unwrap()
+            .1
+            .current,
+        26
+    );
+}
+
+#[test]
 fn currval_is_owned_by_the_logical_session() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("session-currval.db");
@@ -598,6 +673,7 @@ fn opening_an_engine_assigns_legacy_sequence_object_identities() {
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "legacy_ids"),
             object_id: [0; 16],
+            definition_generation: [0; 16],
             start: 5,
             increment: 1,
             current: 5,

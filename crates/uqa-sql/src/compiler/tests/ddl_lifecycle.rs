@@ -462,7 +462,7 @@ fn alter_constraint_not_valid_reports_postgresql_feature_state() {
 #[test]
 fn alter_sequence_preserves_if_exists() {
     let Statement::AlterSequence(sequence) =
-        first("ALTER SEQUENCE IF EXISTS absent AS smallint INCREMENT -2 MINVALUE -20 MAXVALUE -2 START -4 RESTART WITH -6 CYCLE")
+        first("ALTER SEQUENCE IF EXISTS absent AS smallint INCREMENT -2 MINVALUE -20 MAXVALUE -2 START -4 RESTART WITH -6 CACHE 7 CYCLE")
     else {
         panic!("expected ALTER SEQUENCE");
     };
@@ -477,6 +477,7 @@ fn alter_sequence_preserves_if_exists() {
     assert_eq!(sequence.start, Some(-4));
     assert_eq!(sequence.restart, crate::ast::SequenceRestart::With(-6));
     assert_eq!(sequence.cycle, Some(true));
+    assert_eq!(sequence.cache_size, Some(7));
 
     let Statement::AlterSequence(defaults) =
         first("ALTER SEQUENCE absent NO MINVALUE NO MAXVALUE NO CYCLE RESTART")

@@ -127,6 +127,7 @@ pub(super) fn collect_sequence_migrations(
             row: SequenceRow {
                 relation,
                 object_id: stored.object_id,
+                definition_generation: stored.definition_generation,
                 start: stored.start,
                 increment: stored.increment,
                 current: stored.current,
@@ -153,6 +154,7 @@ pub(super) fn collect_sequence_migrations(
                 row: SequenceRow {
                     relation,
                     object_id: [0; 16],
+                    definition_generation: [0; 16],
                     start: state.start,
                     increment: state.increment,
                     current: state.current,
@@ -345,6 +347,7 @@ pub(super) fn put_sequence_migrations(
             &key,
             &encode_value(&StoredSequence {
                 object_id: sequence.row.object_id,
+                definition_generation: sequence.row.definition_generation,
                 start: sequence.row.start,
                 increment: sequence.row.increment,
                 current: sequence.row.current,
