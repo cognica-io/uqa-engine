@@ -83,6 +83,20 @@ INSERT INTO relation_oid_observation VALUES ('relation_oid_source'::regclass);
 CREATE TABLE cursor_routine_rows(id integer PRIMARY KEY);
 CREATE TABLE plpgsql_command_cursor_source(id integer PRIMARY KEY, value integer NOT NULL);
 INSERT INTO plpgsql_command_cursor_source VALUES (1, 10), (2, 20);
+CREATE TABLE plpgsql_cursor_call_log(value integer);
+CREATE PROCEDURE plpgsql_cursor_call_out(IN input integer, OUT output integer) LANGUAGE plpgsql AS $$
+BEGIN
+    INSERT INTO plpgsql_cursor_call_log VALUES (input);
+    output := input + 1;
+END
+$$;
+CREATE PROCEDURE plpgsql_cursor_call_no_out(IN input integer) LANGUAGE plpgsql AS $$
+BEGIN
+    INSERT INTO plpgsql_cursor_call_log VALUES (input);
+END
+$$;
+CREATE TABLE plpgsql_cursor_merge_target(id integer PRIMARY KEY, value integer NOT NULL);
+INSERT INTO plpgsql_cursor_merge_target VALUES (1, 10);
 CREATE FUNCTION cursor_insert_and_count(value integer) RETURNS integer LANGUAGE plpgsql VOLATILE AS $$
 DECLARE
     observed integer;
@@ -130,6 +144,61 @@ BEGIN
     FETCH c INTO fetched;
     CLOSE c;
     RETURN coalesce(fetched, '<null>');
+EXCEPTION WHEN OTHERS THEN
+    RETURN SQLSTATE || '|' || SQLERRM;
+END
+$$;
+CREATE FUNCTION plpgsql_call_cursor(query_text text, fetch_it boolean, scroll_it boolean) RETURNS text LANGUAGE plpgsql VOLATILE AS $$
+DECLARE
+    c refcursor;
+    fetched text;
+    report text;
+BEGIN
+    IF scroll_it THEN
+        OPEN c SCROLL FOR EXECUTE query_text;
+    ELSE
+        OPEN c FOR EXECUTE query_text;
+    END IF;
+    IF fetch_it THEN
+        FETCH c INTO fetched;
+        report := format('fetch=%s/%s;', fetched, FOUND);
+        BEGIN
+            FETCH PRIOR FROM c INTO fetched;
+            report := report || format('prior=%s/%s', fetched, FOUND);
+        EXCEPTION WHEN OTHERS THEN
+            report := report || SQLSTATE || '|' || SQLERRM;
+        END;
+    ELSE
+        report := 'open';
+    END IF;
+    CLOSE c;
+    RETURN report;
+EXCEPTION WHEN OTHERS THEN
+    RETURN SQLSTATE || '|' || SQLERRM;
+END
+$$;
+CREATE FUNCTION plpgsql_merge_cursor(fetch_it boolean, scroll_it boolean, returning_it boolean) RETURNS text LANGUAGE plpgsql VOLATILE AS $$
+DECLARE
+    c refcursor;
+    fetched_id integer;
+    fetched_value integer;
+BEGIN
+    IF returning_it THEN
+        IF scroll_it THEN
+            OPEN c SCROLL FOR EXECUTE 'MERGE INTO plpgsql_cursor_merge_target AS target USING (VALUES (1, 5), (2, 7)) AS source(id, delta) ON target.id = source.id WHEN MATCHED THEN UPDATE SET value = target.value + source.delta WHEN NOT MATCHED THEN INSERT (id, value) VALUES (source.id, source.delta) RETURNING target.id, target.value';
+        ELSE
+            OPEN c FOR EXECUTE 'MERGE INTO plpgsql_cursor_merge_target AS target USING (VALUES (1, 5), (2, 7)) AS source(id, delta) ON target.id = source.id WHEN MATCHED THEN UPDATE SET value = target.value + source.delta WHEN NOT MATCHED THEN INSERT (id, value) VALUES (source.id, source.delta) RETURNING target.id, target.value';
+        END IF;
+    ELSE
+        OPEN c FOR EXECUTE 'MERGE INTO plpgsql_cursor_merge_target AS target USING (VALUES (1, 5)) AS source(id, delta) ON target.id = source.id WHEN MATCHED THEN UPDATE SET value = target.value + source.delta';
+    END IF;
+    IF fetch_it THEN
+        FETCH c INTO fetched_id, fetched_value;
+        CLOSE c;
+        RETURN format('%s/%s/%s', fetched_id, fetched_value, FOUND);
+    END IF;
+    CLOSE c;
+    RETURN 'open';
 EXCEPTION WHEN OTHERS THEN
     RETURN SQLSTATE || '|' || SQLERRM;
 END
@@ -431,6 +500,61 @@ SELECT plpgsql_dynamic_command_cursor('UPDATE plpgsql_command_cursor_source SET 
 
 -- @case plpgsql_dynamic_command_cursor_state rows
 SELECT id, value FROM plpgsql_command_cursor_source ORDER BY id;
+-- @end
+
+-- CALL with output parameters is a deferred row-returning command cursor, while a procedure without output parameters is rejected before execution.
+-- @case plpgsql_call_cursor_open rows
+SELECT plpgsql_call_cursor('CALL plpgsql_cursor_call_out(4, NULL)', false, false) AS result;
+-- @end
+
+-- @case plpgsql_call_cursor_fetch rows
+SELECT plpgsql_call_cursor('CALL plpgsql_cursor_call_out(4, NULL)', true, false) AS result;
+-- @end
+
+-- @case plpgsql_call_cursor_scroll rows
+SELECT plpgsql_call_cursor('CALL plpgsql_cursor_call_out(5, NULL)', true, true) AS result;
+-- @end
+
+-- @case plpgsql_call_cursor_without_output rows
+SELECT plpgsql_call_cursor('CALL plpgsql_cursor_call_no_out(6)', false, false) AS result;
+-- @end
+
+-- @case plpgsql_call_cursor_state rows
+SELECT value FROM plpgsql_cursor_call_log ORDER BY value;
+-- @end
+
+-- MERGE RETURNING is deferred until first FETCH; explicit SCROLL and a missing RETURNING list fail before mutation.
+-- @case plpgsql_merge_cursor_open rows
+SELECT plpgsql_merge_cursor(false, false, true) AS result;
+-- @end
+
+-- @case plpgsql_merge_cursor_open_state rows
+SELECT id, value FROM plpgsql_cursor_merge_target ORDER BY id;
+-- @end
+
+-- @case plpgsql_merge_cursor_fetch rows
+SELECT plpgsql_merge_cursor(true, false, true) AS result;
+-- @end
+
+-- @case plpgsql_merge_cursor_fetch_state rows
+SELECT id, value FROM plpgsql_cursor_merge_target ORDER BY id;
+-- @end
+
+-- @case reset_plpgsql_merge_cursor_fixture ok
+TRUNCATE plpgsql_cursor_merge_target;
+INSERT INTO plpgsql_cursor_merge_target VALUES (1, 10);
+-- @end
+
+-- @case plpgsql_merge_cursor_scroll_error rows
+SELECT plpgsql_merge_cursor(true, true, true) AS result;
+-- @end
+
+-- @case plpgsql_merge_cursor_without_returning rows
+SELECT plpgsql_merge_cursor(false, false, false) AS result;
+-- @end
+
+-- @case plpgsql_merge_cursor_error_state rows
+SELECT id, value FROM plpgsql_cursor_merge_target ORDER BY id;
 -- @end
 
 -- WITH HOLD reexecution at COMMIT uses the same DECLARE-time own-change image and restores the logical cursor position.

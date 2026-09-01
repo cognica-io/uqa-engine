@@ -11,7 +11,7 @@ use uqa_planner::{
     CommandPlan, DeletePlan, ExpressionPlan, InsertPlan, MergePlan, QueryPlan, UnifiedPlan,
     UpdatePlan,
 };
-use uqa_sql::ast::{CreateForeignServer, CreateForeignTable};
+use uqa_sql::ast::{CreateForeignServer, CreateForeignTable, FunctionParamMode};
 use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult};
 
 use crate::engine_capabilities::{MutationCoordinator, QueryRuntimeView, SessionExecutionView};
@@ -26,6 +26,119 @@ use super::{
     run_create_table, run_create_table_as, run_delete, run_drop, run_explain, run_insert,
     run_merge, run_update, run_vacuum, select, CreateTableAsExecution, Engine,
 };
+
+fn call_output_schema(
+    engine: &Engine,
+    definition: &uqa_sql::ast::CreateFunction,
+    parameter_types: &[String],
+) -> Result<Option<uqa_execution::RowSchema>, SQLError> {
+    let output_indices = definition
+        .params
+        .iter()
+        .enumerate()
+        .filter_map(|(index, parameter)| {
+            matches!(
+                parameter.mode,
+                FunctionParamMode::Out | FunctionParamMode::InOut | FunctionParamMode::Table
+            )
+            .then_some(index)
+        })
+        .collect::<Vec<_>>();
+    if output_indices.is_empty() {
+        return Ok(None);
+    }
+    let columns = definition
+        .output_params()
+        .iter()
+        .enumerate()
+        .map(|(index, parameter)| {
+            if parameter.name.is_empty() {
+                format!("column{}", index + 1)
+            } else {
+                parameter.name.clone()
+            }
+        })
+        .collect::<Vec<_>>();
+    let column_types = output_indices
+        .into_iter()
+        .map(|index| {
+            super::resolve_catalog_column_type(engine, &parameter_types[index])
+                .or_else(|| uqa_sql::ast::ColumnType::from_sql_name(&parameter_types[index]).ok())
+                .map(Some)
+                .ok_or_else(|| {
+                    SQLError::TypeMismatch(format!("unknown type `{}`", parameter_types[index]))
+                })
+        })
+        .collect::<Result<Vec<_>, SQLError>>()?;
+    Ok(Some(uqa_execution::RowSchema::with_types(
+        columns,
+        column_types,
+    )))
+}
+
+pub(super) fn analyze_call_result_schema(
+    engine: &Engine,
+    name: &str,
+    arguments: &[ExpressionPlan],
+    params: &[SQLParam],
+) -> Result<Option<uqa_execution::RowSchema>, SQLError> {
+    if arguments
+        .iter()
+        .any(|argument| !argument.subqueries.is_empty())
+    {
+        return Err(SQLError::Unsupported(
+            "cannot use subquery in CALL argument".into(),
+        ));
+    }
+    let (call_arguments, explicit_variadic) = analyze_physical_call_arguments(arguments)?;
+    let argument_names = call_arguments
+        .iter()
+        .map(|argument| argument.name.map(str::to_string))
+        .collect::<Vec<_>>();
+    let scope = select::CteScope::new_for_current_routine(engine);
+    let argument_types = arguments
+        .iter()
+        .zip(&call_arguments)
+        .map(|(argument, call_argument)| {
+            if matches!(
+                call_argument.value,
+                uqa_execution::ScalarExpr::Literal(Value::Str(_) | Value::Null)
+            ) {
+                Ok(None)
+            } else {
+                select::bind_expression_plan_type(engine, argument, params, &scope)
+            }
+        })
+        .collect::<Result<Vec<_>, SQLError>>()?;
+    let Some(resolved) = engine.resolve_static_sql_routine_match(
+        name,
+        None,
+        &argument_names,
+        &argument_types,
+        explicit_variadic,
+        crate::engine_user_functions::RoutineCallKind::Procedure,
+    )?
+    else {
+        let signature = argument_types
+            .iter()
+            .map(|argument| {
+                argument
+                    .as_ref()
+                    .map_or_else(|| "unknown", super::column_type_name)
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(SQLError::Routine {
+            sqlstate: "42883".into(),
+            message: format!("procedure {name}({signature}) does not exist"),
+        });
+    };
+    call_output_schema(
+        engine,
+        &resolved.function.def,
+        &resolved.invocation.parameter_types,
+    )
+}
 
 /// Owns top-level plan orchestration. Relational, mutation, DDL, procedural,
 /// and prepared-plan execution all enter through this exhaustive dispatcher;

@@ -153,6 +153,15 @@ pub(crate) fn execute_nested_optimized_command(
     ))
 }
 
+pub(in crate::sql) fn analyze_call_result_schema(
+    engine: &Engine,
+    name: &str,
+    arguments: &[uqa_planner::ExpressionPlan],
+    params: &[SQLParam],
+) -> Result<Option<uqa_execution::RowSchema>, SQLError> {
+    plan_executor::analyze_call_result_schema(engine, name, arguments, params)
+}
+
 pub(crate) fn call_bound_engine_builtin(
     engine: &Engine,
     binding: &uqa_sql::ast::FunctionBinding,

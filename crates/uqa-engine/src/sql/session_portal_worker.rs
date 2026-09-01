@@ -77,8 +77,14 @@ fn open_plpgsql_command_portal(
     command: &CommandPlan,
 ) -> Result<(), SQLError> {
     let schema = match command {
-        CommandPlan::Insert(_) | CommandPlan::Update(_) | CommandPlan::Delete(_) => {
-            super::dml::dml_command_returning_schema(engine, command, params)?
+        CommandPlan::Insert(_)
+        | CommandPlan::Update(_)
+        | CommandPlan::Delete(_)
+        | CommandPlan::Merge(_) => {
+            super::dml::cursor_command_returning_schema(engine, command, params)?
+        }
+        CommandPlan::Call { name, args } => {
+            super::analyze_call_result_schema(engine, name, args, params)?
         }
         CommandPlan::ShowVariable { name } => {
             engine.session_execution_view().show_variable(name)?;
@@ -98,6 +104,12 @@ fn open_plpgsql_command_portal(
         _ => None,
     }
     .ok_or_else(|| cannot_open_command_cursor(command))?;
+    if scroll == Some(true) && matches!(command, CommandPlan::Merge(_)) {
+        return Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: "DECLARE SCROLL CURSOR ... FOR UPDATE/SHARE is not supported".into(),
+        });
+    }
     let null_returning_values = scroll == Some(true)
         && matches!(
             command,
@@ -127,7 +139,7 @@ fn validate_explain_cursor_body(
             Ok(())
         }
         UnifiedPlan::Command(command) => {
-            let _ = super::dml::dml_command_returning_schema(engine, command, params)?;
+            let _ = super::dml::cursor_command_returning_schema(engine, command, params)?;
             Ok(())
         }
     }

@@ -271,11 +271,14 @@ fn format_substitutes_args() {
     eng.sql("INSERT INTO t (id) VALUES (1)", &[]).unwrap();
     let res = eng
         .sql(
-            "SELECT format('Hello %s -- %d', 'world', 42) AS s FROM t",
+            "SELECT format('Hello %s -- %d -- %s/%s', 'world', 42, true, false) AS s FROM t",
             &[],
         )
         .unwrap();
-    assert_eq!(res.rows[0]["s"], Value::Str("Hello world -- 42".into()));
+    assert_eq!(
+        res.rows[0]["s"],
+        Value::Str("Hello world -- 42 -- t/f".into())
+    );
 }
 
 #[test]

@@ -49,10 +49,7 @@ fn static_open_captures_variables_and_supports_every_single_row_fetch_direction(
     );
     assert_eq!(
         scalar(&engine, "SELECT cursor_static(10) AS value"),
-        Value::Str(
-            "first=11/true/1;last=14/true/1;prior=13/true;absolute=12/true;relative=11/true;"
-                .into()
-        )
+        Value::Str("first=11/t/1;last=14/t/1;prior=13/t;absolute=12/t;relative=11/t;".into())
     );
 }
 
@@ -88,9 +85,7 @@ fn move_supports_direction_expressions_all_found_and_row_count() {
     );
     assert_eq!(
         scalar(&engine, "SELECT cursor_move() AS value"),
-        Value::Str(
-            "forward=2/true;back_all=1/true;next=1/true;missing=0/false;exhausted=/false/0".into()
-        )
+        Value::Str("forward=2/t;back_all=1/t;next=1/t;missing=0/f;exhausted=/f/0".into())
     );
 }
 
@@ -438,7 +433,7 @@ fn command_cursor_zero_move_and_scrolling_match_postgresql() {
     );
     assert_eq!(
         scalar(&engine, "SELECT command_cursor_controls(0) AS value"),
-        Value::Str("0/false;11".into())
+        Value::Str("0/f;11".into())
     );
     assert_eq!(
         scalar(&engine, "SELECT command_cursor_controls(1) AS value"),
@@ -446,6 +441,192 @@ fn command_cursor_zero_move_and_scrolling_match_postgresql() {
     );
     assert_eq!(
         scalar(&engine, "SELECT command_cursor_controls(2) AS value"),
-        Value::Str("/true".into())
+        Value::Str("/t".into())
+    );
+}
+
+#[test]
+fn call_output_cursor_is_deferred_and_obeys_command_scrolling() {
+    let engine = engine();
+    exec(&engine, "CREATE TABLE cursor_call_log(value integer)");
+    exec(
+        &engine,
+        "CREATE PROCEDURE cursor_call_out(IN input integer, OUT output integer) LANGUAGE plpgsql AS $$
+         BEGIN INSERT INTO cursor_call_log VALUES (input); output := input + 1; END
+         $$",
+    );
+    exec(
+        &engine,
+        "CREATE PROCEDURE cursor_call_no_out(IN input integer) LANGUAGE plpgsql AS $$
+         BEGIN INSERT INTO cursor_call_log VALUES (input); END
+         $$",
+    );
+    exec(
+        &engine,
+        "CREATE FUNCTION run_call_cursor(query_text text, fetch_it boolean, scroll_it boolean)
+         RETURNS text LANGUAGE plpgsql AS $$
+         DECLARE c refcursor; fetched text; report text;
+         BEGIN
+           IF scroll_it THEN OPEN c SCROLL FOR EXECUTE query_text;
+           ELSE OPEN c FOR EXECUTE query_text;
+           END IF;
+           IF fetch_it THEN
+             FETCH c INTO fetched;
+             report := format('fetch=%s/%s;', fetched, FOUND);
+             BEGIN FETCH PRIOR FROM c INTO fetched;
+             EXCEPTION WHEN OTHERS THEN CLOSE c; RETURN report || SQLSTATE || '|' || SQLERRM;
+             END;
+             report := report || format('prior=%s/%s', fetched, FOUND);
+           ELSE report := 'open';
+           END IF;
+           CLOSE c; RETURN report;
+         EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || '|' || SQLERRM;
+         END
+         $$",
+    );
+    assert_eq!(
+        scalar(
+            &engine,
+            "SELECT run_call_cursor('CALL cursor_call_out(4, NULL)', false, false)"
+        ),
+        Value::Str("open".into())
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT count(*) FROM cursor_call_log"),
+        Value::Int(0)
+    );
+    assert_eq!(
+        scalar(
+            &engine,
+            "SELECT run_call_cursor('CALL cursor_call_out(4, NULL)', true, false)"
+        ),
+        Value::Str("fetch=5/t;55000|cursor can only scan forward".into())
+    );
+    exec(&engine, "TRUNCATE cursor_call_log");
+    assert_eq!(
+        scalar(
+            &engine,
+            "SELECT run_call_cursor('CALL cursor_call_out(5, NULL)', true, true)"
+        ),
+        Value::Str("fetch=6/t;prior=/f".into())
+    );
+    assert_eq!(
+        scalar(
+            &engine,
+            "SELECT run_call_cursor('CALL cursor_call_no_out(6)', false, false)"
+        ),
+        Value::Str("42P11|cannot open CALL query as cursor".into())
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT sum(value) FROM cursor_call_log"),
+        Value::Int(5)
+    );
+    exec(
+        &engine,
+        "CREATE FUNCTION run_static_call_cursor() RETURNS integer LANGUAGE plpgsql AS $$
+         DECLARE c refcursor; fetched integer;
+         BEGIN
+           OPEN c FOR CALL cursor_call_out(7, NULL);
+           FETCH c INTO fetched;
+           CLOSE c;
+           RETURN fetched;
+         END
+         $$",
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT run_static_call_cursor()"),
+        Value::Int(8)
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT sum(value) FROM cursor_call_log"),
+        Value::Int(12)
+    );
+}
+
+#[test]
+fn merge_returning_cursor_is_deferred_and_rejects_scrolling() {
+    let engine = engine();
+    exec(
+        &engine,
+        "CREATE TABLE cursor_merge_target(id integer PRIMARY KEY, value integer NOT NULL)",
+    );
+    exec(&engine, "INSERT INTO cursor_merge_target VALUES (1, 10)");
+    exec(
+        &engine,
+        "CREATE FUNCTION run_merge_cursor(fetch_it boolean, scroll_it boolean, returning_it boolean)
+         RETURNS text LANGUAGE plpgsql AS $$
+         DECLARE c refcursor; fetched_id integer; fetched_value integer;
+         BEGIN
+           IF returning_it THEN
+             IF scroll_it THEN
+               OPEN c SCROLL FOR EXECUTE
+                 'MERGE INTO cursor_merge_target AS target USING (VALUES (1, 5), (2, 7)) AS source(id, delta) ON target.id = source.id WHEN MATCHED THEN UPDATE SET value = target.value + source.delta WHEN NOT MATCHED THEN INSERT (id, value) VALUES (source.id, source.delta) RETURNING target.id, target.value';
+             ELSE
+               OPEN c FOR EXECUTE
+                 'MERGE INTO cursor_merge_target AS target USING (VALUES (1, 5), (2, 7)) AS source(id, delta) ON target.id = source.id WHEN MATCHED THEN UPDATE SET value = target.value + source.delta WHEN NOT MATCHED THEN INSERT (id, value) VALUES (source.id, source.delta) RETURNING target.id, target.value';
+             END IF;
+           ELSE
+             OPEN c FOR EXECUTE
+               'MERGE INTO cursor_merge_target AS target USING (VALUES (1, 5)) AS source(id, delta) ON target.id = source.id WHEN MATCHED THEN UPDATE SET value = target.value + source.delta';
+           END IF;
+           IF fetch_it THEN
+             FETCH c INTO fetched_id, fetched_value;
+             CLOSE c;
+             RETURN format('%s/%s/%s', fetched_id, fetched_value, FOUND);
+           END IF;
+           CLOSE c;
+           RETURN 'open';
+         EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || '|' || SQLERRM;
+         END
+         $$",
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT run_merge_cursor(false, false, true)"),
+        Value::Str("open".into())
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT sum(value) FROM cursor_merge_target"),
+        Value::Int(10)
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT run_merge_cursor(true, false, true)"),
+        Value::Str("1/15/t".into())
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT sum(value) FROM cursor_merge_target"),
+        Value::Int(22)
+    );
+    exec(&engine, "TRUNCATE cursor_merge_target");
+    exec(&engine, "INSERT INTO cursor_merge_target VALUES (1, 10)");
+    assert_eq!(
+        scalar(&engine, "SELECT run_merge_cursor(true, true, true)"),
+        Value::Str("0A000|DECLARE SCROLL CURSOR ... FOR UPDATE/SHARE is not supported".into())
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT run_merge_cursor(false, false, false)"),
+        Value::Str("42P11|cannot open MERGE query as cursor".into())
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT sum(value) FROM cursor_merge_target"),
+        Value::Int(10)
+    );
+    exec(
+        &engine,
+        "CREATE FUNCTION run_static_merge_cursor() RETURNS integer LANGUAGE plpgsql AS $$
+         DECLARE c refcursor; fetched integer;
+         BEGIN
+           OPEN c FOR MERGE INTO cursor_merge_target AS target
+             USING (VALUES (1, 2)) AS source(id, delta) ON target.id = source.id
+             WHEN MATCHED THEN UPDATE SET value = target.value + source.delta
+             RETURNING target.value;
+           FETCH c INTO fetched;
+           CLOSE c;
+           RETURN fetched;
+         END
+         $$",
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT run_static_merge_cursor()"),
+        Value::Int(12)
     );
 }

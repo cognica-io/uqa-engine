@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "6a1039261c37cf09c1e610a82674aeba9ccd5f0a0bdd3aa838ef86c3963f3d8b",
+  "fixture_sha256": "a57c9c4c0b4f78b8106ac1a048fe5dbecf7eeb26e1c0ce39d5cc3f92c509cd5f",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -397,6 +397,128 @@
         [
           "2",
           "21"
+        ]
+      ]
+    },
+    {
+      "name": "plpgsql_call_cursor_open",
+      "kind": "rows",
+      "rows": [
+        [
+          "open"
+        ]
+      ]
+    },
+    {
+      "name": "plpgsql_call_cursor_fetch",
+      "kind": "rows",
+      "rows": [
+        [
+          "fetch=5/t;55000|cursor can only scan forward"
+        ]
+      ]
+    },
+    {
+      "name": "plpgsql_call_cursor_scroll",
+      "kind": "rows",
+      "rows": [
+        [
+          "fetch=6/t;prior=/f"
+        ]
+      ]
+    },
+    {
+      "name": "plpgsql_call_cursor_without_output",
+      "kind": "rows",
+      "rows": [
+        [
+          "42P11|cannot open CALL query as cursor"
+        ]
+      ]
+    },
+    {
+      "name": "plpgsql_call_cursor_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "4"
+        ],
+        [
+          "5"
+        ]
+      ]
+    },
+    {
+      "name": "plpgsql_merge_cursor_open",
+      "kind": "rows",
+      "rows": [
+        [
+          "open"
+        ]
+      ]
+    },
+    {
+      "name": "plpgsql_merge_cursor_open_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "10"
+        ]
+      ]
+    },
+    {
+      "name": "plpgsql_merge_cursor_fetch",
+      "kind": "rows",
+      "rows": [
+        [
+          "1/15/t"
+        ]
+      ]
+    },
+    {
+      "name": "plpgsql_merge_cursor_fetch_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "15"
+        ],
+        [
+          "2",
+          "7"
+        ]
+      ]
+    },
+    {
+      "name": "reset_plpgsql_merge_cursor_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "plpgsql_merge_cursor_scroll_error",
+      "kind": "rows",
+      "rows": [
+        [
+          "0A000|DECLARE SCROLL CURSOR ... FOR UPDATE/SHARE is not supported"
+        ]
+      ]
+    },
+    {
+      "name": "plpgsql_merge_cursor_without_returning",
+      "kind": "rows",
+      "rows": [
+        [
+          "42P11|cannot open MERGE query as cursor"
+        ]
+      ]
+    },
+    {
+      "name": "plpgsql_merge_cursor_error_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "10"
         ]
       ]
     },

@@ -16,14 +16,15 @@ use super::{
     missing_document_error, partition_insert_target, persist_auto_increment_identity,
     prepare_auto_increment_identity, prepare_document_delete, prepare_insert_identity,
     prepare_partition_update_route, prepare_routed_document_rewrite,
-    refresh_insert_identity_after_trigger, returning_row_context, returning_value_context,
-    stage_prepared_document_delete, stage_prepared_document_rewrite, update_lock_strength,
-    validate_document_constraints, validate_mutation_columns, validate_returning_alias_relations,
-    validate_view_checks, BTreeMap, BTreeSet, CteScope, DmlReturningShape, Document, Engine,
-    MergePlan, MergeWhenPlan, MutationAssignmentTarget, MutationOverlayScope,
-    MutationPublicationBatch, MutationRowImage, MutationRowImages, PhysicalMutationLockTarget,
-    PreparedDocumentInsert, PreparedMutationAction, ProjectionPlan, ReturningValueProjectionRow,
-    SQLError, SQLParam, SQLResult, Value, ViewCheckContext,
+    refresh_insert_identity_after_trigger, returning_expression_schema, returning_row_context,
+    returning_target_schema, returning_value_context, stage_prepared_document_delete,
+    stage_prepared_document_rewrite, update_lock_strength, validate_document_constraints,
+    validate_mutation_columns, validate_returning_alias_relations, validate_view_checks, BTreeMap,
+    BTreeSet, CteScope, DmlReturningShape, Document, Engine, MergePlan, MergeWhenPlan,
+    MutationAssignmentTarget, MutationOverlayScope, MutationPublicationBatch, MutationRowImage,
+    MutationRowImages, PhysicalMutationLockTarget, PreparedDocumentInsert, PreparedMutationAction,
+    ProjectionPlan, ReturningValueProjectionRow, SQLError, SQLParam, SQLResult, Value,
+    ViewCheckContext,
 };
 
 mod codec;
@@ -42,6 +43,55 @@ pub(in crate::sql) use returning::{
     build_view_merge_returning_row, finish_view_merge_returning, ViewMergeReturningResult,
     ViewMergeReturningRow,
 };
+
+pub(in crate::sql) fn merge_command_returning_schema(
+    engine: &Engine,
+    stmt: &MergePlan,
+    params: &[SQLParam],
+) -> Result<Option<uqa_execution::RowSchema>, SQLError> {
+    if stmt.returning.is_empty() {
+        return Ok(None);
+    }
+    let mut ctes = CteScope::new_for_current_routine(engine);
+    ctes.scalar_subqueries.clone_from(&stmt.subqueries);
+    let source_schema =
+        crate::sql::select::analyze_source_plan_schema(engine, &stmt.source, params, &ctes, None)?;
+    validate_returning_alias_relations(
+        &stmt.target_qualifier,
+        &stmt.returning_aliases,
+        Some(&source_schema),
+    )?;
+    let target = dml_null_target_row(engine, &stmt.target, &stmt.target_qualifier)?;
+    validate_merge_action_scopes(engine, stmt, &target.schema, &source_schema, params)?;
+    let source_relation = uqa_sql::ast::InternalRelationId::allocate();
+    let projections = expanded_merge_returning_projections(
+        engine,
+        &stmt.target,
+        &stmt.target_qualifier,
+        &stmt.returning_aliases,
+        &source_schema,
+        source_relation,
+        &stmt.returning,
+    )?;
+    let returning_source_schema = merge_returning_source_schema(&source_schema, source_relation);
+    let star_schema = returning_target_schema(engine, &stmt.target)?;
+    let expression_schema = returning_expression_schema(
+        &star_schema,
+        &stmt.target_qualifier,
+        &stmt.returning_aliases,
+        Some(&returning_source_schema),
+    );
+    crate::sql::select::analyze_projection_output_schema(
+        engine,
+        &projections,
+        &expression_schema,
+        &star_schema,
+        &stmt.subqueries,
+        params,
+        &ctes,
+    )
+    .map(Some)
+}
 
 mod execution;
 pub(in crate::sql) use execution::run_merge;

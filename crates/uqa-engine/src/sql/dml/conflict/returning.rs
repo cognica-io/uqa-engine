@@ -386,7 +386,10 @@ pub(in crate::sql) fn dml_returning_result_with_projections(
     Ok(result)
 }
 
-pub(super) fn returning_target_schema(engine: &Engine, table: &str) -> Result<RowSchema, SQLError> {
+pub(in crate::sql) fn returning_target_schema(
+    engine: &Engine,
+    table: &str,
+) -> Result<RowSchema, SQLError> {
     let definitions = engine
         .try_describe_table_row_type(table)
         .map_err(|error| dml_storage_error("RETURNING schema lookup", error))?;
@@ -413,7 +416,7 @@ pub(super) fn returning_target_schema(engine: &Engine, table: &str) -> Result<Ro
     Ok(RowSchema::with_types(columns, types))
 }
 
-fn returning_expression_schema(
+pub(in crate::sql) fn returning_expression_schema(
     target: &RowSchema,
     target_qualifier: &str,
     aliases: &ReturningAliases,

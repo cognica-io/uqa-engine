@@ -687,7 +687,8 @@ mod returning;
 pub(in crate::sql) use returning::{
     build_returning_row, build_returning_value_row, dml_command_returning_schema,
     dml_returning_result, dml_returning_result_with_projections, dml_statement_returning_schema,
-    document_supplied_id, expanded_returning_projections, returning_value_context,
-    DmlReturningShape, ReturningProjectionRow, ReturningValueProjectionRow,
+    document_supplied_id, expanded_returning_projections, returning_expression_schema,
+    returning_target_schema, returning_value_context, DmlReturningShape, ReturningProjectionRow,
+    ReturningValueProjectionRow,
 };
-use returning::{returning_context_schema, returning_image_values, returning_target_schema};
+use returning::{returning_context_schema, returning_image_values};

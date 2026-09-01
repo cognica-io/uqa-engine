@@ -12,6 +12,14 @@ use super::{
     value_to_string, DecimalValue, Result, SQLError, Value,
 };
 
+fn format_argument_to_string(value: &Value) -> String {
+    match value {
+        Value::Bool(true) => "t".into(),
+        Value::Bool(false) => "f".into(),
+        other => value_to_string(other),
+    }
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "builtin dispatch preserves arity, NULL, and error precedence"
@@ -359,7 +367,7 @@ pub(super) fn eval_math_functions(name: &str, args: &[Value]) -> Option<Result<V
                     if c == '%' {
                         match iter.next() {
                             Some('s') | Some('I') | Some('L') => {
-                                out.push_str(&value_to_string(
+                                out.push_str(&format_argument_to_string(
                                     args.get(idx).unwrap_or(&Value::Null),
                                 ));
                                 idx += 1;

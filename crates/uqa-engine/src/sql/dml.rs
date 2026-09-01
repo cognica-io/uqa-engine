@@ -781,3 +781,16 @@ pub(in crate::sql) use merge::*;
 pub(in crate::sql) use update::*;
 pub(in crate::sql) use update_from::*;
 pub(in crate::sql) use vectors::*;
+
+pub(in crate::sql) fn cursor_command_returning_schema(
+    engine: &Engine,
+    command: &uqa_planner::CommandPlan,
+    params: &[SQLParam],
+) -> Result<Option<uqa_execution::RowSchema>, SQLError> {
+    match command {
+        uqa_planner::CommandPlan::Merge(plan) => {
+            merge_command_returning_schema(engine, plan, params)
+        }
+        _ => dml_command_returning_schema(engine, command, params),
+    }
+}
