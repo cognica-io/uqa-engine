@@ -247,11 +247,11 @@
     },
     {
       "id": "dml.returning-row-images-extended",
-      "postgresql_reference": "PostgreSQL 18.4 DML RETURNING documentation and official trigger, partition, and MERGE regression cases",
-      "uqa_test": "cargo test -p uqa-engine --test integration engine_catalog::sql_update_delete::; cargo test -p uqa-engine --test integration engine_catalog::sql_merge::",
-      "supported_version": "The PostgreSQL 18.4 row-image behavior recorded by dml.returning-row-images, including every ordinary-table MERGE candidate and action kind",
-      "status": "partial",
-      "open_issue": "Trigger and partition row-image coverage remains."
+      "postgresql_reference": "PostgreSQL 18.4 DML RETURNING documentation, official trigger, partition, ON CONFLICT, and MERGE regression cases, and tests/parity/pg18/triggers_stateful.expected.json",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_catalog::sql_triggers::row_images::; cargo test -p uqa-engine --test integration engine_catalog::sql_update_delete::; cargo test -p uqa-engine --test integration engine_catalog::sql_merge::; python3 tests/parity/pg18/run_routines_stateful.py --suite triggers",
+      "supported_version": "PostgreSQL 18.4 INSERT, UPDATE, DELETE, ON CONFLICT, and MERGE current, OLD, and NEW row images across ordinary and partitioned tables, BEFORE-trigger mutation and suppression, immutable original OLD images, non-retroactive AFTER-trigger side effects, stored generated values, same-leaf and cross-leaf updates, source and destination physical tableoid identities, and every MERGE mutation action",
+      "status": "verified",
+      "open_issue": null
     },
     {
       "id": "dml.merge-not-matched-by-source",

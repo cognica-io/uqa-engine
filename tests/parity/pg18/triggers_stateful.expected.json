@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "33c88e8ff26e8bfb354b09ae00fd6ac54b4f4a59353e3295e55167721948ef66",
+  "fixture_sha256": "8dec7959e3c0e17c0a263731d641b723f64bd4d20b91076be39ed354c9dfaae5",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -106,6 +106,417 @@
       "rows": [
         [
           "after_update_statement:AFTER:UPDATE"
+        ]
+      ]
+    },
+    {
+      "name": "create_returning_table_image_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "returning_table_insert_images",
+      "kind": "rows",
+      "rows": [
+        [
+          null,
+          null,
+          null,
+          "1",
+          "6",
+          "60",
+          "1",
+          "6",
+          "60"
+        ],
+        [
+          null,
+          null,
+          null,
+          "3",
+          "31",
+          "310",
+          "3",
+          "31",
+          "310"
+        ],
+        [
+          null,
+          null,
+          null,
+          "4",
+          "41",
+          "410",
+          "4",
+          "41",
+          "410"
+        ]
+      ]
+    },
+    {
+      "name": "returning_table_update_images",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "6",
+          "60",
+          "1",
+          "110",
+          "1100",
+          "1",
+          "110",
+          "1100"
+        ]
+      ]
+    },
+    {
+      "name": "returning_table_delete_images",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "110",
+          "1100",
+          null,
+          null,
+          null,
+          "1",
+          "110",
+          "1100"
+        ]
+      ]
+    },
+    {
+      "name": "returning_table_suppressed_update",
+      "kind": "rows",
+      "rows": []
+    },
+    {
+      "name": "returning_table_suppressed_delete",
+      "kind": "rows",
+      "rows": []
+    },
+    {
+      "name": "returning_table_suppression_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "3",
+          "31",
+          "310"
+        ],
+        [
+          "4",
+          "41",
+          "410"
+        ]
+      ]
+    },
+    {
+      "name": "create_returning_after_image_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "returning_after_insert_image",
+      "kind": "rows",
+      "rows": [
+        [
+          null,
+          "f",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "returning_after_insert_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "10",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "returning_after_update_image",
+      "kind": "rows",
+      "rows": [
+        [
+          "10",
+          "t",
+          "20",
+          "f",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "returning_after_update_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "20",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "create_returning_partition_image_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "returning_partition_insert_images",
+      "kind": "rows",
+      "rows": [
+        [
+          null,
+          null,
+          null,
+          null,
+          "returning_partition_images_low",
+          "1",
+          "6",
+          "60",
+          "returning_partition_images_low",
+          "1",
+          "6",
+          "60"
+        ],
+        [
+          null,
+          null,
+          null,
+          null,
+          "returning_partition_images_high",
+          "2",
+          "7",
+          "70",
+          "returning_partition_images_high",
+          "2",
+          "7",
+          "70"
+        ],
+        [
+          null,
+          null,
+          null,
+          null,
+          "returning_partition_images_low",
+          "3",
+          "31",
+          "310",
+          "returning_partition_images_low",
+          "3",
+          "31",
+          "310"
+        ]
+      ]
+    },
+    {
+      "name": "returning_partition_same_leaf_update_images",
+      "kind": "rows",
+      "rows": [
+        [
+          "returning_partition_images_low",
+          "1",
+          "1",
+          "6",
+          "60",
+          "returning_partition_images_low",
+          "1",
+          "1",
+          "116",
+          "1160",
+          "returning_partition_images_low"
+        ]
+      ]
+    },
+    {
+      "name": "returning_partition_cross_leaf_update_images",
+      "kind": "rows",
+      "rows": [
+        [
+          "returning_partition_images_low",
+          "1",
+          "1",
+          "116",
+          "1160",
+          "returning_partition_images_high",
+          "1",
+          "12",
+          "227",
+          "2270",
+          "returning_partition_images_high"
+        ]
+      ]
+    },
+    {
+      "name": "returning_partition_upsert_images",
+      "kind": "rows",
+      "rows": [
+        [
+          "returning_partition_images_high",
+          "1",
+          "12",
+          "227",
+          "returning_partition_images_high",
+          "1",
+          "12",
+          "131",
+          "returning_partition_images_high",
+          "131"
+        ]
+      ]
+    },
+    {
+      "name": "returning_partition_delete_images",
+      "kind": "rows",
+      "rows": [
+        [
+          "returning_partition_images_high",
+          "2",
+          "11",
+          "7",
+          "70",
+          null,
+          null,
+          null,
+          null,
+          null,
+          "returning_partition_images_high"
+        ]
+      ]
+    },
+    {
+      "name": "returning_partition_final_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "returning_partition_images_high",
+          "1",
+          "12",
+          "131",
+          "1310"
+        ],
+        [
+          "returning_partition_images_low",
+          "3",
+          "1",
+          "31",
+          "310"
+        ]
+      ]
+    },
+    {
+      "name": "create_returning_partition_merge_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "returning_partition_merge_update_images",
+      "kind": "rows",
+      "rows": [
+        [
+          "UPDATE",
+          "update",
+          "returning_partition_merge_images_low",
+          "1",
+          "1",
+          "11",
+          "returning_partition_merge_images_low",
+          "1",
+          "1",
+          "110",
+          "returning_partition_merge_images_low",
+          "110"
+        ]
+      ]
+    },
+    {
+      "name": "returning_partition_merge_delete_images",
+      "kind": "rows",
+      "rows": [
+        [
+          "DELETE",
+          "delete",
+          "returning_partition_merge_images_high",
+          "2",
+          "11",
+          "21",
+          null,
+          null,
+          null,
+          null,
+          "returning_partition_merge_images_high",
+          "21"
+        ]
+      ]
+    },
+    {
+      "name": "returning_partition_merge_cross_leaf_images",
+      "kind": "rows",
+      "rows": [
+        [
+          "UPDATE",
+          "move",
+          "returning_partition_merge_images_low",
+          "3",
+          "1",
+          "31",
+          "returning_partition_merge_images_high",
+          "3",
+          "12",
+          "311",
+          "returning_partition_merge_images_high",
+          "311"
+        ]
+      ]
+    },
+    {
+      "name": "returning_partition_merge_insert_images",
+      "kind": "rows",
+      "rows": [
+        [
+          "INSERT",
+          "insert",
+          null,
+          null,
+          null,
+          null,
+          "returning_partition_merge_images_high",
+          "4",
+          "11",
+          "401",
+          "returning_partition_merge_images_high",
+          "401"
+        ]
+      ]
+    },
+    {
+      "name": "returning_partition_merge_final_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "returning_partition_merge_images_low",
+          "1",
+          "1",
+          "110",
+          "1100"
+        ],
+        [
+          "returning_partition_merge_images_high",
+          "3",
+          "12",
+          "311",
+          "3110"
+        ],
+        [
+          "returning_partition_merge_images_high",
+          "4",
+          "11",
+          "401",
+          "4010"
         ]
       ]
     },

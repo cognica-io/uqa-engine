@@ -99,6 +99,106 @@ UPDATE trigger_items SET value = value + 1 WHERE id = 999;
 SELECT message FROM trigger_log ORDER BY id DESC LIMIT 1;
 -- @end
 
+-- @case create_returning_table_image_fixture ok
+CREATE TABLE returning_table_images (id integer PRIMARY KEY, value integer, generated_value integer GENERATED ALWAYS AS (value * 10) STORED); CREATE FUNCTION returning_table_image_mutate() RETURNS trigger LANGUAGE plpgsql AS $probe$ BEGIN IF TG_OP = 'INSERT' THEN IF NEW.id = 99 THEN RETURN NULL; END IF; NEW.value := NEW.value + 1; RETURN NEW; ELSIF TG_OP = 'UPDATE' THEN OLD.value := OLD.value + 1000; IF OLD.id = 3 THEN RETURN NULL; END IF; NEW.value := NEW.value + 10; RETURN NEW; ELSE OLD.value := OLD.value + 1000; IF OLD.id = 4 THEN RETURN NULL; END IF; RETURN OLD; END IF; END $probe$; CREATE TRIGGER returning_table_image_before BEFORE INSERT OR UPDATE OR DELETE ON returning_table_images FOR EACH ROW EXECUTE FUNCTION returning_table_image_mutate();
+-- @end
+
+-- @case returning_table_insert_images rows
+INSERT INTO returning_table_images VALUES (1, 5), (3, 30), (4, 40), (99, 99) RETURNING old.id, old.value, old.generated_value, new.id, new.value, new.generated_value, id, value, generated_value;
+-- @end
+
+-- @case returning_table_update_images rows
+UPDATE returning_table_images SET value = 100 WHERE id = 1 RETURNING old.id, old.value, old.generated_value, new.id, new.value, new.generated_value, id, value, generated_value;
+-- @end
+
+-- @case returning_table_delete_images rows
+DELETE FROM returning_table_images WHERE id = 1 RETURNING old.id, old.value, old.generated_value, new.id, new.value, new.generated_value, id, value, generated_value;
+-- @end
+
+-- @case returning_table_suppressed_update rows
+UPDATE returning_table_images SET value = 300 WHERE id = 3 RETURNING old.id, old.value, new.id, new.value;
+-- @end
+
+-- @case returning_table_suppressed_delete rows
+DELETE FROM returning_table_images WHERE id = 4 RETURNING old.id, old.value, new.id, new.value;
+-- @end
+
+-- @case returning_table_suppression_state rows
+SELECT id, value, generated_value FROM returning_table_images ORDER BY id;
+-- @end
+
+-- @case create_returning_after_image_fixture ok
+CREATE TABLE returning_after_images (id integer PRIMARY KEY, value integer, after_seen boolean DEFAULT false); CREATE FUNCTION returning_after_image_mutate() RETURNS trigger LANGUAGE plpgsql AS $probe$ BEGIN IF NOT NEW.after_seen THEN UPDATE returning_after_images SET after_seen = true WHERE id = NEW.id; END IF; RETURN NULL; END $probe$; CREATE TRIGGER returning_after_insert AFTER INSERT ON returning_after_images FOR EACH ROW EXECUTE FUNCTION returning_after_image_mutate(); CREATE TRIGGER returning_after_update AFTER UPDATE ON returning_after_images FOR EACH ROW WHEN (NOT NEW.after_seen) EXECUTE FUNCTION returning_after_image_mutate();
+-- @end
+
+-- @case returning_after_insert_image rows
+INSERT INTO returning_after_images(id, value) VALUES (1, 10) RETURNING old.after_seen, new.after_seen, after_seen;
+-- @end
+
+-- @case returning_after_insert_state rows
+SELECT id, value, after_seen FROM returning_after_images;
+-- @end
+
+-- @case returning_after_update_image rows
+UPDATE returning_after_images SET value = 20, after_seen = false WHERE id = 1 RETURNING old.value, old.after_seen, new.value, new.after_seen, after_seen;
+-- @end
+
+-- @case returning_after_update_state rows
+SELECT id, value, after_seen FROM returning_after_images;
+-- @end
+
+-- @case create_returning_partition_image_fixture ok
+CREATE TABLE returning_partition_images (id integer, bucket integer, value integer, generated_value integer GENERATED ALWAYS AS (value * 10) STORED, PRIMARY KEY (id, bucket)) PARTITION BY RANGE (bucket); CREATE TABLE returning_partition_images_low PARTITION OF returning_partition_images FOR VALUES FROM (0) TO (10); CREATE TABLE returning_partition_images_high PARTITION OF returning_partition_images FOR VALUES FROM (10) TO (20); CREATE FUNCTION returning_partition_image_mutate() RETURNS trigger LANGUAGE plpgsql AS $probe$ BEGIN IF TG_OP = 'INSERT' THEN NEW.value := NEW.value + 1; RETURN NEW; ELSIF TG_OP = 'UPDATE' THEN NEW.value := NEW.value + 10; RETURN NEW; ELSE RETURN OLD; END IF; END $probe$; CREATE TRIGGER returning_partition_image_before BEFORE INSERT OR UPDATE OR DELETE ON returning_partition_images FOR EACH ROW EXECUTE FUNCTION returning_partition_image_mutate();
+-- @end
+
+-- @case returning_partition_insert_images rows
+INSERT INTO returning_partition_images VALUES (1, 1, 5), (2, 11, 6), (3, 1, 30) RETURNING old.tableoid::regclass, old.id, old.value, old.generated_value, new.tableoid::regclass, new.id, new.value, new.generated_value, tableoid::regclass, id, value, generated_value;
+-- @end
+
+-- @case returning_partition_same_leaf_update_images rows
+UPDATE returning_partition_images SET value = value + 100 WHERE id = 1 RETURNING old.tableoid::regclass, old.id, old.bucket, old.value, old.generated_value, new.tableoid::regclass, new.id, new.bucket, new.value, new.generated_value, tableoid::regclass;
+-- @end
+
+-- @case returning_partition_cross_leaf_update_images rows
+UPDATE returning_partition_images SET bucket = 12, value = value + 100 WHERE id = 1 RETURNING old.tableoid::regclass, old.id, old.bucket, old.value, old.generated_value, new.tableoid::regclass, new.id, new.bucket, new.value, new.generated_value, tableoid::regclass;
+-- @end
+
+-- @case returning_partition_upsert_images rows
+INSERT INTO returning_partition_images VALUES (1, 12, 20) ON CONFLICT (id, bucket) DO UPDATE SET value = excluded.value + 100 RETURNING old.tableoid::regclass, old.id, old.bucket, old.value, new.tableoid::regclass, new.id, new.bucket, new.value, tableoid::regclass, value;
+-- @end
+
+-- @case returning_partition_delete_images rows
+DELETE FROM returning_partition_images WHERE id = 2 RETURNING old.tableoid::regclass, old.id, old.bucket, old.value, old.generated_value, new.tableoid::regclass, new.id, new.bucket, new.value, new.generated_value, tableoid::regclass;
+-- @end
+
+-- @case returning_partition_final_state rows
+SELECT tableoid::regclass, id, bucket, value, generated_value FROM returning_partition_images ORDER BY id;
+-- @end
+
+-- @case create_returning_partition_merge_fixture ok
+CREATE TABLE returning_partition_merge_images (id integer, bucket integer, value integer, generated_value integer GENERATED ALWAYS AS (value * 10) STORED, PRIMARY KEY (id, bucket)) PARTITION BY RANGE (bucket); CREATE TABLE returning_partition_merge_images_low PARTITION OF returning_partition_merge_images FOR VALUES FROM (0) TO (10); CREATE TABLE returning_partition_merge_images_high PARTITION OF returning_partition_merge_images FOR VALUES FROM (10) TO (20); CREATE TRIGGER returning_partition_merge_before BEFORE INSERT OR UPDATE OR DELETE ON returning_partition_merge_images FOR EACH ROW EXECUTE FUNCTION returning_partition_image_mutate(); CREATE TABLE returning_partition_merge_source (id integer, bucket integer, value integer, action text); INSERT INTO returning_partition_merge_images VALUES (1, 1, 10), (2, 11, 20), (3, 1, 30); INSERT INTO returning_partition_merge_source VALUES (1, 1, 100, 'update'), (2, 11, 200, 'delete'), (3, 12, 300, 'move'), (4, 11, 400, 'insert');
+-- @end
+
+-- @case returning_partition_merge_update_images rows
+MERGE INTO returning_partition_merge_images AS target USING (SELECT * FROM returning_partition_merge_source WHERE action = 'update') AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET bucket = source.bucket, value = source.value RETURNING merge_action(), source.action, old.tableoid::regclass, old.id, old.bucket, old.value, new.tableoid::regclass, new.id, new.bucket, new.value, target.tableoid::regclass, target.value;
+-- @end
+
+-- @case returning_partition_merge_delete_images rows
+MERGE INTO returning_partition_merge_images AS target USING (SELECT * FROM returning_partition_merge_source WHERE action = 'delete') AS source ON target.id = source.id WHEN MATCHED THEN DELETE RETURNING merge_action(), source.action, old.tableoid::regclass, old.id, old.bucket, old.value, new.tableoid::regclass, new.id, new.bucket, new.value, target.tableoid::regclass, target.value;
+-- @end
+
+-- @case returning_partition_merge_cross_leaf_images rows
+MERGE INTO returning_partition_merge_images AS target USING (SELECT * FROM returning_partition_merge_source WHERE action = 'move') AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET bucket = source.bucket, value = source.value RETURNING merge_action(), source.action, old.tableoid::regclass, old.id, old.bucket, old.value, new.tableoid::regclass, new.id, new.bucket, new.value, target.tableoid::regclass, target.value;
+-- @end
+
+-- @case returning_partition_merge_insert_images rows
+MERGE INTO returning_partition_merge_images AS target USING (SELECT * FROM returning_partition_merge_source WHERE action = 'insert') AS source ON target.id = source.id WHEN NOT MATCHED THEN INSERT (id, bucket, value) VALUES (source.id, source.bucket, source.value) RETURNING merge_action(), source.action, old.tableoid::regclass, old.id, old.bucket, old.value, new.tableoid::regclass, new.id, new.bucket, new.value, target.tableoid::regclass, target.value;
+-- @end
+
+-- @case returning_partition_merge_final_state rows
+SELECT tableoid::regclass, id, bucket, value, generated_value FROM returning_partition_merge_images ORDER BY id;
+-- @end
+
 -- @case direct_trigger_call_rejected error
 SELECT trigger_row_probe();
 -- @end

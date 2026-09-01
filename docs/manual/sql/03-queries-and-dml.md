@@ -338,6 +338,23 @@ WHERE e.user_id = s.user_id;
 
 Foreign-key actions can update or delete related rows as part of the same transaction.
 
+### `RETURNING` row images
+
+`INSERT`, `UPDATE`, `DELETE`, and `MERGE` may qualify result expressions with the default `old` and `new` row-image names or rename them with `RETURNING WITH (OLD AS before, NEW AS after)`. The target name denotes the new image for insert and update and the old image for delete; the missing image is a typed NULL row. `MERGE` additionally exposes its source relation and `merge_action()`.
+
+```sql
+UPDATE accounts
+SET balance = balance + 25
+WHERE account_id = 7
+RETURNING WITH (OLD AS before, NEW AS after)
+    before.balance AS old_balance,
+    after.balance AS new_balance;
+```
+
+A successful `BEFORE` row trigger supplies the final new and current images after generated columns are recomputed, while the old image remains the original stored row even if trigger code assigns to `OLD`. Returning NULL from a `BEFORE` trigger suppresses that row and its command count. Writes performed by an `AFTER` trigger do not retroactively alter the outer command's returned images.
+
+For a partitioned target, `old.tableoid` and `new.tableoid` identify the physical source and destination leaves. A same-leaf update keeps both identities equal, a cross-leaf update preserves the source leaf in `OLD` and destination leaf in `NEW`, insert has no old leaf, and delete has no new leaf. These rules also apply to `ON CONFLICT DO UPDATE` and every mutating `MERGE` action.
+
 ## MERGE
 
 ```sql

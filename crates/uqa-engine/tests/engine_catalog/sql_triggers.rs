@@ -16,6 +16,8 @@ mod constraint;
 mod instead_of;
 #[path = "sql_triggers/review_regressions.rs"]
 mod review_regressions;
+#[path = "sql_triggers/row_images.rs"]
+mod row_images;
 #[path = "sql_triggers/transition.rs"]
 mod transition;
 
