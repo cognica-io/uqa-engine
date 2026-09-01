@@ -8,6 +8,7 @@ use super::{
     compile_function_type_name, compile_qualified_name, def_elem_bool, NodeEnum, Result, SQLError,
     Statement,
 };
+use crate::compiler::range_var_name;
 
 pub(in crate::compiler) fn compile_role_spec(
     role: &pg_query::protobuf::RoleSpec,
@@ -110,9 +111,22 @@ pub(in crate::compiler) fn compile_alter_routine_owner(
     }))
 }
 
-pub(in crate::compiler) fn compile_grant_routine(
+pub(in crate::compiler) fn compile_grant(
     statement: &pg_query::protobuf::GrantStmt,
 ) -> Result<Statement> {
+    use pg_query::protobuf::ObjectType;
+    match statement.objtype() {
+        ObjectType::ObjectSequence | ObjectType::ObjectTable => compile_grant_sequence(statement),
+        ObjectType::ObjectFunction | ObjectType::ObjectProcedure | ObjectType::ObjectRoutine => {
+            compile_grant_routine(statement)
+        }
+        other => Err(SQLError::Unsupported(format!(
+            "GRANT/REVOKE object type {other:?} is not supported"
+        ))),
+    }
+}
+
+fn compile_grant_routine(statement: &pg_query::protobuf::GrantStmt) -> Result<Statement> {
     use crate::ast::{AlterRoutineKind, GrantRoutineItem, GrantRoutineStmt, RoutineRevokeBehavior};
     use pg_query::protobuf::{DropBehavior, GrantTargetType, ObjectType};
     if statement.targtype() != GrantTargetType::AclTargetObject {
@@ -194,6 +208,118 @@ pub(in crate::compiler) fn compile_grant_routine(
             RoutineRevokeBehavior::Restrict
         },
     }))
+}
+
+fn compile_grant_sequence(statement: &pg_query::protobuf::GrantStmt) -> Result<Statement> {
+    use crate::ast::{GrantSequenceStmt, SequencePrivilege, SequenceRevokeBehavior};
+    use pg_query::protobuf::DropBehavior;
+
+    let target = compile_grant_sequence_target(statement)?;
+    let privileges = if statement.privileges.is_empty() {
+        vec![
+            SequencePrivilege::Select,
+            SequencePrivilege::Update,
+            SequencePrivilege::Usage,
+        ]
+    } else {
+        let mut privileges = Vec::with_capacity(statement.privileges.len());
+        for privilege in &statement.privileges {
+            let Some(NodeEnum::AccessPriv(privilege)) = privilege.node.as_ref() else {
+                return Err(SQLError::Internal(
+                    "GRANT/REVOKE contains a malformed privilege".into(),
+                ));
+            };
+            let privilege = if privilege.cols.is_empty() {
+                match privilege.priv_name.to_ascii_lowercase().as_str() {
+                    "select" => SequencePrivilege::Select,
+                    "update" => SequencePrivilege::Update,
+                    "usage" => SequencePrivilege::Usage,
+                    _ => SequencePrivilege::Unsupported(privilege.priv_name.to_ascii_uppercase()),
+                }
+            } else {
+                SequencePrivilege::ColumnsUnsupported
+            };
+            if !privileges.contains(&privilege) {
+                privileges.push(privilege);
+            }
+        }
+        privileges
+    };
+    let grantees = statement
+        .grantees
+        .iter()
+        .map(|grantee| {
+            let Some(NodeEnum::RoleSpec(role)) = grantee.node.as_ref() else {
+                return Err(SQLError::Internal(
+                    "GRANT/REVOKE contains a malformed grantee".into(),
+                ));
+            };
+            compile_role_spec(role, true, "GRANT/REVOKE")
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let grantor = statement
+        .grantor
+        .as_ref()
+        .map(|role| compile_role_spec(role, false, "GRANTED BY"))
+        .transpose()?;
+    Ok(Statement::GrantSequence(GrantSequenceStmt {
+        is_grant: statement.is_grant,
+        grant_option: statement.grant_option,
+        grant_option_only: !statement.is_grant && statement.grant_option,
+        privileges,
+        target,
+        grantees,
+        grantor,
+        revoke_behavior: if matches!(statement.behavior(), DropBehavior::DropCascade) {
+            SequenceRevokeBehavior::Cascade
+        } else {
+            SequenceRevokeBehavior::Restrict
+        },
+    }))
+}
+
+fn compile_grant_sequence_target(
+    statement: &pg_query::protobuf::GrantStmt,
+) -> Result<crate::ast::GrantSequenceTarget> {
+    use crate::ast::GrantSequenceTarget;
+    use pg_query::protobuf::{GrantTargetType, ObjectType};
+
+    let object_type = statement.objtype();
+    match statement.targtype() {
+        GrantTargetType::AclTargetObject => {
+            let mut names = Vec::with_capacity(statement.objects.len());
+            for object in &statement.objects {
+                let Some(NodeEnum::RangeVar(relation)) = object.node.as_ref() else {
+                    return Err(SQLError::Internal(
+                        "GRANT/REVOKE contains a malformed sequence target".into(),
+                    ));
+                };
+                names.push(range_var_name(relation));
+            }
+            Ok(GrantSequenceTarget::Sequences {
+                names,
+                require_sequence: object_type == ObjectType::ObjectSequence,
+            })
+        }
+        GrantTargetType::AclTargetAllInSchema if object_type == ObjectType::ObjectSequence => {
+            let schemas = statement
+                .objects
+                .iter()
+                .map(|object| {
+                    let Some(NodeEnum::String(schema)) = object.node.as_ref() else {
+                        return Err(SQLError::Internal(
+                            "GRANT/REVOKE contains a malformed schema target".into(),
+                        ));
+                    };
+                    Ok(schema.sval.clone())
+                })
+                .collect::<Result<Vec<_>>>()?;
+            Ok(GrantSequenceTarget::AllSequencesInSchemas { schemas })
+        }
+        other => Err(SQLError::Unsupported(format!(
+            "sequence privileges do not support target type {other:?}"
+        ))),
+    }
 }
 
 fn compile_membership_role_list(

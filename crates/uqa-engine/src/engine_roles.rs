@@ -508,10 +508,7 @@ impl Engine {
         }
         let sequence_security = self.durable.sequence_security.read();
         for name in &names {
-            if let Some((relation, _)) = sequence_security
-                .iter()
-                .find(|(_, security)| security.role_owner == *name)
-            {
+            if let Some(relation) = dependent_sequence_for_role(&sequence_security, name) {
                 return Err(SQLError::Routine {
                     sqlstate: "2BP01".into(),
                     message: format!(
@@ -790,6 +787,21 @@ impl Engine {
     pub(crate) fn routine_config_state_guard(&self) -> RoutineSessionStateGuard<'_> {
         RoutineSessionStateGuard::capture(self, true)
     }
+}
+
+fn dependent_sequence_for_role<'a>(
+    sequences: &'a BTreeMap<crate::RelationIdentity, crate::engine_state::SequenceSecurity>,
+    role: &str,
+) -> Option<&'a crate::RelationIdentity> {
+    sequences.iter().find_map(|(relation, security)| {
+        let acl_dependency = security.acl.as_ref().is_some_and(|acl| {
+            acl.iter().any(|entry| {
+                entry.role == role
+                    || entry.grantor.as_deref().unwrap_or(&security.role_owner) == role
+            })
+        });
+        (security.role_owner == role || acl_dependency).then_some(relation)
+    })
 }
 
 mod memberships;

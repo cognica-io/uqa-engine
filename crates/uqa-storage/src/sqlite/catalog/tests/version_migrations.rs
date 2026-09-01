@@ -201,6 +201,7 @@ fn migration_26_adds_persistent_sequence_object_identities() {
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "legacy_sequence_object"),
             role_owner: "uqa".into(),
+            acl: None,
             object_id: [7; 16],
             definition_generation: [7; 16],
             start: 1,
@@ -240,6 +241,7 @@ fn migration_27_adds_postgresql_sequence_defaults() {
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "legacy_descending_options"),
             role_owner: "uqa".into(),
+            acl: None,
             object_id: [27; 16],
             definition_generation: [27; 16],
             start: -1,
@@ -282,6 +284,7 @@ fn migration_27_preserves_options_when_columns_precede_the_version_marker() {
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "already_migrated_options"),
             role_owner: "uqa".into(),
+            acl: None,
             object_id: [28; 16],
             definition_generation: [28; 16],
             start: 3,
@@ -326,6 +329,7 @@ fn migration_28_adds_sequence_cache_and_definition_generation() {
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "legacy_cache"),
             role_owner: "uqa".into(),
+            acl: None,
             object_id: [28; 16],
             definition_generation: [29; 16],
             start: 1,
@@ -370,6 +374,7 @@ fn migration_28_preserves_cache_state_when_columns_precede_the_version_marker() 
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "already_migrated_cache"),
             role_owner: "uqa".into(),
+            acl: None,
             object_id: [30; 16],
             definition_generation: [31; 16],
             start: 1,
@@ -409,6 +414,7 @@ fn migration_29_adds_sequence_owner_columns() {
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "legacy_owner"),
             role_owner: "uqa".into(),
+            acl: None,
             object_id: [32; 16],
             definition_generation: [33; 16],
             start: 1,
@@ -462,6 +468,7 @@ fn migration_29_preserves_owner_when_columns_precede_the_version_marker() {
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "already_migrated_owner"),
             role_owner: "uqa".into(),
+            acl: None,
             object_id: [38; 16],
             definition_generation: [39; 16],
             start: 1,
@@ -497,6 +504,7 @@ fn migration_30_adds_sequence_role_owner_with_bootstrap_default() {
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "legacy_role_owner"),
             role_owner: "discarded_owner".into(),
+            acl: None,
             object_id: [40; 16],
             definition_generation: [41; 16],
             start: 1,
@@ -533,6 +541,7 @@ fn migration_30_preserves_role_owner_when_column_precedes_version_marker() {
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "already_migrated_role_owner"),
             role_owner: "retained_owner".into(),
+            acl: None,
             object_id: [42; 16],
             definition_generation: [43; 16],
             start: 1,
@@ -561,6 +570,89 @@ fn migration_30_preserves_role_owner_when_column_precedes_version_marker() {
 }
 
 #[test]
+fn migration_31_adds_nullable_sequence_acl() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let current = Catalog::open(connection.clone()).unwrap();
+    current
+        .create_sequence_row(&SequenceRow {
+            relation: RelationIdentity::new("public", "legacy_acl"),
+            role_owner: "uqa".into(),
+            acl: None,
+            object_id: [44; 16],
+            definition_generation: [45; 16],
+            start: 1,
+            increment: 1,
+            current: 1,
+            called: false,
+            persistence: "p".into(),
+            options: SequenceOptions::default(),
+            owner: None,
+        })
+        .unwrap();
+    drop(current);
+    connection
+        .with(|database| {
+            database.execute("ALTER TABLE _sequences DROP COLUMN acl_json", [])?;
+            database.execute(
+                "UPDATE _metadata SET value = '30' WHERE key = 'schema_version'",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+    let upgraded = Catalog::open(connection).unwrap();
+    let sequence = upgraded.load_sequence_rows().unwrap().remove(0);
+    assert_eq!(sequence.acl, None);
+}
+
+#[test]
+fn migration_31_preserves_sequence_acl_when_column_precedes_version_marker() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let current = Catalog::open(connection.clone()).unwrap();
+    let acl = vec![crate::catalog::SequenceAclEntry {
+        role: "reader".into(),
+        grantor: Some("uqa".into()),
+        privileges: crate::catalog::SequencePrivileges {
+            select: true,
+            update: false,
+            usage: false,
+        },
+        grant_options: crate::catalog::SequencePrivileges::default(),
+    }];
+    current
+        .create_sequence_row(&SequenceRow {
+            relation: RelationIdentity::new("public", "already_migrated_acl"),
+            role_owner: "uqa".into(),
+            acl: Some(acl.clone()),
+            object_id: [46; 16],
+            definition_generation: [47; 16],
+            start: 1,
+            increment: 1,
+            current: 1,
+            called: false,
+            persistence: "p".into(),
+            options: SequenceOptions::default(),
+            owner: None,
+        })
+        .unwrap();
+    drop(current);
+    connection
+        .with(|database| {
+            database.execute(
+                "UPDATE _metadata SET value = '30' WHERE key = 'schema_version'",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+    let upgraded = Catalog::open(connection).unwrap();
+    let sequence = upgraded.load_sequence_rows().unwrap().remove(0);
+    assert_eq!(sequence.acl, Some(acl));
+}
+
+#[test]
 fn migration_18_preserves_legacy_sequence_sentinel_semantics() {
     let connection = ManagedConnection::open_in_memory().unwrap();
     let current = Catalog::open(connection.clone()).unwrap();
@@ -568,6 +660,7 @@ fn migration_18_preserves_legacy_sequence_sentinel_semantics() {
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "legacy_uncalled"),
             role_owner: "uqa".into(),
+            acl: None,
             object_id: [18; 16],
             definition_generation: [18; 16],
             start: 1,
@@ -624,6 +717,7 @@ fn migration_23_moves_sequence_persistence_into_typed_rows() {
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "unlogged_ids"),
             role_owner: "uqa".into(),
+            acl: None,
             object_id: [23; 16],
             definition_generation: [23; 16],
             start: 1,

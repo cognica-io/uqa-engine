@@ -176,9 +176,9 @@ use pg_namespace::build_pg_namespace;
 use pg_proc::build_pg_proc;
 use pg_settings::build_pg_settings;
 pub(crate) use regtypes::{
-    resolve_catalog_column_type, resolve_regclass_oid, resolve_regnamespace_oid,
-    resolve_regobject_oid, resolve_regprocedure_oid, resolve_regrole_oid, resolve_regtype_output,
-    RegtypeOutputCatalog,
+    resolve_catalog_column_type, resolve_regclass_kind_by_oid, resolve_regclass_oid,
+    resolve_regnamespace_oid, resolve_regobject_oid, resolve_regprocedure_oid, resolve_regrole_oid,
+    resolve_regtype_output, RegtypeOutputCatalog,
 };
 use relation_catalog::{build_pg_class, build_pg_inherits};
 use schema::{resolve_virtual_relation, VirtualRelation};

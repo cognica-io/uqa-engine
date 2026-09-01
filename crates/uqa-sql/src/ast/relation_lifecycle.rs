@@ -222,3 +222,49 @@ pub struct AlterSequence {
     #[serde(default)]
     pub lifecycle: SequenceLifecycle,
 }
+
+/// One requested sequence privilege. Unsupported names survive compilation so execution can preserve `PostgreSQL` target- and role-resolution precedence.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum SequencePrivilege {
+    Select,
+    Update,
+    Usage,
+    ColumnsUnsupported,
+    Unsupported(String),
+}
+
+/// Relation targets carried by `GRANT` or `REVOKE` for sequences.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GrantSequenceTarget {
+    Sequences {
+        names: Vec<String>,
+        /// `false` preserves the historical `ON TABLE sequence_name` spelling while allowing the executor to leave actual table ACLs unsupported.
+        require_sequence: bool,
+    },
+    AllSequencesInSchemas {
+        schemas: Vec<String>,
+    },
+}
+
+/// Dependency behavior for sequence privilege revocation.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SequenceRevokeBehavior {
+    #[default]
+    Restrict,
+    Cascade,
+}
+
+/// `GRANT` or `REVOKE` of `USAGE`, `SELECT`, and `UPDATE` on sequences.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GrantSequenceStmt {
+    pub is_grant: bool,
+    pub grant_option: bool,
+    pub grant_option_only: bool,
+    pub privileges: Vec<SequencePrivilege>,
+    pub target: GrantSequenceTarget,
+    pub grantees: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grantor: Option<String>,
+    #[serde(default)]
+    pub revoke_behavior: SequenceRevokeBehavior,
+}

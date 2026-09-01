@@ -127,6 +127,7 @@ pub(super) fn collect_sequence_migrations(
             row: SequenceRow {
                 relation,
                 role_owner: stored.role_owner,
+                acl: stored.acl,
                 object_id: stored.object_id,
                 definition_generation: stored.definition_generation,
                 start: stored.start,
@@ -156,6 +157,7 @@ pub(super) fn collect_sequence_migrations(
                 row: SequenceRow {
                     relation,
                     role_owner: "uqa".into(),
+                    acl: None,
                     object_id: [0; 16],
                     definition_generation: [0; 16],
                     start: state.start,
@@ -351,6 +353,7 @@ pub(super) fn put_sequence_migrations(
             &key,
             &encode_value(&StoredSequence {
                 role_owner: sequence.row.role_owner,
+                acl: sequence.row.acl,
                 object_id: sequence.row.object_id,
                 definition_generation: sequence.row.definition_generation,
                 start: sequence.row.start,

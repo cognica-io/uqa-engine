@@ -6,8 +6,9 @@
 
 //! `pg_class` and `pg_inherits` rows for physical and virtual relations.
 
+use super::helpers::acl::acl_identifier;
 use super::helpers::oids::{split_schema_name, stable_object_oid};
-use super::helpers::rows::{bool_value, catalog_usize, int_value, row, str_value};
+use super::helpers::rows::{bool_value, catalog_array, catalog_usize, int_value, row, str_value};
 use super::helpers::views::view_columns_for;
 use super::partitioning::partition_bound_node;
 use super::pg_catalog::{
@@ -162,7 +163,7 @@ pub(super) fn build_pg_class(
             false,
         ));
     }
-    for (sequence, persistence, object_id, role_owner) in catalog.sequences() {
+    for (sequence, persistence, object_id, security) in catalog.sequences() {
         let (schema, name) = split_schema_name(&sequence)?;
         let mut row =
             pg_class_row_with_lifecycle(&schema, &name, "S", 0, 0.0, false, persistence, true, &[]);
@@ -172,8 +173,9 @@ pub(super) fn build_pg_class(
         );
         row.insert(
             "relowner".into(),
-            int_value(crate::engine_roles::role_oid(&role_owner)),
+            int_value(crate::engine_roles::role_oid(&security.role_owner)),
         );
+        row.insert("relacl".into(), sequence_acl_catalog_value(&security)?);
         out.push(row);
     }
     for index in catalog_indexes {
@@ -195,6 +197,42 @@ pub(super) fn build_pg_class(
     }
     out.extend(super::ag_catalog::age_pg_class_rows(catalog)?);
     Ok(out)
+}
+
+fn sequence_acl_catalog_value(
+    security: &crate::engine_state::SequenceSecurity,
+) -> Result<uqa_core::Value, SQLError> {
+    let Some(acl) = security.acl.as_ref() else {
+        return Ok(uqa_core::Value::Null);
+    };
+    catalog_array(
+        acl.iter()
+            .map(|entry| {
+                let grantee = if entry.role == "PUBLIC" {
+                    String::new()
+                } else {
+                    acl_identifier(&entry.role)
+                };
+                let grantor =
+                    acl_identifier(entry.grantor.as_deref().unwrap_or(&security.role_owner));
+                let mut privileges = String::new();
+                for (enabled, grant_option, code) in [
+                    (entry.privileges.select, entry.grant_options.select, 'r'),
+                    (entry.privileges.update, entry.grant_options.update, 'w'),
+                    (entry.privileges.usage, entry.grant_options.usage, 'U'),
+                ] {
+                    if enabled {
+                        privileges.push(code);
+                        if grant_option {
+                            privileges.push('*');
+                        }
+                    }
+                }
+                str_value(format!("{grantee}={privileges}/{grantor}"))
+            })
+            .collect(),
+        "pg_class.relacl",
+    )
 }
 
 pub(super) fn build_pg_inherits(

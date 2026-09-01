@@ -44,6 +44,8 @@ enum SequenceValueError {
     },
     #[error("cannot execute {0}() in a read-only transaction")]
     ReadOnly(&'static str),
+    #[error(transparent)]
+    Security(#[from] SQLError),
     #[error("{0}")]
     Internal(String),
 }
@@ -73,6 +75,7 @@ impl SequenceValueError {
             Self::SetvalOutOfBounds { .. } => "22003",
             Self::Exhausted { .. } => "2200H",
             Self::ReadOnly(_) => "25006",
+            Self::Security(error) => return error,
             Self::Internal(message) => return SQLError::Internal(message),
         };
         SQLError::Routine {
@@ -230,6 +233,7 @@ impl Engine {
             .is_some_and(|persistence| {
                 *persistence == uqa_sql::ast::RelationPersistence::Temporary
             });
+        self.ensure_sequence_nextval_privilege(&name, &relation)?;
         if self.current_transaction_is_read_only() && !temporary {
             return Err(SequenceValueError::ReadOnly("nextval"));
         }
@@ -445,7 +449,8 @@ impl Engine {
     }
 
     fn currval_inner(&self, name: &str) -> Result<i64, SequenceValueError> {
-        let (name, _relation, object_id) = self.resolve_sequence_value_target(name)?;
+        let (name, relation, object_id) = self.resolve_sequence_value_target(name)?;
+        self.ensure_sequence_currval_privilege(&name, &relation)?;
         self.session
             .state
             .read()
@@ -469,24 +474,29 @@ impl Engine {
         self.refresh_sequences_from_catalog().map_err(|error| {
             SequenceValueError::Internal(format!("load sequence catalog: {error}"))
         })?;
-        let object_ids = self.durable.sequence_object_ids.read();
         let session = self.session.state.read();
         let last = session
             .last_sequence
             .as_ref()
             .ok_or(SequenceValueError::LastvalUndefined)?;
-        if !object_ids
-            .values()
-            .any(|object_id| *object_id == last.object_id)
-        {
-            return Err(SequenceValueError::LastvalUndefined);
-        }
-        session
+        let object_id = last.object_id;
+        let value = session
             .sequence_currvals
             .values()
-            .find(|current| current.object_id == last.object_id)
+            .find(|current| current.object_id == object_id)
             .map(|current| current.value)
-            .ok_or(SequenceValueError::LastvalUndefined)
+            .ok_or(SequenceValueError::LastvalUndefined)?;
+        drop(session);
+        let relation = self
+            .durable
+            .sequence_object_ids
+            .read()
+            .iter()
+            .find_map(|(relation, candidate)| (*candidate == object_id).then(|| relation.clone()))
+            .ok_or(SequenceValueError::LastvalUndefined)?;
+        let name = relation.qualified_name();
+        self.ensure_sequence_currval_privilege(&name, &relation)?;
+        Ok(value)
     }
 
     pub fn setval(&self, name: &str, value: i64) -> Result<i64, String> {
@@ -536,6 +546,7 @@ impl Engine {
             .is_some_and(|persistence| {
                 *persistence == uqa_sql::ast::RelationPersistence::Temporary
             });
+        self.ensure_sequence_setval_privilege(&name, &relation)?;
         if self.current_transaction_is_read_only() && !temporary {
             return Err(SequenceValueError::ReadOnly("setval"));
         }

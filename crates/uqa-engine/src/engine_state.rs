@@ -29,6 +29,7 @@ pub(super) struct StorageContext {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SequenceSecurity {
     pub(crate) role_owner: String,
+    pub(crate) acl: Option<Vec<uqa_storage::SequenceAclEntry>>,
 }
 
 impl StorageContext {

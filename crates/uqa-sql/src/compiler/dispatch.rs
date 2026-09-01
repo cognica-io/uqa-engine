@@ -24,8 +24,8 @@ use super::relations::{
 };
 use super::routines::{
     compile_alter_role, compile_alter_routine, compile_alter_routine_owner, compile_call,
-    compile_create_function, compile_create_role, compile_do, compile_drop_role,
-    compile_grant_role, compile_grant_routine,
+    compile_create_function, compile_create_role, compile_do, compile_drop_role, compile_grant,
+    compile_grant_role,
 };
 use super::sequences::{compile_alter_sequence, compile_create_sequence};
 use super::{
@@ -113,7 +113,7 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
             compile_alter_routine(stmt).map(Statement::AlterRoutine)
         }
         NodeEnum::AlterOwnerStmt(stmt) => compile_alter_routine_owner(stmt),
-        NodeEnum::GrantStmt(stmt) => compile_grant_routine(stmt),
+        NodeEnum::GrantStmt(stmt) => compile_grant(stmt),
         NodeEnum::GrantRoleStmt(stmt) => compile_grant_role(stmt),
         NodeEnum::CreateRoleStmt(stmt) => compile_create_role(stmt),
         NodeEnum::AlterRoleStmt(stmt) => compile_alter_role(stmt),

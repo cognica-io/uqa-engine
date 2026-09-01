@@ -8,6 +8,7 @@
 
 use super::builtin_routines::PG18_BUILTIN_ROUTINE_GROUPS;
 use super::expression_text::schema_expr_text;
+use super::helpers::acl::acl_identifier;
 use super::helpers::oids::{current_user_oid, schema_oid, split_schema_name, stable_oid};
 use super::helpers::rows::{
     bool_value, catalog_array, catalog_usize, int_value, list_int, row, str_value,
@@ -356,14 +357,4 @@ fn routine_acl_catalog_value(def: &uqa_sql::ast::CreateFunction) -> Result<Value
             }),
     );
     catalog_array(entries, "pg_proc.proacl")
-}
-
-fn acl_identifier(name: &str) -> String {
-    if name.bytes().enumerate().all(|(index, byte)| {
-        byte == b'_' || byte.is_ascii_lowercase() || index > 0 && byte.is_ascii_digit()
-    }) {
-        name.to_string()
-    } else {
-        format!("\"{}\"", name.replace('"', "\"\""))
-    }
 }

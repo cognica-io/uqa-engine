@@ -222,6 +222,10 @@ impl Engine {
         }
         state.owner = self.resolve_sequence_ownership(&name, ownership)?;
         let role_owner = self.current_user_name();
+        let security = SequenceSecurity {
+            role_owner,
+            acl: None,
+        };
         let object_id = crate::new_sequence_object_id().map_err(|error| {
             SQLError::Internal(format!("allocate sequence `{name}` identity: {error}"))
         })?;
@@ -234,10 +238,9 @@ impl Engine {
         } else if let Some(catalog) = self.storage.catalog.as_ref() {
             let created = catalog
                 .create_sequence_row(
-                    &Self::sequence_row(&name, object_id, state, persistence, &role_owner)
-                        .map_err(|error| {
-                            SQLError::Internal(format!("build sequence catalog row: {error}"))
-                        })?,
+                    &Self::sequence_row(&name, object_id, state, persistence, &security).map_err(
+                        |error| SQLError::Internal(format!("build sequence catalog row: {error}")),
+                    )?,
                 )
                 .map_err(|error| {
                     SQLError::Internal(format!("persist sequence catalog: {error}"))
@@ -266,7 +269,7 @@ impl Engine {
         self.durable
             .sequence_security
             .write()
-            .insert(relation, SequenceSecurity { role_owner });
+            .insert(relation, security);
         self.note_catalog_registry_changed();
         Ok(true)
     }
@@ -506,12 +509,12 @@ impl Engine {
         invalidate_current_cache: bool,
     ) -> Result<(), SQLError> {
         let temporary = persistence == uqa_sql::ast::RelationPersistence::Temporary;
-        let role_owner = self
+        let security = self
             .durable
             .sequence_security
             .read()
             .get(relation)
-            .map(|security| security.role_owner.clone())
+            .cloned()
             .ok_or_else(|| {
                 SQLError::Internal(format!("sequence `{name}` has no security metadata"))
             })?;
@@ -519,7 +522,7 @@ impl Engine {
             if let Some(catalog) = self.storage.catalog.as_ref() {
                 if !catalog
                     .replace_sequence_row(
-                        &Self::sequence_row(name, object_id, state, persistence, &role_owner)
+                        &Self::sequence_row(name, object_id, state, persistence, &security)
                             .map_err(|error| {
                                 SQLError::Internal(format!("build sequence catalog row: {error}"))
                             })?,

@@ -6,6 +6,7 @@
 
 //! Responsibility-owned helpers for `PostgreSQL` catalog projection.
 
+pub(super) mod acl;
 pub(super) mod constraints;
 mod dependencies;
 pub(super) mod index_definitions;

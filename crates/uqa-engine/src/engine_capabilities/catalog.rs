@@ -144,7 +144,12 @@ impl CatalogReadView {
 
     pub(crate) fn sequences(
         &self,
-    ) -> Vec<(String, uqa_sql::ast::RelationPersistence, [u8; 16], String)> {
+    ) -> Vec<(
+        String,
+        uqa_sql::ast::RelationPersistence,
+        [u8; 16],
+        crate::engine_state::SequenceSecurity,
+    )> {
         self.snapshot
             .durable
             .sequences
@@ -168,7 +173,11 @@ impl CatalogReadView {
                         .durable
                         .sequence_security
                         .get(identity)
-                        .map_or_else(|| "uqa".into(), |security| security.role_owner.clone()),
+                        .cloned()
+                        .unwrap_or_else(|| crate::engine_state::SequenceSecurity {
+                            role_owner: "uqa".into(),
+                            acl: None,
+                        }),
                 )
             })
             .collect()

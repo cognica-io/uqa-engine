@@ -734,6 +734,7 @@ impl Statement {
             | Self::AlterRoutine(_)
             | Self::AlterRoutineOwner(_)
             | Self::GrantRoutine(_)
+            | Self::GrantSequence(_)
             | Self::GrantRole(_)
             | Self::CreateRole(_)
             | Self::AlterRole(_)

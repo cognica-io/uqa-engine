@@ -92,6 +92,8 @@ pub(super) struct StoredSequence {
     #[serde(default = "legacy_sequence_role_owner")]
     pub(super) role_owner: String,
     #[serde(default)]
+    pub(super) acl: Option<Vec<crate::catalog::SequenceAclEntry>>,
+    #[serde(default)]
     pub(super) object_id: [u8; 16],
     #[serde(default)]
     pub(super) definition_generation: [u8; 16],

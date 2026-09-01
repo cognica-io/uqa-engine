@@ -74,6 +74,7 @@ impl KeyValueCatalog {
             &key,
             &encode_value(&StoredSequence {
                 role_owner: sequence.role_owner.clone(),
+                acl: sequence.acl.clone(),
                 object_id: sequence.object_id,
                 definition_generation: sequence.definition_generation,
                 start: sequence.start,
@@ -103,6 +104,7 @@ impl KeyValueCatalog {
             &key,
             &encode_value(&StoredSequence {
                 role_owner: sequence.role_owner.clone(),
+                acl: sequence.acl.clone(),
                 object_id: sequence.object_id,
                 definition_generation: sequence.definition_generation,
                 start: sequence.start,
@@ -178,6 +180,7 @@ impl KeyValueCatalog {
                 Ok(SequenceRow {
                     relation,
                     role_owner: stored.role_owner,
+                    acl: stored.acl,
                     object_id: stored.object_id,
                     definition_generation: stored.definition_generation,
                     start: stored.start,

@@ -138,6 +138,83 @@ fn sequence_role_owner_preserves_direct_and_historical_syntax() {
 }
 
 #[test]
+fn sequence_grants_preserve_privileges_targets_and_grant_paths() {
+    use crate::ast::{GrantSequenceTarget, SequencePrivilege, SequenceRevokeBehavior};
+
+    let Statement::GrantSequence(grant) = first(
+        "GRANT USAGE, SELECT ON SEQUENCE app.ids, ids2 TO caller, PUBLIC WITH GRANT OPTION GRANTED BY CURRENT_USER",
+    ) else {
+        panic!("not sequence GRANT");
+    };
+    assert!(grant.is_grant);
+    assert!(grant.grant_option);
+    assert_eq!(
+        grant.privileges,
+        vec![SequencePrivilege::Usage, SequencePrivilege::Select]
+    );
+    assert!(matches!(
+        grant.target,
+        GrantSequenceTarget::Sequences {
+            ref names,
+            require_sequence: true,
+        } if names == &["app.ids", "ids2"]
+    ));
+    assert_eq!(grant.grantees, ["caller", "PUBLIC"]);
+    assert_eq!(grant.grantor.as_deref(), Some("CURRENT_USER"));
+
+    let Statement::GrantSequence(revoke) = first(
+        "REVOKE GRANT OPTION FOR ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA app, public FROM caller CASCADE",
+    ) else {
+        panic!("not sequence REVOKE");
+    };
+    assert!(!revoke.is_grant);
+    assert!(revoke.grant_option_only);
+    assert_eq!(revoke.revoke_behavior, SequenceRevokeBehavior::Cascade);
+    assert_eq!(
+        revoke.privileges,
+        vec![
+            SequencePrivilege::Select,
+            SequencePrivilege::Update,
+            SequencePrivilege::Usage,
+        ]
+    );
+    assert!(matches!(
+        revoke.target,
+        GrantSequenceTarget::AllSequencesInSchemas { ref schemas }
+            if schemas == &["app", "public"]
+    ));
+
+    let Statement::GrantSequence(historical) = first("GRANT SELECT ON TABLE app.ids TO caller")
+    else {
+        panic!("not historical sequence-compatible GRANT");
+    };
+    assert!(matches!(
+        historical.target,
+        GrantSequenceTarget::Sequences {
+            require_sequence: false,
+            ..
+        }
+    ));
+
+    let Statement::GrantSequence(invalid) = first("GRANT INSERT ON SEQUENCE ids TO caller") else {
+        panic!("not deferred invalid sequence privilege");
+    };
+    assert_eq!(
+        invalid.privileges,
+        vec![SequencePrivilege::Unsupported("INSERT".into())]
+    );
+
+    let Statement::GrantSequence(columns) = first("GRANT SELECT (value) ON SEQUENCE ids TO caller")
+    else {
+        panic!("not deferred sequence column privilege");
+    };
+    assert_eq!(
+        columns.privileges,
+        vec![SequencePrivilege::ColumnsUnsupported]
+    );
+}
+
+#[test]
 fn create_table_with_vector_column() {
     let stmt = first("CREATE TABLE docs (id INTEGER PRIMARY KEY, title TEXT, embedding VECTOR(4))");
     let Statement::CreateTable(ct) = stmt else {

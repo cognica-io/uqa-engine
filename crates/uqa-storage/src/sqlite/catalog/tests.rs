@@ -14,6 +14,22 @@ fn fresh() -> Catalog {
     Catalog::open(mc).unwrap()
 }
 
+fn sample_sequence_acl() -> Vec<crate::catalog::SequenceAclEntry> {
+    vec![crate::catalog::SequenceAclEntry {
+        role: "sequence_reader".into(),
+        grantor: Some("sequence_owner".into()),
+        privileges: crate::catalog::SequencePrivileges {
+            select: true,
+            update: false,
+            usage: true,
+        },
+        grant_options: crate::catalog::SequencePrivileges {
+            usage: true,
+            ..crate::catalog::SequencePrivileges::default()
+        },
+    }]
+}
+
 #[test]
 fn migration_creates_tables_table() {
     let cat = fresh();
@@ -100,10 +116,12 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
         column_object_id: [6; 16],
         dependency: crate::catalog::SequenceOwnerDependency::Internal,
     };
+    let acl = sample_sequence_acl();
     catalog
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "controlled"),
             role_owner: "sequence_owner".into(),
+            acl: Some(acl.clone()),
             object_id,
             definition_generation: object_id,
             start: 1,
@@ -133,6 +151,7 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
     assert!(!uncalled.called);
     assert_eq!(uncalled.owner, Some(owner));
     assert_eq!(uncalled.role_owner, "sequence_owner");
+    assert_eq!(uncalled.acl, Some(acl));
     assert_eq!(
         catalog
             .next_sequence_value("public.controlled", object_id)
@@ -163,6 +182,7 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "cycling"),
             role_owner: "uqa".into(),
+            acl: None,
             object_id: cycling_id,
             definition_generation: cycling_id,
             start: 5,
@@ -199,6 +219,7 @@ fn sqlite_sequence_rename_moves_catalog_identity_and_value_atomically() {
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "ids"),
             role_owner: "uqa".into(),
+            acl: None,
             object_id,
             definition_generation: [18; 16],
             start: 1,
@@ -242,6 +263,7 @@ fn sqlite_sequence_rename_moves_catalog_identity_and_value_atomically() {
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "occupied"),
             role_owner: "uqa".into(),
+            acl: None,
             object_id: [19; 16],
             definition_generation: [19; 16],
             start: 1,
@@ -271,6 +293,7 @@ fn sqlite_sequence_reservations_are_atomic_and_stop_at_the_configured_bound() {
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "cached"),
             role_owner: "uqa".into(),
+            acl: None,
             object_id,
             definition_generation: generation,
             start: 1,

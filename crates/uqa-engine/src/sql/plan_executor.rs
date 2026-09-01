@@ -450,6 +450,10 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 self.engine.grant_sql_routine(statement)?;
                 Ok(SQLResult::empty())
             }
+            CommandPlan::GrantSequence(statement) => {
+                self.engine.grant_sequence_privileges(statement)?;
+                Ok(SQLResult::empty())
+            }
             CommandPlan::GrantRole(statement) => {
                 self.engine.grant_roles(statement)?;
                 Ok(SQLResult::empty())

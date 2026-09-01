@@ -165,6 +165,37 @@ pub(crate) fn resolve_regclass_oid(engine: &Engine, name: &str) -> Result<Option
     lookup_regclass_oid(engine, name).map_err(|error| error.to_string())
 }
 
+pub(crate) fn resolve_regclass_kind_by_oid(
+    engine: &Engine,
+    oid: i64,
+) -> Result<Option<(String, String)>, SQLError> {
+    let catalog = engine.catalog_read_view();
+    let resolution = engine.session_execution_view().relation_name_resolution();
+    for row in build_pg_class(engine, &catalog, &resolution)? {
+        if row.get("oid") != Some(&Value::Int(oid)) {
+            continue;
+        }
+        let name = match row.get("relname") {
+            Some(Value::Str(name) | Value::FixedChar(name)) => name.clone(),
+            _ => {
+                return Err(SQLError::Internal(format!(
+                    "pg_class row {oid} has no relname"
+                )))
+            }
+        };
+        let kind = match row.get("relkind") {
+            Some(Value::Str(kind) | Value::FixedChar(kind)) => kind.clone(),
+            _ => {
+                return Err(SQLError::Internal(format!(
+                    "pg_class row {oid} has no relkind"
+                )))
+            }
+        };
+        return Ok(Some((name, kind)));
+    }
+    Ok(None)
+}
+
 fn parse_regprocedure_name(
     name: &str,
 ) -> Result<Option<uqa_sql::ParsedRegprocedureName>, SQLError> {

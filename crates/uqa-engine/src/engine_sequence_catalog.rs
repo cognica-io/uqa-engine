@@ -18,12 +18,13 @@ impl Engine {
         object_id: [u8; 16],
         state: SequenceState,
         persistence: uqa_sql::ast::RelationPersistence,
-        role_owner: &str,
+        security: &SequenceSecurity,
     ) -> StorageBackendResult<SequenceRow> {
         Ok(SequenceRow {
             relation: RelationIdentity::from_legacy_name(name)
                 .map_err(StorageBackendError::Other)?,
-            role_owner: role_owner.into(),
+            role_owner: security.role_owner.clone(),
+            acl: security.acl.clone(),
             object_id,
             definition_generation: state.definition_generation,
             start: state.start,
@@ -77,7 +78,10 @@ impl Engine {
                         crate::new_sequence_object_id()?,
                         state,
                         uqa_sql::ast::RelationPersistence::Permanent,
-                        "uqa",
+                        &SequenceSecurity {
+                            role_owner: "uqa".into(),
+                            acl: None,
+                        },
                     )?)?;
                 }
                 catalog.set_metadata(SEQUENCES_METADATA_KEY, "{}")?;
@@ -199,10 +203,11 @@ impl Engine {
                 }
             };
             let role_owner = row.role_owner.clone();
+            let acl = row.acl.clone();
             let (relation, state) = Self::sequence_state_from_row(row)?;
             persistence.insert(relation.clone(), stored);
             object_ids.insert(relation.clone(), object_id);
-            security.insert(relation.clone(), SequenceSecurity { role_owner });
+            security.insert(relation.clone(), SequenceSecurity { role_owner, acl });
             sequences.insert(relation, state);
         }
         *self.durable.sequences.write() = sequences;

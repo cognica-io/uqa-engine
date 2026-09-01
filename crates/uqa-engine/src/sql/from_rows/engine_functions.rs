@@ -32,6 +32,7 @@ pub(in crate::sql) fn engine_func_intercept(
             | "pg_get_triggerdef"
             | "pg_get_ruledef"
             | "pg_has_role"
+            | "has_sequence_privilege"
     ) {
         let values = args
             .iter()
@@ -139,6 +140,7 @@ pub(in crate::sql) fn engine_catalog_scalar_value(
         "pg_get_ruledef" => crate::sql::catalog::pg_get_ruledef_value(engine, arguments),
         "pg_get_serial_sequence" => engine.pg_get_serial_sequence_value(arguments),
         "pg_has_role" => engine.pg_has_role_value(arguments),
+        "has_sequence_privilege" => engine.has_sequence_privilege_value(arguments),
         _ => return None,
     })
 }
