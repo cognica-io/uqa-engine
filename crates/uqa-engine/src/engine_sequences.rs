@@ -427,7 +427,94 @@ impl Engine {
         else {
             return Ok(false);
         };
-        let relation = Self::resolved_relation_identity(&name)
+        self.drop_sequences_sql_inner(std::slice::from_ref(&name), false)
+            .map_err(|error| error.to_string())?;
+        Ok(true)
+    }
+
+    pub(crate) fn drop_sequences_sql_inner(
+        &self,
+        names: &[String],
+        cascade: bool,
+    ) -> Result<(), SQLError> {
+        let mut cascade_columns = Vec::new();
+        let mut direct_views = Vec::new();
+        for name in names {
+            let columns = self
+                .sequence_schema_expression_dependents(name)
+                .map_err(|error| {
+                    SQLError::Internal(format!(
+                        "inspect column dependencies for sequence `{name}`: {error}"
+                    ))
+                })?;
+            let views = self.views_depending_on_sequence(name).map_err(|error| {
+                SQLError::Internal(format!(
+                    "inspect view dependencies for sequence `{name}`: {error}"
+                ))
+            })?;
+            if !cascade && (!columns.is_empty() || !views.is_empty()) {
+                let mut dependents = columns
+                    .iter()
+                    .map(|(table, column)| format!("{table}.{column}"))
+                    .collect::<Vec<_>>();
+                dependents.extend(views.iter().map(|view| format!("view {view}")));
+                return Err(SQLError::Routine {
+                    sqlstate: "2BP01".into(),
+                    message: format!(
+                        "cannot drop sequence {name} because other objects depend on it: {}",
+                        dependents.join(", ")
+                    ),
+                });
+            }
+            cascade_columns.extend(columns);
+            direct_views.extend(views);
+        }
+        cascade_columns.sort();
+        cascade_columns.dedup();
+        let cascade_views = self.cascade_view_closure(direct_views)?;
+        if cascade && !cascade_views.is_empty() {
+            self.drop_views_inner(&cascade_views)?;
+        }
+        for name in names {
+            self.detach_sequence_column_dependencies(name, cascade)
+                .map_err(|error| {
+                    SQLError::Internal(format!(
+                        "detach column dependencies for sequence `{name}`: {error}"
+                    ))
+                })?;
+            if !self
+                .remove_sequence_state_inner(name)
+                .map_err(SQLError::Internal)?
+            {
+                return Err(SQLError::Internal(format!(
+                    "resolved sequence `{name}` disappeared before DROP"
+                )));
+            }
+        }
+        if cascade {
+            let mut dependents = cascade_columns
+                .iter()
+                .map(|(table, column)| {
+                    format!("default value for column {column} of table {table}")
+                })
+                .collect::<Vec<_>>();
+            dependents.extend(cascade_views.iter().map(|view| format!("view {view}")));
+            match dependents.as_slice() {
+                [] => {}
+                [dependent] => {
+                    self.push_sql_notice("NOTICE", &format!("drop cascades to {dependent}"));
+                }
+                _ => self.push_sql_notice(
+                    "NOTICE",
+                    &format!("drop cascades to {} other objects", dependents.len()),
+                ),
+            }
+        }
+        Ok(())
+    }
+
+    fn remove_sequence_state_inner(&self, name: &str) -> Result<bool, String> {
+        let relation = Self::resolved_relation_identity(name)
             .map_err(|err| format!("resolve sequence `{name}`: {err}"))?;
         let object_id = self
             .durable
@@ -444,22 +531,11 @@ impl Engine {
             .is_some_and(|persistence| {
                 *persistence == uqa_sql::ast::RelationPersistence::Temporary
             });
-        self.ensure_no_sequence_default_dependencies(&name)
-            .map_err(|err| format!("DROP SEQUENCE `{name}` rejected: {err}"))?;
-        let dependent_views = self
-            .views_depending_on_sequence(&name)
-            .map_err(|err| format!("DROP SEQUENCE `{name}` dependency scan failed: {err}"))?;
-        if !dependent_views.is_empty() {
-            return Err(format!(
-                "DROP SEQUENCE `{name}` rejected: dependent view(s) `{}` reference it",
-                dependent_views.join("`, `")
-            ));
-        }
         let removed = if temporary {
             self.durable.sequences.read().contains_key(&relation)
         } else if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog
-                .drop_sequence_row(&name)
+                .drop_sequence_row(name)
                 .map_err(|err| format!("persist sequence catalog: {err}"))?
         } else {
             self.durable.sequences.read().contains_key(&relation)
@@ -477,6 +553,7 @@ impl Engine {
             {
                 session.last_sequence = None;
             }
+            drop(session);
             self.note_catalog_registry_changed();
         }
         Ok(removed)

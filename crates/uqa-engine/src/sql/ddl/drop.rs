@@ -42,7 +42,7 @@ pub(in crate::sql) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLRes
                 DropKind::View => "VIEW",
                 DropKind::MaterializedView => "MATERIALIZED VIEW",
                 DropKind::Schema => "SCHEMA",
-                DropKind::Table | DropKind::Index => unreachable!(),
+                DropKind::Table | DropKind::Index | DropKind::Sequence => unreachable!(),
             }
         )));
     }
@@ -88,6 +88,7 @@ pub(in crate::sql) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLRes
                 }
             }
         }
+        DropKind::Sequence => {}
     }
     for table in lock_targets {
         engine.lock_relation(&table, crate::row_locks::RelationLockMode::AccessExclusive)?;
@@ -258,6 +259,39 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
                 }
             }
             engine.drop_views(&views)?;
+        }
+        DropKind::Sequence => {
+            let mut sequences = Vec::new();
+            let mut seen = std::collections::BTreeSet::new();
+            for name in &stmt.names {
+                match engine
+                    .try_resolve_relation_kind(name)
+                    .map_err(|error| ddl_storage_error("DROP SEQUENCE", error))?
+                {
+                    Some((canonical, "sequence")) => {
+                        if seen.insert(canonical.clone()) {
+                            sequences.push(canonical);
+                        }
+                    }
+                    Some((_canonical, _kind)) => {
+                        return Err(SQLError::Routine {
+                            sqlstate: "42809".into(),
+                            message: format!("\"{name}\" is not a sequence"),
+                        });
+                    }
+                    None if stmt.if_exists => engine.push_sql_notice(
+                        "NOTICE",
+                        &format!("sequence \"{name}\" does not exist, skipping"),
+                    ),
+                    None => {
+                        return Err(SQLError::Routine {
+                            sqlstate: "42P01".into(),
+                            message: format!("sequence \"{name}\" does not exist"),
+                        });
+                    }
+                }
+            }
+            engine.drop_sequences_sql_inner(&sequences, stmt.cascade)?;
         }
         DropKind::Schema => {
             let mut schemas = Vec::new();

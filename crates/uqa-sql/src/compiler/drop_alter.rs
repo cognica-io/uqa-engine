@@ -38,6 +38,7 @@ pub(super) fn compile_drop(stmt: &pg_query::protobuf::DropStmt) -> Result<Statem
         ObjectType::ObjectIndex => DropKind::Index,
         ObjectType::ObjectView => DropKind::View,
         ObjectType::ObjectMatview => DropKind::MaterializedView,
+        ObjectType::ObjectSequence => DropKind::Sequence,
         ObjectType::ObjectSchema => DropKind::Schema,
         ObjectType::ObjectFunction => return compile_drop_function(stmt, false),
         ObjectType::ObjectProcedure => return compile_drop_function(stmt, true),
@@ -65,12 +66,19 @@ pub(super) fn compile_drop(stmt: &pg_query::protobuf::DropStmt) -> Result<Statem
                 }
                 if matches!(
                     kind,
-                    DropKind::Table | DropKind::View | DropKind::MaterializedView
+                    DropKind::Table
+                        | DropKind::View
+                        | DropKind::MaterializedView
+                        | DropKind::Sequence
                 ) {
                     if parts.len() > 2 {
-                        return Err(SQLError::Unsupported(
-                            "cross-database DROP targets are not supported".into(),
-                        ));
+                        return Err(SQLError::Routine {
+                            sqlstate: "42601".into(),
+                            message: format!(
+                                "improper qualified name (too many dotted names): {}",
+                                parts.join(".")
+                            ),
+                        });
                     }
                     names.push(
                         parts

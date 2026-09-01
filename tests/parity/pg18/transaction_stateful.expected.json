@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "e8653e760c7afd48a22e58c2779bac000b588c62c309f99018f2dee21fe29772",
+  "fixture_sha256": "4c76eb846302e3678a40aa92792eb5a73a3fc4f1bb43aff6b90d9d86448a5705",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -1060,6 +1060,122 @@
           "lastval"
         ]
       ]
+    },
+    {
+      "name": "create_drop_sequence_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "drop_sequence_missing",
+      "kind": "error",
+      "sqlstate": "42P01"
+    },
+    {
+      "name": "drop_sequence_if_exists_missing",
+      "kind": "ok"
+    },
+    {
+      "name": "drop_sequence_if_exists_wrong_kind",
+      "kind": "error",
+      "sqlstate": "42809"
+    },
+    {
+      "name": "drop_sequence_multi_target_atomic",
+      "kind": "error",
+      "sqlstate": "42P01"
+    },
+    {
+      "name": "drop_sequence_multi_target_atomic_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "drop_sequence_basic_catalog_removal",
+      "kind": "ok"
+    },
+    {
+      "name": "drop_sequence_basic_catalog_removal_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "0",
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "drop_sequence_dependency_restrict",
+      "kind": "error",
+      "sqlstate": "2BP01"
+    },
+    {
+      "name": "drop_sequence_dependency_cascade",
+      "kind": "ok"
+    },
+    {
+      "name": "drop_sequence_dependency_cascade_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t",
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "drop_sequence_serial_restrict",
+      "kind": "error",
+      "sqlstate": "2BP01"
+    },
+    {
+      "name": "drop_sequence_serial_cascade_and_replaced_default",
+      "kind": "ok"
+    },
+    {
+      "name": "drop_sequence_serial_cascade_and_replaced_default_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t",
+          "t",
+          "42"
+        ]
+      ]
+    },
+    {
+      "name": "drop_sequence_transaction_rollback_semantics",
+      "kind": "ok"
+    },
+    {
+      "name": "drop_sequence_transaction_rollback_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "savepoint_rollback",
+          "20",
+          "20",
+          "t"
+        ],
+        [
+          "transaction_rollback",
+          "20",
+          "20",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "drop_sequence_read_only_transaction",
+      "kind": "error",
+      "sqlstate": "25006"
     },
     {
       "name": "setval_false_session_semantics",

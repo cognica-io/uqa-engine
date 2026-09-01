@@ -351,28 +351,6 @@ impl Engine {
         Ok(dependents)
     }
 
-    fn cascade_view_closure(&self, initial: Vec<String>) -> Result<Vec<String>, SQLError> {
-        let mut views = initial;
-        views.sort();
-        views.dedup();
-        let mut index = 0;
-        while index < views.len() {
-            let dependents = self
-                .views_depending_on_relation(&views[index])
-                .map_err(|error| {
-                    SQLError::Internal(format!("read cascading view dependencies: {error}"))
-                })?;
-            for dependent in dependents {
-                if !views.contains(&dependent) {
-                    views.push(dependent);
-                }
-            }
-            index += 1;
-        }
-        views.sort();
-        Ok(views)
-    }
-
     fn ensure_no_function_dependencies(
         name: &str,
         argument_types: &[String],

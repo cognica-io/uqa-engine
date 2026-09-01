@@ -730,6 +730,31 @@ impl Engine {
         Ok(dependents)
     }
 
+    pub(crate) fn cascade_view_closure(
+        &self,
+        initial: Vec<String>,
+    ) -> Result<Vec<String>, SQLError> {
+        let mut views = initial;
+        views.sort();
+        views.dedup();
+        let mut index = 0;
+        while index < views.len() {
+            let dependents = self
+                .views_depending_on_relation(&views[index])
+                .map_err(|error| {
+                    SQLError::Internal(format!("read cascading view dependencies: {error}"))
+                })?;
+            for dependent in dependents {
+                if !views.contains(&dependent) {
+                    views.push(dependent);
+                }
+            }
+            index += 1;
+        }
+        views.sort();
+        Ok(views)
+    }
+
     /// Return stored views whose persisted query plan is bound to one exact
     /// non-builtin function identity. Return type is deliberately excluded:
     /// `PostgreSQL` function identity is its canonical name plus input types.

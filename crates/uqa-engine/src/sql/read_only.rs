@@ -58,6 +58,7 @@ fn forbidden_command(
         CommandPlan::Delete(delete) => dml_command(engine, &delete.table, "DELETE", command),
         CommandPlan::Merge(merge) => dml_command(engine, &merge.target, "MERGE", command),
         CommandPlan::Drop(drop) if drop.kind == DropKind::Table => Ok(Some("DROP TABLE")),
+        CommandPlan::Drop(drop) if drop.kind == DropKind::Sequence => Ok(Some("DROP SEQUENCE")),
         CommandPlan::Drop(_) => Ok(Some("DROP")),
         CommandPlan::AlterTable(_) => Ok(Some("ALTER TABLE")),
         CommandPlan::AlterViewOptions(_) => Ok(Some("ALTER VIEW")),

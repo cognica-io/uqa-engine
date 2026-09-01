@@ -327,9 +327,14 @@ SELECT lastval();
 SELECT setval('ticket_ids', 2000);
 SELECT setval('ticket_ids', 2500, false);
 ALTER SEQUENCE ticket_ids RESTART WITH 3000;
+DROP SEQUENCE ticket_ids;
 ```
 
-`CREATE SEQUENCE` supports start and increment for ordinary, temporary, and unlogged sequences. Temporary sequences live in `pg_temp`, participate in `DISCARD TEMP`, and do not survive a reopen; unlogged sequence state survives a clean reopen, while crash-recovery reset semantics remain open. `ALTER SEQUENCE` supports restart, increment, and start. The two-argument `setval` marks the installed value as called, while the three-argument form accepts `false` to make the next `nextval` return the installed value exactly. SQL `DROP SEQUENCE` is not implemented; the Rust engine API provides `Engine::drop_sequence`. Minimum, maximum, cache, cycle, ownership, and identity ownership are not implemented.
+`CREATE SEQUENCE` supports start and increment for ordinary, temporary, and unlogged sequences. Temporary sequences live in `pg_temp`, participate in `DISCARD TEMP`, and do not survive a reopen; unlogged sequence state survives a clean reopen, while crash-recovery reset semantics remain open. `ALTER SEQUENCE` supports restart, increment, and start. The two-argument `setval` marks the installed value as called, while the three-argument form accepts `false` to make the next `nextval` return the installed value exactly. Minimum, maximum, cache, cycle, explicit `OWNED BY`, and identity ownership are not implemented.
+
+`DROP SEQUENCE [ IF EXISTS ] name [, ...] [ CASCADE | RESTRICT ]` resolves relation names through the current `search_path`, validates every target before mutation, ignores duplicate targets, and uses `RESTRICT` by default. A missing target reports `42P01` unless `IF EXISTS` requests a notice and continuation, a target of another relation kind reports `42809` even with `IF EXISTS`, a dependency rejected by `RESTRICT` reports `2BP01`, and a read-only transaction reports `25006` before target lookup.
+
+`CASCADE` removes referencing column defaults and the complete closure of dependent views while retaining the underlying tables. Dropping a serial sequence with `CASCADE` removes its column default and serial ownership metadata; if the serial default was replaced first, an ordinary drop succeeds and preserves the replacement expression. Sequence drops are transactional: transaction and savepoint rollback restore the catalog object and its session-local `currval` and `lastval` identity, while a committed drop remains absent after reopen and does not transfer session values to a same-named replacement.
 
 ## Foreign servers and tables
 

@@ -445,3 +445,25 @@ fn quoted_dots_preserve_range_var_component_boundaries() {
     };
     assert_eq!(drop.names, vec!["\"a.b\".\"d.e\"".to_string()]);
 }
+
+#[test]
+fn drop_sequence_preserves_targets_and_behavior() {
+    let Statement::Drop(drop) =
+        first("DROP SEQUENCE IF EXISTS public.first_ids, \"app.data\".\"second.ids\" CASCADE")
+    else {
+        panic!("expected DROP SEQUENCE");
+    };
+    assert_eq!(drop.kind, DropKind::Sequence);
+    assert_eq!(
+        drop.names,
+        vec![
+            "public.first_ids".to_string(),
+            "\"app.data\".\"second.ids\"".to_string()
+        ]
+    );
+    assert!(drop.if_exists);
+    assert!(drop.cascade);
+
+    let error = compile("DROP SEQUENCE database.public.ids").unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42601"));
+}

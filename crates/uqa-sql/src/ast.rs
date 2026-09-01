@@ -93,6 +93,7 @@ pub enum DropKind {
     View,
     MaterializedView,
     Schema,
+    Sequence,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

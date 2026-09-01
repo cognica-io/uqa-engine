@@ -250,23 +250,20 @@ impl Engine {
         Ok(targets)
     }
 
-    pub(crate) fn ensure_no_sequence_default_dependencies(
+    pub(crate) fn sequence_schema_expression_dependents(
         &self,
         sequence: &str,
-    ) -> StorageBackendResult<()> {
+    ) -> StorageBackendResult<Vec<(String, String)>> {
         self.synchronize_table_catalog()?;
         let mut dependents = Vec::new();
         for (table_name, table) in self.table_entries() {
             for column in table.columns.read().iter() {
-                let mut depends = column
-                    .auto_increment
-                    .as_ref()
-                    .is_some_and(|provenance| provenance.sequence.as_deref() == Some(sequence));
-                if let Some(default) = &column.default {
-                    depends |= self
-                        .stored_sequence_targets_in_expr(default)?
-                        .contains(sequence);
-                }
+                let mut depends = if let Some(default) = &column.default {
+                    self.stored_sequence_targets_in_expr(default)?
+                        .contains(sequence)
+                } else {
+                    false
+                };
                 if !depends {
                     if let Some(generated) = &column.generated {
                         depends = self
@@ -275,17 +272,90 @@ impl Engine {
                     }
                 }
                 if depends {
-                    dependents.push(format!("{table_name}.{}", column.name));
+                    dependents.push((table_name.clone(), column.name.clone()));
                 }
             }
         }
+        dependents.sort();
+        Ok(dependents)
+    }
+
+    pub(crate) fn ensure_no_sequence_default_dependencies(
+        &self,
+        sequence: &str,
+    ) -> StorageBackendResult<()> {
+        let dependents = self.sequence_schema_expression_dependents(sequence)?;
         if dependents.is_empty() {
             return Ok(());
         }
         Err(StorageBackendError::Other(format!(
             "column schema expression(s) `{}` depend on sequence `{sequence}`",
-            dependents.join("`, `")
+            dependents
+                .iter()
+                .map(|(table, column)| format!("{table}.{column}"))
+                .collect::<Vec<_>>()
+                .join("`, `")
         )))
+    }
+
+    /// Remove schema-expression dependencies requested by `DROP SEQUENCE CASCADE` and always detach serial ownership metadata whose sequence is being removed.
+    pub(crate) fn detach_sequence_column_dependencies(
+        &self,
+        sequence: &str,
+        cascade: bool,
+    ) -> StorageBackendResult<()> {
+        if !cascade {
+            self.ensure_no_sequence_default_dependencies(sequence)?;
+        }
+        let mut catalog_changed = false;
+        for (table_name, table) in self.table_entries() {
+            let mut columns = table.columns.read().clone();
+            let mut table_changed = false;
+            for column in &mut columns {
+                if cascade {
+                    let default_depends = if let Some(default) = &column.default {
+                        self.stored_sequence_targets_in_expr(default)?
+                            .contains(sequence)
+                    } else {
+                        false
+                    };
+                    if default_depends {
+                        column.default = None;
+                        table_changed = true;
+                    }
+                    let generated_depends = if let Some(generated) = &column.generated {
+                        self.stored_sequence_targets_in_expr(&generated.expression)?
+                            .contains(sequence)
+                    } else {
+                        false
+                    };
+                    if generated_depends {
+                        column.generated = None;
+                        table_changed = true;
+                    }
+                }
+                if column
+                    .auto_increment
+                    .as_ref()
+                    .is_some_and(|provenance| provenance.sequence.as_deref() == Some(sequence))
+                {
+                    column.auto_increment = None;
+                    table_changed = true;
+                }
+            }
+            if !table_changed {
+                continue;
+            }
+            if self.is_persistent() {
+                self.try_save_table_schema_with_columns(&table_name, &table, &columns)?;
+            }
+            *table.columns.write() = columns;
+            catalog_changed = true;
+        }
+        if catalog_changed {
+            self.note_table_catalog_changed();
+        }
+        Ok(())
     }
 
     pub(super) fn table_schema_references_relation(

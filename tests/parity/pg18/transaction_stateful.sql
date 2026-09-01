@@ -1050,6 +1050,97 @@ SELECT lastval(1);
 SELECT oid, proname, prorettype, proargtypes::text, proisstrict, provolatile, proparallel, prosrc FROM pg_catalog.pg_proc WHERE oid = 2559;
 -- @end
 
+-- DROP SEQUENCE resolves every target before mutation, preserves transactional catalog and session state, and applies PostgreSQL dependency direction for defaults, views, and serial ownership.
+-- @case create_drop_sequence_fixture ok
+CREATE SEQUENCE drop_sequence_atomic;
+CREATE SEQUENCE drop_sequence_dependency;
+CREATE SEQUENCE drop_sequence_transaction START WITH 20;
+CREATE TABLE drop_sequence_default_table(id bigint DEFAULT nextval('drop_sequence_dependency'));
+CREATE VIEW drop_sequence_view AS SELECT nextval('drop_sequence_dependency') AS id;
+CREATE VIEW drop_sequence_nested_view AS SELECT id FROM drop_sequence_view;
+CREATE TABLE drop_sequence_serial_table(id serial, marker integer);
+CREATE TABLE drop_sequence_serial_replaced(id serial, marker integer);
+ALTER TABLE drop_sequence_serial_replaced ALTER COLUMN id SET DEFAULT 42;
+CREATE TABLE drop_sequence_wrong_kind(id integer);
+CREATE TABLE drop_sequence_observations(name text PRIMARY KEY, current_value bigint, last_value bigint, present boolean);
+-- @end
+
+-- @case drop_sequence_missing error
+DROP SEQUENCE drop_sequence_missing;
+-- @end
+
+-- @case drop_sequence_if_exists_missing ok
+DROP SEQUENCE IF EXISTS drop_sequence_missing;
+-- @end
+
+-- @case drop_sequence_if_exists_wrong_kind error
+DROP SEQUENCE IF EXISTS drop_sequence_wrong_kind;
+-- @end
+
+-- @case drop_sequence_multi_target_atomic error
+DROP SEQUENCE drop_sequence_atomic, drop_sequence_missing;
+-- @end
+
+-- @case drop_sequence_multi_target_atomic_result rows
+SELECT to_regclass('drop_sequence_atomic') IS NOT NULL AS first_target_preserved;
+-- @end
+
+-- @case drop_sequence_basic_catalog_removal ok
+DROP SEQUENCE drop_sequence_atomic;
+-- @end
+
+-- @case drop_sequence_basic_catalog_removal_result rows
+SELECT to_regclass('drop_sequence_atomic') IS NULL AS regclass_removed, (SELECT count(*) FROM pg_catalog.pg_class WHERE relnamespace = current_schema()::regnamespace AND relname = 'drop_sequence_atomic') AS class_rows, (SELECT count(*) FROM pg_catalog.pg_sequences WHERE schemaname = current_schema() AND sequencename = 'drop_sequence_atomic') AS sequence_rows;
+-- @end
+
+-- @case drop_sequence_dependency_restrict error
+DROP SEQUENCE drop_sequence_dependency;
+-- @end
+
+-- @case drop_sequence_dependency_cascade ok
+DROP SEQUENCE drop_sequence_dependency CASCADE;
+-- @end
+
+-- @case drop_sequence_dependency_cascade_result rows
+SELECT to_regclass('drop_sequence_dependency') IS NULL AS sequence_removed, (SELECT column_default IS NULL FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'drop_sequence_default_table' AND column_name = 'id') AS default_removed, to_regclass('drop_sequence_view') IS NULL AS view_removed, to_regclass('drop_sequence_nested_view') IS NULL AS nested_view_removed;
+-- @end
+
+-- @case drop_sequence_serial_restrict error
+DROP SEQUENCE drop_sequence_serial_table_id_seq;
+-- @end
+
+-- @case drop_sequence_serial_cascade_and_replaced_default ok
+DROP SEQUENCE drop_sequence_serial_table_id_seq CASCADE;
+DROP SEQUENCE drop_sequence_serial_replaced_id_seq;
+-- @end
+
+-- @case drop_sequence_serial_cascade_and_replaced_default_result rows
+SELECT to_regclass('drop_sequence_serial_table_id_seq') IS NULL AS serial_sequence_removed, (SELECT column_default IS NULL FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'drop_sequence_serial_table' AND column_name = 'id') AS serial_default_removed, to_regclass('drop_sequence_serial_replaced_id_seq') IS NULL AS replaced_sequence_removed, (SELECT column_default FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'drop_sequence_serial_replaced' AND column_name = 'id') AS replaced_default;
+-- @end
+
+-- @case drop_sequence_transaction_rollback_semantics ok
+INSERT INTO __UQA_STATEFUL_SCHEMA__.drop_sequence_observations VALUES ('initial', nextval('__UQA_STATEFUL_SCHEMA__.drop_sequence_transaction'), NULL, true);
+BEGIN;
+DROP SEQUENCE __UQA_STATEFUL_SCHEMA__.drop_sequence_transaction;
+ROLLBACK;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.drop_sequence_observations VALUES ('transaction_rollback', currval('__UQA_STATEFUL_SCHEMA__.drop_sequence_transaction'), lastval(), to_regclass('__UQA_STATEFUL_SCHEMA__.drop_sequence_transaction') IS NOT NULL);
+BEGIN;
+SAVEPOINT drop_sequence_point;
+DROP SEQUENCE __UQA_STATEFUL_SCHEMA__.drop_sequence_transaction;
+ROLLBACK TO SAVEPOINT drop_sequence_point;
+COMMIT;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.drop_sequence_observations VALUES ('savepoint_rollback', currval('__UQA_STATEFUL_SCHEMA__.drop_sequence_transaction'), lastval(), to_regclass('__UQA_STATEFUL_SCHEMA__.drop_sequence_transaction') IS NOT NULL);
+-- @end
+
+-- @case drop_sequence_transaction_rollback_result rows
+SELECT name, current_value, last_value, present FROM drop_sequence_observations WHERE name IN ('transaction_rollback', 'savepoint_rollback') ORDER BY name;
+-- @end
+
+-- @case drop_sequence_read_only_transaction error
+BEGIN READ ONLY;
+DROP SEQUENCE drop_sequence_transaction;
+-- @end
+
 -- @case setval_false_session_semantics ok
 INSERT INTO setval_observations VALUES ('initial_next', nextval('setval_is_called_sequence'), NULL);
 INSERT INTO setval_observations VALUES ('false_return', setval('setval_is_called_sequence', 42, false), NULL);

@@ -713,17 +713,211 @@ fn canonical_default_dependency_survives_reopen_and_blocks_only_its_sequence_dro
 }
 
 #[test]
-fn serial_ownership_still_blocks_sequence_drop_after_default_replacement() {
+fn serial_ownership_does_not_block_drop_after_default_replacement() {
     let eng = Engine::new();
-    eng.sql("CREATE TABLE serial_owner (id SERIAL)", &[])
+    eng.sql("CREATE TABLE serial_owner (id SERIAL, marker INTEGER)", &[])
         .unwrap();
     eng.sql(
         "ALTER TABLE serial_owner ALTER COLUMN id SET DEFAULT 42",
         &[],
     )
     .unwrap();
-    let error = eng.drop_sequence("public.serial_owner_id_seq").unwrap_err();
-    assert!(error.contains("public.serial_owner.id"), "{error}");
+    assert!(eng.drop_sequence("public.serial_owner_id_seq").unwrap());
+    assert_eq!(
+        eng.sql(
+            "INSERT INTO serial_owner(marker) VALUES (1) RETURNING id",
+            &[],
+        )
+        .unwrap()
+        .rows[0]["id"],
+        Value::Int(42)
+    );
+}
+
+#[test]
+fn drop_sequence_sql_matches_missing_wrong_kind_and_multi_target_semantics() {
+    let engine = Engine::new();
+    engine.sql("CREATE SEQUENCE first_ids", &[]).unwrap();
+    engine.sql("CREATE SEQUENCE second_ids", &[]).unwrap();
+    engine
+        .sql("CREATE TABLE not_a_sequence(id integer)", &[])
+        .unwrap();
+
+    let missing = engine.sql("DROP SEQUENCE missing_ids", &[]).unwrap_err();
+    assert_eq!(missing.sqlstate(), Some("42P01"));
+    engine
+        .sql("DROP SEQUENCE IF EXISTS missing_ids", &[])
+        .unwrap();
+    assert_eq!(
+        engine.take_sql_notices(),
+        vec![(
+            "NOTICE".to_string(),
+            "sequence \"missing_ids\" does not exist, skipping".to_string()
+        )]
+    );
+
+    for sql in [
+        "DROP SEQUENCE not_a_sequence",
+        "DROP SEQUENCE IF EXISTS not_a_sequence",
+    ] {
+        let wrong_kind = engine.sql(sql, &[]).unwrap_err();
+        assert_eq!(wrong_kind.sqlstate(), Some("42809"));
+    }
+
+    let multi = engine
+        .sql("DROP SEQUENCE first_ids, missing_ids", &[])
+        .unwrap_err();
+    assert_eq!(multi.sqlstate(), Some("42P01"));
+    assert!(engine.sequence_state("first_ids").unwrap().is_some());
+
+    engine
+        .sql(
+            "DROP SEQUENCE IF EXISTS first_ids, missing_ids, first_ids",
+            &[],
+        )
+        .unwrap();
+    assert!(engine.sequence_state("first_ids").unwrap().is_none());
+    assert!(engine.sequence_state("second_ids").unwrap().is_some());
+}
+
+#[test]
+fn drop_sequence_sql_restricts_or_cascades_column_and_view_dependencies() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("drop-sequence-cascade.sqlite");
+    {
+        let engine = Engine::open(&database).unwrap();
+        engine.sql("CREATE SEQUENCE dependency_ids", &[]).unwrap();
+        engine
+            .sql(
+                "CREATE TABLE dependent_rows(id bigint DEFAULT nextval('dependency_ids'))",
+                &[],
+            )
+            .unwrap();
+        engine
+            .sql(
+                "CREATE VIEW dependent_values AS SELECT nextval('dependency_ids') AS id",
+                &[],
+            )
+            .unwrap();
+        engine
+            .sql(
+                "CREATE VIEW nested_dependent_values AS SELECT id FROM dependent_values",
+                &[],
+            )
+            .unwrap();
+
+        let restricted = engine.sql("DROP SEQUENCE dependency_ids", &[]).unwrap_err();
+        assert_eq!(restricted.sqlstate(), Some("2BP01"));
+        assert!(engine.sequence_state("dependency_ids").unwrap().is_some());
+        assert!(engine
+            .column_default_expr("dependent_rows", "id")
+            .unwrap()
+            .is_some());
+        assert!(engine.view("dependent_values").unwrap().is_some());
+
+        engine
+            .sql("DROP SEQUENCE dependency_ids CASCADE", &[])
+            .unwrap();
+        assert!(engine.sequence_state("dependency_ids").unwrap().is_none());
+        assert!(engine
+            .column_default_expr("dependent_rows", "id")
+            .unwrap()
+            .is_none());
+        assert!(engine.view("dependent_values").unwrap().is_none());
+        assert!(engine.view("nested_dependent_values").unwrap().is_none());
+    }
+
+    let reopened = Engine::open(&database).unwrap();
+    assert!(reopened.sequence_state("dependency_ids").unwrap().is_none());
+    assert!(reopened
+        .column_default_expr("dependent_rows", "id")
+        .unwrap()
+        .is_none());
+    assert!(reopened.view("dependent_values").unwrap().is_none());
+    assert!(reopened.view("nested_dependent_values").unwrap().is_none());
+}
+
+#[test]
+fn drop_sequence_sql_cascade_detaches_serial_default_and_ownership() {
+    let engine = Engine::new();
+    engine
+        .sql("CREATE TABLE serial_rows(id serial, marker integer)", &[])
+        .unwrap();
+    let restricted = engine
+        .sql("DROP SEQUENCE serial_rows_id_seq", &[])
+        .unwrap_err();
+    assert_eq!(restricted.sqlstate(), Some("2BP01"));
+
+    engine
+        .sql("DROP SEQUENCE serial_rows_id_seq CASCADE", &[])
+        .unwrap();
+    assert!(engine
+        .sequence_state("serial_rows_id_seq")
+        .unwrap()
+        .is_none());
+    assert!(engine
+        .column_default_expr("serial_rows", "id")
+        .unwrap()
+        .is_none());
+    let missing_required_value = engine
+        .sql(
+            "INSERT INTO serial_rows(marker) VALUES (1) RETURNING id",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(missing_required_value.sqlstate(), Some("23502"));
+}
+
+#[test]
+fn drop_sequence_sql_is_transactional_and_clears_committed_session_state() {
+    let engine = Engine::new();
+    engine
+        .sql("CREATE SEQUENCE transactional_ids START 10", &[])
+        .unwrap();
+    assert_eq!(engine.nextval("transactional_ids").unwrap(), 10);
+
+    engine.sql("BEGIN", &[]).unwrap();
+    engine.sql("DROP SEQUENCE transactional_ids", &[]).unwrap();
+    assert!(engine
+        .sequence_state("transactional_ids")
+        .unwrap()
+        .is_none());
+    assert!(engine.lastval().is_err());
+    engine.sql("ROLLBACK", &[]).unwrap();
+    assert!(engine
+        .sequence_state("transactional_ids")
+        .unwrap()
+        .is_some());
+    assert_eq!(engine.currval("transactional_ids").unwrap(), 10);
+    assert_eq!(engine.lastval().unwrap(), 10);
+
+    engine.sql("BEGIN", &[]).unwrap();
+    engine.sql("SAVEPOINT sequence_drop_point", &[]).unwrap();
+    engine.sql("DROP SEQUENCE transactional_ids", &[]).unwrap();
+    engine
+        .sql("ROLLBACK TO SAVEPOINT sequence_drop_point", &[])
+        .unwrap();
+    engine.sql("COMMIT", &[]).unwrap();
+    assert!(engine
+        .sequence_state("transactional_ids")
+        .unwrap()
+        .is_some());
+    assert_eq!(engine.currval("transactional_ids").unwrap(), 10);
+    assert_eq!(engine.lastval().unwrap(), 10);
+
+    engine.sql("BEGIN READ ONLY", &[]).unwrap();
+    let read_only = engine
+        .sql("DROP SEQUENCE transactional_ids", &[])
+        .unwrap_err();
+    assert_eq!(read_only.sqlstate(), Some("25006"));
+    engine.sql("ROLLBACK", &[]).unwrap();
+
+    engine.sql("DROP SEQUENCE transactional_ids", &[]).unwrap();
+    assert!(engine
+        .sequence_state("transactional_ids")
+        .unwrap()
+        .is_none());
+    assert!(engine.lastval().is_err());
 }
 
 #[test]
