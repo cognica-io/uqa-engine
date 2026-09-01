@@ -1,0 +1,5 @@
+seed|1|1
+peer|ALTER SEQUENCE|ALTER SEQUENCE
+current|1|1|1|t|t
+after|2|2|2|2|2|t|t
+oid_call|3|3|3

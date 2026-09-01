@@ -1361,6 +1361,146 @@ BEGIN READ ONLY;
 ALTER SEQUENCE IF EXISTS sequence_persistence_missing SET UNLOGGED;
 -- @end
 
+-- Sequence renames and schema moves retain object identity, cached values, session values, and stored dependencies while following transactional catalog lifecycle.
+-- @case create_sequence_name_lifecycle_fixture ok
+CREATE SCHEMA __UQA_SCHEMA_PROBE__;
+CREATE SEQUENCE sequence_name_ids CACHE 3;
+CREATE SEQUENCE sequence_name_historical_ids CACHE 3;
+CREATE SEQUENCE sequence_name_collision_ids;
+CREATE SEQUENCE __UQA_SCHEMA_PROBE__.sequence_name_collision_ids;
+CREATE TABLE sequence_name_oid(saved_oid oid);
+INSERT INTO sequence_name_oid SELECT 'sequence_name_ids'::regclass::oid;
+CREATE TABLE sequence_name_default_rows(id bigint DEFAULT nextval('sequence_name_ids'), label text);
+CREATE VIEW sequence_name_view AS SELECT nextval('sequence_name_ids') AS id;
+CREATE TABLE sequence_name_serial_rows(id serial);
+CREATE TABLE sequence_name_identity_rows(id bigint GENERATED ALWAYS AS IDENTITY);
+CREATE TABLE sequence_name_wrong_kind(id bigint);
+CREATE TABLE sequence_name_observations(name text PRIMARY KEY, value bigint, current_value bigint, last_value bigint, same_oid boolean);
+-- @end
+
+-- @case sequence_name_lifecycle_core ok
+INSERT INTO sequence_name_observations(name, value) VALUES ('seed', nextval('sequence_name_ids'));
+UPDATE sequence_name_observations SET current_value = currval('sequence_name_ids'), last_value = lastval() WHERE name = 'seed';
+ALTER SEQUENCE sequence_name_ids RENAME TO sequence_name_renamed_ids;
+INSERT INTO sequence_name_observations(name, value) VALUES ('renamed', nextval('sequence_name_renamed_ids'));
+UPDATE sequence_name_observations SET current_value = currval('sequence_name_renamed_ids'), last_value = lastval(), same_oid = (SELECT saved_oid = 'sequence_name_renamed_ids'::regclass::oid FROM sequence_name_oid) WHERE name = 'renamed';
+INSERT INTO sequence_name_default_rows(label) VALUES ('renamed');
+INSERT INTO sequence_name_observations(name, value) SELECT 'renamed_view', id FROM sequence_name_view;
+ALTER SEQUENCE sequence_name_renamed_ids SET SCHEMA __UQA_SCHEMA_PROBE__;
+ALTER SEQUENCE __UQA_SCHEMA_PROBE__.sequence_name_renamed_ids SET SCHEMA __UQA_SCHEMA_PROBE__;
+INSERT INTO sequence_name_observations(name, value) VALUES ('moved', nextval('__UQA_SCHEMA_PROBE__.sequence_name_renamed_ids'));
+UPDATE sequence_name_observations SET current_value = currval('__UQA_SCHEMA_PROBE__.sequence_name_renamed_ids'), last_value = lastval(), same_oid = (SELECT saved_oid = '__UQA_SCHEMA_PROBE__.sequence_name_renamed_ids'::regclass::oid FROM sequence_name_oid) WHERE name = 'moved';
+INSERT INTO sequence_name_default_rows(label) VALUES ('moved');
+INSERT INTO sequence_name_observations(name, value) SELECT 'moved_view', id FROM sequence_name_view;
+INSERT INTO sequence_name_observations(name, value) SELECT 'saved_oid_call', nextval(saved_oid::regclass) FROM sequence_name_oid;
+-- @end
+
+-- @case sequence_name_lifecycle_core_result rows
+SELECT name, value, current_value, last_value, same_oid FROM sequence_name_observations ORDER BY name;
+-- @end
+
+-- @case sequence_name_lifecycle_dependencies_result rows
+SELECT label, id FROM sequence_name_default_rows ORDER BY label;
+-- @end
+
+-- @case sequence_name_lifecycle_reopen_dependencies ok
+INSERT INTO sequence_name_default_rows(label) VALUES ('reopen');
+INSERT INTO sequence_name_observations(name, value) SELECT 'reopen_view', id FROM sequence_name_view;
+-- @end
+
+-- @case sequence_name_lifecycle_reopen_result rows
+SELECT (SELECT id FROM sequence_name_default_rows WHERE label = 'reopen'), (SELECT value FROM sequence_name_observations WHERE name = 'reopen_view'), (SELECT saved_oid = '__UQA_SCHEMA_PROBE__.sequence_name_renamed_ids'::regclass::oid FROM sequence_name_oid);
+-- @end
+
+-- @case sequence_name_lifecycle_transaction_rollback ok
+BEGIN;
+ALTER SEQUENCE __UQA_SCHEMA_PROBE__.sequence_name_renamed_ids RENAME TO sequence_name_rolled_back_ids;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.sequence_name_observations(name, value) VALUES ('transaction_rolled_back', nextval('__UQA_SCHEMA_PROBE__.sequence_name_rolled_back_ids'));
+ROLLBACK;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.sequence_name_observations(name, current_value, last_value) VALUES ('transaction_after', currval('__UQA_SCHEMA_PROBE__.sequence_name_renamed_ids'), lastval());
+UPDATE __UQA_STATEFUL_SCHEMA__.sequence_name_observations SET value = nextval('__UQA_SCHEMA_PROBE__.sequence_name_renamed_ids') WHERE name = 'transaction_after';
+-- @end
+
+-- @case sequence_name_lifecycle_transaction_result rows
+SELECT value, current_value, last_value, to_regclass('__UQA_SCHEMA_PROBE__.sequence_name_renamed_ids') IS NOT NULL, to_regclass('__UQA_SCHEMA_PROBE__.sequence_name_rolled_back_ids') IS NULL FROM sequence_name_observations WHERE name = 'transaction_after';
+-- @end
+
+-- @case sequence_name_lifecycle_savepoint_rollback ok
+BEGIN;
+SAVEPOINT sequence_name_boundary;
+ALTER SEQUENCE __UQA_SCHEMA_PROBE__.sequence_name_renamed_ids RENAME TO sequence_name_savepoint_ids;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.sequence_name_observations(name, value) VALUES ('savepoint_rolled_back', nextval('__UQA_SCHEMA_PROBE__.sequence_name_savepoint_ids'));
+ROLLBACK TO SAVEPOINT sequence_name_boundary;
+INSERT INTO __UQA_STATEFUL_SCHEMA__.sequence_name_observations(name, current_value, last_value) VALUES ('savepoint_after', currval('__UQA_SCHEMA_PROBE__.sequence_name_renamed_ids'), lastval());
+UPDATE __UQA_STATEFUL_SCHEMA__.sequence_name_observations SET value = nextval('__UQA_SCHEMA_PROBE__.sequence_name_renamed_ids') WHERE name = 'savepoint_after';
+COMMIT;
+-- @end
+
+-- @case sequence_name_lifecycle_savepoint_result rows
+SELECT value, current_value, last_value, to_regclass('__UQA_SCHEMA_PROBE__.sequence_name_renamed_ids') IS NOT NULL, to_regclass('__UQA_SCHEMA_PROBE__.sequence_name_savepoint_ids') IS NULL FROM sequence_name_observations WHERE name = 'savepoint_after';
+-- @end
+
+-- @case sequence_name_lifecycle_historical_syntax ok
+INSERT INTO sequence_name_observations(name, value) VALUES ('historical_seed', nextval('sequence_name_historical_ids'));
+ALTER TABLE sequence_name_historical_ids RENAME TO sequence_name_historical_renamed_ids;
+INSERT INTO sequence_name_observations(name, value) VALUES ('historical_renamed', nextval('sequence_name_historical_renamed_ids'));
+ALTER TABLE sequence_name_historical_renamed_ids SET SCHEMA __UQA_SCHEMA_PROBE__;
+INSERT INTO sequence_name_observations(name, value) VALUES ('historical_moved', nextval('__UQA_SCHEMA_PROBE__.sequence_name_historical_renamed_ids'));
+-- @end
+
+-- @case sequence_name_lifecycle_historical_result rows
+SELECT name, value FROM sequence_name_observations WHERE name LIKE 'historical_%' ORDER BY name;
+-- @end
+
+-- @case sequence_name_lifecycle_owned_rename ok
+ALTER SEQUENCE sequence_name_serial_rows_id_seq RENAME TO sequence_name_serial_renamed_ids;
+ALTER SEQUENCE sequence_name_identity_rows_id_seq RENAME TO sequence_name_identity_renamed_ids;
+-- @end
+
+-- @case sequence_name_lifecycle_owned_lookup rows
+SELECT pg_get_serial_sequence('sequence_name_serial_rows', 'id') = current_schema() || '.sequence_name_serial_renamed_ids', pg_get_serial_sequence('sequence_name_identity_rows', 'id') = current_schema() || '.sequence_name_identity_renamed_ids';
+-- @end
+
+-- @case sequence_name_lifecycle_owned_move error
+ALTER SEQUENCE sequence_name_serial_renamed_ids SET SCHEMA __UQA_SCHEMA_PROBE__;
+-- @end
+
+-- @case sequence_name_lifecycle_missing_if_exists ok
+ALTER SEQUENCE IF EXISTS sequence_name_missing_ids RENAME TO sequence_name_missing_renamed_ids;
+ALTER SEQUENCE IF EXISTS sequence_name_missing_ids SET SCHEMA __UQA_SCHEMA_PROBE__;
+-- @end
+
+-- @case sequence_name_lifecycle_missing error
+ALTER SEQUENCE sequence_name_missing_ids RENAME TO sequence_name_missing_renamed_ids;
+-- @end
+
+-- @case sequence_name_lifecycle_wrong_kind error
+ALTER SEQUENCE sequence_name_wrong_kind SET SCHEMA __UQA_SCHEMA_PROBE__;
+-- @end
+
+-- @case sequence_name_lifecycle_collision error
+ALTER SEQUENCE sequence_name_collision_ids SET SCHEMA __UQA_SCHEMA_PROBE__;
+-- @end
+
+-- @case sequence_name_lifecycle_same_name error
+ALTER SEQUENCE __UQA_SCHEMA_PROBE__.sequence_name_renamed_ids RENAME TO sequence_name_renamed_ids;
+-- @end
+
+-- @case sequence_name_lifecycle_missing_schema error
+ALTER SEQUENCE __UQA_SCHEMA_PROBE__.sequence_name_renamed_ids SET SCHEMA sequence_name_missing_schema;
+-- @end
+
+-- @case sequence_name_lifecycle_temporary_schema_error error
+CREATE TEMP SEQUENCE sequence_name_temporary_ids;
+ALTER SEQUENCE sequence_name_temporary_ids RENAME TO sequence_name_temporary_renamed_ids;
+ALTER SEQUENCE sequence_name_temporary_renamed_ids SET SCHEMA pg_temp;
+-- @end
+
+-- @case sequence_name_lifecycle_read_only_precedence error
+BEGIN READ ONLY;
+ALTER SEQUENCE IF EXISTS sequence_name_missing_ids SET SCHEMA __UQA_SCHEMA_PROBE__;
+-- @end
+
 -- Sequence ownership uses automatic or internal dependencies keyed by stable table and column identity. Renames retain the link, owner drops remove the sequence, and only RESTART IDENTITY resets owned sequences.
 -- @case create_sequence_owner_fixture ok
 CREATE TABLE sequence_owner_table(id bigint, other bigint);

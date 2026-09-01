@@ -189,6 +189,9 @@ pub enum AlterTableAction {
     SetPersistence {
         persistence: RelationPersistence,
     },
+    SetSchema {
+        schema: String,
+    },
     SetTriggerEnableMode {
         name: Option<String>,
         user_only: bool,

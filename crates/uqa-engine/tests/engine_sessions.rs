@@ -643,6 +643,51 @@ fn sequence_persistence_changes_invalidate_remote_caches_only_when_state_changes
 }
 
 #[test]
+fn sequence_name_lifecycle_preserves_remote_cache_currval_and_oid_identity() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("session-sequence-name-lifecycle.db");
+    let root = Engine::open(&path).unwrap();
+    root.sql(
+        "CREATE SCHEMA archive;
+         CREATE SEQUENCE rename_ids CACHE 3;
+         CREATE SEQUENCE schema_ids CACHE 3;
+         CREATE TABLE saved_oids(rename_oid oid, schema_oid oid);
+         INSERT INTO saved_oids SELECT 'rename_ids'::regclass::oid, 'schema_ids'::regclass::oid",
+        &[],
+    )
+    .unwrap();
+    assert_eq!(root.nextval("rename_ids").unwrap(), 1);
+    assert_eq!(root.nextval("schema_ids").unwrap(), 1);
+
+    let sibling = Engine::open(&path).unwrap();
+    sibling
+        .sql(
+            "ALTER SEQUENCE rename_ids RENAME TO renamed_ids;
+             ALTER SEQUENCE schema_ids SET SCHEMA archive",
+            &[],
+        )
+        .unwrap();
+
+    assert_eq!(root.currval("renamed_ids").unwrap(), 1);
+    assert_eq!(root.currval("archive.schema_ids").unwrap(), 1);
+    assert_eq!(root.lastval().unwrap(), 1);
+    assert_eq!(root.nextval("renamed_ids").unwrap(), 2);
+    assert_eq!(root.currval("renamed_ids").unwrap(), 2);
+    assert_eq!(root.nextval("archive.schema_ids").unwrap(), 2);
+    assert_eq!(root.currval("archive.schema_ids").unwrap(), 2);
+    let result = root
+        .sql(
+            "SELECT rename_oid = 'renamed_ids'::regclass::oid AS rename_same,
+                    schema_oid = 'archive.schema_ids'::regclass::oid AS schema_same
+               FROM saved_oids",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.rows[0]["rename_same"], Value::Bool(true));
+    assert_eq!(result.rows[0]["schema_same"], Value::Bool(true));
+}
+
+#[test]
 fn currval_is_owned_by_the_logical_session() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("session-currval.db");

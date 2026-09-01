@@ -156,6 +156,9 @@ pub(in crate::sql) fn table_relation_oid(engine: &Engine, table: &str) -> Result
     let resolution = engine.session_execution_view().relation_name_resolution();
     snapshot_table_relation_oid(&catalog, &resolution, table)
 }
+pub(crate) fn sequence_relation_oid(object_id: [u8; 16]) -> i64 {
+    helpers::oids::stable_object_oid("relation", &object_id)
+}
 pub(in crate::sql) fn snapshot_table_relation_oid(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,

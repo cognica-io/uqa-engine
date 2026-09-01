@@ -85,7 +85,6 @@ impl SequenceValueError {
 impl Engine {
     fn record_nontransactional_sequence_value(
         &self,
-        relation: &RelationIdentity,
         definition_generation: [u8; 16],
         value: NontransactionalSequenceValue,
         defines_lastval: bool,
@@ -95,7 +94,8 @@ impl Engine {
             .state
             .read()
             .sequence_currvals
-            .get(relation)
+            .values()
+            .find(|current| current.object_id == value.object_id)
             .copied();
         let mut transactions = self.session.transactions.lock();
         for frame in transactions.iter_mut() {
@@ -106,7 +106,7 @@ impl Engine {
             }
             let history = frame
                 .nontransactional_sequence_values
-                .entry(relation.clone())
+                .entry(value.object_id)
                 .or_default();
             let preserves_lastval =
                 !defines_lastval && history.object_id == value.object_id && history.defines_lastval;
@@ -123,12 +123,14 @@ impl Engine {
         &self,
         reference: &str,
     ) -> Result<(String, RelationIdentity, [u8; 16]), SequenceValueError> {
-        let (name, kind) = self
-            .try_resolve_relation_kind(reference)
-            .map_err(|error| {
-                SequenceValueError::Internal(format!("load sequence catalog: {error}"))
-            })?
-            .ok_or_else(|| SequenceValueError::Undefined(reference.to_string()))?;
+        let resolved = self.try_resolve_relation_kind(reference).map_err(|error| {
+            SequenceValueError::Internal(format!("load sequence catalog: {error}"))
+        })?;
+        let Some((name, kind)) = resolved else {
+            return self
+                .resolve_sequence_value_target_by_oid(reference)?
+                .ok_or_else(|| SequenceValueError::Undefined(reference.to_string()));
+        };
         if kind != "sequence" {
             return Err(SequenceValueError::WrongKind {
                 name: reference.to_string(),
@@ -150,6 +152,23 @@ impl Engine {
                 ))
             })?;
         Ok((name, relation, object_id))
+    }
+
+    fn resolve_sequence_value_target_by_oid(
+        &self,
+        reference: &str,
+    ) -> Result<Option<(String, RelationIdentity, [u8; 16])>, SequenceValueError> {
+        let Ok(oid) = reference.parse::<i64>() else {
+            return Ok(None);
+        };
+        self.refresh_sequences_from_catalog().map_err(|error| {
+            SequenceValueError::Internal(format!("load sequence catalog: {error}"))
+        })?;
+        let object_ids = self.durable.sequence_object_ids.read();
+        Ok(object_ids.iter().find_map(|(relation, object_id)| {
+            (crate::sql::sequence_relation_oid(*object_id) == oid)
+                .then(|| (relation.qualified_name(), relation.clone(), *object_id))
+        }))
     }
 
     pub fn nextval(&self, name: &str) -> Result<i64, String> {
@@ -227,9 +246,20 @@ impl Engine {
         target: &NextvalTarget,
         caches: &mut BTreeMap<RelationIdentity, SessionSequenceCache>,
     ) -> Result<Option<(i64, bool)>, SequenceValueError> {
-        let Some(cache) = caches.remove(&target.relation) else {
+        let cache_relation = caches
+            .contains_key(&target.relation)
+            .then(|| target.relation.clone())
+            .or_else(|| {
+                caches.iter().find_map(|(relation, cache)| {
+                    (cache.object_id == target.object_id).then(|| relation.clone())
+                })
+            });
+        let Some(cache_relation) = cache_relation else {
             return Ok(None);
         };
+        let cache = caches
+            .remove(&cache_relation)
+            .expect("selected sequence cache entry must exist");
         if cache.object_id != target.object_id
             || cache.definition_generation != target.state.definition_generation
         {
@@ -378,6 +408,9 @@ impl Engine {
         autonomous: bool,
     ) {
         let mut session = self.session.state.write();
+        session
+            .sequence_currvals
+            .retain(|_, value| value.object_id != object_id);
         session.sequence_currvals.insert(
             relation.clone(),
             super::SessionSequenceValue {
@@ -391,7 +424,6 @@ impl Engine {
         });
         drop(session);
         self.record_nontransactional_sequence_value(
-            relation,
             physical.definition_generation,
             NontransactionalSequenceValue {
                 object_id,
@@ -413,14 +445,13 @@ impl Engine {
     }
 
     fn currval_inner(&self, name: &str) -> Result<i64, SequenceValueError> {
-        let (name, relation, object_id) = self.resolve_sequence_value_target(name)?;
+        let (name, _relation, object_id) = self.resolve_sequence_value_target(name)?;
         self.session
             .state
             .read()
             .sequence_currvals
-            .get(&relation)
-            .copied()
-            .filter(|current| current.object_id == object_id)
+            .values()
+            .find(|current| current.object_id == object_id)
             .map(|current| current.value)
             .ok_or(SequenceValueError::CurrvalUndefined(name))
     }
@@ -444,14 +475,16 @@ impl Engine {
             .last_sequence
             .as_ref()
             .ok_or(SequenceValueError::LastvalUndefined)?;
-        if object_ids.get(&last.relation).copied() != Some(last.object_id) {
+        if !object_ids
+            .values()
+            .any(|object_id| *object_id == last.object_id)
+        {
             return Err(SequenceValueError::LastvalUndefined);
         }
         session
             .sequence_currvals
-            .get(&last.relation)
-            .copied()
-            .filter(|current| current.object_id == last.object_id)
+            .values()
+            .find(|current| current.object_id == last.object_id)
             .map(|current| current.value)
             .ok_or(SequenceValueError::LastvalUndefined)
     }
@@ -553,15 +586,21 @@ impl Engine {
         seq.current = value;
         seq.called = is_called;
         drop(seqs);
-        self.session.sequence_caches.lock().remove(&relation);
+        self.session
+            .sequence_caches
+            .lock()
+            .retain(|_, cache| cache.object_id != object_id);
         if is_called {
-            self.session.state.write().sequence_currvals.insert(
+            let mut session = self.session.state.write();
+            session
+                .sequence_currvals
+                .retain(|_, current| current.object_id != object_id);
+            session.sequence_currvals.insert(
                 relation.clone(),
                 super::SessionSequenceValue { object_id, value },
             );
         }
         self.record_nontransactional_sequence_value(
-            &relation,
             previous.definition_generation,
             NontransactionalSequenceValue {
                 object_id,

@@ -188,6 +188,10 @@ impl CatalogFacade for KeyValueCatalog {
         self.replace_sequence_row_impl(sequence)
     }
 
+    fn rename_sequence_row(&self, from: &str, to: &str) -> StorageBackendResult<bool> {
+        self.rename_sequence_row_impl(from, to)
+    }
+
     fn drop_sequence_row(&self, name: &str) -> StorageBackendResult<bool> {
         self.drop_sequence_row_impl(name)
     }

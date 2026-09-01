@@ -145,6 +145,20 @@ pub enum SequenceOwnership {
     Column { table: String, column: String },
 }
 
+/// Name or namespace lifecycle action carried by `ALTER SEQUENCE`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SequenceLifecycle {
+    /// No name or namespace change was specified.
+    #[default]
+    Unchanged,
+    RenameTo {
+        name: String,
+    },
+    SetSchema {
+        schema: String,
+    },
+}
+
 fn deserialize_sequence_restart<'de, D>(deserializer: D) -> Result<SequenceRestart, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -201,4 +215,7 @@ pub struct AlterSequence {
     /// `SET LOGGED` or `SET UNLOGGED`. Temporary is never a valid requested target state.
     #[serde(default)]
     pub persistence: Option<RelationPersistence>,
+    /// `RENAME TO` or `SET SCHEMA`, kept distinct from definition changes.
+    #[serde(default)]
+    pub lifecycle: SequenceLifecycle,
 }

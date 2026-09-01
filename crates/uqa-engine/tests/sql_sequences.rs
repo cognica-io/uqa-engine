@@ -15,6 +15,8 @@ use uqa_storage::ManagedConnection;
 mod cache;
 #[path = "sql_sequences/lifecycle.rs"]
 mod lifecycle;
+#[path = "sql_sequences/name_lifecycle.rs"]
+mod name_lifecycle;
 #[path = "sql_sequences/ownership.rs"]
 mod ownership;
 #[path = "sql_sequences/persistence.rs"]

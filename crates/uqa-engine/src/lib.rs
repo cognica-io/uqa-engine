@@ -94,6 +94,7 @@ mod engine_relations;
 mod engine_roles;
 mod engine_search;
 mod engine_sequence_catalog;
+mod engine_sequence_lifecycle;
 mod engine_sequence_ownership;
 mod engine_sequence_values;
 mod engine_sequences;
@@ -261,7 +262,7 @@ type ColumnStatsMap = BTreeMap<String, uqa_planner::ColumnStats>;
 type TransactionRelationStates = BTreeMap<RelationIdentity, u64>;
 type FixedTransactionCatalogBaseline = BTreeMap<[u8; 16], (RelationIdentity, Vec<u8>)>;
 type NontransactionalColumnStats = Vec<NontransactionalColumnStatsEntry>;
-type NontransactionalSequenceValues = BTreeMap<RelationIdentity, NontransactionalSequenceHistory>;
+type NontransactionalSequenceValues = BTreeMap<[u8; 16], NontransactionalSequenceHistory>;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct SessionSequenceValue {

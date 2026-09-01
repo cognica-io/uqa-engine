@@ -12,7 +12,9 @@ use super::administrative::{
 };
 use super::cursors::{compile_close_cursor, compile_declare_cursor, compile_fetch_cursor};
 use super::dml::{compile_delete, compile_update};
-use super::drop_alter::{compile_alter_table, compile_drop, compile_rename};
+use super::drop_alter::{
+    compile_alter_object_schema, compile_alter_table, compile_drop, compile_rename,
+};
 use super::events::{compile_create_rule, compile_create_trigger};
 use super::merge::compile_merge;
 use super::relations::{
@@ -76,6 +78,7 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
         NodeEnum::RuleStmt(stmt) => compile_create_rule(stmt).map(Statement::CreateRule),
         NodeEnum::AlterTableStmt(stmt) => compile_alter_table(stmt),
         NodeEnum::RenameStmt(stmt) => compile_rename(stmt),
+        NodeEnum::AlterObjectSchemaStmt(stmt) => compile_alter_object_schema(stmt),
         NodeEnum::ViewStmt(stmt) => compile_create_view(stmt),
         NodeEnum::CreateSchemaStmt(stmt) => compile_create_schema(stmt),
         NodeEnum::ExplainStmt(stmt) => compile_explain(stmt),

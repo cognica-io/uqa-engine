@@ -298,6 +298,87 @@ impl Engine {
         )))
     }
 
+    pub(crate) fn rewrite_sequence_schema_dependencies(
+        &self,
+        from: &RelationIdentity,
+        to: &str,
+    ) -> StorageBackendResult<()> {
+        let mut updates = Vec::new();
+        for (table_name, table) in self.table_entries() {
+            let mut columns = table.columns.read().clone();
+            let mut checks = table.table_checks.read().clone();
+            let foreign_keys = table.foreign_keys.read().clone();
+            let key_constraints = table.key_constraints.read().clone();
+            let hierarchy = table.hierarchy.read().clone();
+            let mut changed = false;
+            for column in &mut columns {
+                if let Some(sequence) = column
+                    .auto_increment
+                    .as_mut()
+                    .and_then(|provenance| provenance.sequence.as_mut())
+                {
+                    if stored_relation_reference_matches(sequence, from) {
+                        *sequence = to.to_string();
+                        changed = true;
+                    }
+                }
+                for expression in [&mut column.default, &mut column.check]
+                    .into_iter()
+                    .flatten()
+                {
+                    rewrite_sequence_function_references(expression, &mut |reference| {
+                        if stored_relation_reference_matches(reference, from) {
+                            *reference = to.to_string();
+                            changed = true;
+                        }
+                        Ok(())
+                    })?;
+                }
+                if let Some(generated) = &mut column.generated {
+                    rewrite_sequence_function_references(
+                        &mut generated.expression,
+                        &mut |reference| {
+                            if stored_relation_reference_matches(reference, from) {
+                                *reference = to.to_string();
+                                changed = true;
+                            }
+                            Ok(())
+                        },
+                    )?;
+                }
+            }
+            for check in &mut checks {
+                rewrite_sequence_function_references(&mut check.expr, &mut |reference| {
+                    if stored_relation_reference_matches(reference, from) {
+                        *reference = to.to_string();
+                        changed = true;
+                    }
+                    Ok(())
+                })?;
+            }
+            if changed {
+                self.persist_constraint_candidate_with_hierarchy(
+                    &table_name,
+                    &table,
+                    &columns,
+                    &checks,
+                    &foreign_keys,
+                    &key_constraints,
+                    &hierarchy,
+                )?;
+                updates.push((table, columns, checks));
+            }
+        }
+        for (table, columns, checks) in &updates {
+            (*table.columns.write()).clone_from(columns);
+            (*table.table_checks.write()).clone_from(checks);
+        }
+        if !updates.is_empty() {
+            self.note_table_catalog_changed();
+        }
+        Ok(())
+    }
+
     /// Retire the legacy name-based owner marker after an explicit `ALTER SEQUENCE ... OWNED BY` action. Generation provenance and the bound sequence reference remain on the original SERIAL or identity column, while the stable dependency stored on the sequence becomes authoritative for lifecycle operations.
     pub(crate) fn clear_auto_increment_owner_markers(
         &self,

@@ -84,15 +84,17 @@ impl Engine {
         } = declaration;
         bind_session_portal_query_relations(self, &mut query, &std::collections::BTreeSet::new())?;
         super::bind_query_plan_sequence_references(&mut query, &mut |reference| {
-            self.try_resolve_sequence_name(reference)
+            self.try_resolve_sequence_oid_reference_for_binding(reference)
                 .map_err(|error| {
                     SQLError::Internal(format!(
                         "bind cursor sequence `{reference}` at DECLARE: {error}"
                     ))
-                })?
-                .ok_or_else(|| SQLError::Routine {
-                    sqlstate: "42P01".into(),
-                    message: format!("relation \"{reference}\" does not exist"),
+                })
+                .and_then(|bound| {
+                    bound.ok_or_else(|| SQLError::Routine {
+                        sqlstate: "42P01".into(),
+                        message: format!("relation \"{reference}\" does not exist"),
+                    })
                 })
         })?;
         let table_dependencies = session_portal_table_dependencies(self, &query)?;

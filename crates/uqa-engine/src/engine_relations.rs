@@ -423,6 +423,19 @@ impl Engine {
             .copied())
     }
 
+    pub(crate) fn sequence_object_id(&self, name: &str) -> StorageBackendResult<Option<[u8; 16]>> {
+        let Some(name) = self.try_resolve_sequence_name(name)? else {
+            return Ok(None);
+        };
+        let relation = Self::resolved_relation_identity(&name)?;
+        Ok(self
+            .durable
+            .sequence_object_ids
+            .read()
+            .get(&relation)
+            .copied())
+    }
+
     pub(crate) fn training_set_from_table(
         &self,
         table: &str,

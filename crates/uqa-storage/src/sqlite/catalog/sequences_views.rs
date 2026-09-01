@@ -252,6 +252,63 @@ impl Catalog {
         })
     }
 
+    pub fn rename_sequence_row(&self, from: &str, to: &str) -> Result<bool> {
+        let from_relation = migration_relation(from)?;
+        let to_relation = migration_relation(to)?;
+        self.conn.with_mut(|connection| {
+            let tx = connection.savepoint()?;
+            let source_exists = tx
+                .query_row(
+                    "SELECT 1 FROM _sequences
+                      WHERE schema_name = ?1 AND relation_name = ?2",
+                    params![from_relation.schema, from_relation.name],
+                    |_| Ok(()),
+                )
+                .optional()?
+                .is_some();
+            if !source_exists {
+                return Ok(false);
+            }
+            if from_relation == to_relation {
+                return Ok(true);
+            }
+            let target_kind = tx
+                .query_row(
+                    "SELECT kind FROM _relations
+                      WHERE schema_name = ?1 AND relation_name = ?2",
+                    params![to_relation.schema, to_relation.name],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
+            if let Some(kind) = target_kind {
+                return Err(SQLiteError::StorageBackend(format!(
+                    "relation `{}` already exists as {kind}",
+                    to_relation.qualified_name()
+                )));
+            }
+            Self::claim_relation(&tx, &to_relation, RelationKind::Sequence)?;
+            let updated = tx.execute(
+                "UPDATE _sequences
+                    SET schema_name = ?3, relation_name = ?4
+                  WHERE schema_name = ?1 AND relation_name = ?2",
+                params![
+                    from_relation.schema,
+                    from_relation.name,
+                    to_relation.schema,
+                    to_relation.name
+                ],
+            )?;
+            if updated != 1 {
+                return Err(SQLiteError::StorageBackend(format!(
+                    "sequence `{from}` changed while renaming"
+                )));
+            }
+            Self::release_relation(&tx, &from_relation, RelationKind::Sequence)?;
+            tx.commit()?;
+            Ok(true)
+        })
+    }
+
     pub fn drop_sequence_row(&self, name: &str) -> Result<bool> {
         let relation = migration_relation(name)?;
         self.conn.with_mut(|connection| {

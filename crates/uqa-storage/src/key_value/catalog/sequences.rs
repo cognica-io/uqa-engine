@@ -115,6 +115,41 @@ impl KeyValueCatalog {
         Ok(true)
     }
 
+    pub(super) fn rename_sequence_row_impl(
+        &self,
+        from: &str,
+        to: &str,
+    ) -> StorageBackendResult<bool> {
+        let _guard = self.sequence_lock.lock();
+        let from_relation =
+            RelationIdentity::from_legacy_name(from).map_err(StorageBackendError::Other)?;
+        let to_relation =
+            RelationIdentity::from_legacy_name(to).map_err(StorageBackendError::Other)?;
+        let from_key = relation_key(TAG_SEQUENCE, &from_relation)?;
+        let Some(value) = self.store.get(&from_key)? else {
+            return Ok(false);
+        };
+        if from_relation == to_relation {
+            return Ok(true);
+        }
+        self.ensure_schema_exists(&to_relation)?;
+        let to_key = relation_key(TAG_SEQUENCE, &to_relation)?;
+        let to_relation_key = relation_key(TAG_RELATION, &to_relation)?;
+        if self.store.get(&to_key)?.is_some() || self.store.get(&to_relation_key)?.is_some() {
+            return Err(StorageBackendError::Other(format!(
+                "relation `{}` already exists",
+                to_relation.qualified_name()
+            )));
+        }
+        let mut batch = self.store.batch();
+        self.claim_relation(batch.as_mut(), &to_relation, RelationKind::Sequence)?;
+        batch.put(&to_key, &value)?;
+        batch.delete(&from_key)?;
+        self.release_relation(batch.as_mut(), &from_relation, RelationKind::Sequence)?;
+        batch.commit()?;
+        Ok(true)
+    }
+
     pub(super) fn drop_sequence_row_impl(&self, name: &str) -> StorageBackendResult<bool> {
         let _guard = self.sequence_lock.lock();
         let relation =

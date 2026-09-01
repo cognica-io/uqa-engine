@@ -183,6 +183,77 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
 }
 
 #[test]
+fn sequence_rename_moves_catalog_identity_and_value_atomically() {
+    let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
+    let catalog = KeyValueCatalog::new(store);
+    let object_id = [17; 16];
+    catalog.save_schema("public").unwrap();
+    catalog.save_schema("archive").unwrap();
+    catalog
+        .create_sequence_row(&SequenceRow {
+            relation: RelationIdentity::new("public", "ids"),
+            object_id,
+            definition_generation: [18; 16],
+            start: 1,
+            increment: 1,
+            current: 7,
+            called: true,
+            persistence: "u".into(),
+            options: SequenceOptions {
+                cache_size: 3,
+                ..SequenceOptions::default()
+            },
+            owner: None,
+        })
+        .unwrap();
+
+    assert!(catalog
+        .rename_sequence_row("public.ids", "archive.renamed_ids")
+        .unwrap());
+    assert_eq!(
+        catalog
+            .next_sequence_value("public.ids", object_id)
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        catalog
+            .next_sequence_value("archive.renamed_ids", object_id)
+            .unwrap(),
+        Some(8)
+    );
+    let row = catalog.load_sequence_rows().unwrap().remove(0);
+    assert_eq!(
+        row.relation,
+        RelationIdentity::new("archive", "renamed_ids")
+    );
+    assert_eq!(row.object_id, object_id);
+    assert_eq!(row.definition_generation, [18; 16]);
+    assert_eq!(row.persistence, "u");
+
+    catalog
+        .create_sequence_row(&SequenceRow {
+            relation: RelationIdentity::new("public", "occupied"),
+            object_id: [19; 16],
+            definition_generation: [19; 16],
+            start: 1,
+            increment: 1,
+            current: 1,
+            called: false,
+            persistence: "p".into(),
+            options: SequenceOptions::default(),
+            owner: None,
+        })
+        .unwrap();
+    assert!(catalog
+        .rename_sequence_row("archive.renamed_ids", "public.occupied")
+        .unwrap_err()
+        .to_string()
+        .contains("already exists"));
+    assert_eq!(catalog.load_sequence_rows().unwrap().len(), 2);
+}
+
+#[test]
 fn sequence_reservations_are_atomic_and_stop_at_the_configured_bound() {
     let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
     let catalog = KeyValueCatalog::new(store);

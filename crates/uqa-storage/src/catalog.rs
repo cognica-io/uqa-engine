@@ -390,7 +390,7 @@ pub struct SequenceRow {
     /// Stable identity of this sequence incarnation. Dropping and recreating the same qualified name must allocate a different value.
     #[serde(default)]
     pub object_id: [u8; 16],
-    /// Changes for every successful `ALTER SEQUENCE` while remaining stable across value reservations and `setval`.
+    /// Changes for every successful definition-changing `ALTER SEQUENCE` while remaining stable across name lifecycle operations, value reservations, and `setval`.
     #[serde(default)]
     pub definition_generation: [u8; 16],
     pub start: i64,
@@ -509,6 +509,8 @@ pub trait CatalogFacade: Send + Sync {
 
     fn create_sequence_row(&self, sequence: &SequenceRow) -> StorageBackendResult<bool>;
     fn replace_sequence_row(&self, sequence: &SequenceRow) -> StorageBackendResult<bool>;
+    /// Atomically move one sequence catalog row and its shared relation claim while preserving object identity and physical value state.
+    fn rename_sequence_row(&self, from: &str, to: &str) -> StorageBackendResult<bool>;
     fn drop_sequence_row(&self, name: &str) -> StorageBackendResult<bool>;
     fn load_sequence_rows(&self) -> StorageBackendResult<Vec<SequenceRow>>;
     fn reserve_sequence_values(

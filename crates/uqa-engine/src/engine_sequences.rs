@@ -24,6 +24,31 @@ impl Engine {
         })
     }
 
+    /// Bind a session portal to the sequence's stable `regclass` carrier so a later rename or schema move cannot retarget or break the cursor.
+    pub(crate) fn try_resolve_sequence_oid_reference_for_binding(
+        &self,
+        reference: &str,
+    ) -> StorageBackendResult<Option<String>> {
+        let Some(canonical) = self.try_resolve_sequence_name(reference)? else {
+            return Ok(None);
+        };
+        let relation = Self::resolved_relation_identity(&canonical)?;
+        let object_id = self
+            .durable
+            .sequence_object_ids
+            .read()
+            .get(&relation)
+            .copied()
+            .ok_or_else(|| {
+                StorageBackendError::Other(format!(
+                    "sequence `{canonical}` has no durable object identity"
+                ))
+            })?;
+        Ok(Some(
+            crate::sql::sequence_relation_oid(object_id).to_string(),
+        ))
+    }
+
     /// Resolve a reference read from legacy persisted metadata without using
     /// the current session's `search_path`. An unqualified local name is safe
     /// only when exactly one catalog sequence has that name.
@@ -288,28 +313,8 @@ impl Engine {
     }
 
     fn alter_sequence_inner(&self, alter: &uqa_sql::ast::AlterSequence) -> Result<bool, SQLError> {
-        let name = match self
-            .try_resolve_relation_kind(&alter.name)
-            .map_err(|error| {
-                SQLError::Internal(format!(
-                    "load sequence catalog for `{}`: {error}",
-                    alter.name
-                ))
-            })? {
-            Some((name, "sequence")) => name,
-            Some((_name, _kind)) => {
-                return Err(SQLError::Routine {
-                    sqlstate: "42809".into(),
-                    message: format!("\"{}\" is not a sequence", alter.name),
-                })
-            }
-            None if alter.if_exists => return Ok(false),
-            None => {
-                return Err(SQLError::Routine {
-                    sqlstate: "42P01".into(),
-                    message: format!("relation \"{}\" does not exist", alter.name),
-                })
-            }
+        let Some(name) = self.alter_sequence_target_name(alter)? else {
+            return Ok(false);
         };
         let relation = Self::resolved_relation_identity(&name)
             .map_err(|error| SQLError::Internal(format!("resolve sequence `{name}`: {error}")))?;
@@ -320,6 +325,10 @@ impl Engine {
             .get(&relation)
             .copied()
             .unwrap_or_default();
+        if alter.lifecycle != uqa_sql::ast::SequenceLifecycle::Unchanged {
+            self.alter_sequence_lifecycle_inner(&name, &relation, persistence, alter)?;
+            return Ok(true);
+        }
         let target_persistence =
             Self::altered_sequence_persistence(alter, persistence, &relation.name)?;
         if target_persistence == persistence && Self::sequence_alter_is_persistence_only(alter) {
@@ -385,6 +394,31 @@ impl Engine {
                 })?;
         }
         Ok(true)
+    }
+
+    fn alter_sequence_target_name(
+        &self,
+        alter: &uqa_sql::ast::AlterSequence,
+    ) -> Result<Option<String>, SQLError> {
+        match self
+            .try_resolve_relation_kind(&alter.name)
+            .map_err(|error| {
+                SQLError::Internal(format!(
+                    "load sequence catalog for `{}`: {error}",
+                    alter.name
+                ))
+            })? {
+            Some((name, "sequence")) => Ok(Some(name)),
+            Some((_name, _kind)) => Err(SQLError::Routine {
+                sqlstate: "42809".into(),
+                message: format!("\"{}\" is not a sequence", alter.name),
+            }),
+            None if alter.if_exists => Ok(None),
+            None => Err(SQLError::Routine {
+                sqlstate: "42P01".into(),
+                message: format!("relation \"{}\" does not exist", alter.name),
+            }),
+        }
     }
 
     fn altered_sequence_persistence(
@@ -764,16 +798,21 @@ impl Engine {
             self.durable.sequence_object_ids.write().remove(&relation);
             self.durable.sequence_persistence.write().remove(&relation);
             let mut session = self.session.state.write();
-            session.sequence_currvals.remove(&relation);
+            session
+                .sequence_currvals
+                .retain(|_, current| current.object_id != object_id);
             if session
                 .last_sequence
                 .as_ref()
-                .is_some_and(|last| last.relation == relation && last.object_id == object_id)
+                .is_some_and(|last| last.object_id == object_id)
             {
                 session.last_sequence = None;
             }
             drop(session);
-            self.session.sequence_caches.lock().remove(&relation);
+            self.session
+                .sequence_caches
+                .lock()
+                .retain(|_, cache| cache.object_id != object_id);
             self.note_catalog_registry_changed();
         }
         Ok(removed)

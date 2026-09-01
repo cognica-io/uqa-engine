@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "eda29c6c5adfc3f052c167c6177ce9a92d0a60713b775dab3a2ccd536c192db1",
+  "fixture_sha256": "28568b4fbd0630ebaaa42c2b63c4a028330f580697d35b9f13a204a0530161aa",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -1563,6 +1563,205 @@
     },
     {
       "name": "sequence_persistence_read_only_precedence",
+      "kind": "error",
+      "sqlstate": "25006"
+    },
+    {
+      "name": "create_sequence_name_lifecycle_fixture",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_name_lifecycle_core",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_name_lifecycle_core_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "moved",
+          "5",
+          "5",
+          "5",
+          "t"
+        ],
+        [
+          "moved_view",
+          "7",
+          null,
+          null,
+          null
+        ],
+        [
+          "renamed",
+          "2",
+          "2",
+          "2",
+          "t"
+        ],
+        [
+          "renamed_view",
+          "4",
+          null,
+          null,
+          null
+        ],
+        [
+          "saved_oid_call",
+          "8",
+          null,
+          null,
+          null
+        ],
+        [
+          "seed",
+          "1",
+          "1",
+          "1",
+          null
+        ]
+      ]
+    },
+    {
+      "name": "sequence_name_lifecycle_dependencies_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "moved",
+          "6"
+        ],
+        [
+          "renamed",
+          "3"
+        ]
+      ]
+    },
+    {
+      "name": "sequence_name_lifecycle_reopen_dependencies",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_name_lifecycle_reopen_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "10",
+          "11",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "sequence_name_lifecycle_transaction_rollback",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_name_lifecycle_transaction_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "14",
+          "13",
+          "13",
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "sequence_name_lifecycle_savepoint_rollback",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_name_lifecycle_savepoint_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "17",
+          "16",
+          "16",
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "sequence_name_lifecycle_historical_syntax",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_name_lifecycle_historical_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "historical_moved",
+          "3"
+        ],
+        [
+          "historical_renamed",
+          "2"
+        ],
+        [
+          "historical_seed",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "sequence_name_lifecycle_owned_rename",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_name_lifecycle_owned_lookup",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "sequence_name_lifecycle_owned_move",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "sequence_name_lifecycle_missing_if_exists",
+      "kind": "ok"
+    },
+    {
+      "name": "sequence_name_lifecycle_missing",
+      "kind": "error",
+      "sqlstate": "42P01"
+    },
+    {
+      "name": "sequence_name_lifecycle_wrong_kind",
+      "kind": "error",
+      "sqlstate": "42809"
+    },
+    {
+      "name": "sequence_name_lifecycle_collision",
+      "kind": "error",
+      "sqlstate": "42P07"
+    },
+    {
+      "name": "sequence_name_lifecycle_same_name",
+      "kind": "error",
+      "sqlstate": "42P07"
+    },
+    {
+      "name": "sequence_name_lifecycle_missing_schema",
+      "kind": "error",
+      "sqlstate": "3F000"
+    },
+    {
+      "name": "sequence_name_lifecycle_temporary_schema_error",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "sequence_name_lifecycle_read_only_precedence",
       "kind": "error",
       "sqlstate": "25006"
     },

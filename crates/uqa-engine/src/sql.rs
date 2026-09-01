@@ -96,7 +96,7 @@ use catalog::build_info_schema_rows;
 pub(crate) use catalog::{
     resolve_age_label_relation_name, resolve_catalog_column_type, resolve_regclass_oid,
     resolve_regnamespace_oid, resolve_regobject_oid, resolve_regprocedure_oid, resolve_regrole_oid,
-    resolve_regtype_output, runtime_constraints, RegtypeOutputCatalog,
+    resolve_regtype_output, runtime_constraints, sequence_relation_oid, RegtypeOutputCatalog,
 };
 pub(in crate::sql) use catalog::{virtual_relation_accepts_row_lock, virtual_relation_schema};
 use ddl::{

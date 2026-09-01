@@ -68,23 +68,7 @@ pub(in crate::sql) fn run_alter_table(
     {
         Some((canonical, "table")) => stmt.table = canonical,
         Some((canonical, "sequence")) => {
-            let [AlterTableAction::SetPersistence { persistence }] = stmt.actions.as_slice() else {
-                return Err(SQLError::Routine {
-                    sqlstate: "42809".into(),
-                    message: format!(
-                        "ALTER TABLE: relation `{canonical}` is a sequence, not a table"
-                    ),
-                });
-            };
-            return super::run_alter_sequence(
-                engine,
-                uqa_sql::ast::AlterSequence {
-                    name: canonical,
-                    if_exists: stmt.if_exists,
-                    persistence: Some(*persistence),
-                    ..uqa_sql::ast::AlterSequence::default()
-                },
-            );
+            return run_alter_sequence_with_table_syntax(engine, canonical, &stmt);
         }
         Some((canonical, "view"))
             if stmt.actions.iter().all(|action| {
@@ -135,6 +119,38 @@ pub(in crate::sql) fn run_alter_table(
         crate::row_locks::RelationLockMode::AccessExclusive,
     )?;
     engine.with_implicit_transaction(move |engine| run_alter_table_inner(engine, stmt))
+}
+
+fn run_alter_sequence_with_table_syntax(
+    engine: &Engine,
+    canonical: String,
+    stmt: &AlterTableStmt,
+) -> Result<SQLResult, SQLError> {
+    let mut alter = uqa_sql::ast::AlterSequence {
+        name: canonical.clone(),
+        if_exists: stmt.if_exists,
+        ..uqa_sql::ast::AlterSequence::default()
+    };
+    match stmt.actions.as_slice() {
+        [AlterTableAction::SetPersistence { persistence }] => {
+            alter.persistence = Some(*persistence);
+        }
+        [AlterTableAction::RenameTable { to }] => {
+            alter.lifecycle = uqa_sql::ast::SequenceLifecycle::RenameTo { name: to.clone() };
+        }
+        [AlterTableAction::SetSchema { schema }] => {
+            alter.lifecycle = uqa_sql::ast::SequenceLifecycle::SetSchema {
+                schema: schema.clone(),
+            };
+        }
+        _ => {
+            return Err(SQLError::Routine {
+                sqlstate: "42809".into(),
+                message: format!("ALTER TABLE: relation `{canonical}` is a sequence, not a table"),
+            });
+        }
+    }
+    super::run_alter_sequence(engine, alter)
 }
 
 fn run_alter_table_inner(engine: &Engine, stmt: AlterTableStmt) -> Result<SQLResult, SQLError> {
@@ -494,6 +510,11 @@ fn run_alter_table_action(
                     uqa_sql::ast::RelationPersistence::Unlogged => "UNLOGGED",
                     uqa_sql::ast::RelationPersistence::Temporary => "TEMPORARY",
                 }
+            )));
+        }
+        AlterTableAction::SetSchema { schema } => {
+            return Err(SQLError::Unsupported(format!(
+                "ALTER TABLE SET SCHEMA {schema} is not supported for tables"
             )));
         }
         AlterTableAction::SetDefault { name, default } => {

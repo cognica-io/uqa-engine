@@ -19,7 +19,9 @@ use super::{
     AlterViewOptionsAction, AlterViewOptionsStmt, DropKind, DropStmt, Node, NodeEnum, Result,
     SQLError, Statement, TableKeyConstraint, TableKeyConstraintKind,
 };
-use crate::ast::{AlterSequence, EventEnableMode, ForeignKey, RelationPersistence, TableCheck};
+use crate::ast::{
+    AlterSequence, EventEnableMode, ForeignKey, RelationPersistence, SequenceLifecycle, TableCheck,
+};
 
 fn extract_strings(nodes: &[pg_query::protobuf::Node]) -> Result<Vec<String>> {
     nodes.iter().map(extract_string).collect()
@@ -702,6 +704,16 @@ pub(super) fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<St
         ObjectType::ObjectTable => AlterTableAction::RenameTable {
             to: render_relation_component(&stmt.newname),
         },
+        ObjectType::ObjectSequence => {
+            return Ok(Statement::AlterSequence(AlterSequence {
+                name: table,
+                if_exists: stmt.missing_ok,
+                lifecycle: SequenceLifecycle::RenameTo {
+                    name: render_relation_component(&stmt.newname),
+                },
+                ..AlterSequence::default()
+            }));
+        }
         ObjectType::ObjectTrigger => AlterTableAction::RenameTrigger {
             from: stmt.subname.clone(),
             to: stmt.newname.clone(),
@@ -727,4 +739,34 @@ pub(super) fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<St
         recurse: false,
         actions: vec![action],
     }))
+}
+
+pub(super) fn compile_alter_object_schema(
+    stmt: &pg_query::protobuf::AlterObjectSchemaStmt,
+) -> Result<Statement> {
+    use pg_query::protobuf::ObjectType;
+    let relation = stmt
+        .relation
+        .as_ref()
+        .ok_or_else(|| SQLError::Internal("ALTER SET SCHEMA without relation".into()))?;
+    let name = range_var_name(relation);
+    let schema = render_relation_component(&stmt.newschema);
+    match stmt.object_type() {
+        ObjectType::ObjectSequence => Ok(Statement::AlterSequence(AlterSequence {
+            name,
+            if_exists: stmt.missing_ok,
+            lifecycle: SequenceLifecycle::SetSchema { schema },
+            ..AlterSequence::default()
+        })),
+        ObjectType::ObjectTable => Ok(Statement::AlterTable(AlterTableStmt {
+            table: name,
+            qualifier: relation.relname.clone(),
+            if_exists: stmt.missing_ok,
+            recurse: false,
+            actions: vec![AlterTableAction::SetSchema { schema }],
+        })),
+        other => Err(SQLError::Unsupported(format!(
+            "ALTER {other:?} SET SCHEMA is not supported"
+        ))),
+    }
 }

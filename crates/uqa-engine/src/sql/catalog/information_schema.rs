@@ -562,7 +562,7 @@ pub(super) fn build_info_sequences(catalog: &CatalogReadView) -> Result<Vec<Resu
     catalog
         .sequences()
         .into_iter()
-        .map(|(name, _)| {
+        .map(|(name, _, _)| {
             let (schema, sequence) = split_schema_name(&name)?;
             Ok(row([
                 ("sequence_catalog", catalog_name()),

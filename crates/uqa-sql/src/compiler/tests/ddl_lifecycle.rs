@@ -523,6 +523,56 @@ fn alter_sequence_persistence_preserves_target_and_historical_table_syntax() {
 }
 
 #[test]
+fn alter_sequence_name_lifecycle_preserves_direct_and_historical_syntax() {
+    let Statement::AlterSequence(rename) =
+        first("ALTER SEQUENCE IF EXISTS app.ids RENAME TO renamed_ids")
+    else {
+        panic!("expected ALTER SEQUENCE RENAME TO");
+    };
+    assert_eq!(rename.name, "app.ids");
+    assert!(rename.if_exists);
+    assert_eq!(
+        rename.lifecycle,
+        crate::ast::SequenceLifecycle::RenameTo {
+            name: "renamed_ids".into()
+        }
+    );
+
+    let Statement::AlterSequence(set_schema) =
+        first("ALTER SEQUENCE IF EXISTS app.ids SET SCHEMA archive")
+    else {
+        panic!("expected ALTER SEQUENCE SET SCHEMA");
+    };
+    assert!(set_schema.if_exists);
+    assert_eq!(
+        set_schema.lifecycle,
+        crate::ast::SequenceLifecycle::SetSchema {
+            schema: "archive".into()
+        }
+    );
+
+    let Statement::AlterTable(table_rename) = first("ALTER TABLE app.ids RENAME TO renamed_ids")
+    else {
+        panic!("expected historical ALTER TABLE RENAME TO");
+    };
+    assert!(matches!(
+        table_rename.actions.as_slice(),
+        [crate::ast::AlterTableAction::RenameTable { to }] if to == "renamed_ids"
+    ));
+
+    let Statement::AlterTable(table_schema) =
+        first("ALTER TABLE IF EXISTS app.ids SET SCHEMA archive")
+    else {
+        panic!("expected historical ALTER TABLE SET SCHEMA");
+    };
+    assert!(table_schema.if_exists);
+    assert!(matches!(
+        table_schema.actions.as_slice(),
+        [crate::ast::AlterTableAction::SetSchema { schema }] if schema == "archive"
+    ));
+}
+
+#[test]
 fn create_table_as_preserves_positional_column_names() {
     let Statement::CreateTableAs {
         name,

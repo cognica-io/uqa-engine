@@ -8,8 +8,8 @@ use super::{
     AlterSequence, ColumnType, CreateFunction, CreateTrigger, FunctionBinding, FunctionBody,
     FunctionDispatch, FunctionParallel, FunctionParam, FunctionParamMode, FunctionReturns,
     FunctionVolatility, RangeFunctionOperation, RangeSubtype, RelationPersistence, RoutineAclEntry,
-    RoutineInvocationBinding, RoutineSecurityAttributes, RoutineVariadicMode, SequenceRestart,
-    Statement, TriggerDeferrability,
+    RoutineInvocationBinding, RoutineSecurityAttributes, RoutineVariadicMode, SequenceLifecycle,
+    SequenceRestart, Statement, TriggerDeferrability,
 };
 
 #[test]
@@ -81,6 +81,7 @@ fn alter_sequence_restart_reads_legacy_and_current_serde_shapes() {
     let omitted: AlterSequence = serde_json::from_str(r#"{"name":"s"}"#).unwrap();
     assert_eq!(omitted.restart, SequenceRestart::Unchanged);
     assert_eq!(omitted.persistence, None);
+    assert_eq!(omitted.lifecycle, SequenceLifecycle::Unchanged);
 
     let legacy_none: AlterSequence =
         serde_json::from_str(r#"{"name":"s","restart":null}"#).unwrap();
@@ -93,12 +94,21 @@ fn alter_sequence_restart_reads_legacy_and_current_serde_shapes() {
         name: "s".into(),
         restart: SequenceRestart::FromStart,
         persistence: Some(RelationPersistence::Unlogged),
+        lifecycle: SequenceLifecycle::RenameTo {
+            name: "renamed".into(),
+        },
         ..AlterSequence::default()
     };
     let round_trip: AlterSequence =
         serde_json::from_str(&serde_json::to_string(&current).unwrap()).unwrap();
     assert_eq!(round_trip.restart, SequenceRestart::FromStart);
     assert_eq!(round_trip.persistence, Some(RelationPersistence::Unlogged));
+    assert_eq!(
+        round_trip.lifecycle,
+        SequenceLifecycle::RenameTo {
+            name: "renamed".into()
+        }
+    );
 }
 
 #[test]

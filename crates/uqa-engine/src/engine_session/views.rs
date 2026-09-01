@@ -730,6 +730,57 @@ impl Engine {
         Ok(dependents)
     }
 
+    pub(crate) fn rewrite_view_sequence_references(
+        &self,
+        from: &RelationIdentity,
+        to: &str,
+    ) -> StorageBackendResult<()> {
+        self.synchronize_catalog_registries()?;
+        let mut rewritten_views = Vec::new();
+        for (relation, stored) in self.durable.views.read().iter() {
+            let mut rewritten = stored.clone();
+            let mut changed = false;
+            bind_query_plan_sequence_references(
+                &mut rewritten.query,
+                &mut |reference| -> StorageBackendResult<String> {
+                    let (schema, name) =
+                        RelationIdentity::parse_reference(reference).map_err(|error| {
+                            StorageBackendError::Other(format!(
+                                "invalid stored view sequence reference `{reference}`: {error}"
+                            ))
+                        })?;
+                    let matches = schema.as_deref().map_or(name == from.name, |schema| {
+                        schema == from.schema && name == from.name
+                    });
+                    if matches {
+                        changed = true;
+                        Ok(to.to_string())
+                    } else {
+                        Ok(reference.to_string())
+                    }
+                },
+            )?;
+            if changed {
+                rewritten_views.push((relation.clone(), rewritten));
+            }
+        }
+        if let Some(catalog) = self.storage.catalog.as_ref() {
+            for (relation, view) in &rewritten_views {
+                if view.persistence != uqa_sql::ast::RelationPersistence::Temporary {
+                    catalog.save_view(&ViewRow {
+                        relation: relation.clone(),
+                        definition_json: serde_json::to_string(view)?,
+                    })?;
+                }
+            }
+        }
+        if !rewritten_views.is_empty() {
+            self.durable.views.write().extend(rewritten_views);
+            self.note_catalog_registry_changed();
+        }
+        Ok(())
+    }
+
     pub(crate) fn cascade_view_closure(
         &self,
         initial: Vec<String>,

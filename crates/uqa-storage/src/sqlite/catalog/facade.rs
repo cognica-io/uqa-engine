@@ -169,6 +169,10 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::replace_sequence_row(self, sequence))
     }
 
+    fn rename_sequence_row(&self, from: &str, to: &str) -> StorageBackendResult<bool> {
+        into_storage_result(Catalog::rename_sequence_row(self, from, to))
+    }
+
     fn drop_sequence_row(&self, name: &str) -> StorageBackendResult<bool> {
         into_storage_result(Catalog::drop_sequence_row(self, name))
     }

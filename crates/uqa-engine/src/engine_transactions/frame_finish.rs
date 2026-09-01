@@ -440,15 +440,18 @@ impl Engine {
             let persistence = self.durable.sequence_persistence.read();
             values
                 .iter()
-                .filter(|(relation, _)| {
-                    persistence.get(*relation).copied().unwrap_or_default()
-                        != uqa_sql::ast::RelationPersistence::Temporary
-                })
-                .filter_map(|(relation, history)| {
-                    let object_id = object_ids.get(relation).copied()?;
+                .filter_map(|(history_object_id, history)| {
+                    let (relation, object_id) = object_ids
+                        .iter()
+                        .find(|(_, object_id)| *object_id == history_object_id)?;
+                    if persistence.get(relation).copied().unwrap_or_default()
+                        == uqa_sql::ast::RelationPersistence::Temporary
+                    {
+                        return None;
+                    }
                     let generation = sequences.get(relation)?.definition_generation;
                     let value = history.values_by_definition.get(&generation).copied()?;
-                    (value.object_id == object_id && !value.autonomous)
+                    (value.object_id == *object_id && !value.autonomous)
                         .then(|| (relation.qualified_name(), value.object_id, value))
                 })
                 .collect::<Vec<_>>()
@@ -501,16 +504,22 @@ impl Engine {
         let mut sequences = self.durable.sequences.write();
         let object_ids = self.durable.sequence_object_ids.read();
         let mut session = self.session.state.write();
-        if let Some((relation, history)) =
+        if let Some((history_object_id, history)) =
             values.iter().find(|(_, history)| history.defines_lastval)
         {
-            session.last_sequence = Some(SessionLastSequenceReference {
-                relation: relation.clone(),
-                object_id: history.object_id,
-            });
+            session.last_sequence = object_ids
+                .iter()
+                .find(|(_, object_id)| *object_id == history_object_id)
+                .map(|(relation, _)| SessionLastSequenceReference {
+                    relation: relation.clone(),
+                    object_id: history.object_id,
+                });
         }
-        for (relation, history) in values {
-            let Some(object_id) = object_ids.get(relation).copied() else {
+        for (history_object_id, history) in values {
+            let Some((relation, object_id)) = object_ids
+                .iter()
+                .find(|(_, object_id)| *object_id == history_object_id)
+            else {
                 continue;
             };
             let Some(generation) = sequences
@@ -522,18 +531,19 @@ impl Engine {
             if let Some(value) = history
                 .values_by_definition
                 .get(&generation)
-                .filter(|value| value.object_id == object_id)
+                .filter(|value| value.object_id == *object_id)
             {
                 if let Some(sequence) = sequences.get_mut(relation) {
                     sequence.current = value.current;
                     sequence.called = value.called;
                 }
             }
-            if history.object_id == object_id {
+            if history.object_id == *object_id {
+                session
+                    .sequence_currvals
+                    .retain(|_, current| current.object_id != *object_id);
                 if let Some(currval) = history.session_currval {
                     session.sequence_currvals.insert(relation.clone(), currval);
-                } else {
-                    session.sequence_currvals.remove(relation);
                 }
             }
         }

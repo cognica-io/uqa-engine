@@ -129,6 +129,17 @@ fn lookup_regclass_oid(engine: &Engine, name: &str) -> Result<Option<i64>, SQLEr
     else {
         return Ok(None);
     };
+    if kind == "sequence" {
+        let object_id = engine
+            .sequence_object_id(&canonical)
+            .map_err(|error| SQLError::Internal(error.to_string()))?
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "resolved sequence `{canonical}` has no object identity"
+                ))
+            })?;
+        return Ok(Some(super::sequence_relation_oid(object_id)));
+    }
     let (schema, relation) = helpers::oids::split_schema_name(&canonical)?;
     if kind == "table" {
         return super::table_relation_oid(engine, &canonical)
@@ -138,7 +149,6 @@ fn lookup_regclass_oid(engine: &Engine, name: &str) -> Result<Option<i64>, SQLEr
     let relkind = match kind {
         "view" => "v",
         "materialized view" => "m",
-        "sequence" => "S",
         "foreign table" => "f",
         other => {
             return Err(SQLError::Internal(format!(
