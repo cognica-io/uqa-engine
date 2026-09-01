@@ -123,8 +123,9 @@ pub(in crate::sql) use rewrite::{
     prepare_aggregate_output_projection, prepare_group_set_projection,
 };
 pub(in crate::sql) use validation::{
-    expression_may_return_set, projections_may_return_set, validate_query_set_contexts,
-    validate_source_set_contexts_before_build, validate_values_set_contexts,
+    builtin_returns_set, expression_may_return_set, projections_may_return_set,
+    validate_query_set_contexts, validate_source_set_contexts_before_build,
+    validate_values_set_contexts,
 };
 
 impl SetProjectionPlan {

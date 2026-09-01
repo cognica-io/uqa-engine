@@ -37,6 +37,7 @@ use super::{
 };
 
 mod cte_execution;
+mod directional_plan;
 mod evaluation;
 mod expression_shape;
 mod facet_projection;
@@ -55,6 +56,7 @@ mod set_projection;
 mod table_access;
 
 pub(in crate::sql) use cte_execution::*;
+use directional_plan::DirectionalQueryPlanOperator;
 pub(crate) use evaluation::CteScope;
 pub(in crate::sql) use evaluation::{
     expr_contains_subquery, prepare_correlated_exists_predicate, DirectColumnKey,
@@ -116,6 +118,14 @@ pub(in crate::sql) trait QueryRowConsumer {
 
     fn uses_directional_scan(&self) -> bool {
         false
+    }
+
+    fn directional_scan_prepared(
+        &self,
+        _engine: &Engine,
+        _support: uqa_execution::BackwardScanSupport,
+    ) -> Result<(), SQLError> {
+        Ok(())
     }
 
     fn scan_direction(&self) -> uqa_execution::PhysicalScanDirection {

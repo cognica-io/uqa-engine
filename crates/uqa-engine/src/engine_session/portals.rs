@@ -653,6 +653,32 @@ impl Engine {
 mod dependencies;
 use dependencies::{bind_session_portal_query_relations, session_portal_table_dependencies};
 impl Engine {
+    pub(crate) fn fork_session_portal_worker_engine(&self) -> Result<Engine, SQLError> {
+        let table_snapshots = self.query_table_snapshots.clone().ok_or_else(|| {
+            SQLError::Internal("directional query branch has no table snapshot".into())
+        })?;
+        let view_snapshots = self.query_view_snapshots.clone().ok_or_else(|| {
+            SQLError::Internal("directional query branch has no view snapshot".into())
+        })?;
+        let sql_function_snapshots =
+            self.query_sql_function_snapshots.clone().ok_or_else(|| {
+                SQLError::Internal("directional query branch has no SQL function snapshot".into())
+            })?;
+        let catalog_snapshot = self.query_catalog_snapshot.clone().ok_or_else(|| {
+            SQLError::Internal("directional query branch has no catalog snapshot".into())
+        })?;
+        let transaction_origin = self.query_transaction_origin.ok_or_else(|| {
+            SQLError::Internal("directional query branch has no transaction origin".into())
+        })?;
+        Ok(self.session_portal_worker_engine(
+            table_snapshots,
+            view_snapshots,
+            sql_function_snapshots,
+            catalog_snapshot,
+            transaction_origin,
+        ))
+    }
+
     fn session_portal_worker_engine(
         &self,
         table_snapshots: SessionPortalTableSnapshots,

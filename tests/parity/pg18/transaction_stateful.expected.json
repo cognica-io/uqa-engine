@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "49cf8ba8140707e00c231ef0fe193365472f3835900c778398c8b445f78269ec",
+  "fixture_sha256": "fbf0fc4f1942ccf165c33696ee4c5dc0aa1f711d281b4ab20e947c27ee967f2b",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -342,6 +342,56 @@
         [
           "directional_projection_after_revisit",
           "4"
+        ]
+      ]
+    },
+    {
+      "name": "cursor_directional_union_timing",
+      "kind": "ok"
+    },
+    {
+      "name": "cursor_directional_union_timing_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "directional_union_cte_after_first",
+          "1"
+        ],
+        [
+          "directional_union_cte_after_second",
+          "2"
+        ],
+        [
+          "directional_union_mixed_after_backward",
+          "2"
+        ],
+        [
+          "directional_union_mixed_after_first",
+          "1"
+        ],
+        [
+          "directional_union_mixed_after_second",
+          "2"
+        ],
+        [
+          "directional_union_native_after_backward",
+          "4"
+        ],
+        [
+          "directional_union_native_after_forward",
+          "3"
+        ],
+        [
+          "directional_union_native_after_revisit",
+          "5"
+        ],
+        [
+          "directional_union_result_after_backward",
+          "2"
+        ],
+        [
+          "directional_union_result_after_forward",
+          "2"
         ]
       ]
     },

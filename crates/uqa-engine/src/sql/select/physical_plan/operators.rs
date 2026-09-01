@@ -73,7 +73,7 @@ pub(in crate::sql) fn build_relational_operator<'a>(
     if ctes.streams_command_progress() {
         operator = Box::new(RowAtATime::new(operator));
     }
-    if ctes.scans_backwards() {
+    if ctes.scans_backwards() && statement.from.is_some() {
         operator = uqa_execution::prepare_backward_scan(operator);
     }
     if let Some(clause) = statement.locking.first() {

@@ -14,7 +14,7 @@ use uqa_sql::{SQLError, SQLParam};
 use super::{CteScope, Engine, PhysicalProjection};
 use crate::sql::aggregates::is_aggregate;
 
-fn builtin_returns_set(name: &str) -> bool {
+pub(in crate::sql) fn builtin_returns_set(name: &str) -> bool {
     matches!(
         name,
         "generate_series"

@@ -48,6 +48,10 @@ CREATE SEQUENCE offset_cursor_sequence START WITH 1;
 CREATE SEQUENCE directional_cursor_sequence START WITH 1;
 CREATE SEQUENCE directional_filter_sequence START WITH 1;
 CREATE SEQUENCE directional_projection_sequence START WITH 1;
+CREATE SEQUENCE directional_union_sequence START WITH 1;
+CREATE SEQUENCE directional_union_cte_sequence START WITH 1;
+CREATE SEQUENCE directional_mixed_union_sequence START WITH 1;
+CREATE SEQUENCE directional_result_union_sequence START WITH 1;
 CREATE SEQUENCE snapshot_cursor_sequence START WITH 1;
 CREATE SEQUENCE hold_cursor_sequence START WITH 1;
 CREATE TABLE own_cursor_source(id integer PRIMARY KEY, value integer NOT NULL);
@@ -486,6 +490,44 @@ COMMIT;
 
 -- @case cursor_directional_filter_timing_result rows
 SELECT name, observed FROM cursor_observations WHERE name LIKE 'directional_filter_%' OR name LIKE 'directional_projection_%' ORDER BY name;
+-- @end
+
+-- UNION ALL follows backwards-capable branches in reverse order, while one unsupported branch materializes the complete Append output.
+-- @case cursor_directional_union_timing ok
+BEGIN;
+DECLARE directional_union_cursor SCROLL CURSOR FOR SELECT value, nextval('directional_union_sequence') AS observed FROM generate_series(1, 2) AS values(value) UNION ALL SELECT value, nextval('directional_union_sequence') AS observed FROM generate_series(3, 4) AS values(value);
+MOVE FORWARD 3 FROM directional_union_cursor;
+INSERT INTO cursor_observations VALUES ('directional_union_native_after_forward', currval('directional_union_sequence'));
+MOVE BACKWARD 1 FROM directional_union_cursor;
+INSERT INTO cursor_observations VALUES ('directional_union_native_after_backward', currval('directional_union_sequence'));
+MOVE FORWARD 1 FROM directional_union_cursor;
+INSERT INTO cursor_observations VALUES ('directional_union_native_after_revisit', currval('directional_union_sequence'));
+CLOSE directional_union_cursor;
+DECLARE directional_union_cte_cursor SCROLL CURSOR FOR SELECT value, nextval('directional_union_cte_sequence') AS observed FROM generate_series(1, 1) AS values(value) UNION ALL (WITH branch AS MATERIALIZED (SELECT nextval('directional_union_cte_sequence') AS observed) SELECT 2 AS value, observed FROM branch);
+MOVE FORWARD 1 FROM directional_union_cte_cursor;
+INSERT INTO cursor_observations VALUES ('directional_union_cte_after_first', currval('directional_union_cte_sequence'));
+MOVE FORWARD 1 FROM directional_union_cte_cursor;
+INSERT INTO cursor_observations VALUES ('directional_union_cte_after_second', currval('directional_union_cte_sequence'));
+CLOSE directional_union_cte_cursor;
+DECLARE directional_mixed_union_cursor SCROLL CURSOR FOR SELECT left_value AS value, nextval('directional_mixed_union_sequence') AS observed FROM generate_series(1, 1) AS left_values(left_value) CROSS JOIN generate_series(1, 1) AS right_values(right_value) UNION ALL SELECT value, nextval('directional_mixed_union_sequence') AS observed FROM generate_series(2, 2) AS values(value);
+MOVE FORWARD 1 FROM directional_mixed_union_cursor;
+INSERT INTO cursor_observations VALUES ('directional_union_mixed_after_first', currval('directional_mixed_union_sequence'));
+MOVE FORWARD 1 FROM directional_mixed_union_cursor;
+INSERT INTO cursor_observations VALUES ('directional_union_mixed_after_second', currval('directional_mixed_union_sequence'));
+MOVE BACKWARD 1 FROM directional_mixed_union_cursor;
+INSERT INTO cursor_observations VALUES ('directional_union_mixed_after_backward', currval('directional_mixed_union_sequence'));
+CLOSE directional_mixed_union_cursor;
+DECLARE directional_result_union_cursor SCROLL CURSOR FOR SELECT 1 AS value, nextval('directional_result_union_sequence') AS observed UNION ALL SELECT value, nextval('directional_result_union_sequence') AS observed FROM generate_series(2, 2) AS values(value);
+MOVE FORWARD 2 FROM directional_result_union_cursor;
+INSERT INTO cursor_observations VALUES ('directional_union_result_after_forward', currval('directional_result_union_sequence'));
+MOVE BACKWARD 1 FROM directional_result_union_cursor;
+INSERT INTO cursor_observations VALUES ('directional_union_result_after_backward', currval('directional_result_union_sequence'));
+CLOSE directional_result_union_cursor;
+COMMIT;
+-- @end
+
+-- @case cursor_directional_union_timing_result rows
+SELECT name, observed FROM cursor_observations WHERE name LIKE 'directional_union_%' ORDER BY name;
 -- @end
 
 -- A READ COMMITTED cursor keeps the snapshot captured by DECLARE even after the declaring transaction writes.

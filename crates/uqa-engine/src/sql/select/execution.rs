@@ -11,10 +11,10 @@ use super::{
     physical_exec_error, physical_work_mem_bytes, query_contains_volatile_function,
     reachable_plan_cte_names, resolve_limit_offset_with_ctes, single_reference_plan_cte_names,
     validate_values_set_contexts, AccessPathPlan, BTreeSet, ComputePlan, CteScope, DirectColumnKey,
-    Engine, EngineExpressionEvaluator, ProjectionPlan, QueryBlockPlan, QueryConsumerControl,
-    QueryOutput, QueryOutputMode, QueryPlan, QueryRows, Rc, RelationalPlan, SQLError, SQLParam,
-    SQLResult, ScopedEngineHook, SetOpKind, SetOperationRowConsumer, SharedExpressionEvaluator,
-    SmallVec, Value,
+    DirectionalQueryPlanOperator, Engine, EngineExpressionEvaluator, ProjectionPlan,
+    QueryBlockPlan, QueryConsumerControl, QueryOutput, QueryOutputMode, QueryPlan, QueryRows, Rc,
+    RelationalPlan, SQLError, SQLParam, SQLResult, ScopedEngineHook, SetOpKind,
+    SetOperationRowConsumer, SharedExpressionEvaluator, SmallVec, Value,
 };
 
 pub(in crate::sql) fn execute_query_plan_with_ctes(
@@ -106,6 +106,86 @@ pub(in crate::sql) fn execute_query_plan_output(
             subqueries,
         } => {
             let set_schema = bind_query_plan_schema(engine, plan, params, ctes, None)?;
+            let directional_union_all = matches!(
+                &output_mode,
+                QueryOutputMode::RowConsumer(downstream)
+                    if downstream.uses_directional_scan()
+                        && matches!((*kind, *all), (SetOpKind::Union, true))
+                        && order_by.is_empty()
+                        && !*with_ties
+            );
+            if directional_union_all {
+                let left_schema = bind_query_plan_schema(engine, left, params, ctes, None)?;
+                let right_schema = bind_query_plan_schema(engine, right, params, ctes, None)?;
+                let child_ctes = {
+                    let child_scope = ctes.enter_lock_identity_emission(false);
+                    (*child_scope).clone()
+                };
+                let left: Box<dyn uqa_execution::PhysicalOperator + '_> = Box::new(
+                    DirectionalQueryPlanOperator::new(
+                        engine.fork_session_portal_worker_engine()?,
+                        (**left).clone(),
+                        params.to_vec(),
+                        child_ctes.clone(),
+                        left_schema,
+                    )
+                    .map_err(physical_exec_error)?,
+                );
+                let right: Box<dyn uqa_execution::PhysicalOperator + '_> = Box::new(
+                    DirectionalQueryPlanOperator::new(
+                        engine.fork_session_portal_worker_engine()?,
+                        (**right).clone(),
+                        params.to_vec(),
+                        child_ctes,
+                        right_schema,
+                    )
+                    .map_err(physical_exec_error)?,
+                );
+                let mut operation: Box<dyn uqa_execution::PhysicalOperator + '_> = Box::new(
+                    uqa_execution::ExternalSetOperation::new_directional_with_types(
+                        left,
+                        right,
+                        *kind,
+                        *all,
+                        set_schema.column_types().to_vec(),
+                        physical_work_mem_bytes(engine.query_runtime_view())?,
+                    )
+                    .map_err(physical_exec_error)?,
+                );
+                let (resolved_offset, resolved_limit) = {
+                    let scoped_ctes = ctes.enter_scalar_subqueries(subqueries);
+                    (
+                        resolve_limit_offset_with_ctes(
+                            offset.as_deref(),
+                            engine,
+                            params,
+                            "OFFSET",
+                            &scoped_ctes,
+                        )?
+                        .unwrap_or(0),
+                        resolve_limit_offset_with_ctes(
+                            limit.as_deref(),
+                            engine,
+                            params,
+                            "LIMIT",
+                            &scoped_ctes,
+                        )?,
+                    )
+                };
+                if resolved_offset != 0 || resolved_limit.is_some() {
+                    operation = Box::new(uqa_execution::Limit::new(
+                        operation,
+                        resolved_offset,
+                        resolved_limit,
+                    ));
+                }
+                return collect_query_operator(
+                    engine,
+                    set_schema.columns().to_vec(),
+                    operation,
+                    output_mode,
+                );
+            }
             let streaming_consumer = match &output_mode {
                 QueryOutputMode::RowConsumer(downstream)
                     if matches!((*kind, *all), (SetOpKind::Union, true))
@@ -504,7 +584,9 @@ fn collect_directional_query_operator(
     operator: &mut Box<dyn uqa_execution::PhysicalOperator + '_>,
     consumer: &Rc<dyn super::QueryRowConsumer>,
 ) -> Result<(), SQLError> {
-    if operator.backward_scan_support() != uqa_execution::BackwardScanSupport::Native {
+    let support = operator.backward_scan_support();
+    consumer.directional_scan_prepared(engine, support)?;
+    if support != uqa_execution::BackwardScanSupport::Native {
         let placeholder: Box<dyn uqa_execution::PhysicalOperator> = Box::new(
             uqa_execution::TableScan::from_physical_rows(operator.row_schema().clone(), Vec::new()),
         );

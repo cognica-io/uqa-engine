@@ -18,8 +18,9 @@ use uqa_sql::ResultRow;
 
 use crate::batch::DEFAULT_BATCH_SIZE;
 use crate::{
-    Batch, ExecError, ExecResult, ExpressionEvaluator, ExternalSort, PhysicalOperator, PhysicalRow,
-    RowProjectionValue, RowSchema, ScalarExpr, SortKey,
+    BackwardScanSupport, Batch, ExecError, ExecResult, ExpressionEvaluator, ExternalSort,
+    PhysicalOperator, PhysicalRow, PhysicalScanDirection, RowProjectionValue, RowSchema,
+    ScalarExpr, SortKey,
 };
 
 struct ColumnEvaluator;
@@ -125,6 +126,10 @@ impl PhysicalOperator for AlignSchema<'_> {
         &self.schema
     }
 
+    fn backward_scan_support(&self) -> BackwardScanSupport {
+        self.child.backward_scan_support()
+    }
+
     fn open(&mut self) -> ExecResult<()> {
         self.child.open()
     }
@@ -133,6 +138,27 @@ impl PhysicalOperator for AlignSchema<'_> {
         let Some(batch) = self.child.next()? else {
             return Ok(None);
         };
+        self.align_batch(batch).map(Some)
+    }
+
+    fn next_direction(&mut self, direction: PhysicalScanDirection) -> ExecResult<Option<Batch>> {
+        let Some(batch) = self.child.next_direction(direction)? else {
+            return Ok(None);
+        };
+        self.align_batch(batch).map(Some)
+    }
+
+    fn rewind(&mut self) -> ExecResult<()> {
+        self.child.rewind()
+    }
+
+    fn close(&mut self) -> ExecResult<()> {
+        self.child.close()
+    }
+}
+
+impl AlignSchema<'_> {
+    fn align_batch(&self, batch: Batch) -> ExecResult<Batch> {
         let identity_layout = batch.schema.physical_width() == self.schema.physical_width()
             && (0..batch.schema.len())
                 .all(|position| batch.schema.slot(position) == Some(position));
@@ -142,7 +168,7 @@ impl PhysicalOperator for AlignSchema<'_> {
                 .into_iter()
                 .map(PhysicalRow::without_lock_origins)
                 .collect();
-            return Ok(Some(Batch::from_physical_rows(self.schema.clone(), rows)));
+            return Ok(Batch::from_physical_rows(self.schema.clone(), rows));
         }
         if self.coercions.iter().all(Option::is_none) {
             let slots = (0..batch.schema.len())
@@ -159,7 +185,7 @@ impl PhysicalOperator for AlignSchema<'_> {
                 .into_iter()
                 .map(|row| row.project_slots(&slots).without_lock_origins())
                 .collect();
-            return Ok(Some(Batch::from_physical_rows(self.schema.clone(), rows)));
+            return Ok(Batch::from_physical_rows(self.schema.clone(), rows));
         }
         let mut rows = Vec::with_capacity(batch.rows.len());
         for row in batch.rows {
@@ -183,11 +209,7 @@ impl PhysicalOperator for AlignSchema<'_> {
                 .collect::<ExecResult<Vec<_>>>()?;
             rows.push(row.project_with_values(values).without_lock_origins());
         }
-        Ok(Some(Batch::from_physical_rows(self.schema.clone(), rows)))
-    }
-
-    fn close(&mut self) -> ExecResult<()> {
-        self.child.close()
+        Ok(Batch::from_physical_rows(self.schema.clone(), rows))
     }
 }
 
@@ -233,6 +255,41 @@ impl<'a> RowCursor<'a> {
         }
     }
 
+    fn backward_scan_support(&self) -> BackwardScanSupport {
+        self.operator.backward_scan_support()
+    }
+
+    fn next_direction_row(
+        &mut self,
+        direction: PhysicalScanDirection,
+    ) -> ExecResult<Option<PhysicalRow>> {
+        if self.batch.len() != 0 || self.lookahead.is_some() {
+            return Err(ExecError::Other(
+                "set-operation input cannot mix batched and directional pulls".into(),
+            ));
+        }
+        let Some(batch) = self.operator.next_direction(direction)? else {
+            self.exhausted = true;
+            return Ok(None);
+        };
+        let mut rows = batch.rows.into_iter();
+        let row = rows.next();
+        if rows.next().is_some() {
+            return Err(ExecError::Other(
+                "directional set-operation input returned more than one row".into(),
+            ));
+        }
+        self.exhausted = row.is_none();
+        Ok(row)
+    }
+
+    fn rewind(&mut self) -> ExecResult<()> {
+        self.batch = Vec::new().into_iter();
+        self.lookahead = None;
+        self.exhausted = false;
+        self.operator.rewind()
+    }
+
     fn take_group(&mut self, schema: &RowSchema) -> ExecResult<Option<RowGroup>> {
         let first = match self.lookahead.take() {
             Some(row) => row,
@@ -261,6 +318,14 @@ impl<'a> RowCursor<'a> {
         self.exhausted = true;
         self.operator.close()
     }
+}
+
+#[derive(Clone, Copy)]
+enum DirectionalAppendPosition {
+    BeforeFirst,
+    Left,
+    Right,
+    AfterLast,
 }
 
 fn compare_rows(left: &PhysicalRow, right: &PhysicalRow, schema: &RowSchema) -> Ordering {
@@ -295,6 +360,8 @@ pub struct ExternalSetOperation<'a> {
     pending_row: Option<PhysicalRow>,
     pending_count: usize,
     union_all_left_done: bool,
+    incremental_union_all: bool,
+    directional_position: DirectionalAppendPosition,
 }
 
 impl<'a> ExternalSetOperation<'a> {
@@ -316,6 +383,30 @@ impl<'a> ExternalSetOperation<'a> {
         all: bool,
         output_types: Vec<Option<ColumnType>>,
         work_mem_bytes: usize,
+    ) -> ExecResult<Self> {
+        Self::new_with_types_and_mode(left, right, kind, all, output_types, work_mem_bytes, false)
+    }
+
+    /// Construct a set operation whose ordinary forward pulls remain one-row incremental when a scroll materialization boundary wraps the complete operation.
+    pub fn new_directional_with_types(
+        left: Box<dyn PhysicalOperator + 'a>,
+        right: Box<dyn PhysicalOperator + 'a>,
+        kind: SetOpKind,
+        all: bool,
+        output_types: Vec<Option<ColumnType>>,
+        work_mem_bytes: usize,
+    ) -> ExecResult<Self> {
+        Self::new_with_types_and_mode(left, right, kind, all, output_types, work_mem_bytes, true)
+    }
+
+    fn new_with_types_and_mode(
+        left: Box<dyn PhysicalOperator + 'a>,
+        right: Box<dyn PhysicalOperator + 'a>,
+        kind: SetOpKind,
+        all: bool,
+        output_types: Vec<Option<ColumnType>>,
+        work_mem_bytes: usize,
+        incremental_union_all: bool,
     ) -> ExecResult<Self> {
         let output = left.schema().to_vec();
         let left: Box<dyn PhysicalOperator + 'a> =
@@ -360,6 +451,8 @@ impl<'a> ExternalSetOperation<'a> {
             pending_row: None,
             pending_count: 0,
             union_all_left_done: false,
+            incremental_union_all,
+            directional_position: DirectionalAppendPosition::BeforeFirst,
         })
     }
 
@@ -383,6 +476,71 @@ impl<'a> ExternalSetOperation<'a> {
             Ok(None)
         } else {
             Ok(Some(Batch::from_physical_rows(self.schema.clone(), rows)))
+        }
+    }
+
+    fn next_union_all_row(&mut self) -> ExecResult<Option<Batch>> {
+        let row = if self.union_all_left_done {
+            self.right.next_row()?
+        } else if let Some(row) = self.left.next_row()? {
+            Some(row)
+        } else {
+            self.union_all_left_done = true;
+            self.right.next_row()?
+        };
+        Ok(row.map(|row| self.directional_row_batch(row)))
+    }
+
+    fn directional_row_batch(&self, row: PhysicalRow) -> Batch {
+        Batch::from_physical_rows(self.schema.clone(), vec![row.without_lock_origins()])
+    }
+
+    fn next_union_all_direction(
+        &mut self,
+        direction: PhysicalScanDirection,
+    ) -> ExecResult<Option<Batch>> {
+        let mut position = match (self.directional_position, direction) {
+            (DirectionalAppendPosition::BeforeFirst, PhysicalScanDirection::Backward)
+            | (DirectionalAppendPosition::AfterLast, PhysicalScanDirection::Forward) => {
+                return Ok(None)
+            }
+            (DirectionalAppendPosition::BeforeFirst, PhysicalScanDirection::Forward)
+            | (DirectionalAppendPosition::Left, _) => DirectionalAppendPosition::Left,
+            (DirectionalAppendPosition::AfterLast, PhysicalScanDirection::Backward)
+            | (DirectionalAppendPosition::Right, _) => DirectionalAppendPosition::Right,
+        };
+        loop {
+            let row = match position {
+                DirectionalAppendPosition::Left => self.left.next_direction_row(direction)?,
+                DirectionalAppendPosition::Right => self.right.next_direction_row(direction)?,
+                DirectionalAppendPosition::BeforeFirst | DirectionalAppendPosition::AfterLast => {
+                    unreachable!()
+                }
+            };
+            if let Some(row) = row {
+                self.directional_position = position;
+                return Ok(Some(self.directional_row_batch(row)));
+            }
+            position = match (position, direction) {
+                (DirectionalAppendPosition::Left, PhysicalScanDirection::Forward) => {
+                    DirectionalAppendPosition::Right
+                }
+                (DirectionalAppendPosition::Right, PhysicalScanDirection::Backward) => {
+                    DirectionalAppendPosition::Left
+                }
+                (DirectionalAppendPosition::Left, PhysicalScanDirection::Backward) => {
+                    self.directional_position = DirectionalAppendPosition::BeforeFirst;
+                    return Ok(None);
+                }
+                (DirectionalAppendPosition::Right, PhysicalScanDirection::Forward) => {
+                    self.directional_position = DirectionalAppendPosition::AfterLast;
+                    return Ok(None);
+                }
+                (
+                    DirectionalAppendPosition::BeforeFirst | DirectionalAppendPosition::AfterLast,
+                    _,
+                ) => unreachable!(),
+            };
         }
     }
 
@@ -478,19 +636,35 @@ impl PhysicalOperator for ExternalSetOperation<'_> {
         &self.schema
     }
 
+    fn backward_scan_support(&self) -> BackwardScanSupport {
+        if matches!((self.kind, self.all), (SetOpKind::Union, true))
+            && self.left.backward_scan_support() == BackwardScanSupport::Native
+            && self.right.backward_scan_support() == BackwardScanSupport::Native
+        {
+            BackwardScanSupport::Native
+        } else {
+            BackwardScanSupport::Unsupported
+        }
+    }
+
     fn open(&mut self) -> ExecResult<()> {
         self.left_group = None;
         self.right_group = None;
         self.pending_row = None;
         self.pending_count = 0;
         self.union_all_left_done = false;
+        self.directional_position = DirectionalAppendPosition::BeforeFirst;
         self.left.open()?;
         self.right.open()
     }
 
     fn next(&mut self) -> ExecResult<Option<Batch>> {
         if matches!((self.kind, self.all), (SetOpKind::Union, true)) {
-            return self.next_union_all();
+            return if self.incremental_union_all {
+                self.next_union_all_row()
+            } else {
+                self.next_union_all()
+            };
         }
         let mut rows = Vec::with_capacity(DEFAULT_BATCH_SIZE);
         while rows.len() < DEFAULT_BATCH_SIZE {
@@ -523,11 +697,40 @@ impl PhysicalOperator for ExternalSetOperation<'_> {
         }
     }
 
+    fn next_direction(&mut self, direction: PhysicalScanDirection) -> ExecResult<Option<Batch>> {
+        if self.backward_scan_support() == BackwardScanSupport::Native {
+            return self.next_union_all_direction(direction);
+        }
+        if direction == PhysicalScanDirection::Forward {
+            return if matches!((self.kind, self.all), (SetOpKind::Union, true)) {
+                self.next_union_all_row()
+            } else {
+                self.next()
+            };
+        }
+        Err(ExecError::Other(
+            "set operation does not support backwards scanning".into(),
+        ))
+    }
+
+    fn rewind(&mut self) -> ExecResult<()> {
+        if self.backward_scan_support() != BackwardScanSupport::Native {
+            return Err(ExecError::Other(
+                "set operation does not support rewind".into(),
+            ));
+        }
+        self.left.rewind()?;
+        self.right.rewind()?;
+        self.directional_position = DirectionalAppendPosition::BeforeFirst;
+        Ok(())
+    }
+
     fn close(&mut self) -> ExecResult<()> {
         self.left_group = None;
         self.right_group = None;
         self.pending_row = None;
         self.pending_count = 0;
+        self.directional_position = DirectionalAppendPosition::BeforeFirst;
         let left = self.left.close();
         let right = self.right.close();
         crate::physical::with_cleanup(left, right, "close right set-operation input")
@@ -611,5 +814,74 @@ mod tests {
             ExternalSetOperation::new(left, Box::new(right), SetOpKind::Union, true, 1).unwrap();
         let rows = run_to_rows(&mut set).unwrap().1;
         assert_eq!(rows, vec![row(1), row(2)]);
+    }
+
+    fn directional_value(batch: Option<Batch>) -> Option<i64> {
+        let batch = batch?;
+        let row = batch.rows.first()?;
+        match batch.schema.view(row).value_at(0) {
+            Some(Value::Int(value)) => Some(*value),
+            value => panic!("unexpected directional set value: {value:?}"),
+        }
+    }
+
+    #[test]
+    fn union_all_scans_children_in_reverse_order_across_the_boundary() {
+        let left: Box<dyn PhysicalOperator> = Box::new(crate::ScrollMaterialize::new(Box::new(
+            TableScan::from_rows(vec!["v".into()], vec![row(1), row(2)]),
+        )));
+        let right: Box<dyn PhysicalOperator> = Box::new(crate::ScrollMaterialize::new(Box::new(
+            TableScan::from_rows(vec!["v".into()], vec![row(3), row(4)]),
+        )));
+        let mut set = ExternalSetOperation::new(left, right, SetOpKind::Union, true, 1).unwrap();
+        assert_eq!(set.backward_scan_support(), BackwardScanSupport::Native);
+        set.open().unwrap();
+        for (direction, expected) in [
+            (PhysicalScanDirection::Forward, 1),
+            (PhysicalScanDirection::Forward, 2),
+            (PhysicalScanDirection::Forward, 3),
+            (PhysicalScanDirection::Backward, 2),
+            (PhysicalScanDirection::Forward, 3),
+        ] {
+            assert_eq!(
+                directional_value(set.next_direction(direction).unwrap()),
+                Some(expected)
+            );
+        }
+        set.rewind().unwrap();
+        assert_eq!(
+            directional_value(set.next_direction(PhysicalScanDirection::Forward).unwrap()),
+            Some(1)
+        );
+        set.close().unwrap();
+    }
+
+    #[test]
+    fn directional_union_all_materialization_pulls_one_row_at_a_time() {
+        let left: Box<dyn PhysicalOperator> =
+            Box::new(TableScan::from_rows(vec!["v".into()], vec![row(1), row(2)]));
+        let right: Box<dyn PhysicalOperator> =
+            Box::new(TableScan::from_rows(vec!["v".into()], vec![row(3)]));
+        let mut set = ExternalSetOperation::new_directional_with_types(
+            left,
+            right,
+            SetOpKind::Union,
+            true,
+            vec![None],
+            1,
+        )
+        .unwrap();
+        assert_eq!(
+            set.backward_scan_support(),
+            BackwardScanSupport::Unsupported
+        );
+        set.open().unwrap();
+        for expected in [1, 2, 3] {
+            let batch = set.next().unwrap().unwrap();
+            assert_eq!(batch.rows.len(), 1);
+            assert_eq!(directional_value(Some(batch)), Some(expected));
+        }
+        assert!(set.next().unwrap().is_none());
+        set.close().unwrap();
     }
 }
