@@ -230,14 +230,16 @@ class PremergeCITest(unittest.TestCase):
             ],
         )
 
-    def test_rust_change_skips_binding_suites(self) -> None:
+    def test_rust_runtime_change_runs_binding_suites(self) -> None:
         result, gh_invocations, git_invocations = self.run_script(
             changed_files=("crates/uqa-engine/src/lib.rs",)
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(gh_invocations), 1)
-        self.assertIn("workflow run ci.yml", gh_invocations[0])
+        self.assertEqual(
+            tuple(invocation.split()[2] for invocation in gh_invocations),
+            ("ci.yml", "javascript-bindings.yml", "python-wheels.yml"),
+        )
         self.assertIn("-f run_rust=true", gh_invocations[0])
         self.assertEqual(len(git_invocations), 2)
 

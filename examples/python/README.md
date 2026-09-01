@@ -4,7 +4,7 @@ These programs mirror the Rust, Node.js, and browser WASM scenarios with the Pyt
 
 | Example | Coverage |
 | --- | --- |
-| [`unified_search.py`](unified_search.py) | Raw and Bayesian text retrieval, vector KNN, exact and robust fusion, typed operator joins, a scalar callback, and Cypher over shared identities |
+| [`unified_search.py`](unified_search.py) | Raw and Bayesian text retrieval, vector KNN, exact and robust fusion, cross-relation typed operator joins, a scalar callback, and Cypher over shared identities |
 | [`vector_knn.py`](vector_knn.py) | Exact, HNSW, and IVF vector access plus relational filtering |
 | [`graph_cypher.py`](graph_cypher.py) | Named graph construction, mutation, traversal, and relational composition |
 | [`storage_transactions.py`](storage_transactions.py) | Persistent reopen, rollback, savepoints, and independent sessions |

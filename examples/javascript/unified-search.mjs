@@ -58,6 +58,12 @@ const PAPERS = [
     [0.05, 0.1, 0.9],
   ],
 ];
+const ARCHIVED_PAPERS = [
+  [101, "Sparse retrieval retrospective", "SIGIR", [0.93, 0.12, 0.04]],
+  [102, "Dense retrieval retrospective", "NeurIPS", [0.82, 0.34, 0.06]],
+  [103, "Storage engines retrospective", "VLDB", [0.08, 0.96, 0.08]],
+  [104, "Graph querying retrospective", "ICDE", [0.04, 0.12, 0.94]],
+];
 const CITES = [
   [3, 1],
   [3, 2],
@@ -114,21 +120,41 @@ export async function runUnifiedSearch(engine, vector) {
   );
   const vectorPairs = await rows(
     engine,
-    "SELECT pairs.left_doc_id AS left_id, " +
-      "pairs.right_doc_id AS right_id, pairs._score AS score " +
+    "SELECT pairs.left_doc_id AS live_id, " +
+      "pairs.right_doc_id AS archive_id, pairs._score AS score, " +
+      "p.title AS live_title, a.title AS archive_title " +
       "FROM vector_similarity_join(" +
       "papers, knn_match(embedding, ARRAY[1.0, 0.0, 0.0], 4), " +
-      "knn_match(embedding, ARRAY[1.0, 0.0, 0.0], 4), 0.80) AS pairs " +
-      "ORDER BY score DESC, left_id, right_id LIMIT 8",
+      "archived_papers, " +
+      "knn_match(archived_embedding, ARRAY[1.0, 0.0, 0.0], 4), " +
+      "0.80) AS pairs " +
+      "JOIN papers AS p ON p.id = pairs.left_doc_id " +
+      "JOIN archived_papers AS a ON a.id = pairs.right_doc_id " +
+      "ORDER BY score DESC, live_id, archive_id LIMIT 8",
+  );
+  const hybridPairs = await rows(
+    engine,
+    "SELECT pairs.left_doc_id AS live_id, " +
+      "pairs.right_doc_id AS archive_id, pairs._score AS score, " +
+      "p.venue, a.title AS archive_title " +
+      "FROM hybrid_join(" +
+      "papers, venue IS NOT NULL " +
+      "AND knn_match(embedding, ARRAY[1.0, 0.0, 0.0], 6), " +
+      "archived_papers, venue IS NOT NULL " +
+      "AND knn_match(archived_embedding, ARRAY[1.0, 0.0, 0.0], 4)) AS pairs " +
+      "JOIN papers AS p ON p.id = pairs.left_doc_id " +
+      "JOIN archived_papers AS a ON a.id = pairs.right_doc_id " +
+      "ORDER BY score DESC, live_id, archive_id",
   );
   const graphDocumentPairs = await rows(
     engine,
     "SELECT pairs.left_doc_id AS vertex_id, " +
-      "pairs.right_doc_id AS paper_id, p.title " +
+      "pairs.right_doc_id AS archive_id, a.title AS archive_title " +
       `FROM cross_paradigm_join(papers, graph_pagerank('${GRAPH}'), ` +
+      "archived_papers, " +
       "venue IS NOT NULL) AS pairs " +
-      "JOIN papers AS p ON p.id = pairs.right_doc_id " +
-      "ORDER BY vertex_id, paper_id",
+      "JOIN archived_papers AS a ON a.id = pairs.right_doc_id " +
+      "ORDER BY vertex_id, archive_id",
   );
   const blended = await rows(
     engine,
@@ -171,6 +197,7 @@ export async function runUnifiedSearch(engine, vector) {
     fusedExact,
     fusedPooled,
     vectorPairs,
+    hybridPairs,
     graphDocumentPairs,
     blended,
     cited,
@@ -184,6 +211,7 @@ export async function runUnifiedSearch(engine, vector) {
     fusedExact,
     fusedPooled,
     vectorPairs,
+    hybridPairs,
     graphDocumentPairs,
     blended,
     cited,
@@ -200,6 +228,7 @@ function assertUnifiedResults(results) {
     "fusedExact",
     "fusedPooled",
     "vectorPairs",
+    "hybridPairs",
     "graphDocumentPairs",
     "blended",
     "cited",
@@ -212,6 +241,15 @@ function assertUnifiedResults(results) {
   }
   assertEqual(results.blended[0].id, 3, "recency-blended winner");
   assertEqual(results.vectorRows[0].id, 1, "vector winner");
+  if (!results.vectorPairs.every((row) => row.live_id < 100 && row.archive_id > 100)) {
+    throw new Error("vector operator join did not preserve live and archive identities");
+  }
+  if (!results.hybridPairs.every((row) => row.live_id < 100 && row.archive_id > 100)) {
+    throw new Error("hybrid operator join did not preserve live and archive identities");
+  }
+  if (!results.graphDocumentPairs.every((row) => row.archive_id > 100)) {
+    throw new Error("cross-paradigm join did not preserve graph and archive identities");
+  }
   assertEqual(results.cited.map((row) => row.id), [1, 2], "direct citations");
   assertEqual(results.reachable.map((row) => row.id), [2], "two-hop citations");
   assertEqual(results.unified.map((row) => row.id), [1, 2], "unified result");
@@ -226,7 +264,7 @@ async function load(engine, vector) {
     "CREATE TABLE papers (id INTEGER PRIMARY KEY, title TEXT, abstract TEXT, " +
       "venue TEXT, year INTEGER, embedding VECTOR(3))",
   );
-  await engine.sql("CREATE INDEX papers_abstract_gin ON papers USING gin (abstract)");
+  await engine.sql("CREATE INDEX papers_text_gin ON papers USING gin (title, abstract)");
   for (const [id, title, abstract, venue, year, embedding] of PAPERS) {
     await engine.sql(
       "INSERT INTO papers (id, title, abstract, venue, year, embedding) " +
@@ -235,6 +273,21 @@ async function load(engine, vector) {
     );
   }
   await engine.sql("CREATE INDEX papers_embedding_hnsw ON papers USING hnsw (embedding)");
+  await engine.sql(
+    "CREATE TABLE archived_papers (id INTEGER PRIMARY KEY, title TEXT, " +
+      "venue TEXT, archived_embedding VECTOR(3))",
+  );
+  for (const [id, title, venue, embedding] of ARCHIVED_PAPERS) {
+    await engine.sql(
+      "INSERT INTO archived_papers (id, title, venue, archived_embedding) " +
+        "VALUES ($1, $2, $3, $4)",
+      [id, title, venue, vector(embedding)],
+    );
+  }
+  await engine.sql(
+    "CREATE INDEX archived_papers_embedding_hnsw " +
+      "ON archived_papers USING hnsw (archived_embedding)",
+  );
   await engine.sql(`SELECT create_graph('${GRAPH}') AS ok`);
   for (const [id, , , venue] of PAPERS) {
     await cypher(engine, `CREATE (:Paper {paper_id: ${id}, venue: '${venue}'})`);

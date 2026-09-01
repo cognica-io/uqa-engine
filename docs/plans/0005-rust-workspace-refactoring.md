@@ -239,7 +239,7 @@ All affected crate unit, single integration, and registered benchmark targets pa
 
 ### 3.7 Phase 6 boundary measurement
 
-The Phase 6 implementation boundary was measured on 2026-09-01 with `bash scripts/measure-rust-refactoring.sh`. `cloc 2.08` reports 1,490 Rust files, 406,927 code lines, 19,873 comment lines, and 27,566 blank lines under `crates/`; the hand-maintained report excludes imported `uqa-pg-query` and reports 1,485 files and 439,077 physical lines. No governed file reaches 1,000 physical lines, every recorded threshold count is zero, and the largest governed file is `uqa-sql/src/compiler/tree/select.rs` at 999 lines.
+The Phase 6 implementation boundary was measured on 2026-09-01 with `bash scripts/measure-rust-refactoring.sh`. `cloc 2.08` reports 1,490 Rust files, 406,927 code lines, 19,873 comment lines, and 27,566 blank lines under `crates/`; the hand-maintained report excludes imported `uqa-pg-query` and reports 1,485 files and 439,164 physical lines. No governed file reaches 1,000 physical lines, every recorded threshold count is zero, and the largest governed file is `uqa-sql/src/compiler/tree/select.rs` at 999 lines.
 
 | Crate | Rust files | Physical lines | Crate | Rust files | Physical lines |
 | --- | ---: | ---: | --- | ---: | ---: |

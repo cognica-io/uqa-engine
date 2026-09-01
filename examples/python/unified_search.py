@@ -66,6 +66,12 @@ PAPERS = [
         [0.05, 0.10, 0.90],
     ),
 ]
+ARCHIVED_PAPERS = [
+    (101, "Sparse retrieval retrospective", "SIGIR", [0.93, 0.12, 0.04]),
+    (102, "Dense retrieval retrospective", "NeurIPS", [0.82, 0.34, 0.06]),
+    (103, "Storage engines retrospective", "VLDB", [0.08, 0.96, 0.08]),
+    (104, "Graph querying retrospective", "ICDE", [0.04, 0.12, 0.94]),
+]
 CITES = [(3, 1), (3, 2), (1, 2), (5, 6), (5, 4)]
 
 
@@ -121,21 +127,41 @@ def main() -> None:
         )
         vector_pairs = rows(
             engine,
-            "SELECT pairs.left_doc_id AS left_id, "
-            "pairs.right_doc_id AS right_id, pairs._score AS score "
+            "SELECT pairs.left_doc_id AS live_id, "
+            "pairs.right_doc_id AS archive_id, pairs._score AS score, "
+            "p.title AS live_title, a.title AS archive_title "
             "FROM vector_similarity_join("
             "papers, knn_match(embedding, ARRAY[1.0, 0.0, 0.0], 4), "
-            "knn_match(embedding, ARRAY[1.0, 0.0, 0.0], 4), 0.80) AS pairs "
-            "ORDER BY score DESC, left_id, right_id LIMIT 8",
+            "archived_papers, "
+            "knn_match(archived_embedding, ARRAY[1.0, 0.0, 0.0], 4), "
+            "0.80) AS pairs "
+            "JOIN papers AS p ON p.id = pairs.left_doc_id "
+            "JOIN archived_papers AS a ON a.id = pairs.right_doc_id "
+            "ORDER BY score DESC, live_id, archive_id LIMIT 8",
+        )
+        hybrid_pairs = rows(
+            engine,
+            "SELECT pairs.left_doc_id AS live_id, "
+            "pairs.right_doc_id AS archive_id, pairs._score AS score, "
+            "p.venue, a.title AS archive_title "
+            "FROM hybrid_join("
+            "papers, venue IS NOT NULL "
+            "AND knn_match(embedding, ARRAY[1.0, 0.0, 0.0], 6), "
+            "archived_papers, venue IS NOT NULL "
+            "AND knn_match(archived_embedding, ARRAY[1.0, 0.0, 0.0], 4)) AS pairs "
+            "JOIN papers AS p ON p.id = pairs.left_doc_id "
+            "JOIN archived_papers AS a ON a.id = pairs.right_doc_id "
+            "ORDER BY score DESC, live_id, archive_id",
         )
         graph_document_pairs = rows(
             engine,
             "SELECT pairs.left_doc_id AS vertex_id, "
-            "pairs.right_doc_id AS paper_id, p.title "
+            "pairs.right_doc_id AS archive_id, a.title AS archive_title "
             f"FROM cross_paradigm_join(papers, graph_pagerank('{GRAPH}'), "
+            "archived_papers, "
             "venue IS NOT NULL) AS pairs "
-            "JOIN papers AS p ON p.id = pairs.right_doc_id "
-            "ORDER BY vertex_id, paper_id",
+            "JOIN archived_papers AS a ON a.id = pairs.right_doc_id "
+            "ORDER BY vertex_id, archive_id",
         )
         blended = rows(
             engine,
@@ -178,6 +204,7 @@ def main() -> None:
             "fused_exact": fused_exact,
             "fused_pooled": fused_pooled,
             "vector_pairs": vector_pairs,
+            "hybrid_pairs": hybrid_pairs,
             "graph_document_pairs": graph_document_pairs,
             "blended": blended,
             "cited": cited,
@@ -195,6 +222,9 @@ def verify_results(results: dict) -> None:
         assert result_rows, f"unified search stage {name} returned no rows"
     assert results["blended"][0]["id"] == 3
     assert results["vector"][0]["id"] == 1
+    assert all(row["live_id"] < 100 < row["archive_id"] for row in results["vector_pairs"])
+    assert all(row["live_id"] < 100 < row["archive_id"] for row in results["hybrid_pairs"])
+    assert all(row["archive_id"] > 100 for row in results["graph_document_pairs"])
     assert [row["id"] for row in results["cited"]] == [1, 2]
     assert [row["id"] for row in results["reachable"]] == [2]
     assert [row["id"] for row in results["unified"]] == [1, 2]
@@ -209,7 +239,7 @@ def load(engine: object) -> None:
         "CREATE TABLE papers (id INTEGER PRIMARY KEY, title TEXT, abstract TEXT, "
         "venue TEXT, year INTEGER, embedding VECTOR(3))"
     )
-    engine.sql("CREATE INDEX papers_abstract_gin ON papers USING gin (abstract)")
+    engine.sql("CREATE INDEX papers_text_gin ON papers USING gin (title, abstract)")
     for paper_id, title, abstract, venue, year, embedding in PAPERS:
         engine.sql(
             "INSERT INTO papers (id, title, abstract, venue, year, embedding) "
@@ -217,6 +247,20 @@ def load(engine: object) -> None:
             [paper_id, title, abstract, venue, year, uqa.vector(embedding)],
         )
     engine.sql("CREATE INDEX papers_embedding_hnsw ON papers USING hnsw (embedding)")
+    engine.sql(
+        "CREATE TABLE archived_papers (id INTEGER PRIMARY KEY, title TEXT, "
+        "venue TEXT, archived_embedding VECTOR(3))"
+    )
+    for paper_id, title, venue, embedding in ARCHIVED_PAPERS:
+        engine.sql(
+            "INSERT INTO archived_papers (id, title, venue, archived_embedding) "
+            "VALUES ($1, $2, $3, $4)",
+            [paper_id, title, venue, uqa.vector(embedding)],
+        )
+    engine.sql(
+        "CREATE INDEX archived_papers_embedding_hnsw "
+        "ON archived_papers USING hnsw (archived_embedding)"
+    )
     engine.sql(f"SELECT create_graph('{GRAPH}') AS ok")
     for paper_id, _, _, venue, _, _ in PAPERS:
         cypher(engine, f"CREATE (:Paper {{paper_id: {paper_id}, venue: '{venue}'}})")

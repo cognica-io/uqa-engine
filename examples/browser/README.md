@@ -4,7 +4,7 @@ These modules mirror the Rust, Python, and Node.js scenarios with the browser WA
 
 | Example | Coverage |
 | --- | --- |
-| [`unified-search.mjs`](unified-search.mjs) | Raw and Bayesian text retrieval, vector KNN, exact and robust fusion, typed operator joins, a scalar callback, and Cypher over shared identities |
+| [`unified-search.mjs`](unified-search.mjs) | Raw and Bayesian text retrieval, vector KNN, exact and robust fusion, cross-relation typed operator joins, a scalar callback, and Cypher over shared identities |
 | [`vector-knn.mjs`](vector-knn.mjs) | Exact, HNSW, and IVF vector access plus relational filtering |
 | [`graph-cypher.mjs`](graph-cypher.mjs) | Named graph construction, mutation, traversal, and relational composition |
 | [`storage-transactions.mjs`](storage-transactions.mjs) | IDBFS-backed reopen, rollback, savepoints, and independent sessions |

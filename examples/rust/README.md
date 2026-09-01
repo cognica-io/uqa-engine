@@ -4,7 +4,7 @@ These standalone workspace crates exercise the same five scenarios as the Python
 
 | Example | Package | Coverage |
 | --- | --- | --- |
-| [`unified-search`](unified-search) | `example-unified-search` | Raw and Bayesian text retrieval, vector KNN, exact and robust fusion, typed operator joins, a scalar callback, and Cypher over shared identities |
+| [`unified-search`](unified-search) | `example-unified-search` | Raw and Bayesian text retrieval, vector KNN, exact and robust fusion, cross-relation typed operator joins, a scalar callback, and Cypher over shared identities |
 | [`vector-knn`](vector-knn) | `example-vector-knn` | Exact, HNSW, and IVF vector access plus relational filtering |
 | [`graph-cypher`](graph-cypher) | `example-graph-cypher` | Named graph construction, mutation, traversal, and relational composition |
 | [`storage-transactions`](storage-transactions) | `example-storage-transactions` | redb-backed reopen, rollback, savepoints, and independent sessions |

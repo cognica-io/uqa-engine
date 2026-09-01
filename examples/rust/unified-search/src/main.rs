@@ -4,14 +4,9 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! The case for one engine: a paper-search pipeline that uses full-text
-//! ranking, vector similarity, relational predicates, a user-defined function,
-//! and a citation graph -- against one dataset, in one session, with one set of
-//! row identities.
+//! The case for one engine: a paper-search pipeline that uses full-text ranking, vector similarity, relational predicates, a user-defined function, and a citation graph -- against a live corpus and an archive in one session.
 //!
-//! Nothing here maps identifiers between systems, copies result sets across
-//! process boundaries, or reconciles two notions of "document 4", because
-//! every stage addresses the same rows.
+//! Cross-relation operator joins preserve the independent identities of both tables, while every single-corpus stage addresses the same live rows.
 //!
 //! Run with: cargo run -p example-unified-search
 
@@ -74,6 +69,36 @@ const PAPERS: &[Paper] = &[
         "ICDE",
         2018,
         [0.05, 0.10, 0.90],
+    ),
+];
+
+/// id, title, venue, archived embedding.
+type ArchivedPaper = (i64, &'static str, &'static str, [f64; 3]);
+
+const ARCHIVED_PAPERS: &[ArchivedPaper] = &[
+    (
+        101,
+        "Sparse retrieval retrospective",
+        "SIGIR",
+        [0.93, 0.12, 0.04],
+    ),
+    (
+        102,
+        "Dense retrieval retrospective",
+        "NeurIPS",
+        [0.82, 0.34, 0.06],
+    ),
+    (
+        103,
+        "Storage engines retrospective",
+        "VLDB",
+        [0.08, 0.96, 0.08],
+    ),
+    (
+        104,
+        "Graph querying retrospective",
+        "ICDE",
+        [0.04, 0.12, 0.94],
     ),
 ];
 
@@ -168,41 +193,79 @@ fn show_vector_and_fusion(engine: &Engine) -> Result<(), Box<dyn std::error::Err
 /// feed one of those tuple sources into an ordinary SQL equijoin.
 fn show_typed_operator_joins(engine: &Engine) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n=== 4. Typed operator joins produce real SQL tuple sources ===");
-    println!("VectorSimilarityJoin emits (left_doc_id, right_doc_id) pairs. CrossParadigmJoin bridges graph vertex properties to document fields, and DPccp can place that typed source inside a larger SQL join.\n");
+    println!("The live `papers` relation and `archived_papers` are independent inputs. VectorSimilarityJoin and HybridJoin preserve both identities, CrossParadigmJoin bridges live graph properties to archive fields, and DPccp can place each typed source inside a larger SQL join.\n");
     let vector_pairs = engine.sql(
-        "SELECT pairs.left_doc_id AS left_id, \
-                pairs.right_doc_id AS right_id, pairs._score AS score \
+        "SELECT pairs.left_doc_id AS live_id, \
+                pairs.right_doc_id AS archive_id, pairs._score AS score, \
+                p.title AS live_title, a.title AS archive_title \
            FROM vector_similarity_join( \
                     papers, \
                     knn_match(embedding, ARRAY[1.0, 0.0, 0.0], 4), \
-                    papers, \
-                    knn_match(embedding, ARRAY[1.0, 0.0, 0.0], 4), \
+                    archived_papers, \
+                    knn_match(archived_embedding, ARRAY[1.0, 0.0, 0.0], 4), \
                     0.80 \
                 ) AS pairs \
-          ORDER BY score DESC, left_id, right_id \
+           JOIN papers AS p ON p.id = pairs.left_doc_id \
+           JOIN archived_papers AS a ON a.id = pairs.right_doc_id \
+          ORDER BY score DESC, live_id, archive_id \
           LIMIT 8",
         &[],
     )?;
-    println!("vector similarity pairs:");
-    print_rows(&vector_pairs, &["left_id", "right_id", "score"]);
+    println!("cross-relation vector similarity pairs:");
+    print_rows(
+        &vector_pairs,
+        &[
+            "live_id",
+            "archive_id",
+            "score",
+            "live_title",
+            "archive_title",
+        ],
+    );
+
+    let hybrid_pairs = engine.sql(
+        "SELECT pairs.left_doc_id AS live_id, \
+                pairs.right_doc_id AS archive_id, pairs._score AS score, \
+                p.venue, a.title AS archive_title \
+           FROM hybrid_join( \
+                    papers, \
+                    venue IS NOT NULL \
+                        AND knn_match(embedding, ARRAY[1.0, 0.0, 0.0], 6), \
+                    archived_papers, \
+                    venue IS NOT NULL \
+                        AND knn_match(archived_embedding, ARRAY[1.0, 0.0, 0.0], 4) \
+                ) AS pairs \
+           JOIN papers AS p ON p.id = pairs.left_doc_id \
+           JOIN archived_papers AS a ON a.id = pairs.right_doc_id \
+          ORDER BY score DESC, live_id, archive_id",
+        &[],
+    )?;
+    println!("\nstructured-and-vector hybrid pairs across live and archive tables:");
+    print_rows(
+        &hybrid_pairs,
+        &["live_id", "archive_id", "score", "venue", "archive_title"],
+    );
 
     let graph_document_pairs = engine.sql(
         &format!(
             "SELECT pairs.left_doc_id AS vertex_id, \
-                    pairs.right_doc_id AS paper_id, p.title \
+                    pairs.right_doc_id AS archive_id, a.title AS archive_title \
                FROM cross_paradigm_join( \
                         papers, \
                         graph_pagerank('{GRAPH}'), \
-                        papers, \
+                        archived_papers, \
                         venue IS NOT NULL \
                     ) AS pairs \
-               JOIN papers AS p ON p.id = pairs.right_doc_id \
-              ORDER BY vertex_id, paper_id"
+               JOIN archived_papers AS a ON a.id = pairs.right_doc_id \
+              ORDER BY vertex_id, archive_id"
         ),
         &[],
     )?;
-    println!("\ngraph-to-document pairs joined back to SQL rows:");
-    print_rows(&graph_document_pairs, &["vertex_id", "paper_id", "title"]);
+    println!("\ngraph-to-archive pairs joined back to SQL rows:");
+    print_rows(
+        &graph_document_pairs,
+        &["vertex_id", "archive_id", "archive_title"],
+    );
     Ok(())
 }
 
@@ -298,8 +361,7 @@ fn show_graph_composition(engine: &Engine, seed: i64) -> Result<(), Box<dyn std:
     Ok(())
 }
 
-/// Create the table, the text and vector indexes, the citation graph, and the
-/// user-defined function. One session owns all four.
+/// Create both tables, their indexes, the citation graph, and the user-defined function. One session owns every component.
 fn load(engine: &Engine) -> Result<(), Box<dyn std::error::Error>> {
     engine.sql(
         "CREATE TABLE papers (
@@ -313,7 +375,7 @@ fn load(engine: &Engine) -> Result<(), Box<dyn std::error::Error>> {
         &[],
     )?;
     engine.sql(
-        "CREATE INDEX papers_abstract_gin ON papers USING gin (abstract)",
+        "CREATE INDEX papers_text_gin ON papers USING gin (title, abstract)",
         &[],
     )?;
 
@@ -330,6 +392,31 @@ fn load(engine: &Engine) -> Result<(), Box<dyn std::error::Error>> {
     }
     engine.sql(
         "CREATE INDEX papers_embedding_hnsw ON papers USING hnsw (embedding)",
+        &[],
+    )?;
+
+    engine.sql(
+        "CREATE TABLE archived_papers (
+             id INTEGER PRIMARY KEY,
+             title TEXT,
+             venue TEXT,
+             archived_embedding VECTOR(3)
+         )",
+        &[],
+    )?;
+    for (id, title, venue, embedding) in ARCHIVED_PAPERS {
+        engine.sql(
+            &format!(
+                "INSERT INTO archived_papers (id, title, venue, archived_embedding) \
+                 VALUES ({id}, '{title}', '{venue}', ARRAY[{}, {}, {}])",
+                embedding[0], embedding[1], embedding[2]
+            ),
+            &[],
+        )?;
+    }
+    engine.sql(
+        "CREATE INDEX archived_papers_embedding_hnsw \
+         ON archived_papers USING hnsw (archived_embedding)",
         &[],
     )?;
 

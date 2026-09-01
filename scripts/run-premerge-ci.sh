@@ -111,7 +111,11 @@ while IFS= read -r path; do
   [[ -n "$path" ]] || continue
 
   case "$path" in
-    Cargo.toml|Cargo.lock)
+    Cargo.toml | \
+    Cargo.lock | \
+    crates/*/Cargo.toml | \
+    crates/*/build.rs | \
+    crates/*.rs)
       run_rust=true
       run_javascript=true
       run_python=true
@@ -119,9 +123,6 @@ while IFS= read -r path; do
     deny.toml | \
     rust-toolchain* | \
     .cargo/* | \
-    crates/*.rs | \
-    crates/*/Cargo.toml | \
-    crates/*/build.rs | \
     crates/uqa-pg-query/libpg_query/* | \
     examples/rust/* | \
     benchmarks/* | \
