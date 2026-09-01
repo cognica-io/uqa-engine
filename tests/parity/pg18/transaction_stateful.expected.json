@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "c069f70916d66960a0ce5b8f2ecc23491a59d46c5ffee5b3c5dc8d53988fa49a",
+  "fixture_sha256": "49cf8ba8140707e00c231ef0fe193365472f3835900c778398c8b445f78269ec",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -270,6 +270,78 @@
         [
           "offset_seed",
           "1"
+        ]
+      ]
+    },
+    {
+      "name": "cursor_directional_projection_timing",
+      "kind": "ok"
+    },
+    {
+      "name": "cursor_directional_projection_timing_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "directional_after_absolute",
+          "7"
+        ],
+        [
+          "directional_after_backward",
+          "3"
+        ],
+        [
+          "directional_after_fetch_zero",
+          "6"
+        ],
+        [
+          "directional_after_forward",
+          "2"
+        ],
+        [
+          "directional_after_move_zero",
+          "6"
+        ],
+        [
+          "directional_after_relative",
+          "9"
+        ],
+        [
+          "directional_after_revisit",
+          "4"
+        ]
+      ]
+    },
+    {
+      "name": "cursor_directional_filter_timing",
+      "kind": "ok"
+    },
+    {
+      "name": "cursor_directional_filter_timing_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "directional_filter_after_backward",
+          "6"
+        ],
+        [
+          "directional_filter_after_forward",
+          "4"
+        ],
+        [
+          "directional_filter_after_revisit",
+          "8"
+        ],
+        [
+          "directional_projection_after_backward",
+          "3"
+        ],
+        [
+          "directional_projection_after_forward",
+          "2"
+        ],
+        [
+          "directional_projection_after_revisit",
+          "4"
         ]
       ]
     },

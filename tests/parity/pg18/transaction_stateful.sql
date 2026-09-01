@@ -45,6 +45,9 @@ INSERT INTO cursor_divisors VALUES (0);
 CREATE TABLE cursor_observations(name text PRIMARY KEY, observed bigint NOT NULL);
 CREATE SEQUENCE incremental_cursor_sequence START WITH 1;
 CREATE SEQUENCE offset_cursor_sequence START WITH 1;
+CREATE SEQUENCE directional_cursor_sequence START WITH 1;
+CREATE SEQUENCE directional_filter_sequence START WITH 1;
+CREATE SEQUENCE directional_projection_sequence START WITH 1;
 CREATE SEQUENCE snapshot_cursor_sequence START WITH 1;
 CREATE SEQUENCE hold_cursor_sequence START WITH 1;
 CREATE TABLE own_cursor_source(id integer PRIMARY KEY, value integer NOT NULL);
@@ -428,6 +431,61 @@ COMMIT;
 
 -- @case cursor_offset_projection_timing_result rows
 SELECT name, observed FROM cursor_observations WHERE name LIKE 'offset_%' ORDER BY name;
+-- @end
+
+-- A backwards-capable scan re-evaluates target expressions for every traversed row, while FETCH 0 backs up and advances and MOVE 0 does not execute the plan.
+-- @case cursor_directional_projection_timing ok
+BEGIN;
+DO $$
+DECLARE
+    directional_cursor SCROLL CURSOR FOR SELECT value, nextval('directional_cursor_sequence') AS observed FROM generate_series(1, 4) AS values(value);
+    fetched_value integer;
+    fetched_observed bigint;
+BEGIN
+    OPEN directional_cursor;
+    MOVE FORWARD 2 FROM directional_cursor;
+    INSERT INTO cursor_observations VALUES ('directional_after_forward', currval('directional_cursor_sequence'));
+    MOVE BACKWARD 1 FROM directional_cursor;
+    INSERT INTO cursor_observations VALUES ('directional_after_backward', currval('directional_cursor_sequence'));
+    MOVE FORWARD 1 FROM directional_cursor;
+    INSERT INTO cursor_observations VALUES ('directional_after_revisit', currval('directional_cursor_sequence'));
+    FETCH RELATIVE 0 FROM directional_cursor INTO fetched_value, fetched_observed;
+    INSERT INTO cursor_observations VALUES ('directional_after_fetch_zero', currval('directional_cursor_sequence'));
+    MOVE FORWARD 0 FROM directional_cursor;
+    INSERT INTO cursor_observations VALUES ('directional_after_move_zero', currval('directional_cursor_sequence'));
+    FETCH ABSOLUTE 1 FROM directional_cursor INTO fetched_value, fetched_observed;
+    INSERT INTO cursor_observations VALUES ('directional_after_absolute', currval('directional_cursor_sequence'));
+    FETCH RELATIVE 2 FROM directional_cursor INTO fetched_value, fetched_observed;
+    INSERT INTO cursor_observations VALUES ('directional_after_relative', currval('directional_cursor_sequence'));
+    CLOSE directional_cursor;
+END
+$$;
+COMMIT;
+-- @end
+
+-- @case cursor_directional_projection_timing_result rows
+SELECT name, observed FROM cursor_observations WHERE name LIKE 'directional_after_%' ORDER BY name;
+-- @end
+
+-- Volatile qualification is scanned again in the requested direction rather than replaying cached final rows.
+-- @case cursor_directional_filter_timing ok
+BEGIN;
+DECLARE directional_filter_cursor SCROLL CURSOR FOR SELECT value, nextval('directional_projection_sequence') AS observed FROM generate_series(1, 5) AS values(value) WHERE nextval('directional_filter_sequence') % 2 = 0;
+MOVE FORWARD 2 FROM directional_filter_cursor;
+INSERT INTO cursor_observations VALUES ('directional_filter_after_forward', currval('directional_filter_sequence'));
+INSERT INTO cursor_observations VALUES ('directional_projection_after_forward', currval('directional_projection_sequence'));
+MOVE BACKWARD 1 FROM directional_filter_cursor;
+INSERT INTO cursor_observations VALUES ('directional_filter_after_backward', currval('directional_filter_sequence'));
+INSERT INTO cursor_observations VALUES ('directional_projection_after_backward', currval('directional_projection_sequence'));
+MOVE FORWARD 1 FROM directional_filter_cursor;
+INSERT INTO cursor_observations VALUES ('directional_filter_after_revisit', currval('directional_filter_sequence'));
+INSERT INTO cursor_observations VALUES ('directional_projection_after_revisit', currval('directional_projection_sequence'));
+CLOSE directional_filter_cursor;
+COMMIT;
+-- @end
+
+-- @case cursor_directional_filter_timing_result rows
+SELECT name, observed FROM cursor_observations WHERE name LIKE 'directional_filter_%' OR name LIKE 'directional_projection_%' ORDER BY name;
 -- @end
 
 -- A READ COMMITTED cursor keeps the snapshot captured by DECLARE even after the declaring transaction writes.

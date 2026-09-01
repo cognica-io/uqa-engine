@@ -311,29 +311,8 @@ impl<'a> ColumnSelection<'a> {
         self.discard_lock_origins = true;
         self
     }
-}
 
-impl PhysicalOperator for ColumnSelection<'_> {
-    fn row_schema(&self) -> &RowSchema {
-        &self.schema
-    }
-
-    fn estimated_cardinality(&self) -> Option<u64> {
-        self.child.estimated_cardinality()
-    }
-
-    fn output_ordering(&self) -> &[PhysicalOrder] {
-        &self.ordering
-    }
-
-    fn open(&mut self) -> ExecResult<()> {
-        self.child.open()
-    }
-
-    fn next(&mut self) -> ExecResult<Option<Batch>> {
-        let Some(batch) = self.child.next()? else {
-            return Ok(None);
-        };
+    fn select_batch(&self, batch: Batch) -> Batch {
         let mut rows = match self.compact_slots.as_ref() {
             Some(slots) => batch
                 .rows
@@ -358,7 +337,50 @@ impl PhysicalOperator for ColumnSelection<'_> {
                 row.rebind_lock_origin_qualifiers_mut(Arc::clone(qualifier));
             }
         }
-        Ok(Some(Batch::from_physical_rows(self.schema.clone(), rows)))
+        Batch::from_physical_rows(self.schema.clone(), rows)
+    }
+}
+
+impl PhysicalOperator for ColumnSelection<'_> {
+    fn row_schema(&self) -> &RowSchema {
+        &self.schema
+    }
+
+    fn estimated_cardinality(&self) -> Option<u64> {
+        self.child.estimated_cardinality()
+    }
+
+    fn output_ordering(&self) -> &[PhysicalOrder] {
+        &self.ordering
+    }
+
+    fn backward_scan_support(&self) -> crate::BackwardScanSupport {
+        self.child.backward_scan_support()
+    }
+
+    fn open(&mut self) -> ExecResult<()> {
+        self.child.open()
+    }
+
+    fn next(&mut self) -> ExecResult<Option<Batch>> {
+        let Some(batch) = self.child.next()? else {
+            return Ok(None);
+        };
+        Ok(Some(self.select_batch(batch)))
+    }
+
+    fn next_direction(
+        &mut self,
+        direction: crate::PhysicalScanDirection,
+    ) -> ExecResult<Option<Batch>> {
+        let Some(batch) = self.child.next_direction(direction)? else {
+            return Ok(None);
+        };
+        Ok(Some(self.select_batch(batch)))
+    }
+
+    fn rewind(&mut self) -> ExecResult<()> {
+        self.child.rewind()
     }
 
     fn close(&mut self) -> ExecResult<()> {

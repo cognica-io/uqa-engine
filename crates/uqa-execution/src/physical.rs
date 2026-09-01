@@ -33,6 +33,24 @@ pub enum ExecError {
 
 pub type ExecResult<T> = std::result::Result<T, ExecError>;
 
+/// Direction requested by a scrollable query consumer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhysicalScanDirection {
+    Forward,
+    Backward,
+}
+
+/// How an operator participates in a backwards-capable pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackwardScanSupport {
+    /// The operator cannot preserve `PostgreSQL` backwards-scan semantics. A scrollable cursor must materialize the completed plan above it.
+    Unsupported,
+    /// The operator's output is a semantic materialization boundary and may be placed in a directional spool before parent expressions run.
+    Materialize,
+    /// The operator natively accepts [`PhysicalScanDirection`] and can rewind without rebuilding its semantic state.
+    Native,
+}
+
 /// Preserve the primary execution result while still surfacing a cleanup
 /// failure. `Result::and` discards the cleanup error whenever both operations
 /// fail, which makes file/child-close failures disappear behind the original
@@ -96,8 +114,28 @@ pub trait PhysicalOperator: Send {
         Ok(false)
     }
 
+    /// Describe backwards-scan support without changing the operator tree. The default is deliberately conservative so a scrollable cursor freezes the complete output of unclassified plans.
+    fn backward_scan_support(&self) -> BackwardScanSupport {
+        BackwardScanSupport::Unsupported
+    }
+
     fn open(&mut self) -> ExecResult<()>;
     fn next(&mut self) -> ExecResult<Option<Batch>>;
+    /// Pull one directional batch. Native backwards-capable pipelines keep batches to one row so a consumer can reverse direction between adjacent fetches.
+    fn next_direction(&mut self, direction: PhysicalScanDirection) -> ExecResult<Option<Batch>> {
+        match direction {
+            PhysicalScanDirection::Forward => self.next(),
+            PhysicalScanDirection::Backward => Err(ExecError::Other(
+                "physical operator does not support backwards scanning".into(),
+            )),
+        }
+    }
+    /// Rewind a native backwards-capable pipeline without recomputing rows held by semantic materialization boundaries.
+    fn rewind(&mut self) -> ExecResult<()> {
+        Err(ExecError::Other(
+            "physical operator does not support rewind".into(),
+        ))
+    }
     fn close(&mut self) -> ExecResult<()>;
 }
 

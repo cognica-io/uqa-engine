@@ -20,7 +20,8 @@ use crate::{
 };
 use binding::bind_session_portal_function_relations;
 use fetch::{
-    ensure_portal_rows_for_fetch, fetch_indices, materialize_portal_to_end, select_portal_rows,
+    ensure_portal_rows_for_fetch, fetch_directional_query_portal, fetch_indices,
+    materialize_portal_to_end, select_portal_rows, uses_directional_query_execution,
 };
 use uqa_planner::{QueryPlan, RelationalPlan, SourcePlan};
 use uqa_sql::ast::{CursorDirection, FetchCursorStmt};
@@ -241,6 +242,15 @@ impl Engine {
             .remove(&fetch.name)
             .ok_or_else(|| cursor_error(&fetch.name, "does not exist", "34000"))?;
         let result = (|| {
+            if uses_directional_query_execution(&state) {
+                return fetch_directional_query_portal(
+                    self,
+                    &mut state,
+                    fetch.direction,
+                    fetch.count,
+                    fetch.move_only,
+                );
+            }
             ensure_portal_rows_for_fetch(
                 self,
                 &mut state,

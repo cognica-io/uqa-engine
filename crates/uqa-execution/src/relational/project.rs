@@ -9,8 +9,8 @@
 use uqa_core::Value;
 
 use super::{
-    Batch, DefaultExpressionEvaluator, ExecResult, PhysicalOperator, RowSchema, SQLParam,
-    ScalarExpr, SharedExpressionEvaluator,
+    BackwardScanSupport, Batch, DefaultExpressionEvaluator, ExecResult, PhysicalOperator,
+    PhysicalScanDirection, RowSchema, SQLParam, ScalarExpr, SharedExpressionEvaluator,
 };
 use crate::batch::ProjectedSlot;
 
@@ -280,30 +280,10 @@ impl<'a> Project<'a> {
             ordering,
         }
     }
-}
 
-impl PhysicalOperator for Project<'_> {
-    fn row_schema(&self) -> &RowSchema {
-        &self.schema
-    }
-
-    fn output_ordering(&self) -> &[crate::PhysicalOrder] {
-        &self.ordering
-    }
-
-    fn open(&mut self) -> ExecResult<()> {
-        self.child.open()
-    }
-
-    fn next(&mut self) -> ExecResult<Option<Batch>> {
-        let Some(batch) = self.child.next()? else {
-            return Ok(None);
-        };
+    fn project_batch(&self, batch: Batch) -> ExecResult<Batch> {
         if self.computed.is_empty() {
-            return Ok(Some(Batch::from_physical_rows(
-                self.schema.clone(),
-                batch.rows,
-            )));
+            return Ok(Batch::from_physical_rows(self.schema.clone(), batch.rows));
         }
         let mut out = Vec::with_capacity(batch.rows.len());
         for row in batch.rows {
@@ -317,7 +297,48 @@ impl PhysicalOperator for Project<'_> {
                 .collect::<ExecResult<Vec<Value>>>()?;
             out.push(row.append_values(values));
         }
-        Ok(Some(Batch::from_physical_rows(self.schema.clone(), out)))
+        Ok(Batch::from_physical_rows(self.schema.clone(), out))
+    }
+}
+
+impl PhysicalOperator for Project<'_> {
+    fn row_schema(&self) -> &RowSchema {
+        &self.schema
+    }
+
+    fn output_ordering(&self) -> &[crate::PhysicalOrder] {
+        &self.ordering
+    }
+
+    fn backward_scan_support(&self) -> BackwardScanSupport {
+        let child = self.child.backward_scan_support();
+        if child == BackwardScanSupport::Native || self.computed.is_empty() {
+            child
+        } else {
+            BackwardScanSupport::Unsupported
+        }
+    }
+
+    fn open(&mut self) -> ExecResult<()> {
+        self.child.open()
+    }
+
+    fn next(&mut self) -> ExecResult<Option<Batch>> {
+        let Some(batch) = self.child.next()? else {
+            return Ok(None);
+        };
+        self.project_batch(batch).map(Some)
+    }
+
+    fn next_direction(&mut self, direction: PhysicalScanDirection) -> ExecResult<Option<Batch>> {
+        let Some(batch) = self.child.next_direction(direction)? else {
+            return Ok(None);
+        };
+        self.project_batch(batch).map(Some)
+    }
+
+    fn rewind(&mut self) -> ExecResult<()> {
+        self.child.rewind()
     }
 
     fn close(&mut self) -> ExecResult<()> {

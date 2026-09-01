@@ -179,6 +179,10 @@ impl PhysicalOperator for Sort<'_> {
         self.inner.output_ordering()
     }
 
+    fn backward_scan_support(&self) -> crate::BackwardScanSupport {
+        crate::BackwardScanSupport::Materialize
+    }
+
     fn open(&mut self) -> ExecResult<()> {
         self.inner.open()
     }

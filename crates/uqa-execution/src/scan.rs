@@ -14,7 +14,7 @@
 //! in-memory `Vec<ResultRow>`.
 
 use crate::batch::{Batch, PhysicalRow, RowSchema, DEFAULT_BATCH_SIZE};
-use crate::physical::{ExecResult, PhysicalOperator, PhysicalOrder};
+use crate::physical::{BackwardScanSupport, ExecResult, PhysicalOperator, PhysicalOrder};
 use uqa_sql::ast::ColumnType;
 use uqa_sql::ResultRow;
 
@@ -207,6 +207,10 @@ impl PhysicalOperator for PhysicalRowIteratorScan<'_> {
         &self.schema
     }
 
+    fn backward_scan_support(&self) -> BackwardScanSupport {
+        BackwardScanSupport::Materialize
+    }
+
     fn open(&mut self) -> ExecResult<()> {
         self.exhausted = false;
         Ok(())
@@ -385,6 +389,10 @@ impl PhysicalOperator for TableScan {
 
     fn output_ordering(&self) -> &[PhysicalOrder] {
         &self.ordering
+    }
+
+    fn backward_scan_support(&self) -> BackwardScanSupport {
+        BackwardScanSupport::Materialize
     }
 
     fn consume_into_aggregate(

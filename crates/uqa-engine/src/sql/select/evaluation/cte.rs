@@ -136,6 +136,14 @@ impl CteScope {
     pub(in crate::sql) fn streams_command_progress(&self) -> bool {
         self.stream_command_progress
     }
+
+    pub(in crate::sql) fn enable_backwards_scanning(&mut self) {
+        self.scan_backwards = true;
+    }
+
+    pub(in crate::sql) fn scans_backwards(&self) -> bool {
+        self.scan_backwards
+    }
 }
 
 pub(in crate::sql) struct ScalarSubqueryScope<'a> {

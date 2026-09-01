@@ -114,6 +114,10 @@ impl PhysicalOperator for RowsFromOperator<'_> {
             .max()
     }
 
+    fn backward_scan_support(&self) -> uqa_execution::BackwardScanSupport {
+        uqa_execution::BackwardScanSupport::Materialize
+    }
+
     fn open(&mut self) -> ExecResult<()> {
         self.next_ordinality = 1;
         self.exhausted = false;

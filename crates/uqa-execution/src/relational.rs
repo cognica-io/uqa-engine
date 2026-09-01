@@ -19,7 +19,9 @@ use uqa_sql::ResultRow;
 use uqa_sql::SQLParam;
 
 use crate::batch::{Batch, RowSchema};
-use crate::physical::{ExecError, ExecResult, PhysicalOperator};
+use crate::physical::{
+    BackwardScanSupport, ExecError, ExecResult, PhysicalOperator, PhysicalScanDirection,
+};
 use crate::scalar::{eval_scalar, ScalarEvalContext, ScalarExpr};
 
 mod aggregate;

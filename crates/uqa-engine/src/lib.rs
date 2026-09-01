@@ -541,7 +541,8 @@ struct SessionPortalMaterialization {
 }
 
 enum SessionPortalWorkerRequest {
-    Next,
+    Step(uqa_execution::PhysicalScanDirection),
+    Rewind,
     Close,
 }
 
@@ -552,6 +553,7 @@ enum SessionPortalWorkerResponse {
     },
     Row(Vec<Value>),
     Eof,
+    Rewound,
     Error(SQLError),
 }
 
@@ -576,7 +578,8 @@ enum SessionPortalPosition {
     BeforeFirst,
     /// The one-based position of the current row.
     OnRow(usize),
-    AfterLast,
+    /// Number of rows processed while moving forward before the executor reported end of scan.
+    AfterLast(usize),
 }
 
 #[derive(Clone, Copy)]

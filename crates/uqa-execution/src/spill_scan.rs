@@ -11,7 +11,7 @@
 //! even when execution stops early.
 
 use crate::batch::{Batch, RowSchema};
-use crate::physical::{ExecResult, PhysicalOperator};
+use crate::physical::{BackwardScanSupport, ExecResult, PhysicalOperator};
 use crate::spill::{SharedSpill, SharedSpillReader, SpillBuffer, SpillDrain};
 
 /// One-shot physical scan over a disk-backed spill buffer.
@@ -47,6 +47,10 @@ impl PhysicalOperator for SharedSpillScan {
 
     fn estimated_cardinality(&self) -> Option<u64> {
         u64::try_from(self.source.rows()).ok()
+    }
+
+    fn backward_scan_support(&self) -> BackwardScanSupport {
+        BackwardScanSupport::Materialize
     }
 
     fn open(&mut self) -> ExecResult<()> {

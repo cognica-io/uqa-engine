@@ -422,6 +422,19 @@ pub(in crate::sql) fn collect_query_operator<'a>(
             QueryRows::ExistsKeySet(keys)
         }
         QueryOutputMode::RowConsumer(consumer) => {
+            if consumer.uses_directional_scan() {
+                collect_directional_query_operator(engine, &columns, &mut operator, &consumer)?;
+                return Ok(QueryOutput {
+                    columns,
+                    column_types,
+                    internal_columns,
+                    internal_types,
+                    rows: QueryRows::Rows {
+                        named: Vec::new(),
+                        positional: None,
+                    },
+                });
+            }
             consumer.begin(engine, &columns, &internal_schema)?;
             if let Err(error) = operator.open() {
                 return Err(close_after_physical_failure(
@@ -450,6 +463,15 @@ pub(in crate::sql) fn collect_query_operator<'a>(
                     match consumer.consume(engine, row) {
                         Ok(QueryConsumerControl::Continue) => {}
                         Ok(QueryConsumerControl::Stop) => break 'consume,
+                        Ok(QueryConsumerControl::Rewind) => {
+                            return Err(close_after_physical_failure(
+                                operator.as_mut(),
+                                uqa_execution::ExecError::Other(
+                                    "forward-only row consumer requested rewind".into(),
+                                ),
+                                "consume query row",
+                            ));
+                        }
                         Err(error) => {
                             return Err(close_after_physical_failure(
                                 operator.as_mut(),
@@ -474,6 +496,99 @@ pub(in crate::sql) fn collect_query_operator<'a>(
         internal_types,
         rows,
     })
+}
+
+fn collect_directional_query_operator(
+    engine: &Engine,
+    columns: &[String],
+    operator: &mut Box<dyn uqa_execution::PhysicalOperator + '_>,
+    consumer: &Rc<dyn super::QueryRowConsumer>,
+) -> Result<(), SQLError> {
+    if operator.backward_scan_support() != uqa_execution::BackwardScanSupport::Native {
+        let placeholder: Box<dyn uqa_execution::PhysicalOperator> = Box::new(
+            uqa_execution::TableScan::from_physical_rows(operator.row_schema().clone(), Vec::new()),
+        );
+        let inner = std::mem::replace(operator, placeholder);
+        *operator = Box::new(uqa_execution::ScrollMaterialize::new(inner));
+    }
+    consumer.begin(engine, columns, operator.row_schema())?;
+    if let Err(error) = operator.open() {
+        return Err(close_after_physical_failure(
+            operator.as_mut(),
+            error,
+            "open directional row consumer input",
+        ));
+    }
+    loop {
+        let batch = match operator.next_direction(consumer.scan_direction()) {
+            Ok(batch) => batch,
+            Err(error) => {
+                return Err(close_after_physical_failure(
+                    operator.as_mut(),
+                    error,
+                    "execute directional row consumer input",
+                ));
+            }
+        };
+        let control = if let Some(batch) = batch {
+            if batch.rows.len() != 1 {
+                return Err(close_after_physical_failure(
+                    operator.as_mut(),
+                    uqa_execution::ExecError::Other(format!(
+                        "directional query operator returned {} rows in one pull",
+                        batch.rows.len()
+                    )),
+                    "execute directional row consumer input",
+                ));
+            }
+            let uqa_execution::Batch { schema, mut rows } = batch;
+            let row = uqa_execution::OwnedPhysicalRow::new(
+                schema,
+                rows.pop().expect("directional batch width checked"),
+            );
+            consumer.consume(engine, row)
+        } else {
+            consumer.direction_exhausted(engine)
+        };
+        let mut control = match control {
+            Ok(control) => control,
+            Err(error) => {
+                return Err(close_after_physical_failure(
+                    operator.as_mut(),
+                    uqa_execution::ExecError::SQL(error),
+                    "consume directional query row",
+                ));
+            }
+        };
+        loop {
+            match control {
+                QueryConsumerControl::Continue => break,
+                QueryConsumerControl::Stop => {
+                    operator.close().map_err(physical_exec_error)?;
+                    return Ok(());
+                }
+                QueryConsumerControl::Rewind => {
+                    if let Err(error) = operator.rewind() {
+                        return Err(close_after_physical_failure(
+                            operator.as_mut(),
+                            error,
+                            "rewind directional query input",
+                        ));
+                    }
+                    control = match consumer.rewound(engine) {
+                        Ok(control) => control,
+                        Err(error) => {
+                            return Err(close_after_physical_failure(
+                                operator.as_mut(),
+                                uqa_execution::ExecError::SQL(error),
+                                "acknowledge directional query rewind",
+                            ));
+                        }
+                    };
+                }
+            }
+        }
+    }
 }
 
 /// Collect decorrelated EXISTS keys directly from the filtered input. Direct column expressions stay as borrowed physical values; non-trivial key expressions are evaluated into an inline buffer. In either case there is no projected `PhysicalRow` materialization between the input and hash set.

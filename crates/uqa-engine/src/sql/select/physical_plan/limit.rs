@@ -93,6 +93,9 @@ pub(in crate::sql) fn attach_order_limit<'a>(
                 keep.filter(|_| statement.locking.is_empty() && !with_ties),
                 work_mem_bytes,
             ));
+            if ctes.scans_backwards() {
+                operator = uqa_execution::prepare_backward_scan(operator);
+            }
         }
     }
     if !statement.locking.is_empty() {

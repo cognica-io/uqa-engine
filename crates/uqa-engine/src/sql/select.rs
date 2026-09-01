@@ -113,12 +113,29 @@ pub(in crate::sql) trait QueryRowConsumer {
         engine: &Engine,
         row: uqa_execution::OwnedPhysicalRow,
     ) -> Result<QueryConsumerControl, SQLError>;
+
+    fn uses_directional_scan(&self) -> bool {
+        false
+    }
+
+    fn scan_direction(&self) -> uqa_execution::PhysicalScanDirection {
+        uqa_execution::PhysicalScanDirection::Forward
+    }
+
+    fn direction_exhausted(&self, _engine: &Engine) -> Result<QueryConsumerControl, SQLError> {
+        Ok(QueryConsumerControl::Stop)
+    }
+
+    fn rewound(&self, _engine: &Engine) -> Result<QueryConsumerControl, SQLError> {
+        Ok(QueryConsumerControl::Continue)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(in crate::sql) enum QueryConsumerControl {
     Continue,
     Stop,
+    Rewind,
 }
 
 struct SetOperationRowConsumer {
@@ -227,9 +244,17 @@ impl QueryRowConsumer for SetOperationRowConsumer {
                     .without_lock_origins(),
             ),
         )?;
-        if matches!(control, QueryConsumerControl::Stop) {
-            self.stopped.set(true);
-            return Ok(control);
+        match control {
+            QueryConsumerControl::Continue => {}
+            QueryConsumerControl::Stop => {
+                self.stopped.set(true);
+                return Ok(control);
+            }
+            QueryConsumerControl::Rewind => {
+                return Err(SQLError::Internal(
+                    "set-operation consumer received a directional rewind".into(),
+                ));
+            }
         }
         if let Some(remaining) = self.remaining.get() {
             let remaining = remaining - 1;
@@ -510,6 +535,19 @@ fn execute_plan_values_output(
             ));
         return collect_query_operator(engine, Vec::new(), scan, output_mode);
     }
+    if matches!(
+        &output_mode,
+        QueryOutputMode::RowConsumer(consumer) if consumer.uses_directional_scan()
+    ) {
+        return execute_directional_values_output(
+            engine,
+            rows,
+            subqueries,
+            params,
+            ctes,
+            output_mode,
+        );
+    }
     let columns: Vec<String> = (0..rows[0].len())
         .map(|index| format!("column{}", index + 1))
         .collect();
@@ -584,6 +622,188 @@ fn execute_plan_values_output(
         uqa_execution::TableScan::from_physical_rows(schema, output.unwrap_or_default()),
     );
     collect_query_operator(engine, columns, scan, output_mode)
+}
+
+fn execute_directional_values_output(
+    engine: &Engine,
+    rows: &[Vec<ScalarExpr>],
+    subqueries: &[QueryPlan],
+    params: &[SQLParam],
+    ctes: &CteScope,
+    output_mode: QueryOutputMode,
+) -> Result<QueryOutput, SQLError> {
+    let columns: Vec<String> = (0..rows[0].len())
+        .map(|index| format!("column{}", index + 1))
+        .collect();
+    let column_types = values_types_in_scope(engine, rows, subqueries, None, params, ctes)?;
+    let empty_schema = uqa_execution::RowSchema::default();
+    let source_types = rows
+        .iter()
+        .map(|source| {
+            if source.len() != columns.len() {
+                return Err(SQLError::TypeMismatch(format!(
+                    "VALUES row width {} does not match first row width {}",
+                    source.len(),
+                    columns.len()
+                )));
+            }
+            source
+                .iter()
+                .map(|expression| {
+                    uqa_execution::common_context_expression_type(
+                        expression,
+                        &empty_schema,
+                        params,
+                        Some(engine),
+                    )
+                })
+                .collect::<Result<Vec<_>, SQLError>>()
+        })
+        .collect::<Result<Vec<_>, SQLError>>()?;
+    let mut values_ctes = ctes.clone();
+    values_ctes.scalar_subqueries = subqueries.to_vec();
+    let operator: Box<dyn uqa_execution::PhysicalOperator + '_> =
+        Box::new(DirectionalValuesScan::new(
+            rows,
+            source_types,
+            uqa_execution::RowSchema::with_types(columns.clone(), column_types),
+            EngineExpressionEvaluator::shared(engine, params, &values_ctes),
+        ));
+    collect_query_operator(engine, columns, operator, output_mode)
+}
+
+#[derive(Clone, Copy)]
+enum ValuesScanPosition {
+    BeforeFirst,
+    OnRow(usize),
+    AfterLast,
+}
+
+struct DirectionalValuesScan<'a> {
+    rows: &'a [Vec<ScalarExpr>],
+    source_types: Vec<Vec<Option<ColumnType>>>,
+    schema: uqa_execution::RowSchema,
+    evaluator: SharedExpressionEvaluator<'a>,
+    position: ValuesScanPosition,
+}
+
+impl<'a> DirectionalValuesScan<'a> {
+    fn new(
+        rows: &'a [Vec<ScalarExpr>],
+        source_types: Vec<Vec<Option<ColumnType>>>,
+        schema: uqa_execution::RowSchema,
+        evaluator: SharedExpressionEvaluator<'a>,
+    ) -> Self {
+        Self {
+            rows,
+            source_types,
+            schema,
+            evaluator,
+            position: ValuesScanPosition::BeforeFirst,
+        }
+    }
+
+    fn evaluate(&self, position: usize) -> uqa_execution::ExecResult<uqa_execution::Batch> {
+        let empty_schema = uqa_execution::RowSchema::default();
+        let empty_row = uqa_execution::PhysicalRow::default();
+        let values = self.rows[position]
+            .iter()
+            .enumerate()
+            .map(|(column, expression)| {
+                let value =
+                    self.evaluator
+                        .evaluate_physical(expression, &empty_schema, &empty_row)?;
+                coerce_common_context_value(
+                    value,
+                    self.source_types[position][column].as_ref(),
+                    self.schema.column_type(column),
+                )
+                .map_err(uqa_execution::ExecError::SQL)
+            })
+            .collect::<uqa_execution::ExecResult<Vec<_>>>()?;
+        Ok(uqa_execution::Batch::from_physical_rows(
+            self.schema.clone(),
+            vec![uqa_execution::PhysicalRow::from_values(values)],
+        ))
+    }
+
+    fn next_in_direction(
+        &mut self,
+        direction: uqa_execution::PhysicalScanDirection,
+    ) -> uqa_execution::ExecResult<Option<uqa_execution::Batch>> {
+        let target = match (direction, self.position) {
+            (uqa_execution::PhysicalScanDirection::Forward, ValuesScanPosition::BeforeFirst) => 0,
+            (
+                uqa_execution::PhysicalScanDirection::Forward,
+                ValuesScanPosition::OnRow(position),
+            ) => position.saturating_add(1),
+            (uqa_execution::PhysicalScanDirection::Forward, ValuesScanPosition::AfterLast)
+            | (uqa_execution::PhysicalScanDirection::Backward, ValuesScanPosition::BeforeFirst) => {
+                return Ok(None)
+            }
+            (uqa_execution::PhysicalScanDirection::Backward, ValuesScanPosition::OnRow(0)) => {
+                self.position = ValuesScanPosition::BeforeFirst;
+                return Ok(None);
+            }
+            (
+                uqa_execution::PhysicalScanDirection::Backward,
+                ValuesScanPosition::OnRow(position),
+            ) => position - 1,
+            (uqa_execution::PhysicalScanDirection::Backward, ValuesScanPosition::AfterLast) => {
+                let Some(position) = self.rows.len().checked_sub(1) else {
+                    self.position = ValuesScanPosition::BeforeFirst;
+                    return Ok(None);
+                };
+                position
+            }
+        };
+        if target >= self.rows.len() {
+            self.position = ValuesScanPosition::AfterLast;
+            return Ok(None);
+        }
+        self.position = ValuesScanPosition::OnRow(target);
+        self.evaluate(target).map(Some)
+    }
+}
+
+impl uqa_execution::PhysicalOperator for DirectionalValuesScan<'_> {
+    fn row_schema(&self) -> &uqa_execution::RowSchema {
+        &self.schema
+    }
+
+    fn estimated_cardinality(&self) -> Option<u64> {
+        u64::try_from(self.rows.len()).ok()
+    }
+
+    fn backward_scan_support(&self) -> uqa_execution::BackwardScanSupport {
+        uqa_execution::BackwardScanSupport::Native
+    }
+
+    fn open(&mut self) -> uqa_execution::ExecResult<()> {
+        self.position = ValuesScanPosition::BeforeFirst;
+        Ok(())
+    }
+
+    fn next(&mut self) -> uqa_execution::ExecResult<Option<uqa_execution::Batch>> {
+        self.next_in_direction(uqa_execution::PhysicalScanDirection::Forward)
+    }
+
+    fn next_direction(
+        &mut self,
+        direction: uqa_execution::PhysicalScanDirection,
+    ) -> uqa_execution::ExecResult<Option<uqa_execution::Batch>> {
+        self.next_in_direction(direction)
+    }
+
+    fn rewind(&mut self) -> uqa_execution::ExecResult<()> {
+        self.position = ValuesScanPosition::BeforeFirst;
+        Ok(())
+    }
+
+    fn close(&mut self) -> uqa_execution::ExecResult<()> {
+        self.position = ValuesScanPosition::AfterLast;
+        Ok(())
+    }
 }
 
 pub(in crate::sql) fn coerce_common_context_value(

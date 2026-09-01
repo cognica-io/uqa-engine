@@ -10,6 +10,8 @@ use super::*;
 mod movement;
 #[path = "pg18_cursors/relation_locks.rs"]
 mod relation_locks;
+#[path = "pg18_cursors/volatile_scrolling.rs"]
+mod volatile_scrolling;
 
 #[test]
 fn pg18_sql_cursor_requires_a_block_and_uses_postgresql_sqlstates() {

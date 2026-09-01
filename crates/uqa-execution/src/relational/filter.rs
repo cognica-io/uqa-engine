@@ -7,8 +7,9 @@
 //! Pipelined WHERE filtering.
 
 use super::{
-    truthy, Batch, DefaultExpressionEvaluator, ExecResult, PhysicalOperator, RowSchema, SQLParam,
-    ScalarExpr, SharedExpressionEvaluator, SharedRowPredicate,
+    truthy, BackwardScanSupport, Batch, DefaultExpressionEvaluator, ExecResult, PhysicalOperator,
+    PhysicalScanDirection, RowSchema, SQLParam, ScalarExpr, SharedExpressionEvaluator,
+    SharedRowPredicate,
 };
 
 /// Pipelined `WHERE` operator. Drops rows whose predicate evaluates
@@ -66,6 +67,23 @@ impl<'a> Filter<'a> {
             schema,
         }
     }
+
+    fn filter_batch(&self, batch: Batch) -> ExecResult<Option<Batch>> {
+        let mut kept = Vec::with_capacity(batch.rows.len());
+        for row in batch.rows {
+            let keep = match &self.condition {
+                FilterCondition::Expression {
+                    predicate,
+                    evaluator,
+                } => truthy(&evaluator.evaluate_physical(predicate, &batch.schema, &row)?),
+                FilterCondition::Row(predicate) => predicate.keep_physical(&batch.schema, &row)?,
+            };
+            if keep {
+                kept.push(row);
+            }
+        }
+        Ok((!kept.is_empty()).then(|| Batch::from_physical_rows(self.schema.clone(), kept)))
+    }
 }
 
 impl PhysicalOperator for Filter<'_> {
@@ -81,6 +99,14 @@ impl PhysicalOperator for Filter<'_> {
         self.child.output_ordering()
     }
 
+    fn backward_scan_support(&self) -> BackwardScanSupport {
+        if self.child.backward_scan_support() == BackwardScanSupport::Native {
+            BackwardScanSupport::Native
+        } else {
+            BackwardScanSupport::Unsupported
+        }
+    }
+
     fn open(&mut self) -> ExecResult<()> {
         self.child.open()
     }
@@ -90,25 +116,25 @@ impl PhysicalOperator for Filter<'_> {
             let Some(batch) = self.child.next()? else {
                 return Ok(None);
             };
-            let mut kept = Vec::with_capacity(batch.rows.len());
-            for row in batch.rows {
-                let keep = match &self.condition {
-                    FilterCondition::Expression {
-                        predicate,
-                        evaluator,
-                    } => truthy(&evaluator.evaluate_physical(predicate, &batch.schema, &row)?),
-                    FilterCondition::Row(predicate) => {
-                        predicate.keep_physical(&batch.schema, &row)?
-                    }
-                };
-                if keep {
-                    kept.push(row);
-                }
-            }
-            if !kept.is_empty() {
-                return Ok(Some(Batch::from_physical_rows(self.schema.clone(), kept)));
+            if let Some(batch) = self.filter_batch(batch)? {
+                return Ok(Some(batch));
             }
         }
+    }
+
+    fn next_direction(&mut self, direction: PhysicalScanDirection) -> ExecResult<Option<Batch>> {
+        loop {
+            let Some(batch) = self.child.next_direction(direction)? else {
+                return Ok(None);
+            };
+            if let Some(batch) = self.filter_batch(batch)? {
+                return Ok(Some(batch));
+            }
+        }
+    }
+
+    fn rewind(&mut self) -> ExecResult<()> {
+        self.child.rewind()
     }
 
     fn close(&mut self) -> ExecResult<()> {

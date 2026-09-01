@@ -38,6 +38,10 @@ impl uqa_execution::PhysicalOperator for RowAtATime<'_> {
         &self.ordering
     }
 
+    fn backward_scan_support(&self) -> uqa_execution::BackwardScanSupport {
+        self.input.backward_scan_support()
+    }
+
     fn open(&mut self) -> uqa_execution::ExecResult<()> {
         self.pending = Vec::new().into_iter();
         self.input.open()
@@ -62,6 +66,38 @@ impl uqa_execution::PhysicalOperator for RowAtATime<'_> {
             }
             self.pending = batch.rows.into_iter();
         }
+    }
+
+    fn next_direction(
+        &mut self,
+        direction: uqa_execution::PhysicalScanDirection,
+    ) -> uqa_execution::ExecResult<Option<uqa_execution::Batch>> {
+        if self.pending.len() != 0 {
+            return Err(uqa_execution::ExecError::Other(
+                "row-at-a-time operator cannot mix batched and directional pulls".into(),
+            ));
+        }
+        let Some(batch) = self.input.next_direction(direction)? else {
+            return Ok(None);
+        };
+        if batch.schema != self.schema {
+            return Err(uqa_execution::ExecError::Other(format!(
+                "row-at-a-time input schema mismatch: expected {:?}, got {:?}",
+                self.schema, batch.schema
+            )));
+        }
+        if batch.rows.len() != 1 {
+            return Err(uqa_execution::ExecError::Other(format!(
+                "directional row-at-a-time input returned {} rows",
+                batch.rows.len()
+            )));
+        }
+        Ok(Some(batch))
+    }
+
+    fn rewind(&mut self) -> uqa_execution::ExecResult<()> {
+        self.pending = Vec::new().into_iter();
+        self.input.rewind()
     }
 
     fn close(&mut self) -> uqa_execution::ExecResult<()> {

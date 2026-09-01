@@ -11,6 +11,14 @@ use super::{
     SessionPortalPosition, SessionPortalState, Value,
 };
 
+pub(super) fn uses_directional_query_execution(state: &SessionPortalState) -> bool {
+    state.scrollable
+        && matches!(
+            state.data,
+            SessionPortalData::Pending { .. } | SessionPortalData::Streaming { .. }
+        )
+}
+
 fn realize_pending_command(
     engine: &Engine,
     state: &mut SessionPortalState,
@@ -95,7 +103,12 @@ fn start_streaming_portal(engine: &Engine, state: &mut SessionPortalState) {
         state.transaction_origin,
     );
     state.data = SessionPortalData::Streaming {
-        worker: crate::sql::start_session_portal_worker(worker_engine, query, params),
+        worker: crate::sql::start_session_portal_worker(
+            worker_engine,
+            query,
+            params,
+            state.scrollable,
+        ),
         materialized: None,
         eof: false,
         restart,
@@ -122,7 +135,9 @@ fn stream_next_portal_row(
     engine.cancellation_token().check()?;
     let _ = worker
         .requests
-        .send(crate::SessionPortalWorkerRequest::Next);
+        .send(crate::SessionPortalWorkerRequest::Step(
+            uqa_execution::PhysicalScanDirection::Forward,
+        ));
     loop {
         match worker.responses.recv() {
             Ok(crate::SessionPortalWorkerResponse::Started {
@@ -153,6 +168,11 @@ fn stream_next_portal_row(
                 *eof = true;
                 return Ok(false);
             }
+            Ok(crate::SessionPortalWorkerResponse::Rewound) => {
+                return Err(SQLError::Internal(
+                    "cursor worker rewound during a forward row request".into(),
+                ));
+            }
             Ok(crate::SessionPortalWorkerResponse::Error(error)) => {
                 *eof = true;
                 return Err(error);
@@ -163,6 +183,328 @@ fn stream_next_portal_row(
                     "cursor worker stopped without completing the query".into(),
                 ));
             }
+        }
+    }
+}
+
+fn stream_directional_portal_row(
+    engine: &Engine,
+    state: &mut SessionPortalState,
+    direction: uqa_execution::PhysicalScanDirection,
+) -> Result<Option<Vec<Value>>, SQLError> {
+    start_streaming_portal(engine, state);
+    let SessionPortalData::Streaming {
+        worker,
+        materialized,
+        eof,
+        ..
+    } = &mut state.data
+    else {
+        return Err(SQLError::Internal(
+            "directional cursor is not backed by a query worker".into(),
+        ));
+    };
+    engine.cancellation_token().check()?;
+    worker
+        .requests
+        .send(crate::SessionPortalWorkerRequest::Step(direction))
+        .map_err(|_| SQLError::Internal("cursor worker stopped before a row request".into()))?;
+    loop {
+        match worker.responses.recv() {
+            Ok(crate::SessionPortalWorkerResponse::Started {
+                columns,
+                column_types,
+            }) => {
+                let schema =
+                    uqa_execution::RowSchema::with_types(columns.clone(), column_types.clone());
+                let rows = uqa_execution::IndexedSpill::new(schema)
+                    .map_err(crate::sql::map_physical_exec_error)?;
+                *materialized = Some(SessionPortalMaterialization {
+                    columns,
+                    column_types,
+                    rows,
+                });
+            }
+            Ok(crate::SessionPortalWorkerResponse::Row(values)) => return Ok(Some(values)),
+            Ok(crate::SessionPortalWorkerResponse::Eof) => return Ok(None),
+            Ok(crate::SessionPortalWorkerResponse::Rewound) => {
+                return Err(SQLError::Internal(
+                    "cursor worker rewound during a row request".into(),
+                ));
+            }
+            Ok(crate::SessionPortalWorkerResponse::Error(error)) => {
+                *eof = true;
+                return Err(error);
+            }
+            Err(_) => {
+                *eof = true;
+                return Err(SQLError::Internal(
+                    "cursor worker stopped without completing the row request".into(),
+                ));
+            }
+        }
+    }
+}
+
+fn rewind_directional_portal(
+    engine: &Engine,
+    state: &mut SessionPortalState,
+) -> Result<(), SQLError> {
+    if matches!(state.position, SessionPortalPosition::BeforeFirst)
+        && matches!(state.data, SessionPortalData::Pending { .. })
+    {
+        return Ok(());
+    }
+    if matches!(state.data, SessionPortalData::Pending { .. }) {
+        state.position = SessionPortalPosition::BeforeFirst;
+        return Ok(());
+    }
+    let SessionPortalData::Streaming { worker, eof, .. } = &mut state.data else {
+        return Err(SQLError::Internal(
+            "directional cursor cannot rewind materialized command output".into(),
+        ));
+    };
+    engine.cancellation_token().check()?;
+    worker
+        .requests
+        .send(crate::SessionPortalWorkerRequest::Rewind)
+        .map_err(|_| SQLError::Internal("cursor worker stopped before rewind".into()))?;
+    match worker.responses.recv() {
+        Ok(crate::SessionPortalWorkerResponse::Rewound) => {
+            state.position = SessionPortalPosition::BeforeFirst;
+            Ok(())
+        }
+        Ok(crate::SessionPortalWorkerResponse::Error(error)) => {
+            *eof = true;
+            Err(error)
+        }
+        Ok(
+            crate::SessionPortalWorkerResponse::Started { .. }
+            | crate::SessionPortalWorkerResponse::Row(_)
+            | crate::SessionPortalWorkerResponse::Eof,
+        ) => Err(SQLError::Internal(
+            "cursor worker returned a row response during rewind".into(),
+        )),
+        Err(_) => {
+            *eof = true;
+            Err(SQLError::Internal(
+                "cursor worker stopped without completing rewind".into(),
+            ))
+        }
+    }
+}
+
+fn portal_position(state: &SessionPortalState) -> usize {
+    match state.position {
+        SessionPortalPosition::BeforeFirst => 0,
+        SessionPortalPosition::OnRow(position) | SessionPortalPosition::AfterLast(position) => {
+            position
+        }
+    }
+}
+
+fn directional_result(state: &SessionPortalState, rows: Vec<Vec<Value>>) -> SQLResult {
+    SQLResult::from_typed_rows_with_positions(
+        state.columns.clone(),
+        state.column_types.clone(),
+        vec![uqa_sql::ResultRow::new(); rows.len()],
+        Some(rows),
+    )
+}
+
+fn directional_count(count: i64) -> Option<u64> {
+    (count != i64::MAX).then_some(u64::try_from(count).unwrap_or(u64::MAX))
+}
+
+fn run_directional_portal(
+    engine: &Engine,
+    state: &mut SessionPortalState,
+    forward: bool,
+    count: Option<u64>,
+    capture: bool,
+) -> Result<(u64, Vec<Vec<Value>>), SQLError> {
+    if count == Some(0) {
+        return Ok((0, Vec::new()));
+    }
+    if forward && matches!(state.position, SessionPortalPosition::AfterLast(_))
+        || !forward && matches!(state.position, SessionPortalPosition::BeforeFirst)
+    {
+        return Ok((0, Vec::new()));
+    }
+    let start = portal_position(state);
+    let was_after_last = matches!(state.position, SessionPortalPosition::AfterLast(_));
+    let direction = if forward {
+        uqa_execution::PhysicalScanDirection::Forward
+    } else {
+        uqa_execution::PhysicalScanDirection::Backward
+    };
+    let mut processed = 0_u64;
+    let mut rows = Vec::new();
+    let mut exhausted = false;
+    while count.is_none_or(|count| processed < count) {
+        let Some(row) = stream_directional_portal_row(engine, state, direction)? else {
+            exhausted = true;
+            break;
+        };
+        processed = processed.checked_add(1).ok_or_else(|| SQLError::Routine {
+            sqlstate: "22003".into(),
+            message: "cursor position is out of range".into(),
+        })?;
+        if capture {
+            rows.push(row);
+        }
+    }
+    let processed_usize = usize::try_from(processed).unwrap_or(usize::MAX);
+    if forward {
+        let position = start.saturating_add(processed_usize);
+        if count.is_none() || exhausted {
+            state.position = SessionPortalPosition::AfterLast(position);
+        } else if processed != 0 {
+            state.position = SessionPortalPosition::OnRow(position);
+        }
+    } else {
+        let adjusted = start.saturating_add(usize::from(was_after_last && processed != 0));
+        if count.is_none() || exhausted {
+            state.position = SessionPortalPosition::BeforeFirst;
+        } else if processed != 0 {
+            state.position = SessionPortalPosition::OnRow(adjusted.saturating_sub(processed_usize));
+        }
+    }
+    Ok((processed, rows))
+}
+
+fn cursor_position_error() -> SQLError {
+    SQLError::Routine {
+        sqlstate: "22003".into(),
+        message: "cursor position is out of range".into(),
+    }
+}
+
+fn finish_directional_fetch(
+    state: &SessionPortalState,
+    move_only: bool,
+    processed: u64,
+    rows: Vec<Vec<Value>>,
+) -> SQLResult {
+    if move_only {
+        SQLResult::from_affected(processed)
+    } else {
+        directional_result(state, rows)
+    }
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "mirrors PostgreSQL's portal positioning rules"
+)]
+pub(super) fn fetch_directional_query_portal(
+    engine: &Engine,
+    state: &mut SessionPortalState,
+    direction: CursorDirection,
+    mut count: i64,
+    move_only: bool,
+) -> Result<SQLResult, SQLError> {
+    let mut direction = direction;
+    if count < 0
+        && matches!(
+            direction,
+            CursorDirection::Forward | CursorDirection::Backward
+        )
+    {
+        count = count.checked_neg().ok_or_else(cursor_position_error)?;
+        direction = match direction {
+            CursorDirection::Forward => CursorDirection::Backward,
+            CursorDirection::Backward => CursorDirection::Forward,
+            CursorDirection::Absolute | CursorDirection::Relative => unreachable!(),
+        };
+    }
+    let capture = !move_only;
+    match direction {
+        CursorDirection::Absolute if count > 0 => {
+            let target = u64::try_from(count).map_err(|_| cursor_position_error())?;
+            let position = u64::try_from(portal_position(state)).unwrap_or(u64::MAX);
+            if target - 1 <= position / 2 {
+                rewind_directional_portal(engine, state)?;
+                if target > 1 {
+                    run_directional_portal(engine, state, true, Some(target - 1), false)?;
+                }
+            } else {
+                let mut current = position;
+                if matches!(state.position, SessionPortalPosition::AfterLast(_)) {
+                    current = current.saturating_add(1);
+                }
+                if target <= current {
+                    run_directional_portal(
+                        engine,
+                        state,
+                        false,
+                        Some(current - target + 1),
+                        false,
+                    )?;
+                } else if target > current.saturating_add(1) {
+                    run_directional_portal(engine, state, true, Some(target - current - 1), false)?;
+                }
+            }
+            let (processed, rows) = run_directional_portal(engine, state, true, Some(1), capture)?;
+            Ok(finish_directional_fetch(state, move_only, processed, rows))
+        }
+        CursorDirection::Absolute if count < 0 => {
+            run_directional_portal(engine, state, true, None, false)?;
+            let magnitude = count.unsigned_abs();
+            if magnitude > 1 {
+                run_directional_portal(engine, state, false, Some(magnitude - 1), false)?;
+            }
+            let (processed, rows) = run_directional_portal(engine, state, false, Some(1), capture)?;
+            Ok(finish_directional_fetch(state, move_only, processed, rows))
+        }
+        CursorDirection::Absolute => {
+            rewind_directional_portal(engine, state)?;
+            Ok(finish_directional_fetch(state, move_only, 0, Vec::new()))
+        }
+        CursorDirection::Relative if count > 0 => {
+            let count = u64::try_from(count).map_err(|_| cursor_position_error())?;
+            if count > 1 {
+                run_directional_portal(engine, state, true, Some(count - 1), false)?;
+            }
+            let (processed, rows) = run_directional_portal(engine, state, true, Some(1), capture)?;
+            Ok(finish_directional_fetch(state, move_only, processed, rows))
+        }
+        CursorDirection::Relative if count < 0 => {
+            let magnitude = count.unsigned_abs();
+            if magnitude > 1 {
+                run_directional_portal(engine, state, false, Some(magnitude - 1), false)?;
+            }
+            let (processed, rows) = run_directional_portal(engine, state, false, Some(1), capture)?;
+            Ok(finish_directional_fetch(state, move_only, processed, rows))
+        }
+        CursorDirection::Relative => {
+            fetch_directional_query_portal(engine, state, CursorDirection::Forward, 0, move_only)
+        }
+        CursorDirection::Forward | CursorDirection::Backward if count == 0 => {
+            let on_row = matches!(state.position, SessionPortalPosition::OnRow(_));
+            if move_only {
+                return Ok(SQLResult::from_affected(u64::from(on_row)));
+            }
+            if !on_row {
+                return Ok(directional_result(state, Vec::new()));
+            }
+            run_directional_portal(engine, state, false, Some(1), false)?;
+            let (processed, rows) = run_directional_portal(engine, state, true, Some(1), true)?;
+            Ok(finish_directional_fetch(state, false, processed, rows))
+        }
+        CursorDirection::Backward if count == i64::MAX && move_only => {
+            let mut processed = u64::try_from(portal_position(state)).unwrap_or(u64::MAX);
+            if processed > 0 && !matches!(state.position, SessionPortalPosition::AfterLast(_)) {
+                processed -= 1;
+            }
+            rewind_directional_portal(engine, state)?;
+            Ok(SQLResult::from_affected(processed))
+        }
+        CursorDirection::Forward | CursorDirection::Backward => {
+            let forward = direction == CursorDirection::Forward;
+            let (processed, rows) =
+                run_directional_portal(engine, state, forward, directional_count(count), capture)?;
+            Ok(finish_directional_fetch(state, move_only, processed, rows))
         }
     }
 }
@@ -210,7 +552,7 @@ pub(super) fn ensure_portal_rows_for_fetch(
             let start = match state.position {
                 SessionPortalPosition::BeforeFirst => 0,
                 SessionPortalPosition::OnRow(position) => position,
-                SessionPortalPosition::AfterLast => return Ok(()),
+                SessionPortalPosition::AfterLast(_) => return Ok(()),
             };
             Some(
                 start.saturating_add(usize::try_from(count).map_err(|_| SQLError::Routine {
@@ -233,7 +575,7 @@ pub(super) fn ensure_portal_rows_for_fetch(
             let current = match state.position {
                 SessionPortalPosition::BeforeFirst => 0,
                 SessionPortalPosition::OnRow(position) => position,
-                SessionPortalPosition::AfterLast => return Ok(()),
+                SessionPortalPosition::AfterLast(_) => return Ok(()),
             };
             Some(
                 current.saturating_add(usize::try_from(count).map_err(|_| SQLError::Routine {
@@ -369,7 +711,7 @@ fn require_scroll(state: &SessionPortalState) -> Result<(), SQLError> {
 fn current_row(state: &SessionPortalState) -> Option<usize> {
     match state.position {
         SessionPortalPosition::OnRow(position) => Some(position - 1),
-        SessionPortalPosition::BeforeFirst | SessionPortalPosition::AfterLast => None,
+        SessionPortalPosition::BeforeFirst | SessionPortalPosition::AfterLast(_) => None,
     }
 }
 
@@ -380,13 +722,13 @@ fn fetch_forward(state: &mut SessionPortalState, count: i64) -> Result<Vec<usize
         }
         return Ok(current_row(state).into_iter().collect());
     }
-    if state.position == SessionPortalPosition::AfterLast {
+    if matches!(state.position, SessionPortalPosition::AfterLast(_)) {
         return Ok(Vec::new());
     }
     let start = match state.position {
         SessionPortalPosition::BeforeFirst => 0,
         SessionPortalPosition::OnRow(position) => position,
-        SessionPortalPosition::AfterLast => unreachable!(),
+        SessionPortalPosition::AfterLast(_) => unreachable!(),
     };
     let available = portal_row_count(state).saturating_sub(start);
     let requested = if count == i64::MAX {
@@ -402,7 +744,7 @@ fn fetch_forward(state: &mut SessionPortalState, count: i64) -> Result<Vec<usize
         state.position = SessionPortalPosition::OnRow(start + fetched);
     }
     if count == i64::MAX || fetched < requested {
-        state.position = SessionPortalPosition::AfterLast;
+        state.position = SessionPortalPosition::AfterLast(start.saturating_add(fetched));
     }
     Ok((start..start + fetched).collect())
 }
@@ -418,7 +760,7 @@ fn fetch_backward(state: &mut SessionPortalState, count: i64) -> Result<Vec<usiz
     let conceptual_position = match state.position {
         SessionPortalPosition::BeforeFirst => unreachable!(),
         SessionPortalPosition::OnRow(position) => position,
-        SessionPortalPosition::AfterLast => portal_row_count(state).saturating_add(1),
+        SessionPortalPosition::AfterLast(position) => position.saturating_add(1),
     };
     let available = conceptual_position.saturating_sub(1);
     let requested = if count == i64::MAX {
@@ -452,7 +794,9 @@ fn fetch_absolute(state: &mut SessionPortalState, count: i64) -> Result<Vec<usiz
     let current = match state.position {
         SessionPortalPosition::BeforeFirst => 0,
         SessionPortalPosition::OnRow(position) => i128::try_from(position).unwrap_or(i128::MAX),
-        SessionPortalPosition::AfterLast => row_count + 1,
+        SessionPortalPosition::AfterLast(position) => {
+            i128::try_from(position).unwrap_or(i128::MAX) + 1
+        }
     };
     let requires_scroll = count < 0
         || (count == 0 && state.position != SessionPortalPosition::BeforeFirst)
@@ -468,7 +812,9 @@ fn fetch_relative(state: &mut SessionPortalState, count: i64) -> Result<Vec<usiz
     let current = match state.position {
         SessionPortalPosition::BeforeFirst => 0,
         SessionPortalPosition::OnRow(position) => i128::try_from(position).unwrap_or(i128::MAX),
-        SessionPortalPosition::AfterLast => row_count + 1,
+        SessionPortalPosition::AfterLast(position) => {
+            i128::try_from(position).unwrap_or(i128::MAX) + 1
+        }
     };
     if count == 0 {
         return fetch_forward(state, 0);
@@ -489,7 +835,8 @@ fn position_at(
         return Ok(Vec::new());
     }
     if target > row_count {
-        state.position = SessionPortalPosition::AfterLast;
+        state.position =
+            SessionPortalPosition::AfterLast(usize::try_from(row_count).unwrap_or(usize::MAX));
         return Ok(Vec::new());
     }
     let row = usize::try_from(target - 1).map_err(|_| SQLError::Routine {

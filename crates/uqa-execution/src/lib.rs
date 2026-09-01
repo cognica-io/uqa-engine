@@ -73,6 +73,7 @@ pub mod relational;
 pub mod scalar;
 pub mod scan;
 pub mod scope_overlay;
+pub mod scroll_materialize;
 pub mod set_operation;
 pub mod spill;
 pub mod spill_scan;
@@ -94,8 +95,8 @@ pub use join_output::{JoinOutput, JoinOutputSource};
 pub use lateral_join::{LateralJoin, LateralRows, LateralSource};
 pub use map_rows::{MapRows, SharedRowMapper};
 pub use physical::{
-    order_expression_position, ordering_satisfies, ExecError, ExecResult, OperatorBatchCursor,
-    PhysicalOperator, PhysicalOrder,
+    order_expression_position, ordering_satisfies, BackwardScanSupport, ExecError, ExecResult,
+    OperatorBatchCursor, PhysicalOperator, PhysicalOrder, PhysicalScanDirection,
 };
 pub use project_set::{
     PhysicalProjectRows, PhysicalProjectSet, PhysicalSetProjector, ProjectRows, ProjectSet,
@@ -116,6 +117,7 @@ pub use scalar::{
 };
 pub use scan::{PhysicalRowIteratorScan, RowIteratorScan, RowSource, TableScan};
 pub use scope_overlay::ScopeOverlay;
+pub use scroll_materialize::{prepare_backward_scan, ScrollMaterialize};
 pub use set_operation::ExternalSetOperation;
 pub use spill::{IndexedSpill, SharedSpill, SharedSpillReader, SpillBuffer};
 pub use spill_scan::{SharedSpillScan, SpillScan};

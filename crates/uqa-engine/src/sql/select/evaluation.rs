@@ -48,6 +48,7 @@ pub(crate) struct CteScope {
     scalar_subquery_arena: u64,
     read_command_overlay: bool,
     stream_command_progress: bool,
+    scan_backwards: bool,
     next_scalar_subquery_arena: Arc<AtomicU64>,
     scalar_subquery_cache:
         Arc<parking_lot::Mutex<BTreeMap<(u64, usize), ScalarSubqueryCacheEntry>>>,
@@ -68,6 +69,7 @@ impl Default for CteScope {
             scalar_subquery_arena: 0,
             read_command_overlay: true,
             stream_command_progress: false,
+            scan_backwards: false,
             next_scalar_subquery_arena: Arc::new(AtomicU64::new(1)),
             scalar_subquery_cache: Arc::new(parking_lot::Mutex::new(BTreeMap::new())),
             catalog: None,

@@ -242,9 +242,42 @@ fn prepare_session_portal(
 struct SessionPortalRowConsumer {
     requests: std::sync::mpsc::Receiver<SessionPortalWorkerRequest>,
     responses: std::sync::mpsc::Sender<SessionPortalWorkerResponse>,
-    initial_next: std::cell::Cell<bool>,
+    direction: std::cell::Cell<uqa_execution::PhysicalScanDirection>,
+    directional: bool,
     closed: std::cell::Cell<bool>,
     public_width: std::cell::Cell<usize>,
+}
+
+impl SessionPortalRowConsumer {
+    fn wait_for_request(&self) -> Result<select::QueryConsumerControl, SQLError> {
+        match self.requests.recv() {
+            Ok(SessionPortalWorkerRequest::Step(direction)) => {
+                self.direction.set(direction);
+                Ok(select::QueryConsumerControl::Continue)
+            }
+            Ok(SessionPortalWorkerRequest::Rewind) if self.directional => {
+                Ok(select::QueryConsumerControl::Rewind)
+            }
+            Ok(SessionPortalWorkerRequest::Rewind) => Err(SQLError::Internal(
+                "forward-only cursor worker received a rewind request".into(),
+            )),
+            Ok(SessionPortalWorkerRequest::Close) | Err(_) => {
+                self.closed.set(true);
+                Ok(select::QueryConsumerControl::Stop)
+            }
+        }
+    }
+
+    fn respond_and_wait(
+        &self,
+        response: SessionPortalWorkerResponse,
+    ) -> Result<select::QueryConsumerControl, SQLError> {
+        if self.responses.send(response).is_err() {
+            self.closed.set(true);
+            return Ok(select::QueryConsumerControl::Stop);
+        }
+        self.wait_for_request()
+    }
 }
 
 impl select::QueryRowConsumer for SessionPortalRowConsumer {
@@ -281,40 +314,30 @@ impl select::QueryRowConsumer for SessionPortalRowConsumer {
         _engine: &Engine,
         row: uqa_execution::OwnedPhysicalRow,
     ) -> Result<select::QueryConsumerControl, SQLError> {
-        let request = if self.initial_next.replace(false) {
-            SessionPortalWorkerRequest::Next
-        } else {
-            match self.requests.recv() {
-                Ok(request) => request,
-                Err(_) => SessionPortalWorkerRequest::Close,
-            }
-        };
-        if matches!(request, SessionPortalWorkerRequest::Close) {
-            self.closed.set(true);
-            return Ok(select::QueryConsumerControl::Stop);
-        }
         let view = row.view();
         let values = (0..self.public_width.get())
             .map(|position| view.value_at(position).cloned().unwrap_or(Value::Null))
             .collect();
-        if self
-            .responses
-            .send(SessionPortalWorkerResponse::Row(values))
-            .is_err()
-        {
-            self.closed.set(true);
-            return Ok(select::QueryConsumerControl::Stop);
-        }
-        match self.requests.recv() {
-            Ok(SessionPortalWorkerRequest::Next) => {
-                self.initial_next.set(true);
-                Ok(select::QueryConsumerControl::Continue)
-            }
-            Ok(SessionPortalWorkerRequest::Close) | Err(_) => {
-                self.closed.set(true);
-                Ok(select::QueryConsumerControl::Stop)
-            }
-        }
+        self.respond_and_wait(SessionPortalWorkerResponse::Row(values))
+    }
+
+    fn uses_directional_scan(&self) -> bool {
+        self.directional
+    }
+
+    fn scan_direction(&self) -> uqa_execution::PhysicalScanDirection {
+        self.direction.get()
+    }
+
+    fn direction_exhausted(
+        &self,
+        _engine: &Engine,
+    ) -> Result<select::QueryConsumerControl, SQLError> {
+        self.respond_and_wait(SessionPortalWorkerResponse::Eof)
+    }
+
+    fn rewound(&self, _engine: &Engine) -> Result<select::QueryConsumerControl, SQLError> {
+        self.respond_and_wait(SessionPortalWorkerResponse::Rewound)
     }
 }
 
@@ -322,24 +345,40 @@ pub(crate) fn start_session_portal_worker(
     engine: Engine,
     query: QueryPlan,
     params: Vec<SQLParam>,
+    directional: bool,
 ) -> SessionPortalWorker {
     let (request_tx, request_rx) = std::sync::mpsc::channel();
     let (response_tx, response_rx) = std::sync::mpsc::channel();
     let join = std::thread::spawn(move || {
         let _statement_gate = engine.runtime.statement_gate.delegate_to_current_thread();
-        let first = match request_rx.recv() {
-            Ok(SessionPortalWorkerRequest::Next) => true,
-            Ok(SessionPortalWorkerRequest::Close) | Err(_) => return,
+        let first_direction = loop {
+            match request_rx.recv() {
+                Ok(SessionPortalWorkerRequest::Step(direction)) => break direction,
+                Ok(SessionPortalWorkerRequest::Rewind) if directional => {
+                    if response_tx
+                        .send(SessionPortalWorkerResponse::Rewound)
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+                Ok(SessionPortalWorkerRequest::Rewind) => return,
+                Ok(SessionPortalWorkerRequest::Close) | Err(_) => return,
+            }
         };
         let consumer = std::rc::Rc::new(SessionPortalRowConsumer {
             requests: request_rx,
             responses: response_tx.clone(),
-            initial_next: std::cell::Cell::new(first),
+            direction: std::cell::Cell::new(first_direction),
+            directional,
             closed: std::cell::Cell::new(false),
             public_width: std::cell::Cell::new(0),
         });
         let mut ctes = select::CteScope::new_for_current_routine(&engine);
         ctes.enable_command_progress_streaming();
+        if directional {
+            ctes.enable_backwards_scanning();
+        }
         let result = select::execute_query_plan_output(
             &engine,
             &query,

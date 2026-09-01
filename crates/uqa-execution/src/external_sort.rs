@@ -244,6 +244,10 @@ impl PhysicalOperator for ExternalSort<'_> {
         &self.ordering
     }
 
+    fn backward_scan_support(&self) -> crate::BackwardScanSupport {
+        crate::BackwardScanSupport::Materialize
+    }
+
     fn open(&mut self) -> ExecResult<()> {
         self.output = None;
         self.initial_run_count = 0;
