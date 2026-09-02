@@ -33,6 +33,15 @@ pub(super) struct StoredForeignServer {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct StoredForeignTable {
+    pub(super) role_owner: String,
+    pub(super) server_name: String,
+    pub(super) columns_json: String,
+    pub(super) options_json: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct LegacyStoredForeignTable {
     pub(super) server_name: String,
     pub(super) columns_json: String,
     pub(super) options_json: String,

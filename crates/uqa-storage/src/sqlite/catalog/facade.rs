@@ -424,6 +424,7 @@ impl CatalogFacade for Catalog {
     fn save_foreign_table(
         &self,
         relation: &RelationIdentity,
+        role_owner: &str,
         server_name: &str,
         columns_json: &str,
         options_json: &str,
@@ -431,9 +432,20 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::save_foreign_table(
             self,
             relation,
+            role_owner,
             server_name,
             columns_json,
             options_json,
+        ))
+    }
+
+    fn update_foreign_table_role_owner(
+        &self,
+        relation: &RelationIdentity,
+        role_owner: &str,
+    ) -> StorageBackendResult<bool> {
+        into_storage_result(Catalog::update_foreign_table_role_owner(
+            self, relation, role_owner,
         ))
     }
 

@@ -51,6 +51,7 @@ impl KeyValueCatalog {
     pub(super) fn save_foreign_table_impl(
         &self,
         relation: &RelationIdentity,
+        role_owner: &str,
         server_name: &str,
         columns_json: &str,
         options_json: &str,
@@ -60,12 +61,28 @@ impl KeyValueCatalog {
         batch.put(
             &relation_key(TAG_FOREIGN_TABLE, relation)?,
             &encode_value(&StoredForeignTable {
+                role_owner: role_owner.to_string(),
                 server_name: server_name.to_string(),
                 columns_json: columns_json.to_string(),
                 options_json: options_json.to_string(),
             })?,
         )?;
         batch.commit()
+    }
+
+    pub(super) fn update_foreign_table_role_owner_impl(
+        &self,
+        relation: &RelationIdentity,
+        role_owner: &str,
+    ) -> StorageBackendResult<bool> {
+        let key = relation_key(TAG_FOREIGN_TABLE, relation)?;
+        let Some(value) = self.store.get(&key)? else {
+            return Ok(false);
+        };
+        let mut stored: StoredForeignTable = decode_value(&value)?;
+        stored.role_owner = role_owner.to_string();
+        self.store.put(&key, &encode_value(&stored)?)?;
+        Ok(true)
     }
 
     pub(super) fn drop_foreign_table_impl(
@@ -85,6 +102,7 @@ impl KeyValueCatalog {
             let stored: StoredForeignTable = decode_value(&value)?;
             rows.push(ForeignTableRow {
                 relation,
+                role_owner: stored.role_owner,
                 server_name: stored.server_name,
                 columns_json: stored.columns_json,
                 options_json: stored.options_json,

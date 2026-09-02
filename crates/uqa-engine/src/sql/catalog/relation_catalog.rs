@@ -176,7 +176,8 @@ pub(super) fn build_pg_class(
     }
     for (name, foreign_table) in catalog.foreign_tables() {
         let (schema, table) = split_schema_name(&name)?;
-        out.push(pg_class_row(
+        let security = catalog.foreign_table_security(&name)?;
+        let mut row = pg_class_row(
             &schema,
             &table,
             "f",
@@ -186,7 +187,16 @@ pub(super) fn build_pg_class(
             )?,
             0.0,
             false,
-        ));
+        );
+        row.insert(
+            "relowner".into(),
+            int_value(crate::engine_roles::role_oid(&security.role_owner)),
+        );
+        row.insert(
+            "relacl".into(),
+            table_acl_catalog_value(&security.role_owner, security.acl.as_ref())?,
+        );
+        out.push(row);
     }
     for (sequence, persistence, object_id, security) in catalog.sequences() {
         let (schema, name) = split_schema_name(&sequence)?;

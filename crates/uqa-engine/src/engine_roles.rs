@@ -591,6 +591,8 @@ impl Engine {
         }
         drop(views);
 
+        self.ensure_roles_have_no_foreign_table_dependencies(names)?;
+
         let sequence_security = self.durable.sequence_security.read();
         for name in names {
             if let Some(relation) = dependent_sequence_for_role(&sequence_security, name) {
@@ -620,6 +622,28 @@ impl Engine {
                 return Err(SQLError::Routine {
                     sqlstate: "2BP01".into(),
                     message: format!("role \"{name}\" cannot be dropped because some objects depend on it: {dependent}"),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn ensure_roles_have_no_foreign_table_dependencies(
+        &self,
+        names: &[String],
+    ) -> Result<(), SQLError> {
+        let foreign_tables = self.durable.foreign_table_security.read();
+        for name in names {
+            if let Some((relation, _)) = foreign_tables
+                .iter()
+                .find(|(_, security)| table_security_depends_on_role(security, name))
+            {
+                return Err(SQLError::Routine {
+                    sqlstate: "2BP01".into(),
+                    message: format!(
+                        "role \"{name}\" cannot be dropped because some objects depend on it: foreign table {}",
+                        relation.qualified_name()
+                    ),
                 });
             }
         }

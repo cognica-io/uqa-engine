@@ -193,6 +193,9 @@ impl UnifiedPlan {
             Statement::AlterTable(value) => {
                 Self::Command(Box::new(CommandPlan::AlterTable(Box::new(value))))
             }
+            Statement::AlterForeignTable(value) => {
+                Self::Command(Box::new(CommandPlan::AlterForeignTable(value)))
+            }
             Statement::AlterView(value) => Self::Command(Box::new(CommandPlan::AlterView(value))),
             Statement::CreateView {
                 name,
@@ -490,6 +493,7 @@ impl CommandPlan {
             Self::Deallocate { .. } => "Deallocate",
             Self::CreateForeignServer(_) => "CreateForeignServer",
             Self::CreateForeignTable(_) => "CreateForeignTable",
+            Self::AlterForeignTable(_) => "AlterForeignTable",
             Self::Merge(_) => "Merge",
             Self::CreateFunction(_) => "CreateFunction",
             Self::DropFunction(_) => "DropFunction",

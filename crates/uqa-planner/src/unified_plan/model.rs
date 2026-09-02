@@ -534,6 +534,7 @@ pub enum CommandPlan {
     },
     CreateForeignServer(uqa_sql::ast::CreateForeignServer),
     CreateForeignTable(uqa_sql::ast::CreateForeignTable),
+    AlterForeignTable(uqa_sql::ast::AlterForeignTableStmt),
     Merge(Box<MergePlan>),
     CreateFunction(Box<uqa_sql::ast::CreateFunction>),
     DropFunction(uqa_sql::ast::DropFunctionStmt),

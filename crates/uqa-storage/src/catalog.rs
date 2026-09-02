@@ -274,6 +274,8 @@ pub struct GraphSnapshot {
 #[derive(Debug, Clone)]
 pub struct ForeignTableRow {
     pub relation: RelationIdentity,
+    /// SQL role that owns the foreign table. Catalogs created before foreign-table role ownership was persisted belong to the bootstrap role.
+    pub role_owner: String,
     pub server_name: String,
     pub columns_json: String,
     pub options_json: String,
@@ -782,10 +784,16 @@ pub trait CatalogFacade: Send + Sync {
     fn save_foreign_table(
         &self,
         relation: &RelationIdentity,
+        role_owner: &str,
         server_name: &str,
         columns_json: &str,
         options_json: &str,
     ) -> StorageBackendResult<()>;
+    fn update_foreign_table_role_owner(
+        &self,
+        relation: &RelationIdentity,
+        role_owner: &str,
+    ) -> StorageBackendResult<bool>;
     fn drop_foreign_table(&self, relation: &RelationIdentity) -> StorageBackendResult<()>;
     fn load_foreign_tables(&self) -> StorageBackendResult<Vec<ForeignTableRow>>;
 

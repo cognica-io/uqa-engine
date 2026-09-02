@@ -140,6 +140,56 @@ fn legacy_view_ownership_is_assigned_only_by_the_explicit_catalog_migration() {
 }
 
 #[test]
+fn foreign_table_rows_round_trip_role_ownership_and_migration_rewrites_it_atomically() {
+    let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
+    let catalog = KeyValueCatalog::new(Arc::clone(&store));
+    catalog.save_schema("public").unwrap();
+    let relation = RelationIdentity::new("public", "owned_foreign_table");
+    catalog
+        .save_foreign_table(&relation, "foreign_owner", "memory", "[]", "{}")
+        .unwrap();
+    let loaded = catalog.load_foreign_tables().unwrap().remove(0);
+    assert_eq!(loaded.relation, relation);
+    assert_eq!(loaded.role_owner, "foreign_owner");
+    assert_eq!(loaded.server_name, "memory");
+    assert!(catalog
+        .update_foreign_table_role_owner(&relation, "next_foreign_owner")
+        .unwrap());
+    assert!(!catalog
+        .update_foreign_table_role_owner(
+            &RelationIdentity::new("public", "missing_foreign_table"),
+            "next_foreign_owner",
+        )
+        .unwrap());
+
+    catalog.migrate_relation_namespace().unwrap();
+    let migrated = catalog.load_foreign_tables().unwrap().remove(0);
+    assert_eq!(migrated.role_owner, "next_foreign_owner");
+    assert_eq!(migrated.server_name, "memory");
+}
+
+#[test]
+fn legacy_foreign_table_ownership_is_assigned_only_by_explicit_catalog_migration() {
+    let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
+    let catalog = KeyValueCatalog::new(Arc::clone(&store));
+    catalog.save_schema("public").unwrap();
+    let relation = RelationIdentity::new("public", "legacy_owned_foreign_table");
+    store
+        .put(
+            &relation_key(TAG_FOREIGN_TABLE, &relation).unwrap(),
+            br#"{"server_name":"memory","columns_json":"[]","options_json":"{}"}"#,
+        )
+        .unwrap();
+
+    assert!(catalog.load_foreign_tables().is_err());
+    catalog.migrate_relation_namespace().unwrap();
+    let migrated = catalog.load_foreign_tables().unwrap().remove(0);
+    assert_eq!(migrated.relation, relation);
+    assert_eq!(migrated.role_owner, "uqa");
+    assert_eq!(migrated.server_name, "memory");
+}
+
+#[test]
 fn view_rows_without_acl_fields_keep_the_valid_default_acl() {
     let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
     let catalog = KeyValueCatalog::new(Arc::clone(&store));

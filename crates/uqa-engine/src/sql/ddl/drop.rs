@@ -46,13 +46,14 @@ pub(in crate::sql) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLRes
                 DropKind::View => "VIEW",
                 DropKind::MaterializedView => "MATERIALIZED VIEW",
                 DropKind::Schema => "SCHEMA",
-                DropKind::Table | DropKind::Index | DropKind::Sequence => unreachable!(),
+                DropKind::Table | DropKind::ForeignTable | DropKind::Index | DropKind::Sequence =>
+                    unreachable!(),
             }
         )));
     }
     let mut lock_targets = std::collections::BTreeSet::new();
     match stmt.kind {
-        DropKind::Table | DropKind::View | DropKind::MaterializedView => {
+        DropKind::Table | DropKind::ForeignTable | DropKind::View | DropKind::MaterializedView => {
             let mut table_targets = Vec::new();
             for name in &stmt.names {
                 if let Some((canonical, kind)) = engine.try_resolve_visible_relation_kind(name)? {
@@ -173,6 +174,83 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
             engine
                 .try_drop_tables(&tables, stmt.cascade)
                 .map_err(|err| ddl_storage_error("DROP TABLE", err))?;
+        }
+        DropKind::ForeignTable => {
+            let mut foreign_tables = Vec::new();
+            let mut seen = std::collections::BTreeSet::new();
+            for name in &stmt.names {
+                match engine.resolve_visible_relation_kind(name)? {
+                    RelationResolution::Found(canonical, "foreign table") => {
+                        if seen.insert(canonical.clone()) {
+                            foreign_tables.push(canonical);
+                        }
+                    }
+                    RelationResolution::Found(_, _) => {
+                        return Err(SQLError::Routine {
+                            sqlstate: "42809".into(),
+                            message: format!("\"{name}\" is not a foreign table"),
+                        });
+                    }
+                    RelationResolution::MissingSchema(schema) if stmt.if_exists => {
+                        engine.push_sql_notice(
+                            "NOTICE",
+                            &format!("schema \"{schema}\" does not exist, skipping"),
+                        );
+                    }
+                    RelationResolution::MissingRelation if stmt.if_exists => {
+                        engine.push_sql_notice(
+                            "NOTICE",
+                            &format!("foreign table \"{name}\" does not exist, skipping"),
+                        );
+                    }
+                    RelationResolution::MissingSchema(schema) => {
+                        return Err(SQLError::Routine {
+                            sqlstate: "3F000".into(),
+                            message: format!("schema \"{schema}\" does not exist"),
+                        });
+                    }
+                    RelationResolution::MissingRelation => {
+                        return Err(SQLError::Routine {
+                            sqlstate: "42P01".into(),
+                            message: format!("foreign table \"{name}\" does not exist"),
+                        });
+                    }
+                }
+            }
+            for table in &foreign_tables {
+                engine.ensure_foreign_table_drop_authority(table)?;
+            }
+            let mut dependents = std::collections::BTreeSet::new();
+            for table in &foreign_tables {
+                dependents.extend(engine.views_depending_on_relation(table).map_err(|error| {
+                    ddl_storage_error("DROP FOREIGN TABLE dependency preflight", error)
+                })?);
+            }
+            if !stmt.cascade && !dependents.is_empty() {
+                return Err(SQLError::Routine {
+                    sqlstate: "2BP01".into(),
+                    message: format!(
+                        "cannot drop foreign table {} because other objects depend on it: {}",
+                        foreign_tables.join(", "),
+                        dependents.into_iter().collect::<Vec<_>>().join(", ")
+                    ),
+                });
+            }
+            if stmt.cascade {
+                engine
+                    .drop_views_depending_on_relations(&foreign_tables)
+                    .map_err(|error| ddl_storage_error("DROP FOREIGN TABLE CASCADE", error))?;
+            }
+            for table in foreign_tables {
+                let removed = engine
+                    .drop_foreign_table_inner(&table)
+                    .map_err(|error| ddl_storage_error("DROP FOREIGN TABLE", error))?;
+                if !removed {
+                    return Err(SQLError::Internal(format!(
+                        "foreign table `{table}` disappeared after DROP preflight"
+                    )));
+                }
+            }
         }
         DropKind::Index => unreachable!("DROP INDEX has a bound execution path"),
         DropKind::View | DropKind::MaterializedView => {

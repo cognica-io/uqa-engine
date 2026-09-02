@@ -64,6 +64,7 @@ impl Catalog {
     pub fn save_foreign_table(
         &self,
         relation: &RelationIdentity,
+        role_owner: &str,
         server_name: &str,
         columns_json: &str,
         options_json: &str,
@@ -73,11 +74,12 @@ impl Catalog {
             Self::claim_relation(&tx, relation, RelationKind::ForeignTable)?;
             tx.execute(
                 "INSERT OR REPLACE INTO _foreign_tables \
-                    (schema_name, relation_name, kind, server_name, columns_json, options) \
-                 VALUES (?1, ?2, 'foreign_table', ?3, ?4, ?5)",
+                    (schema_name, relation_name, kind, role_owner, server_name, columns_json, options) \
+                 VALUES (?1, ?2, 'foreign_table', ?3, ?4, ?5, ?6)",
                 params![
                     relation.schema,
                     relation.name,
+                    role_owner,
                     server_name,
                     columns_json,
                     options_json
@@ -85,6 +87,20 @@ impl Catalog {
             )?;
             tx.commit()?;
             Ok(())
+        })
+    }
+
+    pub fn update_foreign_table_role_owner(
+        &self,
+        relation: &RelationIdentity,
+        role_owner: &str,
+    ) -> Result<bool> {
+        self.conn.with_mut(|connection| {
+            Ok(connection.execute(
+                "UPDATE _foreign_tables SET role_owner = ?3
+                  WHERE schema_name = ?1 AND relation_name = ?2",
+                params![relation.schema, relation.name, role_owner],
+            )? != 0)
         })
     }
 
@@ -107,7 +123,7 @@ impl Catalog {
     pub fn load_foreign_tables(&self) -> Result<Vec<ForeignTableRow>> {
         self.conn.with(|c| {
             let mut stmt = c.prepare(
-                "SELECT schema_name, relation_name, server_name, columns_json, options
+                "SELECT schema_name, relation_name, role_owner, server_name, columns_json, options
                    FROM _foreign_tables ORDER BY schema_name, relation_name",
             )?;
             let rows = stmt.query_map([], |r| {
@@ -117,13 +133,15 @@ impl Catalog {
                     r.get::<_, String>(2)?,
                     r.get::<_, String>(3)?,
                     r.get::<_, String>(4)?,
+                    r.get::<_, String>(5)?,
                 ))
             })?;
             let mut out = Vec::new();
             for row in rows {
-                let (schema, name, server, cols, opts) = row?;
+                let (schema, name, owner, server, cols, opts) = row?;
                 out.push(ForeignTableRow {
                     relation: RelationIdentity::new(schema, name),
+                    role_owner: owner,
                     server_name: server,
                     columns_json: cols,
                     options_json: opts,

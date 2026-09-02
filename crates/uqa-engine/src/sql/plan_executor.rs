@@ -509,6 +509,10 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             CommandPlan::AlterTable(statement) => {
                 run_alter_table(self.engine, (**statement).clone())
             }
+            CommandPlan::AlterForeignTable(statement) => {
+                self.engine.alter_foreign_table(statement)?;
+                Ok(SQLResult::empty())
+            }
             CommandPlan::AlterView(statement) => {
                 self.engine.alter_view(statement)?;
                 Ok(SQLResult::empty())

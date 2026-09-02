@@ -629,6 +629,7 @@ impl Engine {
         self.durable.named_analyzers.write().clear();
         self.durable.foreign_servers.write().clear();
         self.durable.foreign_tables.write().clear();
+        self.durable.foreign_table_security.write().clear();
         self.durable.sql_user_functions.write().clear();
         self.durable.models.write().clear();
         self.durable.scoring_params.write().clear();

@@ -761,6 +761,35 @@ fn relation_forms_and_options_preserve_lifecycle_semantics() {
 }
 
 #[test]
+fn foreign_table_ownership_and_drop_preserve_relation_lifecycle_semantics() {
+    assert!(matches!(
+        first("ALTER FOREIGN TABLE app.items OWNER TO CURRENT_USER"),
+        Statement::AlterForeignTable(crate::ast::AlterForeignTableStmt {
+            name,
+            if_exists: false,
+            owner,
+        }) if name == "app.items" && owner == "CURRENT_USER"
+    ));
+    assert!(matches!(
+        first("ALTER FOREIGN TABLE IF EXISTS app.items OWNER TO next_owner"),
+        Statement::AlterForeignTable(crate::ast::AlterForeignTableStmt {
+            name,
+            if_exists: true,
+            owner,
+        }) if name == "app.items" && owner == "next_owner"
+    ));
+    let Statement::Drop(drop) =
+        first("DROP FOREIGN TABLE IF EXISTS app.items, archive.items CASCADE")
+    else {
+        panic!("expected DROP FOREIGN TABLE");
+    };
+    assert_eq!(drop.kind, crate::ast::DropKind::ForeignTable);
+    assert_eq!(drop.names, ["app.items", "archive.items"]);
+    assert!(drop.if_exists);
+    assert!(drop.cascade);
+}
+
+#[test]
 fn unsupported_create_ddl_never_loses_remaining_envelope_semantics() {
     for (sql, expected) in [
         (

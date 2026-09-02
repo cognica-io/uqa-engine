@@ -7,6 +7,7 @@
 use super::*;
 
 mod column_acls;
+mod foreign_table_ownership;
 mod index_relations;
 mod log_count;
 mod schema_security;

@@ -498,6 +498,24 @@ impl CatalogReadView {
             .collect()
     }
 
+    pub(crate) fn foreign_table_security(
+        &self,
+        name: &str,
+    ) -> Result<&crate::engine_state::TableSecurity, SQLError> {
+        let relation = crate::RelationIdentity::from_legacy_name(name).map_err(|error| {
+            SQLError::Internal(format!("resolve catalog foreign table `{name}`: {error}"))
+        })?;
+        self.snapshot
+            .durable
+            .foreign_table_security
+            .get(&relation)
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "catalog foreign table `{name}` has no ownership metadata"
+                ))
+            })
+    }
+
     pub(crate) fn catalog_indexes(&self) -> impl Iterator<Item = &uqa_storage::CatalogIndexRow> {
         self.snapshot.durable.catalog_indexes.values()
     }

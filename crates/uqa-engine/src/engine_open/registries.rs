@@ -113,8 +113,32 @@ impl Engine {
                     ty: crate::engine_fdw::sql_column_type_to_fdw(&c.ty),
                 })
                 .collect();
-            self.durable.foreign_tables.write().insert(
-                row.relation,
+            if !self.durable.roles.read().contains_key(&row.role_owner) {
+                return Err(StorageBackendError::Other(format!(
+                    "foreign table `{relation_name}` references missing owner role `{}`",
+                    row.role_owner
+                )));
+            }
+            let security = crate::engine_state::TableSecurity::owner(row.role_owner);
+            let column_names = columns
+                .iter()
+                .map(|column| column.name.clone())
+                .collect::<Vec<_>>();
+            crate::engine_table_security::validate_table_security_invariants(
+                &security,
+                Some(&column_names),
+                &self.durable.roles.read(),
+            )
+            .map_err(|error| {
+                StorageBackendError::Other(format!(
+                    "foreign table `{relation_name}` has invalid ownership metadata: {error}"
+                ))
+            })?;
+            let relation = row.relation;
+            let mut tables = self.durable.foreign_tables.write();
+            let mut securities = self.durable.foreign_table_security.write();
+            tables.insert(
+                relation.clone(),
                 uqa_fdw::ForeignTable {
                     name: relation_name,
                     server_name: row.server_name,
@@ -122,6 +146,7 @@ impl Engine {
                     options,
                 },
             );
+            securities.insert(relation, security);
         }
         Ok(())
     }

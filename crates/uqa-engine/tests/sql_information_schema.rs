@@ -749,6 +749,9 @@ mod table_ownership;
 #[path = "sql_information_schema/view_ownership.rs"]
 mod view_ownership;
 
+#[path = "sql_information_schema/foreign_table_ownership.rs"]
+mod foreign_table_ownership;
+
 #[path = "sql_information_schema/view_privileges.rs"]
 mod view_privileges;
 

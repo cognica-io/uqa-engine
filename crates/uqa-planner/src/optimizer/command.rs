@@ -150,6 +150,7 @@ pub(super) fn optimize_command(
         | CommandPlan::CreateIndex(_)
         | CommandPlan::Drop(_)
         | CommandPlan::AlterTable(_)
+        | CommandPlan::AlterForeignTable(_)
         | CommandPlan::AlterView(_)
         | CommandPlan::RefreshMaterializedView { .. }
         | CommandPlan::CreateSchema { .. }

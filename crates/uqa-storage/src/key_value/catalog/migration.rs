@@ -8,9 +8,9 @@
 
 use super::physical_indexes::table_index_prefixes;
 use super::records::{
-    LegacySequenceState, LegacyStoredView, LegacyTableSchema, StoredCatalogIndex,
-    StoredForeignTable, StoredRelation, StoredSequence, StoredView, LEGACY_SEQUENCES_METADATA_KEY,
-    LEGACY_VIEWS_METADATA_KEY,
+    LegacySequenceState, LegacyStoredForeignTable, LegacyStoredView, LegacyTableSchema,
+    StoredCatalogIndex, StoredForeignTable, StoredRelation, StoredSequence, StoredView,
+    LEGACY_SEQUENCES_METADATA_KEY, LEGACY_VIEWS_METADATA_KEY,
 };
 use super::{
     batch_rekey_prefix, column_stats_prefix, decode_catalog_relation_key, decode_relation_key,
@@ -41,7 +41,7 @@ pub(super) struct SequenceMigration {
 pub(super) struct ForeignMigration {
     old_key: Vec<u8>,
     relation: RelationIdentity,
-    value: Vec<u8>,
+    stored: StoredForeignTable,
 }
 
 pub(super) struct ViewMigration {
@@ -197,12 +197,25 @@ pub(super) fn collect_foreign_migrations(
     let mut rows = Vec::new();
     for (key, value) in store.scan_prefix(&key_with_tag(TAG_FOREIGN_TABLE))? {
         let (relation, _, source) = decode_catalog_relation_key(&key)?;
-        decode_value::<StoredForeignTable>(&value)?;
+        let stored = decode_value::<StoredForeignTable>(&value).or_else(|current_error| {
+            decode_value::<LegacyStoredForeignTable>(&value)
+                .map(|legacy| StoredForeignTable {
+                    role_owner: "uqa".into(),
+                    server_name: legacy.server_name,
+                    columns_json: legacy.columns_json,
+                    options_json: legacy.options_json,
+                })
+                .map_err(|legacy_error| {
+                    StorageBackendError::Other(format!(
+                        "decode foreign-table catalog record `{source}` as current ({current_error}) or legacy ({legacy_error})"
+                    ))
+                })
+        })?;
         register_migration_relation(seen, &relation, RelationKind::ForeignTable, source)?;
         rows.push(ForeignMigration {
             old_key: key,
             relation,
-            value,
+            stored,
         });
     }
     Ok(rows)
@@ -489,7 +502,7 @@ pub(super) fn put_foreign_migrations(
 ) -> StorageBackendResult<()> {
     for foreign in foreign_tables {
         let key = relation_key(TAG_FOREIGN_TABLE, &foreign.relation)?;
-        batch.put(&key, &foreign.value)?;
+        batch.put(&key, &encode_value(&foreign.stored)?)?;
         if foreign.old_key != key {
             batch.delete(&foreign.old_key)?;
         }

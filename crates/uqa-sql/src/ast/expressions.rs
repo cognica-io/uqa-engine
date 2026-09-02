@@ -709,6 +709,7 @@ impl Statement {
             | Self::CreateIndex(_)
             | Self::Drop(_)
             | Self::AlterTable(_)
+            | Self::AlterForeignTable(_)
             | Self::AlterView(_)
             | Self::RefreshMaterializedView { .. }
             | Self::CreateSchema { .. }

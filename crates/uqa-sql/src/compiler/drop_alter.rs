@@ -37,6 +37,7 @@ pub(super) fn compile_drop(stmt: &pg_query::protobuf::DropStmt) -> Result<Statem
     }
     let kind = match stmt.remove_type() {
         ObjectType::ObjectTable => DropKind::Table,
+        ObjectType::ObjectForeignTable => DropKind::ForeignTable,
         ObjectType::ObjectIndex => DropKind::Index,
         ObjectType::ObjectView => DropKind::View,
         ObjectType::ObjectMatview => DropKind::MaterializedView,
@@ -69,6 +70,7 @@ pub(super) fn compile_drop(stmt: &pg_query::protobuf::DropStmt) -> Result<Statem
                 if matches!(
                     kind,
                     DropKind::Table
+                        | DropKind::ForeignTable
                         | DropKind::Index
                         | DropKind::View
                         | DropKind::MaterializedView
@@ -174,6 +176,38 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
             }
         }
         return Ok(Statement::AlterSequence(alter));
+    }
+    if stmt.objtype() == ObjectType::ObjectForeignTable {
+        let [command] = stmt.cmds.as_slice() else {
+            return Err(SQLError::Unsupported(
+                "ALTER FOREIGN TABLE OWNER TO accepts one action".into(),
+            ));
+        };
+        let Some(NodeEnum::AlterTableCmd(command)) = command.node.as_ref() else {
+            return Err(SQLError::Internal(
+                "ALTER FOREIGN TABLE command body is malformed".into(),
+            ));
+        };
+        if command.subtype() != AlterTableType::AtChangeOwner {
+            return Err(SQLError::Unsupported(format!(
+                "ALTER FOREIGN TABLE action {:?} is not supported",
+                command.subtype()
+            )));
+        }
+        let owner = command.newowner.as_ref().ok_or_else(|| {
+            SQLError::Internal("ALTER FOREIGN TABLE OWNER TO without owner".into())
+        })?;
+        return Ok(Statement::AlterForeignTable(
+            crate::ast::AlterForeignTableStmt {
+                name: table,
+                if_exists,
+                owner: super::routines::compile_role_spec(
+                    owner,
+                    false,
+                    "ALTER FOREIGN TABLE OWNER TO",
+                )?,
+            },
+        ));
     }
     if matches!(
         stmt.objtype(),

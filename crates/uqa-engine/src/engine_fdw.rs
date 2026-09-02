@@ -345,19 +345,30 @@ impl Engine {
                 return Err(format!("Relation `{name}` already exists as {kind}"));
             }
         }
+        let server_exists = self
+            .durable
+            .foreign_servers
+            .read()
+            .contains_key(server_name);
         let mut tables = self.durable.foreign_tables.write();
+        let mut table_security = self.durable.foreign_table_security.write();
         if tables.contains_key(&relation) {
+            if !table_security.contains_key(&relation) {
+                return Err(format!(
+                    "Foreign table `{name}` has no loaded ownership metadata"
+                ));
+            }
             if if_not_exists {
                 return Ok(());
             }
             return Err(format!("Foreign table `{name}` already exists"));
         }
-        if !self
-            .durable
-            .foreign_servers
-            .read()
-            .contains_key(server_name)
-        {
+        if table_security.contains_key(&relation) {
+            return Err(format!(
+                "Foreign table ownership metadata exists without table `{name}`"
+            ));
+        }
+        if !server_exists {
             return Err(format!("Foreign server `{server_name}` does not exist"));
         }
         let fdw_columns: Vec<uqa_fdw::ColumnDef> = columns
@@ -378,16 +389,28 @@ impl Engine {
             columns: fdw_columns,
             options: opt_map.clone(),
         };
+        let role_owner = self.current_user_name();
         if let Some(catalog) = self.storage.catalog.as_ref() {
             let columns_json = serde_json::to_string(columns)
                 .map_err(|err| format!("serialize foreign table `{name}` columns: {err}"))?;
             let options_json = serde_json::to_string(&opt_map)
                 .map_err(|err| format!("serialize foreign table `{name}` options: {err}"))?;
             catalog
-                .save_foreign_table(&relation, server_name, &columns_json, &options_json)
+                .save_foreign_table(
+                    &relation,
+                    &role_owner,
+                    server_name,
+                    &columns_json,
+                    &options_json,
+                )
                 .map_err(|err| format!("persist foreign table `{name}`: {err}"))?;
         }
-        tables.insert(relation, table);
+        tables.insert(relation.clone(), table);
+        table_security.insert(
+            relation,
+            crate::engine_state::TableSecurity::owner(role_owner),
+        );
+        drop(table_security);
         drop(tables);
         self.note_catalog_registry_changed();
         Ok(())
@@ -431,7 +454,7 @@ impl Engine {
         self.with_implicit_string_transaction(|engine| engine.drop_foreign_table_inner(name))
     }
 
-    fn drop_foreign_table_inner(&self, name: &str) -> Result<bool, String> {
+    pub(crate) fn drop_foreign_table_inner(&self, name: &str) -> Result<bool, String> {
         self.synchronize_catalog_registries()
             .map_err(|err| format!("refresh FDW catalog: {err}"))?;
         let Some(name) = self
@@ -441,6 +464,16 @@ impl Engine {
             return Ok(false);
         };
         let relation = RelationIdentity::from_legacy_name(&name)?;
+        let mut tables = self.durable.foreign_tables.write();
+        let mut table_security = self.durable.foreign_table_security.write();
+        if !tables.contains_key(&relation) {
+            return Err(format!("Foreign table `{name}` disappeared before drop"));
+        }
+        if !table_security.contains_key(&relation) {
+            return Err(format!(
+                "Foreign table `{name}` has no loaded ownership metadata"
+            ));
+        }
         if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog
                 .drop_foreign_table(&relation)
@@ -450,12 +483,10 @@ impl Engine {
             .foreign_memory_tables
             .write()
             .remove(&relation);
-        let removed = self
-            .durable
-            .foreign_tables
-            .write()
-            .remove(&relation)
-            .is_some();
+        let removed = tables.remove(&relation).is_some();
+        table_security.remove(&relation);
+        drop(table_security);
+        drop(tables);
         if removed {
             self.note_catalog_registry_changed();
         }

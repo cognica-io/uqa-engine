@@ -392,11 +392,26 @@ impl CatalogFacade for KeyValueCatalog {
     fn save_foreign_table(
         &self,
         relation: &RelationIdentity,
+        role_owner: &str,
         server_name: &str,
         columns_json: &str,
         options_json: &str,
     ) -> StorageBackendResult<()> {
-        self.save_foreign_table_impl(relation, server_name, columns_json, options_json)
+        self.save_foreign_table_impl(
+            relation,
+            role_owner,
+            server_name,
+            columns_json,
+            options_json,
+        )
+    }
+
+    fn update_foreign_table_role_owner(
+        &self,
+        relation: &RelationIdentity,
+        role_owner: &str,
+    ) -> StorageBackendResult<bool> {
+        self.update_foreign_table_role_owner_impl(relation, role_owner)
     }
 
     fn drop_foreign_table(&self, relation: &RelationIdentity) -> StorageBackendResult<()> {

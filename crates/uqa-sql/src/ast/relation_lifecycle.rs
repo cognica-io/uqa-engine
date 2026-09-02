@@ -58,6 +58,13 @@ pub struct AlterViewStmt {
     pub action: AlterViewAction,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AlterForeignTableStmt {
+    pub name: String,
+    pub if_exists: bool,
+    pub owner: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateSequence {
     pub name: String,

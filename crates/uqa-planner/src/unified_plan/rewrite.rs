@@ -239,6 +239,7 @@ pub(super) fn rewrite_command_scalars(
         | CommandPlan::CreateIndex(_)
         | CommandPlan::Drop(_)
         | CommandPlan::AlterTable(_)
+        | CommandPlan::AlterForeignTable(_)
         | CommandPlan::AlterView(_)
         | CommandPlan::RefreshMaterializedView { .. }
         | CommandPlan::CreateSchema { .. }

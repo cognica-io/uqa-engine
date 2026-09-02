@@ -68,6 +68,9 @@ pub(in crate::sql) fn run_alter_table(
         Some((canonical, "sequence")) => {
             return run_alter_sequence_with_table_syntax(engine, canonical, &stmt);
         }
+        Some((canonical, "foreign table")) => {
+            return run_alter_foreign_table_with_table_syntax(engine, canonical, &stmt);
+        }
         Some((canonical, "view"))
             if stmt.actions.iter().all(|action| {
                 matches!(
@@ -117,6 +120,25 @@ pub(in crate::sql) fn run_alter_table(
         crate::row_locks::RelationLockMode::AccessExclusive,
     )?;
     engine.with_implicit_transaction(move |engine| run_alter_table_inner(engine, stmt))
+}
+
+fn run_alter_foreign_table_with_table_syntax(
+    engine: &Engine,
+    canonical: String,
+    stmt: &AlterTableStmt,
+) -> Result<SQLResult, SQLError> {
+    let [AlterTableAction::ChangeOwner { owner }] = stmt.actions.as_slice() else {
+        return Err(SQLError::Routine {
+            sqlstate: "42809".into(),
+            message: format!("ALTER TABLE: relation `{canonical}` is a foreign table, not a table"),
+        });
+    };
+    engine.alter_foreign_table(&uqa_sql::ast::AlterForeignTableStmt {
+        name: canonical,
+        if_exists: stmt.if_exists,
+        owner: owner.clone(),
+    })?;
+    Ok(SQLResult::empty())
 }
 
 fn run_alter_sequence_with_table_syntax(

@@ -100,6 +100,16 @@ pub(crate) struct TableSecurity {
     pub(crate) column_acls: BTreeMap<String, Vec<uqa_storage::TableAclEntry>>,
 }
 
+impl TableSecurity {
+    pub(crate) fn owner(role_owner: impl Into<String>) -> Self {
+        Self {
+            role_owner: role_owner.into(),
+            acl: None,
+            column_acls: BTreeMap::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SchemaSecurity {
     pub(crate) role_owner: String,
@@ -244,6 +254,7 @@ pub(super) struct DurableCatalogState {
     pub(super) table_field_analyzers: RwLock<TableFieldAnalyzerRegistry>,
     pub(super) foreign_servers: RwLock<BTreeMap<String, uqa_fdw::ForeignServer>>,
     pub(super) foreign_tables: RwLock<BTreeMap<RelationIdentity, uqa_fdw::ForeignTable>>,
+    pub(super) foreign_table_security: RwLock<BTreeMap<RelationIdentity, TableSecurity>>,
     pub(super) sql_user_functions:
         RwLock<BTreeMap<String, Vec<Arc<super::engine_user_functions::SQLUserFunction>>>>,
     pub(super) roles: RwLock<BTreeMap<String, super::engine_roles::RoleDefinition>>,
@@ -279,6 +290,7 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) table_field_analyzers: TableFieldAnalyzerRegistry,
     pub(super) foreign_servers: BTreeMap<String, uqa_fdw::ForeignServer>,
     pub(super) foreign_tables: BTreeMap<RelationIdentity, uqa_fdw::ForeignTable>,
+    pub(super) foreign_table_security: BTreeMap<RelationIdentity, TableSecurity>,
     pub(super) sql_user_functions:
         BTreeMap<String, Vec<Arc<super::engine_user_functions::SQLUserFunction>>>,
     pub(super) roles: BTreeMap<String, super::engine_roles::RoleDefinition>,
@@ -314,6 +326,7 @@ impl DurableCatalogState {
             table_field_analyzers: RwLock::new(BTreeMap::new()),
             foreign_servers: RwLock::new(BTreeMap::new()),
             foreign_tables: RwLock::new(BTreeMap::new()),
+            foreign_table_security: RwLock::new(BTreeMap::new()),
             sql_user_functions: RwLock::new(BTreeMap::new()),
             roles: RwLock::new(BTreeMap::from([(
                 "uqa".to_string(),
@@ -344,6 +357,7 @@ impl DurableCatalogState {
             table_field_analyzers: self.table_field_analyzers.read().clone(),
             foreign_servers: self.foreign_servers.read().clone(),
             foreign_tables: self.foreign_tables.read().clone(),
+            foreign_table_security: self.foreign_table_security.read().clone(),
             sql_user_functions: self.sql_user_functions.read().clone(),
             roles: self.roles.read().clone(),
             role_memberships: self.role_memberships.read().clone(),
@@ -372,6 +386,7 @@ impl DurableCatalogState {
         *self.table_field_analyzers.write() = snapshot.table_field_analyzers.clone();
         *self.foreign_servers.write() = snapshot.foreign_servers.clone();
         *self.foreign_tables.write() = snapshot.foreign_tables.clone();
+        *self.foreign_table_security.write() = snapshot.foreign_table_security.clone();
         *self.sql_user_functions.write() = snapshot.sql_user_functions.clone();
         *self.roles.write() = snapshot.roles.clone();
         *self.role_memberships.write() = snapshot.role_memberships.clone();

@@ -89,6 +89,7 @@ pub struct DropStmt {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DropKind {
     Table,
+    ForeignTable,
     Index,
     View,
     MaterializedView,
@@ -491,6 +492,7 @@ pub enum Statement {
     Delete(DeleteStmt),
     Drop(DropStmt),
     AlterTable(AlterTableStmt),
+    AlterForeignTable(AlterForeignTableStmt),
     AlterView(AlterViewStmt),
     /// `CREATE [OR REPLACE] VIEW name [(column_name, ...)] AS SELECT ...`. The body is the underlying `SelectStmt`; views are materialised lazily on every reference (no row caching).
     CreateView {
