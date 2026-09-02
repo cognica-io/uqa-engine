@@ -345,8 +345,11 @@ impl Engine {
             return Ok(None);
         }
         let reservation = uqa_storage::sequence_value_reservation(
-            sequence.current,
-            sequence.called,
+            uqa_storage::SequenceValuePosition {
+                current: sequence.current,
+                called: sequence.called,
+                log_count: sequence.log_count,
+            },
             sequence.increment,
             sequence.min_value,
             sequence.max_value,
@@ -356,6 +359,7 @@ impl Engine {
         .ok_or_else(|| SequenceValueError::exhausted(&target.name, *sequence))?;
         sequence.current = reservation.last_value;
         sequence.called = true;
+        sequence.log_count = reservation.log_count;
         Ok(Some((reservation, autonomous)))
     }
 
@@ -369,6 +373,7 @@ impl Engine {
         let mut physical = target.state;
         physical.current = reservation.last_value;
         physical.called = true;
+        physical.log_count = reservation.log_count;
         if let Some(state) = self
             .durable
             .sequences
@@ -378,6 +383,7 @@ impl Engine {
         {
             state.current = reservation.last_value;
             state.called = true;
+            state.log_count = reservation.log_count;
         }
         if reservation.count > 1 {
             let next_value = reservation
@@ -433,6 +439,7 @@ impl Engine {
                 object_id,
                 current: physical.current,
                 called: physical.called,
+                log_count: physical.log_count,
                 autonomous,
             },
             true,
@@ -584,7 +591,7 @@ impl Engine {
         };
         if let Some(catalog) = catalog {
             catalog
-                .set_sequence_value(&name, object_id, value, is_called)
+                .set_sequence_value(&name, object_id, value, is_called, 0)
                 .map_err(|error| {
                     SequenceValueError::Internal(format!("persist sequence value: {error}"))
                 })?
@@ -596,6 +603,7 @@ impl Engine {
             .ok_or(SequenceValueError::Undefined(name))?;
         seq.current = value;
         seq.called = is_called;
+        seq.log_count = 0;
         drop(seqs);
         self.session
             .sequence_caches
@@ -617,6 +625,7 @@ impl Engine {
                 object_id,
                 current: value,
                 called: is_called,
+                log_count: 0,
                 autonomous,
             },
             false,

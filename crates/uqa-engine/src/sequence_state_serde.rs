@@ -23,6 +23,8 @@ impl<'de> serde::Deserialize<'de> for SequenceState {
             #[serde(default = "sequence_state_called_default")]
             called: bool,
             #[serde(default)]
+            log_count: i64,
+            #[serde(default)]
             data_type: SequenceDataType,
             #[serde(default)]
             min_value: Option<i64>,
@@ -45,6 +47,7 @@ impl<'de> serde::Deserialize<'de> for SequenceState {
             increment: representation.increment,
             current: representation.current,
             called: representation.called,
+            log_count: representation.log_count,
             data_type: representation.data_type,
             min_value: representation
                 .min_value

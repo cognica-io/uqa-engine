@@ -132,6 +132,7 @@ impl Engine {
                     increment: sequence.increment,
                     current: sequence.start,
                     called: false,
+                    log_count: 0,
                     data_type: sequence.data_type,
                     min_value: sequence.min_value.unwrap_or(if sequence.increment > 0 {
                         1
@@ -188,6 +189,7 @@ impl Engine {
             increment,
             current: start,
             called: false,
+            log_count: 0,
             data_type,
             min_value: if increment > 0 { 1 } else { type_min },
             max_value: if increment > 0 { type_max } else { -1 },
@@ -562,6 +564,13 @@ impl Engine {
         mut state: SequenceState,
         alter: &uqa_sql::ast::AlterSequence,
     ) -> Result<SequenceState, SQLError> {
+        let resets_log_count = alter.data_type.is_some()
+            || alter.increment.is_some()
+            || alter.min_value != SequenceBound::Unchanged
+            || alter.max_value != SequenceBound::Unchanged
+            || alter.cycle.is_some()
+            || alter.cache_size.is_some()
+            || alter.restart != SequenceRestart::Unchanged;
         if let Some(data_type) = alter.data_type {
             let (old_type_min, old_type_max) = state.data_type.bounds();
             let (new_type_min, new_type_max) = data_type.bounds();
@@ -608,6 +617,9 @@ impl Engine {
             };
             state.current = restart_val;
             state.called = false;
+        }
+        if resets_log_count {
+            state.log_count = 0;
         }
         Self::validate_sequence_definition(state, true)?;
         Ok(state)

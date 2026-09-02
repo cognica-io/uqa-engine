@@ -53,6 +53,11 @@ pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> 
         "string_to_array" | "string_to_table" if matches!(argument_count, 2 | 3) => Some(false),
         "pg_has_role" if matches!(argument_count, 2 | 3) => Some(true),
         "has_sequence_privilege" if matches!(argument_count, 2 | 3) => Some(true),
+        "pg_get_sequence_data" | "pg_sequence_last_value" | "pg_sequence_parameters"
+            if argument_count == 1 =>
+        {
+            Some(true)
+        }
         "nextval" | "currval" if argument_count == 1 => Some(true),
         "lastval" if argument_count == 0 => Some(true),
         "setval" if matches!(argument_count, 2 | 3) => Some(true),

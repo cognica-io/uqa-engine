@@ -13,6 +13,8 @@ use uqa_storage::ManagedConnection;
 
 #[path = "sql_sequences/cache.rs"]
 mod cache;
+#[path = "sql_sequences/introspection.rs"]
+mod introspection;
 #[path = "sql_sequences/lifecycle.rs"]
 mod lifecycle;
 #[path = "sql_sequences/name_lifecycle.rs"]

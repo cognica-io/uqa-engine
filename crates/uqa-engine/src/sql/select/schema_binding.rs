@@ -510,6 +510,21 @@ impl SchemaScope {
                     self.deferred_ctes.insert(name.clone(), plan);
                     return result;
                 }
+                if self
+                    .catalog
+                    .sequence_resolved(&self.resolution, name)?
+                    .is_some()
+                {
+                    return Ok(RowSchema::with_qualified_types(
+                        qualifier,
+                        vec!["last_value".into(), "log_cnt".into(), "is_called".into()],
+                        vec![
+                            Some(ColumnType::BigInteger),
+                            Some(ColumnType::BigInteger),
+                            Some(ColumnType::Boolean),
+                        ],
+                    ));
+                }
                 let view = self.catalog.view_resolved(&self.resolution, name)?.cloned();
                 if let Some(view) = view {
                     if view.kind == crate::StoredViewKind::Materialized {

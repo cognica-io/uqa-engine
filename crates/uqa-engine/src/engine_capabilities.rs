@@ -58,6 +58,14 @@ pub(crate) struct CatalogTableSnapshot {
     pub(crate) persistence: uqa_sql::ast::RelationPersistence,
 }
 
+/// Immutable state for one sequence selected through the statement's relation namespace.
+#[derive(Clone)]
+pub(crate) struct CatalogSequenceSnapshot {
+    pub(crate) relation: crate::RelationIdentity,
+    pub(crate) state: crate::SequenceState,
+    pub(crate) security: super::engine_state::SequenceSecurity,
+}
+
 /// Immutable session inputs used to resolve unqualified relation names during one statement.
 #[derive(Clone)]
 pub(crate) struct RelationNameResolution {

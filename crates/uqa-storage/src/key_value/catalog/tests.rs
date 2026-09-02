@@ -123,6 +123,7 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
             increment: 2,
             current: 1,
             called: false,
+            log_count: 0,
             persistence: "p".into(),
             options: SequenceOptions::default(),
             owner: Some(owner),
@@ -137,7 +138,7 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
     );
     assert_eq!(
         catalog
-            .set_sequence_value("public.controlled", object_id, 7, false)
+            .set_sequence_value("public.controlled", object_id, 7, false, 0)
             .unwrap(),
         Some(7)
     );
@@ -161,7 +162,7 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
     );
     assert_eq!(
         catalog
-            .set_sequence_value("public.controlled", object_id, 20, true)
+            .set_sequence_value("public.controlled", object_id, 20, true, 0)
             .unwrap(),
         Some(20)
     );
@@ -171,8 +172,14 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
             .unwrap(),
         Some(22)
     );
+}
 
+#[test]
+fn sequence_reservations_cycle_at_the_configured_bounds() {
+    let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
+    let catalog = KeyValueCatalog::new(store);
     let cycling_id = [9; 16];
+    catalog.save_schema("public").unwrap();
     catalog
         .create_sequence_row(&SequenceRow {
             relation: RelationIdentity::new("public", "cycling"),
@@ -184,6 +191,7 @@ fn sequence_set_value_preserves_the_next_allocation_state() {
             increment: 3,
             current: 5,
             called: false,
+            log_count: 0,
             persistence: "p".into(),
             options: crate::catalog::SequenceOptions {
                 data_type: "integer".into(),
@@ -223,6 +231,7 @@ fn sequence_rename_moves_catalog_identity_and_value_atomically() {
             increment: 1,
             current: 7,
             called: true,
+            log_count: 0,
             persistence: "u".into(),
             options: SequenceOptions {
                 cache_size: 3,
@@ -267,6 +276,7 @@ fn sequence_rename_moves_catalog_identity_and_value_atomically() {
             increment: 1,
             current: 1,
             called: false,
+            log_count: 0,
             persistence: "p".into(),
             options: SequenceOptions::default(),
             owner: None,
@@ -298,6 +308,7 @@ fn sequence_reservations_are_atomic_and_stop_at_the_configured_bound() {
             increment: 1,
             current: 1,
             called: false,
+            log_count: 0,
             persistence: "p".into(),
             options: SequenceOptions {
                 min_value: Some(1),
@@ -317,6 +328,7 @@ fn sequence_reservations_are_atomic_and_stop_at_the_configured_bound() {
             first_value: 1,
             last_value: 3,
             count: 3,
+            log_count: 0,
         })
     );
     assert_eq!(
@@ -343,6 +355,7 @@ fn sequence_reservations_are_atomic_and_stop_at_the_configured_bound() {
             first_value: 1,
             last_value: 3,
             count: 3,
+            log_count: 0,
         })
     );
 }
@@ -423,6 +436,7 @@ fn relation_namespace_migration_rejects_alias_and_cross_kind_collisions() {
                         increment: 1,
                         current: 0,
                         called: true,
+                        log_count: 0,
                         persistence: "p".into(),
                         options: SequenceOptions::default(),
                         owner: None,

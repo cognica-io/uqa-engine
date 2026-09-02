@@ -20,7 +20,9 @@ use crate::engine_state::DurableCatalogState;
 
 #[cfg(test)]
 use super::CatalogReadSnapshot;
-use super::{CatalogReadView, CatalogTableSnapshot, RelationNameResolution};
+use super::{
+    CatalogReadView, CatalogSequenceSnapshot, CatalogTableSnapshot, RelationNameResolution,
+};
 
 #[cfg(test)]
 impl CatalogTableSnapshot {
@@ -85,6 +87,13 @@ impl RelationNameResolution {
 }
 
 impl CatalogReadView {
+    fn relation_exists(&self, relation: &crate::RelationIdentity) -> bool {
+        self.snapshot.tables.contains_key(relation)
+            || self.snapshot.durable.views.contains_key(relation)
+            || self.snapshot.durable.sequences.contains_key(relation)
+            || self.snapshot.durable.foreign_tables.contains_key(relation)
+    }
+
     pub(crate) fn all_schema_names(&self, resolution: &RelationNameResolution) -> Vec<String> {
         let mut schemas = vec![
             "pg_catalog".to_string(),
@@ -230,6 +239,64 @@ impl CatalogReadView {
             &self.snapshot.durable.roles,
             &self.snapshot.durable.role_memberships,
         )
+    }
+
+    pub(crate) fn sequence_is_selectable_to(
+        &self,
+        security: &crate::engine_state::SequenceSecurity,
+        role: &str,
+    ) -> bool {
+        crate::engine_sequence_security::role_can_select_sequence(
+            security,
+            role,
+            &self.snapshot.durable.roles,
+            &self.snapshot.durable.role_memberships,
+        )
+    }
+
+    pub(crate) fn sequence_value_is_readable_to(
+        &self,
+        security: &crate::engine_state::SequenceSecurity,
+        role: &str,
+    ) -> bool {
+        crate::engine_sequence_security::role_can_read_sequence_value(
+            security,
+            role,
+            &self.snapshot.durable.roles,
+            &self.snapshot.durable.role_memberships,
+        )
+    }
+
+    pub(crate) fn sequence_resolved(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+    ) -> Result<Option<CatalogSequenceSnapshot>, SQLError> {
+        for relation in resolution.relation_lookup_candidates(name)? {
+            if let Some(state) = self.snapshot.durable.sequences.get(&relation) {
+                return Ok(Some(CatalogSequenceSnapshot {
+                    relation: relation.clone(),
+                    state: *state,
+                    security: self
+                        .snapshot
+                        .durable
+                        .sequence_security
+                        .get(&relation)
+                        .cloned()
+                        .unwrap_or_else(|| crate::engine_state::SequenceSecurity {
+                            role_owner: "uqa".into(),
+                            acl: None,
+                        }),
+                }));
+            }
+            if self.snapshot.tables.contains_key(&relation)
+                || self.snapshot.durable.views.contains_key(&relation)
+                || self.snapshot.durable.foreign_tables.contains_key(&relation)
+            {
+                return Ok(None);
+            }
+        }
+        Ok(None)
     }
 
     pub(crate) fn views_of_kind(
@@ -421,10 +488,15 @@ impl CatalogReadView {
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<Option<&CatalogTableSnapshot>, SQLError> {
-        Ok(resolution
-            .relation_lookup_candidates(name)?
-            .into_iter()
-            .find_map(|relation| self.snapshot.tables.get(&relation)))
+        for relation in resolution.relation_lookup_candidates(name)? {
+            if let Some(table) = self.snapshot.tables.get(&relation) {
+                return Ok(Some(table));
+            }
+            if self.relation_exists(&relation) {
+                return Ok(None);
+            }
+        }
+        Ok(None)
     }
 
     pub(crate) fn table_name(
@@ -440,11 +512,15 @@ impl CatalogReadView {
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<Option<String>, SQLError> {
-        Ok(resolution
-            .relation_lookup_candidates(name)?
-            .into_iter()
-            .find(|relation| self.snapshot.tables.contains_key(relation))
-            .map(|relation| relation.qualified_name()))
+        for relation in resolution.relation_lookup_candidates(name)? {
+            if self.snapshot.tables.contains_key(&relation) {
+                return Ok(Some(relation.qualified_name()));
+            }
+            if self.relation_exists(&relation) {
+                return Ok(None);
+            }
+        }
+        Ok(None)
     }
 
     pub(crate) fn hierarchy_scan_tables(
@@ -588,10 +664,15 @@ impl CatalogReadView {
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<Option<&crate::StoredView>, SQLError> {
-        Ok(resolution
-            .relation_lookup_candidates(name)?
-            .into_iter()
-            .find_map(|relation| self.snapshot.durable.views.get(&relation)))
+        for relation in resolution.relation_lookup_candidates(name)? {
+            if let Some(view) = self.snapshot.durable.views.get(&relation) {
+                return Ok(Some(view));
+            }
+            if self.relation_exists(&relation) {
+                return Ok(None);
+            }
+        }
+        Ok(None)
     }
 
     pub(crate) fn view_name_resolved(
@@ -599,11 +680,15 @@ impl CatalogReadView {
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<Option<String>, SQLError> {
-        Ok(resolution
-            .relation_lookup_candidates(name)?
-            .into_iter()
-            .find(|relation| self.snapshot.durable.views.contains_key(relation))
-            .map(|relation| relation.qualified_name()))
+        for relation in resolution.relation_lookup_candidates(name)? {
+            if self.snapshot.durable.views.contains_key(&relation) {
+                return Ok(Some(relation.qualified_name()));
+            }
+            if self.relation_exists(&relation) {
+                return Ok(None);
+            }
+        }
+        Ok(None)
     }
 
     pub(crate) fn foreign_table_resolved(
@@ -611,10 +696,15 @@ impl CatalogReadView {
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<Option<&uqa_fdw::ForeignTable>, SQLError> {
-        Ok(resolution
-            .relation_lookup_candidates(name)?
-            .into_iter()
-            .find_map(|relation| self.snapshot.durable.foreign_tables.get(&relation)))
+        for relation in resolution.relation_lookup_candidates(name)? {
+            if let Some(table) = self.snapshot.durable.foreign_tables.get(&relation) {
+                return Ok(Some(table));
+            }
+            if self.relation_exists(&relation) {
+                return Ok(None);
+            }
+        }
+        Ok(None)
     }
 
     pub(crate) fn foreign_table_entry_resolved(
@@ -622,17 +712,15 @@ impl CatalogReadView {
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<Option<(String, uqa_fdw::ForeignTable)>, SQLError> {
-        Ok(resolution
-            .relation_lookup_candidates(name)?
-            .into_iter()
-            .find_map(|relation| {
-                self.snapshot
-                    .durable
-                    .foreign_tables
-                    .get(&relation)
-                    .cloned()
-                    .map(|table| (relation.qualified_name(), table))
-            }))
+        for relation in resolution.relation_lookup_candidates(name)? {
+            if let Some(table) = self.snapshot.durable.foreign_tables.get(&relation) {
+                return Ok(Some((relation.qualified_name(), table.clone())));
+            }
+            if self.relation_exists(&relation) {
+                return Ok(None);
+            }
+        }
+        Ok(None)
     }
 
     #[cfg(test)]

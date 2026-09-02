@@ -57,6 +57,46 @@ pub(crate) fn role_can_view_sequence(
         })
 }
 
+pub(crate) fn role_can_select_sequence(
+    security: &SequenceSecurity,
+    subject: &str,
+    roles: &BTreeMap<String, RoleDefinition>,
+    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+) -> bool {
+    role_has_privilege(
+        security,
+        subject,
+        PrivilegeCheck {
+            privilege: AclPrivilege::Select,
+            grant_option: false,
+        },
+        roles,
+        memberships,
+    )
+}
+
+pub(crate) fn role_can_read_sequence_value(
+    security: &SequenceSecurity,
+    subject: &str,
+    roles: &BTreeMap<String, RoleDefinition>,
+    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+) -> bool {
+    [AclPrivilege::Select, AclPrivilege::Usage]
+        .into_iter()
+        .any(|privilege| {
+            role_has_privilege(
+                security,
+                subject,
+                PrivilegeCheck {
+                    privilege,
+                    grant_option: false,
+                },
+                roles,
+                memberships,
+            )
+        })
+}
+
 impl Engine {
     pub(crate) fn grant_sequence_privileges(
         &self,

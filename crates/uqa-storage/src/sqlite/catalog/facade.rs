@@ -201,9 +201,10 @@ impl CatalogFacade for Catalog {
         object_id: [u8; 16],
         value: i64,
         called: bool,
+        log_count: i64,
     ) -> StorageBackendResult<Option<i64>> {
         into_storage_result(Catalog::set_sequence_value(
-            self, name, object_id, value, called,
+            self, name, object_id, value, called, log_count,
         ))
     }
 

@@ -40,40 +40,7 @@ fn collect_source_column_owners(
             ..
         } => {
             let qualifier = alias.as_deref().unwrap_or(qualifier);
-            let table = catalog.table_resolved(resolution, name)?;
-            let mut columns = table.map_or_else(Vec::new, |table| {
-                table
-                    .columns
-                    .iter()
-                    .map(|column| column.name.clone())
-                    .collect()
-            });
-            if columns.is_empty() {
-                columns = catalog
-                    .view_resolved(resolution, name)?
-                    .and_then(|view| {
-                        view.output_columns
-                            .clone()
-                            .or_else(|| query_plan_output_columns(&view.query))
-                    })
-                    .unwrap_or_default();
-            }
-            if columns.is_empty() {
-                columns = catalog
-                    .foreign_table_resolved(resolution, name)?
-                    .map(|table| {
-                        table
-                            .columns
-                            .iter()
-                            .map(|column| column.name.clone())
-                            .collect()
-                    })
-                    .unwrap_or_default();
-            }
-            if table.is_some() {
-                columns.push(TABLE_OID_COLUMN.into());
-                columns.push(XMIN_COLUMN.into());
-            }
+            let columns = relation_source_columns(catalog, resolution, name)?;
             register_column_owners(owners, qualifier, columns);
         }
         SourcePlan::Join {
@@ -131,6 +98,47 @@ fn collect_source_column_owners(
         | SourcePlan::Subquery { alias: None, .. } => {}
     }
     Ok(())
+}
+
+fn relation_source_columns(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    name: &str,
+) -> Result<Vec<String>, SQLError> {
+    if catalog.sequence_resolved(resolution, name)?.is_some() {
+        return Ok(vec![
+            "last_value".into(),
+            "log_cnt".into(),
+            "is_called".into(),
+        ]);
+    }
+    if let Some(table) = catalog.table_resolved(resolution, name)? {
+        let mut columns = table
+            .columns
+            .iter()
+            .map(|column| column.name.clone())
+            .collect::<Vec<_>>();
+        columns.push(TABLE_OID_COLUMN.into());
+        columns.push(XMIN_COLUMN.into());
+        return Ok(columns);
+    }
+    if let Some(view) = catalog.view_resolved(resolution, name)? {
+        return Ok(view
+            .output_columns
+            .clone()
+            .or_else(|| query_plan_output_columns(&view.query))
+            .unwrap_or_default());
+    }
+    Ok(catalog
+        .foreign_table_resolved(resolution, name)?
+        .map(|table| {
+            table
+                .columns
+                .iter()
+                .map(|column| column.name.clone())
+                .collect()
+        })
+        .unwrap_or_default())
 }
 
 fn register_column_owners(

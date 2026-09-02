@@ -102,6 +102,8 @@ pub(super) struct StoredSequence {
     pub(super) current: i64,
     #[serde(default = "legacy_sequence_called")]
     pub(super) called: bool,
+    #[serde(default)]
+    pub(super) log_count: i64,
     #[serde(default = "legacy_sequence_persistence")]
     pub(super) persistence: String,
     #[serde(default)]

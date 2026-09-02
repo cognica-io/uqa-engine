@@ -78,6 +78,12 @@ docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/pa
 docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/sequence_information_schema_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/sequence_information_schema_oracle.expected.txt -
 ```
 
+`sequence_introspection_oracle.sql` records PostgreSQL 18.4 physical sequence tuples and built-in introspection behavior. The checked-in transcript verifies `pg_class.relnatts`, the three positive-numbered sequence attributes in `pg_attribute`, `last_value`, `log_cnt`, and `is_called`, bounded cached reservations, `pg_sequence_parameters`, `pg_get_sequence_data`, `pg_sequence_last_value`, each function's distinct `SELECT`, `UPDATE`, and `USAGE` visibility rule, `pg_sequences.last_value`, and exact `pg_proc` identities.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/sequence_introspection_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/sequence_introspection_oracle.expected.txt -
+```
+
 ## Transaction catalog visibility oracle
 
 `transaction_catalog_visibility_oracle.sql` uses `dblink` to commit catalog and storage changes from a sibling PostgreSQL 18.4 session after a `REPEATABLE READ` snapshot is established. The checked-in transcript verifies that the fixed snapshot uses current committed view and routine definitions, resolves a relation created after snapshot acquisition with no snapshot-visible rows, and treats a concurrently truncated relation as empty. The paired `pg18_fixed_snapshot_*` Rust integration tests exercise the same catalog identities and row-visibility boundaries in UQA, including transaction-local DDL and rollback.

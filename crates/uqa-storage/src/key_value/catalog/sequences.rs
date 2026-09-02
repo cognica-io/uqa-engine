@@ -12,7 +12,7 @@ use super::{
     StorageBackendError, StorageBackendResult, StoredRelation, StoredSequence, TAG_RELATION,
     TAG_SEQUENCE,
 };
-use crate::catalog::sequence_value_reservation;
+use crate::catalog::{sequence_value_reservation, SequenceValuePosition};
 
 fn concrete_sequence_options(sequence: &SequenceRow) -> SequenceOptions {
     let default_min = if sequence.increment > 0 { 1 } else { i64::MIN };
@@ -81,6 +81,7 @@ impl KeyValueCatalog {
                 increment: sequence.increment,
                 current: sequence.current,
                 called: sequence.called,
+                log_count: sequence.log_count,
                 persistence: sequence.persistence.clone(),
                 owner: sequence.owner,
                 options: concrete_sequence_options(sequence),
@@ -111,6 +112,7 @@ impl KeyValueCatalog {
                 increment: sequence.increment,
                 current: sequence.current,
                 called: sequence.called,
+                log_count: sequence.log_count,
                 persistence: sequence.persistence.clone(),
                 owner: sequence.owner,
                 options: concrete_sequence_options(sequence),
@@ -187,6 +189,7 @@ impl KeyValueCatalog {
                     increment: stored.increment,
                     current: stored.current,
                     called: stored.called,
+                    log_count: stored.log_count,
                     persistence: stored.persistence,
                     owner: stored.owner,
                     options: stored.options,
@@ -218,15 +221,18 @@ impl KeyValueCatalog {
             return Ok(SequenceReservationResult::DefinitionChanged);
         }
         let (min_value, max_value) = sequence_bounds(&stored);
-        if stored.increment == 0 || stored.options.cache_size <= 0 {
+        if stored.increment == 0 || stored.options.cache_size <= 0 || stored.log_count < 0 {
             return Err(StorageBackendError::Other(format!(
-                "corrupt sequence `{name}` has increment {} and cache size {}",
-                stored.increment, stored.options.cache_size
+                "corrupt sequence `{name}` has increment {}, cache size {}, and log count {}",
+                stored.increment, stored.options.cache_size, stored.log_count
             )));
         }
         let Some(reservation) = sequence_value_reservation(
-            stored.current,
-            stored.called,
+            SequenceValuePosition {
+                current: stored.current,
+                called: stored.called,
+                log_count: stored.log_count,
+            },
             stored.increment,
             min_value,
             max_value,
@@ -237,6 +243,7 @@ impl KeyValueCatalog {
         };
         stored.current = reservation.last_value;
         stored.called = true;
+        stored.log_count = reservation.log_count;
         self.store.put(&key, &encode_value(&stored)?)?;
         Ok(SequenceReservationResult::Reserved(reservation))
     }
@@ -247,6 +254,7 @@ impl KeyValueCatalog {
         object_id: [u8; 16],
         value: i64,
         called: bool,
+        log_count: i64,
     ) -> StorageBackendResult<Option<i64>> {
         let _guard = self.sequence_lock.lock();
         let relation =
@@ -261,6 +269,7 @@ impl KeyValueCatalog {
         }
         stored.current = value;
         stored.called = called;
+        stored.log_count = log_count;
         self.store.put(&key, &encode_value(&stored)?)?;
         Ok(Some(value))
     }

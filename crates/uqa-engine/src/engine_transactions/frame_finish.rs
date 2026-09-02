@@ -462,7 +462,13 @@ impl Engine {
         let persist = |catalog: &dyn uqa_storage::CatalogFacade| -> StorageBackendResult<()> {
             for (name, object_id, value) in &persistent {
                 if catalog
-                    .set_sequence_value(name, *object_id, value.current, value.called)?
+                    .set_sequence_value(
+                        name,
+                        *object_id,
+                        value.current,
+                        value.called,
+                        value.log_count,
+                    )?
                     .is_none()
                 {
                     return Err(StorageBackendError::Other(format!(
@@ -536,6 +542,7 @@ impl Engine {
                 if let Some(sequence) = sequences.get_mut(relation) {
                     sequence.current = value.current;
                     sequence.called = value.called;
+                    sequence.log_count = value.log_count;
                 }
             }
             if history.object_id == *object_id {

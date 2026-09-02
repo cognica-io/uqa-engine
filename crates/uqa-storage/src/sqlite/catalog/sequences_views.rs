@@ -10,7 +10,9 @@ use super::{
     migration_relation, params, Catalog, OptionalExtension, RelationIdentity, RelationKind, Result,
     SQLiteError, SequenceOptions, SequenceReservationResult, SequenceRow, ViewRow,
 };
-use crate::catalog::{sequence_value_reservation, SequenceOwner, SequenceOwnerDependency};
+use crate::catalog::{
+    sequence_value_reservation, SequenceOwner, SequenceOwnerDependency, SequenceValuePosition,
+};
 
 fn concrete_sequence_options(sequence: &SequenceRow) -> SequenceOptions {
     let default_min = if sequence.increment > 0 { 1 } else { i64::MIN };
@@ -72,6 +74,105 @@ fn decode_sequence_owner(
     }))
 }
 
+struct RawSequenceRow {
+    schema: String,
+    name: String,
+    object_id: Vec<u8>,
+    definition_generation: Vec<u8>,
+    start: i64,
+    increment: i64,
+    current: i64,
+    called: bool,
+    persistence: String,
+    data_type: String,
+    min_value: i64,
+    max_value: i64,
+    cycle: bool,
+    cache_size: i64,
+    owner_table_object_id: Option<Vec<u8>>,
+    owner_column_object_id: Option<Vec<u8>>,
+    owner_dependency: Option<String>,
+    role_owner: String,
+    acl_json: Option<String>,
+    log_count: i64,
+}
+
+fn read_raw_sequence_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawSequenceRow> {
+    Ok(RawSequenceRow {
+        schema: row.get(0)?,
+        name: row.get(1)?,
+        object_id: row.get(2)?,
+        definition_generation: row.get(3)?,
+        start: row.get(4)?,
+        increment: row.get(5)?,
+        current: row.get(6)?,
+        called: row.get(7)?,
+        persistence: row.get(8)?,
+        data_type: row.get(9)?,
+        min_value: row.get(10)?,
+        max_value: row.get(11)?,
+        cycle: row.get(12)?,
+        cache_size: row.get(13)?,
+        owner_table_object_id: row.get(14)?,
+        owner_column_object_id: row.get(15)?,
+        owner_dependency: row.get(16)?,
+        role_owner: row.get(17)?,
+        acl_json: row.get(18)?,
+        log_count: row.get(19)?,
+    })
+}
+
+fn decode_sequence_identity(
+    relation: &RelationIdentity,
+    label: &str,
+    value: Vec<u8>,
+) -> Result<[u8; 16]> {
+    value.try_into().map_err(|value: Vec<u8>| {
+        SQLiteError::StorageBackend(format!(
+            "corrupt sequence `{}` {label} has {} bytes",
+            relation.qualified_name(),
+            value.len()
+        ))
+    })
+}
+
+fn decode_raw_sequence_row(raw: RawSequenceRow) -> Result<SequenceRow> {
+    let relation = RelationIdentity::new(raw.schema, raw.name);
+    Ok(SequenceRow {
+        role_owner: raw.role_owner,
+        acl: raw
+            .acl_json
+            .map(|json| serde_json::from_str(&json))
+            .transpose()?,
+        owner: decode_sequence_owner(
+            &relation,
+            raw.owner_table_object_id,
+            raw.owner_column_object_id,
+            raw.owner_dependency,
+        )?,
+        object_id: decode_sequence_identity(&relation, "object identity", raw.object_id)?,
+        definition_generation: decode_sequence_identity(
+            &relation,
+            "definition generation",
+            raw.definition_generation,
+        )?,
+        relation,
+        start: raw.start,
+        increment: raw.increment,
+        current: raw.current,
+        called: raw.called,
+        log_count: raw.log_count,
+        persistence: raw.persistence,
+        options: SequenceOptions {
+            data_type: raw.data_type,
+            min_value: Some(raw.min_value),
+            max_value: Some(raw.max_value),
+            cycle: raw.cycle,
+            cache_size: raw.cache_size,
+        },
+    })
+}
+
 fn reserve_sequence_values_in_connection(
     connection: &rusqlite::Connection,
     relation: &RelationIdentity,
@@ -80,7 +181,7 @@ fn reserve_sequence_values_in_connection(
 ) -> Result<SequenceReservationResult> {
     let stored = connection
         .query_row(
-            "SELECT object_id, definition_generation, current, called, increment, min_value, max_value, cycle, cache_size
+            "SELECT object_id, definition_generation, current, called, increment, min_value, max_value, cycle, cache_size, log_count
                FROM _sequences WHERE schema_name = ?1 AND relation_name = ?2",
             params![relation.schema, relation.name],
             |row| {
@@ -94,6 +195,7 @@ fn reserve_sequence_values_in_connection(
                     row.get::<_, i64>(6)?,
                     row.get::<_, bool>(7)?,
                     row.get::<_, i64>(8)?,
+                    row.get::<_, i64>(9)?,
                 ))
             },
         )
@@ -108,6 +210,7 @@ fn reserve_sequence_values_in_connection(
         max,
         cycle,
         cache_size,
+        log_count,
     )) = stored
     else {
         return Ok(SequenceReservationResult::Missing);
@@ -138,13 +241,22 @@ fn reserve_sequence_values_in_connection(
             relation.qualified_name()
         )));
     }
-    let Some(reservation) =
-        sequence_value_reservation(current, called, increment, min, max, cycle, cache_size)
-    else {
+    let Some(reservation) = sequence_value_reservation(
+        SequenceValuePosition {
+            current,
+            called,
+            log_count,
+        },
+        increment,
+        min,
+        max,
+        cycle,
+        cache_size,
+    ) else {
         return Ok(SequenceReservationResult::Exhausted);
     };
     let updated = connection.execute(
-        "UPDATE _sequences SET current = ?5, called = 1
+        "UPDATE _sequences SET current = ?5, called = 1, log_count = ?6
           WHERE schema_name = ?1 AND relation_name = ?2 AND object_id = ?3 AND definition_generation = ?4",
         params![
             relation.schema,
@@ -152,6 +264,7 @@ fn reserve_sequence_values_in_connection(
             object_id.as_slice(),
             definition_generation.as_slice(),
             reservation.last_value,
+            reservation.log_count,
         ],
     )?;
     if updated != 1 {
@@ -193,8 +306,8 @@ impl Catalog {
                 .transpose()?;
             tx.execute(
                 "INSERT INTO _sequences
-                    (schema_name, relation_name, kind, object_id, definition_generation, start, increment, current, called, persistence, data_type, min_value, max_value, cycle, cache_size, owner_table_object_id, owner_column_object_id, owner_dependency, role_owner, acl_json)
-                 VALUES (?1, ?2, 'sequence', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+                    (schema_name, relation_name, kind, object_id, definition_generation, start, increment, current, called, persistence, data_type, min_value, max_value, cycle, cache_size, owner_table_object_id, owner_column_object_id, owner_dependency, role_owner, acl_json, log_count)
+                 VALUES (?1, ?2, 'sequence', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
                 params![
                     sequence.relation.schema,
                     sequence.relation.name,
@@ -215,6 +328,7 @@ impl Catalog {
                     owner_dependency,
                     sequence.role_owner,
                     acl_json,
+                    sequence.log_count,
                 ],
             )?;
             tx.commit()?;
@@ -239,7 +353,7 @@ impl Catalog {
                 "UPDATE _sequences
                     SET object_id = ?3, definition_generation = ?4, start = ?5, increment = ?6, current = ?7, called = ?8, persistence = ?9,
                         data_type = ?10, min_value = ?11, max_value = ?12, cycle = ?13, cache_size = ?14,
-                        owner_table_object_id = ?15, owner_column_object_id = ?16, owner_dependency = ?17, role_owner = ?18, acl_json = ?19
+                        owner_table_object_id = ?15, owner_column_object_id = ?16, owner_dependency = ?17, role_owner = ?18, acl_json = ?19, log_count = ?20
                   WHERE schema_name = ?1 AND relation_name = ?2",
                 params![
                     sequence.relation.schema,
@@ -261,6 +375,7 @@ impl Catalog {
                     owner_dependency,
                     sequence.role_owner,
                     acl_json,
+                    sequence.log_count,
                 ],
             )? != 0)
         })
@@ -344,101 +459,14 @@ impl Catalog {
         self.conn.with(|connection| {
             let mut statement = connection.prepare(
                 "SELECT schema_name, relation_name, object_id, definition_generation, start, increment, current, called, persistence,
-                        data_type, min_value, max_value, cycle, cache_size, owner_table_object_id, owner_column_object_id, owner_dependency, role_owner, acl_json
+                        data_type, min_value, max_value, cycle, cache_size, owner_table_object_id, owner_column_object_id, owner_dependency, role_owner, acl_json, log_count
                        FROM _sequences ORDER BY schema_name, relation_name",
             )?;
-            let rows = statement.query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Vec<u8>>(2)?,
-                    row.get::<_, Vec<u8>>(3)?,
-                    row.get::<_, i64>(4)?,
-                    row.get::<_, i64>(5)?,
-                    row.get::<_, i64>(6)?,
-                    row.get::<_, bool>(7)?,
-                    row.get::<_, String>(8)?,
-                    row.get::<_, String>(9)?,
-                    row.get::<_, i64>(10)?,
-                    row.get::<_, i64>(11)?,
-                    row.get::<_, bool>(12)?,
-                    row.get::<_, i64>(13)?,
-                    row.get::<_, Option<Vec<u8>>>(14)?,
-                    row.get::<_, Option<Vec<u8>>>(15)?,
-                    row.get::<_, Option<String>>(16)?,
-                    row.get::<_, String>(17)?,
-                    row.get::<_, Option<String>>(18)?,
-                ))
-            })?;
-            let mut sequences = Vec::new();
-            for row in rows {
-                let (
-                    schema,
-                    name,
-                    object_id,
-                    definition_generation,
-                    start,
-                    increment,
-                    current,
-                    called,
-                    persistence,
-                    data_type,
-                    min_value,
-                    max_value,
-                    cycle,
-                    cache_size,
-                    owner_table_object_id,
-                    owner_column_object_id,
-                    owner_dependency,
-                    role_owner,
-                    acl_json,
-                ) = row?;
-                let relation = RelationIdentity::new(schema, name);
-                let object_id: [u8; 16] = object_id.try_into().map_err(|value: Vec<u8>| {
-                    SQLiteError::StorageBackend(format!(
-                        "corrupt sequence `{}` object identity has {} bytes",
-                        relation.qualified_name(),
-                        value.len()
-                    ))
-                })?;
-                let definition_generation: [u8; 16] = definition_generation
-                    .try_into()
-                    .map_err(|value: Vec<u8>| {
-                        SQLiteError::StorageBackend(format!(
-                            "corrupt sequence `{}` definition generation has {} bytes",
-                            relation.qualified_name(),
-                            value.len()
-                        ))
-                    })?;
-                sequences.push(SequenceRow {
-                    role_owner,
-                    acl: acl_json
-                        .map(|json| serde_json::from_str(&json))
-                        .transpose()?,
-                    owner: decode_sequence_owner(
-                        &relation,
-                        owner_table_object_id,
-                        owner_column_object_id,
-                        owner_dependency,
-                    )?,
-                    relation,
-                    object_id,
-                    definition_generation,
-                    start,
-                    increment,
-                    current,
-                    called,
-                    persistence,
-                    options: SequenceOptions {
-                        data_type,
-                        min_value: Some(min_value),
-                        max_value: Some(max_value),
-                        cycle,
-                        cache_size,
-                    },
-                });
-            }
-            Ok(sequences)
+            let sequences = statement
+                .query_map([], read_raw_sequence_row)?
+                .map(|row| decode_raw_sequence_row(row?))
+                .collect();
+            sequences
         })
     }
 
@@ -480,19 +508,21 @@ impl Catalog {
         object_id: [u8; 16],
         value: i64,
         called: bool,
+        log_count: i64,
     ) -> Result<Option<i64>> {
         let relation = migration_relation(name)?;
         self.conn.with(|connection| {
             Ok(connection
                 .query_row(
-                    "UPDATE _sequences SET current = ?4, called = ?5
+                    "UPDATE _sequences SET current = ?4, called = ?5, log_count = ?6
                      WHERE schema_name = ?1 AND relation_name = ?2 AND object_id = ?3 RETURNING current",
                     params![
                         relation.schema,
                         relation.name,
                         object_id.as_slice(),
                         value,
-                        called
+                        called,
+                        log_count,
                     ],
                     |row| row.get(0),
                 )

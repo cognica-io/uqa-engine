@@ -7,7 +7,7 @@
 //! Attribute and default catalog projection.
 
 use uqa_core::{ArrayValue, Value};
-use uqa_sql::ast::ColumnDef as SQLColumnDef;
+use uqa_sql::ast::{ColumnDef as SQLColumnDef, ColumnType};
 use uqa_sql::{ResultRow, SQLError};
 
 use crate::engine_capabilities::{CatalogReadView, RelationNameResolution};
@@ -162,8 +162,51 @@ pub(in crate::sql::catalog) fn build_pg_attribute(
             ));
         }
     }
+    for (_, _, object_id, _) in catalog.sequences() {
+        let relid = crate::sql::sequence_relation_oid(object_id);
+        for (idx, column) in sequence_attribute_columns().iter().enumerate() {
+            out.push(pg_attribute_row(
+                relid,
+                catalog_ordinal(idx, "pg_attribute sequence column")?,
+                column,
+            ));
+        }
+    }
     out.extend(super::super::ag_catalog::age_pg_attribute_rows(catalog)?);
     Ok(out)
+}
+
+fn sequence_attribute_columns() -> [SQLColumnDef; 3] {
+    [
+        sequence_attribute_column("last_value", ColumnType::BigInteger),
+        sequence_attribute_column("log_cnt", ColumnType::BigInteger),
+        sequence_attribute_column("is_called", ColumnType::Boolean),
+    ]
+}
+
+fn sequence_attribute_column(name: &str, ty: ColumnType) -> SQLColumnDef {
+    SQLColumnDef {
+        name: name.into(),
+        ty,
+        object_id: None,
+        missing_value: None,
+        primary_key: false,
+        not_null: true,
+        not_null_explicit: true,
+        not_null_name: None,
+        not_null_validated: true,
+        not_null_no_inherit: false,
+        auto_increment: None,
+        unique: false,
+        default: None,
+        generated: None,
+        check: None,
+        check_name: None,
+        check_enforced: true,
+        check_validated: true,
+        check_no_inherit: false,
+        references: None,
+    }
 }
 
 pub(super) fn pg_attribute_row(relid: i64, attnum: i64, col: &SQLColumnDef) -> ResultRow {

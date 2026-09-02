@@ -754,6 +754,7 @@ fn opening_an_engine_assigns_legacy_sequence_object_identities() {
             increment: 1,
             current: 5,
             called: false,
+            log_count: 0,
             persistence: "p".into(),
             options: SequenceOptions::default(),
             owner: None,

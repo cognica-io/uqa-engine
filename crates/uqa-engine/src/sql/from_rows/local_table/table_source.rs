@@ -13,7 +13,7 @@ use super::{
     qualify_source_operator_with_columns, query_contains_volatile_function, query_cte_names,
     query_output_shared, try_build_streaming_subquery_operator, try_streaming_local_table_scan,
     virtual_relation_schema, ColumnPrune, CteScope, Engine, QualifierFilters, QueryOutputMode,
-    SQLError, SQLParam, SourcePlan,
+    SQLError, SQLParam, SourcePlan, Value,
 };
 use uqa_execution::PhysicalOperator;
 
@@ -112,6 +112,43 @@ pub(super) fn build_table_source_operator<'a>(
 
             let catalog = ctes.catalog_read_view()?;
             let resolution = ctes.relation_name_resolution()?;
+            if let Some(sequence) = catalog.sequence_resolved(&resolution, name)? {
+                let current_user = engine.session_execution_view().current_user();
+                if !catalog.sequence_is_selectable_to(&sequence.security, &current_user) {
+                    return Err(SQLError::Routine {
+                        sqlstate: "42501".into(),
+                        message: format!(
+                            "permission denied for sequence {}",
+                            sequence.relation.name
+                        ),
+                    });
+                }
+                let columns = vec!["last_value".into(), "log_cnt".into(), "is_called".into()];
+                let types = vec![
+                    Some(uqa_sql::ast::ColumnType::BigInteger),
+                    Some(uqa_sql::ast::ColumnType::BigInteger),
+                    Some(uqa_sql::ast::ColumnType::Boolean),
+                ];
+                let rows = vec![std::collections::BTreeMap::from([
+                    ("last_value".into(), Value::Int(sequence.state.current)),
+                    ("log_cnt".into(), Value::Int(sequence.state.log_count)),
+                    ("is_called".into(), Value::Bool(sequence.state.called)),
+                ])];
+                let scan: Box<dyn PhysicalOperator + 'a> = Box::new(
+                    uqa_execution::TableScan::from_typed_rows(columns.clone(), types, rows),
+                );
+                let operator = qualify_source_operator_with_columns(
+                    scan,
+                    &columns,
+                    &qualifier,
+                    prune,
+                    &[],
+                    false,
+                );
+                return Ok(attach_qualifier_filter(
+                    operator, &qualifier, filters, engine, params, ctes,
+                ));
+            }
             if let Some(view) = catalog.view_resolved(&resolution, name)?.cloned() {
                 if view.kind == crate::StoredViewKind::Materialized {
                     if !view.populated {

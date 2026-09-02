@@ -91,7 +91,12 @@ pub(in crate::sql) fn validate_table_function_column_definition(
     let builtin = crate::sql::builtin_function_dispatch_name(&name.to_ascii_lowercase());
     if matches!(
         builtin.as_str(),
-        "json_each" | "jsonb_each" | "json_each_text" | "jsonb_each_text"
+        "json_each"
+            | "jsonb_each"
+            | "json_each_text"
+            | "jsonb_each_text"
+            | "pg_get_sequence_data"
+            | "pg_sequence_parameters"
     ) {
         return Err(redundant_out_column_definition_error());
     }
@@ -223,6 +228,8 @@ fn has_builtin_table_function_overloads(name: &str) -> bool {
             | "jsonb_each"
             | "json_each_text"
             | "jsonb_each_text"
+            | "pg_get_sequence_data"
+            | "pg_sequence_parameters"
     )
 }
 
@@ -286,6 +293,10 @@ fn builtin_table_function_overloads(
         "jsonb_each" | "jsonb_each_text" => {
             vec![overload(vec![ColumnType::JsonB], 0, ColumnType::Record)]
         }
+        "pg_get_sequence_data" => vec![overload(vec![ColumnType::Regclass], 0, ColumnType::Record)],
+        "pg_sequence_parameters" => {
+            vec![overload(vec![ColumnType::Oid], 0, ColumnType::Record)]
+        }
         _ => Vec::new(),
     }
 }
@@ -307,6 +318,8 @@ pub(in crate::sql) fn is_builtin_table_function(name: &str) -> bool {
             | "jsonb_each"
             | "json_each_text"
             | "jsonb_each_text"
+            | "pg_get_sequence_data"
+            | "pg_sequence_parameters"
             | "create_analyzer"
             | "drop_analyzer"
             | "list_analyzers"
@@ -532,6 +545,16 @@ pub(in crate::sql) fn table_function_empty_schema(
             "json_each" | "jsonb_each" | "json_each_text" | "jsonb_each_text" => {
                 vec!["key".into(), "value".into()]
             }
+            "pg_get_sequence_data" => vec!["last_value".into(), "is_called".into()],
+            "pg_sequence_parameters" => vec![
+                "start_value".into(),
+                "minimum_value".into(),
+                "maximum_value".into(),
+                "increment".into(),
+                "cycle_option".into(),
+                "cache_size".into(),
+                "data_type".into(),
+            ],
             "pagerank" | "graph_pagerank" | "hits" | "graph_hits" | "betweenness"
             | "graph_betweenness" => vec!["_doc_id".into(), "_score".into()],
             "rpq" => vec!["vertex_id".into()],
@@ -710,6 +733,18 @@ pub(in crate::sql) fn table_function_column_types(
             "json_each_text" | "jsonb_each_text" => {
                 vec![Some(ColumnType::Text), Some(ColumnType::Text)]
             }
+            "pg_get_sequence_data" => {
+                vec![Some(ColumnType::BigInteger), Some(ColumnType::Boolean)]
+            }
+            "pg_sequence_parameters" => vec![
+                Some(ColumnType::BigInteger),
+                Some(ColumnType::BigInteger),
+                Some(ColumnType::BigInteger),
+                Some(ColumnType::BigInteger),
+                Some(ColumnType::Boolean),
+                Some(ColumnType::BigInteger),
+                Some(ColumnType::Oid),
+            ],
             "pagerank" | "graph_pagerank" | "hits" | "graph_hits" | "betweenness"
             | "graph_betweenness" => vec![
                 Some(ColumnType::BigInteger),

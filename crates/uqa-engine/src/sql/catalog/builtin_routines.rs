@@ -60,6 +60,22 @@ impl BuiltinRoutineCatalogEntry {
             _ => 0,
         }
     }
+
+    pub(super) const fn all_argument_types(self) -> Option<&'static [i64]> {
+        match self.oid {
+            3078 => Some(&[26, 20, 20, 20, 20, 16, 20, 26]),
+            6427 => Some(&[2205, 20, 16]),
+            _ => None,
+        }
+    }
+
+    pub(super) const fn argument_modes(self) -> Option<&'static [&'static str]> {
+        match self.oid {
+            3078 => Some(&["i", "o", "o", "o", "o", "o", "o", "o"]),
+            6427 => Some(&["i", "o", "o"]),
+            _ => None,
+        }
+    }
 }
 
 macro_rules! range_routine {
@@ -115,6 +131,7 @@ const FALSE_NODE: &str = "({CONST :consttype 16 :consttypmod -1 :constcollid 0 :
 
 mod ranges;
 mod scalar;
+mod sequences;
 
 pub(super) const PG18_BUILTIN_ROUTINE_GROUPS: &[&[BuiltinRoutineCatalogEntry]] =
-    &[scalar::ROUTINES, ranges::ROUTINES];
+    &[scalar::ROUTINES, ranges::ROUTINES, sequences::ROUTINES];

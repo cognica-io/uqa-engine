@@ -313,6 +313,9 @@ fn builtin_binding_is_non_immutable(binding: &FunctionBinding) -> bool {
                 | "pg_get_expr"
                 | "pg_get_partkeydef"
                 | "pg_get_serial_sequence"
+                | "pg_get_sequence_data"
+                | "pg_sequence_last_value"
+                | "pg_sequence_parameters"
                 | "pg_get_triggerdef"
                 | "pg_get_ruledef"
                 | "pg_has_role"
@@ -568,6 +571,17 @@ fn overloads(name: &str) -> Option<Vec<BuiltinFunctionOverload>> {
             &[ColumnType::Text, ColumnType::Text],
             ColumnType::Text,
         )],
+        "pg_get_sequence_data" => vec![overload(
+            &local,
+            &[ColumnType::Regclass],
+            ColumnType::Record,
+        )],
+        "pg_sequence_last_value" => vec![overload(
+            &local,
+            &[ColumnType::Regclass],
+            ColumnType::BigInteger,
+        )],
+        "pg_sequence_parameters" => vec![overload(&local, &[ColumnType::Oid], ColumnType::Record)],
         "pg_get_triggerdef" | "pg_get_ruledef" => vec![
             overload(&local, &[ColumnType::Oid], ColumnType::Text),
             overload(
@@ -685,6 +699,9 @@ fn local_name(name: &str) -> Option<String> {
             | "pg_get_expr"
             | "pg_get_partkeydef"
             | "pg_get_serial_sequence"
+            | "pg_get_sequence_data"
+            | "pg_sequence_last_value"
+            | "pg_sequence_parameters"
             | "pg_get_triggerdef"
             | "pg_get_ruledef"
             | "pg_has_role"

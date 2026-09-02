@@ -31,6 +31,7 @@ impl Engine {
             increment: state.increment,
             current: state.current,
             called: state.called,
+            log_count: state.log_count,
             persistence: persistence.catalog_code().into(),
             owner: state.owner,
             options: SequenceOptions {
@@ -226,6 +227,12 @@ impl Engine {
                 row.relation.qualified_name()
             )));
         }
+        if row.log_count < 0 {
+            return Err(StorageBackendError::Other(format!(
+                "corrupt sequence `{}` has a negative log count",
+                row.relation.qualified_name()
+            )));
+        }
         let data_type = match row.options.data_type.as_str() {
             "smallint" => SequenceDataType::SmallInt,
             "integer" => SequenceDataType::Integer,
@@ -243,6 +250,7 @@ impl Engine {
             increment: row.increment,
             current: row.current,
             called: row.called,
+            log_count: row.log_count,
             data_type,
             min_value: row.options.min_value.unwrap_or(if row.increment > 0 {
                 1

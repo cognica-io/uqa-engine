@@ -24,16 +24,7 @@ pub(in crate::sql) fn engine_func_intercept(
     evaluate: &mut dyn FnMut(&ScalarExpr) -> Result<Value, SQLError>,
 ) -> Result<Option<Value>, SQLError> {
     let lower = crate::sql::builtin_function_dispatch_name(name);
-    if matches!(
-        lower.as_str(),
-        "pg_get_expr"
-            | "pg_get_partkeydef"
-            | "pg_get_serial_sequence"
-            | "pg_get_triggerdef"
-            | "pg_get_ruledef"
-            | "pg_has_role"
-            | "has_sequence_privilege"
-    ) {
+    if is_engine_catalog_scalar(&lower) {
         let values = args
             .iter()
             .map(evaluate)
@@ -127,6 +118,22 @@ pub(in crate::sql) fn engine_func_intercept(
     }
 }
 
+fn is_engine_catalog_scalar(name: &str) -> bool {
+    matches!(
+        name,
+        "pg_get_expr"
+            | "pg_get_partkeydef"
+            | "pg_get_serial_sequence"
+            | "pg_get_sequence_data"
+            | "pg_sequence_last_value"
+            | "pg_sequence_parameters"
+            | "pg_get_triggerdef"
+            | "pg_get_ruledef"
+            | "pg_has_role"
+            | "has_sequence_privilege"
+    )
+}
+
 pub(in crate::sql) fn engine_catalog_scalar_value(
     engine: &Engine,
     name: &str,
@@ -139,6 +146,9 @@ pub(in crate::sql) fn engine_catalog_scalar_value(
         "pg_get_triggerdef" => crate::sql::catalog::pg_get_triggerdef_value(engine, arguments),
         "pg_get_ruledef" => crate::sql::catalog::pg_get_ruledef_value(engine, arguments),
         "pg_get_serial_sequence" => engine.pg_get_serial_sequence_value(arguments),
+        "pg_get_sequence_data" => engine.pg_get_sequence_data_value(arguments),
+        "pg_sequence_last_value" => engine.pg_sequence_last_value_value(arguments),
+        "pg_sequence_parameters" => engine.pg_sequence_parameters_value(arguments),
         "pg_has_role" => engine.pg_has_role_value(arguments),
         "has_sequence_privilege" => engine.has_sequence_privilege_value(arguments),
         _ => return None,

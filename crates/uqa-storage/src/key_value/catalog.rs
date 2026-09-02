@@ -215,8 +215,9 @@ impl CatalogFacade for KeyValueCatalog {
         object_id: [u8; 16],
         value: i64,
         called: bool,
+        log_count: i64,
     ) -> StorageBackendResult<Option<i64>> {
-        self.set_sequence_value_impl(name, object_id, value, called)
+        self.set_sequence_value_impl(name, object_id, value, called, log_count)
     }
 
     fn save_view(&self, view: &ViewRow) -> StorageBackendResult<()> {

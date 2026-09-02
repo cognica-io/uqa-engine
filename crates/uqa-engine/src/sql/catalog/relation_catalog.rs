@@ -166,7 +166,7 @@ pub(super) fn build_pg_class(
     for (sequence, persistence, object_id, security) in catalog.sequences() {
         let (schema, name) = split_schema_name(&sequence)?;
         let mut row =
-            pg_class_row_with_lifecycle(&schema, &name, "S", 0, 0.0, false, persistence, true, &[]);
+            pg_class_row_with_lifecycle(&schema, &name, "S", 3, 0.0, false, persistence, true, &[]);
         row.insert(
             "oid".into(),
             int_value(stable_object_oid("relation", &object_id)),

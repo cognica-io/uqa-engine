@@ -75,24 +75,21 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
         }
     }
     let record_definition = (!column_types.is_empty()).then_some((column_aliases, column_types));
-    let user_result = binding.map_or_else(
-        || {
-            crate::sql::plpgsql_exec::call_user_table_function(
-                engine,
-                &identity,
-                &call_args,
-                record_definition,
-            )
-        },
-        |binding| {
-            crate::sql::plpgsql_exec::call_bound_user_table_function(
-                engine,
-                binding,
-                &call_args,
-                record_definition,
-            )
-        },
-    );
+    let user_result = match binding {
+        Some(binding) if binding.builtin => None,
+        None => crate::sql::plpgsql_exec::call_user_table_function(
+            engine,
+            &identity,
+            &call_args,
+            record_definition,
+        ),
+        Some(binding) => crate::sql::plpgsql_exec::call_bound_user_table_function(
+            engine,
+            binding,
+            &call_args,
+            record_definition,
+        ),
+    };
     if let Some(result) = user_result {
         return registered_table_function_rows(name, result?, alias, column_aliases);
     }
@@ -183,6 +180,24 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
             }
             Ok(TableFunctionRows::materialized(vec![col], out))
         }
+        "pg_get_sequence_data" => singleton_record_rows(
+            engine.pg_get_sequence_data_value(&evaluated)?,
+            &["last_value", "is_called"],
+            column_aliases,
+        ),
+        "pg_sequence_parameters" => singleton_record_rows(
+            engine.pg_sequence_parameters_value(&evaluated)?,
+            &[
+                "start_value",
+                "minimum_value",
+                "maximum_value",
+                "increment",
+                "cycle_option",
+                "cache_size",
+                "data_type",
+            ],
+            column_aliases,
+        ),
         // -------------------------------------------------------------
         // Analyzer DDL exposed as table functions: create, drop, list,
         // and assign table analyzers.
@@ -445,6 +460,42 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
             "table function `{other}` in FROM"
         ))),
     }
+}
+
+fn singleton_record_rows(
+    value: Value,
+    default_columns: &[&str],
+    column_aliases: &[String],
+) -> Result<TableFunctionRows, SQLError> {
+    let columns = default_columns
+        .iter()
+        .enumerate()
+        .map(|(index, column)| {
+            column_aliases
+                .get(index)
+                .cloned()
+                .unwrap_or_else(|| (*column).into())
+        })
+        .collect::<Vec<_>>();
+    let values = match value {
+        Value::Null => vec![Value::Null; columns.len()],
+        Value::Record(fields) if fields.len() == columns.len() => {
+            fields.into_iter().map(|(_, value)| value).collect()
+        }
+        Value::Record(fields) => {
+            return Err(SQLError::Internal(format!(
+                "sequence introspection returned {} fields for {} columns",
+                fields.len(),
+                columns.len()
+            )));
+        }
+        value => {
+            return Err(SQLError::Internal(format!(
+                "sequence introspection returned non-record value {value:?}"
+            )));
+        }
+    };
+    Ok(TableFunctionRows::materialized(columns, vec![values]))
 }
 
 fn operator_join_rows(

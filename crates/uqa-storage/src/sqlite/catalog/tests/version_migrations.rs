@@ -6,6 +6,8 @@
 
 use super::*;
 
+mod log_count;
+
 #[test]
 fn migration_is_idempotent() {
     let mc = ManagedConnection::open_in_memory().unwrap();
@@ -208,6 +210,7 @@ fn migration_26_adds_persistent_sequence_object_identities() {
             increment: 1,
             current: 1,
             called: false,
+            log_count: 0,
             persistence: "p".into(),
             options: SequenceOptions::default(),
             owner: None,
@@ -248,6 +251,7 @@ fn migration_27_adds_postgresql_sequence_defaults() {
             increment: -3,
             current: -1,
             called: false,
+            log_count: 0,
             persistence: "p".into(),
             options: SequenceOptions::default(),
             owner: None,
@@ -291,6 +295,7 @@ fn migration_27_preserves_options_when_columns_precede_the_version_marker() {
             increment: 2,
             current: 3,
             called: false,
+            log_count: 0,
             persistence: "p".into(),
             options: SequenceOptions {
                 data_type: "integer".into(),
@@ -336,6 +341,7 @@ fn migration_28_adds_sequence_cache_and_definition_generation() {
             increment: 1,
             current: 1,
             called: false,
+            log_count: 0,
             persistence: "p".into(),
             options: SequenceOptions {
                 cache_size: 7,
@@ -381,6 +387,7 @@ fn migration_28_preserves_cache_state_when_columns_precede_the_version_marker() 
             increment: 1,
             current: 1,
             called: false,
+            log_count: 0,
             persistence: "p".into(),
             options: SequenceOptions {
                 cache_size: 9,
@@ -421,6 +428,7 @@ fn migration_29_adds_sequence_owner_columns() {
             increment: 1,
             current: 1,
             called: false,
+            log_count: 0,
             persistence: "p".into(),
             options: SequenceOptions::default(),
             owner: Some(crate::catalog::SequenceOwner {
@@ -475,6 +483,7 @@ fn migration_29_preserves_owner_when_columns_precede_the_version_marker() {
             increment: 1,
             current: 1,
             called: false,
+            log_count: 0,
             persistence: "p".into(),
             options: SequenceOptions::default(),
             owner: Some(owner),
@@ -511,6 +520,7 @@ fn migration_30_adds_sequence_role_owner_with_bootstrap_default() {
             increment: 1,
             current: 1,
             called: false,
+            log_count: 0,
             persistence: "p".into(),
             options: SequenceOptions::default(),
             owner: None,
@@ -548,6 +558,7 @@ fn migration_30_preserves_role_owner_when_column_precedes_version_marker() {
             increment: 1,
             current: 1,
             called: false,
+            log_count: 0,
             persistence: "p".into(),
             options: SequenceOptions::default(),
             owner: None,
@@ -584,6 +595,7 @@ fn migration_31_adds_nullable_sequence_acl() {
             increment: 1,
             current: 1,
             called: false,
+            log_count: 0,
             persistence: "p".into(),
             options: SequenceOptions::default(),
             owner: None,
@@ -631,6 +643,7 @@ fn migration_31_preserves_sequence_acl_when_column_precedes_version_marker() {
             increment: 1,
             current: 1,
             called: false,
+            log_count: 0,
             persistence: "p".into(),
             options: SequenceOptions::default(),
             owner: None,
@@ -667,6 +680,7 @@ fn migration_18_preserves_legacy_sequence_sentinel_semantics() {
             increment: 1,
             current: 0,
             called: false,
+            log_count: 0,
             persistence: "p".into(),
             options: SequenceOptions::default(),
             owner: None,
@@ -724,6 +738,7 @@ fn migration_23_moves_sequence_persistence_into_typed_rows() {
             increment: 1,
             current: 1,
             called: false,
+            log_count: 0,
             persistence: "u".into(),
             options: SequenceOptions::default(),
             owner: None,

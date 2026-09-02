@@ -5,6 +5,7 @@
     "CatalogEpochs",
     "CatalogReadSnapshot",
     "CatalogReadView",
+    "CatalogSequenceSnapshot",
     "CatalogTableSnapshot",
     "MutationCoordinator",
     "QueryRuntimeView",

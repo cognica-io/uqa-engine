@@ -94,6 +94,7 @@ mod engine_relations;
 mod engine_roles;
 mod engine_search;
 mod engine_sequence_catalog;
+mod engine_sequence_introspection;
 mod engine_sequence_lifecycle;
 mod engine_sequence_ownership;
 mod engine_sequence_security;
@@ -299,6 +300,7 @@ struct NontransactionalSequenceValue {
     object_id: [u8; 16],
     current: i64,
     called: bool,
+    log_count: i64,
     autonomous: bool,
 }
 
@@ -341,6 +343,8 @@ pub struct SequenceState {
     /// bit avoids the lossy `start - increment` sentinel at BIGINT boundaries.
     #[serde(default = "sequence_state_called_default")]
     pub called: bool,
+    #[serde(default)]
+    pub log_count: i64,
     pub data_type: SequenceDataType,
     pub min_value: i64,
     pub max_value: i64,

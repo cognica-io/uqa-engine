@@ -458,6 +458,9 @@ pub struct SequenceRow {
     pub current: i64,
     /// False until the first allocation returns `current` verbatim.
     pub called: bool,
+    /// Number of values whose advancement is already durable in the sequence log.
+    #[serde(default)]
+    pub log_count: i64,
     /// `PostgreSQL` `pg_class.relpersistence` code. Durable sequence rows accept only permanent (`p`) and unlogged (`u`) values.
     pub persistence: String,
     #[serde(default)]
@@ -470,12 +473,21 @@ fn default_sequence_role_owner() -> String {
     "uqa".into()
 }
 
+/// Physical sequence position consumed by one atomic reservation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SequenceValuePosition {
+    pub current: i64,
+    pub called: bool,
+    pub log_count: i64,
+}
+
 /// One atomic sequence reservation. `first_value` is returned immediately, while the remaining values through `last_value` belong to the allocating session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SequenceValueReservation {
     pub first_value: i64,
     pub last_value: i64,
     pub count: i64,
+    pub log_count: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -489,14 +501,18 @@ pub enum SequenceReservationResult {
 /// Reserve up to `cache_size` values without crossing a sequence bound. Cycling is applied when selecting the first value of a new reservation, matching `PostgreSQL`'s boundary-truncated cache blocks.
 #[must_use]
 pub fn sequence_value_reservation(
-    current: i64,
-    called: bool,
+    position: SequenceValuePosition,
     increment: i64,
     min_value: i64,
     max_value: i64,
     cycle: bool,
     cache_size: i64,
 ) -> Option<SequenceValueReservation> {
+    let SequenceValuePosition {
+        current,
+        called,
+        log_count,
+    } = position;
     debug_assert_ne!(increment, 0);
     debug_assert!(cache_size > 0);
     let first_value = if called {
@@ -521,10 +537,23 @@ pub fn sequence_value_reservation(
     let available = distance / step + 1;
     let count = available.min(i128::from(cache_size));
     let last_value = i128::from(first_value) + i128::from(increment) * (count - 1);
+    let initial_count = i128::from(!called);
+    let cache_fetch = i128::from(cache_size) - initial_count;
+    let mut fetch = cache_fetch;
+    let mut next_log_count = i128::from(log_count);
+    if i128::from(log_count) < cache_fetch || !called {
+        fetch += 32;
+        next_log_count = fetch;
+    }
+    let fetched = fetch.min(available - initial_count);
+    next_log_count -= fetched.min(cache_fetch);
+    next_log_count -= fetch - fetched;
     Some(SequenceValueReservation {
         first_value,
         last_value: i64::try_from(last_value).expect("reserved sequence value stays in bounds"),
         count: i64::try_from(count).expect("reservation count cannot exceed cache size"),
+        log_count: i64::try_from(next_log_count)
+            .expect("persisted sequence log count cannot exceed the cache request"),
     })
 }
 
@@ -619,6 +648,7 @@ pub trait CatalogFacade: Send + Sync {
         object_id: [u8; 16],
         value: i64,
         called: bool,
+        log_count: i64,
     ) -> StorageBackendResult<Option<i64>>;
 
     fn save_view(&self, view: &ViewRow) -> StorageBackendResult<()>;
@@ -749,7 +779,22 @@ pub trait CatalogFacade: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use super::RelationIdentity;
+    use super::{
+        sequence_value_reservation, RelationIdentity, SequenceValuePosition,
+        SequenceValueReservation,
+    };
+
+    const fn sequence_position(
+        current: i64,
+        called: bool,
+        log_count: i64,
+    ) -> SequenceValuePosition {
+        SequenceValuePosition {
+            current,
+            called,
+            log_count,
+        }
+    }
 
     #[test]
     fn relation_identity_rendering_is_reversible_and_collision_free() {
@@ -798,6 +843,62 @@ mod tests {
                 "\"Upper\"".to_string(),
                 "Upper".to_string()
             ]
+        );
+    }
+
+    #[test]
+    fn sequence_reservations_track_postgresql_log_counts() {
+        assert_eq!(
+            sequence_value_reservation(sequence_position(1, false, 0), 1, 1, i64::MAX, false, 1),
+            Some(SequenceValueReservation {
+                first_value: 1,
+                last_value: 1,
+                count: 1,
+                log_count: 32,
+            })
+        );
+        assert_eq!(
+            sequence_value_reservation(sequence_position(1, true, 32), 1, 1, i64::MAX, false, 1),
+            Some(SequenceValueReservation {
+                first_value: 2,
+                last_value: 2,
+                count: 1,
+                log_count: 31,
+            })
+        );
+        assert_eq!(
+            sequence_value_reservation(sequence_position(1, false, 0), 1, 1, i64::MAX, false, 10),
+            Some(SequenceValueReservation {
+                first_value: 1,
+                last_value: 10,
+                count: 10,
+                log_count: 32,
+            })
+        );
+        assert_eq!(
+            sequence_value_reservation(sequence_position(5, false, 0), 2, 3, 9, true, 3),
+            Some(SequenceValueReservation {
+                first_value: 5,
+                last_value: 9,
+                count: 3,
+                log_count: 0,
+            })
+        );
+        assert_eq!(
+            sequence_value_reservation(
+                sequence_position(1, false, 0),
+                1,
+                1,
+                i64::MAX,
+                false,
+                i64::MAX,
+            ),
+            Some(SequenceValueReservation {
+                first_value: 1,
+                last_value: i64::MAX,
+                count: i64::MAX,
+                log_count: 0,
+            })
         );
     }
 }

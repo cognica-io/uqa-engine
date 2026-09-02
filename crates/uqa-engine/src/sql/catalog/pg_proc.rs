@@ -87,8 +87,26 @@ pub(super) fn build_pg_proc(catalog: &CatalogReadView) -> Result<Vec<ResultRow>,
                 ),
                 ("prorettype", int_value(routine.return_type)),
                 ("proargtypes", list_int(routine.argument_types)),
-                ("proallargtypes", Value::Null),
-                ("proargmodes", Value::Null),
+                (
+                    "proallargtypes",
+                    routine
+                        .all_argument_types()
+                        .map_or(Ok(Value::Null), |types| {
+                            catalog_array(
+                                types.iter().copied().map(int_value).collect(),
+                                "pg_proc.proallargtypes",
+                            )
+                        })?,
+                ),
+                (
+                    "proargmodes",
+                    routine.argument_modes().map_or(Ok(Value::Null), |modes| {
+                        catalog_array(
+                            modes.iter().copied().map(str_value).collect(),
+                            "pg_proc.proargmodes",
+                        )
+                    })?,
+                ),
                 (
                     "proargnames",
                     if routine.argument_names.is_empty() {
