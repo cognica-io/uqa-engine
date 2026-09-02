@@ -421,6 +421,7 @@ fn pg18_role_membership_governs_implicit_routine_ownership_and_owner_transfer() 
         "CREATE ROLE owner_acl_grantee",
         "GRANT owned_routine_role TO inherited_owner_member",
         "GRANT owned_routine_role TO noinherit_owner_member WITH INHERIT FALSE, SET TRUE",
+        "GRANT CREATE ON SCHEMA public TO owned_routine_role",
         "CREATE FUNCTION owner_execute_probe() RETURNS integer LANGUAGE SQL AS 'SELECT 11'",
         "CREATE FUNCTION owner_alter_probe() RETURNS integer LANGUAGE SQL AS 'SELECT 12'",
         "CREATE FUNCTION owner_replace_probe() RETURNS integer LANGUAGE SQL AS 'SELECT 13'",

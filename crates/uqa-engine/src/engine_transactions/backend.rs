@@ -208,6 +208,41 @@ impl Engine {
             .is_some_and(|frame| frame.backend_mode == BackendTransactionMode::Deferred)
     }
 
+    /// Before a deferred writer statement reports a catalog lookup miss, wait for any backend writer that may have committed without publishing its in-process epoch yet, then refresh the `READ COMMITTED` snapshot without retaining writer ownership. The transient lock mark preserves row-lock-before-writer ordering for query-bearing commands.
+    pub(crate) fn fence_catalog_writer_and_refresh_snapshot(&self) -> Result<(), SQLError> {
+        if !self.backend_transaction_is_deferred() {
+            return Ok(());
+        }
+        let (keep_mark, fence_mark) = {
+            let mut stack = self.session.transactions.lock();
+            let frame = stack.last_mut().ok_or_else(|| {
+                SQLError::Internal("catalog writer fence requires an open transaction".into())
+            })?;
+            let keep_mark = frame.lock_mark;
+            let fence_mark = frame.next_lock_mark;
+            frame.next_lock_mark = fence_mark
+                .checked_add(1)
+                .ok_or_else(|| SQLError::Internal("transaction lock mark exhausted".into()))?;
+            if fence_mark <= keep_mark {
+                return Err(SQLError::Internal(
+                    "catalog writer fence did not allocate a newer lock mark".into(),
+                ));
+            }
+            (keep_mark, fence_mark)
+        };
+        let fence = self.row_locks.acquire_relation(
+            self.session_id,
+            self.row_locks.backend_writer_key(),
+            crate::row_locks::RelationLockMode::AccessExclusive,
+            fence_mark,
+            &self.runtime.cancellation,
+        );
+        self.row_locks
+            .release_mark_above(self.session_id, keep_mark);
+        fence?;
+        self.refresh_explicit_statement_snapshot()
+    }
+
     fn promote_deferred_transaction_frame(
         &self,
         stack: &mut Vec<TransactionFrame>,

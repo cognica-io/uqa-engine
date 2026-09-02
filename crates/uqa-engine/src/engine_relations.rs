@@ -158,6 +158,153 @@ impl Engine {
         Ok(RelationIdentity::new(schema, relation).qualified_name())
     }
 
+    /// Resolve the target namespace for a durable SQL object creation. An explicit namespace needs `CREATE`; an unqualified target first needs `USAGE` to participate in the effective search path and then `CREATE` on the selected namespace.
+    pub(crate) fn try_relation_name_for_sql_create(&self, name: &str) -> Result<String, SQLError> {
+        let name = self.resolve_relation_name_for_sql_create(name)?;
+        self.ensure_relation_creation_privilege(&name)?;
+        Ok(name)
+    }
+
+    /// Resolve a durable SQL creation target without checking `CREATE`. CTAS uses this split operation because `PostgreSQL` reports an existing target before a missing schema privilege for the non-`IF NOT EXISTS` form.
+    pub(crate) fn resolve_relation_name_for_sql_create(
+        &self,
+        name: &str,
+    ) -> Result<String, SQLError> {
+        let (schema, relation) =
+            RelationIdentity::parse_reference(name).map_err(SQLError::Unsupported)?;
+        let current_user = self.current_user_name();
+        for attempt in 0..2 {
+            self.synchronize_catalog_registries()
+                .map_err(|error| SQLError::Internal(format!("refresh schema catalog: {error}")))?;
+            let resolved = if let Some(schema) = schema.as_deref() {
+                self.schema_security_for_privilege(schema)
+                    .is_some()
+                    .then(|| schema.to_string())
+            } else {
+                let search_path = self.session.state.read().search_path.clone();
+                search_path.into_iter().find(|schema| {
+                    self.schema_security_for_privilege(schema).is_some()
+                        && self.schema_has_privilege_for_role(
+                            schema,
+                            &current_user,
+                            crate::engine_schema_security::SchemaAclPrivilege::Usage,
+                        )
+                })
+            };
+            if let Some(schema) = resolved {
+                return Ok(RelationIdentity::new(schema, relation).qualified_name());
+            }
+            if attempt == 0 && self.backend_transaction_is_deferred() {
+                self.fence_catalog_writer_and_refresh_snapshot()?;
+                continue;
+            }
+            break;
+        }
+        Err(SQLError::Routine {
+            sqlstate: "3F000".into(),
+            message: schema.map_or_else(
+                || "no schema has been selected to create in".into(),
+                |schema| format!("schema \"{schema}\" does not exist"),
+            ),
+        })
+    }
+
+    pub(crate) fn ensure_relation_creation_privilege(
+        &self,
+        canonical_name: &str,
+    ) -> Result<(), SQLError> {
+        let relation =
+            RelationIdentity::from_legacy_name(canonical_name).map_err(SQLError::Unsupported)?;
+        let current_user = self.current_user_name();
+        self.ensure_schema_privilege(
+            &relation.schema,
+            &current_user,
+            crate::engine_schema_security::SchemaAclPrivilege::Create,
+        )
+    }
+
+    /// Existing-relation operations that allocate a sibling object, such as indexes and indexed key constraints, require both lookup `USAGE` and object-creation `CREATE` on the relation namespace.
+    pub(crate) fn ensure_existing_relation_creation_privilege(
+        &self,
+        canonical_name: &str,
+    ) -> Result<(), SQLError> {
+        let relation =
+            RelationIdentity::from_legacy_name(canonical_name).map_err(SQLError::Unsupported)?;
+        if relation.schema == self.temporary_schema_name() {
+            return self.ensure_temporary_relation_creation_privilege();
+        }
+        let current_user = self.current_user_name();
+        self.ensure_schema_privilege(
+            &relation.schema,
+            &current_user,
+            crate::engine_schema_security::SchemaAclPrivilege::Usage,
+        )?;
+        self.ensure_schema_privilege(
+            &relation.schema,
+            &current_user,
+            crate::engine_schema_security::SchemaAclPrivilege::Create,
+        )
+    }
+
+    /// Resolve the table targeted by `CREATE INDEX` while preserving `PostgreSQL`'s qualified-name precedence: namespace privileges are checked before the table's existence, access method, or indexed columns.
+    pub(crate) fn try_resolve_index_table_name(
+        &self,
+        name: &str,
+    ) -> Result<Option<String>, SQLError> {
+        self.synchronize_table_catalog()
+            .map_err(|error| SQLError::Internal(format!("load table catalog: {error}")))?;
+        self.synchronize_table_data()
+            .map_err(|error| SQLError::Internal(format!("load table data: {error}")))?;
+        self.synchronize_catalog_registries()
+            .map_err(|error| SQLError::Internal(format!("load schema catalog: {error}")))?;
+        let (qualified_schema, _) =
+            RelationIdentity::parse_reference(name).map_err(SQLError::Unsupported)?;
+        if let Some(schema) = qualified_schema.as_deref() {
+            if schema != "pg_temp" && schema != self.temporary_schema_name() {
+                if self.schema_security_for_privilege(schema).is_none() {
+                    return Err(SQLError::Routine {
+                        sqlstate: "3F000".into(),
+                        message: format!("schema \"{schema}\" does not exist"),
+                    });
+                }
+                let current_user = self.current_user_name();
+                self.ensure_schema_privilege(
+                    schema,
+                    &current_user,
+                    crate::engine_schema_security::SchemaAclPrivilege::Usage,
+                )?;
+                self.ensure_schema_privilege(
+                    schema,
+                    &current_user,
+                    crate::engine_schema_security::SchemaAclPrivilege::Create,
+                )?;
+            }
+        }
+        let current_user = self.current_user_name();
+        for relation in self
+            .relation_lookup_candidates(name)
+            .map_err(|error| SQLError::Internal(format!("resolve index table `{name}`: {error}")))?
+        {
+            if qualified_schema.is_none()
+                && relation.schema != self.temporary_schema_name()
+                && !self.schema_has_privilege_for_role(
+                    &relation.schema,
+                    &current_user,
+                    crate::engine_schema_security::SchemaAclPrivilege::Usage,
+                )
+            {
+                continue;
+            }
+            if self.storage.tables.read().contains_key(&relation) {
+                if qualified_schema.is_none() {
+                    self.ensure_existing_relation_creation_privilege(&relation.qualified_name())?;
+                }
+                return Ok(Some(relation.qualified_name()));
+            }
+        }
+        Ok(None)
+    }
+
     pub(crate) fn relation_kind_at(
         &self,
         canonical_name: &str,

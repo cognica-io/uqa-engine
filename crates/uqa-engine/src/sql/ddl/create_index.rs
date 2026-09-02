@@ -13,8 +13,11 @@ use super::{
 
 pub(in crate::sql) fn run_create_index(
     engine: &Engine,
-    c: CreateIndex,
+    mut c: CreateIndex,
 ) -> Result<SQLResult, SQLError> {
+    c.table = engine
+        .try_resolve_index_table_name(&c.table)?
+        .ok_or_else(|| SQLError::UnknownTable(c.table.clone()))?;
     let table = engine.require_table(&c.table)?;
     if table.persistence == uqa_sql::ast::RelationPersistence::Temporary {
         engine.ensure_temporary_relation_creation_privilege()?;
@@ -44,7 +47,9 @@ pub(in crate::sql) fn run_create_index(
         }
         name.clone()
     } else {
-        allocate_default_index_name(engine, &c.table, &c.columns)?
+        let relation = crate::RelationIdentity::from_legacy_name(&c.table)
+            .map_err(|error| SQLError::Internal(format!("resolve index table: {error}")))?;
+        allocate_default_index_name(engine, &relation.name, &c.columns)?
     };
 
     validate_index_columns(engine, &c)?;

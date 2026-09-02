@@ -429,20 +429,23 @@ fn relation_form_wrong_kind_and_option_errors_use_postgresql_states() {
         ("ALTER VIEW plain SET (security_barrier=maybe)", "22023"),
         (
             "CREATE TABLE plain AS SELECT * FROM relation_that_does_not_exist",
-            "42P07",
+            "42P01",
         ),
         (
             "CREATE TABLE occupied_sequence AS SELECT * FROM relation_that_does_not_exist",
-            "42P07",
+            "42P01",
         ),
     ] {
         let error = engine.sql(sql, &[]).unwrap_err();
         assert_eq!(error.sqlstate(), Some(state), "{sql}: {error}");
     }
-    exec(
-        &engine,
-        "CREATE TABLE IF NOT EXISTS plain AS SELECT * FROM relation_that_does_not_exist",
-    );
+    let missing_source = engine
+        .sql(
+            "CREATE TABLE IF NOT EXISTS plain AS SELECT * FROM relation_that_does_not_exist",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(missing_source.sqlstate(), Some("42P01"));
     exec(&engine, "DROP MATERIALIZED VIEW materialized");
     exec(&engine, "DROP VIEW plain");
 }

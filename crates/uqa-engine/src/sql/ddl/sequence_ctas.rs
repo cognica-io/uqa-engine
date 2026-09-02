@@ -63,43 +63,34 @@ fn run_create_table_as_inner(
     execution: &CreateTableAsExecution<'_>,
 ) -> Result<SQLResult, SQLError> {
     let ctes = crate::sql::select::CteScope::new_for_current_routine(engine);
-    // PostgreSQL analyzes a CTAS source before surfacing a missing temporary-object privilege, while an authorized WITH DATA statement checks a target collision before source analysis.
+    // PostgreSQL analyzes the CTAS source before target namespace resolution, collisions, or schema CREATE. Source execution still follows target validation, so an existing target wins over runtime expression errors and row locks.
     let temporary_privilege_error =
         if execution.persistence == uqa_sql::ast::RelationPersistence::Temporary {
             engine.ensure_temporary_relation_creation_privilege().err()
         } else {
             None
         };
-    let mut query_schema = (execution.with_no_data || temporary_privilege_error.is_some())
-        .then(|| {
-            crate::sql::select::analyze_query_plan_schema(
-                engine,
-                execution.query,
-                execution.params,
-                &ctes,
-                None,
-            )
-        })
-        .transpose()?;
+    let query_schema = crate::sql::select::analyze_query_plan_schema(
+        engine,
+        execution.query,
+        execution.params,
+        &ctes,
+        None,
+    )?;
     if let Some(error) = temporary_privilege_error {
         return Err(error);
     }
-    let preliminary_name = create_table_as_target_name(engine, execution);
-    if let Ok(name) = &preliminary_name {
-        if should_skip_existing_create_table_as(engine, name, execution.if_not_exists)? {
-            return Ok(SQLResult::empty());
-        }
+    let preliminary_name = create_table_as_target_name(engine, execution)?;
+    if should_skip_existing_create_table_as(engine, &preliminary_name, execution.if_not_exists)? {
+        return Ok(SQLResult::empty());
+    }
+    let columns = create_table_as_columns(&query_schema, execution.column_names)?;
+    if execution.persistence != uqa_sql::ast::RelationPersistence::Temporary {
+        engine.ensure_relation_creation_privilege(&preliminary_name)?;
     }
     // A locking source must acquire and recheck every tuple before this session promotes its deferred backend transaction. Promoting first would invert the global writer and tuple-lock order against a concurrent updater. The target is checked again after promotion so a concurrent relation create still wins atomically.
     let locking_result =
         if !execution.with_no_data && crate::sql::select::query_has_row_locks(execution.query) {
-            query_schema = Some(crate::sql::select::analyze_query_plan_schema(
-                engine,
-                execution.query,
-                execution.params,
-                &ctes,
-                None,
-            )?);
             Some(crate::sql::select::execute_query_plan(
                 engine,
                 execution.query,
@@ -115,17 +106,9 @@ fn run_create_table_as_inner(
     if should_skip_existing_create_table_as(engine, &name, execution.if_not_exists)? {
         return Ok(SQLResult::empty());
     }
-    let query_schema = match query_schema {
-        Some(schema) => schema,
-        None => crate::sql::select::analyze_query_plan_schema(
-            engine,
-            execution.query,
-            execution.params,
-            &ctes,
-            None,
-        )?,
-    };
-    let columns = create_table_as_columns(&query_schema, execution.column_names)?;
+    if execution.persistence != uqa_sql::ast::RelationPersistence::Temporary {
+        engine.ensure_relation_creation_privilege(&name)?;
+    }
     let result = if execution.with_no_data {
         None
     } else if let Some(result) = locking_result {
@@ -166,9 +149,7 @@ fn create_table_as_target_name(
     if execution.persistence == uqa_sql::ast::RelationPersistence::Temporary {
         engine.try_temporary_relation_name_for_create(execution.name)
     } else {
-        engine
-            .try_relation_name_for_create(execution.name)
-            .map_err(SQLError::Unsupported)
+        engine.resolve_relation_name_for_sql_create(execution.name)
     }
 }
 

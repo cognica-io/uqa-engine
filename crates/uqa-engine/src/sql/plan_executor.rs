@@ -353,9 +353,12 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         for column in &statement.columns {
             super::validate_postgres_column_name(&column.name)?;
         }
+        let name = self
+            .engine
+            .try_relation_name_for_sql_create(&statement.name)?;
         self.engine
             .register_foreign_table(
-                statement.name.clone(),
+                name,
                 statement.server_name.clone(),
                 statement.columns.clone(),
                 statement.options.clone(),

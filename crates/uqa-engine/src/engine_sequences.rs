@@ -212,19 +212,10 @@ impl Engine {
         let name = if persistence == uqa_sql::ast::RelationPersistence::Temporary {
             self.try_temporary_relation_name_for_create(name)?
         } else {
-            self.try_relation_name_for_create(name)
-                .map_err(SQLError::Unsupported)?
+            self.try_relation_name_for_sql_create(name)?
         };
         let relation = Self::resolved_relation_identity(&name)
             .map_err(|error| SQLError::Internal(format!("resolve sequence `{name}`: {error}")))?;
-        if persistence != uqa_sql::ast::RelationPersistence::Temporary {
-            let current_user = self.current_user_name();
-            self.ensure_schema_privilege(
-                &relation.schema,
-                &current_user,
-                crate::engine_schema_security::SchemaAclPrivilege::Create,
-            )?;
-        }
         self.refresh_sequences_from_catalog().map_err(|error| {
             SQLError::Internal(format!("load sequence catalog for `{name}`: {error}"))
         })?;

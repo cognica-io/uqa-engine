@@ -737,5 +737,8 @@ mod pg18_attribute_catalog;
 #[path = "sql_information_schema/database_privileges.rs"]
 mod database_privileges;
 
+#[path = "sql_information_schema/schema_privilege_enforcement.rs"]
+mod schema_privilege_enforcement;
+
 #[path = "sql_information_schema/pg18_routines.rs"]
 mod pg18_routines;

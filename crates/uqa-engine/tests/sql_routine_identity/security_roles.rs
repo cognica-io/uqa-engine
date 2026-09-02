@@ -131,6 +131,9 @@ fn pg18_support_function_validation_precedes_superuser_check() {
         "42883"
     );
     engine.sql("CREATE ROLE support_caller LOGIN", &[]).unwrap();
+    engine
+        .sql("GRANT CREATE ON SCHEMA public TO support_caller", &[])
+        .unwrap();
     engine.sql("SET ROLE support_caller", &[]).unwrap();
     assert_eq!(
         sqlstate(

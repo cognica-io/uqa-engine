@@ -84,6 +84,12 @@ docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/pa
 docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/schema_privilege_inquiry_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/schema_privilege_inquiry_oracle.expected.txt -
 ```
 
+`schema_create_enforcement_oracle.sql` records PostgreSQL 18.4 schema `CREATE` enforcement across supported schema object boundaries. The checked-in transcript verifies tables, CTAS, `SELECT INTO`, views, materialized views, sequences, foreign tables, functions, procedures, indexes, indexed key constraints, qualified and search-path targets, collision and definition-error precedence, inherited grants, immediate revocation, inferred temporary views, transactions, and savepoints.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/schema_create_enforcement_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/schema_create_enforcement_oracle.expected.txt -
+```
+
 `sequence_security_oracle.sql` records PostgreSQL 18.4 sequence role ownership and ACL behavior. The checked-in transcript verifies the default ACL and owner, an independent grant-option chain, all six `has_sequence_privilege` name/OID overloads, value-function access, grant-option `CASCADE`, implicit owner grant options after self-revocation, and ownership-transfer grantor rewriting.
 
 ```sh

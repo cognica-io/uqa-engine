@@ -14,6 +14,7 @@ mod inquiry;
 use acl::{grant_acl, requested_acl_privileges, revoke_acl, select_acl_grantor};
 pub(crate) use acl::{role_has_schema_privilege, SchemaAclPrivilege};
 use uqa_sql::ast::{GrantSchemaStmt, SchemaRevokeBehavior};
+use uqa_storage::{SchemaAclEntry, SchemaPrivileges};
 
 use crate::engine_roles::{RoleDefinition, RoleMembership, RoleMembershipKey};
 use crate::engine_state::SchemaSecurity;
@@ -128,20 +129,35 @@ impl Engine {
         role: &str,
         privilege: SchemaAclPrivilege,
     ) -> bool {
-        if schema == self.temporary_schema_name() {
-            return true;
-        }
-        let schemas = self.durable.schemas.read();
-        let Some(security) = schemas.get(schema) else {
-            return crate::engine_session::is_virtual_system_schema(schema);
+        let Some(security) = self.schema_security_for_privilege(schema) else {
+            return false;
         };
         role_has_schema_privilege(
-            security,
+            &security,
             role,
             privilege,
             &self.durable.roles.read(),
             &self.durable.role_memberships.read(),
         )
+    }
+
+    pub(crate) fn schema_security_for_privilege(&self, schema: &str) -> Option<SchemaSecurity> {
+        if let Some(security) = self.durable.schemas.read().get(schema) {
+            return Some(security.clone());
+        }
+        match schema {
+            "pg_catalog" | "information_schema" => {
+                Some(schema_security_with_public_privileges(false))
+            }
+            "ag_catalog" => Some(SchemaSecurity::legacy("ag_catalog")),
+            name if name == self.temporary_schema_name() => {
+                Some(schema_security_with_public_privileges(true))
+            }
+            name if self.durable.graphs.read().contains_key(name) => {
+                Some(SchemaSecurity::legacy(name))
+            }
+            _ => None,
+        }
     }
 
     pub(crate) fn ensure_schema_privilege(
@@ -157,6 +173,30 @@ impl Engine {
             sqlstate: "42501".into(),
             message: format!("permission denied for schema {schema}"),
         })
+    }
+}
+
+fn schema_security_with_public_privileges(create: bool) -> SchemaSecurity {
+    let role_owner = "uqa".to_string();
+    SchemaSecurity {
+        role_owner: role_owner.clone(),
+        acl: Some(vec![
+            SchemaAclEntry {
+                role: role_owner.clone(),
+                grantor: Some(role_owner.clone()),
+                privileges: SchemaPrivileges::ALL,
+                grant_options: SchemaPrivileges::default(),
+            },
+            SchemaAclEntry {
+                role: "PUBLIC".into(),
+                grantor: Some(role_owner),
+                privileges: SchemaPrivileges {
+                    usage: true,
+                    create,
+                },
+                grant_options: SchemaPrivileges::default(),
+            },
+        ]),
     }
 }
 

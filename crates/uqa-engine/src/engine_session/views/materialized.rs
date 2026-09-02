@@ -64,20 +64,6 @@ impl Engine {
             engine.synchronize_catalog_registries().map_err(|error| {
                 SQLError::Internal(format!("refresh materialized-view catalog: {error}"))
             })?;
-            let name = engine
-                .try_relation_name_for_create(name)
-                .map_err(SQLError::Unsupported)?;
-            if let Some(kind) = engine.relation_kind_at(&name).map_err(|error| {
-                SQLError::Internal(format!("resolve relation `{name}`: {error}"))
-            })? {
-                if if_not_exists {
-                    return Ok(());
-                }
-                return Err(SQLError::Routine {
-                    sqlstate: "42P07".into(),
-                    message: format!("relation \"{name}\" already exists as {kind}"),
-                });
-            }
             if engine.bind_view_plan_for_create(&mut plan)? {
                 return Err(SQLError::Routine {
                     sqlstate: "0A000".into(),
@@ -90,6 +76,19 @@ impl Engine {
             for column in &output_columns {
                 crate::sql::validate_postgres_column_name(column)?;
             }
+            let name = engine.resolve_relation_name_for_sql_create(name)?;
+            if let Some(kind) = engine.relation_kind_at(&name).map_err(|error| {
+                SQLError::Internal(format!("resolve relation `{name}`: {error}"))
+            })? {
+                if if_not_exists {
+                    return Ok(());
+                }
+                return Err(SQLError::Routine {
+                    sqlstate: "42P07".into(),
+                    message: format!("relation \"{name}\" already exists as {kind}"),
+                });
+            }
+            engine.ensure_relation_creation_privilege(&name)?;
             let materialized_column_types = query_schema.column_types().to_vec();
             let materialized_rows = if with_no_data {
                 Vec::new()

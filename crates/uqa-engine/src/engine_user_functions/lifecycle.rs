@@ -188,12 +188,7 @@ impl Engine {
     pub(crate) fn register_sql_function(&self, mut def: CreateFunction) -> Result<(), SQLError> {
         self.prepare_explicit_transaction_writer()?;
         let requested_name = def.name.clone();
-        def.name = self
-            .try_relation_name_for_create(&requested_name)
-            .map_err(|error| SQLError::Routine {
-                sqlstate: "3F000".into(),
-                message: error,
-            })?;
+        def.name = self.try_relation_name_for_sql_create(&requested_name)?;
         resolve_routine_type_references(self, &mut def)?;
         if def.owner.is_empty() {
             def.owner = self.current_user_name();

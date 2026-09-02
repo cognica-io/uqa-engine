@@ -8,8 +8,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use uqa_storage::{SchemaAclEntry, SchemaPrivileges};
-
 use super::acl::{parse_privilege_checks, role_has_schema_privilege_check};
 use super::{Engine, RoleDefinition, SQLError, SchemaSecurity};
 use crate::Value;
@@ -116,22 +114,7 @@ impl Engine {
     }
 
     fn schema_security_for_inquiry(&self, schema: &str) -> Option<SchemaSecurity> {
-        if let Some(security) = self.durable.schemas.read().get(schema) {
-            return Some(security.clone());
-        }
-        match schema {
-            "pg_catalog" | "information_schema" => {
-                Some(schema_security_with_public_privileges(false))
-            }
-            "ag_catalog" => Some(SchemaSecurity::legacy("ag_catalog")),
-            name if name == self.temporary_schema_name() => {
-                Some(schema_security_with_public_privileges(true))
-            }
-            name if self.durable.graphs.read().contains_key(name) => {
-                Some(SchemaSecurity::legacy(name))
-            }
-            _ => None,
-        }
+        self.schema_security_for_privilege(schema)
     }
 }
 
@@ -157,29 +140,5 @@ fn resolve_schema_privilege_role(
         other => Err(SQLError::TypeMismatch(format!(
             "has_schema_privilege role must be name or oid, got {other:?}"
         ))),
-    }
-}
-
-fn schema_security_with_public_privileges(create: bool) -> SchemaSecurity {
-    let role_owner = "uqa".to_string();
-    SchemaSecurity {
-        role_owner: role_owner.clone(),
-        acl: Some(vec![
-            SchemaAclEntry {
-                role: role_owner.clone(),
-                grantor: Some(role_owner.clone()),
-                privileges: SchemaPrivileges::ALL,
-                grant_options: SchemaPrivileges::default(),
-            },
-            SchemaAclEntry {
-                role: "PUBLIC".into(),
-                grantor: Some(role_owner),
-                privileges: SchemaPrivileges {
-                    usage: true,
-                    create,
-                },
-                grant_options: SchemaPrivileges::default(),
-            },
-        ]),
     }
 }

@@ -205,13 +205,15 @@ fn run_alter_table_action(
     stmt: AlterTableStmt,
     action: AlterTableAction,
 ) -> Result<(), SQLError> {
-    if matches!(&action, AlterTableAction::AddKeyConstraint { .. })
-        && engine
+    if matches!(&action, AlterTableAction::AddKeyConstraint { .. }) {
+        let persistence = engine
             .table_persistence(&stmt.table)
-            .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?
-            == Some(uqa_sql::ast::RelationPersistence::Temporary)
-    {
-        engine.ensure_temporary_relation_creation_privilege()?;
+            .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
+        if persistence == Some(uqa_sql::ast::RelationPersistence::Temporary) {
+            engine.ensure_temporary_relation_creation_privilege()?;
+        } else {
+            engine.ensure_existing_relation_creation_privilege(&stmt.table)?;
+        }
     }
     if !matches!(
         action,
@@ -248,9 +250,17 @@ fn run_alter_table_action(
                 if if_not_exists {
                     return Ok(());
                 }
-                return Err(SQLError::Unsupported(format!(
-                    "ALTER TABLE ADD COLUMN: column `{col_name}` already exists"
-                )));
+                let relation =
+                    crate::RelationIdentity::from_legacy_name(&stmt.table).map_err(|error| {
+                        SQLError::Internal(format!("resolve ALTER TABLE target: {error}"))
+                    })?;
+                return Err(SQLError::Routine {
+                    sqlstate: "42701".into(),
+                    message: format!(
+                        "column \"{col_name}\" of relation \"{}\" already exists",
+                        relation.name
+                    ),
+                });
             }
             if let Some(default) = &column.default {
                 validate_default_expression(engine, default, &column.ty)?;
@@ -314,12 +324,15 @@ fn run_alter_table_action(
                 reference.table = foreign_key.ref_table;
                 reference.column = Some(referenced_column.clone());
             }
-            if (column.primary_key || column.unique)
-                && engine.table_persistence(&stmt.table).map_err(|error| {
+            if column.primary_key || column.unique {
+                let persistence = engine.table_persistence(&stmt.table).map_err(|error| {
                     ddl_storage_error("ALTER TABLE ADD COLUMN constraint", error)
-                })? == Some(uqa_sql::ast::RelationPersistence::Temporary)
-            {
-                engine.ensure_temporary_relation_creation_privilege()?;
+                })?;
+                if persistence == Some(uqa_sql::ast::RelationPersistence::Temporary) {
+                    engine.ensure_temporary_relation_creation_privilege()?;
+                } else {
+                    engine.ensure_existing_relation_creation_privilege(&stmt.table)?;
+                }
             }
             let generated_kind = column.generated.as_ref().map(|generated| generated.kind);
             match column.ty {
