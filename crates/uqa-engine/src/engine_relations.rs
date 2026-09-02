@@ -247,7 +247,7 @@ impl Engine {
         )
     }
 
-    /// Resolve the table targeted by `CREATE INDEX` while preserving `PostgreSQL`'s qualified-name precedence: namespace privileges are checked before the table's existence, access method, or indexed columns.
+    /// Resolve the table targeted by `CREATE INDEX` while preserving `PostgreSQL`'s qualified-name precedence: namespace `USAGE` is checked before the table's existence, while the caller checks table ownership before namespace `CREATE` and the index definition.
     pub(crate) fn try_resolve_index_table_name(
         &self,
         name: &str,
@@ -274,11 +274,6 @@ impl Engine {
                     &current_user,
                     crate::engine_schema_security::SchemaAclPrivilege::Usage,
                 )?;
-                self.require_schema_privilege(
-                    schema,
-                    &current_user,
-                    crate::engine_schema_security::SchemaAclPrivilege::Create,
-                )?;
             }
         }
         let current_user = self.current_user_name();
@@ -297,9 +292,6 @@ impl Engine {
                 continue;
             }
             if self.storage.tables.read().contains_key(&relation) {
-                if qualified_schema.is_none() {
-                    self.ensure_existing_relation_creation_privilege(&relation.qualified_name())?;
-                }
                 return Ok(Some(relation.qualified_name()));
             }
             if self.durable.views.read().contains_key(&relation)

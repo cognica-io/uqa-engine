@@ -394,6 +394,7 @@ fn run_drop_index(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
                             "resolved index `{canonical}` has no bound catalog row"
                         ))
                     })?;
+                engine.require_index_drop_authority(&row)?;
                 indexes.push(row);
             }
             RelationResolution::Found(_, _) => {

@@ -108,6 +108,12 @@ docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/pa
 docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/index_namespace_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/index_namespace_oracle.expected.txt -
 ```
 
+`index_ownership_oracle.sql` records PostgreSQL 18.4 standalone-index ownership. The checked-in transcript verifies schema `USAGE`, table ownership, schema `CREATE`, and definition-error ordering for creation; inherited table-owner and containing-schema-owner drop authority; `IF EXISTS`; atomic multi-target preflight; table-owner transfer; transaction rollback; and exact `pg_class.relowner` projection.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/index_ownership_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/index_ownership_oracle.expected.txt -
+```
+
 `table_ownership_oracle.sql` records PostgreSQL 18.4 ordinary-table owner creation, inherited owner authority, ALTER and DROP checks, containing-schema owner DROP authority, target-role existence, SET and schema-CREATE requirements, superuser transfer, serial-sequence propagation, transaction rollback, catalog projection, and dependent-role errors.
 
 ```sh

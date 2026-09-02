@@ -746,6 +746,9 @@ mod relation_schema_usage;
 #[path = "sql_information_schema/table_ownership.rs"]
 mod table_ownership;
 
+#[path = "sql_information_schema/index_ownership.rs"]
+mod index_ownership;
+
 #[path = "sql_information_schema/view_ownership.rs"]
 mod view_ownership;
 

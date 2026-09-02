@@ -18,10 +18,8 @@ pub(in crate::sql) fn run_create_index(
     c.table = engine
         .try_resolve_index_table_name(&c.table)?
         .ok_or_else(|| SQLError::UnknownTable(c.table.clone()))?;
-    let table = engine.require_table(&c.table)?;
-    if table.persistence == uqa_sql::ast::RelationPersistence::Temporary {
-        engine.ensure_temporary_relation_creation_privilege()?;
-    }
+    engine.ensure_table_owner(&c.table)?;
+    engine.ensure_existing_relation_creation_privilege(&c.table)?;
     // Every accepted access method has a matching physical implementation.
     // Reject unknown methods before allocating a name or mutating any table,
     // index, analyzer, or catalog state.

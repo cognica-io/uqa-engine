@@ -1,0 +1,25 @@
+initial-owner|uqa_index_owner_table
+creator-create|42501|must be owner of table items
+schema-owner-create|42501|must be owner of table items
+member-create|ok
+member-created-owner|uqa_index_owner_table
+owner-without-create|42501|permission denied for schema uqa_index_ownership_oracle
+owner-without-usage|42501|permission denied for schema uqa_index_ownership_oracle
+nonowner-before-create-and-definition|42501|must be owner of table items
+missing-table-before-create|42P01|relation "uqa_index_ownership_oracle.missing" does not exist
+if-not-exists-still-checks-owner|42501|must be owner of table items
+outsider-drop|42501|must be owner of index outsider_drop_idx
+creator-drop|42501|must be owner of index owner_drop_idx
+member-drop|ok
+schema-owner-drop|ok
+owner-drop|ok
+multi-target-atomic|42501|must be owner of index multi_creator_idx
+after-multi-target|multi_creator_idx,multi_owner_idx
+if-exists-existing-checks-owner|42501|must be owner of index multi_creator_idx
+schema-owner-multi-drop|ok
+after-schema-owner-multi|0
+transaction-owner|uqa_index_owner_next
+rollback-owner|uqa_index_owner_table
+transferred-owner|uqa_index_owner_next
+former-owner-drop|42501|must be owner of index transfer_idx
+new-owner-drop|ok

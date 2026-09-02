@@ -4,7 +4,9 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{CatalogIndexRow, Engine, RelationIdentity, StorageBackendError, StorageBackendResult};
+use super::{
+    CatalogIndexRow, Engine, RelationIdentity, SQLError, StorageBackendError, StorageBackendResult,
+};
 
 impl Engine {
     pub fn register_catalog_index(
@@ -291,5 +293,39 @@ impl Engine {
             .read()
             .get(&RelationIdentity::new(schema, name))
             .cloned())
+    }
+
+    /// An index has no independent owner: `PostgreSQL` derives its owner from the indexed table and additionally permits the containing schema's owner to drop it.
+    pub(crate) fn require_index_drop_authority(
+        &self,
+        index: &CatalogIndexRow,
+    ) -> Result<(), SQLError> {
+        let table = RelationIdentity::from_legacy_name(&index.table_name)
+            .map_err(|error| SQLError::Internal(format!("resolve indexed table: {error}")))?;
+        let table_owner = self
+            .storage
+            .tables
+            .read()
+            .get(&table)
+            .cloned()
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "index `{}` references missing table `{}`",
+                    index.relation.qualified_name(),
+                    index.table_name
+                ))
+            })?
+            .role_owner();
+        if self.current_user_has_role_privileges(&table_owner)
+            || self
+                .schema_security_for_privilege(&index.relation.schema)
+                .is_some_and(|schema| self.current_user_has_role_privileges(&schema.role_owner))
+        {
+            return Ok(());
+        }
+        Err(SQLError::Routine {
+            sqlstate: "42501".into(),
+            message: format!("must be owner of index {}", index.relation.name),
+        })
     }
 }
