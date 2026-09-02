@@ -150,6 +150,7 @@ pub(super) struct UnifiedPlanExecutor<'engine, 'params> {
     mutation: MutationCoordinator<'engine>,
     params: &'params [SQLParam],
     nested_statement: bool,
+    privilege_subject: Option<String>,
 }
 
 impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
@@ -173,7 +174,13 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             mutation: engine.mutation_coordinator(),
             params,
             nested_statement,
+            privilege_subject: None,
         }
+    }
+
+    pub(super) fn with_privilege_subject(mut self, subject: &str) -> Self {
+        self.privilege_subject = Some(subject.to_string());
+        self
     }
 
     pub(super) fn execute(&mut self, plan: &UnifiedPlan) -> Result<SQLResult, SQLError> {
@@ -189,7 +196,8 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         if self.session.transaction_depth() != 0 {
             select::lock_query_relations(self.engine, query)?;
         }
-        let mut ctes = select::CteScope::new_for_current_routine(self.engine);
+        let mut ctes =
+            select::CteScope::new_for_statement(self.engine, self.privilege_subject.as_deref());
         select::execute_query_plan_with_ctes(self.engine, query, self.params, &mut ctes)
     }
 
@@ -207,7 +215,8 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         if self.session.transaction_depth() != 0 {
             select::lock_query_relations(self.engine, query)?;
         }
-        let mut ctes = select::CteScope::new_for_current_routine(self.engine);
+        let mut ctes =
+            select::CteScope::new_for_statement(self.engine, self.privilege_subject.as_deref());
         select::execute_query_plan_output(
             self.engine,
             query,
@@ -218,15 +227,42 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
     }
 
     fn execute_insert(&self, plan: &InsertPlan) -> Result<SQLResult, SQLError> {
-        run_insert(self.engine, plan.clone(), self.params)
+        let mut plan = plan.clone();
+        self.apply_statement_privilege_subject(
+            &mut plan.statement_privilege_subject,
+            &mut plan.target_privilege_subject,
+        );
+        run_insert(self.engine, plan, self.params)
     }
 
     fn execute_update(&self, plan: &UpdatePlan) -> Result<SQLResult, SQLError> {
-        run_update(self.engine, plan.clone(), self.params)
+        let mut plan = plan.clone();
+        self.apply_statement_privilege_subject(
+            &mut plan.statement_privilege_subject,
+            &mut plan.target_privilege_subject,
+        );
+        run_update(self.engine, plan, self.params)
     }
 
     fn execute_delete(&self, plan: &DeletePlan) -> Result<SQLResult, SQLError> {
-        run_delete(self.engine, plan.clone(), self.params)
+        let mut plan = plan.clone();
+        self.apply_statement_privilege_subject(
+            &mut plan.statement_privilege_subject,
+            &mut plan.target_privilege_subject,
+        );
+        run_delete(self.engine, plan, self.params)
+    }
+
+    fn apply_statement_privilege_subject(
+        &self,
+        statement_subject: &mut Option<String>,
+        target_subject: &mut Option<String>,
+    ) {
+        let Some(subject) = self.privilege_subject.as_ref() else {
+            return;
+        };
+        statement_subject.get_or_insert_with(|| subject.clone());
+        target_subject.get_or_insert_with(|| subject.clone());
     }
 
     fn execute_create_view(
@@ -274,7 +310,11 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
     ) -> Result<SQLResult, SQLError> {
         let analysis = if analyze {
             let started = std::time::Instant::now();
-            let result = UnifiedPlanExecutor::new_nested(self.engine, self.params).execute(body)?;
+            let mut executor = UnifiedPlanExecutor::new_nested(self.engine, self.params);
+            executor
+                .privilege_subject
+                .clone_from(&self.privilege_subject);
+            let result = executor.execute(body)?;
             let rows = u64::try_from(result.rows.len())
                 .map_err(|_| SQLError::Internal("EXPLAIN ANALYZE row count exceeds u64".into()))?;
             Some(super::select::ExplainAnalysis {
@@ -369,7 +409,12 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
     }
 
     fn execute_merge(&self, plan: &MergePlan) -> Result<SQLResult, SQLError> {
-        run_merge(self.engine, plan.clone(), self.params)
+        let mut plan = plan.clone();
+        self.apply_statement_privilege_subject(
+            &mut plan.statement_privilege_subject,
+            &mut plan.target_privilege_subject,
+        );
+        run_merge(self.engine, plan, self.params)
     }
 
     fn execute_call(

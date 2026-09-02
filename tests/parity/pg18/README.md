@@ -120,6 +120,12 @@ docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/pa
 docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/trigger_privilege_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/trigger_privilege_oracle.expected.txt -
 ```
 
+`rule_privilege_oracle.sql` records PostgreSQL 18.4 table and regular-view rewrite-rule authorization and action security. The checked-in transcript verifies owner-only creation and replacement, inherited ownership, DROP, rename, enable, missing-rule ordering, live owner transfer, action target and source relation privileges, invoker-visible `current_user`, and exact SQLSTATEs and primary messages.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/rule_privilege_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/rule_privilege_oracle.expected.txt -
+```
+
 `foreign_table_trigger_oracle.sql` records PostgreSQL 18.4 foreign-table trigger definition and lifecycle behavior. The checked-in transcript verifies ordinary row and statement forms, replacement, `UPDATE OF`, `WHEN`, `TRUNCATE`, invalid constraint, transition, and `INSTEAD OF` forms, target and function authorization, `pg_trigger`, `relhastriggers`, enable, rename, drop, owner transfer, rollback, function dependencies, and relation-drop cleanup.
 
 ```sh

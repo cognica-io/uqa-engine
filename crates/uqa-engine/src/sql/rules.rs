@@ -162,6 +162,7 @@ impl PreparedRuleBatch {
                 executed_action: false,
             });
         }
+        let privilege_subject = engine.rule_privilege_subject(&self.table)?;
         let _guard = RuleExecutionGuard::enter(&self.table, self.event)?;
         let columns = rule_columns(engine, &self.table)?;
         let returning_columns = request
@@ -297,7 +298,12 @@ impl PreparedRuleBatch {
                 } else if action_returns {
                     clear_statement_returning(&mut bound);
                 }
-                let result = super::execute_compiled_statement(engine, bound, &[])?;
+                let result = super::execute_compiled_statement_with_privilege_subject(
+                    engine,
+                    bound,
+                    &[],
+                    &privilege_subject,
+                )?;
                 affected_rows = result.affected_rows;
                 executed_action = true;
                 if captures_action {

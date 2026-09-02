@@ -55,6 +55,15 @@ impl CteScope {
         scope
     }
 
+    pub(in crate::sql) fn new_for_statement(
+        engine: &Engine,
+        privilege_subject: Option<&str>,
+    ) -> Self {
+        let mut scope = Self::new_for_current_routine(engine);
+        scope.privilege_subject = privilege_subject.map(str::to_string);
+        scope
+    }
+
     pub(in crate::sql) fn new_for_catalog_binding(engine: &Engine) -> Self {
         Self {
             catalog: Some(engine.restored_catalog_read_view()),

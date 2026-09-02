@@ -12,6 +12,8 @@ use uqa_engine::Engine;
 
 #[path = "sql_rules/persistence.rs"]
 mod persistence;
+#[path = "sql_rules/privileges.rs"]
+mod privileges;
 #[path = "sql_rules/returning.rs"]
 mod returning;
 

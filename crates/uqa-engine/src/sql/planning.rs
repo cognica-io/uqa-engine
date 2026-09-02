@@ -209,3 +209,18 @@ pub(crate) fn execute_compiled_statement(
     let plan = optimize_engine_plan(engine, plan)?;
     UnifiedPlanExecutor::new_nested(engine, params).execute(&plan)
 }
+
+pub(crate) fn execute_compiled_statement_with_privilege_subject(
+    engine: &Engine,
+    statement: Statement,
+    params: &[SQLParam],
+    privilege_subject: &str,
+) -> Result<SQLResult, SQLError> {
+    let plan = uqa_planner::UnifiedPlan::lower_with(statement, &|name: &str| {
+        engine.has_registered_aggregate_function(name)
+    });
+    let plan = optimize_engine_plan(engine, plan)?;
+    UnifiedPlanExecutor::new_nested(engine, params)
+        .with_privilege_subject(privilege_subject)
+        .execute(&plan)
+}

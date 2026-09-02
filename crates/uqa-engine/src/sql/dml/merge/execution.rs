@@ -90,7 +90,7 @@ fn run_merge_inner(
     }
     let target_qual = stmt.target_qualifier.clone();
     let target_tables = engine.hierarchy_scan_tables(&target_table, stmt.include_descendants)?;
-    let mut ctes = CteScope::new_for_current_routine(engine);
+    let mut ctes = CteScope::new_for_statement(engine, stmt.statement_privilege_subject.as_deref());
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
     for clause in &stmt.when_clauses {
         match clause {

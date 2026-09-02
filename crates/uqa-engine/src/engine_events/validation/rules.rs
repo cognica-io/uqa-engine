@@ -245,6 +245,9 @@ impl Engine {
     ) -> Result<RelationIdentity, SQLError> {
         let (relation, _) = self.resolve_event_relation_kind(&definition.table, lookup_mode)?;
         definition.table = relation.qualified_name();
+        if lookup_mode == RelationLookupMode::Dynamic {
+            self.ensure_event_relation_owner(&relation, None)?;
+        }
         let stored_view_kind = self
             .durable
             .views

@@ -302,6 +302,8 @@ pub struct ViewRuleUpdatePlan {
 pub struct InsertPlan {
     pub table: String,
     pub target_relation_bound: bool,
+    /// Effective role used for non-target privilege checks in an internally rewritten statement.
+    pub statement_privilege_subject: Option<String>,
     /// Effective role used only for privilege checks on an internally rewritten target relation.
     pub target_privilege_subject: Option<String>,
     pub target_qualifier: String,
@@ -339,6 +341,8 @@ pub enum ConflictActionPlan {
 pub struct UpdatePlan {
     pub table: String,
     pub target_relation_bound: bool,
+    /// Effective role used for non-target privilege checks in an internally rewritten statement.
+    pub statement_privilege_subject: Option<String>,
     /// Effective role used only for privilege checks on an internally rewritten target relation.
     pub target_privilege_subject: Option<String>,
     pub target_qualifier: String,
@@ -360,6 +364,8 @@ pub struct UpdatePlan {
 pub struct DeletePlan {
     pub table: String,
     pub target_relation_bound: bool,
+    /// Effective role used for non-target privilege checks in an internally rewritten statement.
+    pub statement_privilege_subject: Option<String>,
     /// Effective role used only for privilege checks on an internally rewritten target relation.
     pub target_privilege_subject: Option<String>,
     pub target_qualifier: String,
@@ -377,6 +383,8 @@ pub struct DeletePlan {
 #[derive(Debug, Clone)]
 pub struct MergePlan {
     pub target: String,
+    /// Effective role used for non-target privilege checks in an internally rewritten statement.
+    pub statement_privilege_subject: Option<String>,
     /// Effective role used only for privilege checks on an internally rewritten target relation.
     pub target_privilege_subject: Option<String>,
     pub target_qualifier: String,

@@ -1,0 +1,25 @@
+create-denied|42501|must be owner of table items
+replace-denied|42501|must be owner of table items
+member-create|ok
+drop-denied|42501|must be owner of relation items
+drop-missing-denied|42704|rule "missing_rule" for relation "missing_items" does not exist
+drop-missing-if-exists|ok
+rename-denied|42501|must be owner of table alter_items
+rename-missing-denied|42501|must be owner of table alter_items
+disable-denied|42501|must be owner of table alter_items
+view-create-denied|42501|must be owner of view item_view
+view-rename-denied|42501|must be owner of view item_view
+runtime-owner-subject|ok
+runtime-row|uqa_rule_caller|42
+runtime-view-target|ok
+view-target|51
+runtime-caller-grants-ignored|42501|permission denied for table runtime_log
+runtime-count|1
+runtime-owner-source-denied|42501|permission denied for table runtime_secret
+runtime-owner-restored|ok
+runtime-rows|uqa_rule_caller:42,uqa_rule_caller:45
+former-owner-rename-denied|42501|must be owner of table transfer_items
+new-owner-rename|ok
+runtime-new-owner-denied|42501|permission denied for table runtime_log
+runtime-new-owner-granted|ok
+runtime-final|uqa_rule_caller:42,uqa_rule_caller:45,uqa_rule_caller:47

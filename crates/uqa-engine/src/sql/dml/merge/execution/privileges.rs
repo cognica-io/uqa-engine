@@ -91,7 +91,7 @@ pub(super) fn ensure_merge_privileges(engine: &Engine, stmt: &MergePlan) -> Resu
             required_columns: &[],
         },
     )?;
-    let mut ctes = CteScope::new_for_current_routine(engine);
+    let mut ctes = CteScope::new_for_statement(engine, stmt.statement_privilege_subject.as_deref());
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
     crate::sql::select::ensure_select_privileges_for_source_expressions(
         &stmt.source,

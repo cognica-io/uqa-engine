@@ -18,6 +18,7 @@
     "relation_schema_usage": "tests/parity/pg18/relation_schema_usage_oracle.expected.txt",
     "index_namespace": "tests/parity/pg18/index_namespace_oracle.expected.txt",
     "trigger_privileges": "tests/parity/pg18/trigger_privilege_oracle.expected.txt",
+    "rule_privileges": "tests/parity/pg18/rule_privilege_oracle.expected.txt",
     "foreign_table_triggers": "tests/parity/pg18/foreign_table_trigger_oracle.expected.txt",
     "table_ownership": "tests/parity/pg18/table_ownership_oracle.expected.txt",
     "view_ownership": "tests/parity/pg18/view_ownership_oracle.expected.txt",
@@ -138,6 +139,7 @@
       "ddl.triggers",
       "ddl.trigger-privilege-security",
       "ddl.foreign-table-trigger-catalog-security",
+      "ddl.rewrite-rule-relation-security",
       "ddl.rewrite-rules",
       "graph.age-default-label-drop",
       "graph.age-cypher-complete-matrix",
@@ -657,12 +659,20 @@
       "open_issue": null
     },
     {
+      "id": "ddl.rewrite-rule-relation-security",
+      "postgresql_reference": "PostgreSQL 18.4 CREATE RULE, ALTER RULE, DROP RULE, and Rules and Privileges documentation plus tests/parity/pg18/rule_privilege_oracle.expected.txt",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_catalog::sql_rules::privileges::; tests/parity/pg18/rule_privilege_oracle.sql",
+      "supported_version": "PostgreSQL 18.4 table and regular-view CREATE RULE and CREATE OR REPLACE RULE owner authorization; inherited target-owner authority; relation-owner-derived DROP, ALTER RULE rename, and ALTER TABLE enable modes without separate rule-owner state; missing-rule and IF EXISTS ordering; action target and source relation privileges checked as the target relation's live owner while SQL-visible current_user remains the invoker; owner transfer, transaction rollback, cross-engine refresh, failure atomicity, and durable reopen",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
       "id": "ddl.rewrite-rules",
       "postgresql_reference": "PostgreSQL 18.4 with Apache AGE stateful table-rule DDL, rewrite execution, ordering, cardinality, catalog, dependency, persistence, view _RETURN, ON CONFLICT, MERGE, and SQLSTATE behavior in tests/parity/pg18/rules_stateful.expected.json plus official rewrite-rule regression cases",
       "uqa_test": "cargo test -p uqa-sql --lib compiler::tests::ddl_lifecycle::rule_statements; cargo test -p uqa-engine --test integration engine_catalog::sql_rules::; env UQA_USQL=target/release/usql python3 tests/parity/pg18/run_routines_stateful.py --suite rules",
       "supported_version": "Durable PostgreSQL 18.4 table rewrite rules for INSERT VALUES, INSERT SELECT, UPDATE, and DELETE, with OLD- or NEW-referencing actions executed set-oriented over matching event rows and row-independent UPDATE and DELETE actions following original-command qualification cardinality for no-predicate, false-predicate, empty-target, UPDATE FROM, and DELETE USING cases, including nullable integer images, collision-free and correlated LATERAL action sources, PostgreSQL CTE, set-operation member, conditional set-operation action, unconditional ON INSERT set-operation one-row success and multi-row 0A000, and ON CONFLICT event-reference scope errors, unqualified INSERT and DELETE conditions, alphabetical ALSO and conditional or unconditional INSTEAD action ordering, DO NOTHING suppression, action statement-trigger cardinality, positional DML RETURNING with exact event-row type and type-modifier validation, one-provider restrictions, lazy projection evaluation, provider current/OLD/NEW images and aliases, UPDATE FROM source projections for UPDATE-provider actions, and DELETE USING source projections for DELETE-provider actions, canonical recursion detection, active-rule ON CONFLICT and MERGE rejection, CREATE OR REPLACE state retention, Origin, Replica, Always, and Disabled enable modes selected by session_replication_role, rename and drop lifecycle, relation and token-safe target-column dependencies, reserved _RETURN naming, view _RETURN replacement and protection, materialized-view rejection, pg_rewrite, pg_rules, relhasrules, hasrules, and compact or pretty pg_get_ruledef",
       "status": "partial",
-      "open_issue": "Rule-condition subqueries, OLD.* and NEW.* record expansion, NOTIFY actions, cross-relation and routine dependencies, inheritance and partition routing, privileges and rule-owner security, exact pg_node_tree serialization and deparsing, dump/restore, and the complete PostgreSQL 18 rewrite-rule regression schedule remain."
+      "open_issue": "Rule-condition subqueries, OLD.* and NEW.* record expansion, NOTIFY actions, cross-relation and routine dependencies, inheritance and partition routing, routine, sequence, and remaining privilege subjects, exact pg_node_tree serialization and deparsing, dump/restore, and the complete PostgreSQL 18 rewrite-rule regression schedule remain."
     },
     {
       "id": "graph.age-default-label-drop",

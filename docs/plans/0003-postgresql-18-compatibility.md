@@ -106,6 +106,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `ddl.triggers` | `M4` | `partial` |
 | `ddl.trigger-privilege-security` | `M4` | `verified` |
 | `ddl.foreign-table-trigger-catalog-security` | `M4` | `verified` |
+| `ddl.rewrite-rule-relation-security` | `M4` | `verified` |
 | `ddl.rewrite-rules` | `M4` | `partial` |
 | `graph.age-default-label-drop` | `M4` | `verified` |
 | `graph.age-cypher-complete-matrix` | `M4` | `partial` |

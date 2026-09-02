@@ -14,7 +14,7 @@ use uqa_sql::SQLError;
 use crate::engine_capabilities::{RelationLookupMode, RelationResolution};
 use crate::{Engine, RelationIdentity, StoredViewKind};
 
-use super::{duplicate_object, undefined_object, StoredRule, StoredTrigger};
+use super::{duplicate_object, undefined_object, undefined_rule, StoredRule, StoredTrigger};
 
 impl Engine {
     fn event_relation_owner(
@@ -54,7 +54,7 @@ impl Engine {
         )))
     }
 
-    fn ensure_event_relation_owner(
+    pub(in crate::engine_events) fn ensure_event_relation_owner(
         &self,
         relation: &RelationIdentity,
         error_kind: Option<&str>,
@@ -173,6 +173,15 @@ impl Engine {
         let (relation, _) = Self::event_relation_from_resolution(&statement.table, resolution)?;
         let mut bound = statement.clone();
         bound.table = relation.qualified_name();
+        let rule_exists = self
+            .durable
+            .rules
+            .read()
+            .get(&relation)
+            .is_some_and(|rules| rules.contains_key(&bound.name));
+        if rule_exists {
+            self.ensure_event_relation_owner(&relation, Some("relation"))?;
+        }
         self.drop_rule(&bound)
     }
 
@@ -205,7 +214,7 @@ impl Engine {
                 );
                 return Ok(());
             }
-            return Err(undefined_object("rule", &statement.name, &table));
+            return Err(undefined_rule(&statement.name, &table));
         }
         if next.get(&relation).is_some_and(BTreeMap::is_empty) {
             next.remove(&relation);
@@ -219,6 +228,7 @@ impl Engine {
 
     pub(crate) fn rename_rule(&self, table: &str, from: &str, to: &str) -> Result<(), SQLError> {
         let relation = self.resolve_rule_relation(table)?;
+        self.ensure_event_relation_owner(&relation, None)?;
         let is_view = self.view_definition(&relation.qualified_name())?.is_some();
         if is_view && from == "_RETURN" {
             return Err(SQLError::Routine {
@@ -238,7 +248,7 @@ impl Engine {
         }
         let mut rule = entries
             .remove(from)
-            .ok_or_else(|| undefined_object("rule", from, table))?;
+            .ok_or_else(|| undefined_rule(from, table))?;
         rule.definition.name = to.to_string();
         entries.insert(to.to_string(), rule);
         self.persist_rule_catalog_snapshot(&next)?;
@@ -254,18 +264,24 @@ impl Engine {
         mode: EventEnableMode,
     ) -> Result<(), SQLError> {
         let relation = self.resolve_rule_relation(table)?;
+        self.ensure_event_relation_owner(&relation, None)?;
         self.prepare_explicit_transaction_writer()?;
         let mut rules = self.durable.rules.write();
         let mut next = rules.clone();
         next.entry(relation)
             .or_default()
             .get_mut(name)
-            .ok_or_else(|| undefined_object("rule", name, table))?
+            .ok_or_else(|| undefined_rule(name, table))?
             .enabled = mode;
         self.persist_rule_catalog_snapshot(&next)?;
         *rules = next;
         self.note_catalog_registry_changed();
         Ok(())
+    }
+
+    pub(crate) fn rule_privilege_subject(&self, table: &str) -> Result<String, SQLError> {
+        let relation = self.resolve_rule_relation(table)?;
+        self.event_relation_owner(&relation).map(|(owner, _)| owner)
     }
 
     pub(crate) fn register_trigger(&self, mut definition: CreateTrigger) -> Result<(), SQLError> {

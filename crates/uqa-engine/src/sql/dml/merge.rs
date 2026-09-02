@@ -52,7 +52,7 @@ pub(in crate::sql) fn merge_command_returning_schema(
     if stmt.returning.is_empty() {
         return Ok(None);
     }
-    let mut ctes = CteScope::new_for_current_routine(engine);
+    let mut ctes = CteScope::new_for_statement(engine, stmt.statement_privilege_subject.as_deref());
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
     let source_schema =
         crate::sql::select::analyze_source_plan_schema(engine, &stmt.source, params, &ctes, None)?;
@@ -102,7 +102,8 @@ fn validate_view_merge_dispatch_contract(
     stmt: &MergePlan,
     params: &[SQLParam],
 ) -> Result<(), SQLError> {
-    let mut scope = CteScope::new_for_current_routine(engine);
+    let mut scope =
+        CteScope::new_for_statement(engine, stmt.statement_privilege_subject.as_deref());
     scope.scalar_subqueries.clone_from(&stmt.subqueries);
     let source =
         crate::sql::select::analyze_source_plan_schema(engine, &stmt.source, params, &scope, None)?;

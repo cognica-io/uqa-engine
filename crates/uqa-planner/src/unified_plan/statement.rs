@@ -103,6 +103,7 @@ impl UnifiedPlan {
                 Self::Command(Box::new(CommandPlan::Insert(Box::new(InsertPlan {
                     table: statement.table,
                     target_relation_bound: statement.target_relation_bound,
+                    statement_privilege_subject: None,
                     target_privilege_subject: None,
                     target_qualifier: statement.target_qualifier,
                     include_descendants: statement.include_descendants,
@@ -141,6 +142,7 @@ impl UnifiedPlan {
                 Self::Command(Box::new(CommandPlan::Update(Box::new(UpdatePlan {
                     table: statement.table,
                     target_relation_bound: statement.target_relation_bound,
+                    statement_privilege_subject: None,
                     target_privilege_subject: None,
                     target_qualifier: statement.target_qualifier,
                     include_descendants: statement.include_descendants,
@@ -176,6 +178,7 @@ impl UnifiedPlan {
                 Self::Command(Box::new(CommandPlan::Delete(Box::new(DeletePlan {
                     table: statement.table,
                     target_relation_bound: statement.target_relation_bound,
+                    statement_privilege_subject: None,
                     target_privilege_subject: None,
                     target_qualifier: statement.target_qualifier,
                     include_descendants: statement.include_descendants,
@@ -369,6 +372,7 @@ impl UnifiedPlan {
                     .collect();
                 Self::Command(Box::new(CommandPlan::Merge(Box::new(MergePlan {
                     target: statement.target,
+                    statement_privilege_subject: None,
                     target_privilege_subject: None,
                     target_qualifier: statement.target_qualifier,
                     target_alias: statement.target_alias,

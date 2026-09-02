@@ -61,6 +61,13 @@ fn undefined_object(kind: &str, name: &str, table: &str) -> SQLError {
     }
 }
 
+fn undefined_rule(name: &str, relation: &str) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "42704".into(),
+        message: format!("rule \"{name}\" for relation \"{relation}\" does not exist"),
+    }
+}
+
 mod lifecycle;
 mod lookup;
 mod persistence;

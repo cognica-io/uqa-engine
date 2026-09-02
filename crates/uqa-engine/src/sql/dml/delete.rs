@@ -152,7 +152,8 @@ pub(in crate::sql) fn run_delete_inner(
     let mut qualified_targets: Vec<MutationCandidate<Option<uqa_execution::OwnedPhysicalRow>>> =
         Vec::new();
     let mut returning_rows = Vec::new();
-    let mut ctes = CteScope::new_for_current_routine(read_engine);
+    let mut ctes =
+        CteScope::new_for_statement(read_engine, stmt.statement_privilege_subject.as_deref());
     crate::sql::select::materialize_plan_ctes(read_engine, &stmt.ctes, params, &mut ctes)?;
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
     if let Some(source) = stmt.source.as_deref() {
