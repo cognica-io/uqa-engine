@@ -127,6 +127,28 @@ fn run_alter_foreign_table_with_table_syntax(
     canonical: String,
     stmt: &AlterTableStmt,
 ) -> Result<SQLResult, SQLError> {
+    if stmt.actions.iter().all(|action| {
+        matches!(
+            action,
+            AlterTableAction::RenameTrigger { .. } | AlterTableAction::SetTriggerEnableMode { .. }
+        )
+    }) {
+        return engine.with_implicit_transaction(|engine| {
+            engine.ensure_foreign_table_owner(&canonical)?;
+            for action in &stmt.actions {
+                match action {
+                    AlterTableAction::RenameTrigger { from, to } => {
+                        engine.rename_trigger(&canonical, from, to)?;
+                    }
+                    AlterTableAction::SetTriggerEnableMode { name, mode, .. } => {
+                        engine.set_trigger_enable_mode(&canonical, name.as_deref(), *mode)?;
+                    }
+                    _ => unreachable!("foreign-table trigger actions were checked above"),
+                }
+            }
+            Ok(SQLResult::empty())
+        });
+    }
     let [AlterTableAction::ChangeOwner { owner }] = stmt.actions.as_slice() else {
         return Err(SQLError::Routine {
             sqlstate: "42809".into(),

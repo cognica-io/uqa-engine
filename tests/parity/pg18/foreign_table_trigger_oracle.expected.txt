@@ -1,0 +1,35 @@
+owner-row-before|ok
+owner-delete-before|ok
+owner-statement-after|ok
+owner-truncate|ok
+creator-granted|ok
+creator-replace|ok
+outsider-denied|42501|permission denied for foreign table items
+function-denied|42501|permission denied for function uqa_foreign_trigger_probe.denied_trigger
+constraint-denied|42809|"items" is a foreign table
+transition-denied|42809|"items" is a foreign table
+instead-denied|42809|"items" is a foreign table
+outsider-constraint-kind-first|42809|"items" is a foreign table
+outsider-transition-kind-first|42501|permission denied for foreign table items
+outsider-instead-kind-first|42809|"items" is a foreign table
+class|f|true
+trigger|creator_before|7|O|CREATE TRIGGER creator_before BEFORE INSERT ON uqa_foreign_trigger_probe.items FOR EACH ROW EXECUTE FUNCTION uqa_foreign_trigger_probe.allowed_trigger()
+trigger|delete_before|11|O|CREATE TRIGGER delete_before BEFORE DELETE ON uqa_foreign_trigger_probe.items FOR EACH ROW WHEN ((old.id > 0)) EXECUTE FUNCTION uqa_foreign_trigger_probe.allowed_trigger()
+trigger|row_before|23|O|CREATE TRIGGER row_before BEFORE INSERT OR UPDATE OF value ON uqa_foreign_trigger_probe.items FOR EACH ROW WHEN ((new.id > 0)) EXECUTE FUNCTION uqa_foreign_trigger_probe.allowed_trigger()
+trigger|statement_after|28|O|CREATE TRIGGER statement_after AFTER INSERT OR DELETE OR UPDATE ON uqa_foreign_trigger_probe.items FOR EACH STATEMENT EXECUTE FUNCTION uqa_foreign_trigger_probe.allowed_trigger()
+trigger|truncate_after|32|O|CREATE TRIGGER truncate_after AFTER TRUNCATE ON uqa_foreign_trigger_probe.items FOR EACH STATEMENT EXECUTE FUNCTION uqa_foreign_trigger_probe.allowed_trigger()
+creator-disable-denied|42501|must be owner of foreign table items
+owner-disable|ok
+disabled|D
+owner-enable-table-spelling|ok
+enabled|O
+creator-rename-denied|42501|must be owner of foreign table items
+owner-rename|ok
+creator-drop-denied|42501|must be owner of relation items
+owner-drop|ok
+former-owner-drop-denied|42501|must be owner of relation transfer_items
+new-owner-drop|ok
+rollback-owner-drop|ok
+drop-function-restrict|2BP01|cannot drop function uqa_foreign_trigger_probe.allowed_trigger() because other objects depend on it
+after-drop|0
+drop-function-after-table|ok

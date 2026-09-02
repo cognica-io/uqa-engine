@@ -51,6 +51,14 @@ fn event_relation_oid_from(
     if catalog.table_name_resolved(resolution, relation)?.is_some() {
         return table_relation_oid_from(catalog, resolution, relation);
     }
+    if let Some((canonical, _)) = catalog.foreign_table_entry_resolved(resolution, relation)? {
+        let relation = RelationIdentity::from_legacy_name(&canonical).map_err(|error| {
+            SQLError::Internal(format!(
+                "decode foreign trigger relation `{canonical}`: {error}"
+            ))
+        })?;
+        return Ok(super::foreign_table_relation_oid(&relation));
+    }
     let canonical = catalog
         .view_name_resolved(resolution, relation)?
         .ok_or_else(|| SQLError::UnknownTable(relation.to_string()))?;

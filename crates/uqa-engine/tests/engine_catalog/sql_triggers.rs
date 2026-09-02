@@ -12,6 +12,8 @@ use uqa_engine::Engine;
 
 #[path = "sql_triggers/constraint.rs"]
 mod constraint;
+#[path = "sql_triggers/foreign_tables.rs"]
+mod foreign_tables;
 #[path = "sql_triggers/instead_of.rs"]
 mod instead_of;
 #[path = "sql_triggers/privileges.rs"]

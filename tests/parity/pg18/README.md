@@ -120,6 +120,12 @@ docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/pa
 docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/trigger_privilege_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/trigger_privilege_oracle.expected.txt -
 ```
 
+`foreign_table_trigger_oracle.sql` records PostgreSQL 18.4 foreign-table trigger definition and lifecycle behavior. The checked-in transcript verifies ordinary row and statement forms, replacement, `UPDATE OF`, `WHEN`, `TRUNCATE`, invalid constraint, transition, and `INSTEAD OF` forms, target and function authorization, `pg_trigger`, `relhastriggers`, enable, rename, drop, owner transfer, rollback, function dependencies, and relation-drop cleanup.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/foreign_table_trigger_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/foreign_table_trigger_oracle.expected.txt -
+```
+
 `table_ownership_oracle.sql` records PostgreSQL 18.4 ordinary-table owner creation, inherited owner authority, ALTER and DROP checks, containing-schema owner DROP authority, target-role existence, SET and schema-CREATE requirements, superuser transfer, serial-sequence propagation, transaction rollback, catalog projection, and dependent-role errors.
 
 ```sh

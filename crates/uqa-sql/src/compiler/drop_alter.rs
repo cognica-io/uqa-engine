@@ -27,6 +27,46 @@ fn extract_strings(nodes: &[pg_query::protobuf::Node]) -> Result<Vec<String>> {
     nodes.iter().map(extract_string).collect()
 }
 
+fn trigger_enable_action(command: &pg_query::protobuf::AlterTableCmd) -> Option<AlterTableAction> {
+    use pg_query::protobuf::AlterTableType;
+    let subtype = command.subtype();
+    match subtype {
+        AlterTableType::AtEnableTrig
+        | AlterTableType::AtEnableAlwaysTrig
+        | AlterTableType::AtEnableReplicaTrig
+        | AlterTableType::AtDisableTrig => Some(AlterTableAction::SetTriggerEnableMode {
+            name: Some(command.name.clone()),
+            user_only: false,
+            mode: match subtype {
+                AlterTableType::AtEnableTrig => EventEnableMode::Origin,
+                AlterTableType::AtEnableAlwaysTrig => EventEnableMode::Always,
+                AlterTableType::AtEnableReplicaTrig => EventEnableMode::Replica,
+                AlterTableType::AtDisableTrig => EventEnableMode::Disabled,
+                _ => unreachable!("named trigger modes were matched above"),
+            },
+        }),
+        AlterTableType::AtEnableTrigAll
+        | AlterTableType::AtDisableTrigAll
+        | AlterTableType::AtEnableTrigUser
+        | AlterTableType::AtDisableTrigUser => Some(AlterTableAction::SetTriggerEnableMode {
+            name: None,
+            user_only: matches!(
+                subtype,
+                AlterTableType::AtEnableTrigUser | AlterTableType::AtDisableTrigUser
+            ),
+            mode: if matches!(
+                subtype,
+                AlterTableType::AtEnableTrigAll | AlterTableType::AtEnableTrigUser
+            ) {
+                EventEnableMode::Origin
+            } else {
+                EventEnableMode::Disabled
+            },
+        }),
+        _ => None,
+    }
+}
+
 pub(super) fn compile_drop(stmt: &pg_query::protobuf::DropStmt) -> Result<Statement> {
     use pg_query::protobuf::{DropBehavior, ObjectType};
     if stmt.remove_type() == ObjectType::ObjectTrigger {
@@ -178,6 +218,28 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
         return Ok(Statement::AlterSequence(alter));
     }
     if stmt.objtype() == ObjectType::ObjectForeignTable {
+        let mut trigger_actions = Vec::with_capacity(stmt.cmds.len());
+        for command in &stmt.cmds {
+            let Some(NodeEnum::AlterTableCmd(command)) = command.node.as_ref() else {
+                return Err(SQLError::Internal(
+                    "ALTER FOREIGN TABLE command body is malformed".into(),
+                ));
+            };
+            let Some(action) = trigger_enable_action(command) else {
+                trigger_actions.clear();
+                break;
+            };
+            trigger_actions.push(action);
+        }
+        if trigger_actions.len() == stmt.cmds.len() {
+            return Ok(Statement::AlterTable(AlterTableStmt {
+                table,
+                qualifier,
+                if_exists,
+                recurse: false,
+                actions: trigger_actions,
+            }));
+        }
         let [command] = stmt.cmds.as_slice() else {
             return Err(SQLError::Unsupported(
                 "ALTER FOREIGN TABLE OWNER TO accepts one action".into(),

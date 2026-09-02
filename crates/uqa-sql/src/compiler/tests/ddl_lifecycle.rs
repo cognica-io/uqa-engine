@@ -778,6 +778,26 @@ fn foreign_table_ownership_and_drop_preserve_relation_lifecycle_semantics() {
             owner,
         }) if name == "app.items" && owner == "next_owner"
     ));
+    let Statement::AlterTable(alter) = first(
+        "ALTER FOREIGN TABLE app.items DISABLE TRIGGER audit, ENABLE ALWAYS TRIGGER normalize",
+    ) else {
+        panic!("expected ALTER FOREIGN TABLE trigger actions");
+    };
+    assert!(matches!(
+        alter.actions.as_slice(),
+        [
+            AlterTableAction::SetTriggerEnableMode {
+                name: Some(disabled),
+                mode: crate::ast::EventEnableMode::Disabled,
+                ..
+            },
+            AlterTableAction::SetTriggerEnableMode {
+                name: Some(always),
+                mode: crate::ast::EventEnableMode::Always,
+                ..
+            }
+        ] if disabled == "audit" && always == "normalize"
+    ));
     let Statement::Drop(drop) =
         first("DROP FOREIGN TABLE IF EXISTS app.items, archive.items CASCADE")
     else {

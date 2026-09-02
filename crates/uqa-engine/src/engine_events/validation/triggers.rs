@@ -21,7 +21,10 @@ impl Engine {
         else {
             return Err(SQLError::UnknownTable(name.to_string()));
         };
-        if !matches!(kind, "table" | "view" | "materialized view") {
+        if !matches!(
+            kind,
+            "table" | "view" | "materialized view" | "foreign table"
+        ) {
             return Err(SQLError::UnknownTable(name.to_string()));
         }
         RelationIdentity::from_legacy_name(&canonical).map_err(|error| {
@@ -42,6 +45,25 @@ impl Engine {
                 .map_err(|error| SQLError::Internal(format!("read trigger columns: {error}")))?
                 .ok_or_else(|| SQLError::UnknownTable(relation.qualified_name()));
         }
+        if kind == "foreign table" {
+            let table = self
+                .durable
+                .foreign_tables
+                .read()
+                .get(relation)
+                .cloned()
+                .ok_or_else(|| SQLError::UnknownTable(relation.qualified_name()))?;
+            return Ok(table
+                .columns
+                .into_iter()
+                .map(|column| {
+                    trigger_column(
+                        column.name,
+                        crate::engine_fdw::fdw_column_type_to_sql(&column.ty),
+                    )
+                })
+                .collect());
+        }
         let view = self
             .restored_catalog_view_definition(&relation.qualified_name())?
             .ok_or_else(|| SQLError::UnknownTable(relation.qualified_name()))?;
@@ -50,32 +72,45 @@ impl Engine {
             .columns()
             .iter()
             .enumerate()
-            .map(|(position, name)| ColumnDef {
-                name: schema.public_name(position).unwrap_or(name).to_string(),
-                ty: schema
-                    .column_type(position)
-                    .cloned()
-                    .unwrap_or(ColumnType::Text),
-                object_id: None,
-                missing_value: None,
-                primary_key: false,
-                not_null: false,
-                not_null_explicit: false,
-                not_null_name: None,
-                not_null_validated: true,
-                not_null_no_inherit: false,
-                auto_increment: None,
-                unique: false,
-                default: None,
-                generated: None,
-                check: None,
-                check_name: None,
-                check_enforced: true,
-                check_validated: true,
-                check_no_inherit: false,
-                references: None,
+            .map(|(position, name)| {
+                trigger_column(
+                    schema.public_name(position).unwrap_or(name).to_string(),
+                    schema
+                        .column_type(position)
+                        .cloned()
+                        .unwrap_or(ColumnType::Text),
+                )
             })
             .collect())
+    }
+
+    pub(in crate::engine_events) fn trigger_relation_from_resolution(
+        name: &str,
+        resolution: RelationResolution,
+    ) -> Result<(RelationIdentity, &'static str), SQLError> {
+        match resolution {
+            RelationResolution::Found(canonical, "foreign table") => {
+                let relation = RelationIdentity::from_legacy_name(&canonical).map_err(|error| {
+                    SQLError::Internal(format!(
+                        "decode resolved trigger relation `{canonical}`: {error}"
+                    ))
+                })?;
+                Ok((relation, "foreign table"))
+            }
+            resolution => Self::event_relation_from_resolution(name, resolution),
+        }
+    }
+
+    pub(in crate::engine_events) fn resolve_trigger_relation_kind(
+        &self,
+        name: &str,
+        lookup_mode: RelationLookupMode,
+    ) -> Result<(RelationIdentity, &'static str), SQLError> {
+        let resolution = match lookup_mode {
+            RelationLookupMode::Dynamic => self.resolve_visible_relation_kind(name)?,
+            RelationLookupMode::Bound => self.resolve_bound_relation_kind(name)?,
+        };
+        Self::trigger_relation_from_resolution(name, resolution)
     }
 
     fn resolve_trigger_function_candidate(
@@ -168,6 +203,10 @@ impl Engine {
                     crate::engine_table_security::TableAclPrivilege::Trigger,
                 )
             }
+            "foreign table" => self.ensure_foreign_table_privilege(
+                &canonical,
+                crate::engine_table_security::TableAclPrivilege::Trigger,
+            ),
             _ => Ok(()),
         }
     }
@@ -221,11 +260,19 @@ impl Engine {
                     message: format!("\"{}\" is a view", relation.name),
                 })
             }
-            "view" => Ok(()),
             "materialized view" => Err(SQLError::Routine {
                 sqlstate: "42809".into(),
                 message: format!("relation \"{}\" cannot have triggers", relation.name),
             }),
+            "foreign table"
+                if definition.constraint || definition.timing == TriggerTiming::InsteadOf =>
+            {
+                Err(SQLError::Routine {
+                    sqlstate: "42809".into(),
+                    message: format!("\"{}\" is a foreign table", relation.name),
+                })
+            }
+            "view" | "foreign table" => Ok(()),
             kind if kind != "table" => Err(SQLError::Routine {
                 sqlstate: "42809".into(),
                 message: format!("relation \"{}\" cannot have triggers", relation.name),
@@ -259,11 +306,17 @@ impl Engine {
             ));
         }
         let (relation, relation_kind) =
-            self.resolve_event_relation_kind(&definition.table, lookup_mode)?;
+            self.resolve_trigger_relation_kind(&definition.table, lookup_mode)?;
         definition.table = relation.qualified_name();
         Self::validate_trigger_relation_kind(definition, &relation, relation_kind)?;
         if lookup_mode == RelationLookupMode::Dynamic {
             self.ensure_trigger_creation_privilege(&relation, relation_kind)?;
+        }
+        if relation_kind == "foreign table" && !definition.transition_relations.is_empty() {
+            return Err(SQLError::Routine {
+                sqlstate: "42809".into(),
+                message: format!("\"{}\" is a foreign table", relation.name),
+            });
         }
         if let Some(referenced_table) = definition.referenced_table.as_mut() {
             let (referenced, referenced_kind) =
@@ -405,5 +458,30 @@ impl Engine {
             Some(_) => {}
         }
         crate::sql::reject_stored_regrole_constants(self, condition, None)
+    }
+}
+
+fn trigger_column(name: String, ty: ColumnType) -> ColumnDef {
+    ColumnDef {
+        name,
+        ty,
+        object_id: None,
+        missing_value: None,
+        primary_key: false,
+        not_null: false,
+        not_null_explicit: false,
+        not_null_name: None,
+        not_null_validated: true,
+        not_null_no_inherit: false,
+        auto_increment: None,
+        unique: false,
+        default: None,
+        generated: None,
+        check: None,
+        check_name: None,
+        check_enforced: true,
+        check_validated: true,
+        check_no_inherit: false,
+        references: None,
     }
 }

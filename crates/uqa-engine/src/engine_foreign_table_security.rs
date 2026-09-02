@@ -50,6 +50,29 @@ impl Engine {
         })
     }
 
+    pub(crate) fn ensure_foreign_table_privilege(
+        &self,
+        name: &str,
+        privilege: crate::engine_table_security::TableAclPrivilege,
+    ) -> Result<(), SQLError> {
+        let (relation, security) = self.bound_foreign_table_security(name)?;
+        let roles = self.durable.roles.read();
+        let memberships = self.durable.role_memberships.read();
+        if crate::engine_table_security::role_has_table_privilege(
+            &security,
+            &self.current_user_name(),
+            privilege,
+            &roles,
+            &memberships,
+        ) {
+            return Ok(());
+        }
+        Err(SQLError::Routine {
+            sqlstate: "42501".into(),
+            message: format!("permission denied for foreign table {}", relation.name),
+        })
+    }
+
     pub(crate) fn ensure_foreign_table_drop_authority(&self, name: &str) -> Result<(), SQLError> {
         let (relation, security) = self.bound_foreign_table_security(name)?;
         if self.current_user_has_role_privileges(&security.role_owner)

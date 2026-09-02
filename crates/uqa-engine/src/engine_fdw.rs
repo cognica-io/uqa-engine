@@ -464,16 +464,21 @@ impl Engine {
             return Ok(false);
         };
         let relation = RelationIdentity::from_legacy_name(&name)?;
-        let mut tables = self.durable.foreign_tables.write();
-        let mut table_security = self.durable.foreign_table_security.write();
-        if !tables.contains_key(&relation) {
+        if !self.durable.foreign_tables.read().contains_key(&relation) {
             return Err(format!("Foreign table `{name}` disappeared before drop"));
         }
-        if !table_security.contains_key(&relation) {
+        if !self
+            .durable
+            .foreign_table_security
+            .read()
+            .contains_key(&relation)
+        {
             return Err(format!(
                 "Foreign table `{name}` has no loaded security metadata"
             ));
         }
+        self.drop_relation_events_inner(&relation)
+            .map_err(|error| format!("drop foreign table `{name}` events: {error}"))?;
         if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog
                 .drop_foreign_table(&relation)
@@ -483,6 +488,8 @@ impl Engine {
             .foreign_memory_tables
             .write()
             .remove(&relation);
+        let mut tables = self.durable.foreign_tables.write();
+        let mut table_security = self.durable.foreign_table_security.write();
         let removed = tables.remove(&relation).is_some();
         table_security.remove(&relation);
         drop(table_security);

@@ -51,6 +51,13 @@ impl Engine {
                     .get(relation)
                     .map(|view| view.persistence)
             })
+            .or_else(|| {
+                self.durable
+                    .foreign_tables
+                    .read()
+                    .contains_key(relation)
+                    .then_some(RelationPersistence::Permanent)
+            })
     }
 
     pub(super) fn persist_rule_catalog_snapshot(

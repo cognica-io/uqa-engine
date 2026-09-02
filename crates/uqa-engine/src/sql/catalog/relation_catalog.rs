@@ -196,6 +196,10 @@ pub(super) fn build_pg_class(
             "relacl".into(),
             table_acl_catalog_value(&security.role_owner, security.acl.as_ref())?,
         );
+        row.insert(
+            "relhastriggers".into(),
+            bool_value(catalog.relation_has_triggers(resolution, &name)?),
+        );
         out.push(row);
     }
     for (sequence, persistence, object_id, security) in catalog.sequences() {

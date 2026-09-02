@@ -33,6 +33,21 @@ impl Engine {
                 },
             ));
         }
+        if self.durable.foreign_tables.read().contains_key(relation) {
+            let owner = self
+                .durable
+                .foreign_table_security
+                .read()
+                .get(relation)
+                .map(|security| security.role_owner.clone())
+                .ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "foreign trigger relation `{}` has no security metadata",
+                        relation.qualified_name()
+                    ))
+                })?;
+            return Ok((owner, "foreign table"));
+        }
         Err(SQLError::Internal(format!(
             "event relation `{}` disappeared after resolution",
             relation.qualified_name()
@@ -58,11 +73,11 @@ impl Engine {
         })
     }
 
-    fn bind_visible_event_drop_relation(
+    fn visible_event_drop_resolution(
         &self,
         requested: &str,
         if_exists: bool,
-    ) -> Result<Option<String>, SQLError> {
+    ) -> Result<Option<RelationResolution>, SQLError> {
         let resolution = self.resolve_visible_relation_kind(requested)?;
         match resolution {
             RelationResolution::MissingSchema(schema) if if_exists => {
@@ -79,8 +94,7 @@ impl Engine {
                 );
                 Ok(None)
             }
-            resolution => Self::event_relation_from_resolution(requested, resolution)
-                .map(|(relation, _)| Some(relation.qualified_name())),
+            resolution => Ok(Some(resolution)),
         }
     }
 
@@ -151,13 +165,14 @@ impl Engine {
     }
 
     pub(crate) fn drop_rule_sql(&self, statement: &DropRule) -> Result<(), SQLError> {
-        let Some(table) =
-            self.bind_visible_event_drop_relation(&statement.table, statement.if_exists)?
+        let Some(resolution) =
+            self.visible_event_drop_resolution(&statement.table, statement.if_exists)?
         else {
             return Ok(());
         };
+        let (relation, _) = Self::event_relation_from_resolution(&statement.table, resolution)?;
         let mut bound = statement.clone();
-        bound.table = table;
+        bound.table = relation.qualified_name();
         self.drop_rule(&bound)
     }
 
@@ -304,14 +319,14 @@ impl Engine {
     }
 
     pub(crate) fn drop_trigger_sql(&self, statement: &DropTrigger) -> Result<(), SQLError> {
-        let Some(table) =
-            self.bind_visible_event_drop_relation(&statement.table, statement.if_exists)?
+        let Some(resolution) =
+            self.visible_event_drop_resolution(&statement.table, statement.if_exists)?
         else {
             return Ok(());
         };
+        let (relation, _) = Self::trigger_relation_from_resolution(&statement.table, resolution)?;
         let mut bound = statement.clone();
-        bound.table = table;
-        let relation = self.resolve_trigger_table(&bound.table)?;
+        bound.table = relation.qualified_name();
         let trigger_exists = {
             let triggers = self.durable.triggers.read();
             triggers
