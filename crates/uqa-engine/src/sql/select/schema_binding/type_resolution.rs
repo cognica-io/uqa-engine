@@ -15,6 +15,24 @@ use crate::engine_user_functions::RoutineResolution;
 pub(super) struct QueryFunctionTypeResolver<'a> {
     pub(super) routines: &'a dyn RoutineResolution,
     pub(super) scalar_subquery_types: Option<Vec<Option<ColumnType>>>,
+    pub(super) defer_routine_namespace_errors: bool,
+}
+
+impl QueryFunctionTypeResolver<'_> {
+    fn routine_resolution<T>(
+        &self,
+        result: Result<Option<T>, SQLError>,
+    ) -> Result<Option<T>, SQLError> {
+        match result {
+            Err(error)
+                if self.defer_routine_namespace_errors
+                    && crate::engine_user_functions::is_routine_namespace_lookup_error(&error) =>
+            {
+                Ok(None)
+            }
+            result => result,
+        }
+    }
 }
 
 impl FunctionTypeResolver for QueryFunctionTypeResolver<'_> {
@@ -34,13 +52,13 @@ impl FunctionTypeResolver for QueryFunctionTypeResolver<'_> {
         argument_types: &[Option<ColumnType>],
         explicit_variadic: bool,
     ) -> Result<Option<ColumnType>, SQLError> {
-        self.routines.resolve_function_type(
+        self.routine_resolution(self.routines.resolve_function_type(
             name,
             binding,
             argument_names,
             argument_types,
             explicit_variadic,
-        )
+        ))
     }
 
     fn resolve_function_overload(
@@ -51,13 +69,13 @@ impl FunctionTypeResolver for QueryFunctionTypeResolver<'_> {
         argument_types: &[Option<ColumnType>],
         explicit_variadic: bool,
     ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
-        self.routines.resolve_function_overload(
+        self.routine_resolution(self.routines.resolve_function_overload(
             name,
             binding,
             argument_names,
             argument_types,
             explicit_variadic,
-        )
+        ))
     }
 
     fn is_scalar_function_binding(
@@ -76,14 +94,14 @@ impl FunctionTypeResolver for QueryFunctionTypeResolver<'_> {
         explicit_variadic: bool,
         builtins: &[uqa_execution::BuiltinFunctionOverload],
     ) -> Result<Option<ResolvedFunctionOverload>, SQLError> {
-        self.routines.resolve_function_overload_with_builtins(
+        self.routine_resolution(self.routines.resolve_function_overload_with_builtins(
             name,
             binding,
             argument_names,
             argument_types,
             explicit_variadic,
             builtins,
-        )
+        ))
     }
 
     fn resolve_scalar_subquery_type(

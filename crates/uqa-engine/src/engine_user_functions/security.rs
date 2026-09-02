@@ -22,8 +22,7 @@ use crate::{
 };
 
 use super::declaration::resolve_alter_routine_identity_types;
-use super::lifecycle::routine_signature_label;
-use super::resolution::{routine_kind, routine_signature_types};
+use super::resolution::{routine_kind, routine_local_name};
 use super::{builtin_routine_support_oid, SQLUserFunction};
 
 impl Engine {
@@ -198,7 +197,7 @@ impl Engine {
                 message: format!(
                     "permission denied for {} {}",
                     routine_kind(definition),
-                    routine_signature_label(&definition.name, &routine_signature_types(definition))
+                    routine_local_name(&definition.name)?
                 ),
             })
         }

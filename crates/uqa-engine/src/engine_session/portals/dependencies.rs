@@ -307,8 +307,11 @@ pub(super) fn collect_session_portal_routine_dependencies(
     if binding.is_some_and(|binding| binding.builtin) {
         return Ok(());
     }
-    let lookup_name = binding.map_or(name, |binding| binding.name.as_str());
-    let Some(overloads) = engine.lookup_sql_functions(lookup_name) else {
+    let overloads = match binding {
+        Some(binding) => engine.lookup_bound_sql_functions(&binding.name),
+        None => engine.lookup_visible_sql_functions_for_analysis(name)?,
+    };
+    let Some(overloads) = overloads else {
         return Ok(());
     };
     for function in overloads {

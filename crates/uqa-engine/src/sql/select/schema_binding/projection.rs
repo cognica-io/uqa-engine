@@ -117,6 +117,7 @@ pub(in crate::sql) fn validate_query_block_expression_types(
     let resolver = QueryFunctionTypeResolver {
         routines,
         scalar_subquery_types: Some(scalar_subquery_types),
+        defer_routine_namespace_errors: true,
     };
     for expression in statement
         .projections
@@ -136,31 +137,25 @@ pub(in crate::sql) fn validate_query_block_expression_types(
     Ok(())
 }
 
-/// Validate projection names only after the caller has the authoritative source schema. Runtime Rust table functions declare their row shape when invoked, so their projections are checked against the built operator rather than a guessed one-column placeholder.
-pub(in crate::sql) fn validate_query_block_projection_references(
+/// Validate every query-block reference only after the caller has the authoritative source schema. This preserves registered table-function row shapes and checks recursive argument references before definitive routine namespace lookup.
+pub(in crate::sql) fn validate_query_block_references(
     routines: &dyn RoutineResolution,
     statement: &QueryBlockPlan,
     schema: &RowSchema,
     params: &[SQLParam],
     ctes: &CteScope,
 ) -> Result<(), SQLError> {
-    let mut analysis = SchemaScope::for_analysis(ctes)?;
-    for projection in &statement.projections {
-        if !matches!(
-            projection.expr,
-            ScalarExpr::Star | ScalarExpr::QualifiedStar(_)
-        ) {
-            analysis.validate_expression_references(
-                routines,
-                &projection.expr,
-                schema,
-                None,
-                &statement.subqueries,
-                params,
-            )?;
-        }
-    }
-    Ok(())
+    let output = analyze_projection_output_schema(
+        routines,
+        &statement.projections,
+        schema,
+        schema,
+        &statement.subqueries,
+        params,
+        ctes,
+    )?;
+    SchemaScope::for_analysis(ctes)?
+        .validate_query_block_clauses(routines, statement, schema, &output, params)
 }
 
 pub(super) fn projection_star_columns(

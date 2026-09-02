@@ -9,6 +9,7 @@ use super::{
     expr_qualifiers, query_contains_volatile_function, BTreeSet, ColumnOwners, Engine, QueryPlan,
     ScalarExpr,
 };
+use crate::sql::volatility::function_binding_is_volatile;
 
 pub(super) fn unique_unqualified_column_owner<'a>(
     expression: &ScalarExpr,
@@ -65,13 +66,13 @@ pub(super) fn outer_expression_contains_volatile_function(
         }
         ScalarExpr::Func {
             name,
+            binding,
             args,
             order_by,
             filter,
             ..
         } => {
-            crate::sql::volatility::function_volatility(engine, name, args.len())
-                == uqa_sql::ast::FunctionVolatility::Volatile
+            function_binding_is_volatile(engine, name, binding.as_ref(), args.len())
                 || args
                     .iter()
                     .any(|expr| outer_expression_contains_volatile_function(engine, expr))

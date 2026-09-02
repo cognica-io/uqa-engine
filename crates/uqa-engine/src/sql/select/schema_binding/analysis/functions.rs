@@ -67,11 +67,6 @@ pub(super) fn validate_qualified_column(
     Err(SQLError::UnknownTable(qualifier.to_string()))
 }
 
-pub(super) fn is_semantic_all_argument(function: &str, argument: &ScalarExpr) -> bool {
-    matches!(argument, ScalarExpr::Column(column) if column == "_all")
-        && uqa_sql::registry::is_registered(&crate::sql::builtin_function_dispatch_name(function))
-}
-
 pub(super) fn single_pseudo_column_qualifier(schema: &RowSchema) -> Option<String> {
     let mut qualifiers = schema_qualifiers(schema).into_iter().filter(|qualifier| {
         schema.has_qualified_column(qualifier, "_doc_id")
@@ -339,11 +334,11 @@ fn resolve_sql_function(
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<Option<std::sync::Arc<crate::engine_user_functions::SQLUserFunction>>, SQLError> {
-    if binding.is_none() && routines.lookup_sql_functions(name).is_none() {
-        return Ok(None);
-    }
     let (argument_names, argument_types, explicit_variadic) =
         uqa_execution::function_call_argument_signature(args, schema, params, Some(resolver))?;
+    if binding.is_none() && routines.lookup_visible_sql_functions(name)?.is_none() {
+        return Ok(None);
+    }
     routines.resolve_static_sql_function(
         name,
         binding,

@@ -160,7 +160,7 @@ impl Engine {
         }
     }
 
-    pub(crate) fn ensure_schema_privilege(
+    pub(crate) fn require_schema_privilege(
         &self,
         schema: &str,
         role: &str,

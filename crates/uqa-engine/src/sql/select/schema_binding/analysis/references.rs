@@ -8,8 +8,8 @@
 
 use super::super::{SQLError, SQLParam, ScalarExpr};
 use super::functions::{
-    is_semantic_all_argument, validate_qualified_column, validate_scalar_function,
-    validate_unqualified_column, validate_window_function, ScalarFunctionValidation,
+    validate_qualified_column, validate_scalar_function, validate_unqualified_column,
+    validate_window_function, ScalarFunctionValidation,
 };
 use crate::engine_user_functions::RoutineResolution;
 use uqa_execution::{FunctionTypeResolver, RowSchema, ScalarFrameBound};
@@ -66,8 +66,8 @@ pub(super) fn validate_expression(
             filter,
             ..
         } => {
-            for argument in args {
-                if is_semantic_all_argument(name, argument) {
+            for (argument_index, argument) in args.iter().enumerate() {
+                if crate::sql::is_semantic_field_argument(name, args, argument_index)? {
                     continue;
                 }
                 validate_expression(routines, argument, schema, None, params, resolver)?;

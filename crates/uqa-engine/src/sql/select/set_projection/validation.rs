@@ -66,7 +66,9 @@ pub(super) fn function_may_return_set(
     if builtin_returns_set(&builtin) || engine.has_registered_table_function(&identity) {
         return Ok(true);
     }
-    let Some(overloads) = engine.lookup_sql_functions(name) else {
+    let (argument_names, argument_types, explicit_variadic) =
+        uqa_execution::function_call_argument_signature(args, schema, params, Some(resolver))?;
+    let Some(overloads) = engine.lookup_visible_sql_functions_for_analysis(name)? else {
         return Ok(false);
     };
     if !uqa_execution::is_fixed_builtin(name) {
@@ -80,8 +82,6 @@ pub(super) fn function_may_return_set(
             }
         }
     }
-    let (argument_names, argument_types, explicit_variadic) =
-        uqa_execution::function_call_argument_signature(args, schema, params, Some(resolver))?;
     if let Some(resolved) = uqa_execution::resolve_fixed_builtin_call(
         name,
         binding,
@@ -135,11 +135,15 @@ pub(super) fn resolve_set_function_binding(
     schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<Option<FunctionBinding>, SQLError> {
-    if engine.lookup_sql_functions(name).is_none() {
-        return Ok(binding.cloned());
-    }
     let (argument_names, argument_types, explicit_variadic) =
         uqa_execution::function_call_argument_signature(args, schema, params, Some(resolver))?;
+    if binding.is_none()
+        && engine
+            .lookup_visible_sql_functions_for_analysis(name)?
+            .is_none()
+    {
+        return Ok(binding.cloned());
+    }
     if let Some(resolved) = uqa_execution::resolve_fixed_builtin_call(
         name,
         binding,

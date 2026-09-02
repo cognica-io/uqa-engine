@@ -16,7 +16,7 @@ use std::collections::BTreeSet;
 
 use uqa_execution::ScalarExpr;
 use uqa_planner::{QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan, UnifiedPlan};
-use uqa_sql::ast::FunctionVolatility;
+use uqa_sql::ast::{FunctionBinding, FunctionVolatility};
 use uqa_sql::SQLError;
 
 use crate::Engine;
@@ -33,6 +33,25 @@ use super::builtin_function_dispatch_name;
 pub(super) fn function_volatility(
     engine: &Engine,
     name: &str,
+    argument_count: usize,
+) -> FunctionVolatility {
+    function_volatility_with_binding(engine, name, None, argument_count)
+}
+
+pub(super) fn function_binding_is_volatile(
+    engine: &Engine,
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    argument_count: usize,
+) -> bool {
+    function_volatility_with_binding(engine, name, binding, argument_count)
+        == FunctionVolatility::Volatile
+}
+
+pub(super) fn function_volatility_with_binding(
+    engine: &Engine,
+    name: &str,
+    binding: Option<&FunctionBinding>,
     argument_count: usize,
 ) -> FunctionVolatility {
     let identity = name.to_ascii_lowercase();
@@ -97,20 +116,8 @@ pub(super) fn function_volatility(
         return volatility;
     }
 
-    if let Some(overloads) = engine.lookup_sql_functions(&identity) {
-        if overloads
-            .iter()
-            .any(|function| function.def.volatility == FunctionVolatility::Volatile)
-        {
-            return FunctionVolatility::Volatile;
-        }
-        if overloads
-            .iter()
-            .any(|function| function.def.volatility == FunctionVolatility::Stable)
-        {
-            return FunctionVolatility::Stable;
-        }
-        return FunctionVolatility::Immutable;
+    if let Some(volatility) = sql_routine_volatility(engine, &identity, binding) {
+        return volatility;
     }
 
     // UQA retrieval/graph functions not listed above read the statement's
@@ -150,6 +157,34 @@ pub(super) fn function_volatility(
     }
 }
 
+fn sql_routine_volatility(
+    engine: &Engine,
+    identity: &str,
+    binding: Option<&FunctionBinding>,
+) -> Option<FunctionVolatility> {
+    let overloads = match binding {
+        Some(binding) if binding.builtin => None,
+        Some(binding) => engine.lookup_bound_sql_functions(&binding.name),
+        None => engine
+            .lookup_visible_sql_functions_for_analysis(identity)
+            .ok()
+            .flatten(),
+    }?;
+    if overloads
+        .iter()
+        .any(|function| function.def.volatility == FunctionVolatility::Volatile)
+    {
+        return Some(FunctionVolatility::Volatile);
+    }
+    if overloads
+        .iter()
+        .any(|function| function.def.volatility == FunctionVolatility::Stable)
+    {
+        return Some(FunctionVolatility::Stable);
+    }
+    Some(FunctionVolatility::Immutable)
+}
+
 pub(super) fn expr_contains_volatile_function(engine: &Engine, expr: &ScalarExpr) -> bool {
     expr_contains_volatile_function_with(engine, expr, true)
 }
@@ -166,7 +201,17 @@ fn expr_contains_volatile_function_with(
             return;
         }
         match part {
-            ScalarExpr::Func { name, args, .. } | ScalarExpr::WindowCall { name, args, .. } => {
+            ScalarExpr::Func {
+                name,
+                binding,
+                args,
+                ..
+            } => {
+                volatile =
+                    function_volatility_with_binding(engine, name, binding.as_ref(), args.len())
+                        == FunctionVolatility::Volatile;
+            }
+            ScalarExpr::WindowCall { name, args, .. } => {
                 volatile =
                     function_volatility(engine, name, args.len()) == FunctionVolatility::Volatile;
             }
@@ -338,17 +383,25 @@ fn source_contains_volatile_function(
             .iter()
             .flatten()
             .any(|expr| expr_contains_volatile_function(engine, expr))),
-        SourcePlan::Function { name, args, .. } => {
-            Ok(
-                function_volatility(engine, name, args.len()) == FunctionVolatility::Volatile
-                    || args
-                        .iter()
-                        .any(|expr| expr_contains_volatile_function(engine, expr)),
-            )
-        }
-        SourcePlan::FunctionGroup { functions, .. } => Ok(functions.iter().any(|function| {
-            function_volatility(engine, &function.name, function.args.len())
+        SourcePlan::Function {
+            name,
+            binding,
+            args,
+            ..
+        } => Ok(
+            function_volatility_with_binding(engine, name, binding.as_ref(), args.len())
                 == FunctionVolatility::Volatile
+                || args
+                    .iter()
+                    .any(|expr| expr_contains_volatile_function(engine, expr)),
+        ),
+        SourcePlan::FunctionGroup { functions, .. } => Ok(functions.iter().any(|function| {
+            function_volatility_with_binding(
+                engine,
+                &function.name,
+                function.binding.as_ref(),
+                function.args.len(),
+            ) == FunctionVolatility::Volatile
                 || function
                     .args
                     .iter()
@@ -371,7 +424,17 @@ pub(super) fn unified_plan_contains_volatile_function(engine: &Engine, plan: &Un
             return;
         }
         match expr {
-            ScalarExpr::Func { name, args, .. } | ScalarExpr::WindowCall { name, args, .. } => {
+            ScalarExpr::Func {
+                name,
+                binding,
+                args,
+                ..
+            } => {
+                volatile =
+                    function_volatility_with_binding(engine, name, binding.as_ref(), args.len())
+                        == FunctionVolatility::Volatile;
+            }
+            ScalarExpr::WindowCall { name, args, .. } => {
                 volatile =
                     function_volatility(engine, name, args.len()) == FunctionVolatility::Volatile;
             }

@@ -140,10 +140,18 @@ impl<'a> SetProjection<'a> {
             )
             .into());
         }
-        if !self.engine.has_registered_table_function(&identity)
-            && self.engine.lookup_sql_functions(&call.name).is_some()
-            && call.binding.as_ref().is_none_or(|binding| !binding.builtin)
-        {
+        let has_sql_function = match call.binding.as_ref() {
+            Some(binding) if binding.builtin => false,
+            Some(binding) => self
+                .engine
+                .lookup_bound_sql_functions(&binding.name)
+                .is_some(),
+            None => self
+                .engine
+                .lookup_visible_sql_functions(&call.name)?
+                .is_some(),
+        };
+        if !self.engine.has_registered_table_function(&identity) && has_sql_function {
             let hook = ScopedEngineHook::new(self.engine, &self.ctes);
             let subqueries = PlanSubqueryArena::new(&self.ctes.scalar_subqueries, Some(&hook));
             let context = ScalarEvalContext::from_row_lookup(row, self.params)

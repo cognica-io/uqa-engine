@@ -184,6 +184,17 @@ pub(crate) use regtypes::{
     resolve_regnamespace_oid, resolve_regobject_oid, resolve_regprocedure_oid, resolve_regrole_oid,
     resolve_regtype_output, RegtypeOutputCatalog,
 };
+
+pub(crate) fn resolve_catalog_column_type_name(
+    engine: &Engine,
+    type_name: &str,
+) -> Result<uqa_sql::ast::ColumnType, SQLError> {
+    resolve_catalog_column_type(engine, type_name).ok_or_else(|| SQLError::Routine {
+        sqlstate: "42704".into(),
+        message: format!("type \"{}\" does not exist", type_name.trim_matches('"')),
+    })
+}
+
 use relation_catalog::{build_pg_class, build_pg_inherits};
 use schema::{resolve_virtual_relation, VirtualRelation};
 pub(in crate::sql) use schema::{virtual_relation_accepts_row_lock, virtual_relation_schema};

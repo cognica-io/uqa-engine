@@ -398,8 +398,14 @@ fn function_may_return_set_statically(
     if binding.is_some_and(|binding| binding.builtin) {
         return false;
     }
-    let lookup_name = binding.map_or(name, |binding| binding.name.as_str());
-    let Some(overloads) = engine.lookup_sql_functions(lookup_name) else {
+    let overloads = match binding {
+        Some(binding) => engine.lookup_bound_sql_functions(&binding.name),
+        None => engine
+            .lookup_visible_sql_functions_for_analysis(name)
+            .ok()
+            .flatten(),
+    };
+    let Some(overloads) = overloads else {
         return false;
     };
     if let Some(binding) = binding {

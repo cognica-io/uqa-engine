@@ -131,7 +131,7 @@ fn resolve_in_context(
     }
     let users = request
         .engine
-        .lookup_sql_routine_candidates(request.name)
+        .lookup_sql_routine_candidates(request.name)?
         .unwrap_or_default();
     let builtins = request
         .builtins

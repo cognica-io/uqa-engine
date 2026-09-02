@@ -17,8 +17,8 @@ use uqa_sql::ast::{
 use uqa_sql::SQLError;
 
 use crate::{
-    engine_roles::role_inherits, Arc, CatalogFacade, Engine, RelationIdentity, StorageBackendError,
-    StorageBackendResult, FUNCTIONS_METADATA_KEY,
+    engine_roles::role_inherits, engine_schema_security::SchemaAclPrivilege, Arc, CatalogFacade,
+    Engine, RelationIdentity, StorageBackendError, StorageBackendResult, FUNCTIONS_METADATA_KEY,
 };
 
 use super::declaration::{
@@ -374,9 +374,7 @@ impl Engine {
         Ok(())
     }
 
-    /// Drop routines per a `DROP FUNCTION` / `DROP PROCEDURE`
-    /// statement, mirroring `PostgreSQL`'s resolution and error
-    /// texts. `IF EXISTS` misses emit a notice instead of failing.
+    /// Resolve a routine name through the schemas the current user can access, while qualified names report missing schemas and `USAGE` denials directly.
     fn routine_lookup_keys(&self, name: &str) -> Result<Vec<String>, SQLError> {
         let (schema, local_name) =
             RelationIdentity::parse_reference(name).map_err(|error| SQLError::Routine {
@@ -384,16 +382,33 @@ impl Engine {
                 message: format!("invalid routine name `{name}`: {error}"),
             })?;
         if let Some(schema) = schema {
+            if self.schema_security_for_privilege(&schema).is_none() {
+                return Err(SQLError::Routine {
+                    sqlstate: "3F000".into(),
+                    message: format!("schema \"{schema}\" does not exist"),
+                });
+            }
+            self.require_schema_privilege(
+                &schema,
+                &self.current_user_name(),
+                SchemaAclPrivilege::Usage,
+            )?;
             return Ok(vec![
                 RelationIdentity::new(schema, local_name).qualified_name()
             ]);
         }
-        Ok(self
-            .session
-            .state
-            .read()
-            .search_path
-            .iter()
+        let current_user = self.current_user_name();
+        let search_path = self.session.state.read().search_path.clone();
+        Ok(search_path
+            .into_iter()
+            .filter(|schema| {
+                self.schema_security_for_privilege(schema).is_some()
+                    && self.schema_has_privilege_for_role(
+                        schema,
+                        &current_user,
+                        SchemaAclPrivilege::Usage,
+                    )
+            })
             .map(|schema| RelationIdentity::new(schema, &local_name).qualified_name())
             .collect())
     }
@@ -401,8 +416,37 @@ impl Engine {
     /// Visible overload set for `name`. Identical signatures in later
     /// `search_path` schemas are shadowed while distinct signatures remain
     /// candidates, matching `PostgreSQL`'s routine lookup rules.
-    pub(crate) fn lookup_sql_functions(&self, name: &str) -> Option<Vec<Arc<SQLUserFunction>>> {
-        let keys = self.routine_lookup_keys(name).ok()?;
+    pub(crate) fn lookup_visible_sql_functions(
+        &self,
+        name: &str,
+    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
+        let keys = self.routine_lookup_keys(name)?;
+        Ok(self.lookup_sql_functions_by_keys(keys))
+    }
+
+    /// Inspect accessible overloads without reporting namespace errors before recursive argument and reference validation. The definitive binder performs the checked lookup again before it records a routine identity.
+    pub(crate) fn lookup_visible_sql_functions_for_analysis(
+        &self,
+        name: &str,
+    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
+        match self.lookup_visible_sql_functions(name) {
+            Err(error) if super::is_routine_namespace_lookup_error(&error) => Ok(None),
+            result => result,
+        }
+    }
+
+    /// Resolve an already-bound routine identity without repeating namespace-name access checks. `PostgreSQL` stores object identities in views, generated expressions, and SQL-standard routine bodies, so later users need object privileges but do not re-resolve the original schema-qualified name.
+    pub(crate) fn lookup_bound_sql_functions(
+        &self,
+        name: &str,
+    ) -> Option<Vec<Arc<SQLUserFunction>>> {
+        self.lookup_sql_functions_by_keys(std::iter::once(name.to_string()))
+    }
+
+    fn lookup_sql_functions_by_keys(
+        &self,
+        keys: impl IntoIterator<Item = String>,
+    ) -> Option<Vec<Arc<SQLUserFunction>>> {
         let live_registry;
         let registry = if let Some(snapshot) = self.query_sql_function_snapshots.as_ref() {
             snapshot.as_ref()
@@ -433,8 +477,22 @@ impl Engine {
     pub(super) fn lookup_sql_routine_candidates(
         &self,
         name: &str,
+    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
+        let keys = self.routine_lookup_keys(name)?;
+        Ok(self.lookup_sql_routine_candidates_by_keys(keys))
+    }
+
+    pub(super) fn lookup_bound_sql_routine_candidates(
+        &self,
+        name: &str,
     ) -> Option<Vec<Arc<SQLUserFunction>>> {
-        let keys = self.routine_lookup_keys(name).ok()?;
+        self.lookup_sql_routine_candidates_by_keys(std::iter::once(name.to_string()))
+    }
+
+    fn lookup_sql_routine_candidates_by_keys(
+        &self,
+        keys: impl IntoIterator<Item = String>,
+    ) -> Option<Vec<Arc<SQLUserFunction>>> {
         let live_registry;
         let registry = if let Some(snapshot) = self.query_sql_function_snapshots.as_ref() {
             snapshot.as_ref()

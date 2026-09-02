@@ -28,7 +28,7 @@ pub(in crate::sql) use cte_controls::{
 };
 pub(in crate::sql) use projection::{
     analyze_projection_output_schema, bind_projection_output_schema,
-    validate_query_block_expression_types, validate_query_block_projection_references,
+    validate_query_block_expression_types, validate_query_block_references,
 };
 pub(in crate::sql) use routine_binding::bind_query_plan_routines_for_storage;
 pub(in crate::sql) use scope::{
@@ -107,6 +107,7 @@ impl SchemaScope {
             return Ok(QueryFunctionTypeResolver {
                 routines,
                 scalar_subquery_types: None,
+                defer_routine_namespace_errors: false,
             });
         }
         let subquery_outer = self.validate_references.then_some(schema).or(outer);
@@ -120,6 +121,7 @@ impl SchemaScope {
         Ok(QueryFunctionTypeResolver {
             routines,
             scalar_subquery_types: Some(scalar_subquery_types),
+            defer_routine_namespace_errors: false,
         })
     }
 }

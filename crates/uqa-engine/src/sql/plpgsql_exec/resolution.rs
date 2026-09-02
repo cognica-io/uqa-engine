@@ -74,7 +74,7 @@ pub(super) fn resolve_routine(
     kind: &str,
     explicit_variadic: bool,
 ) -> Result<Option<ResolvedRoutine>, SQLError> {
-    if engine.lookup_sql_functions(name).is_none() {
+    if engine.lookup_visible_sql_functions(name)?.is_none() {
         return Ok(None);
     }
     let argument_names = args

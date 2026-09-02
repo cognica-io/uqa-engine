@@ -111,6 +111,28 @@ fn typed_virtual_identities_bind_without_changing_visible_layout() {
 }
 
 #[test]
+fn typed_virtual_identities_preserve_existing_name_ambiguity() {
+    let input = RowSchema::with_identities(
+        vec!["id".into(), "id".into()],
+        vec![
+            ColumnIdentity::qualified("left_source", "id"),
+            ColumnIdentity::qualified("right_source", "id"),
+        ],
+        vec![Some(ColumnType::Integer), Some(ColumnType::Integer)],
+    );
+    assert!(input.column_is_ambiguous("id"));
+
+    let schema = RowSchema::with_typed_virtual_identities(
+        &input,
+        &[(
+            ColumnIdentity::unqualified("tableoid"),
+            Some(ColumnType::Oid),
+        )],
+    );
+    assert!(schema.column_is_ambiguous("id"));
+}
+
+#[test]
 fn conflicting_virtual_identities_are_hidden_but_ambiguous() {
     let base = RowSchema::with_qualified_types(
         "recursive",

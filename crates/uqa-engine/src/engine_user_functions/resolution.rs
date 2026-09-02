@@ -35,8 +35,11 @@ pub(crate) trait RoutineResolution: FunctionTypeResolver {
         false
     }
 
-    fn lookup_sql_functions(&self, _name: &str) -> Option<Vec<Arc<SQLUserFunction>>> {
-        None
+    fn lookup_visible_sql_functions(
+        &self,
+        _name: &str,
+    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
+        Ok(None)
     }
 
     fn resolve_static_sql_function(
@@ -87,8 +90,11 @@ impl RoutineResolution for Engine {
         Engine::has_registered_aggregate_function(self, name)
     }
 
-    fn lookup_sql_functions(&self, name: &str) -> Option<Vec<Arc<SQLUserFunction>>> {
-        Engine::lookup_sql_functions(self, name)
+    fn lookup_visible_sql_functions(
+        &self,
+        name: &str,
+    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
+        Engine::lookup_visible_sql_functions(self, name)
     }
 
     fn resolve_static_sql_function(
@@ -215,7 +221,7 @@ impl FunctionTypeResolver for Engine {
     }
 
     fn resolve_type_name(&self, name: &str) -> Result<Option<ColumnType>, SQLError> {
-        Ok(crate::sql::resolve_catalog_column_type(self, name))
+        crate::sql::resolve_catalog_column_type_name(self, name).map(Some)
     }
 
     fn resolve_function_type(
@@ -276,7 +282,7 @@ impl FunctionTypeResolver for Engine {
             return Ok(false);
         }
         let function = self
-            .lookup_sql_functions(&binding.name)
+            .lookup_bound_sql_functions(&binding.name)
             .and_then(|overloads| {
                 overloads.into_iter().find(|function| {
                     !function.def.is_procedure
@@ -413,7 +419,7 @@ impl Engine {
                 return Ok(None);
             }
             let function = self
-                .lookup_sql_routine_candidates(&binding.name)
+                .lookup_bound_sql_routine_candidates(&binding.name)
                 .and_then(|overloads| {
                     overloads.into_iter().find(|function| {
                         function.def.is_procedure == kind.is_procedure()
@@ -457,7 +463,7 @@ impl Engine {
             ensure_routine_kind(name, argument_types, kind, &matched.function.def)?;
             return Ok(Some(matched));
         }
-        let Some(overloads) = self.lookup_sql_routine_candidates(name) else {
+        let Some(overloads) = self.lookup_sql_routine_candidates(name)? else {
             return Ok(None);
         };
         resolve_static_routine_overload(

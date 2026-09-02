@@ -230,12 +230,13 @@ pub(super) fn scalar_type_inner(
             scalar_type_inner(expr, schema, params, resolver)?;
             match ColumnType::from_sql_name(ty) {
                 Ok(ty) => Ok(Some(ty)),
-                Err(error) => match resolver {
+                Err(error @ SQLError::Unsupported(_)) => match resolver {
                     Some(resolver) => resolver
                         .resolve_type_name(ty)?
                         .map_or(Err(error), |ty| Ok(Some(ty))),
                     None => Err(error),
                 },
+                Err(error) => Err(error),
             }
         }
         ScalarExpr::Array(items) => {

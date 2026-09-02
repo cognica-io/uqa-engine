@@ -94,10 +94,10 @@ use aggregates::{
 };
 use catalog::build_info_schema_rows;
 pub(crate) use catalog::{
-    resolve_age_label_relation_name, resolve_catalog_column_type, resolve_regclass_kind_by_oid,
-    resolve_regclass_oid, resolve_regnamespace_oid, resolve_regobject_oid,
-    resolve_regprocedure_oid, resolve_regrole_oid, resolve_regtype_output, runtime_constraints,
-    schema_object_oid, sequence_relation_oid, RegtypeOutputCatalog,
+    resolve_age_label_relation_name, resolve_catalog_column_type, resolve_catalog_column_type_name,
+    resolve_regclass_kind_by_oid, resolve_regclass_oid, resolve_regnamespace_oid,
+    resolve_regobject_oid, resolve_regprocedure_oid, resolve_regrole_oid, resolve_regtype_output,
+    runtime_constraints, schema_object_oid, sequence_relation_oid, RegtypeOutputCatalog,
 };
 pub(in crate::sql) use catalog::{virtual_relation_accepts_row_lock, virtual_relation_schema};
 use ddl::{
@@ -126,7 +126,7 @@ pub(crate) use regrole_dependencies::{
 use row_functions::{
     execute_function, execute_function_with_top_k, execute_tree_entries, expect_column_name,
     expect_optional_graph_value, graph_betweenness_entries, graph_hits_entries,
-    graph_pagerank_entries, run_age_alter_graph_with_evaluator,
+    graph_pagerank_entries, is_semantic_field_argument, run_age_alter_graph_with_evaluator,
     run_age_create_elabel_with_evaluator, run_age_create_graph_with_evaluator,
     run_age_create_vlabel_with_evaluator, run_age_drop_graph_with_evaluator,
     run_age_drop_label_with_evaluator, run_age_graph_exists_with_evaluator,

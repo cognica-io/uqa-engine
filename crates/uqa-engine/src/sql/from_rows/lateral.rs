@@ -414,7 +414,10 @@ fn execute_lateral_query_block_output(
         params,
         &scoped_ctes,
     )?;
-    crate::sql::select::validate_query_block_projection_references(
+    if let (Some(from), Some(filter)) = (stmt.from.as_ref(), stmt.r#where.as_ref()) {
+        crate::sql::validate_joined_expr_text_match_fields(engine, from, filter)?;
+    }
+    crate::sql::select::validate_query_block_references(
         engine,
         stmt,
         operator.row_schema(),

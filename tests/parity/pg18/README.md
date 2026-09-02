@@ -90,6 +90,12 @@ docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/pa
 docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/schema_create_enforcement_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/schema_create_enforcement_oracle.expected.txt -
 ```
 
+`routine_schema_usage_oracle.sql` records PostgreSQL 18.4 schema `USAGE` enforcement at routine name-resolution boundaries. The checked-in transcript verifies qualified and effective-search-path function and procedure calls, argument column and type errors before namespace checks in projections and filters, missing-object and schema-before-`EXECUTE` precedence, ALTER, GRANT, REVOKE, and DROP targets, inherited grants, immediate prepared-plan invalidation after revocation, and the distinction between dynamically resolved invoker or definer bodies and exact bindings stored in views, generated expressions, and SQL-standard routine bodies.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/routine_schema_usage_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/routine_schema_usage_oracle.expected.txt -
+```
+
 `sequence_security_oracle.sql` records PostgreSQL 18.4 sequence role ownership and ACL behavior. The checked-in transcript verifies the default ACL and owner, an independent grant-option chain, all six `has_sequence_privilege` name/OID overloads, value-function access, grant-option `CASCADE`, implicit owner grant options after self-revocation, and ownership-transfer grantor rewriting.
 
 ```sh

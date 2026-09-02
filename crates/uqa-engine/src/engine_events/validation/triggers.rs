@@ -101,7 +101,7 @@ impl Engine {
         name: &str,
     ) -> Result<Arc<SQLUserFunction>, SQLError> {
         let candidates = self
-            .lookup_sql_functions(name)
+            .lookup_visible_sql_functions(name)?
             .unwrap_or_default()
             .into_iter()
             .filter(|function| {

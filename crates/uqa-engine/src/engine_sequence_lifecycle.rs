@@ -147,7 +147,7 @@ impl Engine {
                     });
                 }
                 let current_user = self.current_user_name();
-                self.ensure_schema_privilege(
+                self.require_schema_privilege(
                     &target_schema,
                     &current_user,
                     crate::engine_schema_security::SchemaAclPrivilege::Create,

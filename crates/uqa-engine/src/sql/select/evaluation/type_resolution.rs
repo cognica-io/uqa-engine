@@ -17,7 +17,7 @@ impl FunctionTypeResolver for ScopedEngineHook<'_> {
     }
 
     fn resolve_type_name(&self, name: &str) -> Result<Option<ColumnType>, SQLError> {
-        Ok(crate::sql::resolve_catalog_column_type(self.engine, name))
+        crate::sql::resolve_catalog_column_type_name(self.engine, name).map(Some)
     }
 
     fn resolve_function_type(

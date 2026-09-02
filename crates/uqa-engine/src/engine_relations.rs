@@ -216,7 +216,7 @@ impl Engine {
         let relation =
             RelationIdentity::from_legacy_name(canonical_name).map_err(SQLError::Unsupported)?;
         let current_user = self.current_user_name();
-        self.ensure_schema_privilege(
+        self.require_schema_privilege(
             &relation.schema,
             &current_user,
             crate::engine_schema_security::SchemaAclPrivilege::Create,
@@ -234,12 +234,12 @@ impl Engine {
             return self.ensure_temporary_relation_creation_privilege();
         }
         let current_user = self.current_user_name();
-        self.ensure_schema_privilege(
+        self.require_schema_privilege(
             &relation.schema,
             &current_user,
             crate::engine_schema_security::SchemaAclPrivilege::Usage,
         )?;
-        self.ensure_schema_privilege(
+        self.require_schema_privilege(
             &relation.schema,
             &current_user,
             crate::engine_schema_security::SchemaAclPrivilege::Create,
@@ -268,12 +268,12 @@ impl Engine {
                     });
                 }
                 let current_user = self.current_user_name();
-                self.ensure_schema_privilege(
+                self.require_schema_privilege(
                     schema,
                     &current_user,
                     crate::engine_schema_security::SchemaAclPrivilege::Usage,
                 )?;
-                self.ensure_schema_privilege(
+                self.require_schema_privilege(
                     schema,
                     &current_user,
                     crate::engine_schema_security::SchemaAclPrivilege::Create,

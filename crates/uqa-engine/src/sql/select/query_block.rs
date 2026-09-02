@@ -12,7 +12,7 @@ use super::{
     has_window, overlay_outer_schema, projection_columns, qualifier_filters_for_stmt,
     resolve_row_locks, run_select_without_from_output, run_single_foreign_select_output,
     run_single_table_select_output, validate_query_block_expression_types,
-    validate_query_block_projection_references, validate_query_set_contexts,
+    validate_query_block_references, validate_query_set_contexts,
     validate_source_set_contexts_before_build, with_query_table_pseudo_columns, BTreeSet,
     ColumnPrune, CteScope, Engine, QueryBlockPlan, QueryOutput, QueryOutputMode, SQLError,
     SQLParam, ScalarExpr, ScopedEngineHook, SingleRelation, SourcePlan,
@@ -58,7 +58,7 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
                 message: "SELECT * with no tables specified is not valid".into(),
             });
         }
-        validate_query_block_projection_references(engine, stmt, &expression_schema, params, ctes)?;
+        validate_query_block_references(engine, stmt, &expression_schema, params, ctes)?;
         return run_select_without_from_output(engine, block, stmt, params, ctes, output_mode);
     };
     validate_source_set_contexts_before_build(
@@ -86,13 +86,7 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
         let resolution = ctes.relation_name_resolution()?;
         let foreign_table = catalog.foreign_table_entry_resolved(&resolution, name)?;
         if alias.is_none() && foreign_table.is_some() {
-            validate_query_block_projection_references(
-                engine,
-                stmt,
-                &expression_schema,
-                params,
-                ctes,
-            )?;
+            validate_query_block_references(engine, stmt, &expression_schema, params, ctes)?;
             return run_single_foreign_select_output(
                 engine,
                 SingleRelation {
@@ -108,6 +102,10 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
         }
         let local_table = catalog.table_name_resolved(&resolution, name)?;
         let is_virtual = name.contains('.') || (local_table.is_none() && foreign_table.is_none());
+        let schemaless = local_table.is_some()
+            && catalog
+                .table_resolved(&resolution, name)?
+                .is_some_and(|table| table.columns.is_empty());
         let command_overlay =
             ctes.reads_command_overlay() && engine.command_mutation_overlay_active();
         let has_hierarchy_descendants = local_table.is_some()
@@ -116,13 +114,15 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
                 .len()
                 > 1;
         if alias.is_none() && !is_virtual && !command_overlay && !has_hierarchy_descendants {
-            validate_query_block_projection_references(
-                engine,
-                stmt,
-                &expression_schema,
-                params,
-                ctes,
-            )?;
+            if let Some(filter) = stmt.r#where.as_ref() {
+                crate::sql::validate_expr_text_match_fields(engine, name, filter)?;
+            }
+            let reference_schema = if schemaless {
+                schemaless_reference_schema(engine, stmt, from, qualifier, outer.as_ref(), ctes)?
+            } else {
+                expression_schema.clone()
+            };
+            validate_query_block_references(engine, stmt, &reference_schema, params, ctes)?;
             return run_single_table_select_output(
                 engine,
                 SingleRelation {
@@ -166,7 +166,7 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
     let source_schema = operator.row_schema().clone();
     let projection_schema = with_query_table_pseudo_columns(&source_schema);
     let projection_schema = overlay_outer_schema(&projection_schema, outer.as_ref());
-    validate_query_block_projection_references(engine, stmt, &projection_schema, params, ctes)?;
+    validate_query_block_references(engine, stmt, &projection_schema, params, ctes)?;
     let physical_filter = final_filter_after_qualifier_pushdown(
         engine,
         stmt,
@@ -191,6 +191,28 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
         columns,
         output_mode,
     )
+}
+
+/// Bind the query-visible fields of a schemaless table from the same projection contract that constructs its document scan.
+fn schemaless_reference_schema(
+    engine: &Engine,
+    statement: &QueryBlockPlan,
+    source: &SourcePlan,
+    qualifier: &str,
+    outer: Option<&uqa_execution::RowSchema>,
+    ctes: &CteScope,
+) -> Result<uqa_execution::RowSchema, SQLError> {
+    let columns = column_prune_for_stmt(engine, statement, source, ctes)?
+        .and_then(|prune| prune.get(qualifier).cloned())
+        .and_then(SourceProjection::explicit_columns)
+        .map_or_else(Vec::new, |columns| columns.into_iter().collect());
+    let schema = uqa_execution::RowSchema::with_qualified_types(
+        qualifier,
+        columns.clone(),
+        vec![None; columns.len()],
+    );
+    let schema = with_query_table_pseudo_columns(&schema);
+    Ok(overlay_outer_schema(&schema, outer))
 }
 
 pub(in crate::sql) fn column_prune_for_stmt(

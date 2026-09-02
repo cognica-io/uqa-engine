@@ -21,7 +21,17 @@ pub(crate) use resolution::{
 };
 pub(crate) use uqa_execution::canonical_routine_type_name;
 use uqa_planner::UnifiedPlan;
-use uqa_sql::ast::CreateFunction;
+use uqa_sql::{ast::CreateFunction, SQLError};
+
+pub(crate) fn is_routine_namespace_lookup_error(error: &SQLError) -> bool {
+    matches!(
+        error,
+        SQLError::Routine { sqlstate, message }
+            if sqlstate == "3F000"
+                || (sqlstate == "42501"
+                    && message.starts_with("permission denied for schema "))
+    )
+}
 
 pub(crate) fn builtin_routine_support_oid(name: &str) -> Option<i64> {
     Some(match name.strip_prefix("pg_catalog.").unwrap_or(name) {

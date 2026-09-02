@@ -194,7 +194,7 @@ pub(in crate::sql) fn resolve_table_function_binding(
     let builtin_surface = is_builtin_table_function(&builtin)
         || crate::operator_tree_bridge::is_operator_join_table_function(&builtin)
         || routines.has_registered_table_function(&identity);
-    if routines.lookup_sql_functions(name).is_none() {
+    if routines.lookup_visible_sql_functions(name)?.is_none() {
         return Ok(None);
     }
     match routines.resolve_static_sql_function_match(

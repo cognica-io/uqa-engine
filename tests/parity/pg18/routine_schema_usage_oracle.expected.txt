@@ -1,0 +1,25 @@
+unqualified-skip|ok|visible
+unqualified-missing|42883|function only_probe() does not exist
+argument-column-precedence|42703|column "missing_column" does not exist
+argument-type-precedence|42704|type "missing_routine_type" does not exist
+where-argument-column-precedence|42703|column "missing_column" does not exist
+where-argument-type-precedence|42704|type "missing_routine_type" does not exist
+qualified-existing|42501|permission denied for schema uqa_routine_schema_hidden
+qualified-missing|42501|permission denied for schema uqa_routine_schema_hidden
+missing-schema|3F000|schema "uqa_routine_schema_absent" does not exist
+schema-before-execute|42501|permission denied for schema uqa_routine_schema_hidden
+procedure-schema|42501|permission denied for schema uqa_routine_schema_hidden
+alter-schema|42501|permission denied for schema uqa_routine_schema_hidden
+grant-schema|42501|permission denied for schema uqa_routine_schema_hidden
+revoke-schema|42501|permission denied for schema uqa_routine_schema_hidden
+drop-schema|42501|permission denied for schema uqa_routine_schema_hidden
+unqualified-first-visible|ok|hidden
+execute-after-usage|42501|permission denied for function denied_probe
+prepare-with-usage|ok
+prepared-after-revoke|42501|permission denied for schema uqa_routine_schema_hidden
+bound-view|ok|9
+bound-generated|ok|9
+bound-atomic|ok|9
+source-invoker|42501|permission denied for schema uqa_routine_schema_hidden
+source-definer|ok|9
+inherited-usage|ok|7

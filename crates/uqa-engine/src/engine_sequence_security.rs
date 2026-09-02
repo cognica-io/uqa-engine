@@ -570,7 +570,7 @@ impl Engine {
         if current_owner == new_owner {
             return Ok(());
         }
-        self.ensure_schema_privilege(
+        self.require_schema_privilege(
             &relation.schema,
             &new_owner,
             crate::engine_schema_security::SchemaAclPrivilege::Create,

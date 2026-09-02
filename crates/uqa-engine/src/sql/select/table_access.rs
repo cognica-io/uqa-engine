@@ -39,9 +39,6 @@ pub(in crate::sql) fn run_single_table_select_output(
     let table_snapshot = catalog
         .table_resolved(&resolution, table)?
         .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-    if let Some(filter) = stmt.r#where.as_ref() {
-        crate::sql::validate_expr_text_match_fields(engine, table, filter)?;
-    }
     let has_stored_score_column = table_snapshot
         .columns
         .iter()

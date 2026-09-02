@@ -9,6 +9,7 @@
 use super::{
     multi_field_match_shape, Engine, MultiFieldMatchShape, SQLError, ScalarExpr, SourcePlan, Value,
 };
+use uqa_sql::registry::FunctionKind;
 
 const SINGLE_FIELD_TEXT_MATCH_FUNCTIONS: [&str; 4] = [
     "text_match",
@@ -16,6 +17,70 @@ const SINGLE_FIELD_TEXT_MATCH_FUNCTIONS: [&str; 4] = [
     "fts_match",
     "bayesian_match_with_prior",
 ];
+
+/// Return whether a registered function consumes this argument as a relation-field identifier rather than as a scalar row value.
+pub(in crate::sql) fn is_semantic_field_argument(
+    function: &str,
+    args: &[ScalarExpr],
+    argument_index: usize,
+) -> Result<bool, SQLError> {
+    let dispatch_name = crate::sql::builtin_function_dispatch_name(function);
+    let Some(kind) = uqa_sql::registry::lookup(&dispatch_name) else {
+        return Ok(false);
+    };
+    let is_field = match kind {
+        FunctionKind::TextMatch | FunctionKind::BayesianMatch | FunctionKind::KNNMatch => {
+            argument_index == 0
+        }
+        FunctionKind::FTSMatch => argument_index == 0 && !fts_query_is_jsonpath(args.get(1)),
+        FunctionKind::BayesianMatchWithPrior => matches!(argument_index, 0 | 2),
+        FunctionKind::CalibratedVectorMatch => argument_index == 0,
+        FunctionKind::MultiFieldMatch => match multi_field_match_shape(args)? {
+            MultiFieldMatchShape::FieldsThenQuery { query_idx, .. } => argument_index < query_idx,
+            MultiFieldMatchShape::Pairs { .. } => argument_index.is_multiple_of(2),
+        },
+        FunctionKind::StagedRetrieval => {
+            !matches!(args.first(), Some(ScalarExpr::Func { .. }))
+                && argument_index.is_multiple_of(3)
+        }
+        FunctionKind::UQAFacets => true,
+        FunctionKind::ScoreBM25 | FunctionKind::ScoreBayesianBM25 => {
+            args.len() == 2 && argument_index == 0
+        }
+        FunctionKind::FuseLogOdds
+        | FunctionKind::PositiveEvidencePool
+        | FunctionKind::BayesianEvidenceFusion
+        | FunctionKind::GraphPagerank
+        | FunctionKind::GraphHits
+        | FunctionKind::GraphBetweenness
+        | FunctionKind::GraphTraverse
+        | FunctionKind::GraphNeighbors
+        | FunctionKind::DeepPredict
+        | FunctionKind::UQAHighlight
+        | FunctionKind::TraverseMatch
+        | FunctionKind::TemporalTraverse
+        | FunctionKind::RPQ
+        | FunctionKind::GraphCreate
+        | FunctionKind::GraphDrop
+        | FunctionKind::GraphExists
+        | FunctionKind::GraphLabelCreate
+        | FunctionKind::GraphLabelDrop
+        | FunctionKind::GraphAlter
+        | FunctionKind::GraphEdges
+        | FunctionKind::AttentionFusion
+        | FunctionKind::LearnedFusion
+        | FunctionKind::SparseThreshold
+        | FunctionKind::DeepLearn
+        | FunctionKind::Convolve
+        | FunctionKind::Pool
+        | FunctionKind::Flatten
+        | FunctionKind::Dense
+        | FunctionKind::Softmax
+        | FunctionKind::Layer
+        | FunctionKind::Model => false,
+    };
+    Ok(is_field)
+}
 
 /// Walk an expression tree and hand every text-match field argument to
 /// `validate`. Used by the select runners to reject silently-empty

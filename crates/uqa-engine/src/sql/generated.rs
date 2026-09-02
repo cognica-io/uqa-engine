@@ -178,7 +178,7 @@ fn validate_generation_expression(
                 && (engine
                     .registered_runtime_function_volatility(name)
                     .is_some()
-                    || engine.lookup_sql_functions(name).is_some())
+                    || engine.lookup_visible_sql_functions(name)?.is_some())
             {
                 return Err(SQLError::TypeMismatch(
                     "generation expression uses user-defined function; virtual generated columns cannot use user-defined functions"

@@ -304,12 +304,12 @@ fn scalar_function_is_strict(
     {
         return Ok(strict);
     }
-    if engine.lookup_sql_functions(name).is_none() {
-        return Ok(false);
-    }
     let schema = RowSchema::join(side, other, std::iter::empty::<String>());
     let (argument_names, argument_types, explicit_variadic) =
         uqa_execution::function_call_argument_signature(args, &schema, params, Some(engine))?;
+    if binding.is_none() && engine.lookup_visible_sql_functions(name)?.is_none() {
+        return Ok(false);
+    }
     Ok(engine
         .resolve_static_sql_function(
             name,
