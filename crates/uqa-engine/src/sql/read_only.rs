@@ -61,7 +61,7 @@ fn forbidden_command(
         CommandPlan::Drop(drop) if drop.kind == DropKind::Sequence => Ok(Some("DROP SEQUENCE")),
         CommandPlan::Drop(_) => Ok(Some("DROP")),
         CommandPlan::AlterTable(_) => Ok(Some("ALTER TABLE")),
-        CommandPlan::AlterViewOptions(_) => Ok(Some("ALTER VIEW")),
+        CommandPlan::AlterView(_) => Ok(Some("ALTER VIEW")),
         CommandPlan::CreateView { .. } => Ok(Some("CREATE VIEW")),
         CommandPlan::CreateMaterializedView { .. } => Ok(Some("CREATE MATERIALIZED VIEW")),
         CommandPlan::RefreshMaterializedView { .. } => Ok(Some("REFRESH MATERIALIZED VIEW")),

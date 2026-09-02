@@ -63,6 +63,27 @@ fn sample_table_acl() -> Vec<crate::catalog::TableAclEntry> {
 }
 
 #[test]
+fn view_rows_round_trip_role_ownership() {
+    let catalog = fresh();
+    catalog.save_schema("application").unwrap();
+    catalog
+        .save_view(&ViewRow {
+            relation: RelationIdentity::new("application", "owned_view"),
+            role_owner: "view_owner".into(),
+            definition_json: r#"{"query":"definition"}"#.into(),
+        })
+        .unwrap();
+
+    let view = catalog.load_views().unwrap().remove(0);
+    assert_eq!(
+        view.relation,
+        RelationIdentity::new("application", "owned_view")
+    );
+    assert_eq!(view.role_owner, "view_owner");
+    assert_eq!(view.definition_json, r#"{"query":"definition"}"#);
+}
+
+#[test]
 fn migration_creates_tables_table() {
     let cat = fresh();
     cat.conn

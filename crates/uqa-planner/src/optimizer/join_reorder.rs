@@ -124,7 +124,7 @@ fn reorder_command_joins(
         | CommandPlan::Drop(_)
         | CommandPlan::RefreshMaterializedView { .. }
         | CommandPlan::AlterTable(_)
-        | CommandPlan::AlterViewOptions(_)
+        | CommandPlan::AlterView(_)
         | CommandPlan::CreateSchema { .. }
         | CommandPlan::SetVariable { .. }
         | CommandPlan::ResetVariable { .. }

@@ -246,7 +246,7 @@ impl Engine {
             })?;
         }
         if !dependent_views.is_empty() {
-            self.drop_views_inner(&dependent_views)?;
+            self.drop_views_inner(&dependent_views, false)?;
         }
         for (table, column) in &dependent_columns {
             if !self.try_drop_column_inner(table, column).map_err(|error| {

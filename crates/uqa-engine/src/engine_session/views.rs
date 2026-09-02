@@ -8,6 +8,7 @@
 
 mod materialized;
 mod options;
+mod ownership;
 mod registration;
 
 use super::{
@@ -23,6 +24,17 @@ use uqa_sql::ast::FunctionBinding;
 enum RestoredView {
     Current(StoredView),
     Legacy(QueryPlan),
+}
+
+fn catalog_view_row(
+    relation: &RelationIdentity,
+    view: &StoredView,
+) -> Result<ViewRow, serde_json::Error> {
+    Ok(ViewRow {
+        relation: relation.clone(),
+        role_owner: view.role_owner.clone(),
+        definition_json: serde_json::to_string(view)?,
+    })
 }
 
 fn upgrade_legacy_view_dispatches(plan: &mut QueryPlan) -> bool {
@@ -215,10 +227,7 @@ impl Engine {
         }
         if let Some(catalog) = self.storage.catalog.as_ref() {
             for (relation, view) in &updates {
-                catalog.save_view(&ViewRow {
-                    relation: relation.clone(),
-                    definition_json: serde_json::to_string(view)?,
-                })?;
+                catalog.save_view(&catalog_view_row(relation, view)?)?;
             }
         }
         let mut views = self.durable.views.write();
@@ -242,7 +251,7 @@ impl Engine {
             }
         }
         let views = views.into_iter().collect::<Vec<_>>();
-        self.drop_views_inner(&views)
+        self.drop_views_inner(&views, false)
             .map_err(|error| StorageBackendError::Other(error.to_string()))
     }
 
@@ -262,7 +271,7 @@ impl Engine {
         self.with_implicit_transaction(|engine| {
             match engine.try_resolve_visible_relation_kind(name)? {
                 Some((canonical, "view")) => {
-                    engine.drop_views_inner(&[canonical])?;
+                    engine.drop_views_inner(&[canonical], true)?;
                     Ok(true)
                 }
                 Some((canonical, kind)) => Err(SQLError::Unsupported(format!(
@@ -274,14 +283,30 @@ impl Engine {
     }
 
     pub(crate) fn drop_views(&self, names: &[String]) -> Result<(), SQLError> {
-        self.with_implicit_transaction(|engine| engine.drop_views_inner(names))
+        self.with_implicit_transaction(|engine| engine.drop_views_inner(names, true))
     }
 
-    pub(crate) fn drop_views_inner(&self, names: &[String]) -> Result<(), SQLError> {
+    pub(crate) fn drop_views_inner(
+        &self,
+        names: &[String],
+        check_authority: bool,
+    ) -> Result<(), SQLError> {
         let drop_set = names
             .iter()
             .cloned()
             .collect::<std::collections::BTreeSet<_>>();
+        if check_authority {
+            let views = self.durable.views.read();
+            for name in names {
+                let relation = RelationIdentity::from_legacy_name(name).map_err(|error| {
+                    SQLError::Internal(format!("resolve DROP VIEW target `{name}`: {error}"))
+                })?;
+                let view = views.get(&relation).ok_or_else(|| {
+                    SQLError::Internal(format!("view `{name}` disappeared before owner check"))
+                })?;
+                self.ensure_view_drop_authority(name, view)?;
+            }
+        }
         for name in names {
             let dependents = self
                 .views_depending_on_relation(name)
@@ -581,10 +606,7 @@ impl Engine {
         if let Some(catalog) = self.storage.catalog.as_ref() {
             for (relation, view) in &rewritten_views {
                 if view.persistence != uqa_sql::ast::RelationPersistence::Temporary {
-                    catalog.save_view(&ViewRow {
-                        relation: relation.clone(),
-                        definition_json: serde_json::to_string(view)?,
-                    })?;
+                    catalog.save_view(&catalog_view_row(relation, view)?)?;
                 }
             }
         }
@@ -695,10 +717,7 @@ impl Engine {
                     ))
                 })?;
                 catalog
-                    .save_view(&ViewRow {
-                        relation: relation.clone(),
-                        definition_json: serde_json::to_string(view)?,
-                    })
+                    .save_view(&catalog_view_row(relation, view)?)
                     .map_err(|error| {
                         StorageBackendError::Other(format!(
                             "migrate legacy view `{view_name}` routine bindings: {error}"
@@ -760,6 +779,7 @@ impl Engine {
                 RestoredView::Legacy(query) => {
                     legacy_views.push(row.relation.clone());
                     StoredView {
+                        role_owner: row.role_owner.clone(),
                         query,
                         output_columns: None,
                         persistence: uqa_sql::ast::RelationPersistence::Permanent,
@@ -771,6 +791,13 @@ impl Engine {
                     }
                 }
             };
+            view.role_owner = row.role_owner;
+            if !self.durable.roles.read().contains_key(&view.role_owner) {
+                return Err(StorageBackendError::Other(format!(
+                    "view `{view_name}` is owned by missing role `{}`",
+                    view.role_owner
+                )));
+            }
             if upgrade_legacy_view_dispatches(&mut view.query) {
                 dispatch_upgraded_views.push(row.relation.clone());
             }
@@ -797,10 +824,7 @@ impl Engine {
                     relation.qualified_name()
                 ))
             })?;
-            catalog.save_view(&ViewRow {
-                relation,
-                definition_json: serde_json::to_string(view)?,
-            })?;
+            catalog.save_view(&catalog_view_row(&relation, view)?)?;
         }
         *self.durable.views.write() = views;
         Ok(())

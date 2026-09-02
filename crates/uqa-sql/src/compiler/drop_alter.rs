@@ -15,9 +15,9 @@ use super::types::{
 };
 use super::{
     compile_column_def, compile_expr, compile_pg_type_name, extract_string, range_var_name,
-    render_relation_component, AlterTableAction, AlterTableStmt, AlterViewKind,
-    AlterViewOptionsAction, AlterViewOptionsStmt, DropKind, DropStmt, Node, NodeEnum, Result,
-    SQLError, Statement, TableKeyConstraint, TableKeyConstraintKind,
+    render_relation_component, AlterTableAction, AlterTableStmt, AlterViewAction, AlterViewKind,
+    AlterViewStmt, DropKind, DropStmt, Node, NodeEnum, Result, SQLError, Statement,
+    TableKeyConstraint, TableKeyConstraintKind,
 };
 use crate::ast::{
     AlterSequence, EventEnableMode, ForeignKey, RelationPersistence, SequenceLifecycle, TableCheck,
@@ -181,7 +181,7 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
     ) {
         let [command] = stmt.cmds.as_slice() else {
             return Err(SQLError::Unsupported(
-                "ALTER VIEW accepts one relation-options action at a time".into(),
+                "ALTER VIEW accepts one action at a time".into(),
             ));
         };
         let inner = command
@@ -209,11 +209,21 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                     )?,
                     AlterViewKind::MaterializedView => validate_materialized_view_options(options)?,
                 };
-                AlterViewOptionsAction::Set(options)
+                AlterViewAction::Set(options)
             }
             AlterTableType::AtResetRelOptions => {
                 let nodes = alter_reloption_nodes(cmd)?;
-                AlterViewOptionsAction::Reset(collect_reset_reloption_names(nodes, kind)?)
+                AlterViewAction::Reset(collect_reset_reloption_names(nodes, kind)?)
+            }
+            AlterTableType::AtChangeOwner => {
+                let owner = cmd.newowner.as_ref().ok_or_else(|| {
+                    SQLError::Internal("ALTER VIEW OWNER TO without owner".into())
+                })?;
+                AlterViewAction::OwnerTo(super::routines::compile_role_spec(
+                    owner,
+                    false,
+                    "ALTER VIEW OWNER TO",
+                )?)
             }
             other => {
                 return Err(SQLError::Unsupported(format!(
@@ -225,7 +235,7 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                 )));
             }
         };
-        return Ok(Statement::AlterViewOptions(AlterViewOptionsStmt {
+        return Ok(Statement::AlterView(AlterViewStmt {
             name: table,
             kind,
             if_exists,

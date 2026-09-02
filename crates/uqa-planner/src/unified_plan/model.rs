@@ -428,7 +428,7 @@ pub enum CommandPlan {
     Delete(Box<DeletePlan>),
     Drop(uqa_sql::ast::DropStmt),
     AlterTable(Box<uqa_sql::ast::AlterTableStmt>),
-    AlterViewOptions(uqa_sql::ast::AlterViewOptionsStmt),
+    AlterView(uqa_sql::ast::AlterViewStmt),
     CreateView {
         name: String,
         column_names: Vec<String>,

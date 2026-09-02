@@ -140,12 +140,16 @@ pub(super) fn build_pg_class(
             "relhastriggers".into(),
             bool_value(catalog.relation_has_triggers(resolution, &name)?),
         );
+        row.insert(
+            "relowner".into(),
+            int_value(crate::engine_roles::role_oid(&definition.role_owner)),
+        );
         out.push(row);
     }
     for (name, definition) in catalog.views_of_kind(crate::StoredViewKind::Materialized) {
         let (schema, view) = split_schema_name(&name)?;
         let columns = view_columns_for(engine, catalog, resolution, &definition)?;
-        out.push(pg_class_row_with_lifecycle(
+        let mut row = pg_class_row_with_lifecycle(
             &schema,
             &view,
             "m",
@@ -155,7 +159,12 @@ pub(super) fn build_pg_class(
             definition.persistence,
             definition.populated,
             &definition.options,
-        ));
+        );
+        row.insert(
+            "relowner".into(),
+            int_value(crate::engine_roles::role_oid(&definition.role_owner)),
+        );
+        out.push(row);
     }
     for (name, foreign_table) in catalog.foreign_tables() {
         let (schema, table) = split_schema_name(&name)?;

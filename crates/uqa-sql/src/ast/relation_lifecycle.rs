@@ -44,17 +44,18 @@ pub enum AlterViewKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum AlterViewOptionsAction {
+pub enum AlterViewAction {
     Set(Vec<(String, String)>),
     Reset(Vec<String>),
+    OwnerTo(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AlterViewOptionsStmt {
+pub struct AlterViewStmt {
     pub name: String,
     pub kind: AlterViewKind,
     pub if_exists: bool,
-    pub action: AlterViewOptionsAction,
+    pub action: AlterViewAction,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

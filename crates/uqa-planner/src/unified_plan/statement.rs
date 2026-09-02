@@ -190,9 +190,7 @@ impl UnifiedPlan {
             Statement::AlterTable(value) => {
                 Self::Command(Box::new(CommandPlan::AlterTable(Box::new(value))))
             }
-            Statement::AlterViewOptions(value) => {
-                Self::Command(Box::new(CommandPlan::AlterViewOptions(value)))
-            }
+            Statement::AlterView(value) => Self::Command(Box::new(CommandPlan::AlterView(value))),
             Statement::CreateView {
                 name,
                 column_names,
@@ -460,7 +458,7 @@ impl CommandPlan {
             Self::Delete(_) => "Delete",
             Self::Drop(_) => "Drop",
             Self::AlterTable(_) => "AlterTable",
-            Self::AlterViewOptions(_) => "AlterViewOptions",
+            Self::AlterView(_) => "AlterView",
             Self::CreateView { .. } => "CreateView",
             Self::CreateMaterializedView { .. } => "CreateMaterializedView",
             Self::RefreshMaterializedView { .. } => "RefreshMaterializedView",

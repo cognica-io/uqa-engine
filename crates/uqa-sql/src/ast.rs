@@ -491,7 +491,7 @@ pub enum Statement {
     Delete(DeleteStmt),
     Drop(DropStmt),
     AlterTable(AlterTableStmt),
-    AlterViewOptions(AlterViewOptionsStmt),
+    AlterView(AlterViewStmt),
     /// `CREATE [OR REPLACE] VIEW name [(column_name, ...)] AS SELECT ...`. The body is the underlying `SelectStmt`; views are materialised lazily on every reference (no row caching).
     CreateView {
         name: String,

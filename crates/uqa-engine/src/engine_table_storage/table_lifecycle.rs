@@ -203,8 +203,10 @@ impl Engine {
             )?;
         }
 
-        // Finish every dependency check before mutating a referrer or target.
-        self.ensure_no_drop_view_dependencies(&canonical_names)?;
+        // Finish every dependency check before mutating a referrer or target. CASCADE removes the complete dependent-view closure after this preflight instead of treating a rewritable catalog dependency as an error.
+        if !cascade {
+            self.ensure_no_drop_view_dependencies(&canonical_names)?;
+        }
         Self::ensure_drop_targets_unreferenced(&target_names, &targets, &entries)?;
         let owned_sequences = self.owned_sequences_for_drop(&target_names, &entries)?;
 
@@ -256,6 +258,7 @@ impl Engine {
             )));
         }
         if cascade {
+            self.drop_views_depending_on_relations(&canonical_names)?;
             for (name, table, columns, checks, foreign_keys, key_constraints) in &updates {
                 self.persist_constraint_candidate(
                     name,

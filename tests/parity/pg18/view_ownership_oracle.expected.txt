@@ -1,0 +1,32 @@
+initial-view-owner|uqa_view_owner_source
+initial-matview-owner|uqa_view_owner_source
+pg-views-owner|uqa_view_owner_source
+pg-matviews-owner|uqa_view_owner_source
+outsider-alter|42501|must be owner of view items
+outsider-drop|42501|must be owner of view items
+outsider-refresh|42501|permission denied for materialized view snapshot
+outsider-replace|42501|must be owner of view items
+schema-owner-drop-view|ok
+schema-owner-drop-matview|ok
+member-alter|ok
+member-refresh|ok
+member-replace|ok
+missing-owner|42704|role "uqa_view_owner_missing" does not exist
+owner-without-create|42501|permission denied for schema uqa_view_ownership_oracle
+owner-without-set|42501|must be able to SET ROLE "uqa_view_owner_no_set"
+view-owner-transfer|ok
+matview-owner-transfer|ok
+transferred-view-owner|uqa_view_owner_target
+transferred-matview-owner|uqa_view_owner_target
+former-owner-alter|42501|must be owner of view items
+new-owner-alter|ok
+new-owner-refresh|ok
+cascade-owner-drop|ok
+transaction-owner|uqa_view_owner_target
+rollback-owner|uqa_view_owner_source
+owner-drop-dependent|2BP01|role "uqa_view_owner_target" cannot be dropped because some objects depend on it
+superuser-view-transfer-no-create|ok
+superuser-matview-transfer-no-create|ok
+superuser-transferred-view-owner|uqa_view_owner_no_create
+superuser-transferred-matview-owner|uqa_view_owner_no_create
+owner-drop-released|ok

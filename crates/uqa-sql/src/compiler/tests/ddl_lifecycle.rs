@@ -725,18 +725,34 @@ fn relation_forms_and_options_preserve_lifecycle_semantics() {
     ));
     assert!(matches!(
         first("ALTER VIEW temp_v SET (security_invoker=on)"),
-        Statement::AlterViewOptions(crate::ast::AlterViewOptionsStmt {
+        Statement::AlterView(crate::ast::AlterViewStmt {
             kind: crate::ast::AlterViewKind::View,
-            action: crate::ast::AlterViewOptionsAction::Set(options),
+            action: crate::ast::AlterViewAction::Set(options),
             ..
         }) if options == [("security_invoker".into(), "on".into())]
     ));
     assert!(matches!(
         first("ALTER VIEW temp_v RESET (security_barrier)"),
-        Statement::AlterViewOptions(crate::ast::AlterViewOptionsStmt {
-            action: crate::ast::AlterViewOptionsAction::Reset(options),
+        Statement::AlterView(crate::ast::AlterViewStmt {
+            action: crate::ast::AlterViewAction::Reset(options),
             ..
         }) if options == ["security_barrier"]
+    ));
+    assert!(matches!(
+        first("ALTER VIEW temp_v OWNER TO next_owner"),
+        Statement::AlterView(crate::ast::AlterViewStmt {
+            kind: crate::ast::AlterViewKind::View,
+            action: crate::ast::AlterViewAction::OwnerTo(owner),
+            ..
+        }) if owner == "next_owner"
+    ));
+    assert!(matches!(
+        first("ALTER MATERIALIZED VIEW reports OWNER TO CURRENT_USER"),
+        Statement::AlterView(crate::ast::AlterViewStmt {
+            kind: crate::ast::AlterViewKind::MaterializedView,
+            action: crate::ast::AlterViewAction::OwnerTo(owner),
+            ..
+        }) if owner == "CURRENT_USER"
     ));
     assert!(matches!(
         compile("ALTER VIEW temp_v RENAME TO renamed").unwrap_err(),

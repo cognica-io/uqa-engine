@@ -7,8 +7,8 @@
 //! Materialized-view creation, snapshot replacement, and refresh lifecycle.
 
 use super::{
-    create_view_output_columns, Engine, MaterializedViewRegistration, RelationIdentity, SQLError,
-    StoredView, StoredViewKind, ViewRow,
+    catalog_view_row, create_view_output_columns, Engine, MaterializedViewRegistration,
+    RelationIdentity, SQLError, StoredView, StoredViewKind,
 };
 
 fn materialized_rows(
@@ -100,6 +100,7 @@ impl Engine {
                 SQLError::Internal(format!("invalid materialized-view name: {error}"))
             })?;
             let view = StoredView {
+                role_owner: engine.current_user_name(),
                 query: plan,
                 output_columns: Some(output_columns),
                 persistence: uqa_sql::ast::RelationPersistence::Permanent,
@@ -110,14 +111,10 @@ impl Engine {
                 populated: !with_no_data,
             };
             if let Some(catalog) = engine.storage.catalog.as_ref() {
-                let definition_json = serde_json::to_string(&view).map_err(|error| {
-                    SQLError::Internal(format!("serialize materialized view `{name}`: {error}"))
-                })?;
                 catalog
-                    .save_view(&ViewRow {
-                        relation: relation.clone(),
-                        definition_json,
-                    })
+                    .save_view(&catalog_view_row(&relation, &view).map_err(|error| {
+                        SQLError::Internal(format!("serialize materialized view `{name}`: {error}"))
+                    })?)
                     .map_err(|error| {
                         SQLError::Internal(format!("persist materialized view `{name}`: {error}"))
                     })?;
@@ -166,6 +163,7 @@ impl Engine {
                 .ok_or_else(|| {
                     SQLError::Internal(format!("materialized view `{canonical}` disappeared"))
                 })?;
+            engine.ensure_materialized_view_maintenance(&canonical, &view)?;
             view.materialized_rows = if with_no_data {
                 Vec::new()
             } else {
@@ -179,16 +177,12 @@ impl Engine {
             };
             view.populated = !with_no_data;
             if let Some(catalog) = engine.storage.catalog.as_ref() {
-                let definition_json = serde_json::to_string(&view).map_err(|error| {
-                    SQLError::Internal(format!(
-                        "serialize materialized view `{canonical}`: {error}"
-                    ))
-                })?;
                 catalog
-                    .save_view(&ViewRow {
-                        relation: relation.clone(),
-                        definition_json,
-                    })
+                    .save_view(&catalog_view_row(&relation, &view).map_err(|error| {
+                        SQLError::Internal(format!(
+                            "serialize materialized view `{canonical}`: {error}"
+                        ))
+                    })?)
                     .map_err(|error| {
                         SQLError::Internal(format!(
                             "persist materialized view `{canonical}`: {error}"

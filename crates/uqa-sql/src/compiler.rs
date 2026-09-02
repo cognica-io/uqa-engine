@@ -12,9 +12,9 @@
 //! in the private `types` module.
 
 use crate::ast::{
-    AlterTableAction, AlterTableStmt, AlterViewKind, AlterViewOptionsAction, AlterViewOptionsStmt,
-    ColumnDef, DeleteStmt, DropKind, DropStmt, Expr, Statement, TableKeyConstraint,
-    TableKeyConstraintKind, TransactionStmt, UpdateStmt,
+    AlterTableAction, AlterTableStmt, AlterViewAction, AlterViewKind, AlterViewStmt, ColumnDef,
+    DeleteStmt, DropKind, DropStmt, Expr, Statement, TableKeyConstraint, TableKeyConstraintKind,
+    TransactionStmt, UpdateStmt,
 };
 use crate::error::{Result, SQLError};
 use pg_query::protobuf::{Node, RangeVar};

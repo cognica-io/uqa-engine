@@ -18,6 +18,7 @@ impl KeyValueCatalog {
         batch.put(
             &relation_key(TAG_VIEW, &view.relation)?,
             &encode_value(&StoredView {
+                role_owner: view.role_owner.clone(),
                 definition_json: view.definition_json.clone(),
             })?,
         )?;
@@ -46,6 +47,7 @@ impl KeyValueCatalog {
                 let stored = decode_value::<StoredView>(&value)?;
                 Ok(ViewRow {
                     relation,
+                    role_owner: stored.role_owner,
                     definition_json: stored.definition_json,
                 })
             })

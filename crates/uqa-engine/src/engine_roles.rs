@@ -570,6 +570,25 @@ impl Engine {
         }
         drop(tables);
 
+        let views = self.durable.views.read();
+        for name in names {
+            if let Some((relation, view)) = views.iter().find(|(_, view)| view.role_owner == *name)
+            {
+                let kind = match view.kind {
+                    crate::StoredViewKind::View => "view",
+                    crate::StoredViewKind::Materialized => "materialized view",
+                };
+                return Err(SQLError::Routine {
+                    sqlstate: "2BP01".into(),
+                    message: format!(
+                        "role \"{name}\" cannot be dropped because some objects depend on it: {kind} {}",
+                        relation.qualified_name()
+                    ),
+                });
+            }
+        }
+        drop(views);
+
         let sequence_security = self.durable.sequence_security.read();
         for name in names {
             if let Some(relation) = dependent_sequence_for_role(&sequence_security, name) {

@@ -45,6 +45,13 @@ pub(super) struct StoredRelation {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct StoredView {
+    pub(super) role_owner: String,
+    pub(super) definition_json: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct LegacyStoredView {
     pub(super) definition_json: String,
 }
 

@@ -536,11 +536,12 @@ impl Catalog {
             Self::claim_relation(&tx, &view.relation, RelationKind::View)?;
             tx.execute(
                 "INSERT OR REPLACE INTO _views
-                    (schema_name, relation_name, kind, definition_json)
-                 VALUES (?1, ?2, 'view', ?3)",
+                    (schema_name, relation_name, kind, role_owner, definition_json)
+                 VALUES (?1, ?2, 'view', ?3, ?4)",
                 params![
                     view.relation.schema,
                     view.relation.name,
+                    view.role_owner,
                     view.definition_json
                 ],
             )?;
@@ -567,7 +568,7 @@ impl Catalog {
     pub fn load_views(&self) -> Result<Vec<ViewRow>> {
         self.conn.with(|connection| {
             let mut statement = connection.prepare(
-                "SELECT schema_name, relation_name, definition_json
+                "SELECT schema_name, relation_name, role_owner, definition_json
                    FROM _views ORDER BY schema_name, relation_name",
             )?;
             let rows = statement.query_map([], |row| {
@@ -576,7 +577,8 @@ impl Catalog {
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
                     ),
-                    definition_json: row.get(2)?,
+                    role_owner: row.get(2)?,
+                    definition_json: row.get(3)?,
                 })
             })?;
             let mut views = Vec::new();

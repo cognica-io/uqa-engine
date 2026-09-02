@@ -105,7 +105,7 @@ fn cascade_flags_and_wrong_relation_kinds_fail_before_side_effects() {
 }
 
 #[test]
-fn dependent_views_block_table_and_column_ddl_with_their_name() {
+fn dependent_views_block_restrict_and_column_ddl_but_cascade_with_the_table() {
     let engine = Engine::new();
     engine
         .sql("CREATE TABLE items (id INTEGER, kept INTEGER)", &[])
@@ -122,7 +122,6 @@ fn dependent_views_block_table_and_column_ddl_with_their_name() {
 
     for sql in [
         "DROP TABLE items",
-        "DROP TABLE items CASCADE",
         "ALTER TABLE items RENAME TO renamed_items",
         "ALTER TABLE items RENAME COLUMN id TO item_id",
         "ALTER TABLE items DROP COLUMN id",
@@ -144,9 +143,19 @@ fn dependent_views_block_table_and_column_ddl_with_their_name() {
         error.to_string().contains("public.nested_item_ids"),
         "{error}"
     );
-    engine
-        .sql("DROP VIEW item_ids, nested_item_ids", &[])
-        .unwrap();
+
+    engine.sql("BEGIN", &[]).unwrap();
+    engine.sql("DROP TABLE items CASCADE", &[]).unwrap();
+    assert!(!engine.has_table("items").unwrap());
+    assert!(engine.view("item_ids").unwrap().is_none());
+    assert!(engine.view("nested_item_ids").unwrap().is_none());
+    engine.sql("ROLLBACK", &[]).unwrap();
+    assert!(engine.has_table("items").unwrap());
+    assert!(engine.view("item_ids").unwrap().is_some());
+    assert!(engine.view("nested_item_ids").unwrap().is_some());
+
+    engine.sql("DROP TABLE items CASCADE", &[]).unwrap();
+    assert!(!engine.has_table("items").unwrap());
     assert!(engine.view("item_ids").unwrap().is_none());
     assert!(engine.view("nested_item_ids").unwrap().is_none());
 

@@ -284,6 +284,8 @@ pub struct ForeignTableRow {
 #[derive(Debug, Clone)]
 pub struct ViewRow {
     pub relation: RelationIdentity,
+    /// SQL role that owns the view. Catalogs created before view role ownership was persisted belong to the bootstrap role.
+    pub role_owner: String,
     pub definition_json: String,
 }
 

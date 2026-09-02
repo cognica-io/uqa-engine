@@ -307,6 +307,7 @@ fn relation_namespace_migration_is_atomic_and_moves_public_table_data() {
         catalog.load_views().unwrap()[0].relation,
         RelationIdentity::new("public", "report")
     );
+    assert_eq!(catalog.load_views().unwrap()[0].role_owner, "uqa");
     assert!(catalog.load_schemas().unwrap().contains(&"app".to_string()));
     connection
         .with(|conn| {

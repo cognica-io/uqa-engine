@@ -8,8 +8,9 @@
 
 use super::physical_indexes::table_index_prefixes;
 use super::records::{
-    LegacySequenceState, LegacyTableSchema, StoredCatalogIndex, StoredForeignTable, StoredRelation,
-    StoredSequence, StoredView, LEGACY_SEQUENCES_METADATA_KEY, LEGACY_VIEWS_METADATA_KEY,
+    LegacySequenceState, LegacyStoredView, LegacyTableSchema, StoredCatalogIndex,
+    StoredForeignTable, StoredRelation, StoredSequence, StoredView, LEGACY_SEQUENCES_METADATA_KEY,
+    LEGACY_VIEWS_METADATA_KEY,
 };
 use super::{
     batch_rekey_prefix, column_stats_prefix, decode_catalog_relation_key, decode_relation_key,
@@ -214,12 +215,24 @@ pub(super) fn collect_view_migrations(
     let mut views = Vec::new();
     for (key, value) in catalog.store.scan_prefix(&key_with_tag(TAG_VIEW))? {
         let (relation, _, source) = decode_catalog_relation_key(&key)?;
-        let stored = decode_value::<StoredView>(&value)?;
+        let stored = decode_value::<StoredView>(&value).or_else(|current_error| {
+            decode_value::<LegacyStoredView>(&value)
+                .map(|legacy| StoredView {
+                    role_owner: "uqa".into(),
+                    definition_json: legacy.definition_json,
+                })
+                .map_err(|legacy_error| {
+                    StorageBackendError::Other(format!(
+                        "decode view catalog record `{source}` as current ({current_error}) or legacy ({legacy_error})"
+                    ))
+                })
+        })?;
         register_migration_relation(seen, &relation, RelationKind::View, source)?;
         views.push(ViewMigration {
             old_key: Some(key),
             row: ViewRow {
                 relation,
+                role_owner: stored.role_owner,
                 definition_json: stored.definition_json,
             },
         });
@@ -239,6 +252,7 @@ pub(super) fn collect_view_migrations(
                 old_key: None,
                 row: ViewRow {
                     relation,
+                    role_owner: "uqa".into(),
                     definition_json: serde_json::to_string(&definition)?,
                 },
             });
@@ -486,6 +500,7 @@ pub(super) fn put_view_migrations(
         batch.put(
             &key,
             &encode_value(&StoredView {
+                role_owner: view.row.role_owner,
                 definition_json: view.row.definition_json,
             })?,
         )?;

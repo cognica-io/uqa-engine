@@ -167,6 +167,9 @@ impl StorageContext {
 /// One bound view query together with the fixed public column names captured when the view was created. `None` only represents catalogs written before column metadata was persisted.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct StoredView {
+    /// Durable SQL-role owner loaded from the typed view catalog row. The query-definition JSON deliberately excludes ownership so catalog definition and authorization state cannot disagree.
+    #[serde(skip)]
+    pub(crate) role_owner: String,
     pub(crate) query: uqa_planner::QueryPlan,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) output_columns: Option<Vec<String>>,

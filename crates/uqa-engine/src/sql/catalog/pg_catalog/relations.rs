@@ -13,8 +13,7 @@ use crate::engine_capabilities::{CatalogReadView, RelationNameResolution};
 
 use super::super::helpers::acl::acl_identifier;
 use super::super::helpers::oids::{
-    current_user_name, current_user_oid, relation_oid, schema_oid, split_schema_name,
-    stable_object_oid, stable_oid,
+    current_user_oid, relation_oid, schema_oid, split_schema_name, stable_object_oid, stable_oid,
 };
 use super::super::helpers::rows::{
     bool_value, catalog_array, catalog_name, int_value, row, str_value,
@@ -208,7 +207,7 @@ pub(in crate::sql::catalog) fn build_pg_views(
         rows.push(row([
             ("schemaname", str_value(schema)),
             ("viewname", str_value(view)),
-            ("viewowner", str_value(current_user_name())),
+            ("viewowner", str_value(stored.role_owner)),
             ("definition", str_value(definition)),
         ]));
     }
@@ -224,7 +223,7 @@ pub(in crate::sql::catalog) fn build_pg_matviews(
         rows.push(row([
             ("schemaname", str_value(schema)),
             ("matviewname", str_value(matview)),
-            ("matviewowner", str_value(current_user_name())),
+            ("matviewowner", str_value(stored.role_owner)),
             ("tablespace", Value::Null),
             ("hasindexes", bool_value(false)),
             ("ispopulated", bool_value(stored.populated)),

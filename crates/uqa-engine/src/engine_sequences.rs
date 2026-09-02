@@ -792,7 +792,7 @@ impl Engine {
         cascade_columns.dedup();
         let cascade_views = self.cascade_view_closure(direct_views)?;
         if cascade && !cascade_views.is_empty() {
-            self.drop_views_inner(&cascade_views)?;
+            self.drop_views_inner(&cascade_views, false)?;
         }
         for name in names {
             self.detach_sequence_column_dependencies(name, cascade)

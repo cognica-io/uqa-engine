@@ -8,9 +8,9 @@
 
 use super::{
     bind_query_plan_relations, bind_query_plan_sequence_references,
-    canonical_virtual_relation_reference, create_view_output_columns, named_view_schema,
-    validate_replacement_schema, Engine, QueryPlan, RelationIdentity, SQLError, StoredView,
-    StoredViewKind, ViewRegistration, ViewRow,
+    canonical_virtual_relation_reference, catalog_view_row, create_view_output_columns,
+    named_view_schema, validate_replacement_schema, Engine, QueryPlan, RelationIdentity, SQLError,
+    StoredView, StoredViewKind, ViewRegistration,
 };
 
 impl Engine {
@@ -157,7 +157,7 @@ impl Engine {
         let existing_kind = self
             .relation_kind_at(&name)
             .map_err(|err| SQLError::Internal(format!("resolve relation `{name}`: {err}")))?;
-        match existing_kind {
+        let existing_owner = match existing_kind {
             Some(_) if !or_replace => {
                 return Err(SQLError::Routine {
                     sqlstate: "42P07".into(),
@@ -178,6 +178,8 @@ impl Engine {
                     })?;
                 let existing_schema = self.stored_view_schema(&existing)?;
                 validate_replacement_schema(&existing_schema, &replacement_schema)?;
+                self.ensure_view_owner(&name, &existing)?;
+                Some(existing.role_owner)
             }
             Some(kind) => {
                 return Err(SQLError::Routine {
@@ -185,9 +187,10 @@ impl Engine {
                     message: format!("\"{name}\" is not a view; it is a {kind}"),
                 });
             }
-            None => {}
-        }
+            None => None,
+        };
         let view = StoredView {
+            role_owner: existing_owner.unwrap_or_else(|| self.current_user_name()),
             query: plan,
             output_columns: Some(output_columns),
             persistence,
@@ -201,13 +204,10 @@ impl Engine {
         let mut views = self.durable.views.write();
         if persistence != uqa_sql::ast::RelationPersistence::Temporary {
             if let Some(catalog) = self.storage.catalog.as_ref() {
-                let definition_json = serde_json::to_string(&view)
-                    .map_err(|err| SQLError::Internal(format!("serialize view `{name}`: {err}")))?;
                 catalog
-                    .save_view(&ViewRow {
-                        relation: relation.clone(),
-                        definition_json,
-                    })
+                    .save_view(&catalog_view_row(&relation, &view).map_err(|err| {
+                        SQLError::Internal(format!("serialize view `{name}`: {err}"))
+                    })?)
                     .map_err(|err| SQLError::Internal(format!("persist view `{name}`: {err}")))?;
             }
         }

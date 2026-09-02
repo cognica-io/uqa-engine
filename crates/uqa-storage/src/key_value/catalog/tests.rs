@@ -74,6 +74,49 @@ fn schema_rows_decode_legacy_names_and_round_trip_security_metadata() {
 }
 
 #[test]
+fn view_rows_round_trip_role_ownership_and_migration_rewrites_it_atomically() {
+    let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
+    let catalog = KeyValueCatalog::new(Arc::clone(&store));
+    catalog.save_schema("public").unwrap();
+    let expected = ViewRow {
+        relation: RelationIdentity::new("public", "owned_view"),
+        role_owner: "view_owner".into(),
+        definition_json: r#"{"query":"definition"}"#.into(),
+    };
+    catalog.save_view(&expected).unwrap();
+    let loaded = catalog.load_views().unwrap().remove(0);
+    assert_eq!(loaded.relation, expected.relation);
+    assert_eq!(loaded.role_owner, expected.role_owner);
+    assert_eq!(loaded.definition_json, expected.definition_json);
+
+    catalog.migrate_relation_namespace().unwrap();
+    let migrated = catalog.load_views().unwrap().remove(0);
+    assert_eq!(migrated.role_owner, "view_owner");
+    assert_eq!(migrated.definition_json, expected.definition_json);
+}
+
+#[test]
+fn legacy_view_ownership_is_assigned_only_by_the_explicit_catalog_migration() {
+    let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
+    let catalog = KeyValueCatalog::new(Arc::clone(&store));
+    catalog.save_schema("public").unwrap();
+    let relation = RelationIdentity::new("public", "legacy_owned_view");
+    store
+        .put(
+            &relation_key(TAG_VIEW, &relation).unwrap(),
+            br#"{"definition_json":"{\"query\":\"definition\"}"}"#,
+        )
+        .unwrap();
+
+    assert!(catalog.load_views().is_err());
+    catalog.migrate_relation_namespace().unwrap();
+    let migrated = catalog.load_views().unwrap().remove(0);
+    assert_eq!(migrated.relation, relation);
+    assert_eq!(migrated.role_owner, "uqa");
+    assert_eq!(migrated.definition_json, r#"{"query":"definition"}"#);
+}
+
+#[test]
 fn relation_namespace_migration_is_one_batch_and_moves_public_data() {
     let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
     let catalog = KeyValueCatalog::new(Arc::clone(&store));
@@ -119,6 +162,7 @@ fn relation_namespace_migration_is_one_batch_and_moves_public_data() {
         catalog.load_views().unwrap()[0].relation,
         RelationIdentity::new("public", "report")
     );
+    assert_eq!(catalog.load_views().unwrap()[0].role_owner, "uqa");
     assert!(catalog
         .load_schemas()
         .unwrap()

@@ -207,24 +207,6 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
                     }
                 }
             }
-            let drop_set = views
-                .iter()
-                .cloned()
-                .collect::<std::collections::BTreeSet<_>>();
-            for view in &views {
-                let dependents = engine
-                    .views_depending_on_relation(view)
-                    .map_err(|err| ddl_storage_error(command, err))?
-                    .into_iter()
-                    .filter(|dependent| !drop_set.contains(dependent))
-                    .collect::<Vec<_>>();
-                if !dependents.is_empty() {
-                    return Err(SQLError::Unsupported(format!(
-                        "{command} `{view}` rejected: dependent view(s) `{}` still reference it",
-                        dependents.join("`, `")
-                    )));
-                }
-            }
             engine.drop_views(&views)?;
         }
         DropKind::Sequence => {

@@ -4,16 +4,16 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Durable regular-view and materialized-view reloption changes.
+//! Durable regular-view and materialized-view lifecycle changes.
 
-use super::{Engine, RelationIdentity, SQLError, ViewRow};
+use super::{catalog_view_row, Engine, RelationIdentity, SQLError};
 
 impl Engine {
-    pub(crate) fn alter_view_options(
+    pub(crate) fn alter_view(
         &self,
-        statement: &uqa_sql::ast::AlterViewOptionsStmt,
+        statement: &uqa_sql::ast::AlterViewStmt,
     ) -> Result<(), SQLError> {
-        use uqa_sql::ast::{AlterViewKind, AlterViewOptionsAction};
+        use uqa_sql::ast::{AlterViewAction, AlterViewKind};
 
         self.with_implicit_transaction(move |engine| {
             let expected_kind = match statement.kind {
@@ -49,15 +49,19 @@ impl Engine {
                 .ok_or_else(|| {
                     SQLError::Internal(format!("{expected_kind} `{canonical}` disappeared"))
                 })?;
+            engine.ensure_view_owner(&canonical, &view)?;
             match &statement.action {
-                AlterViewOptionsAction::Set(changes) => {
+                AlterViewAction::Set(changes) => {
                     for (name, value) in changes {
                         view.options.retain(|(current, _)| current != name);
                         view.options.push((name.clone(), value.clone()));
                     }
                 }
-                AlterViewOptionsAction::Reset(names) => {
+                AlterViewAction::Reset(names) => {
                     view.options.retain(|(current, _)| !names.contains(current));
+                }
+                AlterViewAction::OwnerTo(owner) => {
+                    engine.alter_view_role_owner(&canonical, &mut view, owner)?;
                 }
             }
             if statement.kind == AlterViewKind::View {
@@ -65,16 +69,12 @@ impl Engine {
             }
             if view.persistence != uqa_sql::ast::RelationPersistence::Temporary {
                 if let Some(catalog) = engine.storage.catalog.as_ref() {
-                    let definition_json = serde_json::to_string(&view).map_err(|error| {
-                        SQLError::Internal(format!(
-                            "serialize altered {expected_kind} `{canonical}`: {error}"
-                        ))
-                    })?;
                     catalog
-                        .save_view(&ViewRow {
-                            relation: relation.clone(),
-                            definition_json,
-                        })
+                        .save_view(&catalog_view_row(&relation, &view).map_err(|error| {
+                            SQLError::Internal(format!(
+                                "serialize altered {expected_kind} `{canonical}`: {error}"
+                            ))
+                        })?)
                         .map_err(|error| {
                             SQLError::Internal(format!(
                                 "persist altered {expected_kind} `{canonical}`: {error}"

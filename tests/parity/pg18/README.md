@@ -114,6 +114,12 @@ docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/pa
 docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/table_ownership_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/table_ownership_oracle.expected.txt -
 ```
 
+`view_ownership_oracle.sql` records PostgreSQL 18.4 regular-view and materialized-view owner creation, inherited owner authority, ALTER, replacement, refresh, and direct DROP checks including dependency-error precedence, containing-schema owner DROP authority, ownership-independent cascading removal, target-role existence, SET and schema-CREATE requirements, superuser transfer, transaction rollback, catalog projection, and dependent-role errors.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/view_ownership_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/view_ownership_oracle.expected.txt -
+```
+
 `table_privilege_oracle.sql` records PostgreSQL 18.4 ordinary-table ACL and enforcement behavior. The checked-in transcript verifies the NULL default ACL, `arwdDxtm` catalog order, target-read-sensitive DML checks, rooted grant-option revocation, implicit owner rights after self-revocation, explicit sequence targets, all-in-schema sequence exclusion, all six `has_table_privilege` overloads, information-schema visibility, exact error precedence, and ownership-transfer grantor rewriting.
 
 ```sh

@@ -509,8 +509,8 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             CommandPlan::AlterTable(statement) => {
                 run_alter_table(self.engine, (**statement).clone())
             }
-            CommandPlan::AlterViewOptions(statement) => {
-                self.engine.alter_view_options(statement)?;
+            CommandPlan::AlterView(statement) => {
+                self.engine.alter_view(statement)?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::CreateView {
