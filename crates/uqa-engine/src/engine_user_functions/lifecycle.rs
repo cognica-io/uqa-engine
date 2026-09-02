@@ -540,7 +540,7 @@ impl Engine {
                 .durable
                 .schemas
                 .read()
-                .contains(&stored_relation.schema)
+                .contains_key(&stored_relation.schema)
             {
                 return Err(StorageBackendError::Other(format!(
                     "persisted routine `{stored_name}` references missing schema `{}`",

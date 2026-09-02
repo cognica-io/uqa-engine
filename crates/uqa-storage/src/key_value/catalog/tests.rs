@@ -42,6 +42,38 @@ fn sample_sequence_acl() -> Vec<crate::catalog::SequenceAclEntry> {
 }
 
 #[test]
+fn schema_rows_decode_legacy_names_and_round_trip_security_metadata() {
+    let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
+    let catalog = KeyValueCatalog::new(Arc::clone(&store));
+    store
+        .put(
+            &single_str_key(TAG_SCHEMA, "archive").unwrap(),
+            &string_value("archive"),
+        )
+        .unwrap();
+    assert_eq!(
+        catalog.load_schema_rows().unwrap(),
+        vec![SchemaRow::legacy("archive")]
+    );
+
+    let schema = SchemaRow {
+        name: "archive".into(),
+        role_owner: "archive_owner".into(),
+        acl: Some(vec![crate::catalog::SchemaAclEntry {
+            role: "archive_writer".into(),
+            grantor: Some("archive_owner".into()),
+            privileges: crate::catalog::SchemaPrivileges::ALL,
+            grant_options: crate::catalog::SchemaPrivileges {
+                usage: false,
+                create: true,
+            },
+        }]),
+    };
+    catalog.save_schema_row(&schema).unwrap();
+    assert_eq!(catalog.load_schema_rows().unwrap(), vec![schema]);
+}
+
+#[test]
 fn relation_namespace_migration_is_one_batch_and_moves_public_data() {
     let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
     let catalog = KeyValueCatalog::new(Arc::clone(&store));

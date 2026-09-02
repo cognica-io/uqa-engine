@@ -15,6 +15,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::backend::{StorageBackendError, StorageBackendResult};
 
+mod schema;
+
+pub use schema::{SchemaAclEntry, SchemaPrivileges, SchemaRow};
+
 /// Durable identity of a SQL relation.
 ///
 /// The schema and local name are stored separately so `foo` and
@@ -570,9 +574,21 @@ pub trait CatalogFacade: Send + Sync {
     /// or cross-kind collisions instead of merging either object.
     fn migrate_relation_namespace(&self) -> StorageBackendResult<()>;
 
-    fn save_schema(&self, name: &str) -> StorageBackendResult<()>;
+    fn save_schema_row(&self, schema: &SchemaRow) -> StorageBackendResult<()>;
     fn drop_schema(&self, name: &str) -> StorageBackendResult<()>;
-    fn load_schemas(&self) -> StorageBackendResult<Vec<String>>;
+    fn load_schema_rows(&self) -> StorageBackendResult<Vec<SchemaRow>>;
+
+    fn save_schema(&self, name: &str) -> StorageBackendResult<()> {
+        self.save_schema_row(&SchemaRow::legacy(name))
+    }
+
+    fn load_schemas(&self) -> StorageBackendResult<Vec<String>> {
+        Ok(self
+            .load_schema_rows()?
+            .into_iter()
+            .map(|schema| schema.name)
+            .collect())
+    }
 
     fn save_table(&self, schema: &TableSchema) -> StorageBackendResult<()>;
     fn load_tables(&self) -> StorageBackendResult<Vec<TableSchema>>;

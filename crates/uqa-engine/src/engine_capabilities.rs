@@ -71,6 +71,7 @@ pub(crate) struct CatalogSequenceSnapshot {
 pub(crate) struct RelationNameResolution {
     pub(super) search_path: Vec<String>,
     pub(super) temporary_schema: String,
+    pub(super) current_user: String,
 }
 
 /// Read-only session values visible to statement execution. Durable registries and storage backends are intentionally absent.
@@ -110,6 +111,7 @@ impl SessionExecutionView<'_> {
         RelationNameResolution {
             search_path: self.search_path(),
             temporary_schema: self.temporary_schema_name(),
+            current_user: self.current_user(),
         }
     }
 
@@ -293,10 +295,11 @@ impl MutationCoordinator<'_> {
         &self,
         name: &str,
         if_not_exists: bool,
+        role_owner: &str,
     ) -> StorageBackendResult<bool> {
         validate_schema_name(name)?;
         let mut schemas = self.durable.schemas.write();
-        if schemas.contains(name) || self.durable.graphs.read().contains_key(name) {
+        if schemas.contains_key(name) || self.durable.graphs.read().contains_key(name) {
             if if_not_exists {
                 return Ok(false);
             }
@@ -304,10 +307,14 @@ impl MutationCoordinator<'_> {
                 "schema `{name}` already exists"
             )));
         }
+        let security = super::engine_state::SchemaSecurity {
+            role_owner: role_owner.to_string(),
+            acl: None,
+        };
         if let Some(catalog) = self.storage.catalog.as_ref() {
-            catalog.save_schema(name)?;
+            catalog.save_schema_row(&security.row(name))?;
         }
-        schemas.insert(name.to_string());
+        schemas.insert(name.to_string(), security);
         drop(schemas);
         self.note_catalog_registry_changed();
         Ok(true)

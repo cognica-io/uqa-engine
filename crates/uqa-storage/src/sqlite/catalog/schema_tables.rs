@@ -12,7 +12,7 @@ use super::{
     rename_btree_field_rows_or_keep_existing, rename_field_rows_or_keep_existing,
     rename_fts_aux_tables_for_field, renamed_columns_json, table_exists,
     update_btree_table_name_rows_if_exists, update_table_name_rows_if_exists, Catalog,
-    OptionalExtension, RelationIdentity, RelationKind, Result, SQLiteError, TableSchema,
+    OptionalExtension, RelationIdentity, RelationKind, Result, SQLiteError, SchemaRow, TableSchema,
     VectorFieldSchema,
 };
 
@@ -43,10 +43,16 @@ impl Catalog {
     }
 
     pub fn save_schema(&self, name: &str) -> Result<()> {
+        self.save_schema_row(&SchemaRow::legacy(name))
+    }
+
+    pub fn save_schema_row(&self, schema: &SchemaRow) -> Result<()> {
+        let acl_json = schema.acl.as_ref().map(serde_json::to_string).transpose()?;
         self.conn.with(|c| {
             c.execute(
-                "INSERT OR IGNORE INTO _schemas (name) VALUES (?1)",
-                params![name],
+                "INSERT INTO _schemas (name, role_owner, acl_json) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(name) DO UPDATE SET role_owner = excluded.role_owner, acl_json = excluded.acl_json",
+                params![schema.name, schema.role_owner, acl_json],
             )?;
             Ok(())
         })
@@ -70,12 +76,35 @@ impl Catalog {
     }
 
     pub fn load_schemas(&self) -> Result<Vec<String>> {
+        Ok(self
+            .load_schema_rows()?
+            .into_iter()
+            .map(|schema| schema.name)
+            .collect())
+    }
+
+    pub fn load_schema_rows(&self) -> Result<Vec<SchemaRow>> {
         self.conn.with(|c| {
-            let mut stmt = c.prepare("SELECT name FROM _schemas ORDER BY name")?;
-            let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+            let mut stmt =
+                c.prepare("SELECT name, role_owner, acl_json FROM _schemas ORDER BY name")?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            })?;
             let mut out = Vec::new();
             for row in rows {
-                out.push(row?);
+                let (name, role_owner, acl_json) = row?;
+                let acl = acl_json
+                    .map(|json| serde_json::from_str(&json))
+                    .transpose()?;
+                out.push(SchemaRow {
+                    name,
+                    role_owner,
+                    acl,
+                });
             }
             Ok(out)
         })

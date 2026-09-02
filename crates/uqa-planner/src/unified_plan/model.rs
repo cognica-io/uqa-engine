@@ -527,6 +527,7 @@ pub enum CommandPlan {
     AlterRoutineOwner(uqa_sql::ast::AlterRoutineOwnerStmt),
     GrantRoutine(uqa_sql::ast::GrantRoutineStmt),
     GrantSequence(uqa_sql::ast::GrantSequenceStmt),
+    GrantSchema(uqa_sql::ast::GrantSchemaStmt),
     GrantRole(uqa_sql::ast::GrantRoleStmt),
     CreateRole(uqa_sql::ast::CreateRoleStmt),
     AlterRole(uqa_sql::ast::AlterRoleStmt),

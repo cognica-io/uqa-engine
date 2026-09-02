@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::catalog::{
     CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignTableRow,
-    GraphSnapshot, RelationIdentity, RelationKind, SequenceOptions, SequenceReservationResult,
-    SequenceRow, TableSchema, ViewRow,
+    GraphSnapshot, RelationIdentity, RelationKind, SchemaRow, SequenceOptions,
+    SequenceReservationResult, SequenceRow, TableSchema, ViewRow,
 };
 use crate::{StorageBackendError, StorageBackendResult};
 
@@ -99,16 +99,16 @@ impl CatalogFacade for KeyValueCatalog {
         self.migrate_relation_namespace_impl()
     }
 
-    fn save_schema(&self, name: &str) -> StorageBackendResult<()> {
-        self.save_schema_impl(name)
+    fn save_schema_row(&self, schema: &SchemaRow) -> StorageBackendResult<()> {
+        self.save_schema_row_impl(schema)
     }
 
     fn drop_schema(&self, name: &str) -> StorageBackendResult<()> {
         self.drop_schema_impl(name)
     }
 
-    fn load_schemas(&self) -> StorageBackendResult<Vec<String>> {
-        self.load_schemas_impl()
+    fn load_schema_rows(&self) -> StorageBackendResult<Vec<SchemaRow>> {
+        self.load_schema_rows_impl()
     }
 
     fn save_table(&self, schema: &TableSchema) -> StorageBackendResult<()> {

@@ -42,9 +42,10 @@ impl Engine {
     pub fn register_schema(&self, name: &str, if_not_exists: bool) -> StorageBackendResult<bool> {
         self.with_implicit_storage_transaction(|engine| {
             engine.synchronize_catalog_registries()?;
+            let role_owner = engine.current_user_name();
             engine
                 .mutation_coordinator()
-                .register_schema(name, if_not_exists)
+                .register_schema(name, if_not_exists, &role_owner)
         })
     }
 
@@ -61,7 +62,7 @@ impl Engine {
                 "schema `{name}` cannot be dropped"
             )));
         }
-        if !self.durable.schemas.read().contains(name) {
+        if !self.durable.schemas.read().contains_key(name) {
             return Ok(false);
         }
         if !self.schema_is_empty(name) {
@@ -80,7 +81,7 @@ impl Engine {
         if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog.drop_schema(name)?;
         }
-        let removed = schemas.remove(name);
+        let removed = schemas.remove(name).is_some();
         drop(schemas);
         if removed {
             self.note_catalog_registry_changed();
@@ -90,7 +91,7 @@ impl Engine {
 
     pub fn has_schema(&self, name: &str) -> StorageBackendResult<bool> {
         self.synchronize_catalog_registries()?;
-        Ok(self.durable.schemas.read().contains(name))
+        Ok(self.durable.schemas.read().contains_key(name))
     }
 
     /// Whether `name` resolves as a namespace: a durable schema, a virtual
@@ -99,7 +100,7 @@ impl Engine {
     pub fn has_namespace(&self, name: &str) -> StorageBackendResult<bool> {
         self.synchronize_catalog_registries()?;
         Ok(is_virtual_system_schema(name)
-            || self.durable.schemas.read().contains(name)
+            || self.durable.schemas.read().contains_key(name)
             || self.durable.graphs.read().contains_key(name))
     }
 
@@ -141,10 +142,10 @@ impl Engine {
     /// Return every registered schema in sorted order.
     pub fn list_schemas(&self) -> StorageBackendResult<Vec<String>> {
         if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
-            return Ok(snapshot.schemas.iter().cloned().collect());
+            return Ok(snapshot.schemas.keys().cloned().collect());
         }
         self.synchronize_catalog_registries()?;
-        Ok(self.durable.schemas.read().iter().cloned().collect())
+        Ok(self.durable.schemas.read().keys().cloned().collect())
     }
 
     /// Local names of tables whose structural relation identity is owned by

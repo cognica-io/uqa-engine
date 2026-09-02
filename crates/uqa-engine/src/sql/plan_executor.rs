@@ -420,8 +420,9 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         if_not_exists: bool,
     ) -> Result<SQLResult, SQLError> {
         self.engine.prepare_explicit_transaction_writer()?;
+        let role_owner = self.engine.session_execution_view().current_user();
         self.mutation
-            .register_schema(name, if_not_exists)
+            .register_schema(name, if_not_exists, &role_owner)
             .map_err(|error| {
                 SQLError::Internal(format!("CREATE SCHEMA catalog write failed: {error}"))
             })?;
@@ -452,6 +453,10 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             }
             CommandPlan::GrantSequence(statement) => {
                 self.engine.grant_sequence_privileges(statement)?;
+                Ok(SQLResult::empty())
+            }
+            CommandPlan::GrantSchema(statement) => {
+                self.engine.grant_schema_privileges(statement)?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::GrantRole(statement) => {

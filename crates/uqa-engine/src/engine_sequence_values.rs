@@ -126,9 +126,10 @@ impl Engine {
         &self,
         reference: &str,
     ) -> Result<(String, RelationIdentity, [u8; 16]), SequenceValueError> {
-        let resolved = self.try_resolve_relation_kind(reference).map_err(|error| {
-            SequenceValueError::Internal(format!("load sequence catalog: {error}"))
-        })?;
+        let current_user = self.current_user_name();
+        let resolved = self
+            .try_resolve_sequence_relation_kind(reference, &current_user)
+            .map_err(SequenceValueError::Security)?;
         let Some((name, kind)) = resolved else {
             return self
                 .resolve_sequence_value_target_by_oid(reference)?

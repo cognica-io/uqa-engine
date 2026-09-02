@@ -54,7 +54,7 @@ impl Engine {
             .search_path
             .iter()
             .find(|name| {
-                schemas.contains(name.as_str())
+                schemas.contains_key(name.as_str())
                     || super::schemas::is_virtual_system_schema(name)
                     || graphs.contains_key(name.as_str())
             })
@@ -78,7 +78,7 @@ impl Engine {
             out.push("pg_catalog".to_string());
         }
         for name in path {
-            if (schemas.contains(name.as_str())
+            if (schemas.contains_key(name.as_str())
                 || super::schemas::is_virtual_system_schema(name)
                 || graphs.contains_key(name.as_str()))
                 && !out.contains(name)

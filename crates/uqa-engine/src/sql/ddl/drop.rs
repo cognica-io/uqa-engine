@@ -263,11 +263,9 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
         DropKind::Sequence => {
             let mut sequences = Vec::new();
             let mut seen = std::collections::BTreeSet::new();
+            let current_user = engine.session_execution_view().current_user();
             for name in &stmt.names {
-                match engine
-                    .try_resolve_relation_kind(name)
-                    .map_err(|error| ddl_storage_error("DROP SEQUENCE", error))?
-                {
+                match engine.try_resolve_sequence_relation_kind(name, &current_user)? {
                     Some((canonical, "sequence")) => {
                         if seen.insert(canonical.clone()) {
                             sequences.push(canonical);
@@ -279,15 +277,19 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
                             message: format!("\"{name}\" is not a sequence"),
                         });
                     }
-                    None if stmt.if_exists => engine.push_sql_notice(
-                        "NOTICE",
-                        &format!("sequence \"{name}\" does not exist, skipping"),
-                    ),
                     None => {
-                        return Err(SQLError::Routine {
-                            sqlstate: "42P01".into(),
-                            message: format!("sequence \"{name}\" does not exist"),
-                        });
+                        if stmt.if_exists {
+                            engine.push_sql_notice(
+                                "NOTICE",
+                                &format!("sequence \"{name}\" does not exist, skipping"),
+                            );
+                        } else {
+                            engine.ensure_sequence_reference_schema_exists(name)?;
+                            return Err(SQLError::Routine {
+                                sqlstate: "42P01".into(),
+                                message: format!("sequence \"{name}\" does not exist"),
+                            });
+                        }
                     }
                 }
             }

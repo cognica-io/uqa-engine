@@ -18,8 +18,8 @@ use rusqlite::{params, OptionalExtension};
 use crate::backend::{StorageBackendError, StorageBackendResult};
 use crate::catalog::{
     CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignTableRow,
-    GraphSnapshot, RelationIdentity, RelationKind, SequenceOptions, SequenceReservationResult,
-    SequenceRow, TableSchema, VectorFieldSchema, ViewRow,
+    GraphSnapshot, RelationIdentity, RelationKind, SchemaRow, SequenceOptions,
+    SequenceReservationResult, SequenceRow, TableSchema, VectorFieldSchema, ViewRow,
 };
 use crate::sqlite::connection::{ManagedConnection, Result, SQLiteError};
 
@@ -31,7 +31,7 @@ use super::catalog_lifecycle::{
 };
 
 /// Bump this every time a migration is added.
-pub const CURRENT_SCHEMA_VERSION: u32 = 32;
+pub const CURRENT_SCHEMA_VERSION: u32 = 33;
 
 const LEGACY_VIEWS_METADATA_KEY: &str = "sql_views_json";
 const LEGACY_SEQUENCES_METADATA_KEY: &str = "sql_sequences_json";

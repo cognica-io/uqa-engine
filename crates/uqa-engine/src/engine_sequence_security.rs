@@ -184,14 +184,12 @@ impl Engine {
                 require_sequence,
             } => {
                 let mut resolved = Vec::with_capacity(names.len());
+                let current_user = self.current_user_name();
                 for requested in names {
                     let Some((name, kind)) =
-                        self.try_resolve_relation_kind(requested).map_err(|error| {
-                            SQLError::Internal(format!(
-                                "resolve GRANT target `{requested}`: {error}"
-                            ))
-                        })?
+                        self.try_resolve_sequence_relation_kind(requested, &current_user)?
                     else {
+                        self.ensure_sequence_reference_schema_exists(requested)?;
                         return Err(SQLError::Routine {
                             sqlstate: "42P01".into(),
                             message: format!("relation \"{requested}\" does not exist"),
@@ -457,13 +455,11 @@ impl Engine {
                 if let Ok(oid) = reference.parse::<i64>() {
                     return self.resolve_sequence_privilege_oid(oid);
                 }
+                let current_user = self.current_user_name();
                 let Some((name, kind)) =
-                    self.try_resolve_relation_kind(reference).map_err(|error| {
-                        SQLError::Internal(format!(
-                            "resolve sequence privilege target `{reference}`: {error}"
-                        ))
-                    })?
+                    self.try_resolve_sequence_relation_kind(reference, &current_user)?
                 else {
+                    self.ensure_sequence_reference_schema_exists(reference)?;
                     return Err(SQLError::Routine {
                         sqlstate: "42P01".into(),
                         message: format!("relation \"{reference}\" does not exist"),
@@ -574,6 +570,11 @@ impl Engine {
         if current_owner == new_owner {
             return Ok(());
         }
+        self.ensure_schema_privilege(
+            &relation.schema,
+            &new_owner,
+            crate::engine_schema_security::SchemaAclPrivilege::Create,
+        )?;
         let mut security = self
             .durable
             .sequence_security

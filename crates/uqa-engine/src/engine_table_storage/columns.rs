@@ -439,7 +439,12 @@ impl Engine {
             target_schema.unwrap_or_else(|| from_relation.schema.clone()),
             target_name,
         );
-        if !self.durable.schemas.read().contains(&to_relation.schema) {
+        if !self
+            .durable
+            .schemas
+            .read()
+            .contains_key(&to_relation.schema)
+        {
             return Err(StorageBackendError::Other(format!(
                 "schema `{}` does not exist",
                 to_relation.schema

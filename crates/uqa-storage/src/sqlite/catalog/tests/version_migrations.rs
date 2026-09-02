@@ -7,6 +7,8 @@
 use super::*;
 
 mod log_count;
+mod schema_security;
+mod schema_version;
 
 #[test]
 fn migration_is_idempotent() {
@@ -955,45 +957,4 @@ fn migration_21_schedules_only_invalid_btree_fields_and_installs_guards() {
             Ok(())
         })
         .unwrap();
-}
-
-#[test]
-fn corrupt_schema_version_is_reported_instead_of_replaying_migrations() {
-    let mc = ManagedConnection::open_in_memory().unwrap();
-    let _current = Catalog::open(mc.clone()).unwrap();
-    mc.with(|conn| {
-        conn.execute(
-            "UPDATE _metadata SET value = 'not-a-version' WHERE key = 'schema_version'",
-            [],
-        )?;
-        Ok(())
-    })
-    .unwrap();
-
-    let error = Catalog::open(mc).err();
-    assert!(matches!(
-        error,
-        Some(SQLiteError::InvalidSchemaVersion(version)) if version == "not-a-version"
-    ));
-}
-
-#[test]
-fn future_schema_version_is_rejected() {
-    let mc = ManagedConnection::open_in_memory().unwrap();
-    let _current = Catalog::open(mc.clone()).unwrap();
-    let future = CURRENT_SCHEMA_VERSION + 1;
-    mc.with(|conn| {
-        conn.execute(
-            "UPDATE _metadata SET value = ?1 WHERE key = 'schema_version'",
-            [future.to_string()],
-        )?;
-        Ok(())
-    })
-    .unwrap();
-
-    assert!(matches!(
-        Catalog::open(mc).err(),
-        Some(SQLiteError::UnsupportedSchemaVersion { found, supported })
-            if found == future && supported == CURRENT_SCHEMA_VERSION
-    ));
 }

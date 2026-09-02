@@ -32,6 +32,37 @@ pub(crate) struct SequenceSecurity {
     pub(crate) acl: Option<Vec<uqa_storage::SequenceAclEntry>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SchemaSecurity {
+    pub(crate) role_owner: String,
+    pub(crate) acl: Option<Vec<uqa_storage::SchemaAclEntry>>,
+}
+
+impl SchemaSecurity {
+    pub(crate) fn from_row(row: uqa_storage::SchemaRow) -> (String, Self) {
+        (
+            row.name,
+            Self {
+                role_owner: row.role_owner,
+                acl: row.acl,
+            },
+        )
+    }
+
+    pub(crate) fn row(&self, name: impl Into<String>) -> uqa_storage::SchemaRow {
+        uqa_storage::SchemaRow {
+            name: name.into(),
+            role_owner: self.role_owner.clone(),
+            acl: self.acl.clone(),
+        }
+    }
+
+    pub(crate) fn legacy(name: &str) -> Self {
+        let (_, security) = Self::from_row(uqa_storage::SchemaRow::legacy(name));
+        security
+    }
+}
+
 impl StorageContext {
     pub(super) fn memory() -> Self {
         Self {
@@ -102,7 +133,7 @@ pub(super) struct DurableCatalogState {
     pub(super) scoring_params: RwLock<BTreeMap<String, String>>,
     pub(super) views: RwLock<BTreeMap<RelationIdentity, StoredView>>,
     pub(super) catalog_indexes: RwLock<BTreeMap<String, uqa_storage::CatalogIndexRow>>,
-    pub(super) schemas: RwLock<BTreeSet<String>>,
+    pub(super) schemas: RwLock<BTreeMap<String, SchemaSecurity>>,
     pub(super) path_indexes: RwLock<BTreeMap<String, uqa_graph::PathIndex>>,
     pub(super) sequences: RwLock<BTreeMap<RelationIdentity, SequenceState>>,
     pub(super) sequence_object_ids: RwLock<BTreeMap<RelationIdentity, [u8; 16]>>,
@@ -137,7 +168,7 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) scoring_params: BTreeMap<String, String>,
     pub(super) views: BTreeMap<RelationIdentity, StoredView>,
     pub(super) catalog_indexes: BTreeMap<String, uqa_storage::CatalogIndexRow>,
-    pub(super) schemas: BTreeSet<String>,
+    pub(super) schemas: BTreeMap<String, SchemaSecurity>,
     pub(super) path_indexes: BTreeMap<String, uqa_graph::PathIndex>,
     pub(super) sequences: BTreeMap<RelationIdentity, SequenceState>,
     pub(super) sequence_object_ids: BTreeMap<RelationIdentity, [u8; 16]>,
@@ -168,7 +199,10 @@ impl DurableCatalogState {
             scoring_params: RwLock::new(BTreeMap::new()),
             views: RwLock::new(BTreeMap::new()),
             catalog_indexes: RwLock::new(BTreeMap::new()),
-            schemas: RwLock::new(BTreeSet::from(["public".to_string()])),
+            schemas: RwLock::new(BTreeMap::from([(
+                "public".to_string(),
+                SchemaSecurity::legacy("public"),
+            )])),
             path_indexes: RwLock::new(BTreeMap::new()),
             sequences: RwLock::new(BTreeMap::new()),
             sequence_object_ids: RwLock::new(BTreeMap::new()),

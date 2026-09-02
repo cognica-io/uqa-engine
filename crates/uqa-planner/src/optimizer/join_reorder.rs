@@ -154,6 +154,7 @@ fn reorder_command_joins(
         | CommandPlan::AlterRoutineOwner(_)
         | CommandPlan::GrantRoutine(_)
         | CommandPlan::GrantSequence(_)
+        | CommandPlan::GrantSchema(_)
         | CommandPlan::GrantRole(_)
         | CommandPlan::CreateRole(_)
         | CommandPlan::AlterRole(_)

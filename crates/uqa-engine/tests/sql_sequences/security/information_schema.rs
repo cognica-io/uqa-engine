@@ -13,6 +13,8 @@ fn information_schema_engine() -> Engine {
         "CREATE ROLE sequence_information_member INHERIT",
         "CREATE ROLE sequence_information_reader",
         "CREATE SCHEMA sequence_information_space",
+        "GRANT USAGE, CREATE ON SCHEMA sequence_information_space TO sequence_information_owner",
+        "GRANT USAGE ON SCHEMA sequence_information_space TO sequence_information_reader",
         "SET ROLE sequence_information_owner",
         "CREATE SEQUENCE sequence_information_space.small_ids AS smallint INCREMENT BY -3 MINVALUE -30 MAXVALUE 12 START WITH 9 CYCLE CACHE 4",
         "CREATE TABLE sequence_information_space.generated_rows (serial_id serial, identity_id integer GENERATED ALWAYS AS IDENTITY)",

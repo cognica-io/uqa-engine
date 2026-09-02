@@ -128,16 +128,6 @@ impl Engine {
                         message: "cannot move objects into or out of temporary schemas".into(),
                     });
                 }
-                if !self.durable.schemas.read().contains(&target_schema) {
-                    return Err(SQLError::Routine {
-                        sqlstate: "3F000".into(),
-                        message: format!("schema \"{target_schema}\" does not exist"),
-                    });
-                }
-                let target = RelationIdentity::new(target_schema, &source.name);
-                if target == *source {
-                    return Ok(None);
-                }
                 if self
                     .durable
                     .sequences
@@ -149,6 +139,22 @@ impl Engine {
                         sqlstate: "0A000".into(),
                         message: "cannot move an owned sequence into another schema".into(),
                     });
+                }
+                if !self.durable.schemas.read().contains_key(&target_schema) {
+                    return Err(SQLError::Routine {
+                        sqlstate: "3F000".into(),
+                        message: format!("schema \"{target_schema}\" does not exist"),
+                    });
+                }
+                let current_user = self.current_user_name();
+                self.ensure_schema_privilege(
+                    &target_schema,
+                    &current_user,
+                    crate::engine_schema_security::SchemaAclPrivilege::Create,
+                )?;
+                let target = RelationIdentity::new(target_schema, &source.name);
+                if target == *source {
+                    return Ok(None);
                 }
                 self.reject_sequence_lifecycle_collision(source, &target, false)?;
                 Ok(Some(target))

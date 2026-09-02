@@ -48,6 +48,10 @@ impl RelationNameResolution {
         self.search_path.iter().any(|candidate| candidate == schema)
     }
 
+    pub(crate) fn current_user(&self) -> &str {
+        &self.current_user
+    }
+
     fn relation_lookup_candidates(
         &self,
         name: &str,
@@ -82,6 +86,7 @@ impl RelationNameResolution {
         Self {
             search_path,
             temporary_schema,
+            current_user: "uqa".into(),
         }
     }
 }
@@ -100,7 +105,7 @@ impl CatalogReadView {
             "information_schema".to_string(),
             "ag_catalog".to_string(),
         ];
-        schemas.extend(self.snapshot.durable.schemas.iter().cloned());
+        schemas.extend(self.snapshot.durable.schemas.keys().cloned());
         schemas.extend(self.snapshot.durable.graphs.keys().cloned());
         let temporary_schema = resolution.temporary_schema.clone();
         let has_temporary_relation =
@@ -128,9 +133,16 @@ impl CatalogReadView {
         schemas
     }
 
+    pub(crate) fn schema_security(
+        &self,
+        name: &str,
+    ) -> Option<&crate::engine_state::SchemaSecurity> {
+        self.snapshot.durable.schemas.get(name)
+    }
+
     #[cfg(test)]
     pub(crate) fn has_schema(&self, name: &str) -> bool {
-        self.snapshot.durable.schemas.contains(name)
+        self.snapshot.durable.schemas.contains_key(name)
     }
 
     pub(crate) fn table_names(&self) -> Vec<String> {
@@ -272,7 +284,26 @@ impl CatalogReadView {
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<Option<CatalogSequenceSnapshot>, SQLError> {
+        let qualified = crate::RelationIdentity::parse_reference(name)
+            .map_err(SQLError::Internal)?
+            .0
+            .is_some();
         for relation in resolution.relation_lookup_candidates(name)? {
+            if self.snapshot.durable.schemas.contains_key(&relation.schema)
+                && !self.schema_has_privilege_to(
+                    &relation.schema,
+                    &resolution.current_user,
+                    crate::engine_schema_security::SchemaAclPrivilege::Usage,
+                )
+            {
+                if qualified {
+                    return Err(SQLError::Routine {
+                        sqlstate: "42501".into(),
+                        message: format!("permission denied for schema {}", relation.schema),
+                    });
+                }
+                continue;
+            }
             if let Some(state) = self.snapshot.durable.sequences.get(&relation) {
                 return Ok(Some(CatalogSequenceSnapshot {
                     relation: relation.clone(),
@@ -297,6 +328,24 @@ impl CatalogReadView {
             }
         }
         Ok(None)
+    }
+
+    pub(crate) fn schema_has_privilege_to(
+        &self,
+        schema: &str,
+        role: &str,
+        privilege: crate::engine_schema_security::SchemaAclPrivilege,
+    ) -> bool {
+        let Some(security) = self.snapshot.durable.schemas.get(schema) else {
+            return true;
+        };
+        crate::engine_schema_security::role_has_schema_privilege(
+            security,
+            role,
+            privilege,
+            &self.snapshot.durable.roles,
+            &self.snapshot.durable.role_memberships,
+        )
     }
 
     pub(crate) fn views_of_kind(

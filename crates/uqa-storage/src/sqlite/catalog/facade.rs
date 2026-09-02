@@ -80,16 +80,16 @@ impl CatalogFacade for Catalog {
         }))
     }
 
-    fn save_schema(&self, name: &str) -> StorageBackendResult<()> {
-        into_storage_result(Catalog::save_schema(self, name))
+    fn save_schema_row(&self, schema: &crate::catalog::SchemaRow) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::save_schema_row(self, schema))
     }
 
     fn drop_schema(&self, name: &str) -> StorageBackendResult<()> {
         into_storage_result(Catalog::drop_schema(self, name))
     }
 
-    fn load_schemas(&self) -> StorageBackendResult<Vec<String>> {
-        into_storage_result(Catalog::load_schemas(self))
+    fn load_schema_rows(&self) -> StorageBackendResult<Vec<crate::catalog::SchemaRow>> {
+        into_storage_result(Catalog::load_schema_rows(self))
     }
 
     fn save_table(&self, schema: &TableSchema) -> StorageBackendResult<()> {

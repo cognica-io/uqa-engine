@@ -224,12 +224,12 @@ impl Engine {
         catalog: &dyn CatalogFacade,
     ) -> StorageBackendResult<()> {
         catalog.migrate_relation_namespace()?;
-        let schemas = catalog.load_schemas()?;
+        let schemas = catalog.load_schema_rows()?;
         for schema in &schemas {
-            Self::validate_schema_name(schema)?;
+            Self::validate_schema_name(&schema.name)?;
         }
-        if !schemas.iter().any(|name| name == "public") {
-            catalog.save_schema("public")?;
+        if !schemas.iter().any(|schema| schema.name == "public") {
+            catalog.save_schema_row(&uqa_storage::SchemaRow::legacy("public"))?;
         }
         Self::migrate_table_identities(catalog)?;
         Self::repair_dangling_hierarchy_parents(catalog)?;

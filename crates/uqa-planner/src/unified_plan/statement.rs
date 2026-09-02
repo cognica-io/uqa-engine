@@ -392,6 +392,9 @@ impl UnifiedPlan {
             Statement::GrantSequence(value) => {
                 Self::Command(Box::new(CommandPlan::GrantSequence(value)))
             }
+            Statement::GrantSchema(value) => {
+                Self::Command(Box::new(CommandPlan::GrantSchema(value)))
+            }
             Statement::GrantRole(value) => Self::Command(Box::new(CommandPlan::GrantRole(value))),
             Statement::CreateRole(value) => Self::Command(Box::new(CommandPlan::CreateRole(value))),
             Statement::AlterRole(value) => Self::Command(Box::new(CommandPlan::AlterRole(value))),
@@ -484,6 +487,7 @@ impl CommandPlan {
             Self::AlterRoutineOwner(_) => "AlterRoutineOwner",
             Self::GrantRoutine(_) => "GrantRoutine",
             Self::GrantSequence(_) => "GrantSequence",
+            Self::GrantSchema(_) => "GrantSchema",
             Self::GrantRole(_) => "GrantRole",
             Self::CreateRole(_) => "CreateRole",
             Self::AlterRole(_) => "AlterRole",

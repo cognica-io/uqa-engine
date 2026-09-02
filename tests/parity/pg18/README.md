@@ -72,6 +72,12 @@ docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/pa
 docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/sequence_security_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/sequence_security_oracle.expected.txt -
 ```
 
+`sequence_schema_security_oracle.sql` records PostgreSQL 18.4 schema ownership and ACL behavior at sequence boundaries. The checked-in transcript verifies `CREATE` and `USAGE` requirements, definition-error and missing-schema precedence, dependent grant-option `RESTRICT` and `CASCADE`, new-owner and target-schema `CREATE`, owned-sequence rejection and same-owner or same-schema no-op precedence, and `pg_namespace` owner and ACL output.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/sequence_schema_security_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/sequence_schema_security_oracle.expected.txt -
+```
+
 `sequence_information_schema_oracle.sql` records PostgreSQL 18.4 `information_schema.sequences` metadata and visibility. The checked-in transcript verifies current-session temporary namespace filtering in both sequence views, declared type and numeric precision, sequence options, exclusion of identity-owned internal sequences, explicit sequence privileges, and inherited-owner visibility.
 
 ```sh

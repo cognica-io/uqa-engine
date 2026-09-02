@@ -218,6 +218,14 @@ impl Engine {
         };
         let relation = Self::resolved_relation_identity(&name)
             .map_err(|error| SQLError::Internal(format!("resolve sequence `{name}`: {error}")))?;
+        if persistence != uqa_sql::ast::RelationPersistence::Temporary {
+            let current_user = self.current_user_name();
+            self.ensure_schema_privilege(
+                &relation.schema,
+                &current_user,
+                crate::engine_schema_security::SchemaAclPrivilege::Create,
+            )?;
+        }
         self.refresh_sequences_from_catalog().map_err(|error| {
             SQLError::Internal(format!("load sequence catalog for `{name}`: {error}"))
         })?;
@@ -424,24 +432,24 @@ impl Engine {
         &self,
         alter: &uqa_sql::ast::AlterSequence,
     ) -> Result<Option<String>, SQLError> {
-        match self
-            .try_resolve_relation_kind(&alter.name)
-            .map_err(|error| {
-                SQLError::Internal(format!(
-                    "load sequence catalog for `{}`: {error}",
-                    alter.name
-                ))
-            })? {
+        let current_user = self.current_user_name();
+        match self.try_resolve_sequence_relation_kind(&alter.name, &current_user)? {
             Some((name, "sequence")) => Ok(Some(name)),
             Some((_name, _kind)) => Err(SQLError::Routine {
                 sqlstate: "42809".into(),
                 message: format!("\"{}\" is not a sequence", alter.name),
             }),
-            None if alter.if_exists => Ok(None),
-            None => Err(SQLError::Routine {
-                sqlstate: "42P01".into(),
-                message: format!("relation \"{}\" does not exist", alter.name),
-            }),
+            None => {
+                if alter.if_exists {
+                    Ok(None)
+                } else {
+                    self.ensure_sequence_reference_schema_exists(&alter.name)?;
+                    Err(SQLError::Routine {
+                        sqlstate: "42P01".into(),
+                        message: format!("relation \"{}\" does not exist", alter.name),
+                    })
+                }
+            }
         }
     }
 
@@ -925,74 +933,5 @@ impl Engine {
         let relation = Self::resolved_relation_identity(&canonical)?;
         let seqs = self.durable.sequences.read();
         Ok(seqs.get(&relation).copied().map(|state| (canonical, state)))
-    }
-
-    // -----------------------------------------------------------------
-    // Prepared statements.
-    // -----------------------------------------------------------------
-
-    pub fn register_prepared(
-        &self,
-        name: String,
-        definition: uqa_sql::ast::Statement,
-    ) -> Result<(), uqa_sql::SQLError> {
-        let plan = uqa_planner::UnifiedPlan::lower_with(definition, &|aggregate: &str| {
-            self.has_registered_aggregate_function(aggregate)
-        });
-        self.register_prepared_plan(name, plan)
-    }
-
-    pub(crate) fn register_prepared_plan(
-        &self,
-        name: String,
-        logical_plan: uqa_planner::UnifiedPlan,
-    ) -> Result<(), uqa_sql::SQLError> {
-        let plan = crate::sql::optimize_engine_plan(self, logical_plan.clone())?;
-        self.session
-            .state
-            .write()
-            .prepared
-            .insert(name, super::PreparedStatementPlan { logical_plan, plan });
-        Ok(())
-    }
-
-    pub fn lookup_prepared(&self, name: &str) -> Option<uqa_planner::UnifiedPlan> {
-        self.session
-            .state
-            .read()
-            .prepared
-            .get(name)
-            .map(|entry| entry.plan.clone())
-    }
-
-    pub(crate) fn rebind_prepared_plans(&self) -> Result<(), uqa_sql::SQLError> {
-        let plans = self
-            .session
-            .state
-            .read()
-            .prepared
-            .iter()
-            .map(|(name, prepared)| (name.clone(), prepared.logical_plan.clone()))
-            .collect::<Vec<_>>();
-        let mut rebound = Vec::with_capacity(plans.len());
-        for (name, plan) in plans {
-            rebound.push((name, crate::sql::optimize_engine_plan(self, plan)?));
-        }
-        let mut session = self.session.state.write();
-        for (name, plan) in rebound {
-            if let Some(entry) = session.prepared.get_mut(&name) {
-                entry.plan = plan;
-            }
-        }
-        Ok(())
-    }
-
-    pub fn deallocate_prepared(&self, name: Option<&str>) {
-        match name {
-            Some(n) => {
-                self.session.state.write().prepared.remove(n);
-            }
-            None => self.session.state.write().prepared.clear(),
-        }
     }
 }

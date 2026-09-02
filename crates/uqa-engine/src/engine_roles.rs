@@ -506,8 +506,43 @@ impl Engine {
                 });
             }
         }
-        let sequence_security = self.durable.sequence_security.read();
+        self.ensure_roles_have_no_object_dependencies(&names)?;
+        let mut next_roles = snapshot;
         for name in &names {
+            next_roles.remove(name);
+        }
+        let mut next_memberships = memberships.clone();
+        next_memberships.retain(|_, membership| {
+            !names_set.contains(&membership.role)
+                && !names_set.contains(&membership.member)
+                && !names_set.contains(&membership.grantor)
+        });
+        self.persist_roles_snapshot(&next_roles)?;
+        self.persist_role_memberships_snapshot(&next_memberships)?;
+        *roles = next_roles;
+        *memberships = next_memberships;
+        drop(memberships);
+        drop(roles);
+        self.note_catalog_registry_changed();
+        Ok(())
+    }
+
+    fn ensure_roles_have_no_object_dependencies(&self, names: &[String]) -> Result<(), SQLError> {
+        let schema_security = self.durable.schemas.read();
+        for name in names {
+            if let Some(schema) = dependent_schema_for_role(&schema_security, name) {
+                return Err(SQLError::Routine {
+                    sqlstate: "2BP01".into(),
+                    message: format!(
+                        "role \"{name}\" cannot be dropped because some objects depend on it: schema {schema}"
+                    ),
+                });
+            }
+        }
+        drop(schema_security);
+
+        let sequence_security = self.durable.sequence_security.read();
+        for name in names {
             if let Some(relation) = dependent_sequence_for_role(&sequence_security, name) {
                 return Err(SQLError::Routine {
                     sqlstate: "2BP01".into(),
@@ -518,8 +553,10 @@ impl Engine {
                 });
             }
         }
+        drop(sequence_security);
+
         let routines = self.durable.sql_user_functions.read();
-        for name in &names {
+        for name in names {
             if let Some(dependent) = routines.values().flatten().find_map(|function| {
                 let owns = function.def.owner == *name;
                 let has_acl = function.def.execute_acl.as_ref().is_some_and(|acl| {
@@ -536,25 +573,6 @@ impl Engine {
                 });
             }
         }
-        let mut next_roles = snapshot;
-        for name in &names {
-            next_roles.remove(name);
-        }
-        let mut next_memberships = memberships.clone();
-        next_memberships.retain(|_, membership| {
-            !names_set.contains(&membership.role)
-                && !names_set.contains(&membership.member)
-                && !names_set.contains(&membership.grantor)
-        });
-        self.persist_roles_snapshot(&next_roles)?;
-        self.persist_role_memberships_snapshot(&next_memberships)?;
-        *roles = next_roles;
-        *memberships = next_memberships;
-        drop(sequence_security);
-        drop(routines);
-        drop(memberships);
-        drop(roles);
-        self.note_catalog_registry_changed();
         Ok(())
     }
 
@@ -801,6 +819,21 @@ fn dependent_sequence_for_role<'a>(
             })
         });
         (security.role_owner == role || acl_dependency).then_some(relation)
+    })
+}
+
+fn dependent_schema_for_role<'a>(
+    schemas: &'a BTreeMap<String, crate::engine_state::SchemaSecurity>,
+    role: &str,
+) -> Option<&'a String> {
+    schemas.iter().find_map(|(name, security)| {
+        let acl_dependency = security.acl.as_ref().is_some_and(|acl| {
+            acl.iter().any(|entry| {
+                entry.role == role
+                    || entry.grantor.as_deref().unwrap_or(&security.role_owner) == role
+            })
+        });
+        (security.role_owner == role || acl_dependency).then_some(name)
     })
 }
 

@@ -8,6 +8,8 @@ use super::*;
 
 #[path = "security/information_schema.rs"]
 mod information_schema;
+#[path = "security/schema.rs"]
+mod schema;
 #[path = "security/targets.rs"]
 mod targets;
 #[path = "security/temporary_acl.rs"]
@@ -54,6 +56,7 @@ fn sequence_owner_engine() -> (Engine, Value, [u8; 16]) {
         "CREATE ROLE sequence_outsider",
         "CREATE ROLE sequence_owner_member INHERIT",
         "CREATE ROLE sequence_owner_noinherit NOINHERIT",
+        "GRANT CREATE ON SCHEMA public TO sequence_owner, sequence_next_owner",
         "SET ROLE sequence_owner",
         "CREATE SEQUENCE role_owned_ids CACHE 3",
         "RESET ROLE",
@@ -255,6 +258,7 @@ fn assert_durable_owner_transactions(engine: &Engine) {
         "CREATE ROLE durable_sequence_owner",
         "CREATE ROLE durable_sequence_next_owner",
         "GRANT durable_sequence_next_owner TO durable_sequence_owner WITH INHERIT FALSE, SET TRUE",
+        "GRANT CREATE ON SCHEMA public TO durable_sequence_owner, durable_sequence_next_owner",
         "SET ROLE durable_sequence_owner",
         "CREATE SEQUENCE durable_role_ids CACHE 4",
         "BEGIN",
@@ -385,6 +389,7 @@ fn sequence_acl_engine() -> Engine {
         "CREATE ROLE sequence_acl_delegate",
         "CREATE ROLE sequence_acl_outsider",
         "CREATE ROLE sequence_acl_member",
+        "GRANT CREATE ON SCHEMA public TO sequence_acl_owner",
         "SET ROLE sequence_acl_owner",
         "CREATE SEQUENCE sequence_acl_ids",
         "RESET ROLE",
@@ -633,6 +638,7 @@ fn sequence_owner_can_revoke_ordinary_privileges_and_transfer_acl_ownership() {
         "CREATE ROLE acl_next_owner",
         "CREATE ROLE acl_owner_reader",
         "GRANT acl_next_owner TO acl_self_owner WITH INHERIT FALSE, SET TRUE",
+        "GRANT CREATE ON SCHEMA public TO acl_self_owner, acl_next_owner",
         "SET ROLE acl_self_owner",
         "CREATE SEQUENCE acl_owner_ids",
         "REVOKE ALL PRIVILEGES ON SEQUENCE acl_owner_ids FROM acl_self_owner",
@@ -716,6 +722,7 @@ fn sequence_acl_grant_chains_follow_restrict_cascade_and_alternate_paths() {
         "CREATE ROLE acl_chain_leaf",
         "CREATE ROLE acl_chain_tail",
         "CREATE ROLE acl_chain_outsider",
+        "GRANT CREATE ON SCHEMA public TO acl_chain_owner",
         "SET ROLE acl_chain_owner",
         "CREATE SEQUENCE acl_chain_ids",
         "GRANT USAGE ON SEQUENCE acl_chain_ids TO acl_chain_delegate WITH GRANT OPTION",
@@ -815,6 +822,7 @@ fn sequence_acl_follows_transactions_external_refresh_and_reopen() {
         for sql in [
             "CREATE ROLE acl_durable_owner",
             "CREATE ROLE acl_durable_user",
+            "GRANT CREATE ON SCHEMA public TO acl_durable_owner",
             "SET ROLE acl_durable_owner",
             "CREATE SEQUENCE acl_durable_ids",
             "RESET ROLE",

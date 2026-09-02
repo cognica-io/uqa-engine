@@ -30,7 +30,7 @@ fn mutation_coordinator_publishes_schema_changes_without_engine_recovery() {
     let before = engine.catalog_epochs();
     assert!(engine
         .mutation_coordinator()
-        .register_schema("capability_test", false)
+        .register_schema("capability_test", false, "uqa")
         .unwrap());
     assert!(!snapshot.has_schema("capability_test"));
     assert!(engine.catalog_read_view().has_schema("capability_test"));

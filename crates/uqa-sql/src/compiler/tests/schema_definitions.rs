@@ -215,6 +215,47 @@ fn sequence_grants_preserve_privileges_targets_and_grant_paths() {
 }
 
 #[test]
+fn schema_grants_preserve_privileges_targets_and_grant_paths() {
+    use crate::ast::{SchemaPrivilege, SchemaRevokeBehavior};
+
+    let Statement::GrantSchema(grant) = first(
+        "GRANT USAGE, CREATE ON SCHEMA app, archive TO caller WITH GRANT OPTION GRANTED BY CURRENT_USER",
+    ) else {
+        panic!("not schema GRANT");
+    };
+    assert!(grant.is_grant);
+    assert!(grant.grant_option);
+    assert_eq!(
+        grant.privileges,
+        vec![SchemaPrivilege::Usage, SchemaPrivilege::Create]
+    );
+    assert_eq!(grant.schemas, ["app", "archive"]);
+    assert_eq!(grant.grantees, ["caller"]);
+    assert_eq!(grant.grantor.as_deref(), Some("CURRENT_USER"));
+
+    let Statement::GrantSchema(revoke) =
+        first("REVOKE GRANT OPTION FOR ALL PRIVILEGES ON SCHEMA app FROM caller CASCADE")
+    else {
+        panic!("not schema REVOKE");
+    };
+    assert!(!revoke.is_grant);
+    assert!(revoke.grant_option_only);
+    assert_eq!(revoke.revoke_behavior, SchemaRevokeBehavior::Cascade);
+    assert_eq!(
+        revoke.privileges,
+        vec![SchemaPrivilege::Usage, SchemaPrivilege::Create]
+    );
+
+    let Statement::GrantSchema(invalid) = first("GRANT SELECT ON SCHEMA app TO caller") else {
+        panic!("not deferred invalid schema privilege");
+    };
+    assert_eq!(
+        invalid.privileges,
+        vec![SchemaPrivilege::Unsupported("SELECT".into())]
+    );
+}
+
+#[test]
 fn create_table_with_vector_column() {
     let stmt = first("CREATE TABLE docs (id INTEGER PRIMARY KEY, title TEXT, embedding VECTOR(4))");
     let Statement::CreateTable(ct) = stmt else {

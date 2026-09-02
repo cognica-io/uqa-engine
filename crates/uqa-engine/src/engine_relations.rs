@@ -126,7 +126,7 @@ impl Engine {
             .map_err(|err| format!("refresh schema catalog: {err}"))?;
         let (schema, relation) = RelationIdentity::parse_reference(name)?;
         if let Some(schema) = schema {
-            if !self.durable.schemas.read().contains(&schema) {
+            if !self.durable.schemas.read().contains_key(&schema) {
                 return Err(format!("schema `{schema}` does not exist"));
             }
             return Ok(RelationIdentity::new(schema, relation).qualified_name());
@@ -139,7 +139,7 @@ impl Engine {
             .find(|schema| {
                 schema.as_str() != "pg_catalog"
                     && schema.as_str() != "information_schema"
-                    && schemas.contains(schema.as_str())
+                    && schemas.contains_key(schema.as_str())
             })
             .cloned()
             .ok_or_else(|| "no schema has been selected to create in".to_string())?;
@@ -201,6 +201,93 @@ impl Engine {
             }
         }
         Ok(None)
+    }
+
+    /// Resolve a relation for a sequence operation while applying schema `USAGE` to each search-path candidate. A qualified inaccessible schema reports `42501`; an unqualified lookup skips it as `PostgreSQL` does when constructing the effective search path.
+    pub(crate) fn try_resolve_sequence_relation_kind(
+        &self,
+        name: &str,
+        role: &str,
+    ) -> Result<Option<(String, &'static str)>, SQLError> {
+        self.synchronize_table_catalog().map_err(|error| {
+            SQLError::Internal(format!("load table catalog for sequence lookup: {error}"))
+        })?;
+        self.synchronize_catalog_registries().map_err(|error| {
+            SQLError::Internal(format!("load schema catalog for sequence lookup: {error}"))
+        })?;
+        self.refresh_sequences_from_catalog().map_err(|error| {
+            SQLError::Internal(format!("load sequence catalog for lookup: {error}"))
+        })?;
+        let qualified = RelationIdentity::parse_reference(name)
+            .map_err(SQLError::Internal)?
+            .0
+            .is_some();
+        for relation in self
+            .relation_lookup_candidates(name)
+            .map_err(|error| SQLError::Internal(format!("resolve relation `{name}`: {error}")))?
+        {
+            if self.durable.schemas.read().contains_key(&relation.schema)
+                && !self.schema_has_privilege_for_role(
+                    &relation.schema,
+                    role,
+                    crate::engine_schema_security::SchemaAclPrivilege::Usage,
+                )
+            {
+                if qualified {
+                    return Err(SQLError::Routine {
+                        sqlstate: "42501".into(),
+                        message: format!("permission denied for schema {}", relation.schema),
+                    });
+                }
+                continue;
+            }
+            let kind = if self.storage.tables.read().contains_key(&relation) {
+                Some("table")
+            } else if let Some(view) = self.durable.views.read().get(&relation) {
+                Some(match view.kind {
+                    super::StoredViewKind::View => "view",
+                    super::StoredViewKind::Materialized => "materialized view",
+                })
+            } else if self.durable.sequences.read().contains_key(&relation) {
+                Some("sequence")
+            } else if self.durable.foreign_tables.read().contains_key(&relation) {
+                Some("foreign table")
+            } else {
+                None
+            };
+            if let Some(kind) = kind {
+                return Ok(Some((relation.qualified_name(), kind)));
+            }
+        }
+        Ok(None)
+    }
+
+    /// `PostgreSQL` reports a missing qualified namespace separately for sequence DDL and privilege inquiry, while value functions and direct relation scans retain an undefined-relation error.
+    pub(crate) fn ensure_sequence_reference_schema_exists(
+        &self,
+        name: &str,
+    ) -> Result<(), SQLError> {
+        let (schema, _) = RelationIdentity::parse_reference(name).map_err(SQLError::Internal)?;
+        let Some(schema) = schema else {
+            return Ok(());
+        };
+        let temporary_schema = self.temporary_schema_name();
+        let exists = if schema == "pg_temp" || schema == temporary_schema {
+            self.temporary_namespace_allocated()
+        } else {
+            self.has_namespace(&schema).map_err(|error| {
+                SQLError::Internal(format!(
+                    "resolve schema `{schema}` for sequence lookup: {error}"
+                ))
+            })?
+        };
+        if exists {
+            return Ok(());
+        }
+        Err(SQLError::Routine {
+            sqlstate: "3F000".into(),
+            message: format!("schema \"{schema}\" does not exist"),
+        })
     }
 
     pub(crate) fn resolved_relation_identity(name: &str) -> StorageBackendResult<RelationIdentity> {

@@ -111,9 +111,14 @@ impl KeyValueCatalog {
         apply_relation_migrations(self, migrations)
     }
 
-    pub(super) fn save_schema_impl(&self, name: &str) -> StorageBackendResult<()> {
-        self.store
-            .put(&single_str_key(TAG_SCHEMA, name)?, &string_value(name))
+    pub(super) fn save_schema_row_impl(
+        &self,
+        schema: &crate::catalog::SchemaRow,
+    ) -> StorageBackendResult<()> {
+        self.store.put(
+            &single_str_key(TAG_SCHEMA, &schema.name)?,
+            &encode_value(schema)?,
+        )
     }
 
     pub(super) fn drop_schema_impl(&self, name: &str) -> StorageBackendResult<()> {
@@ -127,13 +132,24 @@ impl KeyValueCatalog {
         self.store.delete(&single_str_key(TAG_SCHEMA, name)?)
     }
 
-    pub(super) fn load_schemas_impl(&self) -> StorageBackendResult<Vec<String>> {
+    pub(super) fn load_schema_rows_impl(
+        &self,
+    ) -> StorageBackendResult<Vec<crate::catalog::SchemaRow>> {
         let mut rows = Vec::new();
-        for (key, _) in self.store.scan_prefix(&key_with_tag(TAG_SCHEMA))? {
+        for (key, value) in self.store.scan_prefix(&key_with_tag(TAG_SCHEMA))? {
             let mut offset = 1;
-            rows.push(read_str(&key, &mut offset)?);
+            let name = read_str(&key, &mut offset)?;
+            let schema = decode_value::<crate::catalog::SchemaRow>(&value)
+                .or_else(|_| decode_string(value).map(crate::catalog::SchemaRow::legacy))?;
+            if schema.name != name {
+                return Err(StorageBackendError::Other(format!(
+                    "schema catalog key `{name}` disagrees with stored name `{}`",
+                    schema.name
+                )));
+            }
+            rows.push(schema);
         }
-        rows.sort();
+        rows.sort_by(|left, right| left.name.cmp(&right.name));
         Ok(rows)
     }
 

@@ -34,13 +34,31 @@ pub(super) fn build_info_schemata(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
+    let current_user = resolution.current_user();
     Ok(all_schema_names(catalog, resolution)?
         .into_iter()
+        .filter(|schema| {
+            catalog.schema_security(schema).is_none()
+                || catalog.schema_has_privilege_to(
+                    schema,
+                    current_user,
+                    crate::engine_schema_security::SchemaAclPrivilege::Usage,
+                )
+                || catalog.schema_has_privilege_to(
+                    schema,
+                    current_user,
+                    crate::engine_schema_security::SchemaAclPrivilege::Create,
+                )
+        })
         .map(|schema| {
+            let owner = catalog.schema_security(&schema).map_or_else(
+                || current_user_name().to_string(),
+                |security| security.role_owner.clone(),
+            );
             row([
                 ("catalog_name", catalog_name()),
                 ("schema_name", str_value(schema)),
-                ("schema_owner", str_value(current_user_name())),
+                ("schema_owner", str_value(owner)),
                 ("default_character_set_catalog", catalog_name()),
                 ("default_character_set_schema", str_value("pg_catalog")),
                 ("default_character_set_name", str_value("UTF8")),
@@ -573,6 +591,11 @@ pub(super) fn build_info_sequences(
                 && !state
                     .owner
                     .is_some_and(|owner| owner.dependency == SequenceOwnerDependency::Internal)
+                && catalog.schema_has_privilege_to(
+                    &relation.schema,
+                    &current_user,
+                    crate::engine_schema_security::SchemaAclPrivilege::Usage,
+                )
                 && catalog.sequence_is_visible_to(security, &current_user)
         })
         .map(|(relation, state, _, _)| {

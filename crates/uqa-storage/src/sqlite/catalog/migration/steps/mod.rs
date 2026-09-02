@@ -40,6 +40,7 @@ mod v29;
 mod v30;
 mod v31;
 mod v32;
+mod v33;
 
 type MigrationFn = for<'a> fn(&rusqlite::Transaction<'a>) -> Result<()>;
 
@@ -72,7 +73,7 @@ impl MigrationStep {
 }
 
 /// Migrations applied in order. Each version is run in one transaction and the metadata schema-version row is bumped only after its step succeeds.
-pub(super) const MIGRATIONS: [MigrationStep; 32] = [
+pub(super) const MIGRATIONS: [MigrationStep; 33] = [
     MigrationStep::sql(1, v01::SQL),
     MigrationStep::sql(2, v02::SQL),
     MigrationStep::sql(3, v03::SQL),
@@ -105,4 +106,5 @@ pub(super) const MIGRATIONS: [MigrationStep; 32] = [
     MigrationStep::custom(30, v30::migrate),
     MigrationStep::custom(31, v31::migrate),
     MigrationStep::custom(32, v32::migrate),
+    MigrationStep::custom(33, v33::migrate),
 ];
