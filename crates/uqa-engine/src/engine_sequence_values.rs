@@ -10,6 +10,7 @@ use super::{
     BTreeMap, Engine, NontransactionalSequenceValue, RelationIdentity, SQLError,
     SequenceReservationResult, SequenceState, SessionSequenceCache, StorageBackendResult,
 };
+use crate::engine_capabilities::RelationResolution;
 
 struct NextvalTarget {
     name: String,
@@ -126,14 +127,16 @@ impl Engine {
         &self,
         reference: &str,
     ) -> Result<(String, RelationIdentity, [u8; 16]), SequenceValueError> {
-        let current_user = self.current_user_name();
         let resolved = self
-            .try_resolve_sequence_relation_kind(reference, &current_user)
+            .resolve_visible_relation_kind(reference)
             .map_err(SequenceValueError::Security)?;
-        let Some((name, kind)) = resolved else {
-            return self
-                .resolve_sequence_value_target_by_oid(reference)?
-                .ok_or_else(|| SequenceValueError::Undefined(reference.to_string()));
+        let (name, kind) = match resolved {
+            RelationResolution::Found(name, kind) => (name, kind),
+            RelationResolution::MissingRelation | RelationResolution::MissingSchema(_) => {
+                return self
+                    .resolve_sequence_value_target_by_oid(reference)?
+                    .ok_or_else(|| SequenceValueError::Undefined(reference.to_string()));
+            }
         };
         if kind != "sequence" {
             return Err(SequenceValueError::WrongKind {

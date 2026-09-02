@@ -7,6 +7,7 @@
 //! DROP preflight, object removal, and index side effects.
 
 use super::{CatalogIndexRow, ColumnType, DropKind, DropStmt, Engine, SQLError, SQLResult};
+use crate::engine_capabilities::RelationResolution;
 
 pub(in crate::sql) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError> {
     if stmt.kind == DropKind::Table {
@@ -254,33 +255,38 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
         DropKind::Sequence => {
             let mut sequences = Vec::new();
             let mut seen = std::collections::BTreeSet::new();
-            let current_user = engine.session_execution_view().current_user();
             for name in &stmt.names {
-                match engine.try_resolve_sequence_relation_kind(name, &current_user)? {
-                    Some((canonical, "sequence")) => {
+                match engine.resolve_visible_relation_kind(name)? {
+                    RelationResolution::Found(canonical, "sequence") => {
                         if seen.insert(canonical.clone()) {
                             sequences.push(canonical);
                         }
                     }
-                    Some((_canonical, _kind)) => {
+                    RelationResolution::Found(_canonical, _kind) => {
                         return Err(SQLError::Routine {
                             sqlstate: "42809".into(),
                             message: format!("\"{name}\" is not a sequence"),
                         });
                     }
-                    None => {
-                        if stmt.if_exists {
-                            engine.push_sql_notice(
-                                "NOTICE",
-                                &format!("sequence \"{name}\" does not exist, skipping"),
-                            );
-                        } else {
-                            engine.ensure_sequence_reference_schema_exists(name)?;
-                            return Err(SQLError::Routine {
-                                sqlstate: "42P01".into(),
-                                message: format!("sequence \"{name}\" does not exist"),
-                            });
-                        }
+                    RelationResolution::MissingRelation | RelationResolution::MissingSchema(_)
+                        if stmt.if_exists =>
+                    {
+                        engine.push_sql_notice(
+                            "NOTICE",
+                            &format!("sequence \"{name}\" does not exist, skipping"),
+                        );
+                    }
+                    RelationResolution::MissingSchema(schema) => {
+                        return Err(SQLError::Routine {
+                            sqlstate: "3F000".into(),
+                            message: format!("schema \"{schema}\" does not exist"),
+                        });
+                    }
+                    RelationResolution::MissingRelation => {
+                        return Err(SQLError::Routine {
+                            sqlstate: "42P01".into(),
+                            message: format!("sequence \"{name}\" does not exist"),
+                        });
                     }
                 }
             }

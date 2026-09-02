@@ -22,7 +22,7 @@ use crate::engine_state::DurableCatalogState;
 use super::CatalogReadSnapshot;
 use super::{
     CatalogReadView, CatalogSequenceSnapshot, CatalogTableSnapshot, RelationLookupMode,
-    RelationNameResolution,
+    RelationNameResolution, RelationResolution,
 };
 
 #[cfg(test)]
@@ -55,6 +55,20 @@ impl RelationNameResolution {
 
     pub(crate) fn lookup_mode(&self) -> RelationLookupMode {
         self.lookup_mode
+    }
+
+    fn qualified_schema(&self, name: &str) -> Result<Option<(String, String)>, SQLError> {
+        let (schema, _) = crate::RelationIdentity::parse_reference(name).map_err(|error| {
+            SQLError::Internal(format!("resolve catalog relation `{name}`: {error}"))
+        })?;
+        Ok(schema.map(|schema| {
+            let resolved = if schema == "pg_temp" {
+                self.temporary_schema.clone()
+            } else {
+                schema.clone()
+            };
+            (schema, resolved)
+        }))
     }
 
     pub(crate) fn set_lookup_mode(
@@ -98,6 +112,7 @@ impl RelationNameResolution {
         Self {
             search_path,
             temporary_schema,
+            temporary_namespace_allocated: false,
             current_user: "uqa".into(),
             lookup_mode: RelationLookupMode::Dynamic,
         }
@@ -157,11 +172,27 @@ impl CatalogReadView {
             || self.snapshot.durable.foreign_tables.contains_key(relation)
     }
 
-    pub(crate) fn relation_kind_resolved(
+    fn namespace_exists(&self, resolution: &RelationNameResolution, schema: &str) -> bool {
+        if schema == resolution.temporary_schema {
+            return resolution.temporary_namespace_allocated;
+        }
+        crate::engine_session::is_virtual_system_schema(schema)
+            || self.snapshot.durable.schemas.contains_key(schema)
+            || self.snapshot.durable.graphs.contains_key(schema)
+    }
+
+    pub(crate) fn relation_kind_resolution(
         &self,
         resolution: &RelationNameResolution,
         name: &str,
-    ) -> Result<Option<(String, &'static str)>, SQLError> {
+    ) -> Result<RelationResolution, SQLError> {
+        if resolution.lookup_mode() == RelationLookupMode::Dynamic {
+            if let Some((requested, resolved)) = resolution.qualified_schema(name)? {
+                if !self.namespace_exists(resolution, &resolved) {
+                    return Ok(RelationResolution::MissingSchema(requested));
+                }
+            }
+        }
         for relation in self.relation_lookup_candidates(resolution, name)? {
             let kind = if self.snapshot.tables.contains_key(&relation) {
                 Some("table")
@@ -178,10 +209,10 @@ impl CatalogReadView {
                 None
             };
             if let Some(kind) = kind {
-                return Ok(Some((relation.qualified_name(), kind)));
+                return Ok(RelationResolution::Found(relation.qualified_name(), kind));
             }
         }
-        Ok(None)
+        Ok(RelationResolution::MissingRelation)
     }
 
     pub(crate) fn all_schema_names(&self, resolution: &RelationNameResolution) -> Vec<String> {

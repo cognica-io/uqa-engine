@@ -16,6 +16,7 @@ use acl::{
 };
 use uqa_sql::ast::{GrantSequenceStmt, GrantSequenceTarget, SequenceRevokeBehavior};
 
+use crate::engine_capabilities::RelationResolution;
 use crate::engine_roles::{
     role_can_set, role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey,
 };
@@ -184,16 +185,21 @@ impl Engine {
                 require_sequence,
             } => {
                 let mut resolved = Vec::with_capacity(names.len());
-                let current_user = self.current_user_name();
                 for requested in names {
-                    let Some((name, kind)) =
-                        self.try_resolve_sequence_relation_kind(requested, &current_user)?
-                    else {
-                        self.ensure_sequence_reference_schema_exists(requested)?;
-                        return Err(SQLError::Routine {
-                            sqlstate: "42P01".into(),
-                            message: format!("relation \"{requested}\" does not exist"),
-                        });
+                    let (name, kind) = match self.resolve_visible_relation_kind(requested)? {
+                        RelationResolution::Found(name, kind) => (name, kind),
+                        RelationResolution::MissingSchema(schema) => {
+                            return Err(SQLError::Routine {
+                                sqlstate: "3F000".into(),
+                                message: format!("schema \"{schema}\" does not exist"),
+                            });
+                        }
+                        RelationResolution::MissingRelation => {
+                            return Err(SQLError::Routine {
+                                sqlstate: "42P01".into(),
+                                message: format!("relation \"{requested}\" does not exist"),
+                            });
+                        }
                     };
                     let relation = Self::resolved_relation_identity(&name).map_err(|error| {
                         SQLError::Internal(format!("resolve sequence `{name}`: {error}"))
@@ -455,15 +461,20 @@ impl Engine {
                 if let Ok(oid) = reference.parse::<i64>() {
                     return self.resolve_sequence_privilege_oid(oid);
                 }
-                let current_user = self.current_user_name();
-                let Some((name, kind)) =
-                    self.try_resolve_sequence_relation_kind(reference, &current_user)?
-                else {
-                    self.ensure_sequence_reference_schema_exists(reference)?;
-                    return Err(SQLError::Routine {
-                        sqlstate: "42P01".into(),
-                        message: format!("relation \"{reference}\" does not exist"),
-                    });
+                let (name, kind) = match self.resolve_visible_relation_kind(reference)? {
+                    RelationResolution::Found(name, kind) => (name, kind),
+                    RelationResolution::MissingSchema(schema) => {
+                        return Err(SQLError::Routine {
+                            sqlstate: "3F000".into(),
+                            message: format!("schema \"{schema}\" does not exist"),
+                        });
+                    }
+                    RelationResolution::MissingRelation => {
+                        return Err(SQLError::Routine {
+                            sqlstate: "42P01".into(),
+                            message: format!("relation \"{reference}\" does not exist"),
+                        });
+                    }
                 };
                 if kind != "sequence" {
                     return Err(SQLError::Routine {

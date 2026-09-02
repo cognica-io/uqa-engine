@@ -160,3 +160,53 @@ fn relation_name_resolution_keeps_the_statement_search_path() {
         Some("second_path.items")
     );
 }
+
+#[test]
+fn relation_resolution_preserves_the_missing_namespace_outcome() {
+    let engine = Engine::new();
+    let catalog = engine.catalog_read_view();
+    let resolution = engine.session_execution_view().relation_name_resolution();
+
+    assert_eq!(
+        catalog
+            .relation_kind_resolution(&resolution, "missing_schema.items")
+            .unwrap(),
+        RelationResolution::MissingSchema("missing_schema".into())
+    );
+    assert_eq!(
+        catalog
+            .relation_kind_resolution(&resolution, "missing_items")
+            .unwrap(),
+        RelationResolution::MissingRelation
+    );
+    assert_eq!(
+        catalog
+            .relation_kind_resolution(&resolution, "pg_temp.missing_items")
+            .unwrap(),
+        RelationResolution::MissingSchema("pg_temp".into())
+    );
+
+    engine
+        .sql(
+            "CREATE TEMP TABLE allocate_temp_namespace (id integer)",
+            &[],
+        )
+        .unwrap();
+    let allocated = engine.session_execution_view().relation_name_resolution();
+    assert_eq!(
+        engine
+            .catalog_read_view()
+            .relation_kind_resolution(&allocated, "pg_temp.missing_items")
+            .unwrap(),
+        RelationResolution::MissingRelation
+    );
+
+    let mut bound = resolution;
+    bound.set_lookup_mode(RelationLookupMode::Bound);
+    assert_eq!(
+        catalog
+            .relation_kind_resolution(&bound, "missing_schema.items")
+            .unwrap(),
+        RelationResolution::MissingRelation
+    );
+}

@@ -9,6 +9,7 @@ use super::{
     SequenceOwnerDependency, SequenceRestart, SequenceState, StorageBackendError,
     StorageBackendResult,
 };
+use crate::engine_capabilities::RelationResolution;
 use crate::engine_state::SequenceSecurity;
 use uqa_sql::ast::RelationPersistence;
 
@@ -422,24 +423,25 @@ impl Engine {
         &self,
         alter: &uqa_sql::ast::AlterSequence,
     ) -> Result<Option<String>, SQLError> {
-        let current_user = self.current_user_name();
-        match self.try_resolve_sequence_relation_kind(&alter.name, &current_user)? {
-            Some((name, "sequence")) => Ok(Some(name)),
-            Some((_name, _kind)) => Err(SQLError::Routine {
+        match self.resolve_visible_relation_kind(&alter.name)? {
+            RelationResolution::Found(name, "sequence") => Ok(Some(name)),
+            RelationResolution::Found(_name, _kind) => Err(SQLError::Routine {
                 sqlstate: "42809".into(),
                 message: format!("\"{}\" is not a sequence", alter.name),
             }),
-            None => {
-                if alter.if_exists {
-                    Ok(None)
-                } else {
-                    self.ensure_sequence_reference_schema_exists(&alter.name)?;
-                    Err(SQLError::Routine {
-                        sqlstate: "42P01".into(),
-                        message: format!("relation \"{}\" does not exist", alter.name),
-                    })
-                }
+            RelationResolution::MissingRelation | RelationResolution::MissingSchema(_)
+                if alter.if_exists =>
+            {
+                Ok(None)
             }
+            RelationResolution::MissingSchema(schema) => Err(SQLError::Routine {
+                sqlstate: "3F000".into(),
+                message: format!("schema \"{schema}\" does not exist"),
+            }),
+            RelationResolution::MissingRelation => Err(SQLError::Routine {
+                sqlstate: "42P01".into(),
+                message: format!("relation \"{}\" does not exist", alter.name),
+            }),
         }
     }
 

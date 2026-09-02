@@ -71,8 +71,27 @@ pub(crate) struct CatalogSequenceSnapshot {
 pub(crate) struct RelationNameResolution {
     pub(super) search_path: Vec<String>,
     pub(super) temporary_schema: String,
+    pub(super) temporary_namespace_allocated: bool,
     pub(super) current_user: String,
     pub(super) lookup_mode: RelationLookupMode,
+}
+
+/// Complete outcome of resolving one relation reference through a statement namespace.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum RelationResolution {
+    Found(String, &'static str),
+    MissingRelation,
+    MissingSchema(String),
+}
+
+impl RelationResolution {
+    /// Collapse namespace absence only for SQL boundaries whose contract reports an undefined relation for either absence outcome.
+    pub(crate) fn into_found(self) -> Option<(String, &'static str)> {
+        match self {
+            Self::Found(name, kind) => Some((name, kind)),
+            Self::MissingRelation | Self::MissingSchema(_) => None,
+        }
+    }
 }
 
 /// Whether a query resolves session-visible names or follows catalog identities captured when a stored expression was defined.
@@ -116,10 +135,12 @@ impl SessionExecutionView<'_> {
     }
 
     pub(crate) fn relation_name_resolution(&self) -> RelationNameResolution {
+        let state = self.session.state.read();
         RelationNameResolution {
-            search_path: self.search_path(),
+            search_path: state.search_path.clone(),
             temporary_schema: self.temporary_schema_name(),
-            current_user: self.current_user(),
+            temporary_namespace_allocated: state.temporary_namespace_allocated,
+            current_user: state.current_user.clone(),
             lookup_mode: RelationLookupMode::Dynamic,
         }
     }
