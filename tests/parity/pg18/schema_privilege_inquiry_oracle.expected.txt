@@ -1,0 +1,41 @@
+catalog|2268|has_schema_privilege(name,text,text)|has_schema_privilege_name_name|true|s|s|false|16|19 25 25
+catalog|2269|has_schema_privilege(name,oid,text)|has_schema_privilege_name_id|true|s|s|false|16|19 26 25
+catalog|2270|has_schema_privilege(oid,text,text)|has_schema_privilege_id_name|true|s|s|false|16|26 25 25
+catalog|2271|has_schema_privilege(oid,oid,text)|has_schema_privilege_id_id|true|s|s|false|16|26 26 25
+catalog|2272|has_schema_privilege(text,text)|has_schema_privilege_name|true|s|s|false|16|25 25
+catalog|2273|has_schema_privilege(oid,text)|has_schema_privilege_id|true|s|s|false|16|26 25
+owner-current|true|true
+reader-current-name|true|false|true|true
+reader-current-id|true
+reader-name-name|true
+reader-name-id|true
+reader-id-name|true
+reader-id-id|true
+reader-any-list|true
+numeric-schema-name|true
+reader-missing-schema-id|NULL
+reader-explicit-missing-schema-id|NULL
+inherited-owner|true|true
+outsider|false
+outsider-missing-schema-id|NULL
+system-defaults|true|false|true|false|true|false|false|false
+temporary-alias-outsider|3F000
+temporary-outsider|true|true|false|false
+superuser|true
+temporary-alias-superuser|3F000
+temporary-superuser|true|true
+missing-schema-id|true
+missing-role-id|false
+missing-role-and-schema-id|NULL
+null-current-name|NULL
+null-current-id|NULL
+null-role|NULL
+missing-schema-name|3F000
+missing-role-name|42704
+invalid-privilege|22023
+all-privilege|22023
+missing-role-schema-invalid|42704
+missing-schema-invalid|3F000
+missing-schema-id-invalid|22023
+missing-role-id-invalid|22023
+missing-role-id-missing-schema|3F000

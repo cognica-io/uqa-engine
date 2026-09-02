@@ -10,6 +10,8 @@ use super::*;
 mod information_schema;
 #[path = "security/schema.rs"]
 mod schema;
+#[path = "security/schema_inquiry.rs"]
+mod schema_inquiry;
 #[path = "security/targets.rs"]
 mod targets;
 #[path = "security/temporary_acl.rs"]

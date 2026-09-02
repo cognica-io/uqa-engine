@@ -319,6 +319,7 @@ fn builtin_binding_is_non_immutable(binding: &FunctionBinding) -> bool {
                 | "pg_get_triggerdef"
                 | "pg_get_ruledef"
                 | "pg_has_role"
+                | "has_schema_privilege"
                 | "has_sequence_privilege"
                 | "to_regproc"
                 | "to_regprocedure"
@@ -622,7 +623,7 @@ fn overloads(name: &str) -> Option<Vec<BuiltinFunctionOverload>> {
                 ColumnType::Boolean,
             ),
         ],
-        "has_sequence_privilege" => vec![
+        "has_schema_privilege" | "has_sequence_privilege" => vec![
             overload(
                 &local,
                 &[ColumnType::Name, ColumnType::Text, ColumnType::Text],
@@ -705,6 +706,7 @@ fn local_name(name: &str) -> Option<String> {
             | "pg_get_triggerdef"
             | "pg_get_ruledef"
             | "pg_has_role"
+            | "has_schema_privilege"
             | "has_sequence_privilege"
     )
     .then(|| local.to_string())
@@ -806,6 +808,30 @@ mod tests {
     #[test]
     fn has_sequence_privilege_registers_every_postgresql_name_and_oid_overload() {
         let overloads = overloads("has_sequence_privilege").unwrap();
+
+        assert_eq!(overloads.len(), 6);
+        assert!(overloads
+            .iter()
+            .all(|overload| overload.return_type == ColumnType::Boolean));
+        assert_eq!(
+            overloads
+                .iter()
+                .map(|overload| overload.argument_types.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                vec![ColumnType::Name, ColumnType::Text, ColumnType::Text],
+                vec![ColumnType::Name, ColumnType::Oid, ColumnType::Text],
+                vec![ColumnType::Oid, ColumnType::Text, ColumnType::Text],
+                vec![ColumnType::Oid, ColumnType::Oid, ColumnType::Text],
+                vec![ColumnType::Text, ColumnType::Text],
+                vec![ColumnType::Oid, ColumnType::Text],
+            ]
+        );
+    }
+
+    #[test]
+    fn has_schema_privilege_registers_every_postgresql_name_and_oid_overload() {
+        let overloads = overloads("has_schema_privilege").unwrap();
 
         assert_eq!(overloads.len(), 6);
         assert!(overloads

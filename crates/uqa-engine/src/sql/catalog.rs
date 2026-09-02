@@ -130,6 +130,10 @@ pub(crate) fn runtime_constraints(engine: &Engine) -> Result<Vec<RuntimeConstrai
     Ok(constraints)
 }
 
+pub(crate) fn schema_object_oid(name: &str) -> i64 {
+    helpers::oids::schema_oid(name)
+}
+
 pub(crate) fn resolve_age_label_relation_name(
     engine: &Engine,
     name: &str,

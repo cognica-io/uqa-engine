@@ -97,7 +97,7 @@ pub(crate) use catalog::{
     resolve_age_label_relation_name, resolve_catalog_column_type, resolve_regclass_kind_by_oid,
     resolve_regclass_oid, resolve_regnamespace_oid, resolve_regobject_oid,
     resolve_regprocedure_oid, resolve_regrole_oid, resolve_regtype_output, runtime_constraints,
-    sequence_relation_oid, RegtypeOutputCatalog,
+    schema_object_oid, sequence_relation_oid, RegtypeOutputCatalog,
 };
 pub(in crate::sql) use catalog::{virtual_relation_accepts_row_lock, virtual_relation_schema};
 use ddl::{
@@ -340,6 +340,7 @@ pub(crate) fn builtin_function_dispatch_name(name: &str) -> String {
                         | "pg_get_triggerdef"
                         | "pg_get_ruledef"
                         | "pg_has_role"
+                        | "has_schema_privilege"
                         | "has_sequence_privilege"
                 )
         }

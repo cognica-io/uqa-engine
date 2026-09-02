@@ -9,6 +9,7 @@
 use std::collections::BTreeMap;
 
 mod acl;
+mod inquiry;
 
 use acl::{grant_acl, requested_acl_privileges, revoke_acl, select_acl_grantor};
 pub(crate) use acl::{role_has_schema_privilege, SchemaAclPrivilege};

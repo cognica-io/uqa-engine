@@ -21,6 +21,12 @@ pub(crate) enum SchemaAclPrivilege {
     Create,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct SchemaPrivilegeCheck {
+    pub(super) privilege: SchemaAclPrivilege,
+    pub(super) grant_option: bool,
+}
+
 impl SchemaAclPrivilege {
     const fn mask(self) -> SchemaPrivileges {
         match self {
@@ -48,6 +54,33 @@ pub(super) fn requested_acl_privileges(
                 sqlstate: "0LP01".into(),
                 message: format!("invalid privilege type {name} for schema"),
             }),
+        })
+        .collect()
+}
+
+pub(super) fn parse_privilege_checks(value: &str) -> Result<Vec<SchemaPrivilegeCheck>, SQLError> {
+    value
+        .split(',')
+        .map(|item| {
+            let item = item.trim();
+            let upper = item.to_ascii_uppercase();
+            let (name, grant_option) = upper
+                .strip_suffix(" WITH GRANT OPTION")
+                .map_or((upper.as_str(), false), |name| (name.trim_end(), true));
+            let privilege = match name {
+                "USAGE" => SchemaAclPrivilege::Usage,
+                "CREATE" => SchemaAclPrivilege::Create,
+                _ => {
+                    return Err(SQLError::Routine {
+                        sqlstate: "22023".into(),
+                        message: format!("unrecognized privilege type: \"{item}\""),
+                    })
+                }
+            };
+            Ok(SchemaPrivilegeCheck {
+                privilege,
+                grant_option,
+            })
         })
         .collect()
 }
@@ -120,16 +153,40 @@ pub(crate) fn role_has_schema_privilege(
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
 ) -> bool {
+    role_has_schema_privilege_check(
+        security,
+        subject,
+        SchemaPrivilegeCheck {
+            privilege,
+            grant_option: false,
+        },
+        roles,
+        memberships,
+    )
+}
+
+pub(super) fn role_has_schema_privilege_check(
+    security: &SchemaSecurity,
+    subject: &str,
+    check: SchemaPrivilegeCheck,
+    roles: &BTreeMap<String, RoleDefinition>,
+    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+) -> bool {
     if roles
         .get(subject)
         .is_some_and(|role| role.has(RoleAttribute::Superuser))
     {
         return true;
     }
+    if check.grant_option {
+        return grant_option_roles(security, check.privilege)
+            .iter()
+            .any(|role| role_inherits(roles, memberships, subject, role));
+    }
     match security.acl.as_ref() {
         None => role_inherits(roles, memberships, subject, &security.role_owner),
         Some(acl) => acl.iter().any(|entry| {
-            entry.privileges.intersects(privilege.mask())
+            entry.privileges.intersects(check.privilege.mask())
                 && (entry.role == "PUBLIC"
                     || role_inherits(roles, memberships, subject, &entry.role))
         }),
