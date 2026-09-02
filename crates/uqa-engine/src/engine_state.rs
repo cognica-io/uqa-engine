@@ -164,12 +164,18 @@ impl StorageContext {
     }
 }
 
-/// One bound view query together with the fixed public column names captured when the view was created. `None` only represents catalogs written before column metadata was persisted.
+/// One bound view query together with the fixed public column names captured when the view was created. `None` exists only while the catalog-opening migration reads formats written before column metadata was persisted.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct StoredView {
     /// Durable SQL-role owner loaded from the typed view catalog row. The query-definition JSON deliberately excludes ownership so catalog definition and authorization state cannot disagree.
     #[serde(skip)]
     pub(crate) role_owner: String,
+    /// Durable relation-wide ACL loaded from the typed view catalog row.
+    #[serde(skip)]
+    pub(crate) acl: Option<Vec<uqa_storage::TableAclEntry>>,
+    /// Durable per-column ACLs loaded from the typed view catalog row.
+    #[serde(skip)]
+    pub(crate) column_acls: BTreeMap<String, Vec<uqa_storage::TableAclEntry>>,
     pub(crate) query: uqa_planner::QueryPlan,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) output_columns: Option<Vec<String>>,
@@ -196,6 +202,28 @@ pub(crate) enum StoredViewKind {
 
 const fn default_view_populated() -> bool {
     true
+}
+
+impl StoredView {
+    pub(crate) fn security(&self) -> TableSecurity {
+        TableSecurity {
+            role_owner: self.role_owner.clone(),
+            acl: self.acl.clone(),
+            column_acls: self.column_acls.clone(),
+        }
+    }
+
+    pub(crate) fn set_security(&mut self, security: TableSecurity) {
+        self.role_owner = security.role_owner;
+        self.acl = security.acl;
+        self.column_acls = security.column_acls;
+    }
+
+    pub(crate) fn security_invoker(&self) -> bool {
+        self.options.iter().any(|(name, value)| {
+            name == "security_invoker" && matches!(value.as_str(), "true" | "on" | "yes" | "1")
+        })
+    }
 }
 
 pub(super) struct DurableCatalogState {

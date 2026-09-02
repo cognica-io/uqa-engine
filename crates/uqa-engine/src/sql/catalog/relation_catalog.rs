@@ -144,6 +144,10 @@ pub(super) fn build_pg_class(
             "relowner".into(),
             int_value(crate::engine_roles::role_oid(&definition.role_owner)),
         );
+        row.insert(
+            "relacl".into(),
+            table_acl_catalog_value(&definition.role_owner, definition.acl.as_ref())?,
+        );
         out.push(row);
     }
     for (name, definition) in catalog.views_of_kind(crate::StoredViewKind::Materialized) {
@@ -163,6 +167,10 @@ pub(super) fn build_pg_class(
         row.insert(
             "relowner".into(),
             int_value(crate::engine_roles::role_oid(&definition.role_owner)),
+        );
+        row.insert(
+            "relacl".into(),
+            table_acl_catalog_value(&definition.role_owner, definition.acl.as_ref())?,
         );
         out.push(row);
     }

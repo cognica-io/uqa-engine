@@ -1,0 +1,36 @@
+defaults|true|true|true
+relation-acl|{uqa_view_acl_owner=arwdDxtm/uqa_view_acl_owner,uqa_view_acl_delegate=r*/uqa_view_acl_owner,uqa_view_acl_maintainer=m/uqa_view_acl_owner,uqa_view_acl_reader=r/uqa_view_acl_delegate}
+column-acl|{uqa_view_acl_column_reader=r/uqa_view_acl_owner}
+all-acl|{uqa_view_acl_owner=arwdDxtm/uqa_view_acl_owner,uqa_view_acl_outsider=arwdDxtm/uqa_view_acl_owner}
+inquiry|true|true|true|true|NULL
+view-system-column|42703|column "ctid" of relation "items" does not exist
+select-denied|42501|permission denied for view items
+select-granted|ok
+column-select-granted|ok
+column-select-denied|42501|permission denied for view items
+column-count-granted|ok
+definer-current-user|uqa_view_acl_reader
+invoker-base-denied|42501|permission denied for table base
+invoker-base-granted|ok
+view-insert|ok
+view-update|ok
+view-delete|ok
+view-dml-state|1:10,3:31
+maintainer-refresh|ok
+maintainer-select-denied|42501|permission denied for materialized view identity_snapshot
+refresh-owner-context|uqa_view_acl_owner
+maintain-regular-view|true
+unpopulated-no-select|42501|permission denied for materialized view empty_snapshot
+unpopulated-with-select|55000|materialized view "empty_snapshot" has not been populated
+matview-insert-no-privilege|42501|permission denied for materialized view snapshot
+matview-insert-with-privilege|42809|cannot change materialized view "snapshot"
+information-schema|1|id|id:SELECT|0
+dependent-restrict|2BP01|dependent privileges exist
+cascade|true|false|false
+nested-rule-insert-stop|ok
+nested-rule-update-stop|ok
+nested-rule-delete-stop|ok
+all-tables-schema|true|true|false
+owner-transfer|uqa_view_acl_next_owner|{uqa_view_acl_next_owner=arwdDxtm/uqa_view_acl_next_owner,uqa_view_acl_delegate=r*/uqa_view_acl_next_owner,uqa_view_acl_maintainer=m/uqa_view_acl_next_owner,uqa_view_acl_reader=r/uqa_view_acl_delegate,uqa_view_acl_outsider=r/uqa_view_acl_next_owner}
+owner-transfer-column|{uqa_view_acl_column_reader=r/uqa_view_acl_next_owner}
+grant-role-dependent|2BP01|role "uqa_view_acl_delegate" cannot be dropped because some objects depend on it

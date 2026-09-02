@@ -31,7 +31,7 @@ use super::catalog_lifecycle::{
 };
 
 /// Bump this every time a migration is added.
-pub const CURRENT_SCHEMA_VERSION: u32 = 38;
+pub const CURRENT_SCHEMA_VERSION: u32 = 39;
 
 const LEGACY_VIEWS_METADATA_KEY: &str = "sql_views_json";
 const LEGACY_SEQUENCES_METADATA_KEY: &str = "sql_sequences_json";

@@ -116,6 +116,46 @@ impl Engine {
         self.with_implicit_transaction(move |engine| engine.register_view_plan_inner(registration))
     }
 
+    fn replacement_view(
+        &self,
+        name: &str,
+        relation: &RelationIdentity,
+        or_replace: bool,
+        replacement_schema: &uqa_execution::RowSchema,
+    ) -> Result<Option<StoredView>, SQLError> {
+        match self
+            .relation_kind_at(name)
+            .map_err(|error| SQLError::Internal(format!("resolve relation `{name}`: {error}")))?
+        {
+            Some(_) if !or_replace => Err(SQLError::Routine {
+                sqlstate: "42P07".into(),
+                message: format!("relation \"{name}\" already exists"),
+            }),
+            Some("view") => {
+                let existing = self
+                    .durable
+                    .views
+                    .read()
+                    .get(relation)
+                    .cloned()
+                    .ok_or_else(|| {
+                        SQLError::Internal(format!(
+                            "view `{name}` exists in the catalog but has no loaded definition"
+                        ))
+                    })?;
+                let existing_schema = self.stored_view_schema(&existing)?;
+                validate_replacement_schema(&existing_schema, replacement_schema)?;
+                self.ensure_view_owner(name, &existing)?;
+                Ok(Some(existing))
+            }
+            Some(kind) => Err(SQLError::Routine {
+                sqlstate: "42809".into(),
+                message: format!("\"{name}\" is not a view; it is a {kind}"),
+            }),
+            None => Ok(None),
+        }
+    }
+
     fn register_view_plan_inner(&self, registration: ViewRegistration<'_>) -> Result<(), SQLError> {
         let ViewRegistration {
             name,
@@ -154,43 +194,18 @@ impl Engine {
         crate::sql::reject_stored_query_regrole_constants(self, &mut plan)?;
         let output_columns = create_view_output_columns(&query_schema, column_names)?;
         let replacement_schema = named_view_schema(&query_schema, &output_columns)?;
-        let existing_kind = self
-            .relation_kind_at(&name)
-            .map_err(|err| SQLError::Internal(format!("resolve relation `{name}`: {err}")))?;
-        let existing_owner = match existing_kind {
-            Some(_) if !or_replace => {
-                return Err(SQLError::Routine {
-                    sqlstate: "42P07".into(),
-                    message: format!("relation \"{name}\" already exists"),
-                });
-            }
-            Some("view") => {
-                let existing = self
-                    .durable
-                    .views
-                    .read()
-                    .get(&relation)
-                    .cloned()
-                    .ok_or_else(|| {
-                        SQLError::Internal(format!(
-                            "view `{name}` exists in the catalog but has no loaded definition"
-                        ))
-                    })?;
-                let existing_schema = self.stored_view_schema(&existing)?;
-                validate_replacement_schema(&existing_schema, &replacement_schema)?;
-                self.ensure_view_owner(&name, &existing)?;
-                Some(existing.role_owner)
-            }
-            Some(kind) => {
-                return Err(SQLError::Routine {
-                    sqlstate: "42809".into(),
-                    message: format!("\"{name}\" is not a view; it is a {kind}"),
-                });
-            }
-            None => None,
-        };
+        let existing_view =
+            self.replacement_view(&name, &relation, or_replace, &replacement_schema)?;
         let view = StoredView {
-            role_owner: existing_owner.unwrap_or_else(|| self.current_user_name()),
+            role_owner: existing_view
+                .as_ref()
+                .map_or_else(|| self.current_user_name(), |view| view.role_owner.clone()),
+            acl: existing_view.as_ref().and_then(|view| view.acl.clone()),
+            column_acls: existing_view
+                .as_ref()
+                .map_or_else(std::collections::BTreeMap::new, |view| {
+                    view.column_acls.clone()
+                }),
             query: plan,
             output_columns: Some(output_columns),
             persistence,

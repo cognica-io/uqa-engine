@@ -101,7 +101,18 @@ fn materialize_view_rows(
             .collect::<BTreeSet<_>>();
         super::prune_unused_query_outputs(&mut query, &required_positions, target.columns.len());
     }
-    let result = crate::sql::select::execute_query_plan_with_ctes(engine, &query, params, scope)?;
+    let privilege_subject = if target.definition.security_invoker() {
+        scope.privilege_subject()?.to_string()
+    } else {
+        target.definition.role_owner.clone()
+    };
+    let mut privilege_scope = scope.enter_privilege_subject(privilege_subject);
+    let result = crate::sql::select::execute_query_plan_with_ctes(
+        engine,
+        &query,
+        params,
+        &mut privilege_scope,
+    )?;
     if result.columns.len() != target.columns.len() {
         return Err(SQLError::Internal(format!(
             "view `{}` returned {} columns for a {}-column row type",

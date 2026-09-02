@@ -60,6 +60,8 @@ pub(in crate::sql::dml) fn rewrite_update_to_base(
         return Err(not_automatically_updatable(&statement.table, "UPDATE"));
     }
     let mut plan = statement.clone();
+    let next_privilege_subject = super::super::view_privileges::ensure_update(engine, &plan)?;
+    plan.target_privilege_subject = Some(next_privilege_subject);
     let mut cascaded = false;
     let mut visited = BTreeSet::new();
     let mut source_star_boundaries = Vec::new();
@@ -111,6 +113,11 @@ pub(in crate::sql::dml) fn rewrite_update_to_base(
                 &layer.canonical_name,
                 uqa_sql::ast::RuleEvent::Update,
             )?;
+        if visited.len() > 1 && !rewrite_suppressed && !layer_suppresses {
+            let next_privilege_subject =
+                super::super::view_privileges::ensure_update(engine, &plan)?;
+            plan.target_privilege_subject = Some(next_privilege_subject);
+        }
         if has_view_rules
             && crate::sql::rules::relation_has_returning_provider(
                 engine,
@@ -298,8 +305,11 @@ pub(in crate::sql::dml) fn rewrite_delete_to_base(
         "DELETE",
     )?;
     let mut plan = statement.clone();
+    let next_privilege_subject = super::super::view_privileges::ensure_delete(engine, &plan)?;
+    plan.target_privilege_subject = Some(next_privilege_subject);
     let mut visited = BTreeSet::new();
     let mut source_star_boundaries = Vec::new();
+    let mut rewrite_suppressed = false;
     loop {
         let Some(layer) = automatic_view_layer(engine, &plan.table)? else {
             if active_unconditional_instead_rule(
@@ -317,27 +327,48 @@ pub(in crate::sql::dml) fn rewrite_delete_to_base(
                 layer.canonical_name
             )));
         }
-        validate_direct_view_rule_path(
-            engine,
-            &layer.canonical_name,
-            uqa_sql::ast::RuleEvent::Delete,
-            "DELETE",
-        )?;
-        if visited.len() > 1
+        if !rewrite_suppressed {
+            validate_direct_view_rule_path(
+                engine,
+                &layer.canonical_name,
+                uqa_sql::ast::RuleEvent::Delete,
+                "DELETE",
+            )?;
+        }
+        if !rewrite_suppressed
+            && visited.len() > 1
             && instead_of_trigger_definition(engine, &layer.canonical_name, TriggerEvent::Delete)?
         {
             return Err(not_automatically_updatable(&layer.canonical_name, "DELETE"));
         }
-        if record_view_rule_relation(
-            engine,
-            &mut plan.view_rule_relations,
-            &layer,
-            uqa_sql::ast::RuleEvent::Delete,
-        )? && crate::sql::rules::relation_has_returning_provider(
-            engine,
-            &layer.canonical_name,
-            uqa_sql::ast::RuleEvent::Delete,
-        )? {
+        let has_view_rules = if rewrite_suppressed {
+            false
+        } else {
+            record_view_rule_relation(
+                engine,
+                &mut plan.view_rule_relations,
+                &layer,
+                uqa_sql::ast::RuleEvent::Delete,
+            )?
+        };
+        let layer_suppresses = has_view_rules
+            && crate::sql::rules::relation_suppresses_original_query(
+                engine,
+                &layer.canonical_name,
+                uqa_sql::ast::RuleEvent::Delete,
+            )?;
+        if visited.len() > 1 && !rewrite_suppressed && !layer_suppresses {
+            let next_privilege_subject =
+                super::super::view_privileges::ensure_delete(engine, &plan)?;
+            plan.target_privilege_subject = Some(next_privilege_subject);
+        }
+        if has_view_rules
+            && crate::sql::rules::relation_has_returning_provider(
+                engine,
+                &layer.canonical_name,
+                uqa_sql::ast::RuleEvent::Delete,
+            )?
+        {
             preserve_view_rule_returning(
                 &mut plan.view_rule_returning,
                 &layer.canonical_name,
@@ -418,6 +449,7 @@ pub(in crate::sql::dml) fn rewrite_delete_to_base(
         )?;
         plan.table = layer.source_name;
         plan.include_descendants = layer.source_include_descendants;
+        rewrite_suppressed |= layer_suppresses;
         if !super::super::view_triggers::target_is_view(engine, &plan.table)? {
             break;
         }

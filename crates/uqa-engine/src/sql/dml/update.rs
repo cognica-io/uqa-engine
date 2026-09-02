@@ -42,7 +42,13 @@ pub(in crate::sql) fn run_update_inner(
 ) -> Result<SQLResult, SQLError> {
     if let Some(kind) = super::view_triggers::target_view_kind(engine, &stmt.table)? {
         if kind == crate::StoredViewKind::Materialized {
-            return super::view_triggers::run_view_update_inner(engine, stmt, params);
+            let _ = super::view_privileges::ensure_update(engine, stmt)?;
+            let relation = crate::RelationIdentity::from_legacy_name(&stmt.table)
+                .map_err(SQLError::Internal)?;
+            return Err(SQLError::Routine {
+                sqlstate: "42809".into(),
+                message: format!("cannot change materialized view \"{}\"", relation.name),
+            });
         }
         if super::view_automatic::has_instead_of_trigger(
             engine,
@@ -53,6 +59,7 @@ pub(in crate::sql) fn run_update_inner(
             &stmt.table,
             uqa_sql::ast::RuleEvent::Update,
         )? {
+            let _ = super::view_privileges::ensure_update(engine, stmt)?;
             return super::view_triggers::run_view_update_inner(engine, stmt, params);
         }
         let rewritten = super::view_automatic::rewrite_update_to_base(engine, stmt, params)?;

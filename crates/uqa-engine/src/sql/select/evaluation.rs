@@ -54,6 +54,7 @@ pub(crate) struct CteScope {
         Arc<parking_lot::Mutex<BTreeMap<(u64, usize), ScalarSubqueryCacheEntry>>>,
     catalog: Option<CatalogReadView>,
     catalog_resolution: Option<RelationNameResolution>,
+    privilege_subject: Option<String>,
 }
 
 impl Default for CteScope {
@@ -74,6 +75,7 @@ impl Default for CteScope {
             scalar_subquery_cache: Arc::new(parking_lot::Mutex::new(BTreeMap::new())),
             catalog: None,
             catalog_resolution: None,
+            privilege_subject: None,
         }
     }
 }
@@ -98,6 +100,20 @@ impl CteScope {
                 "query execution scope has no statement name-resolution snapshot".into(),
             )
         })
+    }
+
+    pub(in crate::sql) fn privilege_subject(&self) -> Result<&str, SQLError> {
+        if let Some(subject) = self.privilege_subject.as_deref() {
+            return Ok(subject);
+        }
+        self.catalog_resolution
+            .as_ref()
+            .map(RelationNameResolution::current_user)
+            .ok_or_else(|| {
+                SQLError::Internal(
+                    "query execution scope has no statement authorization subject".into(),
+                )
+            })
     }
 }
 

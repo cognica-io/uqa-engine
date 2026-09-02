@@ -48,6 +48,8 @@ pub(in crate::sql::dml) fn rewrite_insert_to_base(
         return Err(not_automatically_updatable(&statement.table, "INSERT"));
     }
     let mut plan = statement.clone();
+    let next_privilege_subject = super::super::view_privileges::ensure_insert(engine, &plan)?;
+    plan.target_privilege_subject = Some(next_privilege_subject);
     let mut implicit_width = if statement.columns.is_empty() {
         Some(insert_input_width(engine, statement, params)?)
     } else {
@@ -103,6 +105,11 @@ pub(in crate::sql::dml) fn rewrite_insert_to_base(
                 &layer.canonical_name,
                 uqa_sql::ast::RuleEvent::Insert,
             )?;
+        if visited.len() > 1 && !rewrite_suppressed && !layer_suppresses {
+            let next_privilege_subject =
+                super::super::view_privileges::ensure_insert(engine, &plan)?;
+            plan.target_privilege_subject = Some(next_privilege_subject);
+        }
         if has_view_rules
             && crate::sql::rules::relation_has_returning_provider(
                 engine,

@@ -12,10 +12,15 @@ pub(super) fn ensure_update_target_privileges<'a>(
     engine: &Engine,
     statement: &'a UpdatePlan,
 ) -> Result<Vec<&'a ScalarExpr>, SQLError> {
+    let privilege_subject = statement
+        .target_privilege_subject
+        .clone()
+        .unwrap_or_else(|| engine.current_user_name());
     for assignment in &statement.assignments {
-        engine.ensure_column_privilege(
+        engine.ensure_column_privilege_for(
             &statement.table,
             &assignment.column,
+            &privilege_subject,
             crate::engine_table_security::TableAclPrivilege::Update,
         )?;
     }
@@ -33,12 +38,15 @@ pub(super) fn ensure_update_target_privileges<'a>(
         .collect::<Vec<_>>();
     super::super::ensure_target_table_select_for_expressions(
         engine,
-        &statement.table,
-        &statement.target_qualifier,
-        &statement.returning_aliases,
-        &expressions,
-        &statement.subqueries,
-        &[],
+        super::super::TargetSelectPrivilegeRequest {
+            table: &statement.table,
+            privilege_subject: statement.target_privilege_subject.as_deref(),
+            target_qualifier: &statement.target_qualifier,
+            returning_aliases: &statement.returning_aliases,
+            expressions: &expressions,
+            subqueries: &statement.subqueries,
+            required_columns: &[],
+        },
     )?;
     Ok(expressions)
 }

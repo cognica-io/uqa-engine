@@ -16,6 +16,18 @@ use super::{CteScope, LockIdentityOptions};
 use crate::engine_capabilities::RelationLookupMode;
 
 impl CteScope {
+    /// Override only relation privilege checks while preserving SQL-visible `current_user` and the caller's namespace.
+    pub(in crate::sql) fn enter_privilege_subject(
+        &mut self,
+        subject: String,
+    ) -> PrivilegeSubjectScope<'_> {
+        let previous = self.privilege_subject.replace(subject);
+        PrivilegeSubjectScope {
+            ctes: self,
+            previous,
+        }
+    }
+
     /// Select the namespace semantics owned by one query plan and restore the parent plan's mode on every exit path.
     pub(in crate::sql) fn enter_relation_lookup_mode(
         &mut self,
@@ -167,6 +179,31 @@ impl CteScope {
 
     pub(in crate::sql) fn scans_backwards(&self) -> bool {
         self.scan_backwards
+    }
+}
+
+pub(in crate::sql) struct PrivilegeSubjectScope<'a> {
+    ctes: &'a mut CteScope,
+    previous: Option<String>,
+}
+
+impl std::ops::Deref for PrivilegeSubjectScope<'_> {
+    type Target = CteScope;
+
+    fn deref(&self) -> &Self::Target {
+        self.ctes
+    }
+}
+
+impl std::ops::DerefMut for PrivilegeSubjectScope<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.ctes
+    }
+}
+
+impl Drop for PrivilegeSubjectScope<'_> {
+    fn drop(&mut self) {
+        self.ctes.privilege_subject = self.previous.take();
     }
 }
 

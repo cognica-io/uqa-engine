@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Ordinary-table column ACL grant paths and privilege checks.
+//! Table-shaped relation column ACL grant paths and privilege checks.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -16,7 +16,7 @@ use super::acl::{acl_grantor, grant_option_roles, TableAclPrivilege, TablePrivil
 use crate::engine_roles::{role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey};
 use crate::engine_state::TableSecurity;
 
-fn column_grant_option_roles(
+pub(super) fn column_grant_option_roles(
     security: &TableSecurity,
     column: &str,
     privilege: TableAclPrivilege,

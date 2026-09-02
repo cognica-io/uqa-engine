@@ -100,7 +100,10 @@ pub(super) fn build_info_tables(
             ("commit_action", Value::Null),
         ]));
     }
-    for (name, _) in catalog.views_of_kind(crate::StoredViewKind::View) {
+    for (name, stored) in catalog.views_of_kind(crate::StoredViewKind::View) {
+        if !catalog.view_is_visible_to(&stored, resolution.current_user()) {
+            continue;
+        }
         let (schema, view) = split_schema_name(&name)?;
         let updatability = crate::sql::dml::view_automatic::view_updatability(engine, &name)?;
         out.push(row([
@@ -331,10 +334,17 @@ pub(super) fn build_info_columns(
         }
     }
     for (view_name, stored) in catalog.views_of_kind(crate::StoredViewKind::View) {
+        if !catalog.view_is_visible_to(&stored, resolution.current_user()) {
+            continue;
+        }
         let (schema, view) = split_schema_name(&view_name)?;
         let updatability = crate::sql::dml::view_automatic::view_updatability(engine, &view_name)?;
         let columns = view_columns_for(engine, catalog, resolution, &stored)?;
         for (idx, column) in columns.iter().enumerate() {
+            if !catalog.view_column_is_visible_to(&stored, &column.name, resolution.current_user())
+            {
+                continue;
+            }
             out.push(information_schema_column_row(
                 schema.clone(),
                 view.clone(),
@@ -415,7 +425,52 @@ fn default_table_acl_entry(owner: &str) -> TableAclEntry {
     }
 }
 
+fn insert_view_column_privileges(
+    engine: &Engine,
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    privileges: &mut BTreeSet<ColumnPrivilegeCatalogRow>,
+) -> Result<(), SQLError> {
+    for (view_name, view) in catalog.views_of_kind(crate::StoredViewKind::View) {
+        let (schema, table) = split_schema_name(&view_name)?;
+        let columns = view_columns_for(engine, catalog, resolution, &view)?;
+        let default_view_acl;
+        let view_acl = if let Some(acl) = view.acl.as_deref() {
+            acl
+        } else {
+            default_view_acl = [default_table_acl_entry(&view.role_owner)];
+            &default_view_acl
+        };
+        for column in &columns {
+            for entry in view_acl {
+                insert_column_privilege_rows(
+                    privileges,
+                    &schema,
+                    &table,
+                    &column.name,
+                    &view.role_owner,
+                    entry,
+                );
+            }
+            if let Some(column_acl) = view.column_acls.get(&column.name) {
+                for entry in column_acl {
+                    insert_column_privilege_rows(
+                        privileges,
+                        &schema,
+                        &table,
+                        &column.name,
+                        &view.role_owner,
+                        entry,
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn build_info_column_privileges(
+    engine: &Engine,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     role_grants_only: bool,
@@ -459,6 +514,7 @@ pub(super) fn build_info_column_privileges(
             }
         }
     }
+    insert_view_column_privileges(engine, catalog, resolution, &mut privileges)?;
 
     Ok(privileges
         .into_iter()
@@ -494,9 +550,13 @@ pub(super) fn build_info_column_privileges(
 pub(super) fn build_info_views(
     engine: &Engine,
     catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows = Vec::new();
     for (name, stored) in catalog.views_of_kind(crate::StoredViewKind::View) {
+        if !catalog.view_is_visible_to(&stored, resolution.current_user()) {
+            continue;
+        }
         let (schema, view) = split_schema_name(&name)?;
         let updatability = crate::sql::dml::view_automatic::view_updatability(engine, &name)?;
         let trigger_insertable = crate::sql::dml::view_automatic::has_instead_of_trigger(

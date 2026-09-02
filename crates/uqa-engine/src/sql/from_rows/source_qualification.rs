@@ -558,6 +558,17 @@ pub(in crate::sql) fn table_function_empty_schema(
             "pagerank" | "graph_pagerank" | "hits" | "graph_hits" | "betweenness"
             | "graph_betweenness" => vec!["_doc_id".into(), "_score".into()],
             "rpq" => vec!["vertex_id".into()],
+            "list_analyzers" => vec!["analyzer_name".into()],
+            "fts_index_stats" => vec![
+                "table_name".into(),
+                "field".into(),
+                "analyzer".into(),
+                "posting_count".into(),
+                "doc_length_count".into(),
+                "indexed_doc_count".into(),
+                "term_count".into(),
+                "total_field_length".into(),
+            ],
             "text_similarity_join"
             | "vector_similarity_join"
             | "graph_join"

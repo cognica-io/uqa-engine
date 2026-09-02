@@ -26,13 +26,15 @@ enum RestoredView {
     Legacy(QueryPlan),
 }
 
-fn catalog_view_row(
+pub(crate) fn catalog_view_row(
     relation: &RelationIdentity,
     view: &StoredView,
 ) -> Result<ViewRow, serde_json::Error> {
     Ok(ViewRow {
         relation: relation.clone(),
         role_owner: view.role_owner.clone(),
+        acl: view.acl.clone(),
+        column_acls: view.column_acls.clone(),
         definition_json: serde_json::to_string(view)?,
     })
 }
@@ -673,13 +675,14 @@ impl Engine {
         Ok(dependents)
     }
 
-    fn migrate_legacy_view_bindings(
+    fn migrate_legacy_views(
         &self,
         catalog: &dyn CatalogFacade,
         views: &mut BTreeMap<RelationIdentity, StoredView>,
         legacy_views: &[RelationIdentity],
+        missing_output_columns: &[RelationIdentity],
     ) -> StorageBackendResult<()> {
-        if legacy_views.is_empty() {
+        if legacy_views.is_empty() && missing_output_columns.is_empty() {
             return Ok(());
         }
         // Install the complete provisional registry so nested legacy views
@@ -709,15 +712,53 @@ impl Engine {
                     .write()
                     .insert(relation.clone(), view.clone());
             }
-            for relation in legacy_views {
+            for relation in missing_output_columns {
                 let view_name = relation.qualified_name();
-                let view = views.get(relation).ok_or_else(|| {
+                let output_columns = {
+                    let view = views.get(relation).ok_or_else(|| {
+                        StorageBackendError::Other(format!(
+                            "legacy view `{view_name}` disappeared while restoring column metadata"
+                        ))
+                    })?;
+                    let schema = self.stored_view_schema(view).map_err(|error| {
+                        StorageBackendError::Other(format!(
+                            "restore legacy view `{view_name}` column metadata: {error}"
+                        ))
+                    })?;
+                    schema
+                        .columns()
+                        .iter()
+                        .enumerate()
+                        .map(|(position, column)| {
+                            schema.public_name(position).unwrap_or(column).to_string()
+                        })
+                        .collect::<Vec<_>>()
+                };
+                let view = views.get_mut(relation).ok_or_else(|| {
+                    StorageBackendError::Other(format!(
+                        "legacy view `{view_name}` disappeared while installing column metadata"
+                    ))
+                })?;
+                view.output_columns = Some(output_columns);
+                self.durable
+                    .views
+                    .write()
+                    .insert(relation.clone(), view.clone());
+            }
+            let migrated_views = legacy_views
+                .iter()
+                .chain(missing_output_columns)
+                .cloned()
+                .collect::<std::collections::BTreeSet<_>>();
+            for relation in migrated_views {
+                let view_name = relation.qualified_name();
+                let view = views.get(&relation).ok_or_else(|| {
                     StorageBackendError::Other(format!(
                         "legacy view `{view_name}` disappeared during migration"
                     ))
                 })?;
                 catalog
-                    .save_view(&catalog_view_row(relation, view)?)
+                    .save_view(&catalog_view_row(&relation, view)?)
                     .map_err(|error| {
                         StorageBackendError::Other(format!(
                             "migrate legacy view `{view_name}` routine bindings: {error}"
@@ -733,19 +774,63 @@ impl Engine {
         Ok(())
     }
 
-    pub(crate) fn restore_views_from_catalog(
+    fn validate_and_persist_restored_views(
         &self,
         catalog: &dyn CatalogFacade,
+        views: &BTreeMap<RelationIdentity, StoredView>,
+        legacy_views: &[RelationIdentity],
+        dispatch_upgraded_views: &[RelationIdentity],
     ) -> StorageBackendResult<()> {
-        let rows = catalog.load_views()?;
-        let temporary_views = self
-            .durable
+        for (relation, view) in views {
+            let output_columns = view.output_columns.as_deref().ok_or_else(|| {
+                StorageBackendError::Other(format!(
+                    "view `{}` has no public column metadata after catalog migration",
+                    relation.qualified_name()
+                ))
+            })?;
+            crate::engine_table_security::validate_table_security_invariants(
+                &view.security(),
+                Some(output_columns),
+                &self.durable.roles.read(),
+            )
+            .map_err(|error| {
+                StorageBackendError::Other(format!(
+                    "view `{}` has invalid privilege metadata after migration: {error}",
+                    relation.qualified_name()
+                ))
+            })?;
+        }
+        for relation in dispatch_upgraded_views {
+            if legacy_views.contains(relation) {
+                continue;
+            }
+            let view = views.get(relation).ok_or_else(|| {
+                StorageBackendError::Other(format!(
+                    "dispatch-upgraded view `{}` disappeared during restoration",
+                    relation.qualified_name()
+                ))
+            })?;
+            catalog.save_view(&catalog_view_row(relation, view)?)?;
+        }
+        Ok(())
+    }
+
+    fn temporary_stored_views(&self) -> BTreeMap<RelationIdentity, StoredView> {
+        self.durable
             .views
             .read()
             .iter()
             .filter(|(_, view)| view.persistence == uqa_sql::ast::RelationPersistence::Temporary)
             .map(|(relation, view)| (relation.clone(), view.clone()))
-            .collect::<BTreeMap<_, _>>();
+            .collect()
+    }
+
+    pub(crate) fn restore_views_from_catalog(
+        &self,
+        catalog: &dyn CatalogFacade,
+    ) -> StorageBackendResult<()> {
+        let rows = catalog.load_views()?;
+        let temporary_views = self.temporary_stored_views();
         let mut relations = self
             .storage
             .tables
@@ -771,6 +856,7 @@ impl Engine {
 
         let mut views = BTreeMap::new();
         let mut legacy_views = Vec::new();
+        let mut missing_output_columns = Vec::new();
         let mut dispatch_upgraded_views = Vec::new();
         for row in rows {
             let view_name = row.relation.qualified_name();
@@ -780,6 +866,8 @@ impl Engine {
                     legacy_views.push(row.relation.clone());
                     StoredView {
                         role_owner: row.role_owner.clone(),
+                        acl: row.acl.clone(),
+                        column_acls: row.column_acls.clone(),
                         query,
                         output_columns: None,
                         persistence: uqa_sql::ast::RelationPersistence::Permanent,
@@ -792,12 +880,27 @@ impl Engine {
                 }
             };
             view.role_owner = row.role_owner;
+            view.acl = row.acl;
+            view.column_acls = row.column_acls;
+            if view.kind == StoredViewKind::View && view.output_columns.is_none() {
+                missing_output_columns.push(row.relation.clone());
+            }
             if !self.durable.roles.read().contains_key(&view.role_owner) {
                 return Err(StorageBackendError::Other(format!(
                     "view `{view_name}` is owned by missing role `{}`",
                     view.role_owner
                 )));
             }
+            crate::engine_table_security::validate_table_security_invariants(
+                &view.security(),
+                view.output_columns.as_deref(),
+                &self.durable.roles.read(),
+            )
+            .map_err(|error| {
+                StorageBackendError::Other(format!(
+                    "view `{view_name}` has invalid privilege metadata: {error}"
+                ))
+            })?;
             if upgrade_legacy_view_dispatches(&mut view.query) {
                 dispatch_upgraded_views.push(row.relation.clone());
             }
@@ -813,19 +916,13 @@ impl Engine {
             views.insert(row.relation, view);
         }
         views.extend(temporary_views);
-        self.migrate_legacy_view_bindings(catalog, &mut views, &legacy_views)?;
-        for relation in dispatch_upgraded_views {
-            if legacy_views.contains(&relation) {
-                continue;
-            }
-            let view = views.get(&relation).ok_or_else(|| {
-                StorageBackendError::Other(format!(
-                    "dispatch-upgraded view `{}` disappeared during restoration",
-                    relation.qualified_name()
-                ))
-            })?;
-            catalog.save_view(&catalog_view_row(&relation, view)?)?;
-        }
+        self.migrate_legacy_views(catalog, &mut views, &legacy_views, &missing_output_columns)?;
+        self.validate_and_persist_restored_views(
+            catalog,
+            &views,
+            &legacy_views,
+            &dispatch_upgraded_views,
+        )?;
         *self.durable.views.write() = views;
         Ok(())
     }

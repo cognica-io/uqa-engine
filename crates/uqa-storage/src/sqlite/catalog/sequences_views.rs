@@ -534,14 +534,18 @@ impl Catalog {
         self.conn.with_mut(|connection| {
             let tx = connection.savepoint()?;
             Self::claim_relation(&tx, &view.relation, RelationKind::View)?;
+            let acl_json = view.acl.as_ref().map(serde_json::to_string).transpose()?;
+            let column_acls_json = serde_json::to_string(&view.column_acls)?;
             tx.execute(
                 "INSERT OR REPLACE INTO _views
-                    (schema_name, relation_name, kind, role_owner, definition_json)
-                 VALUES (?1, ?2, 'view', ?3, ?4)",
+                    (schema_name, relation_name, kind, role_owner, acl_json, column_acls_json, definition_json)
+                 VALUES (?1, ?2, 'view', ?3, ?4, ?5, ?6)",
                 params![
                     view.relation.schema,
                     view.relation.name,
                     view.role_owner,
+                    acl_json,
+                    column_acls_json,
                     view.definition_json
                 ],
             )?;
@@ -568,22 +572,36 @@ impl Catalog {
     pub fn load_views(&self) -> Result<Vec<ViewRow>> {
         self.conn.with(|connection| {
             let mut statement = connection.prepare(
-                "SELECT schema_name, relation_name, role_owner, definition_json
+                "SELECT schema_name, relation_name, role_owner, acl_json, column_acls_json, definition_json
                    FROM _views ORDER BY schema_name, relation_name",
             )?;
             let rows = statement.query_map([], |row| {
-                Ok(ViewRow {
-                    relation: RelationIdentity::new(
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                    ),
-                    role_owner: row.get(2)?,
-                    definition_json: row.get(3)?,
-                })
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
             })?;
             let mut views = Vec::new();
             for row in rows {
-                views.push(row?);
+                let (schema, name, role_owner, acl_json, column_acls_json, definition_json) = row?;
+                views.push(ViewRow {
+                    relation: RelationIdentity::new(schema, name),
+                    role_owner,
+                    acl: acl_json
+                        .as_deref()
+                        .map(serde_json::from_str)
+                        .transpose()?,
+                    column_acls: column_acls_json
+                        .as_deref()
+                        .map(serde_json::from_str)
+                        .transpose()?
+                        .unwrap_or_default(),
+                    definition_json,
+                });
             }
             Ok(views)
         })

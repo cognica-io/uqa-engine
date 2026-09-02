@@ -45,7 +45,8 @@ use staging::{
 
 mod select_source;
 use select_source::{
-    InsertSelectConsumer, InsertSelectIdentity, PreparedInsertRowContext, PreparedInsertSelect,
+    insert_source_expression_rows, InsertSelectConsumer, InsertSelectIdentity,
+    PreparedInsertRowContext, PreparedInsertSelect,
 };
 
 pub(in crate::sql) fn run_insert(
@@ -59,39 +60,6 @@ pub(in crate::sql) fn run_insert(
     })
 }
 
-fn insert_source_expression_rows(
-    result: SQLResult,
-) -> Result<Vec<Vec<uqa_execution::ScalarExpr>>, SQLError> {
-    let values = match result.positional_rows {
-        Some(rows) => rows,
-        None => result
-            .rows
-            .into_iter()
-            .map(|row| {
-                result
-                    .columns
-                    .iter()
-                    .map(|column| {
-                        row.get(column).cloned().ok_or_else(|| {
-                            SQLError::Internal(format!(
-                                "INSERT SELECT result omitted output column `{column}`"
-                            ))
-                        })
-                    })
-                    .collect::<Result<Vec<_>, SQLError>>()
-            })
-            .collect::<Result<Vec<_>, SQLError>>()?,
-    };
-    Ok(values
-        .into_iter()
-        .map(|row| {
-            row.into_iter()
-                .map(uqa_execution::ScalarExpr::Literal)
-                .collect()
-        })
-        .collect())
-}
-
 #[expect(clippy::too_many_lines, reason = "preserves DML lock and event order")]
 pub(in crate::sql) fn run_insert_inner(
     engine: &Engine,
@@ -100,7 +68,13 @@ pub(in crate::sql) fn run_insert_inner(
 ) -> Result<SQLResult, SQLError> {
     if let Some(kind) = super::view_triggers::target_view_kind(engine, &stmt.table)? {
         if kind == crate::StoredViewKind::Materialized {
-            return super::view_triggers::run_view_insert_inner(engine, stmt, params);
+            let _ = super::view_privileges::ensure_insert(engine, stmt)?;
+            let relation = crate::RelationIdentity::from_legacy_name(&stmt.table)
+                .map_err(SQLError::Internal)?;
+            return Err(SQLError::Routine {
+                sqlstate: "42809".into(),
+                message: format!("cannot change materialized view \"{}\"", relation.name),
+            });
         }
         if super::view_automatic::has_instead_of_trigger(
             engine,
@@ -111,6 +85,7 @@ pub(in crate::sql) fn run_insert_inner(
             &stmt.table,
             uqa_sql::ast::RuleEvent::Insert,
         )? {
+            let _ = super::view_privileges::ensure_insert(engine, stmt)?;
             return super::view_triggers::run_view_insert_inner(engine, stmt, params);
         }
         let rewritten = super::view_automatic::rewrite_insert_to_base(engine, stmt, params)?;
@@ -183,9 +158,14 @@ pub(in crate::sql) fn run_insert_inner(
     }
     let default_values =
         stmt.source.is_none() && stmt.columns.is_empty() && stmt.rows.iter().all(Vec::is_empty);
+    let privilege_subject = stmt
+        .target_privilege_subject
+        .clone()
+        .unwrap_or_else(|| engine.current_user_name());
     if default_values {
-        engine.ensure_any_column_privilege(
+        engine.ensure_any_column_privilege_for(
             &stmt.table,
+            &privilege_subject,
             crate::engine_table_security::TableAclPrivilege::Insert,
         )?;
     } else {
@@ -206,18 +186,20 @@ pub(in crate::sql) fn run_insert_inner(
             stmt.columns.clone()
         };
         for column in insert_columns {
-            engine.ensure_column_privilege(
+            engine.ensure_column_privilege_for(
                 &stmt.table,
                 &column,
+                &privilege_subject,
                 crate::engine_table_security::TableAclPrivilege::Insert,
             )?;
         }
     }
     if let Some(columns) = conflict_update_columns.as_deref() {
         for column in columns {
-            engine.ensure_column_privilege(
+            engine.ensure_column_privilege_for(
                 &stmt.table,
                 column,
+                &privilege_subject,
                 crate::engine_table_security::TableAclPrivilege::Update,
             )?;
         }
@@ -241,14 +223,18 @@ pub(in crate::sql) fn run_insert_inner(
     }
     super::ensure_target_table_select_for_expressions(
         engine,
-        &stmt.table,
-        &stmt.target_qualifier,
-        &stmt.returning_aliases,
-        &privilege_expressions,
-        &stmt.subqueries,
-        stmt.on_conflict
-            .as_ref()
-            .map_or(&[][..], |conflict| conflict.conflict_columns.as_slice()),
+        super::TargetSelectPrivilegeRequest {
+            table: &stmt.table,
+            privilege_subject: stmt.target_privilege_subject.as_deref(),
+            target_qualifier: &stmt.target_qualifier,
+            returning_aliases: &stmt.returning_aliases,
+            expressions: &privilege_expressions,
+            subqueries: &stmt.subqueries,
+            required_columns: stmt
+                .on_conflict
+                .as_ref()
+                .map_or(&[][..], |conflict| conflict.conflict_columns.as_slice()),
+        },
     )?;
     let view_original_query = !stmt.view_rule_relations.iter().try_fold(
         false,

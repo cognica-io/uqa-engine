@@ -41,6 +41,21 @@ fn sample_sequence_acl() -> Vec<crate::catalog::SequenceAclEntry> {
     }]
 }
 
+fn sample_table_acl() -> Vec<crate::catalog::TableAclEntry> {
+    vec![crate::catalog::TableAclEntry {
+        role: "view_reader".into(),
+        grantor: Some("view_owner".into()),
+        privileges: crate::catalog::TablePrivileges {
+            select: true,
+            ..crate::catalog::TablePrivileges::default()
+        },
+        grant_options: crate::catalog::TablePrivileges {
+            select: true,
+            ..crate::catalog::TablePrivileges::default()
+        },
+    }]
+}
+
 #[test]
 fn schema_rows_decode_legacy_names_and_round_trip_security_metadata() {
     let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
@@ -78,20 +93,28 @@ fn view_rows_round_trip_role_ownership_and_migration_rewrites_it_atomically() {
     let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
     let catalog = KeyValueCatalog::new(Arc::clone(&store));
     catalog.save_schema("public").unwrap();
+    let acl = sample_table_acl();
+    let column_acls = std::collections::BTreeMap::from([("title".to_string(), sample_table_acl())]);
     let expected = ViewRow {
         relation: RelationIdentity::new("public", "owned_view"),
         role_owner: "view_owner".into(),
+        acl: Some(acl.clone()),
+        column_acls: column_acls.clone(),
         definition_json: r#"{"query":"definition"}"#.into(),
     };
     catalog.save_view(&expected).unwrap();
     let loaded = catalog.load_views().unwrap().remove(0);
     assert_eq!(loaded.relation, expected.relation);
     assert_eq!(loaded.role_owner, expected.role_owner);
+    assert_eq!(loaded.acl, Some(acl));
+    assert_eq!(loaded.column_acls, column_acls);
     assert_eq!(loaded.definition_json, expected.definition_json);
 
     catalog.migrate_relation_namespace().unwrap();
     let migrated = catalog.load_views().unwrap().remove(0);
     assert_eq!(migrated.role_owner, "view_owner");
+    assert_eq!(migrated.acl, expected.acl);
+    assert_eq!(migrated.column_acls, expected.column_acls);
     assert_eq!(migrated.definition_json, expected.definition_json);
 }
 
@@ -114,6 +137,25 @@ fn legacy_view_ownership_is_assigned_only_by_the_explicit_catalog_migration() {
     assert_eq!(migrated.relation, relation);
     assert_eq!(migrated.role_owner, "uqa");
     assert_eq!(migrated.definition_json, r#"{"query":"definition"}"#);
+}
+
+#[test]
+fn view_rows_without_acl_fields_keep_the_valid_default_acl() {
+    let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
+    let catalog = KeyValueCatalog::new(Arc::clone(&store));
+    catalog.save_schema("public").unwrap();
+    let relation = RelationIdentity::new("public", "default_acl_view");
+    store
+        .put(
+            &relation_key(TAG_VIEW, &relation).unwrap(),
+            br#"{"role_owner":"view_owner","definition_json":"{\"query\":\"definition\"}"}"#,
+        )
+        .unwrap();
+
+    let view = catalog.load_views().unwrap().remove(0);
+    assert_eq!(view.role_owner, "view_owner");
+    assert_eq!(view.acl, None);
+    assert!(view.column_acls.is_empty());
 }
 
 #[test]

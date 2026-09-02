@@ -66,10 +66,14 @@ fn sample_table_acl() -> Vec<crate::catalog::TableAclEntry> {
 fn view_rows_round_trip_role_ownership() {
     let catalog = fresh();
     catalog.save_schema("application").unwrap();
+    let acl = sample_table_acl();
+    let column_acls = std::collections::BTreeMap::from([("title".to_string(), sample_table_acl())]);
     catalog
         .save_view(&ViewRow {
             relation: RelationIdentity::new("application", "owned_view"),
             role_owner: "view_owner".into(),
+            acl: Some(acl.clone()),
+            column_acls: column_acls.clone(),
             definition_json: r#"{"query":"definition"}"#.into(),
         })
         .unwrap();
@@ -80,6 +84,8 @@ fn view_rows_round_trip_role_ownership() {
         RelationIdentity::new("application", "owned_view")
     );
     assert_eq!(view.role_owner, "view_owner");
+    assert_eq!(view.acl, Some(acl));
+    assert_eq!(view.column_acls, column_acls);
     assert_eq!(view.definition_json, r#"{"query":"definition"}"#);
 }
 

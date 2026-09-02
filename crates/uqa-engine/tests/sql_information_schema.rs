@@ -749,6 +749,9 @@ mod table_ownership;
 #[path = "sql_information_schema/view_ownership.rs"]
 mod view_ownership;
 
+#[path = "sql_information_schema/view_privileges.rs"]
+mod view_privileges;
+
 #[path = "sql_information_schema/table_privileges.rs"]
 mod table_privileges;
 

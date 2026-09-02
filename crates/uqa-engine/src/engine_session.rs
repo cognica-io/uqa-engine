@@ -26,7 +26,7 @@ mod settings_parse;
 mod view_binding;
 mod views;
 pub(crate) use schemas::is_virtual_system_schema;
-pub(crate) use views::{MaterializedViewRegistration, ViewRegistration};
+pub(crate) use views::{catalog_view_row, MaterializedViewRegistration, ViewRegistration};
 
 use analyze_helpers::{build_histogram, build_mcv, collect_analyze_values, distinct_count};
 use settings_parse::parse_search_path_list;

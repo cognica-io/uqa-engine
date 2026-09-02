@@ -6,6 +6,8 @@
 
 //! Semantic base-column privilege analysis for query sources.
 
+mod enforcement;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_execution::ScalarExpr;
@@ -13,6 +15,7 @@ use uqa_planner::{QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan};
 use uqa_sql::SQLError;
 
 use super::CteScope;
+use enforcement::ensure_required_select;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct BaseColumn {
@@ -165,39 +168,56 @@ fn table_lineage(
     }
     let catalog = ctes.catalog_read_view()?;
     let resolution = ctes.relation_name_resolution()?;
-    let Some(canonical) = catalog.table_name_resolved(&resolution, name)? else {
-        return Ok(SourceLineage::default());
-    };
-    let table = catalog
-        .table_resolved(&resolution, &canonical)?
-        .ok_or_else(|| SQLError::UnknownTable(canonical.clone()))?;
+    let (canonical, columns, system_columns) =
+        if let Some(canonical) = catalog.table_name_resolved(&resolution, name)? {
+            let table = catalog
+                .table_resolved(&resolution, &canonical)?
+                .ok_or_else(|| SQLError::UnknownTable(canonical.clone()))?;
+            (
+                canonical,
+                table
+                    .columns
+                    .iter()
+                    .map(|column| column.name.clone())
+                    .collect::<Vec<_>>(),
+                true,
+            )
+        } else if let Some(canonical) = catalog.view_name_resolved(&resolution, name)? {
+            let view = catalog
+                .view_resolved(&resolution, &canonical)?
+                .ok_or_else(|| SQLError::UnknownTable(canonical.clone()))?;
+            let columns = view.output_columns.clone().ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "loaded view `{canonical}` has no durable public column metadata"
+                ))
+            })?;
+            (canonical, columns, false)
+        } else {
+            return Ok(SourceLineage::default());
+        };
     let visible_qualifier = alias.unwrap_or(qualifier).to_string();
-    let output = table
-        .columns
+    let output = columns
         .iter()
         .map(|column| OutputColumn {
-            name: column.name.clone(),
+            name: column.clone(),
             sources: BTreeSet::from([BaseColumn {
                 table: canonical.clone(),
-                column: column.name.clone(),
+                column: column.clone(),
             }]),
         })
         .collect::<Vec<_>>();
     Ok(SourceLineage {
         output: output.clone(),
         qualifiers: BTreeMap::from([(visible_qualifier, output)]),
-        system_qualifiers: BTreeMap::from([(
-            alias.unwrap_or(qualifier).to_string(),
-            BTreeSet::from([canonical.clone()]),
-        )]),
-        tables: BTreeMap::from([(
-            canonical,
-            table
-                .columns
-                .iter()
-                .map(|column| column.name.clone())
-                .collect(),
-        )]),
+        system_qualifiers: if system_columns {
+            BTreeMap::from([(
+                alias.unwrap_or(qualifier).to_string(),
+                BTreeSet::from([canonical.clone()]),
+            )])
+        } else {
+            BTreeMap::new()
+        },
+        tables: BTreeMap::from([(canonical, columns.into_iter().collect())]),
     })
 }
 
@@ -734,72 +754,6 @@ fn analyze_query_plan(
     }
 }
 
-fn ensure_required_select(
-    lineage: &SourceLineage,
-    required: &BTreeSet<BaseColumn>,
-    ctes: &CteScope,
-) -> Result<(), SQLError> {
-    let catalog = ctes.catalog_read_view()?;
-    let mut resolution = ctes.relation_name_resolution()?;
-    resolution.set_lookup_mode(crate::engine_capabilities::RelationLookupMode::Bound);
-    for (table, columns) in &lineage.tables {
-        let snapshot = catalog
-            .table_resolved(&resolution, table)?
-            .ok_or_else(|| SQLError::UnknownTable(table.clone()))?;
-        let table_required = required
-            .iter()
-            .filter(|column| column.table == *table)
-            .map(|column| column.column.as_str())
-            .collect::<BTreeSet<_>>();
-        if table_required.is_empty() {
-            let permitted = catalog.table_has_privilege_to(
-                snapshot,
-                resolution.current_user(),
-                crate::engine_table_security::TableAclPrivilege::Select,
-            ) || columns.iter().any(|column| {
-                catalog.table_column_has_privilege_to(
-                    snapshot,
-                    column,
-                    resolution.current_user(),
-                    crate::engine_table_security::TableAclPrivilege::Select,
-                )
-            });
-            if !permitted {
-                return table_permission_denied(table);
-            }
-        } else {
-            for column in table_required {
-                let permitted = if columns.contains(column) {
-                    catalog.table_column_has_privilege_to(
-                        snapshot,
-                        column,
-                        resolution.current_user(),
-                        crate::engine_table_security::TableAclPrivilege::Select,
-                    )
-                } else {
-                    catalog.table_has_privilege_to(
-                        snapshot,
-                        resolution.current_user(),
-                        crate::engine_table_security::TableAclPrivilege::Select,
-                    )
-                };
-                if !permitted {
-                    return table_permission_denied(table);
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-fn table_permission_denied<T>(table: &str) -> Result<T, SQLError> {
-    let relation = crate::RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
-    Err(SQLError::Routine {
-        sqlstate: "42501".into(),
-        message: format!("permission denied for table {}", relation.name),
-    })
-}
-
 pub(in crate::sql) fn ensure_select_privileges_for_query_block(
     statement: &QueryBlockPlan,
     source: &SourcePlan,
@@ -860,20 +814,40 @@ pub(in crate::sql) fn ensure_select_privileges_for_table_expressions(
     let catalog = ctes.catalog_read_view()?;
     let mut resolution = ctes.relation_name_resolution()?;
     resolution.set_lookup_mode(crate::engine_capabilities::RelationLookupMode::Bound);
-    let canonical = catalog
-        .table_name_resolved(&resolution, table)?
-        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-    let snapshot = catalog
-        .table_resolved(&resolution, &canonical)?
-        .ok_or_else(|| SQLError::UnknownTable(canonical.clone()))?;
-    let output = snapshot
-        .columns
+    let (canonical, columns, system_columns) =
+        if let Some(canonical) = catalog.table_name_resolved(&resolution, table)? {
+            let snapshot = catalog
+                .table_resolved(&resolution, &canonical)?
+                .ok_or_else(|| SQLError::UnknownTable(canonical.clone()))?;
+            (
+                canonical,
+                snapshot
+                    .columns
+                    .iter()
+                    .map(|column| column.name.clone())
+                    .collect::<Vec<_>>(),
+                true,
+            )
+        } else if let Some(canonical) = catalog.view_name_resolved(&resolution, table)? {
+            let view = catalog
+                .view_resolved(&resolution, &canonical)?
+                .ok_or_else(|| SQLError::UnknownTable(canonical.clone()))?;
+            let columns = view.output_columns.clone().ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "loaded view `{canonical}` has no durable public column metadata"
+                ))
+            })?;
+            (canonical, columns, false)
+        } else {
+            return Err(SQLError::UnknownTable(table.to_string()));
+        };
+    let output = columns
         .iter()
         .map(|column| OutputColumn {
-            name: column.name.clone(),
+            name: column.clone(),
             sources: BTreeSet::from([BaseColumn {
                 table: canonical.clone(),
-                column: column.name.clone(),
+                column: column.clone(),
             }]),
         })
         .collect::<Vec<_>>();
@@ -883,18 +857,15 @@ pub(in crate::sql) fn ensure_select_privileges_for_table_expressions(
             .iter()
             .map(|qualifier| (qualifier.clone(), output.clone()))
             .collect(),
-        system_qualifiers: qualifiers
-            .iter()
-            .map(|qualifier| (qualifier.clone(), BTreeSet::from([canonical.clone()])))
-            .collect(),
-        tables: BTreeMap::from([(
-            canonical.clone(),
-            snapshot
-                .columns
+        system_qualifiers: if system_columns {
+            qualifiers
                 .iter()
-                .map(|column| column.name.clone())
-                .collect(),
-        )]),
+                .map(|qualifier| (qualifier.clone(), BTreeSet::from([canonical.clone()])))
+                .collect()
+        } else {
+            BTreeMap::new()
+        },
+        tables: BTreeMap::from([(canonical.clone(), columns.into_iter().collect())]),
     };
     let mut universe = SourceLineage::default();
     let mut required = required_columns

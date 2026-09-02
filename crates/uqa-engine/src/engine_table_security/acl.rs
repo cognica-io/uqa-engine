@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Ordinary-table ACL privilege sets, grant paths, and dependency-aware revocation.
+//! Table-shaped relation ACL privilege sets, grant paths, and dependency-aware revocation.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -434,7 +434,7 @@ fn remove_empty_entries(acl: &mut Vec<TableAclEntry>) {
     acl.retain(|entry| !entry.privileges.is_empty() || !entry.grant_options.is_empty());
 }
 
-pub(super) fn rewrite_acl_owner(security: &mut TableSecurity, new_owner: &str) {
+pub(crate) fn rewrite_acl_owner(security: &mut TableSecurity, new_owner: &str) {
     let old_owner = std::mem::replace(&mut security.role_owner, new_owner.to_string());
     if let Some(acl) = security.acl.as_mut() {
         rewrite_acl_entries_owner(acl, &old_owner, new_owner);

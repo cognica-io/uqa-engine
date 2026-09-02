@@ -572,7 +572,9 @@ impl Engine {
 
         let views = self.durable.views.read();
         for name in names {
-            if let Some((relation, view)) = views.iter().find(|(_, view)| view.role_owner == *name)
+            if let Some((relation, view)) = views
+                .iter()
+                .find(|(_, view)| table_security_depends_on_role(&view.security(), name))
             {
                 let kind = match view.kind {
                     crate::StoredViewKind::View => "view",
@@ -844,6 +846,16 @@ impl Engine {
             guard.preserve_current_user();
         }
         result
+    }
+
+    pub(crate) fn with_current_user_context<T>(
+        &self,
+        current_user: &str,
+        execute: impl FnOnce() -> Result<T, SQLError>,
+    ) -> Result<T, SQLError> {
+        let _guard = self.routine_session_state_guard();
+        self.session.state.write().current_user = current_user.to_string();
+        execute()
     }
 
     pub(crate) fn routine_session_state_guard(&self) -> RoutineSessionStateGuard<'_> {

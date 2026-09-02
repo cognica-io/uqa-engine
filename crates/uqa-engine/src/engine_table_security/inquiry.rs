@@ -19,14 +19,15 @@ use crate::{Engine, RelationIdentity, Value};
 
 fn resolve_column_privilege_target(
     relation: &RelationIdentity,
-    columns: &[uqa_sql::ast::ColumnDef],
+    columns: &[String],
+    has_system_columns: bool,
     value: &Value,
 ) -> Result<Option<ResolvedColumnPrivilegeTarget>, SQLError> {
     match value {
         Value::Str(column) | Value::FixedChar(column) => {
-            if columns.iter().any(|definition| definition.name == *column) {
+            if columns.iter().any(|definition| definition == column) {
                 Ok(Some(ResolvedColumnPrivilegeTarget::User(column.clone())))
-            } else if POSTGRES_SYSTEM_COLUMNS.contains(&column.as_str()) {
+            } else if has_system_columns && POSTGRES_SYSTEM_COLUMNS.contains(&column.as_str()) {
                 Ok(Some(ResolvedColumnPrivilegeTarget::System))
             } else {
                 Err(SQLError::Routine {
@@ -41,8 +42,8 @@ fn resolve_column_privilege_target(
         Value::Int(attnum) if *attnum > 0 => Ok(usize::try_from(*attnum - 1)
             .ok()
             .and_then(|index| columns.get(index))
-            .map(|column| ResolvedColumnPrivilegeTarget::User(column.name.clone()))),
-        Value::Int(attnum) if (-6..=-1).contains(attnum) => {
+            .map(|column| ResolvedColumnPrivilegeTarget::User(column.clone()))),
+        Value::Int(attnum) if has_system_columns && (-6..=-1).contains(attnum) => {
             Ok(Some(ResolvedColumnPrivilegeTarget::System))
         }
         Value::Int(_) => Ok(None),
@@ -74,6 +75,20 @@ fn resolve_table_privilege_role(
         other => Err(SQLError::TypeMismatch(format!(
             "has_table_privilege role must be name or oid, got {other:?}"
         ))),
+    }
+}
+
+fn column_privilege_arguments(
+    arguments: &[Value],
+) -> Result<(Option<&Value>, &Value, &Value, &Value), SQLError> {
+    match arguments {
+        [table, column, privilege] => Ok((None, table, column, privilege)),
+        [subject, table, column, privilege] => Ok((Some(subject), table, column, privilege)),
+        _ => Err(SQLError::BadArity {
+            name: "has_column_privilege".into(),
+            expected: "3 or 4".into(),
+            actual: arguments.len(),
+        }),
     }
 }
 
@@ -137,6 +152,26 @@ impl Engine {
                     role_has_privilege(&security, &subject, check, &roles, &memberships)
                 })))
             }
+            ResolvedTablePrivilegeTarget::View(relation) => {
+                let view = self
+                    .durable
+                    .views
+                    .read()
+                    .get(&relation)
+                    .cloned()
+                    .ok_or_else(|| {
+                        SQLError::Internal(format!(
+                            "view `{}` disappeared",
+                            relation.qualified_name()
+                        ))
+                    })?;
+                let security = view.security();
+                let roles = self.durable.roles.read();
+                let memberships = self.durable.role_memberships.read();
+                Ok(Value::Bool(checks.into_iter().any(|check| {
+                    role_has_privilege(&security, &subject, check, &roles, &memberships)
+                })))
+            }
             ResolvedTablePrivilegeTarget::Sequence(relation) => {
                 for check in checks {
                     if self.role_has_sequence_table_privilege(
@@ -160,17 +195,8 @@ impl Engine {
         if arguments.iter().any(|argument| argument == &Value::Null) {
             return Ok(Value::Null);
         }
-        let (subject_value, table_value, column_value, privilege_value) = match arguments {
-            [table, column, privilege] => (None, table, column, privilege),
-            [subject, table, column, privilege] => (Some(subject), table, column, privilege),
-            _ => {
-                return Err(SQLError::BadArity {
-                    name: "has_column_privilege".into(),
-                    expected: "3 or 4".into(),
-                    actual: arguments.len(),
-                })
-            }
-        };
+        let (subject_value, table_value, column_value, privilege_value) =
+            column_privilege_arguments(arguments)?;
         let current_user = subject_value.is_none().then(|| self.current_user_name());
         let subject = {
             let roles = self.durable.roles.read();
@@ -182,8 +208,49 @@ impl Engine {
         let Some(target) = self.resolve_table_privilege_target(table_value)? else {
             return Ok(Value::Null);
         };
-        let relation = match target {
-            ResolvedTablePrivilegeTarget::Table(relation) => relation,
+        let (relation, security, columns, has_system_columns) = match target {
+            ResolvedTablePrivilegeTarget::Table(relation) => {
+                let table = self
+                    .storage
+                    .tables
+                    .read()
+                    .get(&relation)
+                    .cloned()
+                    .ok_or_else(|| {
+                        SQLError::Internal(format!(
+                            "table `{}` disappeared",
+                            relation.qualified_name()
+                        ))
+                    })?;
+                let columns: Vec<String> = table
+                    .columns
+                    .read()
+                    .iter()
+                    .map(|column| column.name.clone())
+                    .collect();
+                (relation, table.security(), columns, true)
+            }
+            ResolvedTablePrivilegeTarget::View(relation) => {
+                let view = self
+                    .durable
+                    .views
+                    .read()
+                    .get(&relation)
+                    .cloned()
+                    .ok_or_else(|| {
+                        SQLError::Internal(format!(
+                            "view `{}` disappeared",
+                            relation.qualified_name()
+                        ))
+                    })?;
+                let columns = view.output_columns.clone().ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "loaded view `{}` has no durable public column metadata",
+                        relation.qualified_name()
+                    ))
+                })?;
+                (relation, view.security(), columns, false)
+            }
             ResolvedTablePrivilegeTarget::Sequence(relation) => {
                 return self.has_sequence_column_privilege_value(
                     &relation,
@@ -193,17 +260,8 @@ impl Engine {
                 );
             }
         };
-        let table = self
-            .storage
-            .tables
-            .read()
-            .get(&relation)
-            .cloned()
-            .ok_or_else(|| {
-                SQLError::Internal(format!("table `{}` disappeared", relation.qualified_name()))
-            })?;
-        let columns = table.columns.read();
-        let Some(column) = resolve_column_privilege_target(&relation, &columns, column_value)?
+        let Some(column) =
+            resolve_column_privilege_target(&relation, &columns, has_system_columns, column_value)?
         else {
             return Ok(Value::Null);
         };
@@ -219,7 +277,6 @@ impl Engine {
         let Some(subject) = subject else {
             return Ok(Value::Bool(false));
         };
-        let security = table.security();
         let roles = self.durable.roles.read();
         let memberships = self.durable.role_memberships.read();
         Ok(Value::Bool(checks.into_iter().any(|check| match &column {
@@ -310,7 +367,7 @@ impl Engine {
                         })
                     }
                 };
-                if !matches!(kind, "table" | "sequence") {
+                if !matches!(kind, "table" | "view" | "materialized view" | "sequence") {
                     return Err(SQLError::Unsupported(format!(
                         "has_table_privilege for {kind} is not supported"
                     )));
@@ -318,10 +375,11 @@ impl Engine {
                 let relation = Self::resolved_relation_identity(&name).map_err(|error| {
                     SQLError::Internal(format!("resolve table `{name}`: {error}"))
                 })?;
-                Ok(Some(if kind == "table" {
-                    ResolvedTablePrivilegeTarget::Table(relation)
-                } else {
-                    ResolvedTablePrivilegeTarget::Sequence(relation)
+                Ok(Some(match kind {
+                    "table" => ResolvedTablePrivilegeTarget::Table(relation),
+                    "view" | "materialized view" => ResolvedTablePrivilegeTarget::View(relation),
+                    "sequence" => ResolvedTablePrivilegeTarget::Sequence(relation),
+                    _ => unreachable!("relation kind was validated above"),
                 }))
             }
             Value::Int(oid) => self.resolve_table_privilege_oid(*oid),
@@ -338,6 +396,9 @@ impl Engine {
         self.synchronize_table_catalog().map_err(|error| {
             SQLError::Internal(format!("load tables for privilege inquiry: {error}"))
         })?;
+        self.synchronize_catalog_registries().map_err(|error| {
+            SQLError::Internal(format!("load views for privilege inquiry: {error}"))
+        })?;
         let catalog = self.catalog_read_view();
         let resolution = self.session_execution_view().relation_name_resolution();
         for relation in self.storage.tables.read().keys() {
@@ -348,6 +409,11 @@ impl Engine {
             )? == oid
             {
                 return Ok(Some(ResolvedTablePrivilegeTarget::Table(relation.clone())));
+            }
+        }
+        for (relation, view) in self.durable.views.read().iter() {
+            if crate::sql::view_relation_oid(relation, view.kind) == oid {
+                return Ok(Some(ResolvedTablePrivilegeTarget::View(relation.clone())));
             }
         }
         if let Some((_name, relation)) = self.resolve_sequence_privilege_oid(oid)? {

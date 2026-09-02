@@ -71,6 +71,8 @@ pub(in crate::sql::dml) fn rewrite_merge_to_base(
     }
 
     let mut plan = statement.clone();
+    let next_privilege_subject = super::super::view_privileges::ensure_merge(engine, &plan)?;
+    plan.target_privilege_subject = Some(next_privilege_subject);
     let mut cascaded = false;
     let mut visited = BTreeSet::new();
     let mut source_star_boundaries = Vec::new();
@@ -95,6 +97,11 @@ pub(in crate::sql::dml) fn rewrite_merge_to_base(
             )));
         }
         validate_merge_targets(&layer, &plan)?;
+        if visited.len() > 1 {
+            let next_privilege_subject =
+                super::super::view_privileges::ensure_merge(engine, &plan)?;
+            plan.target_privilege_subject = Some(next_privilege_subject);
+        }
 
         let matched_subqueries = merge_matched_subquery_ids(&plan);
         rewrite_correlated_dml_context(

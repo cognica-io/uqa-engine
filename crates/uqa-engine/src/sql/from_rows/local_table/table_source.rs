@@ -113,8 +113,8 @@ pub(super) fn build_table_source_operator<'a>(
             let catalog = ctes.catalog_read_view()?;
             let resolution = ctes.relation_name_resolution()?;
             if let Some(sequence) = catalog.sequence_resolved(&resolution, name)? {
-                let current_user = engine.session_execution_view().current_user();
-                if !catalog.sequence_is_selectable_to(&sequence.security, &current_user) {
+                let privilege_subject = ctes.privilege_subject()?;
+                if !catalog.sequence_is_selectable_to(&sequence.security, privilege_subject) {
                     return Err(SQLError::Routine {
                         sqlstate: "42501".into(),
                         message: format!(
@@ -175,6 +175,13 @@ pub(super) fn build_table_source_operator<'a>(
                         operator, &qualifier, filters, engine, params, ctes,
                     ));
                 }
+                let privilege_subject = if view.security_invoker() {
+                    ctes.privilege_subject()?.to_string()
+                } else {
+                    view.role_owner.clone()
+                };
+                let mut privilege_scope = ctes.enter_privilege_subject(privilege_subject);
+                let ctes: &mut CteScope = &mut privilege_scope;
                 let plan = &view.query;
                 let output_columns = view.output_columns.as_deref().unwrap_or(&[]);
                 let inherited_lock = ctes.source_row_lock_for_view(&qualifier, name);

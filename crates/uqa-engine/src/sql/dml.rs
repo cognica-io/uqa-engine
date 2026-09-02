@@ -77,15 +77,29 @@ fn resolve_dml_target_name(
         .ok_or_else(|| SQLError::UnknownTable(name.to_string()))
 }
 
+pub(super) struct TargetSelectPrivilegeRequest<'a, 'expr> {
+    pub(super) table: &'a str,
+    pub(super) privilege_subject: Option<&'a str>,
+    pub(super) target_qualifier: &'a str,
+    pub(super) returning_aliases: &'a uqa_sql::ast::ReturningAliases,
+    pub(super) expressions: &'a [&'expr ScalarExpr],
+    pub(super) subqueries: &'a [QueryPlan],
+    pub(super) required_columns: &'a [String],
+}
+
 pub(super) fn ensure_target_table_select_for_expressions(
     engine: &Engine,
-    table: &str,
-    target_qualifier: &str,
-    returning_aliases: &uqa_sql::ast::ReturningAliases,
-    expressions: &[&ScalarExpr],
-    subqueries: &[QueryPlan],
-    required_columns: &[String],
+    request: TargetSelectPrivilegeRequest<'_, '_>,
 ) -> Result<(), SQLError> {
+    let TargetSelectPrivilegeRequest {
+        table,
+        privilege_subject,
+        target_qualifier,
+        returning_aliases,
+        expressions,
+        subqueries,
+        required_columns,
+    } = request;
     let relation = RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
     let target_qualifiers = BTreeSet::from([
         target_qualifier.to_string(),
@@ -96,14 +110,26 @@ pub(super) fn ensure_target_table_select_for_expressions(
     ]);
     let mut ctes = CteScope::new_for_current_routine(engine);
     ctes.scalar_subqueries = subqueries.to_vec();
-    crate::sql::select::ensure_select_privileges_for_table_expressions(
-        table,
-        &target_qualifiers,
-        expressions,
-        subqueries,
-        required_columns,
-        &ctes,
-    )
+    if let Some(subject) = privilege_subject {
+        let scope = ctes.enter_privilege_subject(subject.to_string());
+        crate::sql::select::ensure_select_privileges_for_table_expressions(
+            table,
+            &target_qualifiers,
+            expressions,
+            subqueries,
+            required_columns,
+            &scope,
+        )
+    } else {
+        crate::sql::select::ensure_select_privileges_for_table_expressions(
+            table,
+            &target_qualifiers,
+            expressions,
+            subqueries,
+            required_columns,
+            &ctes,
+        )
+    }
 }
 
 pub(crate) fn update_lock_strength(
@@ -816,6 +842,7 @@ mod update;
 mod update_from;
 mod vectors;
 pub(in crate::sql) mod view_automatic;
+mod view_privileges;
 mod view_triggers;
 
 pub(in crate::sql) use conflict::*;

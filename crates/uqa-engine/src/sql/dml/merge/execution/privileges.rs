@@ -13,6 +13,10 @@ fn ensure_merge_mutation_privileges(engine: &Engine, stmt: &MergePlan) -> Result
     let mut requires_delete = false;
     let mut requires_any_insert = false;
     let table_columns = engine.bound_table_column_names(&stmt.target)?;
+    let privilege_subject = stmt
+        .target_privilege_subject
+        .clone()
+        .unwrap_or_else(|| engine.current_user_name());
     for clause in &stmt.when_clauses {
         match clause {
             MergeWhenPlan::InsertNotMatched {
@@ -53,19 +57,21 @@ fn ensure_merge_mutation_privileges(engine: &Engine, stmt: &MergePlan) -> Result
         }
     }
     if requires_delete {
-        engine.ensure_table_privilege(
+        engine.ensure_table_privilege_for(
             &stmt.target,
+            &privilege_subject,
             crate::engine_table_security::TableAclPrivilege::Delete,
         )?;
     }
     if requires_any_insert {
-        engine.ensure_any_column_privilege(
+        engine.ensure_any_column_privilege_for(
             &stmt.target,
+            &privilege_subject,
             crate::engine_table_security::TableAclPrivilege::Insert,
         )?;
     }
     for (privilege, column) in column_privileges {
-        engine.ensure_column_privilege(&stmt.target, &column, privilege)?;
+        engine.ensure_column_privilege_for(&stmt.target, &column, &privilege_subject, privilege)?;
     }
     Ok(())
 }
@@ -75,12 +81,15 @@ pub(super) fn ensure_merge_privileges(engine: &Engine, stmt: &MergePlan) -> Resu
     let privilege_expressions = super::super::merge_privilege_expressions(stmt);
     super::super::super::ensure_target_table_select_for_expressions(
         engine,
-        &stmt.target,
-        &stmt.target_qualifier,
-        &stmt.returning_aliases,
-        &privilege_expressions,
-        &stmt.subqueries,
-        &[],
+        super::super::super::TargetSelectPrivilegeRequest {
+            table: &stmt.target,
+            privilege_subject: stmt.target_privilege_subject.as_deref(),
+            target_qualifier: &stmt.target_qualifier,
+            returning_aliases: &stmt.returning_aliases,
+            expressions: &privilege_expressions,
+            subqueries: &stmt.subqueries,
+            required_columns: &[],
+        },
     )?;
     let mut ctes = CteScope::new_for_current_routine(engine);
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);

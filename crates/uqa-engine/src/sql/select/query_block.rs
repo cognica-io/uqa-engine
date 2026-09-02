@@ -163,6 +163,14 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
         crate::sql::validate_joined_expr_text_match_fields(engine, from, filter)?;
     }
 
+    let reference_schema_is_execution_defined = stmt
+        .r#where
+        .as_ref()
+        .is_some_and(uqa_planner::optimizer::contains_retrieval)
+        || source_schema_is_execution_defined(engine, from);
+    if !reference_schema_is_execution_defined {
+        validate_query_block_references(engine, stmt, &expression_schema, params, ctes)?;
+    }
     let column_prune = column_prune_for_stmt(engine, stmt, from, ctes)?;
     let qualifier_filters = qualifier_filters_for_stmt(engine, stmt, from, ctes)?;
     let source_row_locks = resolve_row_locks(
@@ -173,6 +181,7 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
         params,
         ctes,
     )?;
+    ensure_select_privileges_for_query_block(stmt, from, ctes)?;
     let operator = {
         let mut scoped_ctes = ctes.enter_source_row_locks(source_row_locks);
         crate::sql::from_rows::build_join_operator_with_ctes(
@@ -188,7 +197,6 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
     let projection_schema = with_query_table_pseudo_columns(&source_schema);
     let projection_schema = overlay_outer_schema(&projection_schema, outer.as_ref());
     validate_query_block_references(engine, stmt, &projection_schema, params, ctes)?;
-    ensure_select_privileges_for_query_block(stmt, from, ctes)?;
     let physical_filter = final_filter_after_qualifier_pushdown(
         engine,
         stmt,
@@ -213,6 +221,43 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
         columns,
         output_mode,
     )
+}
+
+/// Whether a source contains an extension table function whose row shape is declared by the function result rather than by SQL metadata.
+fn source_schema_is_execution_defined(engine: &Engine, source: &SourcePlan) -> bool {
+    match source {
+        SourcePlan::Join { left, right, .. } => {
+            source_schema_is_execution_defined(engine, left)
+                || source_schema_is_execution_defined(engine, right)
+        }
+        SourcePlan::Function { name, binding, .. } => {
+            binding.as_ref().is_none_or(|binding| binding.builtin)
+                && engine.has_registered_table_function(&name.to_ascii_lowercase())
+        }
+        SourcePlan::FunctionGroup { functions, .. } => functions.iter().any(|function| {
+            function
+                .binding
+                .as_ref()
+                .is_none_or(|binding| binding.builtin)
+                && engine.has_registered_table_function(&function.name.to_ascii_lowercase())
+        }),
+        SourcePlan::Subquery { body, .. } => query_schema_is_execution_defined(engine, body),
+        SourcePlan::Table { .. } | SourcePlan::Values { .. } => false,
+    }
+}
+
+fn query_schema_is_execution_defined(engine: &Engine, query: &uqa_planner::QueryPlan) -> bool {
+    match &query.root {
+        uqa_planner::RelationalPlan::QueryBlock(block) => block
+            .from
+            .as_ref()
+            .is_some_and(|source| source_schema_is_execution_defined(engine, source)),
+        uqa_planner::RelationalPlan::SetOp { left, right, .. } => {
+            query_schema_is_execution_defined(engine, left)
+                || query_schema_is_execution_defined(engine, right)
+        }
+        uqa_planner::RelationalPlan::Values { .. } => false,
+    }
 }
 
 /// Bind the query-visible fields of a schemaless table from the same projection contract that constructs its document scan.

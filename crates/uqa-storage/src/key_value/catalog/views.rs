@@ -19,6 +19,8 @@ impl KeyValueCatalog {
             &relation_key(TAG_VIEW, &view.relation)?,
             &encode_value(&StoredView {
                 role_owner: view.role_owner.clone(),
+                acl: view.acl.clone(),
+                column_acls: view.column_acls.clone(),
                 definition_json: view.definition_json.clone(),
             })?,
         )?;
@@ -48,6 +50,8 @@ impl KeyValueCatalog {
                 Ok(ViewRow {
                     relation,
                     role_owner: stored.role_owner,
+                    acl: stored.acl,
+                    column_acls: stored.column_acls,
                     definition_json: stored.definition_json,
                 })
             })

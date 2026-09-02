@@ -64,6 +64,7 @@ pub(super) fn try_build_streaming_subquery_operator<'a>(
         .from
         .as_ref()
         .expect("derived-table FROM checked above");
+    crate::sql::select::ensure_select_privileges_for_query_block(block, from, ctes)?;
     let projections = crate::sql::select::physical_projections(&block.projections);
     let type_resolver = crate::sql::select::ScopedEngineHook::new(engine, ctes);
     if crate::sql::select::projections_may_return_set(

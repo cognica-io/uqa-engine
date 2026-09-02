@@ -46,6 +46,10 @@ pub(super) struct StoredRelation {
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct StoredView {
     pub(super) role_owner: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) acl: Option<Vec<crate::catalog::TableAclEntry>>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub(super) column_acls: std::collections::BTreeMap<String, Vec<crate::catalog::TableAclEntry>>,
     pub(super) definition_json: String,
 }
 

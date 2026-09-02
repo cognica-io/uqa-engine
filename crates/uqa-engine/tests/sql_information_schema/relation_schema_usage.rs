@@ -53,6 +53,7 @@ fn relation_schema_fixture() -> Engine {
         "CREATE FUNCTION relation_schema_visible.dynamic_invoker() RETURNS integer LANGUAGE SQL SECURITY INVOKER AS 'SELECT value FROM relation_schema_hidden.only_hidden'",
         "CREATE FUNCTION relation_schema_visible.dynamic_definer() RETURNS integer LANGUAGE SQL SECURITY DEFINER AS 'SELECT value FROM relation_schema_hidden.only_hidden'",
         "GRANT SELECT ON TABLE relation_schema_visible.only_table TO relation_schema_caller",
+        "GRANT SELECT ON TABLE relation_schema_visible.bound_view, relation_schema_visible.bound_matview TO relation_schema_caller",
         "GRANT SELECT ON TABLE relation_schema_hidden.only_hidden TO relation_schema_caller, relation_schema_group",
         "GRANT USAGE, CREATE ON SCHEMA relation_schema_hidden, relation_schema_visible TO relation_schema_caller",
         "SET ROLE relation_schema_caller",

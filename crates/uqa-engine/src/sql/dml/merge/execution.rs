@@ -56,6 +56,7 @@ fn run_merge_inner(
                 run_merge_inner(engine, &rewritten, params)
             }
             super::super::view_automatic::MergeViewTargetPath::ViewTriggers => {
+                let _ = super::super::view_privileges::ensure_merge(engine, stmt)?;
                 super::super::view_triggers::run_view_merge_inner(engine, stmt, params)
             }
         };

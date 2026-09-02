@@ -15,6 +15,39 @@ use super::{
     SQLError, SQLParam,
 };
 
+pub(super) fn insert_source_expression_rows(
+    result: super::SQLResult,
+) -> Result<Vec<Vec<uqa_execution::ScalarExpr>>, SQLError> {
+    let values = match result.positional_rows {
+        Some(rows) => rows,
+        None => result
+            .rows
+            .into_iter()
+            .map(|row| {
+                result
+                    .columns
+                    .iter()
+                    .map(|column| {
+                        row.get(column).cloned().ok_or_else(|| {
+                            SQLError::Internal(format!(
+                                "INSERT SELECT result omitted output column `{column}`"
+                            ))
+                        })
+                    })
+                    .collect::<Result<Vec<_>, SQLError>>()
+            })
+            .collect::<Result<Vec<_>, SQLError>>()?,
+    };
+    Ok(values
+        .into_iter()
+        .map(|row| {
+            row.into_iter()
+                .map(uqa_execution::ScalarExpr::Literal)
+                .collect()
+        })
+        .collect())
+}
+
 pub(super) struct InsertSelectConsumer {
     pub(super) state: RefCell<InsertSelectConsumerState>,
 }

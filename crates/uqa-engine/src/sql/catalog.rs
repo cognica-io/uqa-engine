@@ -30,12 +30,12 @@ pub(super) fn build_info_schema_rows(
         VirtualRelation::InformationTables => build_info_tables(engine, catalog, resolution)?,
         VirtualRelation::InformationColumns => build_info_columns(engine, catalog, resolution)?,
         VirtualRelation::InformationColumnPrivileges => {
-            build_info_column_privileges(catalog, resolution, false)?
+            build_info_column_privileges(engine, catalog, resolution, false)?
         }
         VirtualRelation::InformationRoleColumnGrants => {
-            build_info_column_privileges(catalog, resolution, true)?
+            build_info_column_privileges(engine, catalog, resolution, true)?
         }
-        VirtualRelation::InformationViews => build_info_views(engine, catalog)?,
+        VirtualRelation::InformationViews => build_info_views(engine, catalog, resolution)?,
         VirtualRelation::InformationRoutines => build_info_routines(catalog)?,
         VirtualRelation::InformationSequences => build_info_sequences(catalog, session),
         VirtualRelation::InformationTableConstraints => {
@@ -172,6 +172,16 @@ pub(in crate::sql) fn table_relation_oid(engine: &Engine, table: &str) -> Result
 }
 pub(crate) fn sequence_relation_oid(object_id: [u8; 16]) -> i64 {
     helpers::oids::stable_object_oid("relation", &object_id)
+}
+pub(crate) fn view_relation_oid(
+    relation: &crate::RelationIdentity,
+    kind: crate::StoredViewKind,
+) -> i64 {
+    let relkind = match kind {
+        crate::StoredViewKind::View => "v",
+        crate::StoredViewKind::Materialized => "m",
+    };
+    helpers::oids::relation_oid(relkind, &relation.schema, &relation.name)
 }
 pub(crate) fn snapshot_table_relation_oid(
     catalog: &CatalogReadView,

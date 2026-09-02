@@ -38,7 +38,13 @@ pub(in crate::sql) fn run_delete_inner(
 ) -> Result<SQLResult, SQLError> {
     if let Some(kind) = super::view_triggers::target_view_kind(engine, &stmt.table)? {
         if kind == crate::StoredViewKind::Materialized {
-            return super::view_triggers::run_view_delete_inner(engine, stmt, params);
+            let _ = super::view_privileges::ensure_delete(engine, stmt)?;
+            let relation = crate::RelationIdentity::from_legacy_name(&stmt.table)
+                .map_err(SQLError::Internal)?;
+            return Err(SQLError::Routine {
+                sqlstate: "42809".into(),
+                message: format!("cannot change materialized view \"{}\"", relation.name),
+            });
         }
         if super::view_automatic::has_instead_of_trigger(
             engine,
@@ -49,13 +55,19 @@ pub(in crate::sql) fn run_delete_inner(
             &stmt.table,
             uqa_sql::ast::RuleEvent::Delete,
         )? {
+            let _ = super::view_privileges::ensure_delete(engine, stmt)?;
             return super::view_triggers::run_view_delete_inner(engine, stmt, params);
         }
         let rewritten = super::view_automatic::rewrite_delete_to_base(engine, stmt, params)?;
         return run_delete_inner(engine, &rewritten, params);
     }
-    engine.ensure_table_privilege(
+    let privilege_subject = stmt
+        .target_privilege_subject
+        .clone()
+        .unwrap_or_else(|| engine.current_user_name());
+    engine.ensure_table_privilege_for(
         &stmt.table,
+        &privilege_subject,
         crate::engine_table_security::TableAclPrivilege::Delete,
     )?;
     let privilege_expressions = stmt
@@ -65,12 +77,15 @@ pub(in crate::sql) fn run_delete_inner(
         .collect::<Vec<_>>();
     super::ensure_target_table_select_for_expressions(
         engine,
-        &stmt.table,
-        &stmt.target_qualifier,
-        &stmt.returning_aliases,
-        &privilege_expressions,
-        &stmt.subqueries,
-        &[],
+        super::TargetSelectPrivilegeRequest {
+            table: &stmt.table,
+            privilege_subject: stmt.target_privilege_subject.as_deref(),
+            target_qualifier: &stmt.target_qualifier,
+            returning_aliases: &stmt.returning_aliases,
+            expressions: &privilege_expressions,
+            subqueries: &stmt.subqueries,
+            required_columns: &[],
+        },
     )?;
     let _transition_capture_scope = crate::sql::triggers::TransitionCaptureScope::enter();
     engine.lock_relation(

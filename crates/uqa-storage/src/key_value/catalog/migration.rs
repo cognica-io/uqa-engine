@@ -219,6 +219,8 @@ pub(super) fn collect_view_migrations(
             decode_value::<LegacyStoredView>(&value)
                 .map(|legacy| StoredView {
                     role_owner: "uqa".into(),
+                    acl: None,
+                    column_acls: std::collections::BTreeMap::new(),
                     definition_json: legacy.definition_json,
                 })
                 .map_err(|legacy_error| {
@@ -233,6 +235,8 @@ pub(super) fn collect_view_migrations(
             row: ViewRow {
                 relation,
                 role_owner: stored.role_owner,
+                acl: stored.acl,
+                column_acls: stored.column_acls,
                 definition_json: stored.definition_json,
             },
         });
@@ -253,6 +257,8 @@ pub(super) fn collect_view_migrations(
                 row: ViewRow {
                     relation,
                     role_owner: "uqa".into(),
+                    acl: None,
+                    column_acls: std::collections::BTreeMap::new(),
                     definition_json: serde_json::to_string(&definition)?,
                 },
             });
@@ -501,6 +507,8 @@ pub(super) fn put_view_migrations(
             &key,
             &encode_value(&StoredView {
                 role_owner: view.row.role_owner,
+                acl: view.row.acl,
+                column_acls: view.row.column_acls,
                 definition_json: view.row.definition_json,
             })?,
         )?;

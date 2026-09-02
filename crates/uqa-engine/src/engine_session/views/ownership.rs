@@ -9,6 +9,7 @@
 use super::{Engine, RelationIdentity, SQLError, StoredView, StoredViewKind};
 use crate::engine_roles::role_can_set;
 use crate::engine_schema_security::SchemaAclPrivilege;
+use crate::engine_table_security::{role_has_table_privilege, TableAclPrivilege};
 
 fn view_kind_name(view: &StoredView) -> &'static str {
     match view.kind {
@@ -70,7 +71,16 @@ impl Engine {
         view: &StoredView,
     ) -> Result<(), SQLError> {
         debug_assert_eq!(view.kind, StoredViewKind::Materialized);
-        if self.current_user_has_role_privileges(&view.role_owner) {
+        let current_user = self.current_user_name();
+        let roles = self.durable.roles.read();
+        let memberships = self.durable.role_memberships.read();
+        if role_has_table_privilege(
+            &view.security(),
+            &current_user,
+            TableAclPrivilege::Maintain,
+            &roles,
+            &memberships,
+        ) {
             return Ok(());
         }
         let relation = RelationIdentity::from_legacy_name(canonical_name).map_err(|error| {
@@ -128,7 +138,24 @@ impl Engine {
                 SchemaAclPrivilege::Create,
             )?;
         }
-        view.role_owner = new_owner;
+        let mut security = view.security();
+        crate::engine_table_security::rewrite_acl_owner(&mut security, &new_owner);
+        let output_columns = view.output_columns.as_deref().ok_or_else(|| {
+            SQLError::Internal(format!(
+                "loaded view `{canonical_name}` has no durable public column metadata"
+            ))
+        })?;
+        crate::engine_table_security::validate_table_security_invariants(
+            &security,
+            Some(output_columns),
+            &self.durable.roles.read(),
+        )
+        .map_err(|error| {
+            SQLError::Internal(format!(
+                "view `{canonical_name}` produced invalid privilege metadata after owner transfer: {error}"
+            ))
+        })?;
+        view.set_security(security);
         Ok(())
     }
 }

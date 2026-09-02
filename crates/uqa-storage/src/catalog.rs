@@ -286,6 +286,10 @@ pub struct ViewRow {
     pub relation: RelationIdentity,
     /// SQL role that owns the view. Catalogs created before view role ownership was persisted belong to the bootstrap role.
     pub role_owner: String,
+    /// Explicit relation-wide ACL. `None` preserves `PostgreSQL`'s implicit owner-only default ACL.
+    pub acl: Option<Vec<TableAclEntry>>,
+    /// Explicit per-column ACL paths keyed by the view's public column name.
+    pub column_acls: std::collections::BTreeMap<String, Vec<TableAclEntry>>,
     pub definition_json: String,
 }
 

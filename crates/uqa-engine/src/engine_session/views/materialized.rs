@@ -101,6 +101,8 @@ impl Engine {
             })?;
             let view = StoredView {
                 role_owner: engine.current_user_name(),
+                acl: None,
+                column_acls: std::collections::BTreeMap::new(),
                 query: plan,
                 output_columns: Some(output_columns),
                 persistence: uqa_sql::ast::RelationPersistence::Permanent,
@@ -167,11 +169,15 @@ impl Engine {
             view.materialized_rows = if with_no_data {
                 Vec::new()
             } else {
-                let result = crate::sql::execute_query_plan(engine, &view.query, &[])?;
-                let rows = materialized_rows(
-                    &result,
-                    view.output_columns.as_deref().unwrap_or(&result.columns),
-                )?;
+                let result = engine.with_current_user_context(&view.role_owner, || {
+                    crate::sql::execute_query_plan(engine, &view.query, &[])
+                })?;
+                let output_columns = view.output_columns.as_deref().ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "loaded materialized view `{canonical}` has no durable public column metadata"
+                    ))
+                })?;
+                let rows = materialized_rows(&result, output_columns)?;
                 view.materialized_column_types = result.column_types;
                 rows
             };

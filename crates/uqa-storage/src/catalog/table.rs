@@ -4,14 +4,14 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Durable ordinary-table access-control metadata.
+//! Durable access-control metadata for table-shaped relations.
 
 use serde::{Deserialize, Serialize};
 
-/// Grantable privileges carried by one ordinary-table ACL path.
+/// Grantable privileges carried by one table-shaped relation ACL path.
 #[expect(
     clippy::struct_excessive_bools,
-    reason = "models PostgreSQL's independently grantable ordinary-table privileges"
+    reason = "models PostgreSQL's independently grantable table-shaped relation privileges"
 )]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TablePrivileges {
@@ -92,7 +92,7 @@ impl TablePrivileges {
     }
 }
 
-/// One explicit ordinary-table ACL path. Legacy entries without an explicit grantor originate from the table owner.
+/// One explicit table-shaped relation ACL path. Legacy entries without an explicit grantor originate from the relation owner.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TableAclEntry {
     pub role: String,

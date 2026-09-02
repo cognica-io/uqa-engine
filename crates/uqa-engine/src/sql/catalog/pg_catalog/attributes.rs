@@ -117,11 +117,19 @@ pub(in crate::sql::catalog) fn build_pg_attribute(
         let relid = relation_oid("v", &schema, &view);
         let columns = view_columns_for(engine, catalog, resolution, &stored)?;
         for (idx, col) in columns.iter().enumerate() {
-            out.push(pg_attribute_row(
+            let mut attribute = pg_attribute_row(
                 relid,
                 catalog_ordinal(idx, "pg_attribute view column")?,
                 col,
-            ));
+            );
+            attribute.insert(
+                "attacl".into(),
+                super::super::relation_catalog::table_acl_catalog_value(
+                    &stored.role_owner,
+                    stored.column_acls.get(&col.name),
+                )?,
+            );
+            out.push(attribute);
         }
     }
     for (view_name, stored) in catalog.views_of_kind(crate::StoredViewKind::Materialized) {
@@ -129,11 +137,19 @@ pub(in crate::sql::catalog) fn build_pg_attribute(
         let relid = relation_oid("m", &schema, &view);
         let columns = view_columns_for(engine, catalog, resolution, &stored)?;
         for (idx, col) in columns.iter().enumerate() {
-            out.push(pg_attribute_row(
+            let mut attribute = pg_attribute_row(
                 relid,
                 catalog_ordinal(idx, "pg_attribute materialized-view column")?,
                 col,
-            ));
+            );
+            attribute.insert(
+                "attacl".into(),
+                super::super::relation_catalog::table_acl_catalog_value(
+                    &stored.role_owner,
+                    stored.column_acls.get(&col.name),
+                )?,
+            );
+            out.push(attribute);
         }
     }
     for (table_name, foreign_table) in catalog.foreign_tables() {
