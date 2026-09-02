@@ -689,6 +689,7 @@ fn clustered_postings_follow_key_value_table_rename_and_drop() {
     catalog
         .save_table(&TableSchema {
             relation: crate::catalog::RelationIdentity::new("public", "articles"),
+            role_owner: "uqa".into(),
             object_id: [1; 16],
             storage_generation: [1; 16],
             analyzer_json: "{}".into(),
@@ -941,6 +942,7 @@ fn key_value_catalog_preserves_core_registries() {
     catalog
         .save_table(&TableSchema {
             relation: crate::catalog::RelationIdentity::new("public", "docs"),
+            role_owner: "docs_owner".into(),
             object_id: [1; 16],
             storage_generation: [1; 16],
             analyzer_json: "{}".into(),
@@ -962,6 +964,7 @@ fn key_value_catalog_preserves_core_registries() {
         catalog.load_tables().unwrap()[0].relation.qualified_name(),
         "public.docs"
     );
+    assert_eq!(catalog.load_tables().unwrap()[0].role_owner, "docs_owner");
     assert_eq!(
         catalog.load_model("reranker").unwrap().as_deref(),
         Some("{\"model\":1}")

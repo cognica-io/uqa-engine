@@ -91,6 +91,7 @@ pub(super) fn decode_migrated_table(
     }
     Ok(TableSchema {
         relation,
+        role_owner: "uqa".into(),
         object_id: [0; 16],
         storage_generation: [0; 16],
         analyzer_json: legacy.analyzer_json,

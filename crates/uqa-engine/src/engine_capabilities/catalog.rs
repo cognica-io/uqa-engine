@@ -30,6 +30,7 @@ impl CatalogTableSnapshot {
     pub(crate) fn fixture(columns: Vec<uqa_sql::ast::ColumnDef>) -> Self {
         Self {
             object_id: [1; 16],
+            role_owner: "uqa".into(),
             columns,
             checks: Vec::new(),
             foreign_keys: Vec::new(),

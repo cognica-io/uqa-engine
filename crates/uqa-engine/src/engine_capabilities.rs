@@ -50,6 +50,7 @@ pub(crate) struct CatalogReadSnapshot {
 #[derive(Clone)]
 pub(crate) struct CatalogTableSnapshot {
     pub(crate) object_id: [u8; 16],
+    pub(crate) role_owner: String,
     pub(crate) columns: Vec<uqa_sql::ast::ColumnDef>,
     pub(crate) checks: Vec<uqa_sql::ast::TableCheck>,
     pub(crate) foreign_keys: Vec<uqa_sql::ast::ForeignKey>,
@@ -417,6 +418,7 @@ impl Engine {
             .map(|(relation, table)| {
                 let snapshot = CatalogTableSnapshot {
                     object_id: table.object_id(),
+                    role_owner: table.role_owner(),
                     columns: table.columns.read().clone(),
                     checks: table.table_checks.read().clone(),
                     foreign_keys: table.foreign_keys.read().clone(),

@@ -42,6 +42,7 @@ impl Engine {
                 name.clone(),
                 TableDataSnapshot {
                     state: table.clone(),
+                    role_owner: table.role_owner(),
                     storage_generation: table.storage_generation(),
                     document_store,
                     inverted_index,
@@ -101,6 +102,10 @@ impl Engine {
         }
         for table_snapshot in snapshot.tables.values() {
             let table = &table_snapshot.state;
+            table
+                .role_owner
+                .write()
+                .clone_from(&table_snapshot.role_owner);
             let document_store = table_snapshot
                 .document_store
                 .writable_snapshot()

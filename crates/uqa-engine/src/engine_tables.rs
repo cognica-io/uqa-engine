@@ -50,6 +50,23 @@ impl Engine {
         columns: &[uqa_sql::ast::ColumnDef],
         constraints: &uqa_sql::ast::TableConstraintSet,
     ) -> StorageBackendResult<()> {
+        self.try_save_table_schema_with_components_and_owner(
+            name,
+            table,
+            columns,
+            constraints,
+            &table.role_owner(),
+        )
+    }
+
+    pub(crate) fn try_save_table_schema_with_components_and_owner(
+        &self,
+        name: &str,
+        table: &TableState,
+        columns: &[uqa_sql::ast::ColumnDef],
+        constraints: &uqa_sql::ast::TableConstraintSet,
+        role_owner: &str,
+    ) -> StorageBackendResult<()> {
         if table.persistence == uqa_sql::ast::RelationPersistence::Temporary {
             return Ok(());
         }
@@ -73,6 +90,7 @@ impl Engine {
         catalog.save_table(&TableSchema {
             relation: RelationIdentity::from_legacy_name(name)
                 .map_err(StorageBackendError::Other)?,
+            role_owner: role_owner.to_string(),
             object_id: table.object_id(),
             storage_generation: table.storage_generation(),
             analyzer_json,
@@ -176,6 +194,7 @@ impl Engine {
         let table = TableState {
             lifecycle_id: std::sync::atomic::AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: crate::new_table_object_id()?,
+            role_owner: RwLock::new(self.current_user_name()),
             storage_generation: RwLock::new(crate::new_table_storage_generation()?),
             document_store: RwLock::new(docs),
             inverted_index: RwLock::new(inv),

@@ -398,6 +398,7 @@ fn table_and_column_rename_move_btree_children_without_fk_cascade() {
     catalog
         .save_table(&TableSchema {
             relation: RelationIdentity::new("public", "docs"),
+            role_owner: "uqa".into(),
             object_id: [1; 16],
             storage_generation: [1; 16],
             analyzer_json: "{}".into(),

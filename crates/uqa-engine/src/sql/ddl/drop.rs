@@ -139,6 +139,9 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
                     }
                 }
             }
+            for table in &tables {
+                engine.ensure_table_drop_authority(table)?;
+            }
             let (tables, dependents) = engine.hierarchy_drop_targets(&tables, stmt.cascade);
             if !dependents.is_empty() {
                 return Err(SQLError::Routine {

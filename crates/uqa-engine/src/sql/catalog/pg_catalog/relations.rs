@@ -27,10 +27,13 @@ pub(in crate::sql::catalog) fn build_pg_tables(
     let mut out: Vec<ResultRow> = Vec::new();
     for name in catalog.table_names() {
         let (schema, table) = split_schema_name(&name)?;
+        let table_snapshot = catalog
+            .table(resolution, &name)?
+            .ok_or_else(|| SQLError::UnknownTable(name.clone()))?;
         out.push(row([
             ("schemaname", str_value(schema.clone())),
             ("tablename", str_value(table)),
-            ("tableowner", str_value(current_user_name())),
+            ("tableowner", str_value(table_snapshot.role_owner.clone())),
             ("tablespace", Value::Null),
             (
                 "hasindexes",

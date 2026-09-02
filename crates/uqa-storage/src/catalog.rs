@@ -200,6 +200,9 @@ impl RelationKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableSchema {
     pub relation: RelationIdentity,
+    /// SQL role that owns the relation. Catalogs created before table role ownership was persisted belong to the bootstrap role.
+    #[serde(default = "legacy_table_role_owner")]
+    pub role_owner: String,
     /// Stable logical relation identity. `CREATE TABLE` allocates a new value, while renames, schema changes, `TRUNCATE`, and reopen preserve it. A zero value marks a legacy catalog row that the engine upgrades during open.
     #[serde(default)]
     pub object_id: [u8; 16],
@@ -219,6 +222,10 @@ pub struct TableSchema {
     /// created before durable table constraints were introduced.
     #[serde(default)]
     pub constraints_json: String,
+}
+
+fn legacy_table_role_owner() -> String {
+    "uqa".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -38,6 +38,8 @@ fn schema_create_engine() -> Engine {
         "CREATE MATERIALIZED VIEW schema_create_space.existing_matview AS SELECT 1 AS id WITH NO DATA",
         "CREATE FUNCTION schema_create_space.existing_function() RETURNS integer LANGUAGE sql AS 'SELECT 1'",
         "RESET ROLE",
+        "ALTER TABLE schema_create_space.index_target OWNER TO schema_create_worker",
+        "ALTER TABLE schema_create_space.alter_target OWNER TO schema_create_worker",
         "REVOKE CREATE ON DATABASE uqa FROM schema_create_owner",
         "GRANT USAGE ON SCHEMA schema_create_space TO schema_create_worker",
         "CREATE SERVER schema_create_memory FOREIGN DATA WRAPPER memory_fdw OPTIONS (kind 'memory')",

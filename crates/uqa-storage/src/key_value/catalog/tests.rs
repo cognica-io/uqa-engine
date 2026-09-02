@@ -105,6 +105,7 @@ fn relation_namespace_migration_is_one_batch_and_moves_public_data() {
         catalog.load_tables().unwrap()[0].relation,
         RelationIdentity::new("public", "docs")
     );
+    assert_eq!(catalog.load_tables().unwrap()[0].role_owner, "uqa");
     let sequence = &catalog.load_sequence_rows().unwrap()[0];
     assert_eq!(sequence.relation, RelationIdentity::new("public", "seq"));
     assert_eq!(sequence.object_id, [0; 16]);

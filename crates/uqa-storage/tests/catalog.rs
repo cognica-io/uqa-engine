@@ -84,6 +84,7 @@ fn schema(name: &str, fts: &[&str]) -> TableSchema {
 fn schema_in(schema_name: &str, name: &str, fts: &[&str]) -> TableSchema {
     TableSchema {
         relation: uqa_storage::RelationIdentity::new(schema_name, name),
+        role_owner: "uqa".into(),
         object_id: [1; 16],
         storage_generation: [1; 16],
         analyzer_json: r#"{"name":"standard","language":"english"}"#.to_string(),
@@ -97,6 +98,7 @@ fn schema_in(schema_name: &str, name: &str, fts: &[&str]) -> TableSchema {
 fn schema_with_columns(name: &str, columns_json: &str) -> TableSchema {
     TableSchema {
         relation: uqa_storage::RelationIdentity::new("public", name),
+        role_owner: "uqa".into(),
         object_id: [1; 16],
         storage_generation: [1; 16],
         analyzer_json: r#"{"name":"standard","language":"english"}"#.to_string(),
@@ -449,6 +451,7 @@ fn vector_round_trip() {
     let (conn, cat) = open_in_memory_catalog();
     cat.save_table(&TableSchema {
         relation: uqa_storage::RelationIdentity::new("public", "t"),
+        role_owner: "uqa".into(),
         object_id: [1; 16],
         storage_generation: [1; 16],
         analyzer_json: r#"{"name":"standard","language":"english"}"#.into(),

@@ -107,6 +107,7 @@ mod engine_session;
 mod engine_sql_registry;
 mod engine_state;
 mod engine_statement_cache;
+mod engine_table_security;
 mod engine_table_storage;
 mod engine_tables;
 mod engine_transactions;
@@ -696,6 +697,7 @@ struct EngineDataSnapshot {
 #[derive(Clone)]
 struct TableDataSnapshot {
     state: Arc<TableState>,
+    role_owner: String,
     storage_generation: [u8; 16],
     document_store: Arc<dyn DocumentStore>,
     inverted_index: Arc<dyn InvertedIndex>,
@@ -723,6 +725,8 @@ pub(crate) struct TableState {
     lifecycle_id: std::sync::atomic::AtomicU64,
     /// Durable logical relation identity used by `PostgreSQL` catalogs. Renames, schema changes, `TRUNCATE`, and reopen preserve it.
     object_id: [u8; 16],
+    /// Durable SQL role ownership. Mutations are catalog transactions and preserve the relation's logical and physical identities.
+    role_owner: RwLock<String>,
     /// Durable physical-storage generation shared by every session. Schema-only changes preserve it; CREATE and TRUNCATE replace it so a fixed transaction snapshot never aliases a different physical relation lifetime.
     storage_generation: RwLock<[u8; 16]>,
     pub(crate) document_store: RwLock<Box<dyn DocumentStore>>,
@@ -782,6 +786,10 @@ impl TableState {
 
     fn object_id(&self) -> [u8; 16] {
         self.object_id
+    }
+
+    fn role_owner(&self) -> String {
+        self.role_owner.read().clone()
     }
 
     fn fts_fields(&self) -> Vec<FieldName> {

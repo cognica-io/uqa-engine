@@ -17,6 +17,7 @@ fn fresh() -> Catalog {
 fn empty_table(schema: &str, name: &str) -> TableSchema {
     TableSchema {
         relation: RelationIdentity::new(schema, name),
+        role_owner: "uqa".into(),
         object_id: [1; 16],
         storage_generation: [1; 16],
         analyzer_json: "{}".into(),
@@ -64,6 +65,7 @@ fn save_load_round_trip() {
     let cat = fresh();
     let schema = TableSchema {
         relation: RelationIdentity::new("public", "articles"),
+        role_owner: "article_owner".into(),
         object_id: [1; 16],
         storage_generation: [1; 16],
         analyzer_json:
@@ -81,6 +83,7 @@ fn save_load_round_trip() {
     let loaded = cat.load_tables().unwrap();
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].relation.qualified_name(), "public.articles");
+    assert_eq!(loaded[0].role_owner, "article_owner");
     assert_eq!(loaded[0].object_id, [1; 16]);
     assert_eq!(loaded[0].storage_generation, [1; 16]);
     assert_eq!(loaded[0].fts_fields, vec!["title", "body"]);
@@ -97,6 +100,7 @@ fn catalog_facade_trait_object_round_trips_table() {
     let facade: &dyn CatalogFacade = &cat;
     let schema = TableSchema {
         relation: RelationIdentity::new("public", "facade_articles"),
+        role_owner: "facade_owner".into(),
         object_id: [2; 16],
         storage_generation: [2; 16],
         analyzer_json:
@@ -117,6 +121,7 @@ fn catalog_facade_trait_object_round_trips_table() {
         loaded[0].relation.qualified_name(),
         "public.facade_articles"
     );
+    assert_eq!(loaded[0].role_owner, "facade_owner");
 }
 
 #[test]

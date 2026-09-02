@@ -271,7 +271,7 @@ impl Engine {
         Ok(targets)
     }
 
-    fn persist_sequence_security(
+    pub(crate) fn persist_sequence_security(
         &self,
         name: &str,
         relation: &RelationIdentity,
@@ -319,6 +319,13 @@ impl Engine {
             )));
         }
         Ok(())
+    }
+
+    pub(crate) fn rewrite_sequence_security_owner(
+        security: &mut SequenceSecurity,
+        new_owner: &str,
+    ) {
+        rewrite_acl_owner(security, new_owner);
     }
 
     pub(crate) fn ensure_sequence_nextval_privilege(
@@ -581,11 +588,13 @@ impl Engine {
         if current_owner == new_owner {
             return Ok(());
         }
-        self.require_schema_privilege(
-            &relation.schema,
-            &new_owner,
-            crate::engine_schema_security::SchemaAclPrivilege::Create,
-        )?;
+        if !self.current_user_is_superuser() {
+            self.require_schema_privilege(
+                &relation.schema,
+                &new_owner,
+                crate::engine_schema_security::SchemaAclPrivilege::Create,
+            )?;
+        }
         let mut security = self
             .durable
             .sequence_security

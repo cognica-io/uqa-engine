@@ -179,6 +179,56 @@ fn direct_alter_sequence_failure_preserves_state_through_reopen() {
     assert_eq!(restored.current, before.current);
 }
 
+fn table_and_sequence_owners(engine: &Engine) -> (Value, Value) {
+    let table = engine
+        .sql(
+            "SELECT tableowner AS owner FROM pg_catalog.pg_tables WHERE schemaname = 'public' AND tablename = 'owner_atomic'",
+            &[],
+        )
+        .unwrap();
+    let sequence = engine
+        .sql(
+            "SELECT sequenceowner AS owner FROM pg_catalog.pg_sequences WHERE schemaname = 'public' AND sequencename = 'owner_atomic_id_seq'",
+            &[],
+        )
+        .unwrap();
+    (
+        table.rows[0]["owner"].clone(),
+        sequence.rows[0]["owner"].clone(),
+    )
+}
+
+#[test]
+fn table_owner_failure_rolls_back_the_owned_sequence_before_reopen() {
+    let (dir, connection, engine) = persistent_engine();
+    engine.sql("CREATE ROLE owner_atomic_target", &[]).unwrap();
+    engine
+        .sql("CREATE TABLE owner_atomic(id serial)", &[])
+        .unwrap();
+    assert_eq!(
+        table_and_sequence_owners(&engine),
+        (Value::Str("uqa".into()), Value::Str("uqa".into()))
+    );
+
+    fail_event(&connection, "_tables", "INSERT");
+    assert!(engine
+        .sql("ALTER TABLE owner_atomic OWNER TO owner_atomic_target", &[],)
+        .is_err());
+    assert_eq!(
+        table_and_sequence_owners(&engine),
+        (Value::Str("uqa".into()), Value::Str("uqa".into()))
+    );
+    clear_failure(&connection);
+    drop(engine);
+    drop(connection);
+
+    let reopened = Engine::open(&dir.path().join("catalog.db")).unwrap();
+    assert_eq!(
+        table_and_sequence_owners(&reopened),
+        (Value::Str("uqa".into()), Value::Str("uqa".into()))
+    );
+}
+
 #[test]
 fn memory_direct_failure_preserves_detached_vectors_and_existing_rows() {
     let engine = Engine::new();

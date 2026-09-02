@@ -554,6 +554,23 @@ impl Engine {
         }
         drop(schema_security);
 
+        let tables = self.storage.tables.read();
+        for name in names {
+            if let Some(relation) = tables
+                .iter()
+                .find_map(|(relation, table)| (table.role_owner() == *name).then_some(relation))
+            {
+                return Err(SQLError::Routine {
+                    sqlstate: "2BP01".into(),
+                    message: format!(
+                        "role \"{name}\" cannot be dropped because some objects depend on it: table {}",
+                        relation.qualified_name()
+                    ),
+                });
+            }
+        }
+        drop(tables);
+
         let sequence_security = self.durable.sequence_security.read();
         for name in names {
             if let Some(relation) = dependent_sequence_for_role(&sequence_security, name) {

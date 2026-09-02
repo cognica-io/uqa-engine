@@ -162,6 +162,7 @@ fn run_alter_table_inner(engine: &Engine, stmt: AlterTableStmt) -> Result<SQLRes
         recurse,
         actions,
     } = stmt;
+    engine.ensure_table_owner(&table)?;
     for mut action in actions {
         materialize_recursive_action_names(engine, &table, recurse, &mut action)?;
         let targets = recursive_alter_targets(engine, &table, recurse, &action)?;
@@ -203,6 +204,7 @@ fn run_alter_table_action(
     stmt: AlterTableStmt,
     action: AlterTableAction,
 ) -> Result<(), SQLError> {
+    engine.ensure_table_owner(&stmt.table)?;
     if matches!(&action, AlterTableAction::AddKeyConstraint { .. }) {
         let persistence = engine
             .table_persistence(&stmt.table)
@@ -224,10 +226,8 @@ fn run_alter_table_action(
         engine.ensure_no_pending_trigger_events(&stmt.table, "ALTER TABLE")?;
     }
     match action {
-        AlterTableAction::ChangeOwner { .. } => {
-            return Err(SQLError::Unsupported(
-                "ALTER TABLE OWNER TO is not supported for tables".into(),
-            ));
+        AlterTableAction::ChangeOwner { owner } => {
+            engine.alter_table_role_owner(&stmt.table, &owner)?;
         }
         action @ (AlterTableAction::AddInheritance { .. }
         | AlterTableAction::DropInheritance { .. }

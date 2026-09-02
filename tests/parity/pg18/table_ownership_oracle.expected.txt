@@ -1,0 +1,21 @@
+initial-owner|uqa_table_owner_source
+initial-sequence-owner|uqa_table_owner_source
+outsider-alter|42501|must be owner of table items
+outsider-drop|42501|must be owner of table items
+schema-owner-drop|ok
+member-alter|ok
+missing-owner|42704|role "uqa_table_owner_missing" does not exist
+owner-without-create|42501|permission denied for schema uqa_table_ownership_oracle
+owner-without-set|42501|must be able to SET ROLE "uqa_table_owner_no_set"
+owner-transfer|ok
+transferred-owner|uqa_table_owner_target
+transferred-sequence-owner|uqa_table_owner_target
+former-owner-alter|42501|must be owner of table items
+new-owner-alter|ok
+new-owner-no-set|42501|must be able to SET ROLE "uqa_table_owner_outsider"
+transaction-owner|uqa_table_owner_target
+rollback-owner|uqa_table_owner_source
+owner-drop-dependent|2BP01|role "uqa_table_owner_target" cannot be dropped because some objects depend on it
+superuser-transfer-no-create|ok
+superuser-transferred-owner|uqa_table_owner_no_create
+owner-drop-released|ok

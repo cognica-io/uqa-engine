@@ -116,6 +116,7 @@ impl Catalog {
         let vectors = serde_json::to_string(&schema.vector_fields)?;
         let columns = schema.columns_json.clone();
         let constraints = schema.constraints_json.clone();
+        let role_owner = schema.role_owner.clone();
         let object_id = schema.object_id;
         let storage_generation = schema.storage_generation;
         self.conn.with_mut(|c| {
@@ -124,8 +125,9 @@ impl Catalog {
             tx.execute(
                 "INSERT INTO _tables
                     (schema_name, relation_name, kind, analyzer, fts_fields,
-                     vector_fields, columns, constraints, storage_generation, object_id)
-                 VALUES (?1, ?2, 'table', ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                     vector_fields, columns, constraints, storage_generation, object_id,
+                     role_owner)
+                 VALUES (?1, ?2, 'table', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                  ON CONFLICT(schema_name, relation_name) DO UPDATE SET
                      analyzer = excluded.analyzer,
                      fts_fields = excluded.fts_fields,
@@ -133,7 +135,8 @@ impl Catalog {
                      columns = excluded.columns,
                      constraints = excluded.constraints,
                      storage_generation = excluded.storage_generation,
-                     object_id = excluded.object_id",
+                     object_id = excluded.object_id,
+                     role_owner = excluded.role_owner",
                 params![
                     schema.relation.schema,
                     schema.relation.name,
@@ -143,7 +146,8 @@ impl Catalog {
                     columns,
                     constraints,
                     storage_generation.as_slice(),
-                    object_id.as_slice()
+                    object_id.as_slice(),
+                    role_owner
                 ],
             )?;
             tx.commit()?;
@@ -155,7 +159,8 @@ impl Catalog {
         self.conn.with(|c| {
             let mut stmt = c.prepare(
                 "SELECT schema_name, relation_name, analyzer, fts_fields,
-                        vector_fields, columns, constraints, storage_generation, object_id
+                        vector_fields, columns, constraints, storage_generation, object_id,
+                        role_owner
                    FROM _tables ORDER BY schema_name, relation_name",
             )?;
             let rows = stmt.query_map([], |r| {
@@ -169,6 +174,7 @@ impl Catalog {
                     r.get::<_, String>(6)?,
                     r.get::<_, Vec<u8>>(7)?,
                     r.get::<_, Vec<u8>>(8)?,
+                    r.get::<_, String>(9)?,
                 ))
             })?;
             let mut out = Vec::new();
@@ -183,6 +189,7 @@ impl Catalog {
                     constraints_json,
                     storage_generation,
                     object_id,
+                    role_owner,
                 ) = row?;
                 let fts_fields: Vec<String> = serde_json::from_str(&fts_str)?;
                 let vector_fields: Vec<VectorFieldSchema> = serde_json::from_str(&vec_str)?;
@@ -200,6 +207,7 @@ impl Catalog {
                 })?;
                 out.push(TableSchema {
                     relation: RelationIdentity::new(schema_name, relation_name),
+                    role_owner,
                     object_id,
                     storage_generation,
                     analyzer_json,

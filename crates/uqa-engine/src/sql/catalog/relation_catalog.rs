@@ -85,6 +85,10 @@ pub(super) fn build_pg_class(
             int_value(table_rowtype_oid_from(catalog, resolution, &name)?),
         );
         row.insert(
+            "relowner".into(),
+            int_value(crate::engine_roles::role_oid(&table_snapshot.role_owner)),
+        );
+        row.insert(
             "relispartition".into(),
             bool_value(hierarchy.partition_bound.is_some()),
         );
@@ -190,6 +194,13 @@ pub(super) fn build_pg_class(
         index_row.insert(
             "relam".into(),
             int_value(index_access_method_oid(&index.index_type)),
+        );
+        let table = catalog
+            .table(resolution, &index.table_name)?
+            .ok_or_else(|| SQLError::UnknownTable(index.table_name.clone()))?;
+        index_row.insert(
+            "relowner".into(),
+            int_value(crate::engine_roles::role_oid(&table.role_owner)),
         );
         index_row.insert("relispartition".into(), bool_value(index.is_partition));
         index_row.insert("relhassubclass".into(), bool_value(index.has_children));
