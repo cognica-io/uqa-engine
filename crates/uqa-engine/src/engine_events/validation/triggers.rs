@@ -78,7 +78,7 @@ impl Engine {
             .collect())
     }
 
-    pub(crate) fn resolve_trigger_function(
+    fn resolve_trigger_function_candidate(
         &self,
         name: &str,
         lookup_mode: RelationLookupMode,
@@ -108,6 +108,10 @@ impl Engine {
                 })
             }
         };
+        Ok(function)
+    }
+
+    fn validate_trigger_function(function: &SQLUserFunction) -> Result<(), SQLError> {
         let returns_trigger = matches!(
             &function.def.returns,
             FunctionReturns::Scalar { type_name }
@@ -125,7 +129,47 @@ impl Engine {
                 message: "only LANGUAGE plpgsql trigger functions are executable".into(),
             });
         }
+        Ok(())
+    }
+
+    pub(crate) fn resolve_trigger_function(
+        &self,
+        name: &str,
+        lookup_mode: RelationLookupMode,
+    ) -> Result<Arc<SQLUserFunction>, SQLError> {
+        let function = self.resolve_trigger_function_candidate(name, lookup_mode)?;
+        Self::validate_trigger_function(&function)?;
         Ok(function)
+    }
+
+    fn ensure_trigger_creation_privilege(
+        &self,
+        relation: &RelationIdentity,
+        relation_kind: &str,
+    ) -> Result<(), SQLError> {
+        let canonical = relation.qualified_name();
+        match relation_kind {
+            "table" => self.ensure_table_privilege(
+                &canonical,
+                crate::engine_table_security::TableAclPrivilege::Trigger,
+            ),
+            "view" => {
+                let view = self
+                    .restored_catalog_view_definition(&canonical)?
+                    .ok_or_else(|| {
+                        SQLError::Internal(format!(
+                            "resolved trigger view `{canonical}` has no catalog definition"
+                        ))
+                    })?;
+                self.ensure_view_privilege_for(
+                    &canonical,
+                    &view,
+                    &self.current_user_name(),
+                    crate::engine_table_security::TableAclPrivilege::Trigger,
+                )
+            }
+            _ => Ok(()),
+        }
     }
 
     fn validate_trigger_relation_kind(
@@ -218,6 +262,9 @@ impl Engine {
             self.resolve_event_relation_kind(&definition.table, lookup_mode)?;
         definition.table = relation.qualified_name();
         Self::validate_trigger_relation_kind(definition, &relation, relation_kind)?;
+        if lookup_mode == RelationLookupMode::Dynamic {
+            self.ensure_trigger_creation_privilege(&relation, relation_kind)?;
+        }
         if let Some(referenced_table) = definition.referenced_table.as_mut() {
             let (referenced, referenced_kind) =
                 self.resolve_event_relation_kind(referenced_table, lookup_mode)?;
@@ -229,12 +276,13 @@ impl Engine {
             }
             *referenced_table = referenced.qualified_name();
         }
-        definition.function.clone_from(
-            &self
-                .resolve_trigger_function(&definition.function, lookup_mode)?
-                .def
-                .name,
-        );
+        let requested_function = definition.function.clone();
+        let function = self.resolve_trigger_function_candidate(&requested_function, lookup_mode)?;
+        if lookup_mode == RelationLookupMode::Dynamic {
+            self.ensure_routine_execute_privilege_named(&function.def, &requested_function)?;
+        }
+        Self::validate_trigger_function(&function)?;
+        definition.function.clone_from(&function.def.name);
         let columns = self.trigger_relation_columns(&relation, relation_kind)?;
         if relation_kind == "table" {
             self.validate_trigger_transition_relations(definition, &relation)?;

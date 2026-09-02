@@ -12,11 +12,52 @@ use uqa_sql::ast::{CreateRule, CreateTrigger, DropRule, DropTrigger, EventEnable
 use uqa_sql::SQLError;
 
 use crate::engine_capabilities::{RelationLookupMode, RelationResolution};
-use crate::{Engine, RelationIdentity};
+use crate::{Engine, RelationIdentity, StoredViewKind};
 
 use super::{duplicate_object, undefined_object, StoredRule, StoredTrigger};
 
 impl Engine {
+    fn event_relation_owner(
+        &self,
+        relation: &RelationIdentity,
+    ) -> Result<(String, &'static str), SQLError> {
+        if let Some(table) = self.storage.tables.read().get(relation) {
+            return Ok((table.role_owner(), "table"));
+        }
+        if let Some(view) = self.durable.views.read().get(relation) {
+            return Ok((
+                view.role_owner.clone(),
+                match view.kind {
+                    StoredViewKind::View => "view",
+                    StoredViewKind::Materialized => "materialized view",
+                },
+            ));
+        }
+        Err(SQLError::Internal(format!(
+            "event relation `{}` disappeared after resolution",
+            relation.qualified_name()
+        )))
+    }
+
+    fn ensure_event_relation_owner(
+        &self,
+        relation: &RelationIdentity,
+        error_kind: Option<&str>,
+    ) -> Result<(), SQLError> {
+        let (owner, relation_kind) = self.event_relation_owner(relation)?;
+        if self.current_user_has_role_privileges(&owner) {
+            return Ok(());
+        }
+        Err(SQLError::Routine {
+            sqlstate: "42501".into(),
+            message: format!(
+                "must be owner of {} {}",
+                error_kind.unwrap_or(relation_kind),
+                relation.name
+            ),
+        })
+    }
+
     fn bind_visible_event_drop_relation(
         &self,
         requested: &str,
@@ -215,16 +256,6 @@ impl Engine {
     pub(crate) fn register_trigger(&self, mut definition: CreateTrigger) -> Result<(), SQLError> {
         let relation =
             self.validate_trigger_definition(&mut definition, RelationLookupMode::Dynamic)?;
-        if self
-            .relation_kind_at(&relation.qualified_name())
-            .map_err(|error| SQLError::Internal(format!("resolve trigger target: {error}")))?
-            == Some("table")
-        {
-            self.ensure_table_privilege(
-                &relation.qualified_name(),
-                crate::engine_table_security::TableAclPrivilege::Trigger,
-            )?;
-        }
         self.ensure_partition_trigger_name_available(
             &relation,
             &definition.name,
@@ -280,6 +311,16 @@ impl Engine {
         };
         let mut bound = statement.clone();
         bound.table = table;
+        let relation = self.resolve_trigger_table(&bound.table)?;
+        let trigger_exists = {
+            let triggers = self.durable.triggers.read();
+            triggers
+                .get(&relation)
+                .is_some_and(|triggers| triggers.contains_key(&bound.name))
+        };
+        if trigger_exists {
+            self.ensure_event_relation_owner(&relation, Some("relation"))?;
+        }
         self.drop_trigger(&bound)
     }
 
@@ -370,7 +411,7 @@ impl Engine {
                 );
                 return Ok(());
             }
-            return Err(undefined_object("trigger", &statement.name, &table));
+            return Err(undefined_object("trigger", &statement.name, &relation.name));
         };
         if next.get(&relation).is_some_and(BTreeMap::is_empty) {
             next.remove(&relation);
@@ -387,6 +428,7 @@ impl Engine {
 
     pub(crate) fn rename_trigger(&self, table: &str, from: &str, to: &str) -> Result<(), SQLError> {
         let relation = self.resolve_trigger_table(table)?;
+        self.ensure_event_relation_owner(&relation, None)?;
         self.prepare_explicit_transaction_writer()?;
         let mut triggers = self.durable.triggers.write();
         let mut next = triggers.clone();

@@ -179,6 +179,17 @@ impl Engine {
         &self,
         definition: &CreateFunction,
     ) -> Result<(), SQLError> {
+        self.ensure_routine_execute_privilege_named(
+            definition,
+            &routine_local_name(&definition.name)?,
+        )
+    }
+
+    pub(crate) fn ensure_routine_execute_privilege_named(
+        &self,
+        definition: &CreateFunction,
+        display_name: &str,
+    ) -> Result<(), SQLError> {
         let current = self.current_user_name();
         let allowed = self.current_user_is_superuser()
             || self.current_user_has_role_privileges(&definition.owner)
@@ -197,7 +208,7 @@ impl Engine {
                 message: format!(
                     "permission denied for {} {}",
                     routine_kind(definition),
-                    routine_local_name(&definition.name)?
+                    display_name
                 ),
             })
         }

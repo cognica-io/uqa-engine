@@ -1,0 +1,31 @@
+table-denied|42501|permission denied for table denied_items
+schema-owner-denied|42501|permission denied for table denied_items
+member-create|ok
+granted-create|ok
+constraint-granted-create|ok
+view-granted-create|ok
+view-denied-create|42501|permission denied for view item_view
+function-denied|42501|permission denied for function uqa_trigger_privilege_oracle.denied_trigger
+table-before-missing-function|42501|permission denied for table denied_items
+wrong-return-before-table|42501|permission denied for table denied_items
+wrong-return-before-execute|42501|permission denied for function uqa_trigger_privilege_oracle.not_a_trigger
+replace-granted|ok
+replace-function-denied|42501|permission denied for function uqa_trigger_privilege_oracle.allowed_trigger
+duplicate-before-function-execute|42501|permission denied for function uqa_trigger_privilege_oracle.allowed_trigger
+runtime-create|ok
+runtime-after-revoke|ok
+runtime-state|1
+creator-drop-denied|42501|must be owner of relation creator_drop_items
+schema-owner-drop-denied|42501|must be owner of relation schema_drop_items
+outsider-missing|42704|trigger "missing_trigger" for table "missing_drop_items" does not exist
+outsider-if-exists-denied|ok
+member-drop|ok
+owner-drop|ok
+view-drop-denied|42501|must be owner of relation item_view
+view-owner-drop|ok
+creator-alter-denied|42501|must be owner of table alter_creator_items
+member-alter|ok
+view-creator-alter-denied|42501|must be owner of view item_view
+view-owner-alter|ok
+former-owner-drop-denied|42501|must be owner of relation transfer_items
+new-owner-drop|ok

@@ -216,7 +216,6 @@ pub(in crate::sql) fn execute_trigger_routine(
 ) -> Result<Value, SQLError> {
     let _guard = DepthGuard::enter(engine)?;
     let _transaction_context = RoutineTransactionGuard::enter(engine, false);
-    engine.ensure_routine_execute_privilege(&function.def)?;
     engine.with_routine_context(&function.def, || {
         let CompiledFunctionBody::PLpgSQL(parsed) = &function.compiled else {
             return Err(SQLError::Unsupported(

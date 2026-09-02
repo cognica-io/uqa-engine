@@ -14,6 +14,8 @@ use uqa_engine::Engine;
 mod constraint;
 #[path = "sql_triggers/instead_of.rs"]
 mod instead_of;
+#[path = "sql_triggers/privileges.rs"]
+mod privileges;
 #[path = "sql_triggers/review_regressions.rs"]
 mod review_regressions;
 #[path = "sql_triggers/row_images.rs"]
