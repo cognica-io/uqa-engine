@@ -17,7 +17,7 @@ use super::columns::{grant_column_acl, revoke_column_acl, select_column_acl_gran
 use super::{validate_table_security_invariants, TableAclPrivilege};
 use crate::engine_roles::{RoleDefinition, RoleMembership, RoleMembershipKey};
 use crate::engine_state::TableSecurity;
-use crate::{RelationIdentity, StoredView, TableState};
+use crate::{Engine, RelationIdentity, StoredView, TableState};
 
 pub(super) struct ResolvedTableGrantTarget {
     pub(super) requested: String,
@@ -186,6 +186,129 @@ impl TableGrantApplication<'_> {
 
 pub(super) type TablePrivilegeUpdate = (String, Arc<TableState>, TableSecurity);
 pub(super) type ViewPrivilegeUpdate = (RelationIdentity, StoredView);
+pub(super) type ForeignTablePrivilegeUpdate = (RelationIdentity, TableSecurity);
+pub(super) type ForeignTableGrantTarget<'a> =
+    (&'a ResolvedTableGrantTarget, TableSecurity, Vec<String>);
+
+pub(super) fn validated_table_grant_targets<'a>(
+    engine: &Engine,
+    targets: &'a [ResolvedTableGrantTarget],
+    requested: &RequestedTablePrivileges,
+) -> Result<Vec<(&'a ResolvedTableGrantTarget, Arc<TableState>)>, SQLError> {
+    let tables = engine.storage.tables.read();
+    targets
+        .iter()
+        .filter(|target| target.kind == "table")
+        .map(|target| {
+            let table = tables.get(&target.relation).cloned().ok_or_else(|| {
+                SQLError::Internal(format!("table `{}` disappeared", target.name))
+            })?;
+            let columns = table
+                .columns
+                .read()
+                .iter()
+                .map(|column| column.name.clone())
+                .collect::<Vec<_>>();
+            validate_requested_columns(&target.relation, &columns, requested)?;
+            Ok((target, table))
+        })
+        .collect()
+}
+
+pub(super) fn validated_view_grant_targets<'a>(
+    engine: &Engine,
+    targets: &'a [ResolvedTableGrantTarget],
+    requested: &RequestedTablePrivileges,
+) -> Result<Vec<(&'a ResolvedTableGrantTarget, StoredView)>, SQLError> {
+    let views = engine.durable.views.read();
+    let selected = targets
+        .iter()
+        .filter(|target| matches!(target.kind, "view" | "materialized view"))
+        .map(|target| {
+            let view = views
+                .get(&target.relation)
+                .cloned()
+                .ok_or_else(|| SQLError::Internal(format!("view `{}` disappeared", target.name)))?;
+            Ok((target, view))
+        })
+        .collect::<Result<Vec<_>, SQLError>>()?;
+    drop(views);
+    for (target, view) in &selected {
+        let columns = view.output_columns.as_deref().ok_or_else(|| {
+            SQLError::Internal(format!(
+                "loaded view `{}` has no durable public column metadata",
+                target.relation.qualified_name()
+            ))
+        })?;
+        validate_requested_columns(&target.relation, columns, requested)?;
+    }
+    Ok(selected)
+}
+
+pub(super) fn persist_table_privilege_updates(
+    engine: &Engine,
+    updates: &[TablePrivilegeUpdate],
+    view_updates: &[ViewPrivilegeUpdate],
+    foreign_updates: &[ForeignTablePrivilegeUpdate],
+) -> Result<(), SQLError> {
+    for (name, table, security) in updates {
+        engine.persist_table_security(name, table, security)?;
+    }
+    if let Some(catalog) = engine.storage.catalog.as_ref() {
+        for (relation, view) in view_updates {
+            if view.persistence == uqa_sql::ast::RelationPersistence::Temporary {
+                continue;
+            }
+            let row = crate::engine_session::catalog_view_row(relation, view).map_err(|error| {
+                SQLError::Internal(format!(
+                    "serialize view privileges for `{}`: {error}",
+                    relation.qualified_name()
+                ))
+            })?;
+            catalog.save_view(&row).map_err(|error| {
+                SQLError::Internal(format!(
+                    "persist view privileges for `{}`: {error}",
+                    relation.qualified_name()
+                ))
+            })?;
+        }
+    }
+    for (relation, security) in foreign_updates {
+        engine.persist_foreign_table_security(relation, security)?;
+    }
+    Ok(())
+}
+
+pub(super) fn validated_foreign_table_grant_targets<'a>(
+    engine: &Engine,
+    targets: &'a [ResolvedTableGrantTarget],
+    requested: &RequestedTablePrivileges,
+) -> Result<Vec<ForeignTableGrantTarget<'a>>, SQLError> {
+    let tables = engine.durable.foreign_tables.read();
+    let securities = engine.durable.foreign_table_security.read();
+    targets
+        .iter()
+        .filter(|target| target.kind == "foreign table")
+        .map(|target| {
+            let table = tables.get(&target.relation).ok_or_else(|| {
+                SQLError::Internal(format!("foreign table `{}` disappeared", target.name))
+            })?;
+            let security = securities.get(&target.relation).cloned().ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "foreign table `{}` has no loaded security metadata",
+                    target.name
+                ))
+            })?;
+            let columns = table
+                .columns
+                .iter()
+                .map(|column| column.name.clone())
+                .collect::<Vec<_>>();
+            validate_requested_columns(&target.relation, &columns, requested)?;
+            Ok((target, security, columns))
+        })
+        .collect()
+}
 
 pub(super) fn table_privilege_updates(
     targets: Vec<(&ResolvedTableGrantTarget, Arc<TableState>)>,
@@ -236,6 +359,30 @@ pub(super) fn view_privilege_updates(
     Ok(updates)
 }
 
+pub(super) fn foreign_table_privilege_updates(
+    targets: Vec<ForeignTableGrantTarget<'_>>,
+    application: &TableGrantApplication<'_>,
+    notices: &mut Vec<(&'static str, String)>,
+) -> Result<Vec<ForeignTablePrivilegeUpdate>, SQLError> {
+    let mut updates = Vec::new();
+    for (target, current, columns) in targets {
+        let (next, grantable) = application.apply(&current)?;
+        validate_table_security_invariants(&next, Some(&columns), application.roles).map_err(
+            |error| {
+                SQLError::Internal(format!(
+                    "foreign table `{}` produced invalid privilege metadata: {error}",
+                    target.relation.qualified_name()
+                ))
+            },
+        )?;
+        application.record_warning(grantable, &target.relation, notices);
+        if next != current {
+            updates.push((target.relation.clone(), next));
+        }
+    }
+    Ok(updates)
+}
+
 pub(super) fn validate_requested_columns(
     target: &RelationIdentity,
     columns: &[String],
@@ -262,7 +409,7 @@ pub(super) fn validate_table_grant_target_kinds(
     for target in targets {
         if !matches!(
             target.kind,
-            "table" | "view" | "materialized view" | "sequence"
+            "table" | "view" | "materialized view" | "foreign table" | "sequence"
         ) {
             return Err(SQLError::Unsupported(format!(
                 "{} privileges for \"{}\" are not supported",

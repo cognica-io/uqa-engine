@@ -48,7 +48,7 @@ The persistent catalog records:
 - Relational catalog indexes and statistics
 - Named graphs, vertices, edges, memberships, deltas, and path indexes
 - Scoring parameters and calibration models
-- Foreign servers, tables, and foreign-table role ownership
+- Foreign servers and foreign tables with atomically paired role ownership, relation ACLs, and column ACLs
 - Serializable ML model definitions
 - SQL and PL/pgSQL routines
 

@@ -6,7 +6,11 @@
 
 //! Virtual `information_schema` relation builders.
 
+mod foreign_tables;
+
 use std::collections::BTreeSet;
+
+use foreign_tables::{foreign_information_schema_column, insert_foreign_table_column_privileges};
 
 use super::builtin_routines::PG18_BUILTIN_ROUTINE_GROUPS;
 use super::expression_text::{default_expr_text, schema_expr_text};
@@ -129,6 +133,9 @@ pub(super) fn build_info_tables(
         ]));
     }
     for name in catalog.foreign_table_names() {
+        if !catalog.foreign_table_is_visible_to(&name, resolution.current_user())? {
+            continue;
+        }
         let (schema, table) = split_schema_name(&name)?;
         out.push(row([
             ("table_catalog", catalog_name()),
@@ -140,7 +147,7 @@ pub(super) fn build_info_tables(
             ("user_defined_type_catalog", Value::Null),
             ("user_defined_type_schema", Value::Null),
             ("user_defined_type_name", Value::Null),
-            ("is_insertable_into", str_value("YES")),
+            ("is_insertable_into", str_value("NO")),
             ("is_typed", str_value("NO")),
             ("commit_action", Value::Null),
         ]));
@@ -358,6 +365,28 @@ pub(super) fn build_info_columns(
             )?);
         }
     }
+    for (foreign_name, foreign_table) in catalog.foreign_tables() {
+        if !catalog.foreign_table_is_visible_to(&foreign_name, resolution.current_user())? {
+            continue;
+        }
+        let (schema, table) = split_schema_name(&foreign_name)?;
+        for (idx, column) in foreign_table.columns.iter().enumerate() {
+            if !catalog.foreign_table_column_is_visible_to(
+                &foreign_name,
+                &column.name,
+                resolution.current_user(),
+            )? {
+                continue;
+            }
+            out.push(information_schema_column_row(
+                schema.clone(),
+                table.clone(),
+                idx,
+                &foreign_information_schema_column(column),
+                false,
+            )?);
+        }
+    }
     out.extend(super::ag_catalog::age_info_column_rows(catalog)?);
     Ok(out)
 }
@@ -515,6 +544,7 @@ pub(super) fn build_info_column_privileges(
         }
     }
     insert_view_column_privileges(engine, catalog, resolution, &mut privileges)?;
+    insert_foreign_table_column_privileges(catalog, &mut privileges)?;
 
     Ok(privileges
         .into_iter()

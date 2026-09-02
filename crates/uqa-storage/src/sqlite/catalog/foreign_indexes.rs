@@ -8,7 +8,7 @@
 
 use super::{
     params, Catalog, CatalogIndexRow, ForeignTableRow, RelationIdentity, RelationKind, Result,
-    SQLiteError,
+    SQLiteError, TableAclEntry,
 };
 
 impl Catalog {
@@ -61,28 +61,25 @@ impl Catalog {
 
     // -- Foreign tables ----------------------------------------------------
 
-    pub fn save_foreign_table(
-        &self,
-        relation: &RelationIdentity,
-        role_owner: &str,
-        server_name: &str,
-        columns_json: &str,
-        options_json: &str,
-    ) -> Result<()> {
+    pub fn save_foreign_table(&self, row: &ForeignTableRow) -> Result<()> {
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
-            Self::claim_relation(&tx, relation, RelationKind::ForeignTable)?;
+            Self::claim_relation(&tx, &row.relation, RelationKind::ForeignTable)?;
+            let acl_json = row.acl.as_deref().map(serde_json::to_string).transpose()?;
+            let column_acls_json = serde_json::to_string(&row.column_acls)?;
             tx.execute(
                 "INSERT OR REPLACE INTO _foreign_tables \
-                    (schema_name, relation_name, kind, role_owner, server_name, columns_json, options) \
-                 VALUES (?1, ?2, 'foreign_table', ?3, ?4, ?5, ?6)",
+                    (schema_name, relation_name, kind, role_owner, acl_json, column_acls_json, server_name, columns_json, options) \
+                 VALUES (?1, ?2, 'foreign_table', ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![
-                    relation.schema,
-                    relation.name,
-                    role_owner,
-                    server_name,
-                    columns_json,
-                    options_json
+                    row.relation.schema,
+                    row.relation.name,
+                    row.role_owner,
+                    acl_json,
+                    column_acls_json,
+                    row.server_name,
+                    row.columns_json,
+                    row.options_json
                 ],
             )?;
             tx.commit()?;
@@ -90,16 +87,27 @@ impl Catalog {
         })
     }
 
-    pub fn update_foreign_table_role_owner(
+    pub fn update_foreign_table_security(
         &self,
         relation: &RelationIdentity,
         role_owner: &str,
+        acl: Option<&[TableAclEntry]>,
+        column_acls: &std::collections::BTreeMap<String, Vec<TableAclEntry>>,
     ) -> Result<bool> {
         self.conn.with_mut(|connection| {
+            let acl_json = acl.map(serde_json::to_string).transpose()?;
+            let column_acls_json = serde_json::to_string(column_acls)?;
             Ok(connection.execute(
-                "UPDATE _foreign_tables SET role_owner = ?3
+                "UPDATE _foreign_tables
+                    SET role_owner = ?3, acl_json = ?4, column_acls_json = ?5
                   WHERE schema_name = ?1 AND relation_name = ?2",
-                params![relation.schema, relation.name, role_owner],
+                params![
+                    relation.schema,
+                    relation.name,
+                    role_owner,
+                    acl_json,
+                    column_acls_json
+                ],
             )? != 0)
         })
     }
@@ -123,7 +131,7 @@ impl Catalog {
     pub fn load_foreign_tables(&self) -> Result<Vec<ForeignTableRow>> {
         self.conn.with(|c| {
             let mut stmt = c.prepare(
-                "SELECT schema_name, relation_name, role_owner, server_name, columns_json, options
+                "SELECT schema_name, relation_name, role_owner, acl_json, column_acls_json, server_name, columns_json, options
                    FROM _foreign_tables ORDER BY schema_name, relation_name",
             )?;
             let rows = stmt.query_map([], |r| {
@@ -131,17 +139,24 @@ impl Catalog {
                     r.get::<_, String>(0)?,
                     r.get::<_, String>(1)?,
                     r.get::<_, String>(2)?,
-                    r.get::<_, String>(3)?,
+                    r.get::<_, Option<String>>(3)?,
                     r.get::<_, String>(4)?,
                     r.get::<_, String>(5)?,
+                    r.get::<_, String>(6)?,
+                    r.get::<_, String>(7)?,
                 ))
             })?;
             let mut out = Vec::new();
             for row in rows {
-                let (schema, name, owner, server, cols, opts) = row?;
+                let (schema, name, owner, acl_json, column_acls_json, server, cols, opts) = row?;
                 out.push(ForeignTableRow {
                     relation: RelationIdentity::new(schema, name),
                     role_owner: owner,
+                    acl: acl_json
+                        .as_deref()
+                        .map(serde_json::from_str)
+                        .transpose()?,
+                    column_acls: serde_json::from_str(&column_acls_json)?,
                     server_name: server,
                     columns_json: cols,
                     options_json: opts,

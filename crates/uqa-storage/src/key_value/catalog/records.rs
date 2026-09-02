@@ -10,6 +10,7 @@ use super::{Deserialize, RelationKind, Serialize};
 
 pub(super) const LEGACY_VIEWS_METADATA_KEY: &str = "sql_views_json";
 pub(super) const LEGACY_SEQUENCES_METADATA_KEY: &str = "sql_sequences_json";
+pub(super) const STORED_FOREIGN_TABLE_SECURITY_VERSION: u8 = 1;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct StoredVertex {
@@ -32,7 +33,20 @@ pub(super) struct StoredForeignServer {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct StoredForeignTable {
+    pub(super) security_version: u8,
+    pub(super) role_owner: String,
+    pub(super) acl: Option<Vec<crate::catalog::TableAclEntry>>,
+    pub(super) column_acls: std::collections::BTreeMap<String, Vec<crate::catalog::TableAclEntry>>,
+    pub(super) server_name: String,
+    pub(super) columns_json: String,
+    pub(super) options_json: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct OwnedStoredForeignTable {
     pub(super) role_owner: String,
     pub(super) server_name: String,
     pub(super) columns_json: String,

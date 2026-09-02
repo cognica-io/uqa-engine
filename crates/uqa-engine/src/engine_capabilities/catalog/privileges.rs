@@ -137,4 +137,63 @@ impl CatalogReadView {
             .into_iter()
             .any(|privilege| self.view_column_has_privilege_to(view, column, role, privilege))
     }
+
+    pub(crate) fn foreign_table_is_visible_to(
+        &self,
+        name: &str,
+        role: &str,
+    ) -> Result<bool, uqa_sql::SQLError> {
+        Ok(crate::engine_table_security::role_can_view_table(
+            self.foreign_table_security(name)?,
+            role,
+            &self.snapshot.durable.roles,
+            &self.snapshot.durable.role_memberships,
+        ))
+    }
+
+    pub(crate) fn foreign_table_has_privilege_to(
+        &self,
+        name: &str,
+        role: &str,
+        privilege: crate::engine_table_security::TableAclPrivilege,
+    ) -> Result<bool, uqa_sql::SQLError> {
+        Ok(crate::engine_table_security::role_has_table_privilege(
+            self.foreign_table_security(name)?,
+            role,
+            privilege,
+            &self.snapshot.durable.roles,
+            &self.snapshot.durable.role_memberships,
+        ))
+    }
+
+    pub(crate) fn foreign_table_column_has_privilege_to(
+        &self,
+        name: &str,
+        column: &str,
+        role: &str,
+        privilege: crate::engine_table_security::TableAclPrivilege,
+    ) -> Result<bool, uqa_sql::SQLError> {
+        Ok(crate::engine_table_security::role_has_column_privilege(
+            self.foreign_table_security(name)?,
+            column,
+            role,
+            privilege,
+            &self.snapshot.durable.roles,
+            &self.snapshot.durable.role_memberships,
+        ))
+    }
+
+    pub(crate) fn foreign_table_column_is_visible_to(
+        &self,
+        name: &str,
+        column: &str,
+        role: &str,
+    ) -> Result<bool, uqa_sql::SQLError> {
+        for privilege in crate::engine_table_security::TableAclPrivilege::COLUMN_ALL {
+            if self.foreign_table_column_has_privilege_to(name, column, role, privilege)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
 }

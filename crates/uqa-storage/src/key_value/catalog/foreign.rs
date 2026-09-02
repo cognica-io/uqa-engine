@@ -9,8 +9,8 @@
 use super::{
     decode_relation_key, decode_value, encode_value, key_with_tag, read_str, relation_key,
     single_str_key, ForeignTableRow, KeyValueCatalog, RelationIdentity, RelationKind,
-    StorageBackendResult, StoredForeignServer, StoredForeignTable, TAG_FOREIGN_SERVER,
-    TAG_FOREIGN_TABLE,
+    StorageBackendError, StorageBackendResult, StoredForeignServer, StoredForeignTable,
+    TableAclEntry, STORED_FOREIGN_TABLE_SECURITY_VERSION, TAG_FOREIGN_SERVER, TAG_FOREIGN_TABLE,
 };
 
 impl KeyValueCatalog {
@@ -50,37 +50,47 @@ impl KeyValueCatalog {
 
     pub(super) fn save_foreign_table_impl(
         &self,
-        relation: &RelationIdentity,
-        role_owner: &str,
-        server_name: &str,
-        columns_json: &str,
-        options_json: &str,
+        row: &ForeignTableRow,
     ) -> StorageBackendResult<()> {
         let mut batch = self.store.batch();
-        self.claim_relation(batch.as_mut(), relation, RelationKind::ForeignTable)?;
+        self.claim_relation(batch.as_mut(), &row.relation, RelationKind::ForeignTable)?;
         batch.put(
-            &relation_key(TAG_FOREIGN_TABLE, relation)?,
+            &relation_key(TAG_FOREIGN_TABLE, &row.relation)?,
             &encode_value(&StoredForeignTable {
-                role_owner: role_owner.to_string(),
-                server_name: server_name.to_string(),
-                columns_json: columns_json.to_string(),
-                options_json: options_json.to_string(),
+                security_version: STORED_FOREIGN_TABLE_SECURITY_VERSION,
+                role_owner: row.role_owner.clone(),
+                acl: row.acl.clone(),
+                column_acls: row.column_acls.clone(),
+                server_name: row.server_name.clone(),
+                columns_json: row.columns_json.clone(),
+                options_json: row.options_json.clone(),
             })?,
         )?;
         batch.commit()
     }
 
-    pub(super) fn update_foreign_table_role_owner_impl(
+    pub(super) fn update_foreign_table_security_impl(
         &self,
         relation: &RelationIdentity,
         role_owner: &str,
+        acl: Option<&[TableAclEntry]>,
+        column_acls: &std::collections::BTreeMap<String, Vec<TableAclEntry>>,
     ) -> StorageBackendResult<bool> {
         let key = relation_key(TAG_FOREIGN_TABLE, relation)?;
         let Some(value) = self.store.get(&key)? else {
             return Ok(false);
         };
         let mut stored: StoredForeignTable = decode_value(&value)?;
+        if stored.security_version != STORED_FOREIGN_TABLE_SECURITY_VERSION {
+            return Err(StorageBackendError::Other(format!(
+                "foreign-table catalog record `{}` has unsupported security version {}",
+                relation.qualified_name(),
+                stored.security_version
+            )));
+        }
         stored.role_owner = role_owner.to_string();
+        stored.acl = acl.map(<[TableAclEntry]>::to_vec);
+        stored.column_acls.clone_from(column_acls);
         self.store.put(&key, &encode_value(&stored)?)?;
         Ok(true)
     }
@@ -100,9 +110,18 @@ impl KeyValueCatalog {
         for (key, value) in self.store.scan_prefix(&key_with_tag(TAG_FOREIGN_TABLE))? {
             let relation = decode_relation_key(&key)?;
             let stored: StoredForeignTable = decode_value(&value)?;
+            if stored.security_version != STORED_FOREIGN_TABLE_SECURITY_VERSION {
+                return Err(StorageBackendError::Other(format!(
+                    "foreign-table catalog record `{}` has unsupported security version {}",
+                    relation.qualified_name(),
+                    stored.security_version
+                )));
+            }
             rows.push(ForeignTableRow {
                 relation,
                 role_owner: stored.role_owner,
+                acl: stored.acl,
+                column_acls: stored.column_acls,
                 server_name: stored.server_name,
                 columns_json: stored.columns_json,
                 options_json: stored.options_json,

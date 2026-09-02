@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Durable foreign-table ownership policy.
+//! Durable foreign-table ownership and access-control policy.
 
 use super::{Engine, RelationIdentity, SQLError};
 use crate::engine_capabilities::RelationResolution;
@@ -33,7 +33,7 @@ impl Engine {
             .cloned()
             .ok_or_else(|| {
                 SQLError::Internal(format!(
-                    "foreign table `{name}` has no loaded ownership metadata"
+                    "foreign table `{name}` has no loaded security metadata"
                 ))
             })?;
         Ok((relation, security))
@@ -63,6 +63,36 @@ impl Engine {
             sqlstate: "42501".into(),
             message: format!("must be owner of foreign table {}", relation.name),
         })
+    }
+
+    pub(crate) fn persist_foreign_table_security(
+        &self,
+        relation: &RelationIdentity,
+        security: &TableSecurity,
+    ) -> Result<(), SQLError> {
+        let Some(catalog) = self.storage.catalog.as_ref() else {
+            return Ok(());
+        };
+        let updated = catalog
+            .update_foreign_table_security(
+                relation,
+                &security.role_owner,
+                security.acl.as_deref(),
+                &security.column_acls,
+            )
+            .map_err(|error| {
+                SQLError::Internal(format!(
+                    "persist foreign table security for `{}`: {error}",
+                    relation.qualified_name()
+                ))
+            })?;
+        if !updated {
+            return Err(SQLError::Internal(format!(
+                "foreign table `{}` disappeared from durable catalog before security update",
+                relation.qualified_name()
+            )));
+        }
+        Ok(())
     }
 
     fn alter_foreign_table_role_owner(
@@ -131,18 +161,7 @@ impl Engine {
                 "foreign table `{name}` produced invalid ownership metadata after owner transfer: {error}"
             ))
         })?;
-        if let Some(catalog) = self.storage.catalog.as_ref() {
-            let updated = catalog
-                .update_foreign_table_role_owner(&relation, &new_owner)
-                .map_err(|error| {
-                    SQLError::Internal(format!("persist foreign table owner: {error}"))
-                })?;
-            if !updated {
-                return Err(SQLError::Internal(format!(
-                    "foreign table `{name}` disappeared from durable catalog before owner update"
-                )));
-            }
-        }
+        self.persist_foreign_table_security(&relation, &security)?;
         self.durable
             .foreign_table_security
             .write()

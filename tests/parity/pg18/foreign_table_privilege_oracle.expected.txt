@@ -1,0 +1,20 @@
+defaults|true|true
+relation-acl|{uqa_foreign_acl_owner=arwdDxtm/uqa_foreign_acl_owner,uqa_foreign_acl_delegate=r*/uqa_foreign_acl_owner,uqa_foreign_acl_reader=r/uqa_foreign_acl_delegate}
+column-acl|{uqa_foreign_acl_column_reader=r/uqa_foreign_acl_owner}
+all-acl|{uqa_foreign_acl_owner=arwdDxtm/uqa_foreign_acl_owner,uqa_foreign_acl_outsider=arwdDxtm/uqa_foreign_acl_owner}
+column-write-acl|{uqa_foreign_acl_column_reader=awx/uqa_foreign_acl_owner}
+inquiry|true|true|true|true|false
+select-denied|42501|permission denied for foreign table items
+select-granted|ok
+column-select-granted|ok
+column-select-denied|42501|permission denied for foreign table items
+column-count-granted|ok
+information-schema|2|id|id:SELECT|FOREIGN:NO|NO
+dependent-restrict|2BP01|dependent privileges exist
+cascade|true|false|false
+transaction-grant|true
+rollback-grant|false
+all-tables-schema|true|true
+owner-transfer|uqa_foreign_acl_next_owner|{uqa_foreign_acl_next_owner=arwdDxtm/uqa_foreign_acl_next_owner,uqa_foreign_acl_delegate=r*/uqa_foreign_acl_next_owner,uqa_foreign_acl_reader=r/uqa_foreign_acl_delegate,uqa_foreign_acl_outsider=r/uqa_foreign_acl_next_owner}
+owner-transfer-column|{uqa_foreign_acl_column_reader=r/uqa_foreign_acl_next_owner}
+grant-role-dependent|2BP01|role "uqa_foreign_acl_delegate" cannot be dropped because some objects depend on it

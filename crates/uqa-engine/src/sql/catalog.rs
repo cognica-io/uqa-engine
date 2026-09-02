@@ -183,6 +183,10 @@ pub(crate) fn view_relation_oid(
     };
     helpers::oids::relation_oid(relkind, &relation.schema, &relation.name)
 }
+
+pub(crate) fn foreign_table_relation_oid(relation: &crate::RelationIdentity) -> i64 {
+    helpers::oids::relation_oid("f", &relation.schema, &relation.name)
+}
 pub(crate) fn snapshot_table_relation_oid(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,

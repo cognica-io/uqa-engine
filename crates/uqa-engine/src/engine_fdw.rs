@@ -355,7 +355,7 @@ impl Engine {
         if tables.contains_key(&relation) {
             if !table_security.contains_key(&relation) {
                 return Err(format!(
-                    "Foreign table `{name}` has no loaded ownership metadata"
+                    "Foreign table `{name}` has no loaded security metadata"
                 ));
             }
             if if_not_exists {
@@ -365,7 +365,7 @@ impl Engine {
         }
         if table_security.contains_key(&relation) {
             return Err(format!(
-                "Foreign table ownership metadata exists without table `{name}`"
+                "Foreign table security metadata exists without table `{name}`"
             ));
         }
         if !server_exists {
@@ -390,26 +390,26 @@ impl Engine {
             options: opt_map.clone(),
         };
         let role_owner = self.current_user_name();
+        let security = crate::engine_state::TableSecurity::owner(role_owner);
         if let Some(catalog) = self.storage.catalog.as_ref() {
             let columns_json = serde_json::to_string(columns)
                 .map_err(|err| format!("serialize foreign table `{name}` columns: {err}"))?;
             let options_json = serde_json::to_string(&opt_map)
                 .map_err(|err| format!("serialize foreign table `{name}` options: {err}"))?;
             catalog
-                .save_foreign_table(
-                    &relation,
-                    &role_owner,
-                    server_name,
-                    &columns_json,
-                    &options_json,
-                )
+                .save_foreign_table(&uqa_storage::ForeignTableRow {
+                    relation: relation.clone(),
+                    role_owner: security.role_owner.clone(),
+                    acl: security.acl.clone(),
+                    column_acls: security.column_acls.clone(),
+                    server_name: server_name.to_string(),
+                    columns_json,
+                    options_json,
+                })
                 .map_err(|err| format!("persist foreign table `{name}`: {err}"))?;
         }
         tables.insert(relation.clone(), table);
-        table_security.insert(
-            relation,
-            crate::engine_state::TableSecurity::owner(role_owner),
-        );
+        table_security.insert(relation, security);
         drop(table_security);
         drop(tables);
         self.note_catalog_registry_changed();
@@ -471,7 +471,7 @@ impl Engine {
         }
         if !table_security.contains_key(&relation) {
             return Err(format!(
-                "Foreign table `{name}` has no loaded ownership metadata"
+                "Foreign table `{name}` has no loaded security metadata"
             ));
         }
         if let Some(catalog) = self.storage.catalog.as_ref() {

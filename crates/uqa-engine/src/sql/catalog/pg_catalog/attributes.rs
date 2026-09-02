@@ -155,6 +155,7 @@ pub(in crate::sql::catalog) fn build_pg_attribute(
     for (table_name, foreign_table) in catalog.foreign_tables() {
         let (schema, table) = split_schema_name(&table_name)?;
         let relid = relation_oid("f", &schema, &table);
+        let security = catalog.foreign_table_security(&table_name)?;
         for (idx, column) in foreign_table.columns.into_iter().enumerate() {
             let col = SQLColumnDef {
                 name: column.name,
@@ -178,11 +179,19 @@ pub(in crate::sql::catalog) fn build_pg_attribute(
                 check_no_inherit: false,
                 references: None,
             };
-            out.push(pg_attribute_row(
+            let mut attribute = pg_attribute_row(
                 relid,
                 catalog_ordinal(idx, "pg_attribute foreign-table column")?,
                 &col,
-            ));
+            );
+            attribute.insert(
+                "attacl".into(),
+                super::super::relation_catalog::table_acl_catalog_value(
+                    &security.role_owner,
+                    security.column_acls.get(&col.name),
+                )?,
+            );
+            out.push(attribute);
         }
     }
     for (_, _, object_id, _) in catalog.sequences() {

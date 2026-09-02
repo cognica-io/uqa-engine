@@ -9,8 +9,9 @@
 use super::physical_indexes::table_index_prefixes;
 use super::records::{
     LegacySequenceState, LegacyStoredForeignTable, LegacyStoredView, LegacyTableSchema,
-    StoredCatalogIndex, StoredForeignTable, StoredRelation, StoredSequence, StoredView,
-    LEGACY_SEQUENCES_METADATA_KEY, LEGACY_VIEWS_METADATA_KEY,
+    OwnedStoredForeignTable, StoredCatalogIndex, StoredForeignTable, StoredRelation,
+    StoredSequence, StoredView, LEGACY_SEQUENCES_METADATA_KEY, LEGACY_VIEWS_METADATA_KEY,
+    STORED_FOREIGN_TABLE_SECURITY_VERSION,
 };
 use super::{
     batch_rekey_prefix, column_stats_prefix, decode_catalog_relation_key, decode_relation_key,
@@ -197,20 +198,43 @@ pub(super) fn collect_foreign_migrations(
     let mut rows = Vec::new();
     for (key, value) in store.scan_prefix(&key_with_tag(TAG_FOREIGN_TABLE))? {
         let (relation, _, source) = decode_catalog_relation_key(&key)?;
-        let stored = decode_value::<StoredForeignTable>(&value).or_else(|current_error| {
-            decode_value::<LegacyStoredForeignTable>(&value)
-                .map(|legacy| StoredForeignTable {
-                    role_owner: "uqa".into(),
+        let stored = match decode_value::<StoredForeignTable>(&value) {
+            Ok(stored) if stored.security_version == STORED_FOREIGN_TABLE_SECURITY_VERSION => {
+                stored
+            }
+            Ok(stored) => {
+                return Err(StorageBackendError::Other(format!(
+                    "foreign-table catalog record `{source}` has unsupported security version {}",
+                    stored.security_version
+                )))
+            }
+            Err(current_error) => match decode_value::<OwnedStoredForeignTable>(&value) {
+                Ok(legacy) => StoredForeignTable {
+                    security_version: STORED_FOREIGN_TABLE_SECURITY_VERSION,
+                    role_owner: legacy.role_owner,
+                    acl: None,
+                    column_acls: std::collections::BTreeMap::new(),
                     server_name: legacy.server_name,
                     columns_json: legacy.columns_json,
                     options_json: legacy.options_json,
-                })
-                .map_err(|legacy_error| {
-                    StorageBackendError::Other(format!(
-                        "decode foreign-table catalog record `{source}` as current ({current_error}) or legacy ({legacy_error})"
-                    ))
-                })
-        })?;
+                },
+                Err(owned_error) => decode_value::<LegacyStoredForeignTable>(&value)
+                    .map(|legacy| StoredForeignTable {
+                        security_version: STORED_FOREIGN_TABLE_SECURITY_VERSION,
+                        role_owner: "uqa".into(),
+                        acl: None,
+                        column_acls: std::collections::BTreeMap::new(),
+                        server_name: legacy.server_name,
+                        columns_json: legacy.columns_json,
+                        options_json: legacy.options_json,
+                    })
+                    .map_err(|legacy_error| {
+                        StorageBackendError::Other(format!(
+                            "decode foreign-table catalog record `{source}` as current ({current_error}), owned legacy ({owned_error}), or ownerless legacy ({legacy_error})"
+                        ))
+                    })?,
+            },
+        };
         register_migration_relation(seen, &relation, RelationKind::ForeignTable, source)?;
         rows.push(ForeignMigration {
             old_key: key,

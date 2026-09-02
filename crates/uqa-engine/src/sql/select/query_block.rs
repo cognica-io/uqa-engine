@@ -93,6 +93,7 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
                     .map(|(canonical, _)| canonical.as_str())
                     .expect("foreign table presence checked above");
                 validate_query_block_references(engine, stmt, &expression_schema, params, ctes)?;
+                ensure_select_privileges_for_query_block(stmt, from, ctes)?;
                 return run_single_foreign_select_output(
                     engine,
                     SingleRelation {

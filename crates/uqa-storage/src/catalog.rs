@@ -276,6 +276,10 @@ pub struct ForeignTableRow {
     pub relation: RelationIdentity,
     /// SQL role that owns the foreign table. Catalogs created before foreign-table role ownership was persisted belong to the bootstrap role.
     pub role_owner: String,
+    /// Explicit relation-wide ACL. `None` preserves `PostgreSQL`'s implicit owner-only default ACL.
+    pub acl: Option<Vec<TableAclEntry>>,
+    /// Explicit per-column ACL paths keyed by the foreign table's public column name.
+    pub column_acls: std::collections::BTreeMap<String, Vec<TableAclEntry>>,
     pub server_name: String,
     pub columns_json: String,
     pub options_json: String,
@@ -781,18 +785,13 @@ pub trait CatalogFacade: Send + Sync {
     fn drop_foreign_server(&self, name: &str) -> StorageBackendResult<()>;
     fn load_foreign_servers(&self) -> StorageBackendResult<Vec<(String, String, String)>>;
 
-    fn save_foreign_table(
+    fn save_foreign_table(&self, row: &ForeignTableRow) -> StorageBackendResult<()>;
+    fn update_foreign_table_security(
         &self,
         relation: &RelationIdentity,
         role_owner: &str,
-        server_name: &str,
-        columns_json: &str,
-        options_json: &str,
-    ) -> StorageBackendResult<()>;
-    fn update_foreign_table_role_owner(
-        &self,
-        relation: &RelationIdentity,
-        role_owner: &str,
+        acl: Option<&[TableAclEntry]>,
+        column_acls: &std::collections::BTreeMap<String, Vec<TableAclEntry>>,
     ) -> StorageBackendResult<bool>;
     fn drop_foreign_table(&self, relation: &RelationIdentity) -> StorageBackendResult<()>;
     fn load_foreign_tables(&self) -> StorageBackendResult<Vec<ForeignTableRow>>;

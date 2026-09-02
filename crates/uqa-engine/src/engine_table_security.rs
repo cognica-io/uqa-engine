@@ -27,9 +27,11 @@ use acl::{
 pub(crate) use acl::{rewrite_acl_owner, TableAclPrivilege};
 use columns::{column_grant_option_roles, role_has_column_privilege as column_privilege_check};
 use grants::{
-    table_privilege_updates, table_sequence_privileges, validate_requested_columns,
-    validate_table_acl_roles, validate_table_grant_target_kinds, view_privilege_updates,
-    ResolvedTableGrantTarget, TableGrantApplication,
+    foreign_table_privilege_updates, persist_table_privilege_updates, table_privilege_updates,
+    table_sequence_privileges, validate_table_acl_roles, validate_table_grant_target_kinds,
+    validated_foreign_table_grant_targets, validated_table_grant_targets,
+    validated_view_grant_targets, view_privilege_updates, ResolvedTableGrantTarget,
+    TableGrantApplication,
 };
 
 use crate::engine_capabilities::RelationResolution;
@@ -41,6 +43,7 @@ use crate::{Engine, RelationIdentity, TableState};
 enum ResolvedTablePrivilegeTarget {
     Table(RelationIdentity),
     View(RelationIdentity),
+    ForeignTable(RelationIdentity),
     Sequence(RelationIdentity),
 }
 
@@ -234,9 +237,12 @@ impl Engine {
         )?;
 
         validate_table_grant_target_kinds(statement, &targets)?;
-        let has_table_relations = targets
-            .iter()
-            .any(|target| matches!(target.kind, "table" | "view" | "materialized view"));
+        let has_table_relations = targets.iter().any(|target| {
+            matches!(
+                target.kind,
+                "table" | "view" | "materialized view" | "foreign table"
+            )
+        });
         let requested_privileges = if has_table_relations
             || matches!(
                 statement.target,
@@ -250,8 +256,10 @@ impl Engine {
             }
         };
         let memberships = self.durable.role_memberships.read();
-        let table_targets = self.validated_table_grant_targets(&targets, &requested_privileges)?;
-        let view_targets = self.validated_view_grant_targets(&targets, &requested_privileges)?;
+        let table_targets = validated_table_grant_targets(self, &targets, &requested_privileges)?;
+        let view_targets = validated_view_grant_targets(self, &targets, &requested_privileges)?;
+        let foreign_targets =
+            validated_foreign_table_grant_targets(self, &targets, &requested_privileges)?;
         let mut notices = Vec::new();
         let application = TableGrantApplication {
             statement,
@@ -263,32 +271,9 @@ impl Engine {
         };
         let updates = table_privilege_updates(table_targets, &application, &mut notices)?;
         let view_updates = view_privilege_updates(view_targets, &application, &mut notices)?;
-        for (name, table, security) in &updates {
-            self.persist_table_security(name, table, security)?;
-        }
-        if let Some(catalog) = self.storage.catalog.as_ref() {
-            for (relation, view) in &view_updates {
-                if view.persistence != uqa_sql::ast::RelationPersistence::Temporary {
-                    catalog
-                        .save_view(
-                            &crate::engine_session::catalog_view_row(relation, view).map_err(
-                                |error| {
-                                    SQLError::Internal(format!(
-                                        "serialize view privileges for `{}`: {error}",
-                                        relation.qualified_name()
-                                    ))
-                                },
-                            )?,
-                        )
-                        .map_err(|error| {
-                            SQLError::Internal(format!(
-                                "persist view privileges for `{}`: {error}",
-                                relation.qualified_name()
-                            ))
-                        })?;
-                }
-            }
-        }
+        let foreign_updates =
+            foreign_table_privilege_updates(foreign_targets, &application, &mut notices)?;
+        persist_table_privilege_updates(self, &updates, &view_updates, &foreign_updates)?;
         let table_changed = !updates.is_empty();
         for (_, table, security) in updates {
             table.security.write().clone_from(&security);
@@ -300,6 +285,13 @@ impl Engine {
                 views.insert(relation, view);
             }
         }
+        let foreign_changed = !foreign_updates.is_empty();
+        if foreign_changed {
+            let mut securities = self.durable.foreign_table_security.write();
+            for (relation, security) in foreign_updates {
+                securities.insert(relation, security);
+            }
+        }
         drop(memberships);
         drop(roles);
 
@@ -307,65 +299,11 @@ impl Engine {
         for (level, message) in notices {
             self.push_sql_notice(level, &message);
         }
-        if table_changed || view_changed {
+        if table_changed || view_changed || foreign_changed {
             self.note_table_catalog_changed();
             self.note_catalog_registry_changed();
         }
         Ok(())
-    }
-
-    fn validated_table_grant_targets<'a>(
-        &self,
-        targets: &'a [ResolvedTableGrantTarget],
-        requested: &RequestedTablePrivileges,
-    ) -> Result<Vec<(&'a ResolvedTableGrantTarget, Arc<TableState>)>, SQLError> {
-        let tables = self.storage.tables.read();
-        targets
-            .iter()
-            .filter(|target| target.kind == "table")
-            .map(|target| {
-                let table = tables.get(&target.relation).cloned().ok_or_else(|| {
-                    SQLError::Internal(format!("table `{}` disappeared", target.name))
-                })?;
-                let columns = table
-                    .columns
-                    .read()
-                    .iter()
-                    .map(|column| column.name.clone())
-                    .collect::<Vec<_>>();
-                validate_requested_columns(&target.relation, &columns, requested)?;
-                Ok((target, table))
-            })
-            .collect()
-    }
-
-    fn validated_view_grant_targets<'a>(
-        &self,
-        targets: &'a [ResolvedTableGrantTarget],
-        requested: &RequestedTablePrivileges,
-    ) -> Result<Vec<(&'a ResolvedTableGrantTarget, crate::StoredView)>, SQLError> {
-        let views = self.durable.views.read();
-        let selected = targets
-            .iter()
-            .filter(|target| matches!(target.kind, "view" | "materialized view"))
-            .map(|target| {
-                let view = views.get(&target.relation).cloned().ok_or_else(|| {
-                    SQLError::Internal(format!("view `{}` disappeared", target.name))
-                })?;
-                Ok((target, view))
-            })
-            .collect::<Result<Vec<_>, SQLError>>()?;
-        drop(views);
-        for (target, view) in &selected {
-            let columns = view.output_columns.as_deref().ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "loaded view `{}` has no durable public column metadata",
-                    target.relation.qualified_name()
-                ))
-            })?;
-            validate_requested_columns(&target.relation, columns, requested)?;
-        }
-        Ok(selected)
     }
 
     fn grant_table_syntax_sequence_privileges(
@@ -515,6 +453,19 @@ impl Engine {
                         crate::StoredViewKind::View => "view",
                         crate::StoredViewKind::Materialized => "materialized view",
                     },
+                }),
+        );
+        targets.extend(
+            self.durable
+                .foreign_tables
+                .read()
+                .keys()
+                .filter(|relation| resolved_schemas.contains(&relation.schema))
+                .map(|relation| ResolvedTableGrantTarget {
+                    requested: relation.qualified_name(),
+                    name: relation.qualified_name(),
+                    relation: relation.clone(),
+                    kind: "foreign table",
                 }),
         );
         targets.sort_by(|left, right| left.relation.cmp(&right.relation));

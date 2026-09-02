@@ -140,32 +140,89 @@ fn legacy_view_ownership_is_assigned_only_by_the_explicit_catalog_migration() {
 }
 
 #[test]
-fn foreign_table_rows_round_trip_role_ownership_and_migration_rewrites_it_atomically() {
+fn foreign_table_rows_round_trip_security_and_migration_rewrites_it_atomically() {
     let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
     let catalog = KeyValueCatalog::new(Arc::clone(&store));
     catalog.save_schema("public").unwrap();
     let relation = RelationIdentity::new("public", "owned_foreign_table");
+    let acl = vec![TableAclEntry {
+        role: "foreign_reader".into(),
+        grantor: Some("foreign_owner".into()),
+        privileges: crate::catalog::TablePrivileges {
+            select: true,
+            ..crate::catalog::TablePrivileges::default()
+        },
+        grant_options: crate::catalog::TablePrivileges::default(),
+    }];
+    let column_acls = std::collections::BTreeMap::from([(
+        "id".into(),
+        vec![TableAclEntry {
+            role: "foreign_column_reader".into(),
+            grantor: Some("foreign_owner".into()),
+            privileges: crate::catalog::TablePrivileges {
+                select: true,
+                ..crate::catalog::TablePrivileges::default()
+            },
+            grant_options: crate::catalog::TablePrivileges::default(),
+        }],
+    )]);
     catalog
-        .save_foreign_table(&relation, "foreign_owner", "memory", "[]", "{}")
+        .save_foreign_table(&ForeignTableRow {
+            relation: relation.clone(),
+            role_owner: "foreign_owner".into(),
+            acl: Some(acl.clone()),
+            column_acls: column_acls.clone(),
+            server_name: "memory".into(),
+            columns_json: "[]".into(),
+            options_json: "{}".into(),
+        })
         .unwrap();
     let loaded = catalog.load_foreign_tables().unwrap().remove(0);
     assert_eq!(loaded.relation, relation);
     assert_eq!(loaded.role_owner, "foreign_owner");
+    assert_eq!(loaded.acl, Some(acl.clone()));
+    assert_eq!(loaded.column_acls, column_acls);
     assert_eq!(loaded.server_name, "memory");
     assert!(catalog
-        .update_foreign_table_role_owner(&relation, "next_foreign_owner")
+        .update_foreign_table_security(&relation, "next_foreign_owner", Some(&acl), &column_acls,)
         .unwrap());
     assert!(!catalog
-        .update_foreign_table_role_owner(
+        .update_foreign_table_security(
             &RelationIdentity::new("public", "missing_foreign_table"),
             "next_foreign_owner",
+            None,
+            &std::collections::BTreeMap::new(),
         )
         .unwrap());
 
     catalog.migrate_relation_namespace().unwrap();
     let migrated = catalog.load_foreign_tables().unwrap().remove(0);
     assert_eq!(migrated.role_owner, "next_foreign_owner");
+    assert_eq!(migrated.acl, Some(acl));
+    assert_eq!(migrated.column_acls, column_acls);
     assert_eq!(migrated.server_name, "memory");
+}
+
+#[test]
+fn owned_foreign_table_acl_defaults_are_assigned_only_by_explicit_catalog_migration() {
+    let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
+    let catalog = KeyValueCatalog::new(Arc::clone(&store));
+    catalog.save_schema("public").unwrap();
+    let relation = RelationIdentity::new("public", "legacy_foreign_acl");
+    store
+        .put(
+            &relation_key(TAG_FOREIGN_TABLE, &relation).unwrap(),
+            br#"{"role_owner":"foreign_owner","server_name":"memory","columns_json":"[]","options_json":"{}"}"#,
+        )
+        .unwrap();
+
+    assert!(catalog.load_foreign_tables().is_err());
+    catalog.migrate_relation_namespace().unwrap();
+    let migrated = catalog.load_foreign_tables().unwrap().remove(0);
+    assert_eq!(migrated.relation, relation);
+    assert_eq!(migrated.role_owner, "foreign_owner");
+    assert_eq!(migrated.acl, None);
+    assert!(migrated.column_acls.is_empty());
 }
 
 #[test]
@@ -186,6 +243,8 @@ fn legacy_foreign_table_ownership_is_assigned_only_by_explicit_catalog_migration
     let migrated = catalog.load_foreign_tables().unwrap().remove(0);
     assert_eq!(migrated.relation, relation);
     assert_eq!(migrated.role_owner, "uqa");
+    assert_eq!(migrated.acl, None);
+    assert!(migrated.column_acls.is_empty());
     assert_eq!(migrated.server_name, "memory");
 }
 

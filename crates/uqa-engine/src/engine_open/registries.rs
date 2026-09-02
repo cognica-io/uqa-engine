@@ -119,7 +119,11 @@ impl Engine {
                     row.role_owner
                 )));
             }
-            let security = crate::engine_state::TableSecurity::owner(row.role_owner);
+            let security = crate::engine_state::TableSecurity {
+                role_owner: row.role_owner,
+                acl: row.acl,
+                column_acls: row.column_acls,
+            };
             let column_names = columns
                 .iter()
                 .map(|column| column.name.clone())
@@ -131,7 +135,7 @@ impl Engine {
             )
             .map_err(|error| {
                 StorageBackendError::Other(format!(
-                    "foreign table `{relation_name}` has invalid ownership metadata: {error}"
+                    "foreign table `{relation_name}` has invalid security metadata: {error}"
                 ))
             })?;
             let relation = row.relation;

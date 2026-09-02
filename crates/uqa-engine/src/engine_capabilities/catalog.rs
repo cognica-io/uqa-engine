@@ -511,7 +511,7 @@ impl CatalogReadView {
             .get(&relation)
             .ok_or_else(|| {
                 SQLError::Internal(format!(
-                    "catalog foreign table `{name}` has no ownership metadata"
+                    "catalog foreign table `{name}` has no security metadata"
                 ))
             })
     }

@@ -92,7 +92,7 @@ pub(crate) struct SequenceSecurity {
     pub(crate) acl: Option<Vec<uqa_storage::SequenceAclEntry>>,
 }
 
-/// Complete ordinary-table security state. Ownership and ACL changes are published through one value so readers cannot observe a torn authorization state.
+/// Complete table-shaped relation security state. Ownership and ACL changes are published through one value so readers cannot observe a torn authorization state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TableSecurity {
     pub(crate) role_owner: String,

@@ -6,7 +6,7 @@
 
 //! Catalog facade implementation for key/value-backed persistence.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::catalog::{
     CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignTableRow,
     GraphSnapshot, RelationIdentity, RelationKind, SchemaRow, SequenceOptions,
-    SequenceReservationResult, SequenceRow, TableSchema, ViewRow,
+    SequenceReservationResult, SequenceRow, TableAclEntry, TableSchema, ViewRow,
 };
 use crate::{StorageBackendError, StorageBackendResult};
 
@@ -65,6 +65,7 @@ use migration::{
 use records::{
     StoredCatalogIndex, StoredColumnStats, StoredEdge, StoredForeignServer, StoredForeignTable,
     StoredRelation, StoredSequence, StoredVertex, StoredView,
+    STORED_FOREIGN_TABLE_SECURITY_VERSION,
 };
 
 #[derive(Clone)]
@@ -389,29 +390,18 @@ impl CatalogFacade for KeyValueCatalog {
         self.load_foreign_servers_impl()
     }
 
-    fn save_foreign_table(
-        &self,
-        relation: &RelationIdentity,
-        role_owner: &str,
-        server_name: &str,
-        columns_json: &str,
-        options_json: &str,
-    ) -> StorageBackendResult<()> {
-        self.save_foreign_table_impl(
-            relation,
-            role_owner,
-            server_name,
-            columns_json,
-            options_json,
-        )
+    fn save_foreign_table(&self, row: &ForeignTableRow) -> StorageBackendResult<()> {
+        self.save_foreign_table_impl(row)
     }
 
-    fn update_foreign_table_role_owner(
+    fn update_foreign_table_security(
         &self,
         relation: &RelationIdentity,
         role_owner: &str,
+        acl: Option<&[TableAclEntry]>,
+        column_acls: &BTreeMap<String, Vec<TableAclEntry>>,
     ) -> StorageBackendResult<bool> {
-        self.update_foreign_table_role_owner_impl(relation, role_owner)
+        self.update_foreign_table_security_impl(relation, role_owner, acl, column_acls)
     }
 
     fn drop_foreign_table(&self, relation: &RelationIdentity) -> StorageBackendResult<()> {

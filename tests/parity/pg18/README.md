@@ -126,6 +126,12 @@ docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/pa
 docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/foreign_table_ownership_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/foreign_table_ownership_oracle.expected.txt -
 ```
 
+`foreign_table_privilege_oracle.sql` records PostgreSQL 18.4 foreign-table relation and column ACL behavior. The checked-in transcript verifies NULL defaults, exact ACL text and privilege ordering, all-table and column grants, rooted grant-option dependencies, `RESTRICT` and `CASCADE`, `ALL TABLES IN SCHEMA`, owner-transfer rewriting, role dependencies, name/OID inquiry, direct SELECT enforcement, exact-column and `count(*)` authorization, and information-schema visibility and read-only metadata.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/foreign_table_privilege_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/foreign_table_privilege_oracle.expected.txt -
+```
+
 `view_privilege_oracle.sql` records PostgreSQL 18.4 regular-view and materialized-view ACL and enforcement behavior. The checked-in transcript verifies NULL defaults, exact relation and column ACL text, rooted grant-option revocation, all-in-schema targeting, name/OID privilege inquiry, information-schema visibility, regular-view definer and security-invoker authorization, automatically updatable DML, delegated materialized-view `MAINTAIN`, refresh owner context, unpopulated and DML error precedence, owner-transfer grantor rewriting, and role dependencies.
 
 ```sh

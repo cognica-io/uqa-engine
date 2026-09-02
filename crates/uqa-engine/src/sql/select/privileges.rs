@@ -192,6 +192,15 @@ fn table_lineage(
                 ))
             })?;
             (canonical, columns, false)
+        } else if let Some((canonical, table)) =
+            catalog.foreign_table_entry_resolved(&resolution, name)?
+        {
+            let columns = table
+                .columns
+                .iter()
+                .map(|column| column.name.clone())
+                .collect();
+            (canonical, columns, true)
         } else {
             return Ok(SourceLineage::default());
         };
@@ -838,6 +847,15 @@ pub(in crate::sql) fn ensure_select_privileges_for_table_expressions(
                 ))
             })?;
             (canonical, columns, false)
+        } else if let Some((canonical, table)) =
+            catalog.foreign_table_entry_resolved(&resolution, table)?
+        {
+            let columns = table
+                .columns
+                .iter()
+                .map(|column| column.name.clone())
+                .collect();
+            (canonical, columns, true)
         } else {
             return Err(SQLError::UnknownTable(table.to_string()));
         };

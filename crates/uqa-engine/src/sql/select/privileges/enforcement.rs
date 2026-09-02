@@ -21,11 +21,7 @@ pub(super) fn ensure_required_select(
     resolution.set_lookup_mode(crate::engine_capabilities::RelationLookupMode::Bound);
     let subject = ctes.privilege_subject()?;
     for (table, columns) in &lineage.tables {
-        let table_required = required
-            .iter()
-            .filter(|column| column.table == *table)
-            .map(|column| column.column.as_str())
-            .collect::<BTreeSet<_>>();
+        let table_required = required_columns_for_table(required, table);
         if let Some(snapshot) = catalog.table_resolved(&resolution, table)? {
             if table_required.is_empty() {
                 let permitted = catalog.table_has_privilege_to(
@@ -110,7 +106,76 @@ pub(super) fn ensure_required_select(
             }
             continue;
         }
+        if catalog
+            .foreign_table_resolved(&resolution, table)?
+            .is_some()
+        {
+            ensure_foreign_table_select(&catalog, table, columns, &table_required, subject)?;
+            continue;
+        }
         return Err(SQLError::UnknownTable(table.clone()));
+    }
+    Ok(())
+}
+
+fn required_columns_for_table<'a>(
+    required: &'a BTreeSet<BaseColumn>,
+    table: &str,
+) -> BTreeSet<&'a str> {
+    required
+        .iter()
+        .filter(|column| column.table == table)
+        .map(|column| column.column.as_str())
+        .collect()
+}
+
+fn ensure_foreign_table_select(
+    catalog: &crate::engine_capabilities::CatalogReadView,
+    table: &str,
+    columns: &BTreeSet<String>,
+    required: &BTreeSet<&str>,
+    subject: &str,
+) -> Result<(), SQLError> {
+    if required.is_empty() {
+        let mut permitted = catalog.foreign_table_has_privilege_to(
+            table,
+            subject,
+            crate::engine_table_security::TableAclPrivilege::Select,
+        )?;
+        for column in columns {
+            if catalog.foreign_table_column_has_privilege_to(
+                table,
+                column,
+                subject,
+                crate::engine_table_security::TableAclPrivilege::Select,
+            )? {
+                permitted = true;
+                break;
+            }
+        }
+        if !permitted {
+            return relation_permission_denied(table, "foreign table");
+        }
+        return Ok(());
+    }
+    for column in required {
+        let permitted = if columns.contains(*column) {
+            catalog.foreign_table_column_has_privilege_to(
+                table,
+                column,
+                subject,
+                crate::engine_table_security::TableAclPrivilege::Select,
+            )?
+        } else {
+            catalog.foreign_table_has_privilege_to(
+                table,
+                subject,
+                crate::engine_table_security::TableAclPrivilege::Select,
+            )?
+        };
+        if !permitted {
+            return relation_permission_denied(table, "foreign table");
+        }
     }
     Ok(())
 }
