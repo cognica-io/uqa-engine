@@ -8,45 +8,27 @@ use super::{
     bind_expr, canonical_routine_type_name, is_boolean_type, routine_signature_types,
     validate_trigger_condition_references, validate_trigger_transition_relation, Arc, ColumnDef,
     ColumnType, CompiledFunctionBody, CreateTrigger, Engine, Expr, FunctionReturns,
-    RelationIdentity, SQLError, SQLUserFunction, StoredViewKind, TriggerConditionTypeResolver,
-    TriggerEvent, TriggerTiming, Value,
+    RelationIdentity, RelationLookupMode, RelationResolution, SQLError, SQLUserFunction,
+    TriggerConditionTypeResolver, TriggerEvent, TriggerTiming, Value,
 };
 
 impl Engine {
-    fn resolve_trigger_relation_kind(
-        &self,
-        name: &str,
-    ) -> Result<(RelationIdentity, &'static str), SQLError> {
-        let candidates = self.relation_lookup_candidates(name).map_err(|error| {
-            SQLError::Internal(format!("resolve trigger relation `{name}`: {error}"))
-        })?;
-        let tables = self.storage.tables.read();
-        let views = self.durable.views.read();
-        candidates
-            .into_iter()
-            .find_map(|relation| {
-                if tables.contains_key(&relation) {
-                    return Some((relation, "table"));
-                }
-                views.get(&relation).map(|view| {
-                    (
-                        relation,
-                        match view.kind {
-                            StoredViewKind::View => "view",
-                            StoredViewKind::Materialized => "materialized view",
-                        },
-                    )
-                })
-            })
-            .ok_or_else(|| SQLError::UnknownTable(name.to_string()))
-    }
-
     pub(in crate::engine_events) fn resolve_trigger_table(
         &self,
         name: &str,
     ) -> Result<RelationIdentity, SQLError> {
-        self.resolve_trigger_relation_kind(name)
-            .map(|(relation, _)| relation)
+        let RelationResolution::Found(canonical, kind) = self.resolve_bound_relation_kind(name)?
+        else {
+            return Err(SQLError::UnknownTable(name.to_string()));
+        };
+        if !matches!(kind, "table" | "view" | "materialized view") {
+            return Err(SQLError::UnknownTable(name.to_string()));
+        }
+        RelationIdentity::from_legacy_name(&canonical).map_err(|error| {
+            SQLError::Internal(format!(
+                "decode bound trigger relation `{canonical}`: {error}"
+            ))
+        })
     }
 
     fn trigger_relation_columns(
@@ -99,15 +81,18 @@ impl Engine {
     pub(crate) fn resolve_trigger_function(
         &self,
         name: &str,
+        lookup_mode: RelationLookupMode,
     ) -> Result<Arc<SQLUserFunction>, SQLError> {
-        let candidates = self
-            .lookup_visible_sql_functions(name)?
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|function| {
-                !function.def.is_procedure && routine_signature_types(&function.def).is_empty()
-            })
-            .collect::<Vec<_>>();
+        let candidates = match lookup_mode {
+            RelationLookupMode::Dynamic => self.lookup_visible_sql_functions(name)?,
+            RelationLookupMode::Bound => self.lookup_bound_sql_functions(name),
+        }
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|function| {
+            !function.def.is_procedure && routine_signature_types(&function.def).is_empty()
+        })
+        .collect::<Vec<_>>();
         let function = match candidates.as_slice() {
             [function] => function.clone(),
             [] => {
@@ -208,6 +193,7 @@ impl Engine {
     pub(in crate::engine_events) fn validate_trigger_definition(
         &self,
         definition: &mut CreateTrigger,
+        lookup_mode: RelationLookupMode,
     ) -> Result<RelationIdentity, SQLError> {
         if definition.constraint && definition.or_replace {
             return Err(SQLError::Routine {
@@ -228,12 +214,13 @@ impl Engine {
                 "ordinary trigger retained constraint-only metadata".into(),
             ));
         }
-        let (relation, relation_kind) = self.resolve_trigger_relation_kind(&definition.table)?;
+        let (relation, relation_kind) =
+            self.resolve_event_relation_kind(&definition.table, lookup_mode)?;
         definition.table = relation.qualified_name();
         Self::validate_trigger_relation_kind(definition, &relation, relation_kind)?;
         if let Some(referenced_table) = definition.referenced_table.as_mut() {
             let (referenced, referenced_kind) =
-                self.resolve_trigger_relation_kind(referenced_table)?;
+                self.resolve_event_relation_kind(referenced_table, lookup_mode)?;
             if referenced_kind != "table" {
                 return Err(SQLError::Routine {
                     sqlstate: "42809".into(),
@@ -244,7 +231,7 @@ impl Engine {
         }
         definition.function.clone_from(
             &self
-                .resolve_trigger_function(&definition.function)?
+                .resolve_trigger_function(&definition.function, lookup_mode)?
                 .def
                 .name,
         );

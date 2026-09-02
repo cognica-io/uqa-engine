@@ -309,7 +309,10 @@ fn invoke_trigger(
             invocation.table
         ))
     })?;
-    let function = engine.resolve_trigger_function(&invocation.trigger.definition.function)?;
+    let function = engine.resolve_trigger_function(
+        &invocation.trigger.definition.function,
+        crate::engine_capabilities::RelationLookupMode::Bound,
+    )?;
     let _transition_scope = match transition_tables {
         Some(tables) => tables.enter(&invocation.trigger.definition)?,
         None if invocation

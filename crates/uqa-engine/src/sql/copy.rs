@@ -85,6 +85,7 @@ impl Engine {
             self,
             Statement::Insert(InsertStmt {
                 table: relation.clone(),
+                target_relation_bound: false,
                 target_qualifier: qualifier.clone(),
                 include_descendants: true,
                 columns,

@@ -235,6 +235,9 @@ pub enum AlterTableAction {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InsertStmt {
     pub table: String,
+    /// Whether `table` is a stored catalog identity rather than a name to resolve in the executing session.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub target_relation_bound: bool,
     /// SQL-visible target relation name: explicit alias, otherwise the local relation name.
     pub target_qualifier: String,
     #[serde(default = "default_include_descendants")]
@@ -396,6 +399,9 @@ pub enum DiscardTarget {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateStmt {
     pub table: String,
+    /// Whether `table` is a stored catalog identity rather than a name to resolve in the executing session.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub target_relation_bound: bool,
     pub target_qualifier: String,
     #[serde(default = "default_include_descendants")]
     pub include_descendants: bool,
@@ -414,6 +420,9 @@ pub struct UpdateStmt {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeleteStmt {
     pub table: String,
+    /// Whether `table` is a stored catalog identity rather than a name to resolve in the executing session.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub target_relation_bound: bool,
     pub target_qualifier: String,
     #[serde(default = "default_include_descendants")]
     pub include_descendants: bool,

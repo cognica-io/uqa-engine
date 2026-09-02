@@ -301,6 +301,7 @@ pub struct ViewRuleUpdatePlan {
 #[derive(Debug, Clone)]
 pub struct InsertPlan {
     pub table: String,
+    pub target_relation_bound: bool,
     pub target_qualifier: String,
     pub include_descendants: bool,
     pub columns: Vec<String>,
@@ -335,6 +336,7 @@ pub enum ConflictActionPlan {
 #[derive(Debug, Clone)]
 pub struct UpdatePlan {
     pub table: String,
+    pub target_relation_bound: bool,
     pub target_qualifier: String,
     pub include_descendants: bool,
     pub assignments: Vec<AssignmentPlan>,
@@ -353,6 +355,7 @@ pub struct UpdatePlan {
 #[derive(Debug, Clone)]
 pub struct DeletePlan {
     pub table: String,
+    pub target_relation_bound: bool,
     pub target_qualifier: String,
     pub include_descendants: bool,
     pub predicate: Option<ScalarExpr>,

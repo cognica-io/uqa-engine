@@ -43,13 +43,7 @@ pub(super) fn prepare_create_table_hierarchy(
     let mut inherited_foreign_keys = Vec::new();
     let mut inherited_keys = Vec::new();
     for requested_parent in &table.hierarchy.parents {
-        let parent = engine
-            .try_resolve_table_name(requested_parent)
-            .map_err(|error| SQLError::Internal(format!("resolve inherited table: {error}")))?
-            .ok_or_else(|| SQLError::Routine {
-                sqlstate: "42P01".into(),
-                message: format!("relation \"{requested_parent}\" does not exist"),
-            })?;
+        let parent = engine.resolve_visible_table_reference(requested_parent)?;
         if parent == table.name {
             return Err(SQLError::Routine {
                 sqlstate: "42P17".into(),

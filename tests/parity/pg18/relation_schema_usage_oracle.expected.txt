@@ -19,6 +19,58 @@ bound-matview|ok|7
 bound-function|ok|7
 dynamic-invoker|42501|permission denied for schema uqa_rel_hidden
 dynamic-definer|ok|7
+bound-trigger-function|ok
+trigger-qualified|42501|permission denied for schema uqa_rel_hidden
+trigger-qualified-missing|42501|permission denied for schema uqa_rel_hidden
+trigger-unqualified-skip|ok
+trigger-drop-qualified|42501|permission denied for schema uqa_rel_hidden
+trigger-drop-unqualified-skip|ok
+trigger-missing-schema|3F000|schema "uqa_rel_absent" does not exist
+trigger-drop-missing-schema|3F000|schema "uqa_rel_absent" does not exist
+trigger-drop-if-exists-missing-schema|ok
+trigger-drop-if-exists-missing-relation|ok
+rule-qualified|42501|permission denied for schema uqa_rel_hidden
+rule-qualified-missing|42501|permission denied for schema uqa_rel_hidden
+rule-unqualified-skip|ok
+rule-drop-qualified|42501|permission denied for schema uqa_rel_hidden
+rule-drop-unqualified-skip|ok
+rule-missing-schema|3F000|schema "uqa_rel_absent" does not exist
+rule-drop-missing-schema|3F000|schema "uqa_rel_absent" does not exist
+rule-drop-if-exists-missing-schema|ok
+rule-drop-if-exists-missing-relation|ok
+rule-action-qualified|42501|permission denied for schema uqa_rel_hidden
+rule-action-missing-schema|42P01|relation "uqa_rel_absent.event_log" does not exist
+constraint-trigger-from-qualified|42501|permission denied for schema uqa_rel_hidden
+constraint-trigger-from-missing-schema|3F000|schema "uqa_rel_absent" does not exist
+trigger-function-qualified|42501|permission denied for schema uqa_rel_hidden
+trigger-function-missing-schema|3F000|schema "uqa_rel_absent" does not exist
+inherits-qualified|42501|permission denied for schema uqa_rel_hidden
+inherits-unqualified-skip|ok
+inherits-missing-schema|3F000|schema "uqa_rel_absent" does not exist
+partition-qualified|42501|permission denied for schema uqa_rel_hidden
+partition-unqualified-skip|ok
+partition-missing-schema|3F000|schema "uqa_rel_absent" does not exist
+fk-column-qualified|42501|permission denied for schema uqa_rel_hidden
+fk-table-qualified|42501|permission denied for schema uqa_rel_hidden
+fk-unqualified-skip|ok
+fk-column-missing-schema|3F000|schema "uqa_rel_absent" does not exist
+fk-table-missing-schema|3F000|schema "uqa_rel_absent" does not exist
+fk-alter-qualified|42501|permission denied for schema uqa_rel_hidden
+inherit-alter-qualified|42501|permission denied for schema uqa_rel_hidden
+attach-alter-qualified|42501|permission denied for schema uqa_rel_hidden
+fk-alter-missing-schema|3F000|schema "uqa_rel_absent" does not exist
+inherit-alter-missing-schema|3F000|schema "uqa_rel_absent" does not exist
+attach-alter-missing-schema|3F000|schema "uqa_rel_absent" does not exist
+bound-rule-insert-create|ok
+bound-rule-update-create|ok
+bound-rule-delete-create|ok
+bound-fk-create|ok
+bound-rule-execute|ok
+bound-rule-insert-result|1
+bound-rule-update-result|41
+bound-rule-delete-result|0
+bound-fk-execute|42501|permission denied for schema uqa_rel_hidden
+bound-fk-result|0
 first-visible|ok|1
 prepare-with-usage|ok
 prepared-after-revoke|42501|permission denied for schema uqa_rel_hidden

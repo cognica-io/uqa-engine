@@ -13,6 +13,8 @@ use uqa_sql::ast::{
     RelationPersistence, TableCheck, TableHierarchy, TableKeyConstraint,
 };
 
+use crate::engine_capabilities::RelationResolution;
+
 pub(super) fn run_alter_hierarchy_action(
     engine: &Engine,
     table: &str,
@@ -829,12 +831,16 @@ fn read_hierarchy(engine: &Engine, table: &str) -> Result<TableHierarchy, SQLErr
 }
 
 fn resolve_table(engine: &Engine, requested: &str) -> Result<String, SQLError> {
-    match engine.try_resolve_visible_relation_kind(requested)? {
-        Some((canonical, "table")) => Ok(canonical),
-        Some((canonical, kind)) => Err(wrong_object(format!(
+    match engine.resolve_visible_relation_kind(requested)? {
+        RelationResolution::Found(canonical, "table") => Ok(canonical),
+        RelationResolution::Found(canonical, kind) => Err(wrong_object(format!(
             "relation \"{canonical}\" is a {kind}, not a table"
         ))),
-        None => Err(routine(
+        RelationResolution::MissingSchema(schema) => Err(routine(
+            "3F000",
+            format!("schema \"{schema}\" does not exist"),
+        )),
+        RelationResolution::MissingRelation => Err(routine(
             "42P01",
             format!("relation \"{requested}\" does not exist"),
         )),

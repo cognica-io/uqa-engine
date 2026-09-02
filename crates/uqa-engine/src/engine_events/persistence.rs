@@ -12,6 +12,7 @@ use sha2::{Digest, Sha256};
 use uqa_sql::ast::RelationPersistence;
 use uqa_sql::SQLError;
 
+use crate::engine_capabilities::RelationLookupMode;
 use crate::{
     CatalogFacade, Engine, RelationIdentity, StorageBackendError, StorageBackendResult,
     RULES_METADATA_KEY, TRIGGERS_METADATA_KEY,
@@ -98,7 +99,7 @@ impl Engine {
                 action.upgrade_legacy_serialized_dispatches();
             }
             let relation = self
-                .validate_rule_definition(&mut rule.definition)
+                .validate_rule_definition(&mut rule.definition, RelationLookupMode::Bound)
                 .map_err(|error| {
                     StorageBackendError::Other(format!("restore rule catalog: {error}"))
                 })?;
@@ -169,7 +170,7 @@ impl Engine {
                 condition.upgrade_legacy_serialized_dispatches();
             }
             let relation = self
-                .validate_trigger_definition(&mut trigger.definition)
+                .validate_trigger_definition(&mut trigger.definition, RelationLookupMode::Bound)
                 .map_err(|error| {
                     StorageBackendError::Other(format!("restore trigger catalog: {error}"))
                 })?;

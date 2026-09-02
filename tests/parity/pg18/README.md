@@ -96,7 +96,7 @@ docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/pa
 docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/routine_schema_usage_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/routine_schema_usage_oracle.expected.txt -
 ```
 
-`relation_schema_usage_oracle.sql` records PostgreSQL 18.4 schema `USAGE` enforcement at relation name-resolution boundaries. The checked-in transcript verifies qualified and effective-search-path lookup, missing-relation and column-error precedence, DML, TRUNCATE, ALTER, DROP, hard and soft `regclass` input, inherited grants, immediate prepared-plan invalidation, security-context-aware string SQL, and namespace-check-free identities stored in views, materialized views, SQL-standard query bodies, and declared cursors.
+`relation_schema_usage_oracle.sql` records PostgreSQL 18.4 schema `USAGE` enforcement at relation name-resolution boundaries. The checked-in transcript verifies qualified and effective-search-path lookup, missing-relation and column-error precedence, DML, TRUNCATE, ALTER, DROP, trigger and rule targets, constraint-trigger references, rule-action mutation targets, hierarchy parents, foreign-key references, hard and soft `regclass` input, inherited grants, immediate prepared-plan invalidation, security-context-aware string SQL, and namespace-check-free identities stored in views, materialized views, SQL-standard query bodies, declared cursors, and rule actions.
 
 ```sh
 docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/relation_schema_usage_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/relation_schema_usage_oracle.expected.txt -

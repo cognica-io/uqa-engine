@@ -57,6 +57,7 @@ pub(super) fn compile_update(stmt: &pg_query::protobuf::UpdateStmt) -> Result<Up
     };
     Ok(UpdateStmt {
         table,
+        target_relation_bound: false,
         target_qualifier,
         include_descendants: relation.inh,
         assignments,
@@ -97,6 +98,7 @@ pub(super) fn compile_delete(stmt: &pg_query::protobuf::DeleteStmt) -> Result<De
     };
     Ok(DeleteStmt {
         table,
+        target_relation_bound: false,
         target_qualifier,
         include_descendants: relation.inh,
         r#where,

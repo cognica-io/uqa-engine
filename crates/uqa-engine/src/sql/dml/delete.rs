@@ -23,7 +23,7 @@ pub(in crate::sql) fn run_delete(
     mut stmt: DeletePlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    stmt.table = super::resolve_dml_target_name(engine, &stmt.table)?;
+    stmt.table = super::resolve_dml_target_name(engine, &stmt.table, stmt.target_relation_bound)?;
     validate_returning_alias_relations(&stmt.target_qualifier, &stmt.returning_aliases, None)?;
     super::run_mutation_command(engine, move |engine| {
         run_delete_inner(engine, &stmt, params)

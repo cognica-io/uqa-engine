@@ -93,6 +93,7 @@ pub(in crate::compiler) fn compile_insert(
     };
     Ok(InsertStmt {
         table,
+        target_relation_bound: false,
         target_qualifier,
         include_descendants: relation.inh,
         columns,

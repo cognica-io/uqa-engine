@@ -26,7 +26,7 @@ pub(in crate::sql) fn run_update(
     mut stmt: UpdatePlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    stmt.table = super::resolve_dml_target_name(engine, &stmt.table)?;
+    stmt.table = super::resolve_dml_target_name(engine, &stmt.table, stmt.target_relation_bound)?;
     super::run_mutation_command(engine, move |engine| {
         run_update_inner(engine, &stmt, params)
     })

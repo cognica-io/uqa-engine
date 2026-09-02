@@ -20,6 +20,7 @@ pub(in crate::sql) fn period_foreign_key_coverage(
     excluded_parents: &[PhysicalDocumentIdentity],
     replacement_parent: Option<(&PhysicalDocumentIdentity, &Document)>,
 ) -> Result<(bool, Vec<PhysicalDocumentIdentity>), SQLError> {
+    super::authorize_foreign_key_parent_namespace(engine, foreign_key)?;
     let Some(period_column) = foreign_key.ref_columns.last() else {
         return Err(SQLError::Internal(
             "PERIOD foreign key has no referenced period column".into(),

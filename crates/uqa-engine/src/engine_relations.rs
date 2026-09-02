@@ -312,7 +312,6 @@ impl Engine {
     ) -> StorageBackendResult<Option<&'static str>> {
         self.synchronize_table_catalog()?;
         self.synchronize_catalog_registries()?;
-        self.refresh_sequences_from_catalog()?;
         let relation = RelationIdentity::from_legacy_name(canonical_name)
             .map_err(StorageBackendError::Other)?;
         if self.storage.tables.read().contains_key(&relation) {
@@ -339,6 +338,17 @@ impl Engine {
         self.resolve_relation_kind_for_query(name, false)
     }
 
+    /// Resolve a canonical relation identity against the already-loaded catalog without consulting the active role's namespace or recursively synchronizing registries.
+    pub(crate) fn resolve_bound_relation_kind(
+        &self,
+        name: &str,
+    ) -> Result<RelationResolution, SQLError> {
+        let mut resolution = self.session_execution_view().relation_name_resolution();
+        resolution.set_lookup_mode(crate::engine_capabilities::RelationLookupMode::Bound);
+        self.catalog_read_view()
+            .relation_kind_resolution(&resolution, name)
+    }
+
     /// Resolve a SQL relation reference through the current user's effective namespace. This is the dynamic-name boundary; code operating on a returned canonical identity must use exact catalog access rather than repeating name resolution.
     pub(crate) fn try_resolve_visible_relation_kind(
         &self,
@@ -347,18 +357,43 @@ impl Engine {
         Ok(self.resolve_visible_relation_kind(name)?.into_found())
     }
 
+    /// Bind a table named as a secondary DDL relation, where `PostgreSQL` distinguishes an absent qualified schema from an absent relation.
+    pub(crate) fn resolve_visible_table_reference(&self, name: &str) -> Result<String, SQLError> {
+        match self.resolve_visible_relation_kind(name)? {
+            RelationResolution::Found(canonical, "table") => Ok(canonical),
+            RelationResolution::MissingSchema(schema) => Err(SQLError::Routine {
+                sqlstate: "3F000".into(),
+                message: format!("schema \"{schema}\" does not exist"),
+            }),
+            RelationResolution::Found(_, _) | RelationResolution::MissingRelation => {
+                Err(SQLError::UnknownTable(name.to_string()))
+            }
+        }
+    }
+
+    pub(crate) fn try_resolve_bound_table_name(
+        &self,
+        name: &str,
+    ) -> Result<Option<String>, SQLError> {
+        Ok(match self.resolve_bound_relation_kind(name)? {
+            RelationResolution::Found(name, "table") => Some(name),
+            RelationResolution::Found(_, _)
+            | RelationResolution::MissingRelation
+            | RelationResolution::MissingSchema(_) => None,
+        })
+    }
+
     /// Resolve a query source with the namespace semantics recorded by its owning plan. Dynamic plans use the current effective namespace; stored plans accept only canonical identities captured by their binder.
     pub(crate) fn resolve_relation_kind_for_query(
         &self,
         name: &str,
         relations_bound: bool,
     ) -> Result<RelationResolution, SQLError> {
+        // Registry synchronization hydrates sequence identities with every other relation kind. Sequence-value refresh is intentionally separate because name binding neither observes nor mutates nontransactional sequence state.
         self.synchronize_table_catalog()
             .map_err(|error| SQLError::Internal(format!("load table catalog: {error}")))?;
         self.synchronize_catalog_registries()
             .map_err(|error| SQLError::Internal(format!("load relation catalog: {error}")))?;
-        self.refresh_sequences_from_catalog()
-            .map_err(|error| SQLError::Internal(format!("load sequence catalog: {error}")))?;
         let mut resolution = self.session_execution_view().relation_name_resolution();
         if relations_bound {
             resolution.set_lookup_mode(crate::engine_capabilities::RelationLookupMode::Bound);
@@ -386,7 +421,6 @@ impl Engine {
     ) -> StorageBackendResult<Option<(String, &'static str)>> {
         self.synchronize_table_catalog()?;
         self.synchronize_catalog_registries()?;
-        self.refresh_sequences_from_catalog()?;
         for relation in self.relation_lookup_candidates(name)? {
             let kind = if self.storage.tables.read().contains_key(&relation) {
                 Some("table")

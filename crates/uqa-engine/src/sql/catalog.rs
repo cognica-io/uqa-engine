@@ -21,6 +21,9 @@ pub(super) fn build_info_schema_rows(
     let Some(relation) = resolve_virtual_relation(resolution, name) else {
         return ag_catalog::build_age_label_relation_rows(catalog, resolution, name);
     };
+    let mut catalog_resolution = resolution.clone();
+    catalog_resolution.set_lookup_mode(crate::engine_capabilities::RelationLookupMode::Bound);
+    let resolution = &catalog_resolution;
     Ok(Some(match relation {
         VirtualRelation::InformationSchemaCatalogName => build_info_catalog_name(),
         VirtualRelation::InformationSchemata => build_info_schemata(catalog, resolution)?,
@@ -157,7 +160,8 @@ use partitioning::build_pg_partitioned_table;
 pub(in crate::sql) use partitioning::{pg_get_expr_value, pg_get_partkeydef_value};
 pub(in crate::sql) fn table_relation_oid(engine: &Engine, table: &str) -> Result<i64, SQLError> {
     let catalog = engine.catalog_read_view();
-    let resolution = engine.session_execution_view().relation_name_resolution();
+    let mut resolution = engine.session_execution_view().relation_name_resolution();
+    resolution.set_lookup_mode(crate::engine_capabilities::RelationLookupMode::Bound);
     snapshot_table_relation_oid(&catalog, &resolution, table)
 }
 pub(crate) fn sequence_relation_oid(object_id: [u8; 16]) -> i64 {

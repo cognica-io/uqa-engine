@@ -19,10 +19,53 @@ use super::{
     first_rule_row_reference_in_expr, first_rule_row_reference_in_select,
     rule_action_has_set_operation,
 };
+use crate::engine_capabilities::{RelationLookupMode, RelationResolution};
 use crate::engine_user_functions::{
     canonical_routine_type_name, routine_signature_types, CompiledFunctionBody, SQLUserFunction,
 };
 use crate::{Arc, Engine, RelationIdentity, StoredViewKind};
+
+impl Engine {
+    pub(in crate::engine_events) fn event_relation_from_resolution(
+        requested: &str,
+        resolution: RelationResolution,
+    ) -> Result<(RelationIdentity, &'static str), SQLError> {
+        let (canonical, kind) = match resolution {
+            RelationResolution::Found(canonical, kind)
+                if matches!(kind, "table" | "view" | "materialized view") =>
+            {
+                (canonical, kind)
+            }
+            RelationResolution::Found(_, _) | RelationResolution::MissingRelation => {
+                return Err(SQLError::UnknownTable(requested.to_string()));
+            }
+            RelationResolution::MissingSchema(schema) => {
+                return Err(SQLError::Routine {
+                    sqlstate: "3F000".into(),
+                    message: format!("schema \"{schema}\" does not exist"),
+                });
+            }
+        };
+        let relation = RelationIdentity::from_legacy_name(&canonical).map_err(|error| {
+            SQLError::Internal(format!(
+                "decode resolved event relation `{canonical}`: {error}"
+            ))
+        })?;
+        Ok((relation, kind))
+    }
+
+    pub(in crate::engine_events) fn resolve_event_relation_kind(
+        &self,
+        name: &str,
+        lookup_mode: RelationLookupMode,
+    ) -> Result<(RelationIdentity, &'static str), SQLError> {
+        let resolution = match lookup_mode {
+            RelationLookupMode::Dynamic => self.resolve_visible_relation_kind(name)?,
+            RelationLookupMode::Bound => self.resolve_bound_relation_kind(name)?,
+        };
+        Self::event_relation_from_resolution(name, resolution)
+    }
+}
 
 struct TriggerConditionTypeResolver<'a> {
     columns: &'a [uqa_sql::ast::ColumnDef],

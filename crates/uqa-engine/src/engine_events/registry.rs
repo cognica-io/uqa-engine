@@ -11,13 +11,41 @@ use std::collections::BTreeMap;
 use uqa_sql::ast::{CreateRule, CreateTrigger, DropRule, DropTrigger, EventEnableMode};
 use uqa_sql::SQLError;
 
+use crate::engine_capabilities::{RelationLookupMode, RelationResolution};
 use crate::{Engine, RelationIdentity};
 
 use super::{duplicate_object, undefined_object, StoredRule, StoredTrigger};
 
 impl Engine {
+    fn bind_visible_event_drop_relation(
+        &self,
+        requested: &str,
+        if_exists: bool,
+    ) -> Result<Option<String>, SQLError> {
+        let resolution = self.resolve_visible_relation_kind(requested)?;
+        match resolution {
+            RelationResolution::MissingSchema(schema) if if_exists => {
+                self.push_sql_notice(
+                    "NOTICE",
+                    &format!("schema \"{schema}\" does not exist, skipping"),
+                );
+                Ok(None)
+            }
+            RelationResolution::MissingRelation if if_exists => {
+                self.push_sql_notice(
+                    "NOTICE",
+                    &format!("relation \"{requested}\" does not exist, skipping"),
+                );
+                Ok(None)
+            }
+            resolution => Self::event_relation_from_resolution(requested, resolution)
+                .map(|(relation, _)| Some(relation.qualified_name())),
+        }
+    }
+
     pub(crate) fn register_rule(&self, mut definition: CreateRule) -> Result<(), SQLError> {
-        let relation = self.validate_rule_definition(&mut definition)?;
+        let relation =
+            self.validate_rule_definition(&mut definition, RelationLookupMode::Dynamic)?;
         if definition.event == uqa_sql::ast::RuleEvent::Select {
             if !definition.or_replace {
                 return Err(duplicate_object(
@@ -79,6 +107,17 @@ impl Engine {
         drop(rules);
         self.note_catalog_registry_changed();
         Ok(())
+    }
+
+    pub(crate) fn drop_rule_sql(&self, statement: &DropRule) -> Result<(), SQLError> {
+        let Some(table) =
+            self.bind_visible_event_drop_relation(&statement.table, statement.if_exists)?
+        else {
+            return Ok(());
+        };
+        let mut bound = statement.clone();
+        bound.table = table;
+        self.drop_rule(&bound)
     }
 
     pub(crate) fn drop_rule(&self, statement: &DropRule) -> Result<(), SQLError> {
@@ -174,7 +213,8 @@ impl Engine {
     }
 
     pub(crate) fn register_trigger(&self, mut definition: CreateTrigger) -> Result<(), SQLError> {
-        let relation = self.validate_trigger_definition(&mut definition)?;
+        let relation =
+            self.validate_trigger_definition(&mut definition, RelationLookupMode::Dynamic)?;
         self.ensure_partition_trigger_name_available(
             &relation,
             &definition.name,
@@ -220,6 +260,17 @@ impl Engine {
         drop(triggers);
         self.note_catalog_registry_changed();
         Ok(())
+    }
+
+    pub(crate) fn drop_trigger_sql(&self, statement: &DropTrigger) -> Result<(), SQLError> {
+        let Some(table) =
+            self.bind_visible_event_drop_relation(&statement.table, statement.if_exists)?
+        else {
+            return Ok(());
+        };
+        let mut bound = statement.clone();
+        bound.table = table;
+        self.drop_trigger(&bound)
     }
 
     fn ensure_partition_trigger_name_available(

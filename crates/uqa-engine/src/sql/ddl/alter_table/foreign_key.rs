@@ -17,11 +17,28 @@ pub(super) fn validate_foreign_key_definition(
     validate_foreign_key_definition_with_local_state(engine, table, None, None, foreign_key)
 }
 
+pub(in crate::sql::ddl) fn validate_foreign_key_definition_with_local_state(
+    engine: &Engine,
+    table: &str,
+    local_columns: Option<&[uqa_sql::ast::ColumnDef]>,
+    local_keys: Option<&[uqa_sql::ast::TableKeyConstraint]>,
+    foreign_key: &mut uqa_sql::ast::ForeignKey,
+) -> Result<(), SQLError> {
+    foreign_key.ref_table = engine.resolve_visible_table_reference(&foreign_key.ref_table)?;
+    validate_bound_foreign_key_definition_with_local_state(
+        engine,
+        table,
+        local_columns,
+        local_keys,
+        foreign_key,
+    )
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "preserves DDL dependency and action order"
 )]
-pub(in crate::sql::ddl) fn validate_foreign_key_definition_with_local_state(
+pub(in crate::sql::ddl) fn validate_bound_foreign_key_definition_with_local_state(
     engine: &Engine,
     table: &str,
     local_columns: Option<&[uqa_sql::ast::ColumnDef]>,
@@ -44,16 +61,14 @@ pub(in crate::sql::ddl) fn validate_foreign_key_definition_with_local_state(
         }
     }
     let referenced = engine
-        .try_resolve_table_name(&foreign_key.ref_table)
-        .map_err(|error| ddl_storage_error("FOREIGN KEY referenced table", error))?
+        .try_resolve_bound_table_name(&foreign_key.ref_table)?
         .ok_or_else(|| SQLError::UnknownTable(foreign_key.ref_table.clone()))?;
     let referenced_columns = engine
         .try_describe_table(&referenced)
         .map_err(|error| ddl_storage_error("FOREIGN KEY referenced columns", error))?
         .ok_or_else(|| SQLError::UnknownTable(referenced.clone()))?;
     let local = engine
-        .try_resolve_table_name(table)
-        .map_err(|error| ddl_storage_error("FOREIGN KEY local table", error))?
+        .try_resolve_bound_table_name(table)?
         .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
     let referenced_keys = if referenced == local {
         match local_keys {

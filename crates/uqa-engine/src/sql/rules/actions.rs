@@ -78,6 +78,7 @@ pub(super) fn bind_insert_values_action(
 #[derive(PartialEq)]
 struct BoundInsertContract<'a> {
     table: &'a str,
+    target_relation_bound: bool,
     target_qualifier: &'a str,
     include_descendants: bool,
     columns: &'a [String],
@@ -92,6 +93,7 @@ impl<'a> From<&'a InsertStmt> for BoundInsertContract<'a> {
     fn from(insert: &'a InsertStmt) -> Self {
         Self {
             table: &insert.table,
+            target_relation_bound: insert.target_relation_bound,
             target_qualifier: &insert.target_qualifier,
             include_descendants: insert.include_descendants,
             columns: &insert.columns,

@@ -491,7 +491,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 Ok(SQLResult::empty())
             }
             CommandPlan::DropTrigger(statement) => {
-                self.engine.drop_trigger(statement)?;
+                self.engine.drop_trigger_sql(statement)?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::CreateRule(statement) => {
@@ -499,7 +499,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 Ok(SQLResult::empty())
             }
             CommandPlan::DropRule(statement) => {
-                self.engine.drop_rule(statement)?;
+                self.engine.drop_rule_sql(statement)?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::AlterTable(statement) => {

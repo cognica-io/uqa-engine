@@ -62,9 +62,17 @@ fn dml_storage_error(action: &str, err: impl std::fmt::Display) -> SQLError {
 }
 
 /// Resolve a statement's mutation target once, before any internal storage or rewrite path can observe its textual name.
-fn resolve_dml_target_name(engine: &Engine, name: &str) -> Result<String, SQLError> {
-    engine
-        .try_resolve_visible_relation_kind(name)?
+fn resolve_dml_target_name(
+    engine: &Engine,
+    name: &str,
+    target_relation_bound: bool,
+) -> Result<String, SQLError> {
+    let resolution = if target_relation_bound {
+        engine.resolve_bound_relation_kind(name)?.into_found()
+    } else {
+        engine.try_resolve_visible_relation_kind(name)?
+    };
+    resolution
         .map(|(canonical, _)| canonical)
         .ok_or_else(|| SQLError::UnknownTable(name.to_string()))
 }

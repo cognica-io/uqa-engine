@@ -35,7 +35,8 @@ use constraint_lifecycle::{
     ConstraintLocation,
 };
 pub(super) use foreign_key::{
-    column_foreign_key, validate_foreign_key_definition_with_local_state,
+    column_foreign_key, validate_bound_foreign_key_definition_with_local_state,
+    validate_foreign_key_definition_with_local_state,
 };
 use recursion::{
     materialize_recursive_action_names, merge_existing_recursive_action, recursive_alter_targets,

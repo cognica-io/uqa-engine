@@ -432,7 +432,7 @@
       "id": "relations.schema-usage",
       "postgresql_reference": "PostgreSQL 18.4 live relation namespace resolution and SQLSTATE transcript in tests/parity/pg18/relation_schema_usage_oracle.expected.txt",
       "uqa_test": "cargo test -p uqa-engine --test integration engine_catalog::sql_information_schema::relation_schema_usage::; tests/parity/pg18/relation_schema_usage_oracle.sql",
-      "supported_version": "PostgreSQL 18.4 schema USAGE enforcement for qualified and effective-search-path table, view, materialized-view, and foreign-table query lookup; INSERT, UPDATE, DELETE, TRUNCATE, ALTER TABLE, DROP TABLE, stored-view creation, and hard or soft regclass lookup; inherited grants and immediate prepared-plan revocation; namespace-check-free exact table identities stored in views, materialized views, SQL-standard query bodies, and declared cursors; and security-context-aware dynamic SQL bodies",
+      "supported_version": "PostgreSQL 18.4 schema USAGE enforcement for qualified and effective-search-path table, view, materialized-view, and foreign-table query lookup; INSERT, UPDATE, DELETE, TRUNCATE, ALTER TABLE, DROP TABLE, stored-view creation, trigger and rule targets, constraint-trigger references, rule-action mutation targets, hierarchy parents, foreign-key references, and hard or soft regclass lookup; inherited grants and immediate prepared-plan revocation; namespace-check-free exact table identities stored in views, materialized views, SQL-standard query bodies, declared cursors, rule actions, and system-catalog relationships; and security-context-aware dynamic SQL bodies",
       "status": "verified",
       "open_issue": null
     },

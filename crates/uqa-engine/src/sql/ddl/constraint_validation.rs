@@ -204,8 +204,7 @@ pub(super) fn resolve_foreign_key_parent(
     reference: &str,
 ) -> Result<(String, Vec<ColumnDef>, Vec<TableKeyConstraint>), SQLError> {
     let canonical = engine
-        .try_resolve_table_name(reference)
-        .map_err(|error| SQLError::Internal(format!("resolve FOREIGN KEY target: {error}")))?
+        .try_resolve_bound_table_name(reference)?
         .ok_or_else(|| SQLError::UnknownTable(reference.to_string()))?;
     let columns = engine
         .try_describe_table(&canonical)

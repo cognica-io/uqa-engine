@@ -49,7 +49,7 @@ pub(in crate::sql) fn run_merge(
     mut stmt: MergePlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    stmt.target = super::super::resolve_dml_target_name(engine, &stmt.target)?;
+    stmt.target = super::super::resolve_dml_target_name(engine, &stmt.target, false)?;
     super::super::run_mutation_command(engine, move |engine| run_merge_inner(engine, &stmt, params))
 }
 

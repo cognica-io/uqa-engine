@@ -8,21 +8,39 @@ use super::{
     bind_expr, first_invalid_rule_condition_qualifier, is_boolean_type, rule_action_has_returning,
     rule_action_has_set_operation, validate_rule_action_reference_scopes,
     validate_rule_returning_shape, ColumnType, CreateRule, Engine, Expr, RelationIdentity,
-    RuleConditionNameResolver, RuleEvent, RuleRowTypeResolver, SQLError, Statement, StoredViewKind,
-    Value,
+    RelationLookupMode, RelationResolution, RuleConditionNameResolver, RuleEvent,
+    RuleRowTypeResolver, SQLError, Statement, StoredViewKind, Value,
 };
 
 impl Engine {
+    fn resolve_visible_rule_action_relation(
+        &self,
+        name: &str,
+    ) -> Result<RelationIdentity, SQLError> {
+        let Some((canonical, kind)) = self.try_resolve_visible_relation_kind(name)? else {
+            return Err(SQLError::UnknownTable(name.to_string()));
+        };
+        if !matches!(kind, "table" | "view" | "materialized view") {
+            return Err(SQLError::UnknownTable(name.to_string()));
+        }
+        RelationIdentity::from_legacy_name(&canonical).map_err(|error| {
+            SQLError::Internal(format!(
+                "decode resolved rule action relation `{canonical}`: {error}"
+            ))
+        })
+    }
+
     pub(crate) fn resolve_rule_relation(&self, name: &str) -> Result<RelationIdentity, SQLError> {
-        let candidates = self.relation_lookup_candidates(name).map_err(|error| {
-            SQLError::Internal(format!("resolve rule relation `{name}`: {error}"))
-        })?;
-        let tables = self.storage.tables.read();
-        let views = self.durable.views.read();
-        candidates
-            .into_iter()
-            .find(|relation| tables.contains_key(relation) || views.contains_key(relation))
-            .ok_or_else(|| SQLError::UnknownTable(name.to_string()))
+        let RelationResolution::Found(canonical, kind) = self.resolve_bound_relation_kind(name)?
+        else {
+            return Err(SQLError::UnknownTable(name.to_string()));
+        };
+        if !matches!(kind, "table" | "view" | "materialized view") {
+            return Err(SQLError::UnknownTable(name.to_string()));
+        }
+        RelationIdentity::from_legacy_name(&canonical).map_err(|error| {
+            SQLError::Internal(format!("decode bound rule relation `{canonical}`: {error}"))
+        })
     }
 
     pub(crate) fn rule_relation_columns(
@@ -176,14 +194,30 @@ impl Engine {
         crate::sql::reject_stored_regrole_constants(self, condition, None)
     }
 
-    fn canonicalize_rule_action_target(&self, action: &mut Statement) -> Result<(), SQLError> {
-        let target = match action {
-            Statement::Insert(statement) => &mut statement.table,
-            Statement::Update(statement) => &mut statement.table,
-            Statement::Delete(statement) => &mut statement.table,
+    fn canonicalize_rule_action_target(
+        &self,
+        action: &mut Statement,
+        lookup_mode: RelationLookupMode,
+    ) -> Result<(), SQLError> {
+        let (target, target_relation_bound) = match action {
+            Statement::Insert(statement) => {
+                (&mut statement.table, &mut statement.target_relation_bound)
+            }
+            Statement::Update(statement) => {
+                (&mut statement.table, &mut statement.target_relation_bound)
+            }
+            Statement::Delete(statement) => {
+                (&mut statement.table, &mut statement.target_relation_bound)
+            }
             _ => return Ok(()),
         };
-        *target = self.resolve_rule_relation(target)?.qualified_name();
+        let relation = if lookup_mode == RelationLookupMode::Bound || *target_relation_bound {
+            self.resolve_rule_relation(target)?
+        } else {
+            self.resolve_visible_rule_action_relation(target)?
+        };
+        *target_relation_bound = true;
+        *target = relation.qualified_name();
         Ok(())
     }
 
@@ -207,8 +241,9 @@ impl Engine {
     pub(in crate::engine_events) fn validate_rule_definition(
         &self,
         definition: &mut CreateRule,
+        lookup_mode: RelationLookupMode,
     ) -> Result<RelationIdentity, SQLError> {
-        let relation = self.resolve_rule_relation(&definition.table)?;
+        let (relation, _) = self.resolve_event_relation_kind(&definition.table, lookup_mode)?;
         definition.table = relation.qualified_name();
         let stored_view_kind = self
             .durable
@@ -260,7 +295,7 @@ impl Engine {
             });
         }
         for action in &mut definition.actions {
-            self.canonicalize_rule_action_target(action)?;
+            self.canonicalize_rule_action_target(action, lookup_mode)?;
             validate_rule_action_reference_scopes(action)?;
             let action_columns = self.rule_action_target_columns(action)?;
             let bound = crate::engine_events::bind_rule_action(

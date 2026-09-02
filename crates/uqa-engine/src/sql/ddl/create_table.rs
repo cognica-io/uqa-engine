@@ -56,6 +56,7 @@ fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResu
         )));
     }
     prepare_create_table_hierarchy(engine, &mut c)?;
+    bind_create_table_relation_references(engine, &mut c)?;
     materialize_implicit_sequences(engine, &mut c)?;
     let check_columns = c.columns.clone();
     for column in &mut c.columns {
@@ -154,7 +155,7 @@ fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResu
             continue;
         };
         let mut foreign_key = super::alter_table::column_foreign_key(column, &reference);
-        super::alter_table::validate_foreign_key_definition_with_local_state(
+        super::alter_table::validate_bound_foreign_key_definition_with_local_state(
             engine,
             &c.name,
             None,
@@ -175,7 +176,7 @@ fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResu
         reference.column = Some(referenced_column.clone());
     }
     for foreign_key in &mut c.foreign_keys {
-        super::alter_table::validate_foreign_key_definition_with_local_state(
+        super::alter_table::validate_bound_foreign_key_definition_with_local_state(
             engine,
             &c.name,
             None,
@@ -210,6 +211,42 @@ fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResu
         .refresh_value_indexes_for_table(&c.name)
         .map_err(|e| ddl_storage_error("CREATE TABLE btree indexes", e))?;
     Ok(SQLResult::empty())
+}
+
+fn bind_create_table_relation_references(
+    engine: &Engine,
+    table: &mut CreateTable,
+) -> Result<(), SQLError> {
+    let table_name = table.name.clone();
+    let qualifier = table.qualifier.clone();
+    for column in &mut table.columns {
+        if let Some(reference) = column.references.as_mut() {
+            bind_create_table_reference(engine, &table_name, &qualifier, &mut reference.table)?;
+        }
+    }
+    for foreign_key in &mut table.foreign_keys {
+        bind_create_table_reference(engine, &table_name, &qualifier, &mut foreign_key.ref_table)?;
+    }
+    Ok(())
+}
+
+fn bind_create_table_reference(
+    engine: &Engine,
+    table: &str,
+    qualifier: &str,
+    reference: &mut String,
+) -> Result<(), SQLError> {
+    let self_reference = reference == table
+        || reference == qualifier
+        || table
+            .rsplit_once('.')
+            .is_some_and(|(_, local_name)| local_name == reference);
+    if self_reference {
+        table.clone_into(reference);
+        return Ok(());
+    }
+    *reference = engine.resolve_visible_table_reference(reference)?;
+    Ok(())
 }
 
 fn materialize_implicit_sequences(

@@ -726,6 +726,7 @@ pub(in crate::sql) fn find_foreign_key_parent(
     fk: &ForeignKey,
     lookup: &ForeignKeyLookup,
 ) -> Result<Option<PhysicalDocumentIdentity>, SQLError> {
+    authorize_foreign_key_parent_namespace(engine, fk)?;
     if lookup.comparison.exact_reference_lookup {
         return find_exact_foreign_key_parent(engine, fk, &lookup.values);
     }
@@ -743,6 +744,24 @@ pub(in crate::sql) fn find_foreign_key_parent(
         }
     }
     Ok(None)
+}
+
+pub(super) fn authorize_foreign_key_parent_namespace(
+    engine: &Engine,
+    foreign_key: &ForeignKey,
+) -> Result<(), SQLError> {
+    let relation =
+        crate::RelationIdentity::from_legacy_name(&foreign_key.ref_table).map_err(|error| {
+            SQLError::Internal(format!(
+                "decode stored FOREIGN KEY relation `{}`: {error}",
+                foreign_key.ref_table
+            ))
+        })?;
+    engine.require_schema_privilege(
+        &relation.schema,
+        &engine.current_user_name(),
+        crate::engine_schema_security::SchemaAclPrivilege::Usage,
+    )
 }
 
 fn find_exact_foreign_key_parent(
