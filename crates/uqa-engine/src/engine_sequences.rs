@@ -210,8 +210,7 @@ impl Engine {
     ) -> Result<bool, SQLError> {
         Self::validate_sequence_definition(state, false)?;
         let name = if persistence == uqa_sql::ast::RelationPersistence::Temporary {
-            self.try_temporary_relation_name_for_create(name)
-                .map_err(SQLError::Unsupported)?
+            self.try_temporary_relation_name_for_create(name)?
         } else {
             self.try_relation_name_for_create(name)
                 .map_err(SQLError::Unsupported)?

@@ -145,7 +145,7 @@ impl Engine {
     ) -> StorageBackendResult<()> {
         let name = if persistence == uqa_sql::ast::RelationPersistence::Temporary {
             self.try_temporary_relation_name_for_create(raw_name)
-                .map_err(StorageBackendError::Other)?
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?
         } else {
             self.try_relation_name_for_create(raw_name)
                 .map_err(StorageBackendError::Other)?

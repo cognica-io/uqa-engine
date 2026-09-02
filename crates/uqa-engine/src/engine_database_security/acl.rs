@@ -203,6 +203,25 @@ pub(super) fn role_has_database_privilege_check(
     }
 }
 
+pub(crate) fn role_has_database_privilege(
+    security: &DatabaseSecurity,
+    subject: &str,
+    privilege: DatabaseAclPrivilege,
+    roles: &BTreeMap<String, RoleDefinition>,
+    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+) -> bool {
+    role_has_database_privilege_check(
+        security,
+        subject,
+        DatabasePrivilegeCheck {
+            privilege,
+            grant_option: false,
+        },
+        roles,
+        memberships,
+    )
+}
+
 pub(super) fn grant_acl(
     security: &mut DatabaseSecurity,
     privilege: DatabaseAclPrivilege,

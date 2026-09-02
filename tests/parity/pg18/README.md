@@ -72,6 +72,12 @@ docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/pa
 docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/database_privilege_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/database_privilege_oracle.expected.txt -
 ```
 
+`database_privilege_enforcement_oracle.sql` records PostgreSQL 18.4 database `CREATE` and `TEMPORARY` enforcement. The checked-in transcript verifies schema and every implemented temporary relation or index creation form, exact precedence across existing, reserved, qualified, invalid-definition, and missing-source targets, inherited grants, immediate revocation after temporary-namespace allocation, and `DISCARD TEMP` behavior.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/database_privilege_enforcement_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/database_privilege_enforcement_oracle.expected.txt -
+```
+
 `schema_privilege_inquiry_oracle.sql` records PostgreSQL 18.4 schema privilege inquiry behavior. The checked-in transcript verifies all six name/OID `has_schema_privilege` overloads, owner and inherited-role privileges, ACL and grant-option paths, comma-any checks, system and current temporary namespaces, strict NULLs, missing OIDs, name and OID resolution precedence, and exact `pg_proc` identities.
 
 ```sh

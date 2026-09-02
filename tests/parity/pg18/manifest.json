@@ -13,6 +13,7 @@
     "stateful_rules": "tests/parity/pg18/rules_stateful.expected.json",
     "stateful_transactions": "tests/parity/pg18/transaction_stateful.expected.json",
     "database_privileges": "tests/parity/pg18/database_privilege_oracle.expected.txt",
+    "database_privilege_enforcement": "tests/parity/pg18/database_privilege_enforcement_oracle.expected.txt",
     "schema_privilege_inquiry": "tests/parity/pg18/schema_privilege_inquiry_oracle.expected.txt",
     "sequence_introspection": "tests/parity/pg18/sequence_introspection_oracle.expected.txt",
     "transaction_catalog_visibility": "tests/parity/pg18/transaction_catalog_visibility_oracle.expected.txt",
@@ -539,11 +540,11 @@
     },
     {
       "id": "catalog.pg-database-locale",
-      "postgresql_reference": "PostgreSQL 18.4 pg_database ownership and ACL catalog behavior plus tests/parity/pg18/database_privilege_oracle.expected.txt",
+      "postgresql_reference": "PostgreSQL 18.4 pg_database ownership, ACL catalog, and privilege enforcement behavior plus tests/parity/pg18/database_privilege_oracle.expected.txt and tests/parity/pg18/database_privilege_enforcement_oracle.expected.txt",
       "uqa_test": "cargo test -p uqa-sql --lib database_grants_preserve_privileges_targets_and_grant_paths; cargo test -p uqa-execution --lib has_database_privilege_registers_every_postgresql_name_and_oid_overload; cargo test -p uqa-engine --test integration sql_information_schema::database_privileges; cargo test -p uqa-engine --test integration postgresql_18_database_catalog_matches_builtin_unicode_behavior",
-      "supported_version": "PostgreSQL 18.4 fixed uqa database identity, bootstrap ownership, builtin Unicode locale catalog fields, default PUBLIC CONNECT and TEMPORARY privileges, durable explicit CONNECT, CREATE, TEMPORARY or TEMP ACL grants and revokes, membership-aware owner and independent rooted grant-option paths, GRANTED BY validation, dependency-aware RESTRICT and CASCADE, role dependencies, transaction, savepoint, cross-engine refresh, reopen, exact pg_database datdba and datacl output, and all six current-user or explicit-role name/OID has_database_privilege overloads with comma-any and grant-option checks, strict NULL, missing-object and error precedence, and exact pg_proc metadata",
+      "supported_version": "PostgreSQL 18.4 fixed uqa database identity, bootstrap ownership, builtin Unicode locale catalog fields, default PUBLIC CONNECT and TEMPORARY privileges, durable explicit CONNECT, CREATE, TEMPORARY or TEMP ACL grants and revokes, membership-aware owner and independent rooted grant-option paths, GRANTED BY validation, dependency-aware RESTRICT and CASCADE, role dependencies, transaction, savepoint, cross-engine refresh, reopen, exact pg_database datdba and datacl output, all six current-user or explicit-role name/OID has_database_privilege overloads with comma-any and grant-option checks, strict NULL, missing-object and error precedence, exact pg_proc metadata, CREATE enforcement at schema creation, and TEMPORARY enforcement for temporary tables, sequences, views, CTAS, SELECT INTO, indexes, and indexed key constraints with inherited grants, immediate revocation, transactional restoration, and PostgreSQL source-analysis and definition-error precedence",
       "status": "partial",
-      "open_issue": "Complete collation and locale-provider behavior, database creation, alteration, removal, owner transfer and other lifecycle operations, and CONNECT, CREATE, and TEMPORARY enforcement at connection, schema-creation, and temporary-object boundaries remain."
+      "open_issue": "Complete collation and locale-provider behavior, database creation, alteration, removal, owner transfer and other lifecycle operations, and CONNECT enforcement at the embedding connection boundary remain."
     },
     {
       "id": "plpgsql.datum-slots-and-bound-cursors",

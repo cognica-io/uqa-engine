@@ -11,8 +11,10 @@ use std::collections::BTreeMap;
 mod acl;
 mod inquiry;
 
+pub(crate) use acl::DatabaseAclPrivilege;
 use acl::{
-    grant_acl, requested_acl_privileges, revoke_acl, select_acl_grantor, DatabaseAclPrivilege,
+    grant_acl, requested_acl_privileges, revoke_acl, role_has_database_privilege,
+    select_acl_grantor,
 };
 use uqa_sql::ast::{DatabaseRevokeBehavior, GrantDatabaseStmt};
 
@@ -135,6 +137,36 @@ impl Engine {
         drop(roles);
         *self.durable.database_security.write() = security;
         Ok(())
+    }
+
+    pub(crate) fn ensure_database_privilege(
+        &self,
+        role: &str,
+        privilege: DatabaseAclPrivilege,
+    ) -> Result<(), SQLError> {
+        if role_has_database_privilege(
+            &self.durable.database_security.read(),
+            role,
+            privilege,
+            &self.durable.roles.read(),
+            &self.durable.role_memberships.read(),
+        ) {
+            return Ok(());
+        }
+        let message = match privilege {
+            DatabaseAclPrivilege::Temporary => {
+                format!(
+                    "permission denied to create temporary tables in database \"{DATABASE_NAME}\""
+                )
+            }
+            DatabaseAclPrivilege::Connect | DatabaseAclPrivilege::Create => {
+                format!("permission denied for database {DATABASE_NAME}")
+            }
+        };
+        Err(SQLError::Routine {
+            sqlstate: "42501".into(),
+            message,
+        })
     }
 }
 

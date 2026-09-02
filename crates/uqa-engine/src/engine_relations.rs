@@ -97,17 +97,29 @@ impl Engine {
         Ok(candidates)
     }
 
+    pub(crate) fn ensure_temporary_relation_creation_privilege(&self) -> Result<(), SQLError> {
+        let current_user = self.current_user_name();
+        self.ensure_database_privilege(
+            &current_user,
+            crate::engine_database_security::DatabaseAclPrivilege::Temporary,
+        )
+    }
+
     pub(crate) fn try_temporary_relation_name_for_create(
         &self,
         name: &str,
-    ) -> Result<String, String> {
-        let (schema, relation) = RelationIdentity::parse_reference(name)?;
+    ) -> Result<String, SQLError> {
+        self.ensure_temporary_relation_creation_privilege()?;
+        let (schema, relation) =
+            RelationIdentity::parse_reference(name).map_err(SQLError::Unsupported)?;
         let temporary_schema = self.temporary_schema_name();
         if schema
             .as_deref()
             .is_some_and(|schema| schema != "pg_temp" && schema != temporary_schema)
         {
-            return Err("temporary relations cannot specify a schema name".into());
+            return Err(SQLError::Unsupported(
+                "temporary relations cannot specify a schema name".into(),
+            ));
         }
         self.session.state.write().temporary_namespace_allocated = true;
         Ok(RelationIdentity::new(temporary_schema, relation).qualified_name())

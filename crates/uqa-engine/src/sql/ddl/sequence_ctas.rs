@@ -63,8 +63,14 @@ fn run_create_table_as_inner(
     execution: &CreateTableAsExecution<'_>,
 ) -> Result<SQLResult, SQLError> {
     let ctes = crate::sql::select::CteScope::new_for_current_routine(engine);
-    let mut query_schema = execution
-        .with_no_data
+    // PostgreSQL analyzes a CTAS source before surfacing a missing temporary-object privilege, while an authorized WITH DATA statement checks a target collision before source analysis.
+    let temporary_privilege_error =
+        if execution.persistence == uqa_sql::ast::RelationPersistence::Temporary {
+            engine.ensure_temporary_relation_creation_privilege().err()
+        } else {
+            None
+        };
+    let mut query_schema = (execution.with_no_data || temporary_privilege_error.is_some())
         .then(|| {
             crate::sql::select::analyze_query_plan_schema(
                 engine,
@@ -75,6 +81,9 @@ fn run_create_table_as_inner(
             )
         })
         .transpose()?;
+    if let Some(error) = temporary_privilege_error {
+        return Err(error);
+    }
     let preliminary_name = create_table_as_target_name(engine, execution);
     if let Ok(name) = &preliminary_name {
         if should_skip_existing_create_table_as(engine, name, execution.if_not_exists)? {
@@ -155,9 +164,7 @@ fn create_table_as_target_name(
     execution: &CreateTableAsExecution<'_>,
 ) -> Result<String, SQLError> {
     if execution.persistence == uqa_sql::ast::RelationPersistence::Temporary {
-        engine
-            .try_temporary_relation_name_for_create(execution.name)
-            .map_err(SQLError::Unsupported)
+        engine.try_temporary_relation_name_for_create(execution.name)
     } else {
         engine
             .try_relation_name_for_create(execution.name)

@@ -13,6 +13,7 @@ fn schema_inquiry_engine() -> Engine {
         "CREATE ROLE schema_inquiry_reader",
         "CREATE ROLE schema_inquiry_outsider",
         "CREATE ROLE schema_inquiry_member INHERIT",
+        "GRANT CREATE ON DATABASE uqa TO schema_inquiry_owner",
         "SET ROLE schema_inquiry_owner",
         "CREATE SCHEMA schema_inquiry_space",
         "CREATE SCHEMA \"12345\"",
@@ -20,6 +21,7 @@ fn schema_inquiry_engine() -> Engine {
         "GRANT CREATE ON SCHEMA schema_inquiry_space TO schema_inquiry_reader WITH GRANT OPTION",
         "GRANT USAGE ON SCHEMA \"12345\" TO schema_inquiry_reader",
         "RESET ROLE",
+        "REVOKE CREATE ON DATABASE uqa FROM schema_inquiry_owner",
         "GRANT schema_inquiry_owner TO schema_inquiry_member",
     ] {
         engine

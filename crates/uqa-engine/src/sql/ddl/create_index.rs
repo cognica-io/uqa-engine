@@ -15,8 +15,12 @@ pub(in crate::sql) fn run_create_index(
     engine: &Engine,
     c: CreateIndex,
 ) -> Result<SQLResult, SQLError> {
+    let table = engine.require_table(&c.table)?;
+    if table.persistence == uqa_sql::ast::RelationPersistence::Temporary {
+        engine.ensure_temporary_relation_creation_privilege()?;
+    }
     // Every accepted access method has a matching physical implementation.
-    // Reject unknown methods before allocating a name or touching any table,
+    // Reject unknown methods before allocating a name or mutating any table,
     // index, analyzer, or catalog state.
     let am = c.access_method.to_ascii_lowercase();
     if !matches!(am.as_str(), "" | "btree" | "gin" | "ivf" | "hnsw") {

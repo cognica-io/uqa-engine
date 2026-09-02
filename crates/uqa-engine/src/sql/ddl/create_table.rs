@@ -39,9 +39,7 @@ fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResu
         engine.prepare_explicit_transaction_writer()?;
     }
     c.name = if c.persistence == uqa_sql::ast::RelationPersistence::Temporary {
-        engine
-            .try_temporary_relation_name_for_create(&c.name)
-            .map_err(SQLError::Unsupported)?
+        engine.try_temporary_relation_name_for_create(&c.name)?
     } else {
         engine
             .try_relation_name_for_create(&c.name)

@@ -43,6 +43,24 @@ fn database_privilege_engine() -> Engine {
     engine
 }
 
+fn database_privilege_enforcement_engine() -> Engine {
+    let engine = Engine::new();
+    for sql in [
+        "CREATE ROLE database_enforcement_outsider",
+        "CREATE ROLE database_enforcement_creator",
+        "CREATE ROLE database_enforcement_member INHERIT",
+        "GRANT database_enforcement_creator TO database_enforcement_member",
+        "CREATE SCHEMA database_enforcement_existing",
+        "REVOKE CREATE, TEMPORARY ON DATABASE uqa FROM PUBLIC",
+        "GRANT CREATE, TEMPORARY ON DATABASE uqa TO database_enforcement_creator",
+    ] {
+        engine
+            .sql(sql, &[])
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+    }
+    engine
+}
+
 fn assert_database_inquiry_missing_and_error_boundary(engine: &Engine) {
     assert_eq!(
         scalar(engine, "SELECT pg_typeof(4294967290::oid)::text AS v"),
@@ -151,6 +169,229 @@ fn database_privilege_inquiry_covers_defaults_overloads_and_errors() {
     }
     engine.sql("RESET ROLE", &[]).unwrap();
     assert_database_inquiry_missing_and_error_boundary(&engine);
+}
+
+#[test]
+fn database_privileges_guard_schema_and_temporary_relation_creation_boundaries() {
+    let engine = database_privilege_enforcement_engine();
+    engine
+        .sql("SET ROLE database_enforcement_outsider", &[])
+        .unwrap();
+    for (sql, expected) in [
+        ("CREATE SCHEMA database_enforcement_denied", "42501"),
+        ("CREATE SCHEMA database_enforcement_existing", "42501"),
+        (
+            "CREATE SCHEMA IF NOT EXISTS database_enforcement_existing",
+            "42501",
+        ),
+        ("CREATE SCHEMA pg_database_enforcement_denied", "42501"),
+        (
+            "CREATE TEMP TABLE database_enforcement_temp_table(id integer)",
+            "42501",
+        ),
+        (
+            "CREATE TEMP SEQUENCE database_enforcement_temp_sequence",
+            "42501",
+        ),
+        (
+            "CREATE TEMP SEQUENCE database_enforcement_invalid_sequence INCREMENT 0",
+            "22023",
+        ),
+        (
+            "CREATE TEMP VIEW database_enforcement_temp_view AS SELECT 1 AS id",
+            "42501",
+        ),
+        (
+            "CREATE TEMP VIEW database_enforcement_missing_view AS SELECT * FROM database_enforcement_missing_source",
+            "42P01",
+        ),
+        (
+            "CREATE TEMP VIEW database_enforcement_duplicate_view(id, id) AS SELECT 1, 2",
+            "42501",
+        ),
+        (
+            "CREATE TEMP TABLE database_enforcement_temp_ctas AS SELECT 1 AS id",
+            "42501",
+        ),
+        (
+            "CREATE TEMP TABLE database_enforcement_missing_ctas AS SELECT * FROM database_enforcement_missing_source",
+            "42P01",
+        ),
+        (
+            "CREATE TEMP TABLE database_enforcement_duplicate_ctas AS SELECT 1 AS id, 2 AS id",
+            "42501",
+        ),
+        (
+            "SELECT 1 AS id INTO TEMP database_enforcement_temp_select_into",
+            "42501",
+        ),
+        (
+            "CREATE TEMP TABLE public.database_enforcement_temp_qualified(id integer)",
+            "42501",
+        ),
+        (
+            "CREATE TEMP TABLE database_enforcement_temp_definition(id integer, id integer)",
+            "42501",
+        ),
+    ] {
+        assert_eq!(sqlstate(&engine, sql), expected, "{sql}");
+    }
+    engine.sql("RESET ROLE", &[]).unwrap();
+}
+
+#[test]
+fn temporary_index_creation_enforces_database_privilege_and_postgresql_precedence() {
+    let engine = database_privilege_enforcement_engine();
+    engine
+        .sql("SET ROLE database_enforcement_creator", &[])
+        .unwrap();
+    engine
+        .sql(
+            "CREATE TEMP TABLE database_enforcement_index_source(id integer)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "CREATE INDEX database_enforcement_existing_index ON database_enforcement_index_source(id)",
+            &[],
+        )
+        .unwrap();
+    engine.sql("RESET ROLE", &[]).unwrap();
+    engine
+        .sql(
+            "REVOKE TEMPORARY ON DATABASE uqa FROM database_enforcement_creator",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql("SET ROLE database_enforcement_creator", &[])
+        .unwrap();
+    for sql in [
+        "CREATE INDEX database_enforcement_after_revoke_index ON database_enforcement_index_source(id)",
+        "CREATE INDEX database_enforcement_existing_index ON database_enforcement_index_source(id)",
+        "CREATE INDEX IF NOT EXISTS database_enforcement_existing_index ON database_enforcement_index_source(id)",
+        "CREATE INDEX database_enforcement_missing_column_index ON database_enforcement_index_source(missing)",
+        "CREATE INDEX database_enforcement_invalid_method_index ON database_enforcement_index_source USING missing_method(id)",
+        "ALTER TABLE database_enforcement_index_source ADD UNIQUE(id)",
+        "ALTER TABLE database_enforcement_index_source ADD CONSTRAINT database_enforcement_existing_index UNIQUE(id)",
+        "ALTER TABLE database_enforcement_index_source ADD UNIQUE(missing)",
+        "ALTER TABLE database_enforcement_index_source ADD COLUMN indexed_value integer UNIQUE",
+    ] {
+        assert_eq!(sqlstate(&engine, sql), "42501", "{sql}");
+    }
+    assert_eq!(
+        sqlstate(
+            &engine,
+            "CREATE INDEX database_enforcement_missing_table_index ON database_enforcement_missing_table(id)"
+        ),
+        "42P01"
+    );
+    engine.sql("RESET ROLE", &[]).unwrap();
+}
+
+#[test]
+fn database_privilege_enforcement_tracks_inheritance_revocation_and_savepoints() {
+    let engine = database_privilege_enforcement_engine();
+    engine
+        .sql("SET ROLE database_enforcement_member", &[])
+        .unwrap();
+    engine
+        .sql("CREATE SCHEMA database_enforcement_inherited", &[])
+        .unwrap();
+    engine
+        .sql(
+            "CREATE TEMP TABLE database_enforcement_inherited_temp(id integer)",
+            &[],
+        )
+        .unwrap();
+    engine.sql("RESET ROLE", &[]).unwrap();
+
+    engine
+        .sql("SET ROLE database_enforcement_creator", &[])
+        .unwrap();
+    engine
+        .sql("CREATE SCHEMA database_enforcement_granted", &[])
+        .unwrap();
+    engine
+        .sql(
+            "CREATE TEMP TABLE database_enforcement_granted_temp(id integer)",
+            &[],
+        )
+        .unwrap();
+    engine.sql("RESET ROLE", &[]).unwrap();
+    engine
+        .sql(
+            "REVOKE CREATE, TEMPORARY ON DATABASE uqa FROM database_enforcement_creator",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql("SET ROLE database_enforcement_creator", &[])
+        .unwrap();
+    for sql in [
+        "CREATE SCHEMA database_enforcement_after_revoke",
+        "CREATE SCHEMA IF NOT EXISTS database_enforcement_granted",
+        "CREATE TEMP TABLE database_enforcement_after_revoke_temp(id integer)",
+    ] {
+        assert_eq!(sqlstate(&engine, sql), "42501", "{sql}");
+    }
+    engine.sql("RESET ROLE", &[]).unwrap();
+
+    engine.sql("BEGIN", &[]).unwrap();
+    engine
+        .sql(
+            "GRANT CREATE, TEMPORARY ON DATABASE uqa TO database_enforcement_creator",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql("SAVEPOINT database_enforcement_granted", &[])
+        .unwrap();
+    engine
+        .sql(
+            "REVOKE CREATE, TEMPORARY ON DATABASE uqa FROM database_enforcement_creator",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql("SET ROLE database_enforcement_creator", &[])
+        .unwrap();
+    assert_eq!(
+        sqlstate(
+            &engine,
+            "CREATE SCHEMA database_enforcement_savepoint_denied"
+        ),
+        "42501"
+    );
+    engine
+        .sql("ROLLBACK TO SAVEPOINT database_enforcement_granted", &[])
+        .unwrap();
+    engine
+        .sql("SET ROLE database_enforcement_creator", &[])
+        .unwrap();
+    engine
+        .sql("CREATE SCHEMA database_enforcement_savepoint_granted", &[])
+        .unwrap();
+    engine
+        .sql(
+            "CREATE TEMP TABLE database_enforcement_savepoint_temp(id integer)",
+            &[],
+        )
+        .unwrap();
+    engine.sql("RESET ROLE", &[]).unwrap();
+    engine.sql("ROLLBACK", &[]).unwrap();
+
+    engine
+        .sql("SET ROLE database_enforcement_creator", &[])
+        .unwrap();
+    for sql in [
+        "CREATE SCHEMA database_enforcement_after_rollback",
+        "CREATE TEMP TABLE database_enforcement_after_rollback_temp(id integer)",
+    ] {
+        assert_eq!(sqlstate(&engine, sql), "42501", "{sql}");
+    }
+    engine.sql("RESET ROLE", &[]).unwrap();
 }
 
 #[test]

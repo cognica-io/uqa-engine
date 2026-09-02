@@ -12,10 +12,12 @@ fn create_schema_security_roles(engine: &Engine) {
         "CREATE ROLE schema_sequence_owner",
         "CREATE ROLE schema_sequence_new_owner",
         "CREATE ROLE schema_sequence_outsider",
+        "GRANT CREATE ON DATABASE uqa TO schema_acl_owner",
         "SET ROLE schema_acl_owner",
         "CREATE SCHEMA sequence_source",
         "CREATE SCHEMA sequence_target",
         "RESET ROLE",
+        "REVOKE CREATE ON DATABASE uqa FROM schema_acl_owner",
     ] {
         engine
             .sql(sql, &[])
@@ -303,9 +305,11 @@ fn schema_grant_error_precedence_and_atomicity_match_postgresql() {
     for sql in [
         "CREATE ROLE schema_grant_owner",
         "CREATE ROLE schema_grant_user",
+        "GRANT CREATE ON DATABASE uqa TO schema_grant_owner",
         "SET ROLE schema_grant_owner",
         "CREATE SCHEMA schema_grant_space",
         "RESET ROLE",
+        "REVOKE CREATE ON DATABASE uqa FROM schema_grant_owner",
     ] {
         engine
             .sql(sql, &[])
@@ -440,10 +444,12 @@ fn create_schema_acl_chain(engine: &Engine) {
         "CREATE ROLE schema_chain_owner",
         "CREATE ROLE schema_chain_delegate",
         "CREATE ROLE schema_chain_leaf",
+        "GRANT CREATE ON DATABASE uqa TO schema_chain_owner",
         "SET ROLE schema_chain_owner",
         "CREATE SCHEMA schema_chain_space",
         "GRANT USAGE ON SCHEMA schema_chain_space TO schema_chain_delegate WITH GRANT OPTION",
         "RESET ROLE",
+        "REVOKE CREATE ON DATABASE uqa FROM schema_chain_owner",
         "SET ROLE schema_chain_delegate",
         "GRANT USAGE ON SCHEMA schema_chain_space TO schema_chain_leaf",
         "RESET ROLE",

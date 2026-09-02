@@ -205,6 +205,14 @@ fn run_alter_table_action(
     stmt: AlterTableStmt,
     action: AlterTableAction,
 ) -> Result<(), SQLError> {
+    if matches!(&action, AlterTableAction::AddKeyConstraint { .. })
+        && engine
+            .table_persistence(&stmt.table)
+            .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?
+            == Some(uqa_sql::ast::RelationPersistence::Temporary)
+    {
+        engine.ensure_temporary_relation_creation_privilege()?;
+    }
     if !matches!(
         action,
         AlterTableAction::RenameColumn { .. }
@@ -305,6 +313,13 @@ fn run_alter_table_action(
                 };
                 reference.table = foreign_key.ref_table;
                 reference.column = Some(referenced_column.clone());
+            }
+            if (column.primary_key || column.unique)
+                && engine.table_persistence(&stmt.table).map_err(|error| {
+                    ddl_storage_error("ALTER TABLE ADD COLUMN constraint", error)
+                })? == Some(uqa_sql::ast::RelationPersistence::Temporary)
+            {
+                engine.ensure_temporary_relation_creation_privilege()?;
             }
             let generated_kind = column.generated.as_ref().map(|generated| generated.kind);
             match column.ty {

@@ -421,6 +421,10 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
     ) -> Result<SQLResult, SQLError> {
         self.engine.prepare_explicit_transaction_writer()?;
         let role_owner = self.engine.session_execution_view().current_user();
+        self.engine.ensure_database_privilege(
+            &role_owner,
+            crate::engine_database_security::DatabaseAclPrivilege::Create,
+        )?;
         self.mutation
             .register_schema(name, if_not_exists, &role_owner)
             .map_err(|error| {
