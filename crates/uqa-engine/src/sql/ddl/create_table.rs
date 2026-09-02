@@ -43,17 +43,24 @@ fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResu
     } else {
         engine.try_relation_name_for_sql_create(&c.name)?
     };
-    if engine
-        .try_has_table(&c.name)
-        .map_err(|err| ddl_storage_error("CREATE TABLE", err))?
-    {
+    if matches!(
+        engine.resolve_bound_relation_kind(&c.name)?,
+        crate::engine_capabilities::RelationResolution::Found(_, _)
+    ) {
+        let local = crate::RelationIdentity::from_legacy_name(&c.name)
+            .map_err(SQLError::Internal)?
+            .name;
         if c.if_not_exists {
+            engine.push_sql_notice(
+                "NOTICE",
+                &format!("relation \"{local}\" already exists, skipping"),
+            );
             return Ok(SQLResult::empty());
         }
-        return Err(SQLError::Unsupported(format!(
-            "CREATE TABLE: relation `{}` already exists",
-            c.name
-        )));
+        return Err(SQLError::Routine {
+            sqlstate: "42P07".into(),
+            message: format!("relation \"{local}\" already exists"),
+        });
     }
     prepare_create_table_hierarchy(engine, &mut c)?;
     bind_create_table_relation_references(engine, &mut c)?;

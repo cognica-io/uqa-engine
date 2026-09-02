@@ -360,13 +360,13 @@ pub(super) fn engine_index_candidates(
             serde_json::from_str::<Vec<String>>(&index.columns_json).map_err(|error| {
                 SQLError::Internal(format!(
                     "decode catalog index `{}` columns: {error}",
-                    index.name
+                    index.relation.qualified_name()
                 ))
             })?;
         if let Some(field) = columns.first() {
             indexes_by_field
                 .entry(field.clone())
-                .or_insert(index.name.clone());
+                .or_insert_with(|| index.relation.qualified_name());
         }
     }
 

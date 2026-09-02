@@ -16,16 +16,6 @@ pub(in crate::sql::catalog) fn split_schema_name(name: &str) -> Result<(String, 
     Ok((relation.schema, relation.name))
 }
 
-pub(in crate::sql::catalog) fn split_index_name(
-    index_name: &str,
-    table_schema: &str,
-) -> Result<(String, String), SQLError> {
-    let (schema, name) = RelationIdentity::parse_reference(index_name).map_err(|error| {
-        SQLError::Internal(format!("invalid catalog index `{index_name}`: {error}"))
-    })?;
-    Ok((schema.unwrap_or_else(|| table_schema.to_string()), name))
-}
-
 pub(in crate::sql::catalog) fn stable_oid(kind: &str, name: &str) -> i64 {
     let mut hash = 14_695_981_039_346_656_037_u64;
     for byte in kind.bytes().chain(*b":").chain(name.bytes()) {

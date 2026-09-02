@@ -33,24 +33,30 @@ pub(in crate::sql) fn run_create_index(
         )));
     }
 
+    let table_relation = crate::RelationIdentity::from_legacy_name(&c.table)
+        .map_err(|error| SQLError::Internal(format!("resolve index table: {error}")))?;
     let name = if let Some(name) = c.name.as_ref() {
-        if engine
-            .has_catalog_index(name)
-            .map_err(|err| ddl_storage_error("CREATE INDEX", err))?
-        {
-            if c.if_not_exists {
-                return Ok(SQLResult::empty());
-            }
-            return Err(SQLError::Unsupported(format!(
-                "Index `{name}` already exists"
-            )));
-        }
         name.clone()
     } else {
-        let relation = crate::RelationIdentity::from_legacy_name(&c.table)
-            .map_err(|error| SQLError::Internal(format!("resolve index table: {error}")))?;
-        allocate_default_index_name(engine, &relation.name, &c.columns)?
+        allocate_default_index_name(engine, &table_relation, &c.columns)?
     };
+    let relation = crate::RelationIdentity::new(&table_relation.schema, &name);
+    if matches!(
+        engine.resolve_bound_relation_kind(&relation.qualified_name())?,
+        crate::engine_capabilities::RelationResolution::Found(_, _)
+    ) {
+        if c.if_not_exists {
+            engine.push_sql_notice(
+                "NOTICE",
+                &format!("relation \"{name}\" already exists, skipping"),
+            );
+            return Ok(SQLResult::empty());
+        }
+        return Err(SQLError::Routine {
+            sqlstate: "42P07".into(),
+            message: format!("relation \"{name}\" already exists"),
+        });
+    }
 
     validate_index_columns(engine, &c)?;
 
@@ -79,7 +85,13 @@ pub(in crate::sql) fn run_create_index(
     // for `gin`) on restore.
     let catalog_index_type = if am.is_empty() { "btree" } else { &am };
     engine
-        .try_register_catalog_index(&name, catalog_index_type, &c.table, &c.columns, &c.options)
+        .try_register_catalog_index(
+            &relation.qualified_name(),
+            catalog_index_type,
+            &c.table,
+            &c.columns,
+            &c.options,
+        )
         .map_err(|e| ddl_storage_error("CREATE INDEX", e))?;
     Ok(SQLResult::empty())
 }
@@ -180,7 +192,7 @@ fn create_vector_index(
 
 fn allocate_default_index_name(
     engine: &Engine,
-    table: &str,
+    table: &crate::RelationIdentity,
     columns: &[String],
 ) -> Result<String, SQLError> {
     fn component(raw: &str) -> String {
@@ -201,9 +213,7 @@ fn allocate_default_index_name(
         out
     }
 
-    let mut parts = table
-        .split('.')
-        .map(component)
+    let mut parts = std::iter::once(component(&table.name))
         .chain(columns.iter().map(|column| component(column)))
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>();
@@ -211,18 +221,19 @@ fn allocate_default_index_name(
         parts.push("index".to_string());
     }
     let base = format!("{}_idx", parts.join("_"));
-    let existing = engine
-        .list_catalog_indexes()
-        .map_err(|err| ddl_storage_error("CREATE INDEX", err))?
-        .into_iter()
-        .map(|row| row.name)
-        .collect::<std::collections::BTreeSet<_>>();
-    if !existing.contains(&base) {
+    let available = |name: &str| -> Result<bool, SQLError> {
+        let candidate = crate::RelationIdentity::new(&table.schema, name).qualified_name();
+        Ok(matches!(
+            engine.resolve_bound_relation_kind(&candidate)?,
+            crate::engine_capabilities::RelationResolution::MissingRelation
+        ))
+    };
+    if available(&base)? {
         return Ok(base);
     }
     for suffix in 1_u64.. {
-        let candidate = format!("{base}_{suffix}");
-        if !existing.contains(&candidate) {
+        let candidate = format!("{base}{suffix}");
+        if available(&candidate)? {
             return Ok(candidate);
         }
     }

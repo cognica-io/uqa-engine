@@ -256,7 +256,9 @@ CREATE UNIQUE INDEX orders_account_state_uq ON orders (account_id, state);
 DROP INDEX orders_state_idx;
 ```
 
-Expression indexes are not implemented. Index columns must be table columns. `DROP ... CASCADE` is rejected instead of discarding dependent objects implicitly.
+An index belongs to its table's schema, and its durable identity stores that schema and local name as separate components. Distinct schemas may therefore contain indexes with the same local name, while an index cannot share one schema-local relation name with a table, view, materialized view, sequence, or foreign table. Unnamed indexes allocate PostgreSQL-style schema-local names such as `orders_state_idx` and then `orders_state_idx1`. `DROP INDEX` resolves one exact identity through the effective `search_path`, skips inaccessible unqualified schemas, and applies qualified schema `USAGE`, missing-schema, missing-index, and wrong-relation-kind precedence before mutation. Index `regclass` values and the corresponding `pg_class`, `pg_index`, and `pg_indexes` rows use the same identity and remain stable across durable reopen. Indexes on temporary tables stay session-local and are never written to the durable catalog.
+
+Expression indexes are not implemented. Index columns must be table columns. `DROP INDEX CASCADE` syntax is accepted, but dependency-sensitive index cascade behavior remains incomplete.
 
 ## Full-text GIN indexes
 

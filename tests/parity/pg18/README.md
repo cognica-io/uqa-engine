@@ -102,6 +102,12 @@ docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/pa
 docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/relation_schema_usage_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/relation_schema_usage_oracle.expected.txt -
 ```
 
+`index_namespace_oracle.sql` records PostgreSQL 18.4 index identity and shared relation-namespace behavior. The checked-in transcript verifies equal local index names in distinct schemas, distinct `regclass` OIDs, quoted component boundaries, default-name collision suffixes, table/index collisions, `IF NOT EXISTS`, effective-search-path `DROP INDEX`, wrong-kind precedence, missing schemas and indexes, and schema `USAGE` filtering.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/index_namespace_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/index_namespace_oracle.expected.txt -
+```
+
 `sequence_security_oracle.sql` records PostgreSQL 18.4 sequence role ownership and ACL behavior. The checked-in transcript verifies the default ACL and owner, an independent grant-option chain, all six `has_sequence_privilege` name/OID overloads, value-function access, grant-option `CASCADE`, implicit owner grant options after self-revocation, and ownership-transfer grantor rewriting.
 
 ```sh

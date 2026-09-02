@@ -13,6 +13,31 @@ use super::{
 };
 
 impl KeyValueCatalog {
+    pub(super) fn require_relation_kind(
+        &self,
+        relation: &RelationIdentity,
+        expected: RelationKind,
+    ) -> StorageBackendResult<()> {
+        let key = relation_key(TAG_RELATION, relation)?;
+        let value = self.store.get(&key)?.ok_or_else(|| {
+            StorageBackendError::Other(format!(
+                "catalog relation `{}` has no {} parent",
+                relation.qualified_name(),
+                expected.as_str()
+            ))
+        })?;
+        let actual = decode_value::<StoredRelation>(&value)?.kind;
+        if actual != expected {
+            return Err(StorageBackendError::Other(format!(
+                "catalog relation `{}` is {}, not {}",
+                relation.qualified_name(),
+                actual.as_str(),
+                expected.as_str()
+            )));
+        }
+        Ok(())
+    }
+
     pub(super) fn ensure_schema_exists(
         &self,
         relation: &RelationIdentity,

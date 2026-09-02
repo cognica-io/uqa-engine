@@ -14,6 +14,19 @@ fn fresh() -> Catalog {
     Catalog::open(mc).unwrap()
 }
 
+fn empty_table(schema: &str, name: &str) -> TableSchema {
+    TableSchema {
+        relation: RelationIdentity::new(schema, name),
+        object_id: [1; 16],
+        storage_generation: [1; 16],
+        analyzer_json: "{}".into(),
+        fts_fields: Vec::new(),
+        vector_fields: Vec::new(),
+        columns_json: "[]".into(),
+        constraints_json: String::new(),
+    }
+}
+
 fn sample_sequence_acl() -> Vec<crate::catalog::SequenceAclEntry> {
     vec![crate::catalog::SequenceAclEntry {
         role: "sequence_reader".into(),
@@ -359,22 +372,100 @@ fn sqlite_sequence_reservations_are_atomic_and_stop_at_the_configured_bound() {
 #[test]
 fn corrupt_catalog_index_columns_abort_column_lifecycle() {
     let cat = fresh();
-    cat.save_catalog_index("broken", "btree", "docs", "not-json", "{}")
-        .unwrap();
+    cat.save_table(&empty_table("public", "docs")).unwrap();
+    cat.save_catalog_index(
+        &RelationIdentity::new("public", "broken"),
+        "btree",
+        "public.docs",
+        "not-json",
+        "{}",
+    )
+    .unwrap();
 
     assert!(matches!(
-        cat.drop_column_data("docs", "title"),
+        cat.drop_column_data("public.docs", "title"),
         Err(SQLiteError::Serde(_))
     ));
     assert_eq!(cat.load_catalog_indexes().unwrap().len(), 1);
     assert!(matches!(
-        cat.rename_column_data("docs", "title", "headline"),
+        cat.rename_column_data("public.docs", "title", "headline"),
         Err(SQLiteError::Serde(_))
     ));
     assert_eq!(
         cat.load_catalog_indexes().unwrap()[0].columns_json,
         "not-json"
     );
+}
+
+#[test]
+fn catalog_index_storage_enforces_schema_parent_and_shared_namespace_identity() {
+    let cat = fresh();
+    cat.save_schema("app").unwrap();
+    cat.save_schema("archive").unwrap();
+    cat.save_table(&empty_table("app", "docs")).unwrap();
+    let index = RelationIdentity::new("app", "docs_idx");
+    cat.save_catalog_index(&index, "btree", "app.docs", "[\"id\"]", "{}")
+        .unwrap();
+    cat.save_catalog_index(&index, "gin", "app.docs", "[\"id\"]", "{}")
+        .unwrap();
+    assert_eq!(cat.load_catalog_indexes().unwrap().len(), 1);
+    CatalogFacade::migrate_relation_namespace(&cat).unwrap();
+    let parent_kind = cat
+        .conn
+        .with(|connection| {
+            Ok(connection.query_row(
+                "SELECT kind FROM _relations
+                  WHERE schema_name = 'app' AND relation_name = 'docs_idx'",
+                [],
+                |row| row.get::<_, String>(0),
+            )?)
+        })
+        .unwrap();
+    assert_eq!(parent_kind, "index");
+    assert!(cat
+        .save_catalog_index(
+            &RelationIdentity::new("archive", "docs_idx"),
+            "btree",
+            "app.docs",
+            "[\"id\"]",
+            "{}",
+        )
+        .is_err());
+    assert!(cat
+        .save_catalog_index(
+            &RelationIdentity::new("app", "missing_idx"),
+            "btree",
+            "app.missing",
+            "[\"id\"]",
+            "{}",
+        )
+        .is_err());
+    assert!(cat.save_table(&empty_table("app", "docs_idx")).is_err());
+    assert!(cat
+        .save_catalog_index(
+            &RelationIdentity::new("app", "docs"),
+            "btree",
+            "app.docs",
+            "[\"id\"]",
+            "{}",
+        )
+        .is_err());
+
+    cat.drop_catalog_index(&index).unwrap();
+    CatalogFacade::migrate_relation_namespace(&cat).unwrap();
+    assert!(cat.load_catalog_indexes().unwrap().is_empty());
+    let remaining_parent = cat
+        .conn
+        .with(|connection| {
+            Ok(connection.query_row(
+                "SELECT COUNT(*) FROM _relations
+                  WHERE schema_name = 'app' AND relation_name = 'docs_idx'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )?)
+        })
+        .unwrap();
+    assert_eq!(remaining_parent, 0);
 }
 
 #[test]

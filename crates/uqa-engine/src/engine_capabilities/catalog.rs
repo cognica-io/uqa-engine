@@ -170,6 +170,7 @@ impl CatalogReadView {
             || self.snapshot.durable.views.contains_key(relation)
             || self.snapshot.durable.sequences.contains_key(relation)
             || self.snapshot.durable.foreign_tables.contains_key(relation)
+            || self.snapshot.durable.catalog_indexes.contains_key(relation)
     }
 
     fn namespace_exists(&self, resolution: &RelationNameResolution, schema: &str) -> bool {
@@ -205,6 +206,13 @@ impl CatalogReadView {
                 Some("sequence")
             } else if self.snapshot.durable.foreign_tables.contains_key(&relation) {
                 Some("foreign table")
+            } else if self
+                .snapshot
+                .durable
+                .catalog_indexes
+                .contains_key(&relation)
+            {
+                Some("index")
             } else {
                 None
             };
@@ -424,6 +432,11 @@ impl CatalogReadView {
             if self.snapshot.tables.contains_key(&relation)
                 || self.snapshot.durable.views.contains_key(&relation)
                 || self.snapshot.durable.foreign_tables.contains_key(&relation)
+                || self
+                    .snapshot
+                    .durable
+                    .catalog_indexes
+                    .contains_key(&relation)
             {
                 return Ok(None);
             }

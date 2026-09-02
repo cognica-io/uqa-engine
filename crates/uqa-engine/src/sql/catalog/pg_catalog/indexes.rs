@@ -10,9 +10,10 @@ use uqa_core::Value;
 use uqa_sql::{ResultRow, SQLError};
 
 use crate::engine_capabilities::{CatalogReadView, RelationNameResolution};
+use crate::RelationIdentity;
 
 use super::super::helpers::index_definitions::{index_columns, indexdef};
-use super::super::helpers::oids::{relation_oid, split_index_name, split_schema_name};
+use super::super::helpers::oids::{relation_oid, split_schema_name};
 use super::super::helpers::rows::{
     bool_value, catalog_ordinal, catalog_usize, int_value, row, str_value,
 };
@@ -20,8 +21,7 @@ use super::table_relation_oid_from;
 
 #[derive(Debug, Clone)]
 pub(in crate::sql::catalog) struct CatalogIndexRelation {
-    pub(in crate::sql::catalog) schema: String,
-    pub(in crate::sql::catalog) name: String,
+    pub(in crate::sql::catalog) relation: RelationIdentity,
     pub(in crate::sql::catalog) table_name: String,
     pub(in crate::sql::catalog) index_type: String,
     pub(in crate::sql::catalog) columns: Vec<String>,
@@ -33,7 +33,7 @@ pub(in crate::sql::catalog) struct CatalogIndexRelation {
 
 impl CatalogIndexRelation {
     pub(in crate::sql::catalog) fn oid(&self) -> i64 {
-        relation_oid(self.relkind, &self.schema, &self.name)
+        relation_oid(self.relkind, &self.relation.schema, &self.relation.name)
     }
 }
 
@@ -44,12 +44,10 @@ pub(in crate::sql::catalog) fn catalog_index_relations(
     let registered = catalog.catalog_indexes().cloned().collect::<Vec<_>>();
     let mut used = registered
         .iter()
-        .map(|index| index.name.clone())
+        .map(|index| index.relation.clone())
         .collect::<std::collections::BTreeSet<_>>();
     let mut output = Vec::new();
     for index in registered {
-        let (table_schema, _) = split_schema_name(&index.table_name)?;
-        let (schema, name) = split_index_name(&index.name, &table_schema)?;
         let columns = index_columns(&index.columns_json)?;
         let hierarchy = &catalog
             .table(resolution, &index.table_name)?
@@ -65,8 +63,7 @@ pub(in crate::sql::catalog) fn catalog_index_relations(
                 .direct_hierarchy_children(resolution, &index.table_name)?
                 .is_empty();
         let root = CatalogIndexRelation {
-            schema,
-            name,
+            relation: index.relation.clone(),
             table_name: index.table_name.clone(),
             index_type: index.index_type.clone(),
             columns: columns.clone(),
@@ -101,7 +98,7 @@ fn append_partition_index_children(
     parent_index_oid: i64,
     index_type: &str,
     columns: &[String],
-    used: &mut std::collections::BTreeSet<String>,
+    used: &mut std::collections::BTreeSet<RelationIdentity>,
     output: &mut Vec<CatalogIndexRelation>,
 ) -> Result<(), SQLError> {
     for child in catalog.direct_hierarchy_children(resolution, parent_table)? {
@@ -116,10 +113,9 @@ fn append_partition_index_children(
             "i"
         };
         let children = catalog.direct_hierarchy_children(resolution, &child)?;
-        let name = allocate_derived_index_name(&table, columns, used);
+        let relation = allocate_derived_index_name(&schema, &table, columns, used);
         let relation = CatalogIndexRelation {
-            schema,
-            name,
+            relation,
             table_name: child.clone(),
             index_type: index_type.to_string(),
             columns: columns.to_vec(),
@@ -147,10 +143,11 @@ fn append_partition_index_children(
 }
 
 fn allocate_derived_index_name(
+    schema: &str,
     table: &str,
     columns: &[String],
-    used: &mut std::collections::BTreeSet<String>,
-) -> String {
+    used: &mut std::collections::BTreeSet<RelationIdentity>,
+) -> RelationIdentity {
     fn component(raw: &str) -> String {
         let mut output = String::with_capacity(raw.len());
         let mut separator = false;
@@ -178,13 +175,15 @@ fn allocate_derived_index_name(
         parts.push("index".into());
     }
     let base = format!("{}_idx", parts.join("_"));
-    if used.insert(base.clone()) {
-        return base;
+    let base_relation = RelationIdentity::new(schema, &base);
+    if used.insert(base_relation.clone()) {
+        return base_relation;
     }
     for suffix in 1_u64.. {
-        let candidate = format!("{base}_{suffix}");
-        if used.insert(candidate.clone()) {
-            return candidate;
+        let candidate = format!("{base}{suffix}");
+        let relation = RelationIdentity::new(schema, candidate);
+        if used.insert(relation.clone()) {
+            return relation;
         }
     }
     unreachable!("u64 index-name suffix space is non-empty")
@@ -276,12 +275,12 @@ pub(in crate::sql::catalog) fn build_pg_indexes(
         rows.push(row([
             ("schemaname", str_value(schema)),
             ("tablename", str_value(table.clone())),
-            ("indexname", str_value(index.name.clone())),
+            ("indexname", str_value(index.relation.name.clone())),
             ("tablespace", Value::Null),
             (
                 "indexdef",
                 str_value(indexdef(
-                    &index.name,
+                    &index.relation.name,
                     &index.index_type,
                     &index_target,
                     &index.columns,

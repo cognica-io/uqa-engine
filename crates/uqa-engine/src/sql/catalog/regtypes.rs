@@ -7,7 +7,7 @@
 //! Catalog-backed `reg*` input/output and type-name resolution.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use uqa_core::Value;
 use uqa_sql::ast::ColumnType;
@@ -15,58 +15,15 @@ use uqa_sql::{ResultRow, SQLError};
 
 use crate::Engine;
 
-use super::pg_catalog::build_pg_type;
+use super::helpers;
+use super::pg_catalog::{build_pg_type, catalog_index_relations};
 use super::pg_namespace::build_pg_namespace;
 use super::pg_proc::build_pg_proc;
 use super::relation_catalog::build_pg_class;
-use super::{helpers, schema};
 
-static CATALOG_DOMAIN_TYPES: LazyLock<Vec<ColumnType>> = LazyLock::new(|| {
-    let mut domains = schema::information_schema_domains();
-    domains.extend(schema::ag_catalog_domains());
-    domains
-});
+mod type_names;
 
-pub(crate) fn resolve_catalog_column_type(engine: &Engine, type_name: &str) -> Option<ColumnType> {
-    if let Ok(ty) = ColumnType::from_sql_name(type_name) {
-        return Some(ty);
-    }
-    let mut base_name = type_name.trim();
-    let mut array_dimensions = 0usize;
-    while let Some(element) = base_name.strip_suffix("[]") {
-        base_name = element.trim_end();
-        array_dimensions += 1;
-    }
-    let (schema, local_name) = base_name
-        .rsplit_once('.')
-        .map_or((None, base_name), |(schema, local_name)| {
-            (Some(schema.trim_matches('"')), local_name)
-        });
-    let local_name = local_name.trim_matches('"');
-    let mut resolved = CATALOG_DOMAIN_TYPES
-        .iter()
-        .find(|domain| match domain {
-            ColumnType::Domain {
-                schema: domain_schema,
-                name: domain_name,
-                ..
-            } => {
-                domain_name == local_name
-                    && schema.map_or_else(
-                        || engine.search_path_contains(domain_schema),
-                        |schema| domain_schema == schema,
-                    )
-            }
-            _ => false,
-        })
-        .cloned();
-    if let Some(ty) = resolved.as_mut() {
-        for _ in 0..array_dimensions {
-            *ty = ColumnType::Array(Box::new(ty.clone()));
-        }
-    }
-    resolved
-}
+pub(crate) use type_names::resolve_catalog_column_type;
 
 fn cross_database_reference(name: &str) -> SQLError {
     SQLError::Unsupported(format!(
@@ -136,6 +93,22 @@ fn lookup_regclass_oid(engine: &Engine, name: &str) -> Result<Option<i64>, SQLEr
                 ))
             })?;
         return Ok(Some(super::sequence_relation_oid(object_id)));
+    }
+    if kind == "index" {
+        let relation =
+            crate::RelationIdentity::from_legacy_name(&canonical).map_err(SQLError::Internal)?;
+        let catalog = engine.catalog_read_view();
+        let mut resolution = engine.session_execution_view().relation_name_resolution();
+        resolution.set_lookup_mode(crate::engine_capabilities::RelationLookupMode::Bound);
+        let index = catalog_index_relations(&catalog, &resolution)?
+            .into_iter()
+            .find(|index| index.relation == relation)
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "resolved index `{canonical}` has no catalog relation"
+                ))
+            })?;
+        return Ok(Some(index.oid()));
     }
     let (schema, relation) = helpers::oids::split_schema_name(&canonical)?;
     if kind == "table" {

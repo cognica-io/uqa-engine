@@ -122,10 +122,18 @@ impl Catalog {
             let tx = c.savepoint()?;
             Self::claim_relation(&tx, &schema.relation, RelationKind::Table)?;
             tx.execute(
-                "INSERT OR REPLACE INTO _tables
+                "INSERT INTO _tables
                     (schema_name, relation_name, kind, analyzer, fts_fields,
                      vector_fields, columns, constraints, storage_generation, object_id)
-                 VALUES (?1, ?2, 'table', ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                 VALUES (?1, ?2, 'table', ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                 ON CONFLICT(schema_name, relation_name) DO UPDATE SET
+                     analyzer = excluded.analyzer,
+                     fts_fields = excluded.fts_fields,
+                     vector_fields = excluded.vector_fields,
+                     columns = excluded.columns,
+                     constraints = excluded.constraints,
+                     storage_generation = excluded.storage_generation,
+                     object_id = excluded.object_id",
                 params![
                     schema.relation.schema,
                     schema.relation.name,
@@ -209,6 +217,7 @@ impl Catalog {
         let relation = migration_relation(name)?;
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
+            Self::drop_catalog_index_rows_for_table(&tx, &relation)?;
             tx.execute(
                 "DELETE FROM _tables WHERE schema_name = ?1 AND relation_name = ?2",
                 params![relation.schema, relation.name],
@@ -262,6 +271,7 @@ impl Catalog {
         let storage_names = relation.canonical_and_legacy_public_names();
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
+            Self::drop_catalog_index_rows_for_table(&tx, &relation)?;
             tx.execute(
                 "DELETE FROM _tables WHERE schema_name = ?1 AND relation_name = ?2",
                 params![relation.schema, relation.name],
@@ -291,10 +301,6 @@ impl Catalog {
                     "DELETE FROM _table_field_analyzers WHERE table_name = ?1",
                     params![storage_name],
                 )?;
-                tx.execute(
-                    "DELETE FROM _catalog_indexes WHERE table_name = ?1",
-                    params![storage_name],
-                )?;
                 drop_fts_aux_tables_for_table(&tx, storage_name)?;
             }
             Self::release_relation(&tx, &relation, RelationKind::Table)?;
@@ -308,6 +314,11 @@ impl Catalog {
         let to_relation = migration_relation(to)?;
         if from_relation == to_relation {
             return Ok(());
+        }
+        if from_relation.schema != to_relation.schema {
+            return Err(SQLiteError::StorageBackend(
+                "moving a table between schemas is not supported by the catalog".into(),
+            ));
         }
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
@@ -344,7 +355,6 @@ impl Catalog {
                 "_hnsw_edges",
                 "_column_stats",
                 "_table_field_analyzers",
-                "_catalog_indexes",
             ] {
                 update_table_name_rows_if_exists(&tx, table, from, to)?;
             }
@@ -394,11 +404,13 @@ impl Catalog {
                 "DELETE FROM _table_field_analyzers WHERE table_name = ?1 AND field = ?2",
                 params![table_name, column_name],
             )?;
-            for index_name in indexes {
+            for index in indexes {
                 tx.execute(
-                    "DELETE FROM _catalog_indexes WHERE name = ?1",
-                    params![index_name],
+                    "DELETE FROM _catalog_indexes
+                      WHERE schema_name = ?1 AND relation_name = ?2",
+                    params![index.schema, index.name],
                 )?;
+                Self::release_relation(&tx, &index, RelationKind::Index)?;
             }
             drop_fts_aux_tables_for_field(&tx, table_name, column_name)?;
             tx.commit()?;
@@ -450,12 +462,12 @@ impl Catalog {
                 from,
                 to,
             )?;
-            for (index_name, columns_json) in index_updates {
+            for (index, columns_json) in index_updates {
                 tx.execute(
                     "UPDATE _catalog_indexes
                         SET columns = ?2
-                      WHERE name = ?1",
-                    params![index_name, columns_json],
+                      WHERE schema_name = ?1 AND relation_name = ?3",
+                    params![index.schema, columns_json, index.name],
                 )?;
             }
             rename_fts_aux_tables_for_field(&tx, table_name, from, to)?;
@@ -468,13 +480,13 @@ impl Catalog {
         &self,
         table_name: &str,
         column_name: &str,
-    ) -> Result<Vec<String>> {
+    ) -> Result<Vec<RelationIdentity>> {
         let mut out = Vec::new();
         for row in self.load_catalog_indexes()? {
             if row.table_name == table_name
                 && columns_json_references(&row.columns_json, column_name)?
             {
-                out.push(row.name);
+                out.push(row.relation);
             }
         }
         Ok(out)
@@ -485,14 +497,14 @@ impl Catalog {
         table_name: &str,
         from: &str,
         to: &str,
-    ) -> Result<Vec<(String, String)>> {
+    ) -> Result<Vec<(RelationIdentity, String)>> {
         let mut out = Vec::new();
         for row in self.load_catalog_indexes()? {
             if row.table_name != table_name {
                 continue;
             }
             if let Some(columns_json) = renamed_columns_json(&row.columns_json, from, to)? {
-                out.push((row.name, columns_json));
+                out.push((row.relation, columns_json));
             }
         }
         Ok(out)

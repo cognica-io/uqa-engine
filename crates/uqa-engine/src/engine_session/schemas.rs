@@ -22,7 +22,7 @@ impl Engine {
                 .values()
                 .cloned()
                 .collect::<Vec<_>>();
-            out.sort_by(|a, b| a.name.cmp(&b.name));
+            out.sort_by(|a, b| a.relation.cmp(&b.relation));
             return Ok(out);
         }
         self.synchronize_catalog_registries()?;
@@ -33,7 +33,7 @@ impl Engine {
             .values()
             .cloned()
             .collect();
-        out.sort_by(|a, b| a.name.cmp(&b.name));
+        out.sort_by(|a, b| a.relation.cmp(&b.relation));
         Ok(out)
     }
 
@@ -130,6 +130,12 @@ impl Engine {
             && !self
                 .durable
                 .foreign_tables
+                .read()
+                .keys()
+                .any(|relation| relation.schema == schema)
+            && !self
+                .durable
+                .catalog_indexes
                 .read()
                 .keys()
                 .any(|relation| relation.schema == schema)

@@ -49,21 +49,31 @@ fn vector_row_count(db: &std::path::Path, table: &str, field: &str) -> i64 {
 }
 
 fn catalog_index_table(db: &std::path::Path, name: &str) -> Option<String> {
+    let index = RelationIdentity::from_legacy_name(name).unwrap();
     let conn = rusqlite::Connection::open(db).unwrap();
     conn.query_row(
-        "SELECT table_name FROM _catalog_indexes WHERE name = ?1",
-        [name],
-        |row| row.get(0),
+        "SELECT table_schema_name, table_relation_name
+           FROM _catalog_indexes
+          WHERE schema_name = ?1 AND relation_name = ?2",
+        rusqlite::params![index.schema, index.name],
+        |row| {
+            Ok(
+                RelationIdentity::new(row.get::<_, String>(0)?, row.get::<_, String>(1)?)
+                    .qualified_name(),
+            )
+        },
     )
     .ok()
 }
 
 fn catalog_index_columns(db: &std::path::Path, name: &str) -> Vec<String> {
+    let index = RelationIdentity::from_legacy_name(name).unwrap();
     let conn = rusqlite::Connection::open(db).unwrap();
     let json: Option<String> = conn
         .query_row(
-            "SELECT columns FROM _catalog_indexes WHERE name = ?1",
-            [name],
+            "SELECT columns FROM _catalog_indexes
+              WHERE schema_name = ?1 AND relation_name = ?2",
+            rusqlite::params![index.schema, index.name],
             |row| row.get(0),
         )
         .ok();
@@ -159,8 +169,8 @@ fn drop_index_without_if_exists_errors_when_missing() {
     )
     .unwrap();
     let err = eng.sql("DROP INDEX notes_body_idx", &[]).unwrap_err();
-    let msg = err.to_string();
-    assert!(msg.contains("DROP INDEX"), "unexpected error: {msg}");
+    assert_eq!(err.sqlstate(), Some("42704"));
+    assert_eq!(err.to_string(), "index \"notes_body_idx\" does not exist");
 }
 
 #[test]

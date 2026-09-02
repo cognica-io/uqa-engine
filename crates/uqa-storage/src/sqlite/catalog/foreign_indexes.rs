@@ -8,6 +8,7 @@
 
 use super::{
     params, Catalog, CatalogIndexRow, ForeignTableRow, RelationIdentity, RelationKind, Result,
+    SQLiteError,
 };
 
 impl Catalog {
@@ -136,48 +137,112 @@ impl Catalog {
 
     pub fn save_catalog_index(
         &self,
-        name: &str,
+        relation: &RelationIdentity,
         index_type: &str,
         table_name: &str,
         columns_json: &str,
         parameters_json: &str,
     ) -> Result<()> {
-        self.conn.with(|c| {
-            c.execute(
-                "INSERT OR REPLACE INTO _catalog_indexes \
-                    (name, index_type, table_name, columns, parameters) \
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![name, index_type, table_name, columns_json, parameters_json],
+        let table =
+            RelationIdentity::from_legacy_name(table_name).map_err(SQLiteError::StorageBackend)?;
+        if relation.schema != table.schema {
+            return Err(SQLiteError::StorageBackend(format!(
+                "catalog index `{}` cannot belong to a different schema than table `{}`",
+                relation.qualified_name(),
+                table.qualified_name()
+            )));
+        }
+        self.conn.with_mut(|c| {
+            let tx = c.savepoint()?;
+            Self::claim_relation(&tx, relation, RelationKind::Index)?;
+            tx.execute(
+                "INSERT INTO _catalog_indexes
+                    (schema_name, relation_name, kind, index_type, table_schema_name,
+                     table_relation_name, columns, parameters)
+                 VALUES (?1, ?2, 'index', ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(schema_name, relation_name) DO UPDATE SET
+                     index_type = excluded.index_type,
+                     table_schema_name = excluded.table_schema_name,
+                     table_relation_name = excluded.table_relation_name,
+                     columns = excluded.columns,
+                     parameters = excluded.parameters",
+                params![
+                    relation.schema,
+                    relation.name,
+                    index_type,
+                    table.schema,
+                    table.name,
+                    columns_json,
+                    parameters_json
+                ],
             )?;
+            tx.commit()?;
             Ok(())
         })
     }
 
-    pub fn drop_catalog_index(&self, name: &str) -> Result<()> {
-        self.conn.with(|c| {
-            c.execute(
-                "DELETE FROM _catalog_indexes WHERE name = ?1",
-                params![name],
+    pub fn drop_catalog_index(&self, relation: &RelationIdentity) -> Result<()> {
+        self.conn.with_mut(|c| {
+            let tx = c.savepoint()?;
+            tx.execute(
+                "DELETE FROM _catalog_indexes
+                  WHERE schema_name = ?1 AND relation_name = ?2",
+                params![relation.schema, relation.name],
             )?;
+            Self::release_relation(&tx, relation, RelationKind::Index)?;
+            tx.commit()?;
             Ok(())
         })
     }
 
     pub fn drop_catalog_indexes_for_table(&self, table_name: &str) -> Result<()> {
-        self.conn.with(|c| {
-            c.execute(
-                "DELETE FROM _catalog_indexes WHERE table_name = ?1",
-                params![table_name],
-            )?;
+        let table =
+            RelationIdentity::from_legacy_name(table_name).map_err(SQLiteError::StorageBackend)?;
+        self.conn.with_mut(|c| {
+            let tx = c.savepoint()?;
+            Self::drop_catalog_index_rows_for_table(&tx, &table)?;
+            tx.commit()?;
             Ok(())
         })
+    }
+
+    pub(in crate::sqlite::catalog) fn drop_catalog_index_rows_for_table(
+        conn: &rusqlite::Connection,
+        table: &RelationIdentity,
+    ) -> Result<()> {
+        let indexes = {
+            let mut statement = conn.prepare(
+                "SELECT schema_name, relation_name
+                   FROM _catalog_indexes
+                  WHERE table_schema_name = ?1 AND table_relation_name = ?2",
+            )?;
+            let indexes = statement
+                .query_map(params![table.schema, table.name], |row| {
+                    Ok(RelationIdentity::new(
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            indexes
+        };
+        for index in indexes {
+            conn.execute(
+                "DELETE FROM _catalog_indexes
+                  WHERE schema_name = ?1 AND relation_name = ?2",
+                params![index.schema, index.name],
+            )?;
+            Self::release_relation(conn, &index, RelationKind::Index)?;
+        }
+        Ok(())
     }
 
     pub fn load_catalog_indexes(&self) -> Result<Vec<CatalogIndexRow>> {
         self.conn.with(|c| {
             let mut stmt = c.prepare(
-                "SELECT name, index_type, table_name, columns, parameters \
-                   FROM _catalog_indexes ORDER BY name",
+                "SELECT schema_name, relation_name, index_type,
+                        table_schema_name, table_relation_name, columns, parameters
+                   FROM _catalog_indexes ORDER BY schema_name, relation_name",
             )?;
             let rows = stmt.query_map([], |r| {
                 Ok((
@@ -186,15 +251,17 @@ impl Catalog {
                     r.get::<_, String>(2)?,
                     r.get::<_, String>(3)?,
                     r.get::<_, String>(4)?,
+                    r.get::<_, String>(5)?,
+                    r.get::<_, String>(6)?,
                 ))
             })?;
             let mut out = Vec::new();
             for row in rows {
-                let (name, ty, table, cols, params_json) = row?;
+                let (schema, name, ty, table_schema, table_name, cols, params_json) = row?;
                 out.push(CatalogIndexRow {
-                    name,
+                    relation: RelationIdentity::new(schema, name),
                     index_type: ty,
-                    table_name: table,
+                    table_name: RelationIdentity::new(table_schema, table_name).qualified_name(),
                     columns_json: cols,
                     parameters_json: params_json,
                 });

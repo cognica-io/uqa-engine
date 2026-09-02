@@ -302,6 +302,13 @@ impl Engine {
                 }
                 return Ok(Some(relation.qualified_name()));
             }
+            if self.durable.views.read().contains_key(&relation)
+                || self.durable.sequences.read().contains_key(&relation)
+                || self.durable.foreign_tables.read().contains_key(&relation)
+                || self.durable.catalog_indexes.read().contains_key(&relation)
+            {
+                return Ok(None);
+            }
         }
         Ok(None)
     }
@@ -325,6 +332,8 @@ impl Engine {
             Ok(Some("sequence"))
         } else if self.durable.foreign_tables.read().contains_key(&relation) {
             Ok(Some("foreign table"))
+        } else if self.durable.catalog_indexes.read().contains_key(&relation) {
+            Ok(Some("index"))
         } else {
             Ok(None)
         }
@@ -433,6 +442,8 @@ impl Engine {
                 Some("sequence")
             } else if self.durable.foreign_tables.read().contains_key(&relation) {
                 Some("foreign table")
+            } else if self.durable.catalog_indexes.read().contains_key(&relation) {
+                Some("index")
             } else {
                 None
             };

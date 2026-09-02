@@ -43,6 +43,8 @@ fn relation_schema_fixture() -> Engine {
         "INSERT INTO relation_schema_visible.only_table VALUES (2)",
         "CREATE TABLE relation_schema_hidden.only_hidden(value integer)",
         "INSERT INTO relation_schema_hidden.only_hidden VALUES (7)",
+        "CREATE INDEX shared_schema_idx ON relation_schema_hidden.only_hidden(value)",
+        "CREATE INDEX shared_schema_idx ON relation_schema_visible.only_table(value)",
         "CREATE TABLE relation_schema_hidden.event_items(id integer)",
         "CREATE TABLE relation_schema_visible.event_items(id integer)",
         "CREATE TABLE relation_schema_hidden.event_log(id integer)",
@@ -120,6 +122,8 @@ fn pg18_mutation_and_relation_ddl_resolve_the_namespace_before_object_details() 
         "TRUNCATE relation_schema_hidden.only_hidden",
         "ALTER TABLE relation_schema_hidden.only_hidden DROP COLUMN missing_column",
         "DROP TABLE relation_schema_hidden.only_hidden",
+        "CREATE INDEX denied_schema_idx ON relation_schema_hidden.only_hidden(value)",
+        "DROP INDEX relation_schema_hidden.shared_schema_idx",
         "CREATE VIEW relation_schema_visible.denied_view AS SELECT value FROM relation_schema_hidden.only_hidden",
     ] {
         let (state, message) = failure(&engine, sql);
@@ -129,6 +133,97 @@ fn pg18_mutation_and_relation_ddl_resolve_the_namespace_before_object_details() 
             "{sql}"
         );
     }
+}
+
+#[test]
+fn pg18_index_drop_binds_one_visible_schema_identity() {
+    let engine = relation_schema_fixture();
+
+    execute(&engine, "DROP INDEX shared_schema_idx");
+    assert_eq!(
+        failure(
+            &engine,
+            "DROP INDEX relation_schema_hidden.shared_schema_idx"
+        )
+        .0,
+        "42501"
+    );
+    assert_eq!(
+        failure(
+            &engine,
+            "DROP INDEX IF EXISTS relation_schema_hidden.absent"
+        )
+        .0,
+        "42501"
+    );
+    assert_eq!(
+        failure(&engine, "DROP INDEX relation_schema_missing.absent").0,
+        "3F000"
+    );
+    assert_eq!(
+        failure(&engine, "DROP INDEX relation_schema_visible.absent").0,
+        "42704"
+    );
+
+    engine.take_sql_notices();
+    execute(
+        &engine,
+        "DROP INDEX IF EXISTS relation_schema_missing.absent",
+    );
+    execute(
+        &engine,
+        "DROP INDEX IF EXISTS relation_schema_visible.absent",
+    );
+    assert_eq!(
+        engine.take_sql_notices(),
+        [
+            (
+                "NOTICE".into(),
+                "schema \"relation_schema_missing\" does not exist, skipping".into(),
+            ),
+            (
+                "NOTICE".into(),
+                "index \"absent\" does not exist, skipping".into(),
+            ),
+        ]
+    );
+
+    for sql in [
+        "RESET ROLE",
+        "CREATE SCHEMA relation_schema_later",
+        "REVOKE ALL ON SCHEMA relation_schema_later FROM PUBLIC",
+        "CREATE TABLE relation_schema_visible.shadow_idx(id integer)",
+        "CREATE TABLE relation_schema_later.indexed_rows(id integer)",
+        "CREATE INDEX shadow_idx ON relation_schema_later.indexed_rows(id)",
+        "GRANT USAGE ON SCHEMA relation_schema_later TO relation_schema_caller",
+        "SET ROLE relation_schema_caller",
+        "SET search_path TO relation_schema_visible, relation_schema_later, pg_catalog",
+    ] {
+        execute(&engine, sql);
+    }
+    assert_eq!(failure(&engine, "DROP INDEX shadow_idx").0, "42809");
+    execute(&engine, "RESET ROLE");
+    assert_eq!(
+        scalar(
+            &engine,
+            "SELECT count(*) FROM pg_catalog.pg_indexes WHERE schemaname = 'relation_schema_later' AND indexname = 'shadow_idx'"
+        ),
+        Value::Int(1)
+    );
+    assert_eq!(
+        scalar(
+            &engine,
+            "SELECT count(*) FROM pg_catalog.pg_indexes WHERE schemaname = 'relation_schema_hidden' AND indexname = 'shared_schema_idx'"
+        ),
+        Value::Int(1)
+    );
+    assert_eq!(
+        scalar(
+            &engine,
+            "SELECT count(*) FROM pg_catalog.pg_indexes WHERE schemaname = 'relation_schema_visible' AND indexname = 'shared_schema_idx'"
+        ),
+        Value::Int(0)
+    );
 }
 
 #[test]

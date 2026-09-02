@@ -6,6 +6,7 @@
 
 use super::*;
 
+mod index_relations;
 mod log_count;
 mod schema_security;
 mod schema_version;
@@ -823,11 +824,25 @@ fn migration_19_creates_complete_hnsw_storage_schema() {
 fn migration_20_repairs_only_hnsw_rows_backed_by_legacy_ivf_metadata() {
     let connection = ManagedConnection::open_in_memory().unwrap();
     let current = Catalog::open(connection.clone()).unwrap();
+    current
+        .save_table(&empty_table("public", "legacy"))
+        .unwrap();
+    current
+        .save_table(&empty_table("public", "native"))
+        .unwrap();
     drop(current);
     connection
         .with(|conn| {
             conn.execute_batch(
-                "INSERT INTO _catalog_indexes
+                "DROP TABLE _catalog_indexes;
+                 CREATE TABLE _catalog_indexes (
+                     name TEXT PRIMARY KEY,
+                     index_type TEXT NOT NULL,
+                     table_name TEXT NOT NULL,
+                     columns TEXT NOT NULL,
+                     parameters TEXT NOT NULL
+                 );
+                 INSERT INTO _catalog_indexes
                      (name, index_type, table_name, columns, parameters)
                  VALUES
                      ('legacy_idx', 'hnsw', 'public.legacy', '[\"embedding\"]', '{}'),
@@ -858,13 +873,13 @@ fn migration_20_repairs_only_hnsw_rows_backed_by_legacy_ivf_metadata() {
     let rows = upgraded.load_catalog_indexes().unwrap();
     assert_eq!(
         rows.iter()
-            .find(|row| row.name == "legacy_idx")
+            .find(|row| row.relation.name == "legacy_idx")
             .map(|row| row.index_type.as_str()),
         Some("ivf")
     );
     assert_eq!(
         rows.iter()
-            .find(|row| row.name == "native_idx")
+            .find(|row| row.relation.name == "native_idx")
             .map(|row| row.index_type.as_str()),
         Some("hnsw")
     );

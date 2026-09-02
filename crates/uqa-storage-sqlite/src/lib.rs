@@ -790,7 +790,13 @@ mod tests {
             .save_foreign_server("fs", "memory", "{\"root\":\"/tmp\"}")
             .unwrap();
         catalog
-            .save_catalog_index("idx_docs_title", "gin", "docs", "[\"title\"]", "{}")
+            .save_catalog_index(
+                &uqa_storage::RelationIdentity::new("public", "idx_docs_title"),
+                "gin",
+                "public.docs",
+                "[\"title\"]",
+                "{}",
+            )
             .unwrap();
         catalog
             .save_column_stats(ColumnStatsInput::basic(
@@ -815,8 +821,10 @@ mod tests {
         assert_eq!(catalog.load_analyzers().unwrap()[0].0, "ko");
         assert_eq!(catalog.load_foreign_servers().unwrap()[0].0, "fs");
         assert_eq!(
-            catalog.load_catalog_indexes().unwrap()[0].name,
-            "idx_docs_title"
+            catalog.load_catalog_indexes().unwrap()[0]
+                .relation
+                .qualified_name(),
+            "public.idx_docs_title"
         );
         assert_eq!(
             catalog.load_column_stats("docs").unwrap()[0].distinct_count,

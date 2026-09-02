@@ -48,12 +48,22 @@ pub(super) struct ViewMigration {
     row: ViewRow,
 }
 
+enum IndexMigration {
+    Delete(Vec<u8>),
+    Put {
+        old_key: Vec<u8>,
+        new_key: Vec<u8>,
+        stored: StoredCatalogIndex,
+    },
+}
+
 pub(super) struct RelationMigrations {
     pub(super) seen: SeenRelations,
     tables: Vec<TableMigration>,
     sequences: Vec<SequenceMigration>,
     foreign_tables: Vec<ForeignMigration>,
     views: Vec<ViewMigration>,
+    indexes: Vec<IndexMigration>,
 }
 
 pub(super) fn decode_migrated_table(
@@ -234,6 +244,77 @@ pub(super) fn collect_view_migrations(
     Ok(views)
 }
 
+fn collect_index_migrations(
+    store: &dyn KeyValueStore,
+    seen: &mut SeenRelations,
+    tables: &[TableMigration],
+) -> StorageBackendResult<Vec<IndexMigration>> {
+    let mut table_aliases = std::collections::BTreeMap::new();
+    for table in tables {
+        let canonical = table.schema.relation.qualified_name();
+        table_aliases.insert(table.old_physical_name.clone(), canonical.clone());
+        table_aliases.insert(canonical.clone(), canonical);
+    }
+    let mut indexes = Vec::new();
+    for (key, value) in store.scan_prefix(&key_with_tag(TAG_CATALOG_INDEX))? {
+        let (key_relation, legacy_key, source) = decode_catalog_relation_key(&key)?;
+        let mut stored = decode_value::<StoredCatalogIndex>(&value)?;
+        if let Some(canonical) = table_aliases.get(&stored.table_name) {
+            stored.table_name.clone_from(canonical);
+        }
+        let table = RelationIdentity::from_legacy_name(&stored.table_name)
+            .map_err(StorageBackendError::Other)?;
+        if table.schema.starts_with("pg_temp_") {
+            if !legacy_key {
+                return Err(StorageBackendError::Other(format!(
+                    "typed catalog index `{source}` cannot be stored in a temporary schema"
+                )));
+            }
+            indexes.push(IndexMigration::Delete(key));
+            continue;
+        }
+        if !matches!(seen.get(&table), Some((RelationKind::Table, _))) {
+            return Err(StorageBackendError::Other(format!(
+                "catalog index `{source}` references missing table `{}`",
+                table.qualified_name()
+            )));
+        }
+        let relation = if legacy_key {
+            RelationIdentity::from_legacy_index_name(&source, &table)
+        } else {
+            if key_relation.schema != table.schema {
+                return Err(StorageBackendError::Other(format!(
+                    "catalog index key `{source}` disagrees with table schema `{}`",
+                    table.schema
+                )));
+            }
+            let parent = store
+                .get(&relation_key(TAG_RELATION, &key_relation)?)?
+                .ok_or_else(|| {
+                    StorageBackendError::Other(format!(
+                        "catalog index `{source}` has no index relation parent"
+                    ))
+                })?;
+            let actual = decode_value::<StoredRelation>(&parent)?.kind;
+            if actual != RelationKind::Index {
+                return Err(StorageBackendError::Other(format!(
+                    "catalog index `{source}` has a {} relation parent",
+                    actual.as_str()
+                )));
+            }
+            key_relation
+        };
+        register_migration_relation(seen, &relation, RelationKind::Index, source)?;
+        stored.table_name = table.qualified_name();
+        indexes.push(IndexMigration::Put {
+            old_key: key,
+            new_key: relation_key(TAG_CATALOG_INDEX, &relation)?,
+            stored,
+        });
+    }
+    Ok(indexes)
+}
+
 pub(super) fn collect_relation_migrations(
     catalog: &KeyValueCatalog,
 ) -> StorageBackendResult<RelationMigrations> {
@@ -242,12 +323,14 @@ pub(super) fn collect_relation_migrations(
     let sequences = collect_sequence_migrations(catalog, &mut seen)?;
     let foreign_tables = collect_foreign_migrations(catalog.store.as_ref(), &mut seen)?;
     let views = collect_view_migrations(catalog, &mut seen)?;
+    let indexes = collect_index_migrations(catalog.store.as_ref(), &mut seen, &tables)?;
     Ok(RelationMigrations {
         seen,
         tables,
         sequences,
         foreign_tables,
         views,
+        indexes,
     })
 }
 
@@ -412,18 +495,29 @@ pub(super) fn put_view_migrations(
     Ok(())
 }
 
-pub(super) fn finish_relation_migration(
-    store: &dyn KeyValueStore,
+fn put_index_migrations(
     batch: &mut dyn KeyValueBatch,
-    table_renames: &std::collections::BTreeMap<String, String>,
+    indexes: Vec<IndexMigration>,
 ) -> StorageBackendResult<()> {
-    for (key, value) in store.scan_prefix(&key_with_tag(TAG_CATALOG_INDEX))? {
-        let mut stored = decode_value::<StoredCatalogIndex>(&value)?;
-        if let Some(canonical) = table_renames.get(&stored.table_name) {
-            stored.table_name.clone_from(canonical);
-            batch.put(&key, &encode_value(&stored)?)?;
+    for index in indexes {
+        match index {
+            IndexMigration::Delete(key) => batch.delete(&key)?,
+            IndexMigration::Put {
+                old_key,
+                new_key,
+                stored,
+            } => {
+                batch.put(&new_key, &encode_value(&stored)?)?;
+                if old_key != new_key {
+                    batch.delete(&old_key)?;
+                }
+            }
         }
     }
+    Ok(())
+}
+
+fn finish_relation_migration(batch: &mut dyn KeyValueBatch) -> StorageBackendResult<()> {
     for metadata_key in [LEGACY_VIEWS_METADATA_KEY, LEGACY_SEQUENCES_METADATA_KEY] {
         batch.put(
             &single_str_key(TAG_METADATA, metadata_key)?,
@@ -437,19 +531,23 @@ pub(super) fn apply_relation_migrations(
     catalog: &KeyValueCatalog,
     migrations: RelationMigrations,
 ) -> StorageBackendResult<()> {
+    let RelationMigrations {
+        seen,
+        tables,
+        sequences,
+        foreign_tables,
+        views,
+        indexes,
+    } = migrations;
     let mut batch = catalog.store.batch();
-    put_relation_parents(catalog.store.as_ref(), batch.as_mut(), &migrations.seen)?;
-    let mut table_renames = std::collections::BTreeMap::new();
-    for table in migrations.tables {
-        if let Some((old, new)) =
-            apply_table_migration(catalog.store.as_ref(), batch.as_mut(), table)?
-        {
-            table_renames.insert(old, new);
-        }
+    put_relation_parents(catalog.store.as_ref(), batch.as_mut(), &seen)?;
+    for table in tables {
+        apply_table_migration(catalog.store.as_ref(), batch.as_mut(), table)?;
     }
-    put_sequence_migrations(batch.as_mut(), migrations.sequences)?;
-    put_foreign_migrations(batch.as_mut(), migrations.foreign_tables)?;
-    put_view_migrations(batch.as_mut(), migrations.views)?;
-    finish_relation_migration(catalog.store.as_ref(), batch.as_mut(), &table_renames)?;
+    put_sequence_migrations(batch.as_mut(), sequences)?;
+    put_foreign_migrations(batch.as_mut(), foreign_tables)?;
+    put_view_migrations(batch.as_mut(), views)?;
+    put_index_migrations(batch.as_mut(), indexes)?;
+    finish_relation_migration(batch.as_mut())?;
     batch.commit()
 }

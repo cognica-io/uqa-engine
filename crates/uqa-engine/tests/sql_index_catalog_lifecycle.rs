@@ -41,12 +41,13 @@ fn storage_count(db: &Path, storage_table: &str, table: &str, field: &str) -> i6
 }
 
 fn catalog_index_count(db: &Path, table: &str) -> i64 {
-    let table = physical_relation_name(table);
+    let table = RelationIdentity::from_legacy_name(table).unwrap();
     Connection::open(db)
         .unwrap()
         .query_row(
-            "SELECT COUNT(*) FROM _catalog_indexes WHERE table_name = ?1",
-            [table],
+            "SELECT COUNT(*) FROM _catalog_indexes
+              WHERE table_schema_name = ?1 AND table_relation_name = ?2",
+            params![table.schema, table.name],
             |row| row.get(0),
         )
         .unwrap()
@@ -159,7 +160,7 @@ fn assert_unnamed_index_catalog(engine: &Engine) {
     let indexes = engine.list_catalog_indexes().unwrap();
     let names_and_types = indexes
         .iter()
-        .map(|row| (row.name.as_str(), row.index_type.as_str()))
+        .map(|row| (row.relation.name.as_str(), row.index_type.as_str()))
         .collect::<Vec<_>>();
     assert_eq!(
         names_and_types,
@@ -167,7 +168,7 @@ fn assert_unnamed_index_catalog(engine: &Engine) {
             ("items_body_idx", "gin"),
             ("items_embedding_idx", "ivf"),
             ("items_qty_idx", "btree"),
-            ("items_qty_idx_1", "btree"),
+            ("items_qty_idx1", "btree"),
         ]
     );
 }
@@ -188,6 +189,252 @@ fn assert_unnamed_indexes_execute(engine: &Engine) {
         .knn_search("items", "embedding", vec![1.0, 0.0], 1)
         .unwrap();
     assert_eq!(nearest.first().map(|hit| hit.doc_id), Some(1));
+}
+
+fn index_identities(engine: &Engine) -> Vec<String> {
+    engine
+        .list_catalog_indexes()
+        .unwrap()
+        .into_iter()
+        .map(|row| row.relation.qualified_name())
+        .collect()
+}
+
+#[test]
+fn schema_scoped_index_identities_keep_same_local_names_and_regclass_oids() {
+    let directory = TempDir::new().unwrap();
+    let database = directory.path().join("schema-index-identities.db");
+    let first_oid;
+    let second_oid;
+    {
+        let engine = Engine::open(&database).unwrap();
+        engine
+            .sql(
+                "CREATE SCHEMA index_alpha;
+                 CREATE SCHEMA index_beta;
+                 CREATE TABLE index_alpha.items(id integer);
+                 CREATE TABLE index_beta.items(id integer);
+                 CREATE INDEX shared_idx ON index_alpha.items(id);
+                 CREATE INDEX shared_idx ON index_beta.items(id)",
+                &[],
+            )
+            .unwrap();
+        assert_eq!(
+            index_identities(&engine),
+            ["index_alpha.shared_idx", "index_beta.shared_idx"]
+        );
+        let oids = engine
+            .sql(
+                "SELECT 'index_alpha.shared_idx'::regclass::oid AS alpha_oid,
+                        'index_beta.shared_idx'::regclass::oid AS beta_oid",
+                &[],
+            )
+            .unwrap();
+        let Value::Int(alpha_oid) = oids.rows[0]["alpha_oid"] else {
+            panic!("alpha index regclass must use an integer OID")
+        };
+        let Value::Int(beta_oid) = oids.rows[0]["beta_oid"] else {
+            panic!("beta index regclass must use an integer OID")
+        };
+        assert_ne!(alpha_oid, beta_oid);
+        first_oid = alpha_oid;
+        second_oid = beta_oid;
+    }
+
+    {
+        let engine = Engine::open(&database).unwrap();
+        assert_eq!(
+            index_identities(&engine),
+            ["index_alpha.shared_idx", "index_beta.shared_idx"]
+        );
+        let oids = engine
+            .sql(
+                "SELECT 'index_alpha.shared_idx'::regclass::oid AS alpha_oid,
+                        'index_beta.shared_idx'::regclass::oid AS beta_oid",
+                &[],
+            )
+            .unwrap();
+        assert_eq!(oids.rows[0]["alpha_oid"], Value::Int(first_oid));
+        assert_eq!(oids.rows[0]["beta_oid"], Value::Int(second_oid));
+        engine
+            .sql(
+                "SET search_path TO index_beta, index_alpha; DROP INDEX shared_idx",
+                &[],
+            )
+            .unwrap();
+        assert_eq!(index_identities(&engine), ["index_alpha.shared_idx"]);
+    }
+
+    let reopened = Engine::open(&database).unwrap();
+    assert_eq!(index_identities(&reopened), ["index_alpha.shared_idx"]);
+    assert_eq!(
+        reopened
+            .sql(
+                "SELECT to_regclass('index_beta.shared_idx') IS NULL AS missing",
+                &[]
+            )
+            .unwrap()
+            .rows[0]["missing"],
+        Value::Bool(true)
+    );
+}
+
+#[test]
+fn temporary_indexes_never_enter_the_durable_catalog() {
+    let directory = TempDir::new().unwrap();
+    let database = directory.path().join("temporary-index.db");
+    {
+        let engine = Engine::open(&database).unwrap();
+        engine
+            .sql(
+                "CREATE TEMP TABLE temp_items(id integer);
+                 CREATE INDEX temp_items_idx ON temp_items(id)",
+                &[],
+            )
+            .unwrap();
+        assert_eq!(
+            index_identities(&engine)
+                .into_iter()
+                .map(|name| name.rsplit_once('.').unwrap().1.to_string())
+                .collect::<Vec<_>>(),
+            ["temp_items_idx"]
+        );
+        let count: i64 = Connection::open(&database)
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM _catalog_indexes", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    let reopened = Engine::open(&database).unwrap();
+    assert!(index_identities(&reopened).is_empty());
+    assert_eq!(
+        reopened
+            .sql(
+                "SELECT to_regclass('temp_items_idx') IS NULL AS missing",
+                &[]
+            )
+            .unwrap()
+            .rows[0]["missing"],
+        Value::Bool(true)
+    );
+}
+
+#[test]
+fn temporary_indexes_survive_persistent_catalog_refresh() {
+    let directory = TempDir::new().unwrap();
+    let database = directory.path().join("temporary-index-refresh.db");
+    {
+        let engine = Engine::open(&database).unwrap();
+        let writer = engine.new_session().unwrap();
+        engine
+            .sql(
+                "CREATE TEMP TABLE temp_items(id integer);
+                 CREATE INDEX temp_items_idx ON temp_items(id)",
+                &[],
+            )
+            .unwrap();
+        writer
+            .sql(
+                "CREATE TABLE durable_items(id integer);
+                 CREATE INDEX durable_items_idx ON durable_items(id)",
+                &[],
+            )
+            .unwrap();
+
+        let indexes = engine.list_catalog_indexes().unwrap();
+        assert!(indexes.iter().any(|row| {
+            row.relation.name == "temp_items_idx" && row.relation.schema.starts_with("pg_temp_")
+        }));
+        assert!(indexes
+            .iter()
+            .any(|row| row.relation == RelationIdentity::new("public", "durable_items_idx")));
+        assert_eq!(
+            engine
+                .sql(
+                    "SELECT to_regclass('temp_items_idx') IS NOT NULL AS present",
+                    &[]
+                )
+                .unwrap()
+                .rows[0]["present"],
+            Value::Bool(true)
+        );
+    }
+
+    let reopened = Engine::open(&database).unwrap();
+    assert_eq!(index_identities(&reopened), ["public.durable_items_idx"]);
+}
+
+#[test]
+fn quoted_index_identity_preserves_component_boundaries() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE SCHEMA \"index.dot\";
+             CREATE TABLE \"index.dot\".items(id integer);
+             CREATE INDEX \"shared.dot\" ON \"index.dot\".items(id)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(index_identities(&engine), ["\"index.dot\".\"shared.dot\""]);
+    let result = engine
+        .sql(
+            "SELECT '\"index.dot\".\"shared.dot\"'::regclass::oid =
+                    to_regclass('\"index.dot\".\"shared.dot\"')::oid AS same_oid",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.rows[0]["same_oid"], Value::Bool(true));
+    engine
+        .sql("DROP INDEX \"index.dot\".\"shared.dot\"", &[])
+        .unwrap();
+    assert!(index_identities(&engine).is_empty());
+}
+
+#[test]
+fn indexes_and_other_relations_cannot_share_one_schema_identity() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE indexed_items(id integer);
+             CREATE TABLE occupied_name(id integer);
+             CREATE INDEX occupied_index ON indexed_items(id)",
+            &[],
+        )
+        .unwrap();
+
+    for sql in [
+        "CREATE INDEX occupied_index ON indexed_items(id)",
+        "CREATE INDEX occupied_name ON indexed_items(id)",
+        "CREATE TABLE occupied_index(id integer)",
+    ] {
+        let error = engine.sql(sql, &[]).expect_err(sql);
+        assert_eq!(error.sqlstate(), Some("42P07"), "{sql}: {error}");
+    }
+    engine.take_sql_notices();
+    engine
+        .sql(
+            "CREATE INDEX IF NOT EXISTS occupied_index ON indexed_items(id);
+             CREATE INDEX IF NOT EXISTS occupied_name ON indexed_items(id)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        engine.take_sql_notices(),
+        [
+            (
+                "NOTICE".into(),
+                "relation \"occupied_index\" already exists, skipping".into(),
+            ),
+            (
+                "NOTICE".into(),
+                "relation \"occupied_name\" already exists, skipping".into(),
+            ),
+        ]
+    );
+    assert_eq!(index_identities(&engine), ["public.occupied_index"]);
 }
 
 fn assert_unnamed_index_storage(db: &Path) {
@@ -281,9 +528,9 @@ fn dropping_shared_gin_cleans_physical_state_only_after_the_last_reference() {
                 .list_catalog_indexes()
                 .unwrap()
                 .into_iter()
-                .map(|row| row.name)
+                .map(|row| row.relation.qualified_name())
                 .collect::<Vec<_>>(),
-            vec!["docs_body_gin_b"]
+            vec!["public.docs_body_gin_b"]
         );
         assert_shared_gin_is_live(&engine);
         assert!(storage_count(&db, "_posting_clusters", "docs", "body") > 0);

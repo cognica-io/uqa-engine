@@ -467,3 +467,25 @@ fn drop_sequence_preserves_targets_and_behavior() {
     let error = compile("DROP SEQUENCE database.public.ids").unwrap_err();
     assert_eq!(error.sqlstate(), Some("42601"));
 }
+
+#[test]
+fn drop_index_preserves_qualified_relation_identities() {
+    let Statement::Drop(drop) =
+        first("DROP INDEX IF EXISTS app.shared_idx, \"archive.data\".\"second.idx\" CASCADE")
+    else {
+        panic!("expected DROP INDEX");
+    };
+    assert_eq!(drop.kind, DropKind::Index);
+    assert_eq!(
+        drop.names,
+        vec![
+            "app.shared_idx".to_string(),
+            "\"archive.data\".\"second.idx\"".to_string()
+        ]
+    );
+    assert!(drop.if_exists);
+    assert!(drop.cascade);
+
+    let error = compile("DROP INDEX database.public.idx").unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42601"));
+}

@@ -409,17 +409,23 @@ impl CatalogFacade for KeyValueCatalog {
 
     fn save_catalog_index(
         &self,
-        name: &str,
+        relation: &RelationIdentity,
         index_type: &str,
         table_name: &str,
         columns_json: &str,
         parameters_json: &str,
     ) -> StorageBackendResult<()> {
-        self.save_catalog_index_impl(name, index_type, table_name, columns_json, parameters_json)
+        self.save_catalog_index_impl(
+            relation,
+            index_type,
+            table_name,
+            columns_json,
+            parameters_json,
+        )
     }
 
-    fn drop_catalog_index(&self, name: &str) -> StorageBackendResult<()> {
-        self.drop_catalog_index_impl(name)
+    fn drop_catalog_index(&self, relation: &RelationIdentity) -> StorageBackendResult<()> {
+        self.drop_catalog_index_impl(relation)
     }
 
     fn drop_catalog_indexes_for_table(&self, table_name: &str) -> StorageBackendResult<()> {

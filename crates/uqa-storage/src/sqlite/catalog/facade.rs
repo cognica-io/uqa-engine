@@ -55,6 +55,9 @@ impl CatalogFacade for Catalog {
                            UNION ALL
                            SELECT schema_name, relation_name, 'foreign_table' AS kind
                              FROM _foreign_tables
+                           UNION ALL
+                           SELECT schema_name, relation_name, 'index' AS kind
+                             FROM _catalog_indexes
                        ) AS child
                          ON child.schema_name = r.schema_name
                         AND child.relation_name = r.relation_name
@@ -444,7 +447,7 @@ impl CatalogFacade for Catalog {
 
     fn save_catalog_index(
         &self,
-        name: &str,
+        relation: &RelationIdentity,
         index_type: &str,
         table_name: &str,
         columns_json: &str,
@@ -452,7 +455,7 @@ impl CatalogFacade for Catalog {
     ) -> StorageBackendResult<()> {
         into_storage_result(Catalog::save_catalog_index(
             self,
-            name,
+            relation,
             index_type,
             table_name,
             columns_json,
@@ -460,8 +463,8 @@ impl CatalogFacade for Catalog {
         ))
     }
 
-    fn drop_catalog_index(&self, name: &str) -> StorageBackendResult<()> {
-        into_storage_result(Catalog::drop_catalog_index(self, name))
+    fn drop_catalog_index(&self, relation: &RelationIdentity) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::drop_catalog_index(self, relation))
     }
 
     fn drop_catalog_indexes_for_table(&self, table_name: &str) -> StorageBackendResult<()> {

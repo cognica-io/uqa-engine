@@ -84,6 +84,11 @@ impl RelationIdentity {
         ))
     }
 
+    /// Recover an index identity from the former flat index catalog. The stored value is a decoded local identifier rather than a relation reference, so dots and quotes remain part of the local name and the owning table supplies the schema.
+    pub(crate) fn from_legacy_index_name(value: &str, table: &Self) -> Self {
+        Self::new(&table.schema, value)
+    }
+
     /// Parse a possibly-unqualified SQL relation reference without choosing a
     /// search-path schema. Components use `PostgreSQL` double-quote escaping.
     pub fn parse_reference(value: &str) -> Result<(Option<String>, String), String> {
@@ -177,6 +182,7 @@ pub enum RelationKind {
     View,
     Sequence,
     ForeignTable,
+    Index,
 }
 
 impl RelationKind {
@@ -186,6 +192,7 @@ impl RelationKind {
             Self::View => "view",
             Self::Sequence => "sequence",
             Self::ForeignTable => "foreign_table",
+            Self::Index => "index",
         }
     }
 }
@@ -268,7 +275,7 @@ pub struct ViewRow {
 /// One row from the secondary-index registry.
 #[derive(Debug, Clone)]
 pub struct CatalogIndexRow {
-    pub name: String,
+    pub relation: RelationIdentity,
     pub index_type: String,
     pub table_name: String,
     pub columns_json: String,
@@ -763,13 +770,13 @@ pub trait CatalogFacade: Send + Sync {
 
     fn save_catalog_index(
         &self,
-        name: &str,
+        relation: &RelationIdentity,
         index_type: &str,
         table_name: &str,
         columns_json: &str,
         parameters_json: &str,
     ) -> StorageBackendResult<()>;
-    fn drop_catalog_index(&self, name: &str) -> StorageBackendResult<()>;
+    fn drop_catalog_index(&self, relation: &RelationIdentity) -> StorageBackendResult<()>;
     fn drop_catalog_indexes_for_table(&self, table_name: &str) -> StorageBackendResult<()>;
     fn load_catalog_indexes(&self) -> StorageBackendResult<Vec<CatalogIndexRow>>;
 

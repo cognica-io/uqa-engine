@@ -885,7 +885,7 @@ impl Engine {
                     || row.index_type.eq_ignore_ascii_case("hnsw"))
                 && Self::catalog_index_references_column(row, column)?
             {
-                names.push(row.name.clone());
+                names.push(row.relation.qualified_name());
             }
         }
         Ok(names)

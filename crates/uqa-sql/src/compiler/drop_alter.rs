@@ -69,6 +69,7 @@ pub(super) fn compile_drop(stmt: &pg_query::protobuf::DropStmt) -> Result<Statem
                 if matches!(
                     kind,
                     DropKind::Table
+                        | DropKind::Index
                         | DropKind::View
                         | DropKind::MaterializedView
                         | DropKind::Sequence

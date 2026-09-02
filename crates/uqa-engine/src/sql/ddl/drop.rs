@@ -29,6 +29,9 @@ pub(in crate::sql) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLRes
             }
         }
     }
+    if stmt.kind == DropKind::Index {
+        return run_drop_index(engine, stmt);
+    }
     if stmt.cascade
         && matches!(
             stmt.kind,
@@ -65,16 +68,7 @@ pub(in crate::sql) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLRes
                 lock_targets.extend(hierarchy_targets);
             }
         }
-        DropKind::Index => {
-            for name in &stmt.names {
-                if let Some(index) = engine
-                    .catalog_index(name)
-                    .map_err(|err| ddl_storage_error("DROP INDEX relation lock", err))?
-                {
-                    lock_targets.insert(index.table_name);
-                }
-            }
-        }
+        DropKind::Index => unreachable!("DROP INDEX has a bound execution path"),
         DropKind::Schema => {
             // Dropping a schema removes every relation it owns, including the label relations of a graph namespace, so each of them takes the same AccessExclusive lock a direct DROP would.
             for name in &stmt.names {
@@ -177,29 +171,7 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
                 .try_drop_tables(&tables, stmt.cascade)
                 .map_err(|err| ddl_storage_error("DROP TABLE", err))?;
         }
-        DropKind::Index => {
-            let mut indexes = Vec::new();
-            for name in &stmt.names {
-                let Some(row) = engine
-                    .catalog_index(name)
-                    .map_err(|err| ddl_storage_error("DROP INDEX", err))?
-                else {
-                    if stmt.if_exists {
-                        continue;
-                    }
-                    return Err(SQLError::Unsupported(format!(
-                        "DROP INDEX: index `{name}` does not exist"
-                    )));
-                };
-                indexes.push(row);
-            }
-            for row in indexes {
-                drop_index_side_effects(engine, &row)?;
-                engine
-                    .try_drop_catalog_index(&row.name)
-                    .map_err(|e| ddl_storage_error("DROP INDEX", e))?;
-            }
-        }
+        DropKind::Index => unreachable!("DROP INDEX has a bound execution path"),
         DropKind::View | DropKind::MaterializedView => {
             let expected_kind = if stmt.kind == DropKind::View {
                 "view"
@@ -340,6 +312,82 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
     Ok(SQLResult::empty())
 }
 
+fn run_drop_index(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError> {
+    let mut indexes = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for requested in &stmt.names {
+        match engine.resolve_visible_relation_kind(requested)? {
+            RelationResolution::Found(canonical, "index") => {
+                let relation = crate::RelationIdentity::from_legacy_name(&canonical)
+                    .map_err(SQLError::Internal)?;
+                if !seen.insert(relation.clone()) {
+                    continue;
+                }
+                let row = engine
+                    .bound_catalog_index(&canonical)
+                    .map_err(|error| ddl_storage_error("DROP INDEX", error))?
+                    .ok_or_else(|| {
+                        SQLError::Internal(format!(
+                            "resolved index `{canonical}` has no bound catalog row"
+                        ))
+                    })?;
+                indexes.push(row);
+            }
+            RelationResolution::Found(_, _) => {
+                return Err(SQLError::Routine {
+                    sqlstate: "42809".into(),
+                    message: format!("\"{requested}\" is not an index"),
+                });
+            }
+            RelationResolution::MissingSchema(schema) if stmt.if_exists => {
+                engine.push_sql_notice(
+                    "NOTICE",
+                    &format!("schema \"{schema}\" does not exist, skipping"),
+                );
+            }
+            RelationResolution::MissingSchema(schema) => {
+                return Err(SQLError::Routine {
+                    sqlstate: "3F000".into(),
+                    message: format!("schema \"{schema}\" does not exist"),
+                });
+            }
+            RelationResolution::MissingRelation if stmt.if_exists => {
+                let local = crate::RelationIdentity::parse_reference(requested)
+                    .map_err(SQLError::Internal)?
+                    .1;
+                engine.push_sql_notice(
+                    "NOTICE",
+                    &format!("index \"{local}\" does not exist, skipping"),
+                );
+            }
+            RelationResolution::MissingRelation => {
+                let local = crate::RelationIdentity::parse_reference(requested)
+                    .map_err(SQLError::Internal)?
+                    .1;
+                return Err(SQLError::Routine {
+                    sqlstate: "42704".into(),
+                    message: format!("index \"{local}\" does not exist"),
+                });
+            }
+        }
+    }
+    for row in &indexes {
+        engine.lock_relation(
+            &row.table_name,
+            crate::row_locks::RelationLockMode::AccessExclusive,
+        )?;
+    }
+    engine.with_implicit_transaction(move |engine| {
+        for row in indexes {
+            drop_index_side_effects(engine, &row)?;
+            engine
+                .try_drop_catalog_index_relation(&row.relation)
+                .map_err(|error| ddl_storage_error("DROP INDEX", error))?;
+        }
+        Ok(SQLResult::empty())
+    })
+}
+
 pub(super) fn ddl_storage_error(action: &str, err: impl std::fmt::Display) -> SQLError {
     SQLError::Internal(format!("{action} failed in storage backend: {err}"))
 }
@@ -359,7 +407,7 @@ fn catalog_index_columns(row: &CatalogIndexRow, action: &str) -> Result<Vec<Stri
     serde_json::from_str(&row.columns_json).map_err(|e| {
         SQLError::Internal(format!(
             "{action} `{}`: invalid index column metadata: {e}",
-            row.name
+            row.relation.qualified_name()
         ))
     })
 }
@@ -375,7 +423,7 @@ fn drop_gin_index_side_effects(engine: &Engine, row: &CatalogIndexRow) -> Result
     for field in fields {
         let mut still_referenced = false;
         for candidate in &indexes {
-            if candidate.name == row.name
+            if candidate.relation == row.relation
                 || candidate.table_name != row.table_name
                 || !candidate.index_type.eq_ignore_ascii_case("gin")
             {
@@ -395,7 +443,8 @@ fn drop_gin_index_side_effects(engine: &Engine, row: &CatalogIndexRow) -> Result
                 .map_err(|err| {
                     SQLError::Internal(format!(
                         "DROP INDEX `{}`: failed to remove FTS field `{}`.`{field}`: {err}",
-                        row.name, row.table_name
+                        row.relation.qualified_name(),
+                        row.table_name
                     ))
                 })?;
         }
@@ -417,7 +466,8 @@ fn drop_vector_index_side_effects(engine: &Engine, row: &CatalogIndexRow) -> Res
                 {
                     return Err(SQLError::Unsupported(format!(
                         "DROP INDEX `{}`: relation `{}` does not exist",
-                        row.name, row.table_name
+                        row.relation.qualified_name(),
+                        row.table_name
                     )));
                 }
                 engine
@@ -425,20 +475,21 @@ fn drop_vector_index_side_effects(engine: &Engine, row: &CatalogIndexRow) -> Res
                     .map_err(|e| {
                         SQLError::Internal(format!(
                             "DROP INDEX `{}`: failed to drop vector-index metadata for `{}`.`{col}`: {e}",
-                            row.name, row.table_name
+                            row.relation.qualified_name(), row.table_name
                         ))
                     })?;
             }
             Some(other) => {
                 return Err(SQLError::Unsupported(format!(
                     "DROP INDEX `{}`: vector-index column `{}`.`{col}` is no longer VECTOR or TENSOR, got {other:?}",
-                    row.name, row.table_name
+                    row.relation.qualified_name(), row.table_name
                 )));
             }
             None => {
                 return Err(SQLError::Unsupported(format!(
                     "DROP INDEX `{}`: column `{}`.`{col}` does not exist",
-                    row.name, row.table_name
+                    row.relation.qualified_name(),
+                    row.table_name
                 )));
             }
         }

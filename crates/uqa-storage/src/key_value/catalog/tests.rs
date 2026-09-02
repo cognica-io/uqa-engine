@@ -445,6 +445,131 @@ fn relation_namespace_migration_moves_all_physical_index_namespaces() {
 }
 
 #[test]
+fn relation_namespace_migration_gives_catalog_indexes_typed_parents() {
+    let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
+    let catalog = KeyValueCatalog::new(Arc::clone(&store));
+    store
+        .put(
+            &single_str_key(TAG_TABLE, "app.docs").unwrap(),
+            &legacy_table_value("app.docs"),
+        )
+        .unwrap();
+    store
+        .put(
+            &single_str_key(TAG_CATALOG_INDEX, "shared_idx").unwrap(),
+            &encode_value(&StoredCatalogIndex {
+                index_type: "btree".into(),
+                table_name: "app.docs".into(),
+                columns_json: "[\"id\"]".into(),
+                parameters_json: "{}".into(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    store
+        .put(
+            &single_str_key(TAG_CATALOG_INDEX, "shared.dot").unwrap(),
+            &encode_value(&StoredCatalogIndex {
+                index_type: "btree".into(),
+                table_name: "app.docs".into(),
+                columns_json: "[\"id\"]".into(),
+                parameters_json: "{}".into(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    store
+        .put(
+            &single_str_key(TAG_CATALOG_INDEX, "temp_idx").unwrap(),
+            &encode_value(&StoredCatalogIndex {
+                index_type: "btree".into(),
+                table_name: "pg_temp_91.docs".into(),
+                columns_json: "[\"id\"]".into(),
+                parameters_json: "{}".into(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+    catalog.migrate_relation_namespace().unwrap();
+    catalog.migrate_relation_namespace().unwrap();
+
+    let rows = catalog.load_catalog_indexes().unwrap();
+    assert_eq!(rows.len(), 2);
+    for relation in [
+        RelationIdentity::new("app", "shared_idx"),
+        RelationIdentity::new("app", "shared.dot"),
+    ] {
+        assert!(rows
+            .iter()
+            .any(|row| row.relation == relation && row.table_name == "app.docs"));
+        let parent = store
+            .get(&relation_key(TAG_RELATION, &relation).unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            decode_value::<StoredRelation>(&parent).unwrap().kind,
+            RelationKind::Index
+        );
+    }
+    assert!(store
+        .get(&single_str_key(TAG_CATALOG_INDEX, "shared_idx").unwrap())
+        .unwrap()
+        .is_none());
+    assert!(store
+        .get(&single_str_key(TAG_CATALOG_INDEX, "shared.dot").unwrap())
+        .unwrap()
+        .is_none());
+    assert!(store
+        .get(&single_str_key(TAG_CATALOG_INDEX, "temp_idx").unwrap())
+        .unwrap()
+        .is_none());
+
+    store
+        .delete(&relation_key(TAG_RELATION, &RelationIdentity::new("app", "shared_idx")).unwrap())
+        .unwrap();
+    let error = catalog.migrate_relation_namespace().unwrap_err();
+    assert!(error.to_string().contains("has no index relation parent"));
+    assert_eq!(catalog.load_catalog_indexes().unwrap().len(), 2);
+}
+
+#[test]
+fn relation_namespace_migration_rejects_catalog_index_collisions_atomically() {
+    let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
+    let catalog = KeyValueCatalog::new(Arc::clone(&store));
+    for name in ["app.docs", "app.taken"] {
+        store
+            .put(
+                &single_str_key(TAG_TABLE, name).unwrap(),
+                &legacy_table_value(name),
+            )
+            .unwrap();
+    }
+    let legacy_index_key = single_str_key(TAG_CATALOG_INDEX, "taken").unwrap();
+    store
+        .put(
+            &legacy_index_key,
+            &encode_value(&StoredCatalogIndex {
+                index_type: "btree".into(),
+                table_name: "app.docs".into(),
+                columns_json: "[\"id\"]".into(),
+                parameters_json: "{}".into(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+    let error = catalog.migrate_relation_namespace().unwrap_err();
+    assert!(error.to_string().contains("migration collision"));
+    assert!(error.to_string().contains("app.taken"));
+    assert!(store
+        .scan_prefix(&key_with_tag(TAG_RELATION))
+        .unwrap()
+        .is_empty());
+    assert!(store.get(&legacy_index_key).unwrap().is_some());
+}
+
+#[test]
 fn relation_namespace_migration_rejects_alias_and_cross_kind_collisions() {
     for cross_kind in [false, true] {
         let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());

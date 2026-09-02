@@ -16,6 +16,7 @@
     "database_privilege_enforcement": "tests/parity/pg18/database_privilege_enforcement_oracle.expected.txt",
     "schema_privilege_inquiry": "tests/parity/pg18/schema_privilege_inquiry_oracle.expected.txt",
     "relation_schema_usage": "tests/parity/pg18/relation_schema_usage_oracle.expected.txt",
+    "index_namespace": "tests/parity/pg18/index_namespace_oracle.expected.txt",
     "sequence_introspection": "tests/parity/pg18/sequence_introspection_oracle.expected.txt",
     "transaction_catalog_visibility": "tests/parity/pg18/transaction_catalog_visibility_oracle.expected.txt",
     "tpch_fixture": "benchmarks/tpch/expected/pg18.json"
@@ -430,9 +431,9 @@
     },
     {
       "id": "relations.schema-usage",
-      "postgresql_reference": "PostgreSQL 18.4 live relation namespace resolution and SQLSTATE transcript in tests/parity/pg18/relation_schema_usage_oracle.expected.txt",
-      "uqa_test": "cargo test -p uqa-engine --test integration engine_catalog::sql_information_schema::relation_schema_usage::; tests/parity/pg18/relation_schema_usage_oracle.sql",
-      "supported_version": "PostgreSQL 18.4 schema USAGE enforcement for qualified and effective-search-path table, view, materialized-view, and foreign-table query lookup; INSERT, UPDATE, DELETE, TRUNCATE, ALTER TABLE, DROP TABLE, stored-view creation, trigger and rule targets, constraint-trigger references, rule-action mutation targets, hierarchy parents, foreign-key references, and hard or soft regclass lookup; inherited grants and immediate prepared-plan revocation; namespace-check-free exact table identities stored in views, materialized views, SQL-standard query bodies, declared cursors, rule actions, and system-catalog relationships; and security-context-aware dynamic SQL bodies",
+      "postgresql_reference": "PostgreSQL 18.4 live relation namespace and index identity transcripts in tests/parity/pg18/relation_schema_usage_oracle.expected.txt and tests/parity/pg18/index_namespace_oracle.expected.txt",
+      "uqa_test": "cargo test -p uqa-sql --lib drop_index_preserves_qualified_relation_identities; cargo test -p uqa-engine --test integration engine_catalog::sql_information_schema::relation_schema_usage::; cargo test -p uqa-engine --test integration engine_catalog::sql_index_catalog_lifecycle::; tests/parity/pg18/relation_schema_usage_oracle.sql; tests/parity/pg18/index_namespace_oracle.sql",
+      "supported_version": "PostgreSQL 18.4 schema USAGE enforcement for qualified and effective-search-path table, view, materialized-view, foreign-table, and standalone-index lookup; INSERT, UPDATE, DELETE, TRUNCATE, ALTER TABLE, DROP TABLE, DROP INDEX, stored-view creation, trigger and rule targets, constraint-trigger references, rule-action mutation targets, hierarchy parents, foreign-key references, and hard or soft regclass lookup; inherited grants and immediate prepared-plan revocation; namespace-check-free exact table identities stored in views, materialized views, SQL-standard query bodies, declared cursors, rule actions, and system-catalog relationships; schema-qualified index catalog identities with equal local names in distinct schemas, shared relation-namespace collisions, quoted component boundaries, PostgreSQL default-name suffixes, distinct stable regclass OIDs, durable reopen and temporary-session lifecycle, effective-search-path DROP binding, and exact missing-schema, missing-index, wrong-kind, and IF NOT EXISTS behavior; and security-context-aware dynamic SQL bodies",
       "status": "verified",
       "open_issue": null
     },

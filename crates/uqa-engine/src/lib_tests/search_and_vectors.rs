@@ -419,7 +419,8 @@ fn hnsw_is_a_distinct_persistent_index_and_survives_reopen() {
             Ok((
                 conn.query_row(
                     "SELECT index_type FROM _catalog_indexes
-                      WHERE name = 'articles_embedding_hnsw'",
+                      WHERE schema_name = 'public'
+                        AND relation_name = 'articles_embedding_hnsw'",
                     [],
                     |row| row.get(0),
                 )?,
@@ -480,7 +481,8 @@ fn sqlite_reopen_repairs_legacy_hnsw_alias_backed_by_ivf() {
         .with(|conn| {
             conn.execute(
                 "UPDATE _catalog_indexes SET index_type = 'hnsw'
-                  WHERE name = 'articles_embedding_idx'",
+                  WHERE schema_name = 'public'
+                    AND relation_name = 'articles_embedding_idx'",
                 [],
             )?;
             conn.execute(

@@ -180,8 +180,8 @@ pub(super) fn build_pg_class(
     }
     for index in catalog_indexes {
         let mut index_row = pg_class_row(
-            &index.schema,
-            &index.name,
+            &index.relation.schema,
+            &index.relation.name,
             index.relkind,
             catalog_usize(index.columns.len(), "pg_class index column count")?,
             0.0,

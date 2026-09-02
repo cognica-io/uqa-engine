@@ -11,6 +11,7 @@
     "QueryRuntimeView",
     "RelationLookupMode",
     "RelationNameResolution",
+    "RelationResolution",
     "SessionExecutionView"
   ],
   "scopes": [
@@ -63,6 +64,7 @@
         "crates/uqa-engine/src/sql/catalog/pg_catalog/constraints.rs",
         "crates/uqa-engine/src/sql/catalog/pg_proc.rs",
         "crates/uqa-engine/src/sql/catalog/regtypes.rs",
+        "crates/uqa-engine/src/sql/catalog/regtypes/type_names.rs",
         "crates/uqa-engine/src/sql/catalog/relation_catalog.rs"
       ],
       "engine_allowlist": [
@@ -72,6 +74,7 @@
         "crates/uqa-engine/src/sql/catalog/partitioning.rs",
         "crates/uqa-engine/src/sql/catalog/pg_catalog/attributes.rs",
         "crates/uqa-engine/src/sql/catalog/regtypes.rs",
+        "crates/uqa-engine/src/sql/catalog/regtypes/type_names.rs",
         "crates/uqa-engine/src/sql/catalog/relation_catalog.rs"
       ]
     },

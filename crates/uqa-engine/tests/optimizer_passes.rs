@@ -174,7 +174,7 @@ fn simplify_algebra_deduplicates_separately_lowered_filters() {
             ref index_name,
             ref field,
             ..
-        } if index_name == "notes_year_idx" && field == "year"
+        } if index_name == "public.notes_year_idx" && field == "year"
     ));
 }
 
@@ -233,7 +233,7 @@ fn pure_filter_uses_catalog_btree_in_final_optimizer_pass() {
     else {
         panic!("expected the catalog btree to become IndexScan");
     };
-    assert_eq!(index_name, "notes_year_idx");
+    assert_eq!(index_name, "public.notes_year_idx");
     assert_eq!(field, "year");
 
     let result = eng
@@ -382,7 +382,7 @@ fn fuse_log_odds_with_relational_filter_lowers_to_intersect() {
                 index_name,
                 field,
                 ..
-            } if index_name == "notes_year_idx" && field == "year"
+            } if index_name == "public.notes_year_idx" && field == "year"
         )
     }));
 }

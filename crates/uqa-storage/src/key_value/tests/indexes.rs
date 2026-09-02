@@ -6,6 +6,22 @@
 
 use super::*;
 
+fn save_empty_table(catalog: &KeyValueCatalog, schema: &str, name: &str) {
+    catalog.save_schema(schema).unwrap();
+    catalog
+        .save_table(&TableSchema {
+            relation: crate::catalog::RelationIdentity::new(schema, name),
+            object_id: [1; 16],
+            storage_generation: [1; 16],
+            analyzer_json: "{}".into(),
+            fts_fields: Vec::new(),
+            vector_fields: Vec::new(),
+            columns_json: "[]".into(),
+            constraints_json: String::new(),
+        })
+        .unwrap();
+}
+
 #[test]
 fn key_value_column_stats_replace_is_a_complete_batch() {
     let catalog = KeyValueCatalog::new(store());
@@ -72,21 +88,87 @@ fn key_value_drop_cleans_only_its_legacy_public_alias() {
 #[test]
 fn key_value_column_lifecycle_rejects_corrupt_catalog_index_columns() {
     let catalog = KeyValueCatalog::new(store());
+    save_empty_table(&catalog, "public", "docs");
     catalog
-        .save_catalog_index("broken", "btree", "docs", "not-json", "{}")
+        .save_catalog_index(
+            &crate::catalog::RelationIdentity::new("public", "broken"),
+            "btree",
+            "public.docs",
+            "not-json",
+            "{}",
+        )
         .unwrap();
 
     assert!(matches!(
-        catalog.drop_column_data("docs", "title"),
+        catalog.drop_column_data("public.docs", "title"),
         Err(StorageBackendError::Serde(_))
     ));
     assert_eq!(catalog.load_catalog_indexes().unwrap().len(), 1);
     assert!(matches!(
-        catalog.rename_column_data("docs", "title", "headline"),
+        catalog.rename_column_data("public.docs", "title", "headline"),
         Err(StorageBackendError::Serde(_))
     ));
     assert_eq!(
         catalog.load_catalog_indexes().unwrap()[0].columns_json,
         "not-json"
     );
+}
+
+#[test]
+fn key_value_catalog_indexes_enforce_schema_parent_and_shared_namespace_identity() {
+    let catalog = KeyValueCatalog::new(store());
+    save_empty_table(&catalog, "app", "docs");
+    catalog.save_schema("archive").unwrap();
+    let index = crate::catalog::RelationIdentity::new("app", "docs_idx");
+    catalog
+        .save_catalog_index(&index, "btree", "app.docs", "[\"id\"]", "{}")
+        .unwrap();
+    catalog
+        .save_catalog_index(&index, "gin", "app.docs", "[\"id\"]", "{}")
+        .unwrap();
+    assert_eq!(catalog.load_catalog_indexes().unwrap().len(), 1);
+    assert!(catalog
+        .save_catalog_index(
+            &crate::catalog::RelationIdentity::new("archive", "docs_idx"),
+            "btree",
+            "app.docs",
+            "[\"id\"]",
+            "{}",
+        )
+        .is_err());
+    assert!(catalog
+        .save_catalog_index(
+            &crate::catalog::RelationIdentity::new("app", "missing_idx"),
+            "btree",
+            "app.missing",
+            "[\"id\"]",
+            "{}",
+        )
+        .is_err());
+    assert!(catalog
+        .save_table(&TableSchema {
+            relation: crate::catalog::RelationIdentity::new("app", "docs_idx"),
+            object_id: [2; 16],
+            storage_generation: [2; 16],
+            analyzer_json: "{}".into(),
+            fts_fields: Vec::new(),
+            vector_fields: Vec::new(),
+            columns_json: "[]".into(),
+            constraints_json: String::new(),
+        })
+        .is_err());
+    assert!(catalog
+        .save_catalog_index(
+            &crate::catalog::RelationIdentity::new("app", "docs"),
+            "btree",
+            "app.docs",
+            "[\"id\"]",
+            "{}",
+        )
+        .is_err());
+
+    catalog.migrate_relation_namespace().unwrap();
+    catalog.drop_catalog_index(&index).unwrap();
+    catalog.migrate_relation_namespace().unwrap();
+    assert!(catalog.load_catalog_indexes().unwrap().is_empty());
 }

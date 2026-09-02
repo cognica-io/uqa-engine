@@ -189,6 +189,7 @@ impl KeyValueCatalog {
         let relation =
             RelationIdentity::from_legacy_name(name).map_err(StorageBackendError::Other)?;
         let mut batch = self.store.batch();
+        self.drop_catalog_indexes_for_table_in_batch(batch.as_mut(), &relation.qualified_name())?;
         batch.delete(&relation_key(TAG_TABLE, &relation)?)?;
         self.release_relation(batch.as_mut(), &relation, RelationKind::Table)?;
         batch.commit()
@@ -199,6 +200,7 @@ impl KeyValueCatalog {
             RelationIdentity::from_legacy_name(name).map_err(StorageBackendError::Other)?;
         let storage_names = relation.canonical_and_legacy_public_names();
         let mut batch = self.store.batch();
+        self.drop_catalog_indexes_for_table_in_batch(batch.as_mut(), &relation.qualified_name())?;
         batch.delete(&relation_key(TAG_TABLE, &relation)?)?;
         self.release_relation(batch.as_mut(), &relation, RelationKind::Table)?;
         for storage_name in &storage_names {
@@ -214,11 +216,6 @@ impl KeyValueCatalog {
             batch.delete_prefix(&column_stats_prefix(storage_name)?)?;
             batch.delete_prefix(&table_field_analyzer_prefix(storage_name)?)?;
             drop_table_indexes(batch.as_mut(), storage_name)?;
-        }
-        for row in self.load_catalog_indexes()? {
-            if storage_names.contains(&row.table_name) {
-                batch.delete(&single_str_key(TAG_CATALOG_INDEX, &row.name)?)?;
-            }
         }
         batch.commit()
     }
@@ -250,6 +247,11 @@ impl KeyValueCatalog {
             RelationIdentity::from_legacy_name(to).map_err(StorageBackendError::Other)?;
         if from_relation == to_relation {
             return Ok(());
+        }
+        if from_relation.schema != to_relation.schema {
+            return Err(StorageBackendError::Other(
+                "moving a table between schemas is not supported by the catalog".into(),
+            ));
         }
         self.ensure_schema_exists(&to_relation)?;
         let from_key = relation_key(TAG_TABLE, &from_relation)?;
@@ -320,7 +322,7 @@ impl KeyValueCatalog {
         for row in self.load_catalog_indexes()? {
             if row.table_name == from {
                 batch.put(
-                    &single_str_key(TAG_CATALOG_INDEX, &row.name)?,
+                    &relation_key(TAG_CATALOG_INDEX, &row.relation)?,
                     &encode_value(&StoredCatalogIndex {
                         index_type: row.index_type,
                         table_name: to.to_string(),
@@ -397,7 +399,8 @@ impl KeyValueCatalog {
         }
         for row in self.load_catalog_indexes()? {
             if row.table_name == table_name && catalog_index_references_column(&row, column_name)? {
-                batch.delete(&single_str_key(TAG_CATALOG_INDEX, &row.name)?)?;
+                batch.delete(&relation_key(TAG_CATALOG_INDEX, &row.relation)?)?;
+                self.release_relation(batch.as_mut(), &row.relation, RelationKind::Index)?;
             }
         }
         batch.commit()
@@ -470,7 +473,7 @@ impl KeyValueCatalog {
             }
             if let Some(columns_json) = catalog_index_rename_column(&row, from, to)? {
                 batch.put(
-                    &single_str_key(TAG_CATALOG_INDEX, &row.name)?,
+                    &relation_key(TAG_CATALOG_INDEX, &row.relation)?,
                     &encode_value(&StoredCatalogIndex {
                         index_type: row.index_type,
                         table_name: row.table_name,

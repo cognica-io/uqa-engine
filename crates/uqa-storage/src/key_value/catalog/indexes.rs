@@ -7,34 +7,65 @@
 //! Secondary indexes, path indexes, and column statistics.
 
 use super::{
-    column_stats_key, column_stats_prefix, decode_value, encode_value, key_with_tag,
-    load_single_string_rows, read_str, single_str_key, string_value, CatalogFacade,
-    CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, KeyValueCatalog, StorageBackendError,
-    StorageBackendResult, StoredCatalogIndex, StoredColumnStats, TAG_CATALOG_INDEX, TAG_PATH_INDEX,
+    column_stats_key, column_stats_prefix, decode_catalog_relation_key, decode_value, encode_value,
+    key_with_tag, load_single_string_rows, read_str, relation_key, single_str_key, string_value,
+    CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, KeyValueBatch,
+    KeyValueCatalog, RelationIdentity, RelationKind, StorageBackendError, StorageBackendResult,
+    StoredCatalogIndex, StoredColumnStats, TAG_CATALOG_INDEX, TAG_PATH_INDEX,
 };
 
 impl KeyValueCatalog {
     pub(super) fn save_catalog_index_impl(
         &self,
-        name: &str,
+        relation: &RelationIdentity,
         index_type: &str,
         table_name: &str,
         columns_json: &str,
         parameters_json: &str,
     ) -> StorageBackendResult<()> {
-        self.store.put(
-            &single_str_key(TAG_CATALOG_INDEX, name)?,
+        let table =
+            RelationIdentity::from_legacy_name(table_name).map_err(StorageBackendError::Other)?;
+        if relation.schema != table.schema {
+            return Err(StorageBackendError::Other(format!(
+                "catalog index `{}` cannot belong to a different schema than table `{}`",
+                relation.qualified_name(),
+                table.qualified_name()
+            )));
+        }
+        if self
+            .store
+            .get(&relation_key(super::TAG_TABLE, &table)?)?
+            .is_none()
+        {
+            return Err(StorageBackendError::Other(format!(
+                "catalog index `{}` references missing table `{}`",
+                relation.qualified_name(),
+                table.qualified_name()
+            )));
+        }
+        self.require_relation_kind(&table, RelationKind::Table)?;
+        let mut batch = self.store.batch();
+        self.claim_relation(batch.as_mut(), relation, RelationKind::Index)?;
+        batch.put(
+            &relation_key(TAG_CATALOG_INDEX, relation)?,
             &encode_value(&StoredCatalogIndex {
                 index_type: index_type.to_string(),
-                table_name: table_name.to_string(),
+                table_name: table.qualified_name(),
                 columns_json: columns_json.to_string(),
                 parameters_json: parameters_json.to_string(),
             })?,
-        )
+        )?;
+        batch.commit()
     }
 
-    pub(super) fn drop_catalog_index_impl(&self, name: &str) -> StorageBackendResult<()> {
-        self.store.delete(&single_str_key(TAG_CATALOG_INDEX, name)?)
+    pub(super) fn drop_catalog_index_impl(
+        &self,
+        relation: &RelationIdentity,
+    ) -> StorageBackendResult<()> {
+        let mut batch = self.store.batch();
+        batch.delete(&relation_key(TAG_CATALOG_INDEX, relation)?)?;
+        self.release_relation(batch.as_mut(), relation, RelationKind::Index)?;
+        batch.commit()
     }
 
     pub(super) fn drop_catalog_indexes_for_table_impl(
@@ -42,29 +73,38 @@ impl KeyValueCatalog {
         table_name: &str,
     ) -> StorageBackendResult<()> {
         let mut batch = self.store.batch();
+        self.drop_catalog_indexes_for_table_in_batch(batch.as_mut(), table_name)?;
+        batch.commit()
+    }
+
+    pub(super) fn drop_catalog_indexes_for_table_in_batch(
+        &self,
+        batch: &mut dyn KeyValueBatch,
+        table_name: &str,
+    ) -> StorageBackendResult<()> {
         for row in self.load_catalog_indexes()? {
             if row.table_name == table_name {
-                batch.delete(&single_str_key(TAG_CATALOG_INDEX, &row.name)?)?;
+                batch.delete(&relation_key(TAG_CATALOG_INDEX, &row.relation)?)?;
+                self.release_relation(batch, &row.relation, RelationKind::Index)?;
             }
         }
-        batch.commit()
+        Ok(())
     }
 
     pub(super) fn load_catalog_indexes_impl(&self) -> StorageBackendResult<Vec<CatalogIndexRow>> {
         let mut rows = Vec::new();
         for (key, value) in self.store.scan_prefix(&key_with_tag(TAG_CATALOG_INDEX))? {
-            let mut offset = 1;
-            let name = read_str(&key, &mut offset)?;
+            let (relation, _, _) = decode_catalog_relation_key(&key)?;
             let stored: StoredCatalogIndex = decode_value(&value)?;
             rows.push(CatalogIndexRow {
-                name,
+                relation,
                 index_type: stored.index_type,
                 table_name: stored.table_name,
                 columns_json: stored.columns_json,
                 parameters_json: stored.parameters_json,
             });
         }
-        rows.sort_by(|a, b| a.name.cmp(&b.name));
+        rows.sort_by(|a, b| a.relation.cmp(&b.relation));
         Ok(rows)
     }
 

@@ -131,16 +131,50 @@ impl Engine {
         catalog: &dyn CatalogFacade,
     ) -> StorageBackendResult<()> {
         for row in catalog.load_catalog_indexes()? {
-            if !self.try_has_table(&row.table_name)? {
+            let table = crate::RelationIdentity::from_legacy_name(&row.table_name)
+                .map_err(StorageBackendError::Other)?;
+            if row.relation.schema != table.schema {
+                return Err(StorageBackendError::Other(format!(
+                    "catalog index `{}` belongs to schema `{}` but references table `{}` in schema `{}`",
+                    row.relation.qualified_name(),
+                    row.relation.schema,
+                    row.table_name,
+                    table.schema
+                )));
+            }
+            if !self.storage.tables.read().contains_key(&table) {
                 return Err(StorageBackendError::Other(format!(
                     "catalog index `{}` references missing table `{}`",
-                    row.name, row.table_name
+                    row.relation.qualified_name(),
+                    row.table_name
+                )));
+            }
+            let conflicting_kind = if self.storage.tables.read().contains_key(&row.relation) {
+                Some("table")
+            } else if self.durable.views.read().contains_key(&row.relation) {
+                Some("view")
+            } else if self.durable.sequences.read().contains_key(&row.relation) {
+                Some("sequence")
+            } else if self
+                .durable
+                .foreign_tables
+                .read()
+                .contains_key(&row.relation)
+            {
+                Some("foreign table")
+            } else {
+                None
+            };
+            if let Some(kind) = conflicting_kind {
+                return Err(StorageBackendError::Other(format!(
+                    "catalog index `{}` conflicts with existing {kind}",
+                    row.relation.qualified_name()
                 )));
             }
             self.durable
                 .catalog_indexes
                 .write()
-                .insert(row.name.clone(), row.clone());
+                .insert(row.relation.clone(), row.clone());
             let columns: Vec<String> = serde_json::from_str(&row.columns_json)?;
             let parameters: BTreeMap<String, String> = serde_json::from_str(&row.parameters_json)?;
             if row.index_type.eq_ignore_ascii_case("gin") {
@@ -168,13 +202,15 @@ impl Engine {
                     else {
                         return Err(StorageBackendError::Other(format!(
                             "vector index `{}` references missing or non-vector column `{}`.`{col}`",
-                            row.name, row.table_name
+                            row.relation.qualified_name(),
+                            row.table_name
                         )));
                     };
                     if !self.restore_vector_field_index(&row.table_name, col, dim, spec)? {
                         return Err(StorageBackendError::Other(format!(
                             "failed to restore vector index `{}` for table `{}`",
-                            row.name, row.table_name
+                            row.relation.qualified_name(),
+                            row.table_name
                         )));
                     }
                 }
