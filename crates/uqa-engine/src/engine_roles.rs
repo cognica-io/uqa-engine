@@ -528,6 +528,19 @@ impl Engine {
     }
 
     fn ensure_roles_have_no_object_dependencies(&self, names: &[String]) -> Result<(), SQLError> {
+        let database_security = self.durable.database_security.read();
+        for name in names {
+            if database_depends_on_role(&database_security, name) {
+                return Err(SQLError::Routine {
+                    sqlstate: "2BP01".into(),
+                    message: format!(
+                        "role \"{name}\" cannot be dropped because some objects depend on it: database uqa"
+                    ),
+                });
+            }
+        }
+        drop(database_security);
+
         let schema_security = self.durable.schemas.read();
         for name in names {
             if let Some(schema) = dependent_schema_for_role(&schema_security, name) {
@@ -835,6 +848,15 @@ fn dependent_schema_for_role<'a>(
         });
         (security.role_owner == role || acl_dependency).then_some(name)
     })
+}
+
+fn database_depends_on_role(security: &crate::engine_state::DatabaseSecurity, role: &str) -> bool {
+    let acl_dependency = security.acl.as_ref().is_some_and(|acl| {
+        acl.iter().any(|entry| {
+            entry.role == role || entry.grantor.as_deref().unwrap_or(&security.role_owner) == role
+        })
+    });
+    security.role_owner == role || acl_dependency
 }
 
 mod memberships;

@@ -117,6 +117,7 @@ pub(in crate::compiler) fn compile_grant(
     use pg_query::protobuf::ObjectType;
     match statement.objtype() {
         ObjectType::ObjectSequence | ObjectType::ObjectTable => compile_grant_sequence(statement),
+        ObjectType::ObjectDatabase => compile_grant_database(statement),
         ObjectType::ObjectSchema => compile_grant_schema(statement),
         ObjectType::ObjectFunction | ObjectType::ObjectProcedure | ObjectType::ObjectRoutine => {
             compile_grant_routine(statement)
@@ -125,6 +126,86 @@ pub(in crate::compiler) fn compile_grant(
             "GRANT/REVOKE object type {other:?} is not supported"
         ))),
     }
+}
+
+fn compile_grant_database(statement: &pg_query::protobuf::GrantStmt) -> Result<Statement> {
+    use crate::ast::{DatabasePrivilege, DatabaseRevokeBehavior, GrantDatabaseStmt};
+    use pg_query::protobuf::{DropBehavior, GrantTargetType};
+
+    if statement.targtype() != GrantTargetType::AclTargetObject {
+        return Err(SQLError::Unsupported(
+            "database privileges require explicit database targets".into(),
+        ));
+    }
+    let privileges = if statement.privileges.is_empty() {
+        vec![
+            DatabasePrivilege::Connect,
+            DatabasePrivilege::Create,
+            DatabasePrivilege::Temporary,
+        ]
+    } else {
+        let mut privileges = Vec::with_capacity(statement.privileges.len());
+        for privilege in &statement.privileges {
+            let Some(NodeEnum::AccessPriv(privilege)) = privilege.node.as_ref() else {
+                return Err(SQLError::Internal(
+                    "GRANT/REVOKE contains a malformed privilege".into(),
+                ));
+            };
+            let privilege = match privilege.priv_name.to_ascii_lowercase().as_str() {
+                "connect" if privilege.cols.is_empty() => DatabasePrivilege::Connect,
+                "create" if privilege.cols.is_empty() => DatabasePrivilege::Create,
+                "temporary" | "temp" if privilege.cols.is_empty() => DatabasePrivilege::Temporary,
+                _ => DatabasePrivilege::Unsupported(privilege.priv_name.to_ascii_uppercase()),
+            };
+            if !privileges.contains(&privilege) {
+                privileges.push(privilege);
+            }
+        }
+        privileges
+    };
+    let databases = statement
+        .objects
+        .iter()
+        .map(|object| {
+            let Some(NodeEnum::String(database)) = object.node.as_ref() else {
+                return Err(SQLError::Internal(
+                    "GRANT/REVOKE contains a malformed database target".into(),
+                ));
+            };
+            Ok(database.sval.clone())
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let grantees = statement
+        .grantees
+        .iter()
+        .map(|grantee| {
+            let Some(NodeEnum::RoleSpec(role)) = grantee.node.as_ref() else {
+                return Err(SQLError::Internal(
+                    "GRANT/REVOKE contains a malformed grantee".into(),
+                ));
+            };
+            compile_role_spec(role, true, "GRANT/REVOKE")
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let grantor = statement
+        .grantor
+        .as_ref()
+        .map(|role| compile_role_spec(role, false, "GRANTED BY"))
+        .transpose()?;
+    Ok(Statement::GrantDatabase(GrantDatabaseStmt {
+        is_grant: statement.is_grant,
+        grant_option: statement.grant_option,
+        grant_option_only: !statement.is_grant && statement.grant_option,
+        privileges,
+        databases,
+        grantees,
+        grantor,
+        revoke_behavior: if matches!(statement.behavior(), DropBehavior::DropCascade) {
+            DatabaseRevokeBehavior::Cascade
+        } else {
+            DatabaseRevokeBehavior::Restrict
+        },
+    }))
 }
 
 fn compile_grant_schema(statement: &pg_query::protobuf::GrantStmt) -> Result<Statement> {

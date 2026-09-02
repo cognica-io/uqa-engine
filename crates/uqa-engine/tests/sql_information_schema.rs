@@ -734,5 +734,8 @@ fn pg_catalog_exposes_indexes_types_functions_and_roles() {
 #[path = "sql_information_schema/pg18_attribute_catalog.rs"]
 mod pg18_attribute_catalog;
 
+#[path = "sql_information_schema/database_privileges.rs"]
+mod database_privileges;
+
 #[path = "sql_information_schema/pg18_routines.rs"]
 mod pg18_routines;

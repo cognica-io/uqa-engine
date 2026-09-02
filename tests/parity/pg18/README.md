@@ -66,6 +66,12 @@ docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/pa
 docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/sequence_name_lifecycle_session_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/sequence_name_lifecycle_session_oracle.expected.txt -
 ```
 
+`database_privilege_oracle.sql` records PostgreSQL 18.4 database ownership, ACL, and privilege inquiry behavior. The checked-in transcript verifies default `PUBLIC` privileges, explicit grants and revokes, rooted grant-option chains, dependent `RESTRICT` and `CASCADE`, owner and inherited-owner privileges, all six name/OID `has_database_privilege` overloads, strict NULLs, missing objects, error precedence, exact `pg_database` ACL output, and exact `pg_proc` identities.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/database_privilege_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/database_privilege_oracle.expected.txt -
+```
+
 `schema_privilege_inquiry_oracle.sql` records PostgreSQL 18.4 schema privilege inquiry behavior. The checked-in transcript verifies all six name/OID `has_schema_privilege` overloads, owner and inherited-role privileges, ACL and grant-option paths, comma-any checks, system and current temporary namespaces, strict NULLs, missing OIDs, name and OID resolution precedence, and exact `pg_proc` identities.
 
 ```sh

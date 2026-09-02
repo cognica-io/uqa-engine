@@ -455,6 +455,10 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 self.engine.grant_sequence_privileges(statement)?;
                 Ok(SQLResult::empty())
             }
+            CommandPlan::GrantDatabase(statement) => {
+                self.engine.grant_database_privileges(statement)?;
+                Ok(SQLResult::empty())
+            }
             CommandPlan::GrantSchema(statement) => {
                 self.engine.grant_schema_privileges(statement)?;
                 Ok(SQLResult::empty())

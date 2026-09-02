@@ -81,6 +81,7 @@ mod engine_analyzers;
 mod engine_cancellation;
 mod engine_capabilities;
 mod engine_catalog_indexes;
+mod engine_database_security;
 mod engine_events;
 mod engine_fdw;
 mod engine_fts;
@@ -173,6 +174,7 @@ const SEQUENCES_METADATA_KEY: &str = "sql_sequences_json";
 /// (`graph_label_registry::<graph>` -> JSON `GraphLabelRegistry`).
 const GRAPH_LABELS_METADATA_PREFIX: &str = "graph_label_registry::";
 const FUNCTIONS_METADATA_KEY: &str = "sql_functions_json";
+const DATABASE_SECURITY_METADATA_KEY: &str = "sql_database_security_json";
 const ROLES_METADATA_KEY: &str = "sql_roles_json";
 const ROLE_MEMBERSHIPS_METADATA_KEY: &str = "sql_role_memberships_json";
 const TRIGGERS_METADATA_KEY: &str = "sql_triggers_json";

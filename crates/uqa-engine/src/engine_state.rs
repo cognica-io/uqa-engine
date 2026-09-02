@@ -26,6 +26,66 @@ pub(super) struct StorageContext {
     pub(super) provider: Option<Arc<dyn uqa_storage::PersistentStorageProvider>>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct DatabasePrivileges {
+    pub(crate) connect: bool,
+    pub(crate) create: bool,
+    pub(crate) temporary: bool,
+}
+
+impl DatabasePrivileges {
+    pub(crate) const ALL: Self = Self {
+        connect: true,
+        create: true,
+        temporary: true,
+    };
+
+    pub(crate) const fn intersects(self, other: Self) -> bool {
+        (self.connect && other.connect)
+            || (self.create && other.create)
+            || (self.temporary && other.temporary)
+    }
+
+    pub(crate) fn insert(&mut self, other: Self) {
+        self.connect |= other.connect;
+        self.create |= other.create;
+        self.temporary |= other.temporary;
+    }
+
+    pub(crate) fn remove(&mut self, other: Self) {
+        self.connect &= !other.connect;
+        self.create &= !other.create;
+        self.temporary &= !other.temporary;
+    }
+
+    pub(crate) const fn is_empty(self) -> bool {
+        !self.connect && !self.create && !self.temporary
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct DatabaseAclEntry {
+    pub(crate) role: String,
+    pub(crate) grantor: Option<String>,
+    pub(crate) privileges: DatabasePrivileges,
+    pub(crate) grant_options: DatabasePrivileges,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct DatabaseSecurity {
+    pub(crate) role_owner: String,
+    pub(crate) acl: Option<Vec<DatabaseAclEntry>>,
+}
+
+impl DatabaseSecurity {
+    pub(crate) fn bootstrap() -> Self {
+        Self {
+            role_owner: "uqa".into(),
+            acl: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SequenceSecurity {
     pub(crate) role_owner: String,
@@ -133,6 +193,7 @@ pub(super) struct DurableCatalogState {
     pub(super) scoring_params: RwLock<BTreeMap<String, String>>,
     pub(super) views: RwLock<BTreeMap<RelationIdentity, StoredView>>,
     pub(super) catalog_indexes: RwLock<BTreeMap<String, uqa_storage::CatalogIndexRow>>,
+    pub(super) database_security: RwLock<DatabaseSecurity>,
     pub(super) schemas: RwLock<BTreeMap<String, SchemaSecurity>>,
     pub(super) path_indexes: RwLock<BTreeMap<String, uqa_graph::PathIndex>>,
     pub(super) sequences: RwLock<BTreeMap<RelationIdentity, SequenceState>>,
@@ -168,6 +229,7 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) scoring_params: BTreeMap<String, String>,
     pub(super) views: BTreeMap<RelationIdentity, StoredView>,
     pub(super) catalog_indexes: BTreeMap<String, uqa_storage::CatalogIndexRow>,
+    pub(super) database_security: DatabaseSecurity,
     pub(super) schemas: BTreeMap<String, SchemaSecurity>,
     pub(super) path_indexes: BTreeMap<String, uqa_graph::PathIndex>,
     pub(super) sequences: BTreeMap<RelationIdentity, SequenceState>,
@@ -199,6 +261,7 @@ impl DurableCatalogState {
             scoring_params: RwLock::new(BTreeMap::new()),
             views: RwLock::new(BTreeMap::new()),
             catalog_indexes: RwLock::new(BTreeMap::new()),
+            database_security: RwLock::new(DatabaseSecurity::bootstrap()),
             schemas: RwLock::new(BTreeMap::from([(
                 "public".to_string(),
                 SchemaSecurity::legacy("public"),
@@ -231,6 +294,7 @@ impl DurableCatalogState {
             scoring_params: self.scoring_params.read().clone(),
             views: self.views.read().clone(),
             catalog_indexes: self.catalog_indexes.read().clone(),
+            database_security: self.database_security.read().clone(),
             schemas: self.schemas.read().clone(),
             path_indexes: self.path_indexes.read().clone(),
             sequences: self.sequences.read().clone(),
@@ -256,6 +320,9 @@ impl DurableCatalogState {
         *self.scoring_params.write() = snapshot.scoring_params.clone();
         *self.views.write() = snapshot.views.clone();
         *self.catalog_indexes.write() = snapshot.catalog_indexes.clone();
+        self.database_security
+            .write()
+            .clone_from(&snapshot.database_security);
         self.schemas.write().clone_from(&snapshot.schemas);
         *self.path_indexes.write() = snapshot.path_indexes.clone();
         *self.sequences.write() = snapshot.sequences.clone();

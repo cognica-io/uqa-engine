@@ -54,7 +54,7 @@ pub(super) fn build_info_schema_rows(
         VirtualRelation::PgType => build_pg_type(),
         VirtualRelation::PgRange => build_pg_range(),
         VirtualRelation::PgProc => build_pg_proc(catalog)?,
-        VirtualRelation::PgDatabase => build_pg_database(),
+        VirtualRelation::PgDatabase => build_pg_database(catalog)?,
         VirtualRelation::PgAuthMembers => build_pg_auth_members(catalog),
         VirtualRelation::PgRoles => build_pg_roles(catalog),
         VirtualRelation::PgUser => build_pg_user(catalog),

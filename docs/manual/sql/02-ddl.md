@@ -2,6 +2,17 @@
 
 DDL changes the durable catalog and participates in engine transaction boundaries. Use explicit transactions when multiple catalog and data changes form one deployment invariant.
 
+## Database privileges
+
+```sql
+GRANT CONNECT, TEMPORARY ON DATABASE uqa TO app_reader;
+GRANT CREATE ON DATABASE uqa TO app_writer WITH GRANT OPTION;
+SELECT has_database_privilege('app_reader', 'uqa', 'CONNECT');
+REVOKE GRANT OPTION FOR CREATE ON DATABASE uqa FROM app_writer CASCADE;
+```
+
+The embedded engine exposes one current database named `uqa`, owned by the bootstrap `uqa` role. Its default ACL grants `CONNECT` and `TEMPORARY` to `PUBLIC`, while the owner retains implicit `CONNECT`, `CREATE`, and `TEMPORARY` grant options even after self-revocation. Database ACLs support `ALL [PRIVILEGES]`, `PUBLIC`, `TEMP` as an alias for `TEMPORARY`, `WITH GRANT OPTION`, `GRANT OPTION FOR`, `GRANTED BY`, `RESTRICT`, and `CASCADE`; independent rooted grantor paths, role dependencies, transactions, savepoints, cross-engine refresh, and durable reopen are preserved. `pg_database.datdba` and `datacl` expose the owner and ACL. The six current-user or explicit-role name/OID `has_database_privilege` overloads accept comma-separated checks, preserve inherited ownership, strict NULLs, missing-name and missing-OID distinctions, exact error precedence, and PostgreSQL 18 `pg_proc` identities. Creating, altering, dropping, or transferring ownership of databases and enforcing `CONNECT`, `CREATE`, or `TEMPORARY` at connection, schema-creation, and temporary-object boundaries remain compatibility bugs.
+
 ## Schemas
 
 ```sql

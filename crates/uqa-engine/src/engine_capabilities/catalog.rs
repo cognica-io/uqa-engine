@@ -140,6 +140,10 @@ impl CatalogReadView {
         self.snapshot.durable.schemas.get(name)
     }
 
+    pub(crate) fn database_security(&self) -> &crate::engine_state::DatabaseSecurity {
+        &self.snapshot.durable.database_security
+    }
+
     #[cfg(test)]
     pub(crate) fn has_schema(&self, name: &str) -> bool {
         self.snapshot.durable.schemas.contains_key(name)

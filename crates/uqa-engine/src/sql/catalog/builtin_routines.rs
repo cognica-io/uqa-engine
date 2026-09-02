@@ -129,9 +129,14 @@ const BIT_LENGTH_SQL_BODY_SUFFIX: &str = concat!(
 
 const FALSE_NODE: &str = "({CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 0 0 0 0 0 0 0 0 ]})";
 
+mod privileges;
 mod ranges;
 mod scalar;
 mod sequences;
 
-pub(super) const PG18_BUILTIN_ROUTINE_GROUPS: &[&[BuiltinRoutineCatalogEntry]] =
-    &[scalar::ROUTINES, ranges::ROUTINES, sequences::ROUTINES];
+pub(super) const PG18_BUILTIN_ROUTINE_GROUPS: &[&[BuiltinRoutineCatalogEntry]] = &[
+    scalar::ROUTINES,
+    privileges::ROUTINES,
+    ranges::ROUTINES,
+    sequences::ROUTINES,
+];

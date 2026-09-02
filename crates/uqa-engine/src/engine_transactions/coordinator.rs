@@ -6,7 +6,7 @@
 
 //! Coordination of transaction frames and their storage snapshots.
 //!
-//! Memory snapshot acquisition is ordered by the statement gate, the table registry and its per-table state, the durable registries (`graphs`, `models`, `scoring_params`, `views`, `catalog_indexes`, `schemas`, `path_indexes`, `sequences`, `sequence_object_ids`, `sequence_persistence`, `sequence_security`, `named_analyzers`, `table_field_analyzers`, `foreign_servers`, `foreign_tables`, `sql_user_functions`, `roles`, `role_memberships`, `triggers`, and `rules`), and finally in-memory FDW rows. Durable restore uses the same registry order. Callers must enter through this coordinator instead of holding an individual registry lock across snapshot or restore.
+//! Memory snapshot acquisition is ordered by the statement gate, the table registry and its per-table state, the durable registries (`graphs`, `models`, `scoring_params`, `views`, `catalog_indexes`, `database_security`, `schemas`, `path_indexes`, `sequences`, `sequence_object_ids`, `sequence_persistence`, `sequence_security`, `named_analyzers`, `table_field_analyzers`, `foreign_servers`, `foreign_tables`, `sql_user_functions`, `roles`, `role_memberships`, `triggers`, and `rules`), and finally in-memory FDW rows. Durable restore uses the same registry order. Callers must enter through this coordinator instead of holding an individual registry lock across snapshot or restore.
 
 use super::{
     failed_transaction_error, BackendTransactionMode, ConstraintModeState, Engine,

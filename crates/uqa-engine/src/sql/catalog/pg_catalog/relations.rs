@@ -11,6 +11,7 @@ use uqa_sql::{ResultRow, SQLError};
 
 use crate::engine_capabilities::{CatalogReadView, RelationNameResolution};
 
+use super::super::helpers::acl::acl_identifier;
 use super::super::helpers::oids::{
     current_user_name, current_user_oid, relation_oid, schema_oid, split_schema_name,
     stable_object_oid, stable_oid,
@@ -230,11 +231,23 @@ pub(in crate::sql::catalog) fn build_pg_matviews(
     Ok(rows)
 }
 
-pub(in crate::sql::catalog) fn build_pg_database() -> Vec<ResultRow> {
-    vec![row([
-        ("oid", int_value(5)),
-        ("datname", str_value("uqa")),
-        ("datdba", int_value(current_user_oid())),
+pub(in crate::sql::catalog) fn build_pg_database(
+    catalog: &CatalogReadView,
+) -> Result<Vec<ResultRow>, SQLError> {
+    let security = catalog.database_security();
+    Ok(vec![row([
+        (
+            "oid",
+            int_value(crate::engine_database_security::DATABASE_OID),
+        ),
+        (
+            "datname",
+            str_value(crate::engine_database_security::DATABASE_NAME),
+        ),
+        (
+            "datdba",
+            int_value(crate::engine_roles::role_oid(&security.role_owner)),
+        ),
         ("encoding", int_value(6)),
         ("datlocprovider", str_value("b")),
         ("datistemplate", bool_value(false)),
@@ -249,6 +262,46 @@ pub(in crate::sql::catalog) fn build_pg_database() -> Vec<ResultRow> {
         ("datlocale", str_value("PG_UNICODE_FAST")),
         ("daticurules", Value::Null),
         ("datcollversion", str_value("1")),
-        ("datacl", Value::Null),
-    ])]
+        ("datacl", database_acl_catalog_value(security)?),
+    ])])
+}
+
+fn database_acl_catalog_value(
+    security: &crate::engine_state::DatabaseSecurity,
+) -> Result<Value, SQLError> {
+    let Some(acl) = security.acl.as_ref() else {
+        return Ok(Value::Null);
+    };
+    catalog_array(
+        acl.iter()
+            .map(|entry| {
+                let grantee = if entry.role == "PUBLIC" {
+                    String::new()
+                } else {
+                    acl_identifier(&entry.role)
+                };
+                let grantor =
+                    acl_identifier(entry.grantor.as_deref().unwrap_or(&security.role_owner));
+                let mut privileges = String::new();
+                for (enabled, grant_option, code) in [
+                    (entry.privileges.create, entry.grant_options.create, 'C'),
+                    (
+                        entry.privileges.temporary,
+                        entry.grant_options.temporary,
+                        'T',
+                    ),
+                    (entry.privileges.connect, entry.grant_options.connect, 'c'),
+                ] {
+                    if enabled {
+                        privileges.push(code);
+                        if grant_option {
+                            privileges.push('*');
+                        }
+                    }
+                }
+                str_value(format!("{grantee}={privileges}/{grantor}"))
+            })
+            .collect(),
+        "pg_database.datacl",
+    )
 }

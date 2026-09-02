@@ -12,6 +12,7 @@
     "stateful_triggers": "tests/parity/pg18/triggers_stateful.expected.json",
     "stateful_rules": "tests/parity/pg18/rules_stateful.expected.json",
     "stateful_transactions": "tests/parity/pg18/transaction_stateful.expected.json",
+    "database_privileges": "tests/parity/pg18/database_privilege_oracle.expected.txt",
     "schema_privilege_inquiry": "tests/parity/pg18/schema_privilege_inquiry_oracle.expected.txt",
     "sequence_introspection": "tests/parity/pg18/sequence_introspection_oracle.expected.txt",
     "transaction_catalog_visibility": "tests/parity/pg18/transaction_catalog_visibility_oracle.expected.txt",
@@ -430,7 +431,7 @@
       "uqa_test": "python3 tests/parity/pg18/run_routines_stateful.py --suite roles; cargo test -p uqa-sql --lib compiler::tests::routines::; cargo test -p uqa-execution --lib has_schema_privilege_registers_every_postgresql_name_and_oid_overload; cargo test -p uqa-engine --test integration sql_sequences::security::schema_inquiry; cargo test -p uqa-engine --test integration engine_functions::sql_routine_identity::security_roles::; cargo test -p uqa-engine --test integration engine_functions::sql_routine_identity::; cargo test -p uqa-engine --test integration engine_functions::sql_plpgsql::",
       "supported_version": "Durable logical role creation, supported role-attribute alteration and removal with PostgreSQL 18 CREATEROLE delegation limits; CREATE ROLE membership clauses and legacy ALTER GROUP membership changes; per-grantor GRANT and REVOKE ROLE with ADMIN, INHERIT, and SET options, option-only revocation, dependency-aware RESTRICT and CASCADE, cycles, transactions, role-drop lifecycle, pg_auth_members, and transitive privilege inheritance and role assumption; all six name/OID pg_has_role overloads with MEMBER, USAGE, SET, ADMIN or GRANT option aliases, comma lists, strict NULL, exact errors, and pg_proc metadata; all six current-user or explicit-role name/OID has_schema_privilege overloads with USAGE, CREATE, WITH GRANT OPTION, comma-any checks, inherited owner and ACL paths, system and current temporary namespace behavior, strict NULL, missing-object and error precedence, and exact pg_proc metadata; SET and RESET ROLE with distinct current_user and session_user; membership-aware routine implicit ownership, replacement, drop, ownership transfer, and EXECUTE ACL checks; default PUBLIC EXECUTE plus owner, inherited, and non-owner grant-option sources, independent per-grantor ACL paths, GRANTED BY current-user validation, warning no-ops without grant option, dependency-aware RESTRICT and recursive CASCADE with alternate-path retention, owner-transfer grantor rewriting, and exact pg_proc ACL output; SECURITY DEFINER SET ROLE rejection and successful SECURITY INVOKER role persistence with error restoration; routine-local SET configuration; superuser-gated leakproof and recognized PostgreSQL support-function metadata; parallel-safety metadata; pg_roles, pg_user, pg_auth_members, pg_namespace, and pg_proc exposure; atomic persistence and reopen",
       "status": "partial",
-      "open_issue": "Passwords, per-role settings, schema privilege enforcement outside the implemented sequence boundaries, database privileges and their inquiry helpers, default privileges, row-level-security interactions, extension languages, and complete support-function, planner, and server-security consequences remain."
+      "open_issue": "Passwords, per-role settings, schema privilege enforcement outside the implemented sequence boundaries, default privileges, row-level-security interactions, extension languages, and complete support-function, planner, and server-security consequences remain."
     },
     {
       "id": "functions.json-null-stripping",
@@ -538,11 +539,11 @@
     },
     {
       "id": "catalog.pg-database-locale",
-      "postgresql_reference": "PostgreSQL 18 pg_database catalog",
-      "uqa_test": "crates/uqa-engine/tests/sql_information_schema.rs",
-      "supported_version": "PostgreSQL 18",
+      "postgresql_reference": "PostgreSQL 18.4 pg_database ownership and ACL catalog behavior plus tests/parity/pg18/database_privilege_oracle.expected.txt",
+      "uqa_test": "cargo test -p uqa-sql --lib database_grants_preserve_privileges_targets_and_grant_paths; cargo test -p uqa-execution --lib has_database_privilege_registers_every_postgresql_name_and_oid_overload; cargo test -p uqa-engine --test integration sql_information_schema::database_privileges; cargo test -p uqa-engine --test integration postgresql_18_database_catalog_matches_builtin_unicode_behavior",
+      "supported_version": "PostgreSQL 18.4 fixed uqa database identity, bootstrap ownership, builtin Unicode locale catalog fields, default PUBLIC CONNECT and TEMPORARY privileges, durable explicit CONNECT, CREATE, TEMPORARY or TEMP ACL grants and revokes, membership-aware owner and independent rooted grant-option paths, GRANTED BY validation, dependency-aware RESTRICT and CASCADE, role dependencies, transaction, savepoint, cross-engine refresh, reopen, exact pg_database datdba and datacl output, and all six current-user or explicit-role name/OID has_database_privilege overloads with comma-any and grant-option checks, strict NULL, missing-object and error precedence, and exact pg_proc metadata",
       "status": "partial",
-      "open_issue": "Complete collation, locale-provider, ownership, ACL, and database lifecycle behavior remains."
+      "open_issue": "Complete collation and locale-provider behavior, database creation, alteration, removal, owner transfer and other lifecycle operations, and CONNECT, CREATE, and TEMPORARY enforcement at connection, schema-creation, and temporary-object boundaries remain."
     },
     {
       "id": "plpgsql.datum-slots-and-bound-cursors",

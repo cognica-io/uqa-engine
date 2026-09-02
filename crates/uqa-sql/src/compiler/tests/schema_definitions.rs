@@ -215,6 +215,60 @@ fn sequence_grants_preserve_privileges_targets_and_grant_paths() {
 }
 
 #[test]
+fn database_grants_preserve_privileges_targets_and_grant_paths() {
+    use crate::ast::{DatabasePrivilege, DatabaseRevokeBehavior};
+
+    let Statement::GrantDatabase(grant) = first(
+        "GRANT CONNECT, CREATE, TEMPORARY ON DATABASE uqa, archive TO caller WITH GRANT OPTION GRANTED BY CURRENT_USER",
+    ) else {
+        panic!("not database GRANT");
+    };
+    assert!(grant.is_grant);
+    assert!(grant.grant_option);
+    assert_eq!(
+        grant.privileges,
+        vec![
+            DatabasePrivilege::Connect,
+            DatabasePrivilege::Create,
+            DatabasePrivilege::Temporary,
+        ]
+    );
+    assert_eq!(grant.databases, ["uqa", "archive"]);
+    assert_eq!(grant.grantees, ["caller"]);
+    assert_eq!(grant.grantor.as_deref(), Some("CURRENT_USER"));
+
+    let Statement::GrantDatabase(revoke) =
+        first("REVOKE GRANT OPTION FOR ALL PRIVILEGES ON DATABASE uqa FROM caller CASCADE")
+    else {
+        panic!("not database REVOKE");
+    };
+    assert!(!revoke.is_grant);
+    assert!(revoke.grant_option_only);
+    assert_eq!(revoke.revoke_behavior, DatabaseRevokeBehavior::Cascade);
+    assert_eq!(
+        revoke.privileges,
+        vec![
+            DatabasePrivilege::Connect,
+            DatabasePrivilege::Create,
+            DatabasePrivilege::Temporary,
+        ]
+    );
+
+    let Statement::GrantDatabase(temp) = first("GRANT TEMP ON DATABASE uqa TO caller") else {
+        panic!("not database TEMP GRANT");
+    };
+    assert_eq!(temp.privileges, vec![DatabasePrivilege::Temporary]);
+
+    let Statement::GrantDatabase(invalid) = first("GRANT SELECT ON DATABASE uqa TO caller") else {
+        panic!("not deferred invalid database privilege");
+    };
+    assert_eq!(
+        invalid.privileges,
+        vec![DatabasePrivilege::Unsupported("SELECT".into())]
+    );
+}
+
+#[test]
 fn schema_grants_preserve_privileges_targets_and_grant_paths() {
     use crate::ast::{SchemaPrivilege, SchemaRevokeBehavior};
 

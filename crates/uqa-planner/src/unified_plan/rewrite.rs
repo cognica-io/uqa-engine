@@ -266,6 +266,7 @@ pub(super) fn rewrite_command_scalars(
         | CommandPlan::AlterRoutineOwner(_)
         | CommandPlan::GrantRoutine(_)
         | CommandPlan::GrantSequence(_)
+        | CommandPlan::GrantDatabase(_)
         | CommandPlan::GrantSchema(_)
         | CommandPlan::GrantRole(_)
         | CommandPlan::CreateRole(_)

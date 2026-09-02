@@ -1,0 +1,40 @@
+catalog|2250|has_database_privilege(name,text,text)|has_database_privilege_name_name|true|s|s|false|16|19 25 25
+catalog|2251|has_database_privilege(name,oid,text)|has_database_privilege_name_id|true|s|s|false|16|19 26 25
+catalog|2252|has_database_privilege(oid,text,text)|has_database_privilege_id_name|true|s|s|false|16|26 25 25
+catalog|2253|has_database_privilege(oid,oid,text)|has_database_privilege_id_id|true|s|s|false|16|26 26 25
+catalog|2254|has_database_privilege(text,text)|has_database_privilege_name|true|s|s|false|16|25 25
+catalog|2255|has_database_privilege(oid,text)|has_database_privilege_id|true|s|s|false|16|26 25
+initial-catalog|uqa_database_privilege_owner|NULL
+default-outsider|true|false|true|true|false|false
+granted-catalog|uqa_database_privilege_owner|{uqa_database_privilege_owner=CTc/uqa_database_privilege_owner,uqa_database_privilege_reader=C*T/uqa_database_privilege_owner}
+reader-current-name|false|true|true|true|false
+reader-current-id|true
+reader-name-name|true
+reader-name-id|true
+reader-id-name|true
+reader-id-id|false
+reader-any-list|true
+numeric-database-name|true
+dependent-restrict|2BP01
+delegate-after-cascade|false
+owner-before-revoke|true
+owner-after-revoke|true|true|true
+inherited-owner|true|true|true
+outsider-after-revoke|false
+outsider-missing-database-id|NULL
+superuser|true
+missing-database-id|true
+missing-role-id|false
+missing-role-and-database-id|NULL
+null-current-name|NULL
+null-current-id|NULL
+null-role|NULL
+missing-database-name|3D000
+missing-role-name|42704
+invalid-privilege|22023
+all-privilege|22023
+missing-role-database-invalid|42704
+missing-database-invalid|3D000
+missing-database-id-invalid|22023
+missing-role-id-invalid|22023
+missing-role-id-missing-database|3D000

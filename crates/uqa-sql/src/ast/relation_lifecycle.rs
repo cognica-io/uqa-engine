@@ -269,6 +269,38 @@ pub struct GrantSequenceStmt {
     pub revoke_behavior: SequenceRevokeBehavior,
 }
 
+/// One requested database privilege. Unsupported names survive compilation so execution can preserve `PostgreSQL` target- and role-resolution precedence.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum DatabasePrivilege {
+    Connect,
+    Create,
+    Temporary,
+    Unsupported(String),
+}
+
+/// Dependency behavior for database privilege revocation.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DatabaseRevokeBehavior {
+    #[default]
+    Restrict,
+    Cascade,
+}
+
+/// `GRANT` or `REVOKE` of `CONNECT`, `CREATE`, and `TEMPORARY` on databases.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GrantDatabaseStmt {
+    pub is_grant: bool,
+    pub grant_option: bool,
+    pub grant_option_only: bool,
+    pub privileges: Vec<DatabasePrivilege>,
+    pub databases: Vec<String>,
+    pub grantees: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grantor: Option<String>,
+    #[serde(default)]
+    pub revoke_behavior: DatabaseRevokeBehavior,
+}
+
 /// One requested schema privilege. Unsupported names survive compilation so execution can preserve `PostgreSQL` target- and role-resolution precedence.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum SchemaPrivilege {

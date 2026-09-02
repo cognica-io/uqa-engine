@@ -130,6 +130,7 @@ fn is_engine_catalog_scalar(name: &str) -> bool {
             | "pg_get_triggerdef"
             | "pg_get_ruledef"
             | "pg_has_role"
+            | "has_database_privilege"
             | "has_schema_privilege"
             | "has_sequence_privilege"
     )
@@ -151,6 +152,7 @@ pub(in crate::sql) fn engine_catalog_scalar_value(
         "pg_sequence_last_value" => engine.pg_sequence_last_value_value(arguments),
         "pg_sequence_parameters" => engine.pg_sequence_parameters_value(arguments),
         "pg_has_role" => engine.pg_has_role_value(arguments),
+        "has_database_privilege" => engine.has_database_privilege_value(arguments),
         "has_schema_privilege" => engine.has_schema_privilege_value(arguments),
         "has_sequence_privilege" => engine.has_sequence_privilege_value(arguments),
         _ => return None,

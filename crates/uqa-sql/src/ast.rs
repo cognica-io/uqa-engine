@@ -645,6 +645,7 @@ pub enum Statement {
     AlterRoutineOwner(AlterRoutineOwnerStmt),
     GrantRoutine(GrantRoutineStmt),
     GrantSequence(GrantSequenceStmt),
+    GrantDatabase(GrantDatabaseStmt),
     GrantSchema(GrantSchemaStmt),
     GrantRole(GrantRoleStmt),
     CreateRole(CreateRoleStmt),
