@@ -733,6 +733,12 @@ pub(in crate::sql) fn run_view_merge_inner(
     let read_engine = statement_snapshot.as_ref().unwrap_or(engine);
     let mut ctes = CteScope::new_for_current_routine(read_engine);
     ctes.scalar_subqueries.clone_from(&plan.subqueries);
+    let source_privilege_expressions = super::super::merge::merge_privilege_expressions(plan);
+    crate::sql::select::ensure_select_privileges_for_source_expressions(
+        &plan.source,
+        &source_privilege_expressions,
+        &ctes,
+    )?;
     let source_rows = build_join_spill_with_ctes(read_engine, &plan.source, params, &mut ctes)?;
     let mut target_scope = ctes.returning_statement_snapshot_scope();
     let candidates = materialize_view_rows(read_engine, &target, None, params, &mut target_scope)?;

@@ -97,6 +97,7 @@ pub(crate) struct SequenceSecurity {
 pub(crate) struct TableSecurity {
     pub(crate) role_owner: String,
     pub(crate) acl: Option<Vec<uqa_storage::TableAclEntry>>,
+    pub(crate) column_acls: BTreeMap<String, Vec<uqa_storage::TableAclEntry>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

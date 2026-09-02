@@ -94,6 +94,7 @@ impl Engine {
                 .map_err(StorageBackendError::Other)?,
             role_owner: security.role_owner.clone(),
             acl: security.acl.clone(),
+            column_acls: security.column_acls.clone(),
             object_id: table.object_id(),
             storage_generation: table.storage_generation(),
             analyzer_json,
@@ -200,6 +201,7 @@ impl Engine {
             security: RwLock::new(TableSecurity {
                 role_owner: self.current_user_name(),
                 acl: None,
+                column_acls: BTreeMap::new(),
             }),
             storage_generation: RwLock::new(crate::new_table_storage_generation()?),
             document_store: RwLock::new(docs),

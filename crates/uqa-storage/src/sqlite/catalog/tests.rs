@@ -19,6 +19,7 @@ fn empty_table(schema: &str, name: &str) -> TableSchema {
         relation: RelationIdentity::new(schema, name),
         role_owner: "uqa".into(),
         acl: None,
+        column_acls: std::collections::BTreeMap::default(),
         object_id: [1; 16],
         storage_generation: [1; 16],
         analyzer_json: "{}".into(),
@@ -81,10 +82,12 @@ fn migration_creates_tables_table() {
 fn save_load_round_trip() {
     let cat = fresh();
     let acl = sample_table_acl();
+    let column_acls = std::collections::BTreeMap::from([("title".to_string(), sample_table_acl())]);
     let schema = TableSchema {
         relation: RelationIdentity::new("public", "articles"),
         role_owner: "article_owner".into(),
         acl: Some(acl.clone()),
+        column_acls: column_acls.clone(),
         object_id: [1; 16],
         storage_generation: [1; 16],
         analyzer_json:
@@ -104,6 +107,7 @@ fn save_load_round_trip() {
     assert_eq!(loaded[0].relation.qualified_name(), "public.articles");
     assert_eq!(loaded[0].role_owner, "article_owner");
     assert_eq!(loaded[0].acl, Some(acl));
+    assert_eq!(loaded[0].column_acls, column_acls);
     assert_eq!(loaded[0].object_id, [1; 16]);
     assert_eq!(loaded[0].storage_generation, [1; 16]);
     assert_eq!(loaded[0].fts_fields, vec!["title", "body"]);
@@ -122,6 +126,7 @@ fn catalog_facade_trait_object_round_trips_table() {
         relation: RelationIdentity::new("public", "facade_articles"),
         role_owner: "facade_owner".into(),
         acl: None,
+        column_acls: std::collections::BTreeMap::default(),
         object_id: [2; 16],
         storage_generation: [2; 16],
         analyzer_json:

@@ -120,6 +120,12 @@ docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/pa
 docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/table_privilege_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/table_privilege_oracle.expected.txt -
 ```
 
+`column_privilege_oracle.sql` records PostgreSQL 18.4 ordinary-table column ACL and enforcement behavior. The checked-in transcript verifies NULL and explicitly empty `attacl` state, exact `SELECT`, `INSERT`, `UPDATE`, and `REFERENCES` column requirements, table-to-column privilege implication, independent grant-option chains, system-column and attnum boundaries, sequence columns, all twelve `has_column_privilege` overloads, information-schema visibility, and ownership-transfer grantor rewriting.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/column_privilege_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/column_privilege_oracle.expected.txt -
+```
+
 `sequence_security_oracle.sql` records PostgreSQL 18.4 sequence role ownership and ACL behavior. The checked-in transcript verifies the default ACL and owner, an independent grant-option chain, all six `has_sequence_privilege` name/OID overloads, value-function access, grant-option `CASCADE`, implicit owner grant options after self-revocation, and ownership-transfer grantor rewriting.
 
 ```sh

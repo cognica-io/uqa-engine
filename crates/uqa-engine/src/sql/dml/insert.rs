@@ -181,15 +181,46 @@ pub(in crate::sql) fn run_insert_inner(
             "INSERT",
         )?;
     }
-    engine.ensure_table_privilege(
-        &stmt.table,
-        crate::engine_table_security::TableAclPrivilege::Insert,
-    )?;
-    if conflict_update_columns.is_some() {
-        engine.ensure_table_privilege(
+    let default_values =
+        stmt.source.is_none() && stmt.columns.is_empty() && stmt.rows.iter().all(Vec::is_empty);
+    if default_values {
+        engine.ensure_any_column_privilege(
             &stmt.table,
-            crate::engine_table_security::TableAclPrivilege::Update,
+            crate::engine_table_security::TableAclPrivilege::Insert,
         )?;
+    } else {
+        let insert_columns = if stmt.columns.is_empty() {
+            let supplied = stmt.source.as_deref().map_or_else(
+                || stmt.rows.first().map(Vec::len),
+                |source| {
+                    crate::sql::select::query_plan_output_columns(source)
+                        .map(|columns| columns.len())
+                },
+            );
+            let columns = engine.bound_table_column_names(&stmt.table)?;
+            match supplied {
+                Some(supplied) => columns.into_iter().take(supplied).collect(),
+                None => columns,
+            }
+        } else {
+            stmt.columns.clone()
+        };
+        for column in insert_columns {
+            engine.ensure_column_privilege(
+                &stmt.table,
+                &column,
+                crate::engine_table_security::TableAclPrivilege::Insert,
+            )?;
+        }
+    }
+    if let Some(columns) = conflict_update_columns.as_deref() {
+        for column in columns {
+            engine.ensure_column_privilege(
+                &stmt.table,
+                column,
+                crate::engine_table_security::TableAclPrivilege::Update,
+            )?;
+        }
     }
     let mut privilege_expressions = stmt
         .returning
@@ -214,9 +245,10 @@ pub(in crate::sql) fn run_insert_inner(
         &stmt.target_qualifier,
         &stmt.returning_aliases,
         &privilege_expressions,
+        &stmt.subqueries,
         stmt.on_conflict
             .as_ref()
-            .is_some_and(|conflict| !conflict.conflict_columns.is_empty()),
+            .map_or(&[][..], |conflict| conflict.conflict_columns.as_slice()),
     )?;
     let view_original_query = !stmt.view_rule_relations.iter().try_fold(
         false,

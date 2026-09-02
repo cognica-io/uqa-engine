@@ -93,6 +93,7 @@ pub(super) fn decode_migrated_table(
         relation,
         role_owner: "uqa".into(),
         acl: None,
+        column_acls: std::collections::BTreeMap::new(),
         object_id: [0; 16],
         storage_generation: [0; 16],
         analyzer_json: legacy.analyzer_json,

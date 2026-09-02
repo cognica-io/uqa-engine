@@ -18,6 +18,8 @@ pub(super) fn canonical_virtual_relation_reference(reference: &str) -> Option<St
         "schemata"
             | "tables"
             | "columns"
+            | "column_privileges"
+            | "role_column_grants"
             | "views"
             | "routines"
             | "sequences"

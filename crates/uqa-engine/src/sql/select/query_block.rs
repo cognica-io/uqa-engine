@@ -7,7 +7,7 @@
 //! Query-block preparation and column-pruning analysis.
 
 use super::{
-    bind_source_plan_schema, ensure_select_privileges_for_source,
+    bind_source_plan_schema, ensure_select_privileges_for_query_block,
     execute_query_block_operator_output, expand_from_star_columns, expr_contains_subquery,
     expr_contains_volatile_function, final_filter_after_qualifier_pushdown, has_window,
     overlay_outer_schema, projection_columns, qualifier_filters_for_stmt, resolve_row_locks,
@@ -141,7 +141,7 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
                     expression_schema.clone()
                 };
                 validate_query_block_references(engine, stmt, &reference_schema, params, ctes)?;
-                ensure_select_privileges_for_source(from, ctes)?;
+                ensure_select_privileges_for_query_block(stmt, from, ctes)?;
                 return run_single_table_select_output(
                     engine,
                     SingleRelation {
@@ -188,7 +188,7 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
     let projection_schema = with_query_table_pseudo_columns(&source_schema);
     let projection_schema = overlay_outer_schema(&projection_schema, outer.as_ref());
     validate_query_block_references(engine, stmt, &projection_schema, params, ctes)?;
-    ensure_select_privileges_for_source(from, ctes)?;
+    ensure_select_privileges_for_query_block(stmt, from, ctes)?;
     let physical_filter = final_filter_after_qualifier_pushdown(
         engine,
         stmt,

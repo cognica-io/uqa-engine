@@ -29,6 +29,12 @@ pub(super) fn build_info_schema_rows(
         VirtualRelation::InformationSchemata => build_info_schemata(catalog, resolution)?,
         VirtualRelation::InformationTables => build_info_tables(engine, catalog, resolution)?,
         VirtualRelation::InformationColumns => build_info_columns(engine, catalog, resolution)?,
+        VirtualRelation::InformationColumnPrivileges => {
+            build_info_column_privileges(catalog, resolution, false)?
+        }
+        VirtualRelation::InformationRoleColumnGrants => {
+            build_info_column_privileges(catalog, resolution, true)?
+        }
         VirtualRelation::InformationViews => build_info_views(engine, catalog)?,
         VirtualRelation::InformationRoutines => build_info_routines(catalog)?,
         VirtualRelation::InformationSequences => build_info_sequences(catalog, session),
@@ -152,9 +158,9 @@ pub(in crate::sql) use events::{
     event_relation_oid, pg_get_ruledef_value, pg_get_triggerdef_value,
 };
 use information_schema::{
-    build_info_catalog_name, build_info_columns, build_info_key_column_usage, build_info_routines,
-    build_info_schemata, build_info_sequences, build_info_table_constraints, build_info_tables,
-    build_info_views,
+    build_info_catalog_name, build_info_column_privileges, build_info_columns,
+    build_info_key_column_usage, build_info_routines, build_info_schemata, build_info_sequences,
+    build_info_table_constraints, build_info_tables, build_info_views,
 };
 use partitioning::build_pg_partitioned_table;
 pub(in crate::sql) use partitioning::{pg_get_expr_value, pg_get_partkeydef_value};

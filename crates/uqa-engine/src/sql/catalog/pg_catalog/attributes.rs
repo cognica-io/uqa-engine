@@ -87,6 +87,13 @@ pub(in crate::sql::catalog) fn build_pg_attribute(
             let mut attribute =
                 pg_attribute_row(relid, catalog_ordinal(idx, "pg_attribute column")?, col);
             attribute.insert(
+                "attacl".into(),
+                super::super::relation_catalog::table_acl_catalog_value(
+                    &table.role_owner,
+                    table.column_acls.get(&col.name),
+                )?,
+            );
+            attribute.insert(
                 "attinhcount".into(),
                 int_value(catalog_usize(
                     inheritance_count,

@@ -214,7 +214,7 @@ pub(super) fn build_pg_class(
     Ok(out)
 }
 
-fn table_acl_catalog_value(
+pub(in crate::sql::catalog) fn table_acl_catalog_value(
     owner: &str,
     acl: Option<&Vec<uqa_storage::TableAclEntry>>,
 ) -> Result<uqa_core::Value, SQLError> {

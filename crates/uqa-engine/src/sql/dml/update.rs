@@ -21,6 +21,8 @@ use super::{
     SQLResult, ScalarExpr, UpdatePlan, Value, ViewCheckContext,
 };
 
+mod privileges;
+
 pub(in crate::sql) fn run_update(
     engine: &Engine,
     mut stmt: UpdatePlan,
@@ -86,25 +88,7 @@ pub(in crate::sql) fn run_update_inner(
             "UPDATE",
         )?;
     }
-    engine.ensure_table_privilege(
-        &stmt.table,
-        crate::engine_table_security::TableAclPrivilege::Update,
-    )?;
-    let privilege_expressions = stmt
-        .assignments
-        .iter()
-        .map(|assignment| &assignment.value)
-        .chain(stmt.predicate.iter())
-        .chain(stmt.returning.iter().map(|projection| &projection.expr))
-        .collect::<Vec<_>>();
-    super::ensure_target_table_select_for_expressions(
-        engine,
-        &stmt.table,
-        &stmt.target_qualifier,
-        &stmt.returning_aliases,
-        &privilege_expressions,
-        false,
-    )?;
+    let privilege_expressions = privileges::ensure_update_target_privileges(engine, stmt)?;
     let assigned_columns = stmt
         .assignments
         .iter()
@@ -160,6 +144,8 @@ pub(in crate::sql) fn run_update_inner(
     let mut ctes = CteScope::new_for_current_routine(read_engine);
     crate::sql::select::materialize_plan_ctes(read_engine, &stmt.ctes, params, &mut ctes)?;
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
+
+    privileges::ensure_update_source_privileges(stmt, &privilege_expressions, &ctes)?;
 
     if stmt.source.is_none() {
         let allowed = BTreeSet::from([stmt.target_qualifier.clone()]);

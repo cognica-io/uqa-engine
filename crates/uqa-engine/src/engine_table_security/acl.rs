@@ -33,6 +33,12 @@ pub(super) struct TablePrivilegeCheck {
     pub(super) grant_option: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct RequestedTablePrivileges {
+    pub(super) table: Vec<TableAclPrivilege>,
+    pub(super) columns: Vec<(TableAclPrivilege, String)>,
+}
+
 impl TableAclPrivilege {
     pub(super) const ALL: [Self; 8] = [
         Self::Select,
@@ -44,6 +50,9 @@ impl TableAclPrivilege {
         Self::Trigger,
         Self::Maintain,
     ];
+
+    pub(crate) const COLUMN_ALL: [Self; 4] =
+        [Self::Select, Self::Insert, Self::Update, Self::References];
 
     pub(super) const fn mask(self) -> TablePrivileges {
         let mut privileges = TablePrivileges {
@@ -72,29 +81,16 @@ impl TableAclPrivilege {
 
 pub(super) fn requested_acl_privileges(
     requested: &[TablePrivilegeSpec],
-) -> Result<Vec<TableAclPrivilege>, SQLError> {
+) -> Result<RequestedTablePrivileges, SQLError> {
     if requested.is_empty() {
-        return Ok(TableAclPrivilege::ALL.into());
+        return Ok(RequestedTablePrivileges {
+            table: TableAclPrivilege::ALL.into(),
+            columns: Vec::new(),
+        });
     }
-    let mut privileges = Vec::with_capacity(requested.len());
+    let mut table = Vec::with_capacity(requested.len());
+    let mut columns = Vec::new();
     for spec in requested {
-        if !spec.columns.is_empty() {
-            return match spec.privilege {
-                TablePrivilege::Select
-                | TablePrivilege::Insert
-                | TablePrivilege::Update
-                | TablePrivilege::References => Err(SQLError::Unsupported(
-                    "column-level table privileges are not supported".into(),
-                )),
-                _ => Err(SQLError::Routine {
-                    sqlstate: "0LP01".into(),
-                    message: format!(
-                        "invalid privilege type {} for column",
-                        table_privilege_name(&spec.privilege)
-                    ),
-                }),
-            };
-        }
         let privilege = match &spec.privilege {
             TablePrivilege::Select => TableAclPrivilege::Select,
             TablePrivilege::Insert => TableAclPrivilege::Insert,
@@ -107,21 +103,50 @@ pub(super) fn requested_acl_privileges(
             TablePrivilege::Usage => {
                 return Err(SQLError::Routine {
                     sqlstate: "0LP01".into(),
-                    message: "invalid privilege type USAGE for table".into(),
+                    message: if spec.columns.is_empty() {
+                        "invalid privilege type USAGE for table".into()
+                    } else {
+                        "invalid privilege type USAGE for column".into()
+                    },
                 })
             }
             TablePrivilege::Unsupported(name) => {
                 return Err(SQLError::Routine {
                     sqlstate: "0LP01".into(),
-                    message: format!("invalid privilege type {name} for table"),
+                    message: format!(
+                        "invalid privilege type {name} for {}",
+                        if spec.columns.is_empty() {
+                            "table"
+                        } else {
+                            "column"
+                        }
+                    ),
                 })
             }
         };
-        if !privileges.contains(&privilege) {
-            privileges.push(privilege);
+        if spec.columns.is_empty() {
+            if !table.contains(&privilege) {
+                table.push(privilege);
+            }
+        } else {
+            if !TableAclPrivilege::COLUMN_ALL.contains(&privilege) {
+                return Err(SQLError::Routine {
+                    sqlstate: "0LP01".into(),
+                    message: format!(
+                        "invalid privilege type {} for column",
+                        table_privilege_name(&spec.privilege)
+                    ),
+                });
+            }
+            for column in &spec.columns {
+                let requested = (privilege, column.clone());
+                if !columns.contains(&requested) {
+                    columns.push(requested);
+                }
+            }
         }
     }
-    Ok(privileges)
+    Ok(RequestedTablePrivileges { table, columns })
 }
 
 fn table_privilege_name(privilege: &TablePrivilege) -> &str {
@@ -172,7 +197,47 @@ pub(super) fn parse_privilege_checks(value: &str) -> Result<Vec<TablePrivilegeCh
         .collect()
 }
 
-fn acl_grantor<'a>(entry: &'a TableAclEntry, owner: &'a str) -> &'a str {
+pub(super) fn parse_column_privilege_checks(
+    value: &str,
+) -> Result<Vec<TablePrivilegeCheck>, SQLError> {
+    let checks = parse_privilege_checks(value)?;
+    if let Some(invalid) = checks
+        .iter()
+        .find(|check| !TableAclPrivilege::COLUMN_ALL.contains(&check.privilege))
+    {
+        let item = value
+            .split(',')
+            .find(|item| {
+                let upper = item.trim().to_ascii_uppercase();
+                let name = upper
+                    .strip_suffix(" WITH GRANT OPTION")
+                    .unwrap_or(&upper)
+                    .trim_end();
+                table_privilege_name_from_acl(invalid.privilege) == name
+            })
+            .map_or(value, str::trim);
+        return Err(SQLError::Routine {
+            sqlstate: "22023".into(),
+            message: format!("unrecognized privilege type: \"{item}\""),
+        });
+    }
+    Ok(checks)
+}
+
+fn table_privilege_name_from_acl(privilege: TableAclPrivilege) -> &'static str {
+    match privilege {
+        TableAclPrivilege::Select => "SELECT",
+        TableAclPrivilege::Insert => "INSERT",
+        TableAclPrivilege::Update => "UPDATE",
+        TableAclPrivilege::Delete => "DELETE",
+        TableAclPrivilege::Truncate => "TRUNCATE",
+        TableAclPrivilege::References => "REFERENCES",
+        TableAclPrivilege::Trigger => "TRIGGER",
+        TableAclPrivilege::Maintain => "MAINTAIN",
+    }
+}
+
+pub(super) fn acl_grantor<'a>(entry: &'a TableAclEntry, owner: &'a str) -> &'a str {
     entry.grantor.as_deref().unwrap_or(owner)
 }
 
@@ -187,7 +252,10 @@ fn materialize_acl(security: &mut TableSecurity) {
     }
 }
 
-fn grant_option_roles(security: &TableSecurity, privilege: TableAclPrivilege) -> BTreeSet<String> {
+pub(super) fn grant_option_roles(
+    security: &TableSecurity,
+    privilege: TableAclPrivilege,
+) -> BTreeSet<String> {
     let mut reachable = BTreeSet::from([security.role_owner.clone()]);
     let Some(acl) = security.acl.as_ref() else {
         return reachable;
@@ -368,14 +436,20 @@ fn remove_empty_entries(acl: &mut Vec<TableAclEntry>) {
 
 pub(super) fn rewrite_acl_owner(security: &mut TableSecurity, new_owner: &str) {
     let old_owner = std::mem::replace(&mut security.role_owner, new_owner.to_string());
-    let Some(acl) = security.acl.as_mut() else {
-        return;
-    };
+    if let Some(acl) = security.acl.as_mut() {
+        rewrite_acl_entries_owner(acl, &old_owner, new_owner);
+    }
+    for column_acl in security.column_acls.values_mut() {
+        rewrite_acl_entries_owner(column_acl, &old_owner, new_owner);
+    }
+}
+
+fn rewrite_acl_entries_owner(acl: &mut Vec<TableAclEntry>, old_owner: &str, new_owner: &str) {
     for entry in acl.iter_mut() {
         if entry.role == old_owner {
             entry.role = new_owner.to_string();
         }
-        if entry.grantor.as_deref() == Some(&old_owner) {
+        if entry.grantor.as_deref() == Some(old_owner) {
             entry.grantor = Some(new_owner.to_string());
         }
     }

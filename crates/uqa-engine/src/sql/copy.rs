@@ -51,10 +51,20 @@ impl Engine {
         };
         let (canonical, columns) =
             self.copy_relation_columns(relation, qualifier, requested_columns, false)?;
-        self.ensure_table_privilege(
-            &canonical,
-            crate::engine_table_security::TableAclPrivilege::Insert,
-        )?;
+        if columns.is_empty() {
+            self.ensure_any_column_privilege(
+                &canonical,
+                crate::engine_table_security::TableAclPrivilege::Insert,
+            )?;
+        } else {
+            for column in &columns {
+                self.ensure_column_privilege(
+                    &canonical,
+                    column,
+                    crate::engine_table_security::TableAclPrivilege::Insert,
+                )?;
+            }
+        }
         let mut bytes = Vec::new();
         input
             .read_to_end(&mut bytes)
@@ -128,10 +138,20 @@ impl Engine {
             } => {
                 let (canonical, columns) =
                     self.copy_relation_columns(relation, qualifier, requested_columns, true)?;
-                self.ensure_table_privilege(
-                    &canonical,
-                    crate::engine_table_security::TableAclPrivilege::Select,
-                )?;
+                if columns.is_empty() {
+                    self.ensure_any_column_privilege(
+                        &canonical,
+                        crate::engine_table_security::TableAclPrivilege::Select,
+                    )?;
+                } else {
+                    for column in &columns {
+                        self.ensure_column_privilege(
+                            &canonical,
+                            column,
+                            crate::engine_table_security::TableAclPrivilege::Select,
+                        )?;
+                    }
+                }
                 let projection = columns
                     .iter()
                     .map(|column| uqa_sql::expr::quote_ident(column))

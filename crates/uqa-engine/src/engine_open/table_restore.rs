@@ -396,6 +396,7 @@ impl Engine {
             security: RwLock::new(crate::engine_state::TableSecurity {
                 role_owner: schema.role_owner,
                 acl: schema.acl,
+                column_acls: schema.column_acls,
             }),
             storage_generation: RwLock::new(schema.storage_generation),
             document_store: RwLock::new(docs),

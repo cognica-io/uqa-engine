@@ -6,6 +6,8 @@
 
 //! Virtual `information_schema` relation builders.
 
+use std::collections::BTreeSet;
+
 use super::builtin_routines::PG18_BUILTIN_ROUTINE_GROUPS;
 use super::expression_text::{default_expr_text, schema_expr_text};
 use super::helpers::constraints::{constraint_catalog_rows, ConstraintCatalogKind};
@@ -25,6 +27,7 @@ use uqa_core::Value;
 use uqa_sql::ast::ColumnDef as SQLColumnDef;
 use uqa_sql::registry::registered_names;
 use uqa_sql::{ResultRow, SQLError};
+use uqa_storage::{TableAclEntry, TablePrivileges};
 
 pub(super) fn build_info_catalog_name() -> Vec<ResultRow> {
     vec![row([("catalog_name", catalog_name())])]
@@ -311,6 +314,13 @@ pub(super) fn build_info_columns(
         let cols = &table_snapshot.columns;
         let (schema, table) = split_schema_name(&tname)?;
         for (idx, col) in cols.iter().enumerate() {
+            if !catalog.table_column_is_visible_to(
+                table_snapshot,
+                &col.name,
+                resolution.current_user(),
+            ) {
+                continue;
+            }
             out.push(information_schema_column_row(
                 schema.clone(),
                 table.clone(),
@@ -340,6 +350,145 @@ pub(super) fn build_info_columns(
     }
     out.extend(super::ag_catalog::age_info_column_rows(catalog)?);
     Ok(out)
+}
+
+type ColumnPrivilegeCatalogRow = (String, String, String, String, String, String, String, bool);
+
+fn insert_column_privilege_rows(
+    rows: &mut BTreeSet<ColumnPrivilegeCatalogRow>,
+    schema: &str,
+    table: &str,
+    column: &str,
+    owner: &str,
+    entry: &TableAclEntry,
+) {
+    let grantor = entry.grantor.as_deref().unwrap_or(owner);
+    for (privilege_type, granted, grantable) in [
+        (
+            "INSERT",
+            entry.privileges.insert,
+            entry.grant_options.insert,
+        ),
+        (
+            "SELECT",
+            entry.privileges.select,
+            entry.grant_options.select,
+        ),
+        (
+            "UPDATE",
+            entry.privileges.update,
+            entry.grant_options.update,
+        ),
+        (
+            "REFERENCES",
+            entry.privileges.references,
+            entry.grant_options.references,
+        ),
+    ] {
+        if granted {
+            rows.insert((
+                schema.to_string(),
+                table.to_string(),
+                column.to_string(),
+                owner.to_string(),
+                grantor.to_string(),
+                entry.role.clone(),
+                privilege_type.to_string(),
+                grantable,
+            ));
+        }
+    }
+}
+
+fn default_table_acl_entry(owner: &str) -> TableAclEntry {
+    TableAclEntry {
+        role: owner.to_string(),
+        grantor: Some(owner.to_string()),
+        privileges: TablePrivileges {
+            select: true,
+            insert: true,
+            update: true,
+            references: true,
+            ..TablePrivileges::default()
+        },
+        grant_options: TablePrivileges::default(),
+    }
+}
+
+pub(super) fn build_info_column_privileges(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    role_grants_only: bool,
+) -> Result<Vec<ResultRow>, SQLError> {
+    let current_user = resolution.current_user();
+    let mut privileges = BTreeSet::new();
+    for table_name in catalog.table_names() {
+        let table_snapshot = catalog
+            .table(resolution, &table_name)?
+            .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?;
+        let (schema, table) = split_schema_name(&table_name)?;
+        let default_table_acl;
+        let table_acl = if let Some(acl) = table_snapshot.acl.as_deref() {
+            acl
+        } else {
+            default_table_acl = [default_table_acl_entry(&table_snapshot.role_owner)];
+            &default_table_acl
+        };
+        for column in &table_snapshot.columns {
+            for entry in table_acl {
+                insert_column_privilege_rows(
+                    &mut privileges,
+                    &schema,
+                    &table,
+                    &column.name,
+                    &table_snapshot.role_owner,
+                    entry,
+                );
+            }
+            if let Some(column_acl) = table_snapshot.column_acls.get(&column.name) {
+                for entry in column_acl {
+                    insert_column_privilege_rows(
+                        &mut privileges,
+                        &schema,
+                        &table,
+                        &column.name,
+                        &table_snapshot.role_owner,
+                        entry,
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(privileges
+        .into_iter()
+        .filter_map(
+            |(schema, table, column, owner, grantor, grantee, privilege_type, grantable)| {
+                let grantor_enabled = catalog.role_is_enabled_for(current_user, &grantor);
+                let grantee_enabled =
+                    grantee != "PUBLIC" && catalog.role_is_enabled_for(current_user, &grantee);
+                if (role_grants_only || grantee != "PUBLIC") && !grantor_enabled && !grantee_enabled
+                {
+                    return None;
+                }
+                let is_grantable = grantable
+                    || grantee != "PUBLIC" && catalog.role_is_enabled_for(&grantee, &owner);
+                Some(row([
+                    ("grantor", str_value(grantor)),
+                    ("grantee", str_value(grantee)),
+                    ("table_catalog", catalog_name()),
+                    ("table_schema", str_value(schema)),
+                    ("table_name", str_value(table)),
+                    ("column_name", str_value(column)),
+                    ("privilege_type", str_value(privilege_type)),
+                    (
+                        "is_grantable",
+                        str_value(if is_grantable { "YES" } else { "NO" }),
+                    ),
+                ]))
+            },
+        )
+        .collect())
 }
 
 pub(super) fn build_info_views(

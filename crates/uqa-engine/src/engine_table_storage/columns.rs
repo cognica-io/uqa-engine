@@ -184,6 +184,7 @@ impl Engine {
                     .iter()
                     .any(|name| name == column)
         });
+        t.security.write().column_acls.remove(column);
         // Remove from FTS field list if present.
         {
             let mut fts = t.fts_fields.write();
@@ -310,6 +311,16 @@ impl Engine {
         })
     }
 
+    fn rename_column_acl(table: &super::TableState, from: &str, to: &str) {
+        if from == to {
+            return;
+        }
+        let mut security = table.security.write();
+        if let Some(acl) = security.column_acls.remove(from) {
+            security.column_acls.insert(to.to_string(), acl);
+        }
+    }
+
     pub(super) fn try_rename_column_inner(
         &self,
         table: &str,
@@ -343,6 +354,7 @@ impl Engine {
                 }
             }
         }
+        Self::rename_column_acl(&t, from, to);
         for constraint in t.key_constraints.write().iter_mut() {
             for column in &mut constraint.columns {
                 if column == from {

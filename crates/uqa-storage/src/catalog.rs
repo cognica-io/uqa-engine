@@ -208,6 +208,9 @@ pub struct TableSchema {
     /// Explicit table ACL paths. `None` represents `PostgreSQL`'s null default ACL, in which the owner has every ordinary table privilege.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acl: Option<Vec<TableAclEntry>>,
+    /// Explicit per-column ACL paths keyed by the current column name. A missing key represents `PostgreSQL`'s null default `attacl`; an empty entry represents an explicitly empty ACL.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub column_acls: std::collections::BTreeMap<String, Vec<TableAclEntry>>,
     /// Stable logical relation identity. `CREATE TABLE` allocates a new value, while renames, schema changes, `TRUNCATE`, and reopen preserve it. A zero value marks a legacy catalog row that the engine upgrades during open.
     #[serde(default)]
     pub object_id: [u8; 16],

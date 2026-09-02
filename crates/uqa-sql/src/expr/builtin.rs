@@ -53,6 +53,7 @@ pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> 
         "string_to_array" | "string_to_table" if matches!(argument_count, 2 | 3) => Some(false),
         "pg_has_role" if matches!(argument_count, 2 | 3) => Some(true),
         "has_table_privilege" if matches!(argument_count, 2 | 3) => Some(true),
+        "has_column_privilege" if matches!(argument_count, 3 | 4) => Some(true),
         "has_database_privilege" if matches!(argument_count, 2 | 3) => Some(true),
         "has_schema_privilege" if matches!(argument_count, 2 | 3) => Some(true),
         "has_sequence_privilege" if matches!(argument_count, 2 | 3) => Some(true),

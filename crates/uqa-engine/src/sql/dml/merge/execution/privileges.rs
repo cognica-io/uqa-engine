@@ -6,69 +6,87 @@
 
 //! Privilege analysis performed before MERGE begins mutation work.
 
-use super::{BTreeSet, Engine, MergePlan, MergeWhenPlan, SQLError};
+use super::{BTreeSet, CteScope, Engine, MergePlan, MergeWhenPlan, SQLError};
 
-pub(super) fn ensure_merge_privileges(engine: &Engine, stmt: &MergePlan) -> Result<(), SQLError> {
-    let required = stmt
-        .when_clauses
-        .iter()
-        .filter_map(|clause| match clause {
-            MergeWhenPlan::InsertNotMatched { .. } => {
-                Some(crate::engine_table_security::TableAclPrivilege::Insert)
-            }
-            MergeWhenPlan::UpdateMatched { .. }
-            | MergeWhenPlan::UpdateNotMatchedBySource { .. } => {
-                Some(crate::engine_table_security::TableAclPrivilege::Update)
-            }
-            MergeWhenPlan::DeleteMatched { .. }
-            | MergeWhenPlan::DeleteNotMatchedBySource { .. } => {
-                Some(crate::engine_table_security::TableAclPrivilege::Delete)
-            }
-            _ => None,
-        })
-        .collect::<BTreeSet<_>>();
-    for privilege in required {
-        engine.ensure_table_privilege(&stmt.target, privilege)?;
-    }
-
-    let mut privilege_expressions = vec![&stmt.join_condition];
-    privilege_expressions.extend(stmt.target_predicate.iter());
-    privilege_expressions.extend(stmt.returning.iter().map(|projection| &projection.expr));
+fn ensure_merge_mutation_privileges(engine: &Engine, stmt: &MergePlan) -> Result<(), SQLError> {
+    let mut column_privileges = BTreeSet::new();
+    let mut requires_delete = false;
+    let mut requires_any_insert = false;
+    let table_columns = engine.bound_table_column_names(&stmt.target)?;
     for clause in &stmt.when_clauses {
         match clause {
-            MergeWhenPlan::UpdateMatched {
-                condition,
-                assignments,
-            }
-            | MergeWhenPlan::UpdateNotMatchedBySource {
-                condition,
-                assignments,
-            } => {
-                privilege_expressions.extend(condition.iter());
-                privilege_expressions
-                    .extend(assignments.iter().map(|assignment| &assignment.value));
-            }
             MergeWhenPlan::InsertNotMatched {
-                condition, values, ..
+                columns, values, ..
             } => {
-                privilege_expressions.extend(condition.iter());
-                privilege_expressions.extend(values);
+                if columns.is_empty() && values.is_empty() {
+                    requires_any_insert = true;
+                } else {
+                    let columns = if columns.is_empty() {
+                        table_columns
+                            .iter()
+                            .take(values.len())
+                            .cloned()
+                            .collect::<Vec<_>>()
+                    } else {
+                        columns.clone()
+                    };
+                    column_privileges.extend(columns.into_iter().map(|column| {
+                        (
+                            crate::engine_table_security::TableAclPrivilege::Insert,
+                            column,
+                        )
+                    }));
+                }
             }
-            MergeWhenPlan::DeleteMatched { condition }
-            | MergeWhenPlan::DeleteNotMatchedBySource { condition }
-            | MergeWhenPlan::NothingMatched { condition }
-            | MergeWhenPlan::NothingNotMatched { condition }
-            | MergeWhenPlan::NothingNotMatchedBySource { condition } => {
-                privilege_expressions.extend(condition.iter());
+            MergeWhenPlan::UpdateMatched { assignments, .. }
+            | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => {
+                column_privileges.extend(assignments.iter().map(|assignment| {
+                    (
+                        crate::engine_table_security::TableAclPrivilege::Update,
+                        assignment.column.clone(),
+                    )
+                }));
             }
+            MergeWhenPlan::DeleteMatched { .. }
+            | MergeWhenPlan::DeleteNotMatchedBySource { .. } => requires_delete = true,
+            _ => {}
         }
     }
+    if requires_delete {
+        engine.ensure_table_privilege(
+            &stmt.target,
+            crate::engine_table_security::TableAclPrivilege::Delete,
+        )?;
+    }
+    if requires_any_insert {
+        engine.ensure_any_column_privilege(
+            &stmt.target,
+            crate::engine_table_security::TableAclPrivilege::Insert,
+        )?;
+    }
+    for (privilege, column) in column_privileges {
+        engine.ensure_column_privilege(&stmt.target, &column, privilege)?;
+    }
+    Ok(())
+}
+
+pub(super) fn ensure_merge_privileges(engine: &Engine, stmt: &MergePlan) -> Result<(), SQLError> {
+    ensure_merge_mutation_privileges(engine, stmt)?;
+    let privilege_expressions = super::super::merge_privilege_expressions(stmt);
     super::super::super::ensure_target_table_select_for_expressions(
         engine,
         &stmt.target,
         &stmt.target_qualifier,
         &stmt.returning_aliases,
         &privilege_expressions,
-        false,
+        &stmt.subqueries,
+        &[],
+    )?;
+    let mut ctes = CteScope::new_for_current_routine(engine);
+    ctes.scalar_subqueries.clone_from(&stmt.subqueries);
+    crate::sql::select::ensure_select_privileges_for_source_expressions(
+        &stmt.source,
+        &privilege_expressions,
+        &ctes,
     )
 }

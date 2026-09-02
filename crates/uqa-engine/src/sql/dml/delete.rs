@@ -69,7 +69,8 @@ pub(in crate::sql) fn run_delete_inner(
         &stmt.target_qualifier,
         &stmt.returning_aliases,
         &privilege_expressions,
-        false,
+        &stmt.subqueries,
+        &[],
     )?;
     let _transition_capture_scope = crate::sql::triggers::TransitionCaptureScope::enter();
     engine.lock_relation(
@@ -139,6 +140,13 @@ pub(in crate::sql) fn run_delete_inner(
     let mut ctes = CteScope::new_for_current_routine(read_engine);
     crate::sql::select::materialize_plan_ctes(read_engine, &stmt.ctes, params, &mut ctes)?;
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
+    if let Some(source) = stmt.source.as_deref() {
+        crate::sql::select::ensure_select_privileges_for_source_expressions(
+            source,
+            &privilege_expressions,
+            &ctes,
+        )?;
+    }
     let mut action_qualification_count = if has_any_delete_rules && stmt.source.is_none() {
         super::row_independent_mutation_qualification_count(
             read_engine,

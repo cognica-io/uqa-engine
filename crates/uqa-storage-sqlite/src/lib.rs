@@ -773,6 +773,7 @@ mod tests {
                 relation: uqa_storage::RelationIdentity::new("public", "docs"),
                 role_owner: "uqa".into(),
                 acl: None,
+                column_acls: std::collections::BTreeMap::default(),
                 object_id: [1; 16],
                 storage_generation: [1; 16],
                 analyzer_json: "{}".into(),

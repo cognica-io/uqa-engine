@@ -692,6 +692,7 @@ fn clustered_postings_follow_key_value_table_rename_and_drop() {
             relation: crate::catalog::RelationIdentity::new("public", "articles"),
             role_owner: "uqa".into(),
             acl: None,
+            column_acls: std::collections::BTreeMap::default(),
             object_id: [1; 16],
             storage_generation: [1; 16],
             analyzer_json: "{}".into(),

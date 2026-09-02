@@ -845,7 +845,12 @@ fn table_security_depends_on_role(
             entry.role == role || entry.grantor.as_deref().unwrap_or(&security.role_owner) == role
         })
     });
-    security.role_owner == role || acl_dependency
+    let column_acl_dependency = security.column_acls.values().any(|acl| {
+        acl.iter().any(|entry| {
+            entry.role == role || entry.grantor.as_deref().unwrap_or(&security.role_owner) == role
+        })
+    });
+    security.role_owner == role || acl_dependency || column_acl_dependency
 }
 
 fn dependent_sequence_for_role<'a>(

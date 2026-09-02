@@ -308,6 +308,20 @@ pub(in crate::sql::dml) fn run_view_update_inner(
         );
     }
     let mut source_scope = ctes.returning_statement_snapshot_scope();
+    let source_privilege_expressions = stmt
+        .assignments
+        .iter()
+        .map(|assignment| &assignment.value)
+        .chain(stmt.predicate.iter())
+        .chain(stmt.returning.iter().map(|projection| &projection.expr))
+        .collect::<Vec<_>>();
+    if let Some(source) = stmt.source.as_deref() {
+        crate::sql::select::ensure_select_privileges_for_source_expressions(
+            source,
+            &source_privilege_expressions,
+            &source_scope,
+        )?;
+    }
     let source_rows = stmt
         .source
         .as_deref()
@@ -736,6 +750,18 @@ pub(in crate::sql::dml) fn run_view_delete_inner(
         );
     }
     let mut source_scope = ctes.returning_statement_snapshot_scope();
+    let source_privilege_expressions = stmt
+        .predicate
+        .iter()
+        .chain(stmt.returning.iter().map(|projection| &projection.expr))
+        .collect::<Vec<_>>();
+    if let Some(source) = stmt.source.as_deref() {
+        crate::sql::select::ensure_select_privileges_for_source_expressions(
+            source,
+            &source_privilege_expressions,
+            &source_scope,
+        )?;
+    }
     let source_rows = stmt
         .source
         .as_deref()
