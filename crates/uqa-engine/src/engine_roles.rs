@@ -556,10 +556,9 @@ impl Engine {
 
         let tables = self.storage.tables.read();
         for name in names {
-            if let Some(relation) = tables
-                .iter()
-                .find_map(|(relation, table)| (table.role_owner() == *name).then_some(relation))
-            {
+            if let Some(relation) = tables.iter().find_map(|(relation, table)| {
+                table_security_depends_on_role(&table.security(), name).then_some(relation)
+            }) {
                 return Err(SQLError::Routine {
                     sqlstate: "2BP01".into(),
                     message: format!(
@@ -835,6 +834,18 @@ impl Engine {
     pub(crate) fn routine_config_state_guard(&self) -> RoutineSessionStateGuard<'_> {
         RoutineSessionStateGuard::capture(self, true)
     }
+}
+
+fn table_security_depends_on_role(
+    security: &crate::engine_state::TableSecurity,
+    role: &str,
+) -> bool {
+    let acl_dependency = security.acl.as_ref().is_some_and(|acl| {
+        acl.iter().any(|entry| {
+            entry.role == role || entry.grantor.as_deref().unwrap_or(&security.role_owner) == role
+        })
+    });
+    security.role_owner == role || acl_dependency
 }
 
 fn dependent_sequence_for_role<'a>(

@@ -12,6 +12,7 @@ fn save_empty_table(catalog: &KeyValueCatalog, schema: &str, name: &str) {
         .save_table(&TableSchema {
             relation: crate::catalog::RelationIdentity::new(schema, name),
             role_owner: "uqa".into(),
+            acl: None,
             object_id: [1; 16],
             storage_generation: [1; 16],
             analyzer_json: "{}".into(),
@@ -58,6 +59,7 @@ fn key_value_drop_cleans_only_its_legacy_public_alias() {
             .save_table(&TableSchema {
                 relation: crate::catalog::RelationIdentity::new(schema, name),
                 role_owner: "uqa".into(),
+                acl: None,
                 object_id: [1; 16],
                 storage_generation: [1; 16],
                 analyzer_json: "{}".into(),
@@ -151,6 +153,7 @@ fn key_value_catalog_indexes_enforce_schema_parent_and_shared_namespace_identity
         .save_table(&TableSchema {
             relation: crate::catalog::RelationIdentity::new("app", "docs_idx"),
             role_owner: "uqa".into(),
+            acl: None,
             object_id: [2; 16],
             storage_generation: [2; 16],
             analyzer_json: "{}".into(),

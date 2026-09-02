@@ -17,6 +17,58 @@ use super::{
 };
 use crate::sql::from_rows::SourceProjection;
 
+pub(in crate::sql) fn ensure_select_privileges_for_source(
+    source: &uqa_planner::SourcePlan,
+    ctes: &CteScope,
+) -> Result<(), SQLError> {
+    fn visit(
+        source: &uqa_planner::SourcePlan,
+        ctes: &CteScope,
+        checked: &mut std::collections::BTreeSet<String>,
+    ) -> Result<(), SQLError> {
+        match source {
+            uqa_planner::SourcePlan::Table { name, .. } => {
+                if ctes.is_visible_cte(name) {
+                    return Ok(());
+                }
+                let catalog = ctes.catalog_read_view()?;
+                let resolution = ctes.relation_name_resolution()?;
+                let Some(table) = catalog.table_name_resolved(&resolution, name)? else {
+                    return Ok(());
+                };
+                if checked.insert(table.clone()) {
+                    let snapshot = catalog
+                        .table_resolved(&resolution, &table)?
+                        .ok_or_else(|| SQLError::UnknownTable(table.clone()))?;
+                    if !catalog.table_has_privilege_to(
+                        snapshot,
+                        resolution.current_user(),
+                        crate::engine_table_security::TableAclPrivilege::Select,
+                    ) {
+                        let relation = crate::RelationIdentity::from_legacy_name(&table)
+                            .map_err(SQLError::Internal)?;
+                        return Err(SQLError::Routine {
+                            sqlstate: "42501".into(),
+                            message: format!("permission denied for table {}", relation.name),
+                        });
+                    }
+                }
+                Ok(())
+            }
+            uqa_planner::SourcePlan::Join { left, right, .. } => {
+                visit(left, ctes, checked)?;
+                visit(right, ctes, checked)
+            }
+            uqa_planner::SourcePlan::Values { .. }
+            | uqa_planner::SourcePlan::Function { .. }
+            | uqa_planner::SourcePlan::FunctionGroup { .. }
+            | uqa_planner::SourcePlan::Subquery { .. } => Ok(()),
+        }
+    }
+
+    visit(source, ctes, &mut std::collections::BTreeSet::new())
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "preserves SELECT schema and row identity"

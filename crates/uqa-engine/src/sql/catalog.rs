@@ -27,7 +27,7 @@ pub(super) fn build_info_schema_rows(
     Ok(Some(match relation {
         VirtualRelation::InformationSchemaCatalogName => build_info_catalog_name(),
         VirtualRelation::InformationSchemata => build_info_schemata(catalog, resolution)?,
-        VirtualRelation::InformationTables => build_info_tables(engine, catalog)?,
+        VirtualRelation::InformationTables => build_info_tables(engine, catalog, resolution)?,
         VirtualRelation::InformationColumns => build_info_columns(engine, catalog, resolution)?,
         VirtualRelation::InformationViews => build_info_views(engine, catalog)?,
         VirtualRelation::InformationRoutines => build_info_routines(catalog)?,
@@ -167,7 +167,7 @@ pub(in crate::sql) fn table_relation_oid(engine: &Engine, table: &str) -> Result
 pub(crate) fn sequence_relation_oid(object_id: [u8; 16]) -> i64 {
     helpers::oids::stable_object_oid("relation", &object_id)
 }
-pub(in crate::sql) fn snapshot_table_relation_oid(
+pub(crate) fn snapshot_table_relation_oid(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     table: &str,

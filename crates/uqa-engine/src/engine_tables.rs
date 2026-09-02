@@ -11,6 +11,7 @@ use super::{
     StorageBackendError, StorageBackendResult, TableSchema, TableState, VectorFieldSchema,
     VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
 };
+use crate::engine_state::TableSecurity;
 
 impl Engine {
     pub(crate) fn is_persistent(&self) -> bool {
@@ -50,22 +51,23 @@ impl Engine {
         columns: &[uqa_sql::ast::ColumnDef],
         constraints: &uqa_sql::ast::TableConstraintSet,
     ) -> StorageBackendResult<()> {
-        self.try_save_table_schema_with_components_and_owner(
+        let security = table.security();
+        self.try_save_table_schema_with_components_and_security(
             name,
             table,
             columns,
             constraints,
-            &table.role_owner(),
+            &security,
         )
     }
 
-    pub(crate) fn try_save_table_schema_with_components_and_owner(
+    pub(crate) fn try_save_table_schema_with_components_and_security(
         &self,
         name: &str,
         table: &TableState,
         columns: &[uqa_sql::ast::ColumnDef],
         constraints: &uqa_sql::ast::TableConstraintSet,
-        role_owner: &str,
+        security: &crate::engine_state::TableSecurity,
     ) -> StorageBackendResult<()> {
         if table.persistence == uqa_sql::ast::RelationPersistence::Temporary {
             return Ok(());
@@ -90,7 +92,8 @@ impl Engine {
         catalog.save_table(&TableSchema {
             relation: RelationIdentity::from_legacy_name(name)
                 .map_err(StorageBackendError::Other)?,
-            role_owner: role_owner.to_string(),
+            role_owner: security.role_owner.clone(),
+            acl: security.acl.clone(),
             object_id: table.object_id(),
             storage_generation: table.storage_generation(),
             analyzer_json,
@@ -194,7 +197,10 @@ impl Engine {
         let table = TableState {
             lifecycle_id: std::sync::atomic::AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: crate::new_table_object_id()?,
-            role_owner: RwLock::new(self.current_user_name()),
+            security: RwLock::new(TableSecurity {
+                role_owner: self.current_user_name(),
+                acl: None,
+            }),
             storage_generation: RwLock::new(crate::new_table_storage_generation()?),
             document_store: RwLock::new(docs),
             inverted_index: RwLock::new(inv),

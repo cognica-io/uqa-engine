@@ -26,23 +26,10 @@ use super::{
     SQLError, SQLParam, SQLResult, ViewCheckContext,
 };
 
-pub(super) type MergeTargetIdentity = (String, uqa_core::DocId);
+mod model;
+mod privileges;
 
-pub(super) enum SelectedMergeAction {
-    Nothing,
-    Update {
-        doc_id: uqa_core::DocId,
-        old_document: Document,
-        new_document: Document,
-        updated_columns: Vec<String>,
-    },
-    Delete {
-        doc_id: uqa_core::DocId,
-    },
-    Insert {
-        document: Document,
-    },
-}
+pub(super) use model::{MergeTargetIdentity, SelectedMergeAction};
 
 pub(in crate::sql) fn run_merge(
     engine: &Engine,
@@ -73,6 +60,7 @@ fn run_merge_inner(
             }
         };
     }
+    privileges::ensure_merge_privileges(engine, stmt)?;
     let _transition_capture_scope = crate::sql::triggers::TransitionCaptureScope::enter();
     let target_table = stmt.target.clone();
     engine.lock_relation(

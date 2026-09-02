@@ -85,6 +85,7 @@ fn schema_in(schema_name: &str, name: &str, fts: &[&str]) -> TableSchema {
     TableSchema {
         relation: uqa_storage::RelationIdentity::new(schema_name, name),
         role_owner: "uqa".into(),
+        acl: None,
         object_id: [1; 16],
         storage_generation: [1; 16],
         analyzer_json: r#"{"name":"standard","language":"english"}"#.to_string(),
@@ -99,6 +100,7 @@ fn schema_with_columns(name: &str, columns_json: &str) -> TableSchema {
     TableSchema {
         relation: uqa_storage::RelationIdentity::new("public", name),
         role_owner: "uqa".into(),
+        acl: None,
         object_id: [1; 16],
         storage_generation: [1; 16],
         analyzer_json: r#"{"name":"standard","language":"english"}"#.to_string(),
@@ -452,6 +454,7 @@ fn vector_round_trip() {
     cat.save_table(&TableSchema {
         relation: uqa_storage::RelationIdentity::new("public", "t"),
         role_owner: "uqa".into(),
+        acl: None,
         object_id: [1; 16],
         storage_generation: [1; 16],
         analyzer_json: r#"{"name":"standard","language":"english"}"#.into(),

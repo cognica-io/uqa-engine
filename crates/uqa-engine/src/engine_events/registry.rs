@@ -215,6 +215,16 @@ impl Engine {
     pub(crate) fn register_trigger(&self, mut definition: CreateTrigger) -> Result<(), SQLError> {
         let relation =
             self.validate_trigger_definition(&mut definition, RelationLookupMode::Dynamic)?;
+        if self
+            .relation_kind_at(&relation.qualified_name())
+            .map_err(|error| SQLError::Internal(format!("resolve trigger target: {error}")))?
+            == Some("table")
+        {
+            self.ensure_table_privilege(
+                &relation.qualified_name(),
+                crate::engine_table_security::TableAclPrivilege::Trigger,
+            )?;
+        }
         self.ensure_partition_trigger_name_available(
             &relation,
             &definition.name,

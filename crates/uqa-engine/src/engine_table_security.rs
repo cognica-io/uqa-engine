@@ -4,18 +4,719 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Durable ordinary-table ownership and owner-authorized lifecycle changes.
+//! Durable ordinary-table ownership, access-control lists, and authorization checks.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use uqa_sql::ast::{
+    GrantSequenceStmt, GrantSequenceTarget, GrantTableStmt, GrantTableTarget, SequencePrivilege,
+    SequenceRevokeBehavior, TablePrivilege, TableRevokeBehavior,
+};
 use uqa_sql::SQLError;
 
-use crate::engine_roles::role_can_set;
+mod acl;
+
+pub(crate) use acl::TableAclPrivilege;
+use acl::{
+    grant_acl, parse_privilege_checks, requested_acl_privileges, revoke_acl, rewrite_acl_owner,
+    role_has_privilege, select_acl_grantor, TablePrivilegeCheck,
+};
+
+use crate::engine_capabilities::RelationResolution;
+use crate::engine_roles::{role_can_set, RoleDefinition, RoleMembership, RoleMembershipKey};
 use crate::engine_schema_security::SchemaAclPrivilege;
-use crate::engine_state::SequenceSecurity;
-use crate::{Engine, RelationIdentity, TableState};
+use crate::engine_state::{SequenceSecurity, TableSecurity};
+use crate::{Engine, RelationIdentity, TableState, Value};
+
+struct ResolvedTableGrantTarget {
+    requested: String,
+    name: String,
+    relation: RelationIdentity,
+    kind: &'static str,
+}
+
+enum ResolvedTablePrivilegeTarget {
+    Table(RelationIdentity),
+    Sequence(RelationIdentity),
+}
+
+fn apply_table_acl(
+    statement: &GrantTableStmt,
+    grantees: &[String],
+    privileges: &[TableAclPrivilege],
+    current_user: &str,
+    roles: &BTreeMap<String, RoleDefinition>,
+    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    current: &TableSecurity,
+) -> Result<(TableSecurity, usize), SQLError> {
+    let grantors = privileges
+        .iter()
+        .map(|privilege| {
+            (
+                *privilege,
+                select_acl_grantor(current, *privilege, current_user, roles, memberships),
+            )
+        })
+        .collect::<Vec<_>>();
+    let grantable = grantors
+        .iter()
+        .filter(|(_, grantor)| grantor.is_some())
+        .count();
+    let mut next = current.clone();
+    for (privilege, grantor) in grantors {
+        let Some(grantor) = grantor else {
+            continue;
+        };
+        if statement.is_grant {
+            grant_acl(
+                &mut next,
+                privilege,
+                grantees,
+                &grantor,
+                statement.grant_option,
+            );
+        } else {
+            revoke_acl(
+                &mut next,
+                privilege,
+                grantees,
+                &grantor,
+                statement.grant_option_only,
+                statement.revoke_behavior == TableRevokeBehavior::Cascade,
+            )?;
+        }
+    }
+    Ok((next, grantable))
+}
+
+fn validate_table_acl_roles(
+    statement: &GrantTableStmt,
+    grantees: &[String],
+    requested_grantor: Option<&str>,
+    current_user: &str,
+    roles: &BTreeMap<String, RoleDefinition>,
+) -> Result<(), SQLError> {
+    for role in grantees {
+        if role != "PUBLIC" && !roles.contains_key(role) {
+            return Err(SQLError::Routine {
+                sqlstate: "42704".into(),
+                message: format!("role \"{role}\" does not exist"),
+            });
+        }
+    }
+    if statement.is_grant && statement.grant_option && grantees.iter().any(|role| role == "PUBLIC")
+    {
+        return Err(SQLError::Routine {
+            sqlstate: "0LP01".into(),
+            message: "grant options can only be granted to roles".into(),
+        });
+    }
+    if let Some(requested_grantor) = requested_grantor {
+        if !roles.contains_key(requested_grantor) {
+            return Err(SQLError::Routine {
+                sqlstate: "42704".into(),
+                message: format!("role \"{requested_grantor}\" does not exist"),
+            });
+        }
+        if requested_grantor != current_user {
+            return Err(SQLError::Routine {
+                sqlstate: "0A000".into(),
+                message: "grantor must be current user".into(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn table_sequence_privileges(
+    privileges: &[uqa_sql::ast::TablePrivilegeSpec],
+) -> (Vec<SequencePrivilege>, bool) {
+    if privileges.is_empty() {
+        return (
+            vec![
+                SequencePrivilege::Select,
+                SequencePrivilege::Update,
+                SequencePrivilege::Usage,
+            ],
+            false,
+        );
+    }
+    let mut mapped = Vec::new();
+    let mut inapplicable = false;
+    for spec in privileges {
+        let privilege = if spec.columns.is_empty() {
+            match &spec.privilege {
+                TablePrivilege::Select => Some(SequencePrivilege::Select),
+                TablePrivilege::Update => Some(SequencePrivilege::Update),
+                TablePrivilege::Usage => Some(SequencePrivilege::Usage),
+                _ => {
+                    inapplicable = true;
+                    None
+                }
+            }
+        } else {
+            Some(SequencePrivilege::ColumnsUnsupported)
+        };
+        if let Some(privilege) = privilege {
+            if !mapped.contains(&privilege) {
+                mapped.push(privilege);
+            }
+        }
+    }
+    (mapped, inapplicable)
+}
+
+fn resolve_table_privilege_role(
+    value: &Value,
+    roles: &BTreeMap<String, RoleDefinition>,
+) -> Result<Option<String>, SQLError> {
+    match value {
+        Value::Str(name) | Value::FixedChar(name) => {
+            if roles.contains_key(name) {
+                Ok(Some(name.clone()))
+            } else {
+                Err(SQLError::Routine {
+                    sqlstate: "42704".into(),
+                    message: format!("role \"{name}\" does not exist"),
+                })
+            }
+        }
+        Value::Int(oid) => Ok(roles
+            .values()
+            .find(|role| role.oid == *oid)
+            .map(|role| role.name.clone())),
+        other => Err(SQLError::TypeMismatch(format!(
+            "has_table_privilege role must be name or oid, got {other:?}"
+        ))),
+    }
+}
+
+fn table_acl_warning(is_grant: bool, partial: bool, name: &str) -> (&'static str, String) {
+    let message = match (is_grant, partial) {
+        (true, true) => format!("not all privileges were granted for \"{name}\""),
+        (true, false) => format!("no privileges were granted for \"{name}\""),
+        (false, true) => format!("not all privileges could be revoked for \"{name}\""),
+        (false, false) => format!("no privileges could be revoked for \"{name}\""),
+    };
+    ("WARNING", message)
+}
+
+pub(crate) fn role_can_view_table(
+    security: &TableSecurity,
+    subject: &str,
+    roles: &BTreeMap<String, RoleDefinition>,
+    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+) -> bool {
+    TableAclPrivilege::ALL.into_iter().any(|privilege| {
+        role_has_privilege(
+            security,
+            subject,
+            TablePrivilegeCheck {
+                privilege,
+                grant_option: false,
+            },
+            roles,
+            memberships,
+        )
+    })
+}
+
+pub(crate) fn role_has_table_privilege(
+    security: &TableSecurity,
+    subject: &str,
+    privilege: TableAclPrivilege,
+    roles: &BTreeMap<String, RoleDefinition>,
+    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+) -> bool {
+    role_has_privilege(
+        security,
+        subject,
+        TablePrivilegeCheck {
+            privilege,
+            grant_option: false,
+        },
+        roles,
+        memberships,
+    )
+}
 
 impl Engine {
+    pub(crate) fn grant_table_privileges(
+        &self,
+        statement: &GrantTableStmt,
+    ) -> Result<(), SQLError> {
+        self.prepare_explicit_transaction_writer()?;
+        let targets = self.resolve_table_grant_targets(&statement.target)?;
+        let grantees = statement
+            .grantees
+            .iter()
+            .map(|role| self.resolve_role_reference(role))
+            .collect::<Vec<_>>();
+        let requested_grantor = statement
+            .grantor
+            .as_ref()
+            .map(|role| self.resolve_role_reference(role));
+        let current_user = self.current_user_name();
+        let roles = self.durable.roles.read();
+        validate_table_acl_roles(
+            statement,
+            &grantees,
+            requested_grantor.as_deref(),
+            &current_user,
+            &roles,
+        )?;
+
+        let has_tables = targets.iter().any(|target| target.kind == "table");
+        for target in &targets {
+            if !matches!(target.kind, "table" | "sequence") {
+                return Err(SQLError::Unsupported(format!(
+                    "{} privileges for \"{}\" are not supported",
+                    target.kind, target.requested
+                )));
+            }
+        }
+        let table_privileges = if has_tables
+            || matches!(
+                statement.target,
+                GrantTableTarget::AllTablesInSchemas { .. }
+            ) {
+            requested_acl_privileges(&statement.privileges)?
+        } else {
+            Vec::new()
+        };
+        let memberships = self.durable.role_memberships.read();
+        let mut updates = Vec::new();
+        let mut notices = Vec::new();
+        for target in targets.iter().filter(|target| target.kind == "table") {
+            let table = self
+                .storage
+                .tables
+                .read()
+                .get(&target.relation)
+                .cloned()
+                .ok_or_else(|| {
+                    SQLError::Internal(format!("table `{}` disappeared", target.name))
+                })?;
+            let current = table.security();
+            let (next, grantable) = apply_table_acl(
+                statement,
+                &grantees,
+                &table_privileges,
+                &current_user,
+                &roles,
+                &memberships,
+                &current,
+            )?;
+            if grantable != table_privileges.len() {
+                notices.push(table_acl_warning(
+                    statement.is_grant,
+                    grantable != 0,
+                    &target.relation.name,
+                ));
+            }
+            if next != current {
+                updates.push((target.name.clone(), table, next));
+            }
+        }
+        for (name, table, security) in &updates {
+            self.persist_table_security(name, table, security)?;
+        }
+        let table_changed = !updates.is_empty();
+        for (_, table, security) in updates {
+            table.security.write().clone_from(&security);
+        }
+        drop(memberships);
+        drop(roles);
+
+        self.grant_table_syntax_sequence_privileges(statement, &targets)?;
+        for (level, message) in notices {
+            self.push_sql_notice(level, &message);
+        }
+        if table_changed {
+            self.note_table_catalog_changed();
+        }
+        Ok(())
+    }
+
+    fn grant_table_syntax_sequence_privileges(
+        &self,
+        statement: &GrantTableStmt,
+        targets: &[ResolvedTableGrantTarget],
+    ) -> Result<(), SQLError> {
+        let sequence_names = targets
+            .iter()
+            .filter(|target| target.kind == "sequence")
+            .map(|target| target.name.clone())
+            .collect::<Vec<_>>();
+        if !sequence_names.is_empty() {
+            let (sequence_privileges, has_inapplicable) =
+                table_sequence_privileges(&statement.privileges);
+            if has_inapplicable {
+                for target in targets.iter().filter(|target| target.kind == "sequence") {
+                    self.push_sql_notice(
+                        "WARNING",
+                        &format!(
+                            "sequence \"{}\" only supports USAGE, SELECT, and UPDATE privileges",
+                            target.relation.name
+                        ),
+                    );
+                }
+            }
+            if !sequence_privileges.is_empty() {
+                self.grant_sequence_privileges(&GrantSequenceStmt {
+                    is_grant: statement.is_grant,
+                    grant_option: statement.grant_option,
+                    grant_option_only: statement.grant_option_only,
+                    privileges: sequence_privileges,
+                    target: GrantSequenceTarget::Sequences {
+                        names: sequence_names,
+                    },
+                    grantees: statement.grantees.clone(),
+                    grantor: statement.grantor.clone(),
+                    revoke_behavior: if statement.revoke_behavior == TableRevokeBehavior::Cascade {
+                        SequenceRevokeBehavior::Cascade
+                    } else {
+                        SequenceRevokeBehavior::Restrict
+                    },
+                })?;
+            }
+        }
+        Ok(())
+    }
+
+    fn resolve_table_grant_targets(
+        &self,
+        target: &GrantTableTarget,
+    ) -> Result<Vec<ResolvedTableGrantTarget>, SQLError> {
+        match target {
+            GrantTableTarget::Relations { names } => {
+                let mut resolved = Vec::with_capacity(names.len());
+                for requested in names {
+                    let (name, kind) = match self.resolve_visible_relation_kind(requested)? {
+                        RelationResolution::Found(name, kind) => (name, kind),
+                        RelationResolution::MissingSchema(schema) => {
+                            return Err(SQLError::Routine {
+                                sqlstate: "3F000".into(),
+                                message: format!("schema \"{schema}\" does not exist"),
+                            })
+                        }
+                        RelationResolution::MissingRelation => {
+                            return Err(SQLError::Routine {
+                                sqlstate: "42P01".into(),
+                                message: format!("relation \"{requested}\" does not exist"),
+                            })
+                        }
+                    };
+                    let relation = Self::resolved_relation_identity(&name).map_err(|error| {
+                        SQLError::Internal(format!("resolve table `{name}`: {error}"))
+                    })?;
+                    resolved.push(ResolvedTableGrantTarget {
+                        requested: requested.clone(),
+                        name,
+                        relation,
+                        kind,
+                    });
+                }
+                Ok(resolved)
+            }
+            GrantTableTarget::AllTablesInSchemas { schemas } => {
+                self.resolve_all_tables_in_schemas(schemas)
+            }
+        }
+    }
+
+    fn resolve_all_tables_in_schemas(
+        &self,
+        schemas: &[String],
+    ) -> Result<Vec<ResolvedTableGrantTarget>, SQLError> {
+        self.synchronize_catalog_registries().map_err(|error| {
+            SQLError::Internal(format!("load schemas for table privileges: {error}"))
+        })?;
+        self.synchronize_table_catalog()
+            .map_err(|error| SQLError::Internal(format!("load tables for privileges: {error}")))?;
+        let temporary_schema = self.temporary_schema_name();
+        let mut resolved_schemas = Vec::with_capacity(schemas.len());
+        for schema in schemas {
+            let resolved = if schema == "pg_temp" {
+                temporary_schema.clone()
+            } else {
+                schema.clone()
+            };
+            let exists = if resolved == temporary_schema {
+                self.temporary_namespace_allocated()
+            } else {
+                self.has_namespace(&resolved).map_err(|error| {
+                    SQLError::Internal(format!("resolve schema `{schema}`: {error}"))
+                })?
+            };
+            if !exists {
+                return Err(SQLError::Routine {
+                    sqlstate: "3F000".into(),
+                    message: format!("schema \"{schema}\" does not exist"),
+                });
+            }
+            if !resolved_schemas.contains(&resolved) {
+                resolved_schemas.push(resolved);
+            }
+        }
+        let tables = self.storage.tables.read();
+        let mut targets = tables
+            .keys()
+            .filter(|relation| resolved_schemas.contains(&relation.schema))
+            .map(|relation| ResolvedTableGrantTarget {
+                requested: relation.qualified_name(),
+                name: relation.qualified_name(),
+                relation: relation.clone(),
+                kind: "table",
+            })
+            .collect::<Vec<_>>();
+        targets.sort_by(|left, right| left.relation.cmp(&right.relation));
+        Ok(targets)
+    }
+
+    fn persist_table_security(
+        &self,
+        name: &str,
+        table: &TableState,
+        security: &TableSecurity,
+    ) -> Result<(), SQLError> {
+        let columns = table.columns.read().clone();
+        let constraints = uqa_sql::ast::TableConstraintSet {
+            checks: table.table_checks.read().clone(),
+            foreign_keys: table.foreign_keys.read().clone(),
+            key_constraints: table.key_constraints.read().clone(),
+            persistence: table.persistence,
+            on_commit: table.on_commit,
+            hierarchy: table.hierarchy.read().clone(),
+        };
+        self.try_save_table_schema_with_components_and_security(
+            name,
+            table,
+            &columns,
+            &constraints,
+            security,
+        )
+        .map_err(|error| SQLError::Internal(format!("persist table privileges: {error}")))
+    }
+
+    pub(crate) fn ensure_table_privilege(
+        &self,
+        name: &str,
+        privilege: TableAclPrivilege,
+    ) -> Result<(), SQLError> {
+        let (relation, table) = self.bound_table_for_security(name)?;
+        let security = table.security();
+        let current_user = self.current_user_name();
+        let roles = self.durable.roles.read();
+        let memberships = self.durable.role_memberships.read();
+        if role_has_privilege(
+            &security,
+            &current_user,
+            TablePrivilegeCheck {
+                privilege,
+                grant_option: false,
+            },
+            &roles,
+            &memberships,
+        ) {
+            return Ok(());
+        }
+        Err(SQLError::Routine {
+            sqlstate: "42501".into(),
+            message: format!("permission denied for table {}", relation.name),
+        })
+    }
+
+    pub(crate) fn maintenance_table_names(&self, operation: &str) -> Result<Vec<String>, SQLError> {
+        self.synchronize_table_catalog()
+            .map_err(|error| SQLError::Internal(format!("load tables for {operation}: {error}")))?;
+        let tables = self
+            .storage
+            .tables
+            .read()
+            .iter()
+            .map(|(relation, table)| (relation.clone(), table.security()))
+            .collect::<Vec<_>>();
+        let current_user = self.current_user_name();
+        let roles = self.durable.roles.read();
+        let memberships = self.durable.role_memberships.read();
+        let mut permitted = Vec::new();
+        let mut denied = Vec::new();
+        for (relation, security) in tables {
+            if role_has_privilege(
+                &security,
+                &current_user,
+                TablePrivilegeCheck {
+                    privilege: TableAclPrivilege::Maintain,
+                    grant_option: false,
+                },
+                &roles,
+                &memberships,
+            ) {
+                permitted.push(relation.qualified_name());
+            } else {
+                denied.push(relation.name);
+            }
+        }
+        drop(memberships);
+        drop(roles);
+        for name in denied {
+            self.push_sql_notice(
+                "WARNING",
+                &format!("permission denied to {operation} \"{name}\", skipping it"),
+            );
+        }
+        Ok(permitted)
+    }
+
+    pub(crate) fn has_table_privilege_value(&self, arguments: &[Value]) -> Result<Value, SQLError> {
+        if arguments.iter().any(|argument| argument == &Value::Null) {
+            return Ok(Value::Null);
+        }
+        let (subject_value, table_value, privilege_value) = match arguments {
+            [table, privilege] => (None, table, privilege),
+            [subject, table, privilege] => (Some(subject), table, privilege),
+            _ => {
+                return Err(SQLError::BadArity {
+                    name: "has_table_privilege".into(),
+                    expected: "2 or 3".into(),
+                    actual: arguments.len(),
+                })
+            }
+        };
+        let current_user = subject_value.is_none().then(|| self.current_user_name());
+        let subject = {
+            let roles = self.durable.roles.read();
+            subject_value.map_or_else(
+                || Ok(current_user),
+                |value| resolve_table_privilege_role(value, &roles),
+            )?
+        };
+        let Some(target) = self.resolve_table_privilege_target(table_value)? else {
+            return Ok(Value::Null);
+        };
+        let privilege = match privilege_value {
+            Value::Str(privilege) | Value::FixedChar(privilege) => privilege,
+            other => {
+                return Err(SQLError::TypeMismatch(format!(
+                    "has_table_privilege privilege must be text, got {other:?}"
+                )))
+            }
+        };
+        let checks = parse_privilege_checks(privilege)?;
+        let Some(subject) = subject else {
+            return Ok(Value::Bool(false));
+        };
+        match target {
+            ResolvedTablePrivilegeTarget::Table(relation) => {
+                let table = self
+                    .storage
+                    .tables
+                    .read()
+                    .get(&relation)
+                    .cloned()
+                    .ok_or_else(|| {
+                        SQLError::Internal(format!(
+                            "table `{}` disappeared",
+                            relation.qualified_name()
+                        ))
+                    })?;
+                let security = table.security();
+                let roles = self.durable.roles.read();
+                let memberships = self.durable.role_memberships.read();
+                Ok(Value::Bool(checks.into_iter().any(|check| {
+                    role_has_privilege(&security, &subject, check, &roles, &memberships)
+                })))
+            }
+            ResolvedTablePrivilegeTarget::Sequence(relation) => {
+                for check in checks {
+                    if self.role_has_sequence_table_privilege(
+                        &relation,
+                        &subject,
+                        check.privilege,
+                        check.grant_option,
+                    )? {
+                        return Ok(Value::Bool(true));
+                    }
+                }
+                Ok(Value::Bool(false))
+            }
+        }
+    }
+
+    fn resolve_table_privilege_target(
+        &self,
+        value: &Value,
+    ) -> Result<Option<ResolvedTablePrivilegeTarget>, SQLError> {
+        match value {
+            Value::Str(reference) | Value::FixedChar(reference) => {
+                let (name, kind) = match self.resolve_visible_relation_kind(reference)? {
+                    RelationResolution::Found(name, kind) => (name, kind),
+                    RelationResolution::MissingSchema(schema) => {
+                        return Err(SQLError::Routine {
+                            sqlstate: "3F000".into(),
+                            message: format!("schema \"{schema}\" does not exist"),
+                        })
+                    }
+                    RelationResolution::MissingRelation => {
+                        return Err(SQLError::Routine {
+                            sqlstate: "42P01".into(),
+                            message: format!("relation \"{reference}\" does not exist"),
+                        })
+                    }
+                };
+                if !matches!(kind, "table" | "sequence") {
+                    return Err(SQLError::Unsupported(format!(
+                        "has_table_privilege for {kind} is not supported"
+                    )));
+                }
+                let relation = Self::resolved_relation_identity(&name).map_err(|error| {
+                    SQLError::Internal(format!("resolve table `{name}`: {error}"))
+                })?;
+                Ok(Some(if kind == "table" {
+                    ResolvedTablePrivilegeTarget::Table(relation)
+                } else {
+                    ResolvedTablePrivilegeTarget::Sequence(relation)
+                }))
+            }
+            Value::Int(oid) => self.resolve_table_privilege_oid(*oid),
+            other => Err(SQLError::TypeMismatch(format!(
+                "has_table_privilege table must be text or oid, got {other:?}"
+            ))),
+        }
+    }
+
+    fn resolve_table_privilege_oid(
+        &self,
+        oid: i64,
+    ) -> Result<Option<ResolvedTablePrivilegeTarget>, SQLError> {
+        self.synchronize_table_catalog().map_err(|error| {
+            SQLError::Internal(format!("load tables for privilege inquiry: {error}"))
+        })?;
+        let catalog = self.catalog_read_view();
+        let resolution = self.session_execution_view().relation_name_resolution();
+        for relation in self.storage.tables.read().keys() {
+            if crate::sql::snapshot_table_relation_oid(
+                &catalog,
+                &resolution,
+                &relation.qualified_name(),
+            )? == oid
+            {
+                return Ok(Some(ResolvedTablePrivilegeTarget::Table(relation.clone())));
+            }
+        }
+        if let Some((_name, relation)) = self.resolve_sequence_privilege_oid(oid)? {
+            return Ok(Some(ResolvedTablePrivilegeTarget::Sequence(relation)));
+        }
+        if let Some((name, kind)) = crate::sql::resolve_regclass_kind_by_oid(self, oid)? {
+            return Err(SQLError::Unsupported(format!(
+                "has_table_privilege for {kind} `{name}` is not supported"
+            )));
+        }
+        Ok(None)
+    }
+
     fn bound_table_for_security(
         &self,
         name: &str,
@@ -117,16 +818,18 @@ impl Engine {
             on_commit: table.on_commit,
             hierarchy: table.hierarchy.read().clone(),
         };
-        self.try_save_table_schema_with_components_and_owner(
+        let mut table_security = table.security();
+        rewrite_acl_owner(&mut table_security, &new_owner);
+        self.try_save_table_schema_with_components_and_security(
             name,
             &table,
             &columns,
             &constraints,
-            &new_owner,
+            &table_security,
         )
         .map_err(|error| SQLError::Internal(format!("persist table owner: {error}")))?;
 
-        table.role_owner.write().clone_from(&new_owner);
+        table.security.write().clone_from(&table_security);
         if !sequence_updates.is_empty() {
             let mut registry = self.durable.sequence_security.write();
             for (sequence, security) in sequence_updates {

@@ -89,6 +89,10 @@ pub(super) fn build_pg_class(
             int_value(crate::engine_roles::role_oid(&table_snapshot.role_owner)),
         );
         row.insert(
+            "relacl".into(),
+            table_acl_catalog_value(&table_snapshot.role_owner, table_snapshot.acl.as_ref())?,
+        );
+        row.insert(
             "relispartition".into(),
             bool_value(hierarchy.partition_bound.is_some()),
         );
@@ -208,6 +212,51 @@ pub(super) fn build_pg_class(
     }
     out.extend(super::ag_catalog::age_pg_class_rows(catalog)?);
     Ok(out)
+}
+
+fn table_acl_catalog_value(
+    owner: &str,
+    acl: Option<&Vec<uqa_storage::TableAclEntry>>,
+) -> Result<uqa_core::Value, SQLError> {
+    let Some(acl) = acl else {
+        return Ok(uqa_core::Value::Null);
+    };
+    catalog_array(
+        acl.iter()
+            .map(|entry| {
+                let grantee = if entry.role == "PUBLIC" {
+                    String::new()
+                } else {
+                    acl_identifier(&entry.role)
+                };
+                let grantor = acl_identifier(entry.grantor.as_deref().unwrap_or(owner));
+                let mut privileges = String::new();
+                for (enabled, grant_option, code) in [
+                    (entry.privileges.insert, entry.grant_options.insert, 'a'),
+                    (entry.privileges.select, entry.grant_options.select, 'r'),
+                    (entry.privileges.update, entry.grant_options.update, 'w'),
+                    (entry.privileges.delete, entry.grant_options.delete, 'd'),
+                    (entry.privileges.truncate, entry.grant_options.truncate, 'D'),
+                    (
+                        entry.privileges.references,
+                        entry.grant_options.references,
+                        'x',
+                    ),
+                    (entry.privileges.trigger, entry.grant_options.trigger, 't'),
+                    (entry.privileges.maintain, entry.grant_options.maintain, 'm'),
+                ] {
+                    if enabled {
+                        privileges.push(code);
+                        if grant_option {
+                            privileges.push('*');
+                        }
+                    }
+                }
+                str_value(format!("{grantee}={privileges}/{grantor}"))
+            })
+            .collect(),
+        "pg_class.relacl",
+    )
 }
 
 fn sequence_acl_catalog_value(

@@ -393,6 +393,7 @@ impl UnifiedPlan {
             Statement::GrantRoutine(value) => {
                 Self::Command(Box::new(CommandPlan::GrantRoutine(value)))
             }
+            Statement::GrantTable(value) => Self::Command(Box::new(CommandPlan::GrantTable(value))),
             Statement::GrantSequence(value) => {
                 Self::Command(Box::new(CommandPlan::GrantSequence(value)))
             }
@@ -493,6 +494,7 @@ impl CommandPlan {
             Self::AlterRoutine(_) => "AlterRoutine",
             Self::AlterRoutineOwner(_) => "AlterRoutineOwner",
             Self::GrantRoutine(_) => "GrantRoutine",
+            Self::GrantTable(_) => "GrantTable",
             Self::GrantSequence(_) => "GrantSequence",
             Self::GrantDatabase(_) => "GrantDatabase",
             Self::GrantSchema(_) => "GrantSchema",

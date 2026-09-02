@@ -233,17 +233,64 @@ pub enum SequencePrivilege {
     Unsupported(String),
 }
 
+/// One table privilege and its optional column list. Unsupported names and column forms survive compilation so execution can preserve `PostgreSQL` object- and role-resolution precedence.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct TablePrivilegeSpec {
+    pub privilege: TablePrivilege,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub columns: Vec<String>,
+}
+
+/// One requested ordinary-table privilege.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum TablePrivilege {
+    Select,
+    Insert,
+    Update,
+    Delete,
+    Truncate,
+    References,
+    Trigger,
+    Maintain,
+    Usage,
+    Unsupported(String),
+}
+
+/// Relation targets carried by `GRANT` or `REVOKE` with the `TABLE` object class.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GrantTableTarget {
+    Relations { names: Vec<String> },
+    AllTablesInSchemas { schemas: Vec<String> },
+}
+
+/// Dependency behavior for ordinary-table privilege revocation.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TableRevokeBehavior {
+    #[default]
+    Restrict,
+    Cascade,
+}
+
+/// `GRANT` or `REVOKE` of privileges on ordinary tables. An empty privilege list records `ALL PRIVILEGES` so explicit sequence targets can expand against their own privilege set.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GrantTableStmt {
+    pub is_grant: bool,
+    pub grant_option: bool,
+    pub grant_option_only: bool,
+    pub privileges: Vec<TablePrivilegeSpec>,
+    pub target: GrantTableTarget,
+    pub grantees: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grantor: Option<String>,
+    #[serde(default)]
+    pub revoke_behavior: TableRevokeBehavior,
+}
+
 /// Relation targets carried by `GRANT` or `REVOKE` for sequences.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GrantSequenceTarget {
-    Sequences {
-        names: Vec<String>,
-        /// `false` preserves the historical `ON TABLE sequence_name` spelling while allowing the executor to leave actual table ACLs unsupported.
-        require_sequence: bool,
-    },
-    AllSequencesInSchemas {
-        schemas: Vec<String>,
-    },
+    Sequences { names: Vec<String> },
+    AllSequencesInSchemas { schemas: Vec<String> },
 }
 
 /// Dependency behavior for sequence privilege revocation.

@@ -52,7 +52,7 @@ impl KeyValueCatalog {
     ) -> StorageBackendResult<bool> {
         let _guard = self.sequence_lock.lock();
         validate_sequence_persistence(&sequence.persistence)?;
-        self.ensure_schema_exists(&sequence.relation)?;
+        self.require_schema_exists(&sequence.relation)?;
         let key = relation_key(TAG_SEQUENCE, &sequence.relation)?;
         if self.store.get(&key)?.is_some() {
             return Ok(false);
@@ -138,7 +138,7 @@ impl KeyValueCatalog {
         if from_relation == to_relation {
             return Ok(true);
         }
-        self.ensure_schema_exists(&to_relation)?;
+        self.require_schema_exists(&to_relation)?;
         let to_key = relation_key(TAG_SEQUENCE, &to_relation)?;
         let to_relation_key = relation_key(TAG_RELATION, &to_relation)?;
         if self.store.get(&to_key)?.is_some() || self.store.get(&to_relation_key)?.is_some() {

@@ -4,74 +4,142 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Sequence ACL privilege sets, grant paths, and dependency-aware revocation.
+//! Ordinary-table ACL privilege sets, grant paths, and dependency-aware revocation.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use uqa_sql::ast::{RoleAttribute, SequencePrivilege};
+use uqa_sql::ast::{RoleAttribute, TablePrivilege, TablePrivilegeSpec};
 use uqa_sql::SQLError;
-use uqa_storage::{SequenceAclEntry, SequencePrivileges};
+use uqa_storage::{TableAclEntry, TablePrivileges};
 
 use crate::engine_roles::{role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey};
-use crate::engine_state::SequenceSecurity;
+use crate::engine_state::TableSecurity;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) enum AclPrivilege {
+pub(crate) enum TableAclPrivilege {
     Select,
+    Insert,
     Update,
-    Usage,
+    Delete,
+    Truncate,
+    References,
+    Trigger,
+    Maintain,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct PrivilegeCheck {
-    pub(super) privilege: AclPrivilege,
+pub(super) struct TablePrivilegeCheck {
+    pub(super) privilege: TableAclPrivilege,
     pub(super) grant_option: bool,
 }
 
-impl AclPrivilege {
-    pub(super) const fn mask(self) -> SequencePrivileges {
+impl TableAclPrivilege {
+    pub(super) const ALL: [Self; 8] = [
+        Self::Select,
+        Self::Insert,
+        Self::Update,
+        Self::Delete,
+        Self::Truncate,
+        Self::References,
+        Self::Trigger,
+        Self::Maintain,
+    ];
+
+    pub(super) const fn mask(self) -> TablePrivileges {
+        let mut privileges = TablePrivileges {
+            select: false,
+            insert: false,
+            update: false,
+            delete: false,
+            truncate: false,
+            references: false,
+            trigger: false,
+            maintain: false,
+        };
         match self {
-            Self::Select => SequencePrivileges {
-                select: true,
-                update: false,
-                usage: false,
-            },
-            Self::Update => SequencePrivileges {
-                select: false,
-                update: true,
-                usage: false,
-            },
-            Self::Usage => SequencePrivileges {
-                select: false,
-                update: false,
-                usage: true,
-            },
+            Self::Select => privileges.select = true,
+            Self::Insert => privileges.insert = true,
+            Self::Update => privileges.update = true,
+            Self::Delete => privileges.delete = true,
+            Self::Truncate => privileges.truncate = true,
+            Self::References => privileges.references = true,
+            Self::Trigger => privileges.trigger = true,
+            Self::Maintain => privileges.maintain = true,
         }
+        privileges
     }
 }
 
 pub(super) fn requested_acl_privileges(
-    requested: &[SequencePrivilege],
-) -> Result<Vec<AclPrivilege>, SQLError> {
-    requested
-        .iter()
-        .map(|privilege| match privilege {
-            SequencePrivilege::Select => Ok(AclPrivilege::Select),
-            SequencePrivilege::Update => Ok(AclPrivilege::Update),
-            SequencePrivilege::Usage => Ok(AclPrivilege::Usage),
-            SequencePrivilege::ColumnsUnsupported => Err(SQLError::Routine {
-                sqlstate: "0LP01".into(),
-                message: "column privileges are only valid for relations".into(),
-            }),
-            SequencePrivilege::Unsupported(name) => Err(SQLError::Routine {
-                sqlstate: "0LP01".into(),
-                message: format!("invalid privilege type {name} for sequence"),
-            }),
-        })
-        .collect()
+    requested: &[TablePrivilegeSpec],
+) -> Result<Vec<TableAclPrivilege>, SQLError> {
+    if requested.is_empty() {
+        return Ok(TableAclPrivilege::ALL.into());
+    }
+    let mut privileges = Vec::with_capacity(requested.len());
+    for spec in requested {
+        if !spec.columns.is_empty() {
+            return match spec.privilege {
+                TablePrivilege::Select
+                | TablePrivilege::Insert
+                | TablePrivilege::Update
+                | TablePrivilege::References => Err(SQLError::Unsupported(
+                    "column-level table privileges are not supported".into(),
+                )),
+                _ => Err(SQLError::Routine {
+                    sqlstate: "0LP01".into(),
+                    message: format!(
+                        "invalid privilege type {} for column",
+                        table_privilege_name(&spec.privilege)
+                    ),
+                }),
+            };
+        }
+        let privilege = match &spec.privilege {
+            TablePrivilege::Select => TableAclPrivilege::Select,
+            TablePrivilege::Insert => TableAclPrivilege::Insert,
+            TablePrivilege::Update => TableAclPrivilege::Update,
+            TablePrivilege::Delete => TableAclPrivilege::Delete,
+            TablePrivilege::Truncate => TableAclPrivilege::Truncate,
+            TablePrivilege::References => TableAclPrivilege::References,
+            TablePrivilege::Trigger => TableAclPrivilege::Trigger,
+            TablePrivilege::Maintain => TableAclPrivilege::Maintain,
+            TablePrivilege::Usage => {
+                return Err(SQLError::Routine {
+                    sqlstate: "0LP01".into(),
+                    message: "invalid privilege type USAGE for table".into(),
+                })
+            }
+            TablePrivilege::Unsupported(name) => {
+                return Err(SQLError::Routine {
+                    sqlstate: "0LP01".into(),
+                    message: format!("invalid privilege type {name} for table"),
+                })
+            }
+        };
+        if !privileges.contains(&privilege) {
+            privileges.push(privilege);
+        }
+    }
+    Ok(privileges)
 }
 
-pub(super) fn parse_privilege_checks(value: &str) -> Result<Vec<PrivilegeCheck>, SQLError> {
+fn table_privilege_name(privilege: &TablePrivilege) -> &str {
+    match privilege {
+        TablePrivilege::Select => "SELECT",
+        TablePrivilege::Insert => "INSERT",
+        TablePrivilege::Update => "UPDATE",
+        TablePrivilege::Delete => "DELETE",
+        TablePrivilege::Truncate => "TRUNCATE",
+        TablePrivilege::References => "REFERENCES",
+        TablePrivilege::Trigger => "TRIGGER",
+        TablePrivilege::Maintain => "MAINTAIN",
+        TablePrivilege::Usage => "USAGE",
+        TablePrivilege::Unsupported(name) => name,
+    }
+}
+
+pub(super) fn parse_privilege_checks(value: &str) -> Result<Vec<TablePrivilegeCheck>, SQLError> {
     value
         .split(',')
         .map(|item| {
@@ -81,9 +149,14 @@ pub(super) fn parse_privilege_checks(value: &str) -> Result<Vec<PrivilegeCheck>,
                 .strip_suffix(" WITH GRANT OPTION")
                 .map_or((upper.as_str(), false), |name| (name.trim_end(), true));
             let privilege = match name {
-                "SELECT" => AclPrivilege::Select,
-                "UPDATE" => AclPrivilege::Update,
-                "USAGE" => AclPrivilege::Usage,
+                "SELECT" => TableAclPrivilege::Select,
+                "INSERT" => TableAclPrivilege::Insert,
+                "UPDATE" => TableAclPrivilege::Update,
+                "DELETE" => TableAclPrivilege::Delete,
+                "TRUNCATE" => TableAclPrivilege::Truncate,
+                "REFERENCES" => TableAclPrivilege::References,
+                "TRIGGER" => TableAclPrivilege::Trigger,
+                "MAINTAIN" => TableAclPrivilege::Maintain,
                 _ => {
                     return Err(SQLError::Routine {
                         sqlstate: "22023".into(),
@@ -91,7 +164,7 @@ pub(super) fn parse_privilege_checks(value: &str) -> Result<Vec<PrivilegeCheck>,
                     })
                 }
             };
-            Ok(PrivilegeCheck {
+            Ok(TablePrivilegeCheck {
                 privilege,
                 grant_option,
             })
@@ -99,22 +172,22 @@ pub(super) fn parse_privilege_checks(value: &str) -> Result<Vec<PrivilegeCheck>,
         .collect()
 }
 
-fn acl_grantor<'a>(entry: &'a SequenceAclEntry, owner: &'a str) -> &'a str {
+fn acl_grantor<'a>(entry: &'a TableAclEntry, owner: &'a str) -> &'a str {
     entry.grantor.as_deref().unwrap_or(owner)
 }
 
-fn materialize_acl(security: &mut SequenceSecurity) {
+fn materialize_acl(security: &mut TableSecurity) {
     if security.acl.is_none() {
-        security.acl = Some(vec![SequenceAclEntry {
+        security.acl = Some(vec![TableAclEntry {
             role: security.role_owner.clone(),
             grantor: Some(security.role_owner.clone()),
-            privileges: SequencePrivileges::ALL,
-            grant_options: SequencePrivileges::default(),
+            privileges: TablePrivileges::ALL,
+            grant_options: TablePrivileges::default(),
         }]);
     }
 }
 
-fn grant_option_roles(security: &SequenceSecurity, privilege: AclPrivilege) -> BTreeSet<String> {
+fn grant_option_roles(security: &TableSecurity, privilege: TableAclPrivilege) -> BTreeSet<String> {
     let mut reachable = BTreeSet::from([security.role_owner.clone()]);
     let Some(acl) = security.acl.as_ref() else {
         return reachable;
@@ -136,8 +209,8 @@ fn grant_option_roles(security: &SequenceSecurity, privilege: AclPrivilege) -> B
 }
 
 pub(super) fn select_acl_grantor(
-    security: &SequenceSecurity,
-    privilege: AclPrivilege,
+    security: &TableSecurity,
+    privilege: TableAclPrivilege,
     current_user: &str,
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
@@ -158,9 +231,9 @@ pub(super) fn select_acl_grantor(
 }
 
 pub(super) fn role_has_privilege(
-    security: &SequenceSecurity,
+    security: &TableSecurity,
     subject: &str,
-    check: PrivilegeCheck,
+    check: TablePrivilegeCheck,
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
 ) -> bool {
@@ -187,28 +260,25 @@ pub(super) fn role_has_privilege(
 }
 
 pub(super) fn grant_acl(
-    security: &mut SequenceSecurity,
-    privilege: AclPrivilege,
+    security: &mut TableSecurity,
+    privilege: TableAclPrivilege,
     grantees: &[String],
     grantor: &str,
     grant_option: bool,
 ) {
     materialize_acl(security);
     let owner = security.role_owner.clone();
-    let acl = security
-        .acl
-        .as_mut()
-        .expect("sequence ACL was materialized");
+    let acl = security.acl.as_mut().expect("table ACL was materialized");
     for grantee in grantees {
         let position = acl
             .iter()
             .position(|entry| entry.role == *grantee && acl_grantor(entry, &owner) == grantor)
             .unwrap_or_else(|| {
-                acl.push(SequenceAclEntry {
+                acl.push(TableAclEntry {
                     role: grantee.clone(),
                     grantor: Some(grantor.to_string()),
-                    privileges: SequencePrivileges::default(),
-                    grant_options: SequencePrivileges::default(),
+                    privileges: TablePrivileges::default(),
+                    grant_options: TablePrivileges::default(),
                 });
                 acl.len() - 1
             });
@@ -221,8 +291,8 @@ pub(super) fn grant_acl(
 }
 
 pub(super) fn revoke_acl(
-    security: &mut SequenceSecurity,
-    privilege: AclPrivilege,
+    security: &mut TableSecurity,
+    privilege: TableAclPrivilege,
     grantees: &[String],
     grantor: &str,
     grant_option_only: bool,
@@ -231,10 +301,7 @@ pub(super) fn revoke_acl(
     let before = grant_option_roles(security, privilege);
     materialize_acl(security);
     let owner = security.role_owner.clone();
-    let acl = security
-        .acl
-        .as_mut()
-        .expect("sequence ACL was materialized");
+    let acl = security.acl.as_mut().expect("table ACL was materialized");
     for entry in acl
         .iter_mut()
         .filter(|entry| grantees.contains(&entry.role) && acl_grantor(entry, &owner) == grantor)
@@ -249,8 +316,8 @@ pub(super) fn revoke_acl(
 }
 
 fn revoke_dependent_acl(
-    security: &mut SequenceSecurity,
-    privilege: AclPrivilege,
+    security: &mut TableSecurity,
+    privilege: TableAclPrivilege,
     before: &BTreeSet<String>,
     cascade: bool,
 ) -> Result<(), SQLError> {
@@ -283,7 +350,7 @@ fn revoke_dependent_acl(
         let acl = security
             .acl
             .as_mut()
-            .expect("dependent sequence privileges require an explicit ACL");
+            .expect("dependent table privileges require an explicit ACL");
         for entry in acl
             .iter_mut()
             .filter(|entry| lost.contains(acl_grantor(entry, &owner)))
@@ -295,11 +362,11 @@ fn revoke_dependent_acl(
     }
 }
 
-fn remove_empty_entries(acl: &mut Vec<SequenceAclEntry>) {
+fn remove_empty_entries(acl: &mut Vec<TableAclEntry>) {
     acl.retain(|entry| !entry.privileges.is_empty() || !entry.grant_options.is_empty());
 }
 
-pub(super) fn rewrite_acl_owner(security: &mut SequenceSecurity, new_owner: &str) {
+pub(super) fn rewrite_acl_owner(security: &mut TableSecurity, new_owner: &str) {
     let old_owner = std::mem::replace(&mut security.role_owner, new_owner.to_string());
     let Some(acl) = security.acl.as_mut() else {
         return;
@@ -312,7 +379,7 @@ pub(super) fn rewrite_acl_owner(security: &mut SequenceSecurity, new_owner: &str
             entry.grantor = Some(new_owner.to_string());
         }
     }
-    let mut merged: Vec<SequenceAclEntry> = Vec::with_capacity(acl.len());
+    let mut merged: Vec<TableAclEntry> = Vec::with_capacity(acl.len());
     for entry in std::mem::take(acl) {
         if let Some(existing) = merged.iter_mut().find(|existing| {
             existing.role == entry.role

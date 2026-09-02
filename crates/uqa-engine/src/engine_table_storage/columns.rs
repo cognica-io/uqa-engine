@@ -439,11 +439,12 @@ impl Engine {
             target_schema.unwrap_or_else(|| from_relation.schema.clone()),
             target_name,
         );
-        if !self
-            .durable
-            .schemas
-            .read()
-            .contains_key(&to_relation.schema)
+        if to_relation.schema != self.temporary_schema_name()
+            && !self
+                .durable
+                .schemas
+                .read()
+                .contains_key(&to_relation.schema)
         {
             return Err(StorageBackendError::Other(format!(
                 "schema `{}` does not exist",
@@ -456,14 +457,18 @@ impl Engine {
                 "relation `{to}` already exists as {kind}"
             )));
         }
-        {
+        let persist_catalog = {
             let tables = self.storage.tables.read();
             if !tables.contains_key(&from_relation) || tables.contains_key(&to_relation) {
                 return Ok(false);
             }
-        }
+            self.is_persistent()
+                && tables.get(&from_relation).is_some_and(|table| {
+                    table.persistence != uqa_sql::ast::RelationPersistence::Temporary
+                })
+        };
         self.rewrite_table_rename_dependencies(&from, &to)?;
-        if self.is_persistent() {
+        if persist_catalog {
             if let Some(catalog) = self.storage.catalog.as_ref() {
                 catalog.rename_table_data(&from, &to)?;
             }
@@ -492,7 +497,7 @@ impl Engine {
             });
             analyzers.extend(moved);
         }
-        if self.is_persistent() {
+        if persist_catalog {
             self.rebind_persistent_table_stores(&to, &state)?;
             self.try_save_table_schema(&to, &state)?;
             if state.columns.read().iter().any(|column| {

@@ -157,6 +157,7 @@ fn resolve_sql_truncate_targets(
 ) -> Result<SQLTruncateTargets, SQLError> {
     let mut targets = BTreeSet::new();
     let mut trigger_targets = Vec::new();
+    let mut privilege_targets = BTreeSet::new();
     for requested in tables {
         let Some((table, "table")) = engine.try_resolve_visible_relation_kind(&requested.table)?
         else {
@@ -165,6 +166,7 @@ fn resolve_sql_truncate_targets(
                 requested.table
             )));
         };
+        privilege_targets.insert(table.clone());
         let hierarchy = engine
             .try_table_hierarchy(&table)
             .map_err(|err| SQLError::Internal(format!("read table hierarchy: {err}")))?;
@@ -189,10 +191,17 @@ fn resolve_sql_truncate_targets(
                 .map_err(|err| SQLError::Internal(format!("read foreign keys: {err}")))?
             {
                 if targets.insert(referrer.clone()) {
+                    privilege_targets.insert(referrer.clone());
                     trigger_targets.push(referrer);
                 }
             }
         }
+    }
+    for table in &privilege_targets {
+        engine.ensure_table_privilege(
+            table,
+            crate::engine_table_security::TableAclPrivilege::Truncate,
+        )?;
     }
     for table in &trigger_targets {
         engine.ensure_no_pending_trigger_events(table, "TRUNCATE")?;

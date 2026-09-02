@@ -458,6 +458,10 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 self.engine.grant_sql_routine(statement)?;
                 Ok(SQLResult::empty())
             }
+            CommandPlan::GrantTable(statement) => {
+                self.engine.grant_table_privileges(statement)?;
+                Ok(SQLResult::empty())
+            }
             CommandPlan::GrantSequence(statement) => {
                 self.engine.grant_sequence_privileges(statement)?;
                 Ok(SQLResult::empty())
@@ -601,9 +605,25 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 body,
             } => self.execute_explain(body, *analyze, *verbose, format.as_deref()),
             CommandPlan::Analyze { table } => {
-                self.engine
-                    .run_analyze(table.as_deref())
-                    .map_err(|err| SQLError::Internal(format!("ANALYZE failed: {err}")))?;
+                let targets = if let Some(requested) = table.as_deref() {
+                    let Some((canonical, "table")) =
+                        self.engine.try_resolve_visible_relation_kind(requested)?
+                    else {
+                        return Err(SQLError::UnknownTable(requested.to_string()));
+                    };
+                    self.engine.ensure_table_privilege(
+                        &canonical,
+                        crate::engine_table_security::TableAclPrivilege::Maintain,
+                    )?;
+                    vec![canonical]
+                } else {
+                    self.engine.maintenance_table_names("analyze")?
+                };
+                for target in targets {
+                    self.engine
+                        .run_analyze_target(&target, &[], true)
+                        .map_err(|err| SQLError::Internal(format!("ANALYZE failed: {err}")))?;
+                }
                 Ok(SQLResult::empty())
             }
             CommandPlan::Vacuum(statement) => run_vacuum(self.engine, statement),

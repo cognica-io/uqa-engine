@@ -86,6 +86,25 @@ pub(in crate::sql) fn run_update_inner(
             "UPDATE",
         )?;
     }
+    engine.ensure_table_privilege(
+        &stmt.table,
+        crate::engine_table_security::TableAclPrivilege::Update,
+    )?;
+    let privilege_expressions = stmt
+        .assignments
+        .iter()
+        .map(|assignment| &assignment.value)
+        .chain(stmt.predicate.iter())
+        .chain(stmt.returning.iter().map(|projection| &projection.expr))
+        .collect::<Vec<_>>();
+    super::ensure_target_table_select_for_expressions(
+        engine,
+        &stmt.table,
+        &stmt.target_qualifier,
+        &stmt.returning_aliases,
+        &privilege_expressions,
+        false,
+    )?;
     let assigned_columns = stmt
         .assignments
         .iter()

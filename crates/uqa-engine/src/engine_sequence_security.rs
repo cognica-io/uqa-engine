@@ -28,7 +28,6 @@ struct ResolvedSequenceGrantTarget {
     name: String,
     relation: RelationIdentity,
     kind: &'static str,
-    require_sequence: bool,
 }
 
 pub(crate) fn role_can_view_sequence(
@@ -180,10 +179,7 @@ impl Engine {
         target: &GrantSequenceTarget,
     ) -> Result<Vec<ResolvedSequenceGrantTarget>, SQLError> {
         match target {
-            GrantSequenceTarget::Sequences {
-                names,
-                require_sequence,
-            } => {
+            GrantSequenceTarget::Sequences { names } => {
                 let mut resolved = Vec::with_capacity(names.len());
                 for requested in names {
                     let (name, kind) = match self.resolve_visible_relation_kind(requested)? {
@@ -209,7 +205,6 @@ impl Engine {
                         name,
                         relation,
                         kind,
-                        require_sequence: *require_sequence,
                     });
                 }
                 Ok(resolved)
@@ -264,7 +259,6 @@ impl Engine {
                 name: relation.qualified_name(),
                 relation: relation.clone(),
                 kind: "sequence",
-                require_sequence: true,
             })
             .collect::<Vec<_>>();
         targets.sort_by(|left, right| left.relation.cmp(&right.relation));
@@ -459,15 +453,55 @@ impl Engine {
         })))
     }
 
+    pub(crate) fn role_has_sequence_table_privilege(
+        &self,
+        relation: &RelationIdentity,
+        subject: &str,
+        privilege: crate::engine_table_security::TableAclPrivilege,
+        grant_option: bool,
+    ) -> Result<bool, SQLError> {
+        let privilege = match privilege {
+            crate::engine_table_security::TableAclPrivilege::Select => AclPrivilege::Select,
+            crate::engine_table_security::TableAclPrivilege::Update => AclPrivilege::Update,
+            crate::engine_table_security::TableAclPrivilege::Insert
+            | crate::engine_table_security::TableAclPrivilege::Delete
+            | crate::engine_table_security::TableAclPrivilege::Truncate
+            | crate::engine_table_security::TableAclPrivilege::References
+            | crate::engine_table_security::TableAclPrivilege::Trigger
+            | crate::engine_table_security::TableAclPrivilege::Maintain => return Ok(false),
+        };
+        let security = self
+            .durable
+            .sequence_security
+            .read()
+            .get(relation)
+            .cloned()
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "sequence `{}` has no security metadata",
+                    relation.qualified_name()
+                ))
+            })?;
+        let roles = self.durable.roles.read();
+        let memberships = self.durable.role_memberships.read();
+        Ok(role_has_privilege(
+            &security,
+            subject,
+            PrivilegeCheck {
+                privilege,
+                grant_option,
+            },
+            &roles,
+            &memberships,
+        ))
+    }
+
     fn resolve_sequence_privilege_target(
         &self,
         value: &Value,
     ) -> Result<Option<(String, RelationIdentity)>, SQLError> {
         match value {
             Value::Str(reference) | Value::FixedChar(reference) => {
-                if let Ok(oid) = reference.parse::<i64>() {
-                    return self.resolve_sequence_privilege_oid(oid);
-                }
                 let (name, kind) = match self.resolve_visible_relation_kind(reference)? {
                     RelationResolution::Found(name, kind) => (name, kind),
                     RelationResolution::MissingSchema(schema) => {
@@ -501,7 +535,7 @@ impl Engine {
         }
     }
 
-    fn resolve_sequence_privilege_oid(
+    pub(crate) fn resolve_sequence_privilege_oid(
         &self,
         oid: i64,
     ) -> Result<Option<(String, RelationIdentity)>, SQLError> {
@@ -736,11 +770,6 @@ fn validate_sequence_grant_target_kinds(
     for target in targets {
         if target.kind == "sequence" {
             continue;
-        }
-        if !target.require_sequence {
-            return Err(SQLError::Unsupported(
-                "table privileges are not supported".into(),
-            ));
         }
         return Err(SQLError::Routine {
             sqlstate: "42809".into(),

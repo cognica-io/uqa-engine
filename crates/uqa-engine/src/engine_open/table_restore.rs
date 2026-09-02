@@ -393,7 +393,10 @@ impl Engine {
         Ok(Arc::new(TableState {
             lifecycle_id: std::sync::atomic::AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: schema.object_id,
-            role_owner: RwLock::new(schema.role_owner),
+            security: RwLock::new(crate::engine_state::TableSecurity {
+                role_owner: schema.role_owner,
+                acl: schema.acl,
+            }),
             storage_generation: RwLock::new(schema.storage_generation),
             document_store: RwLock::new(docs),
             inverted_index: RwLock::new(inv),

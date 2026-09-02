@@ -27,6 +27,7 @@ pub(in crate::sql) fn build_join_spill_with_ctes(
     crate::sql::select::bind_source_plan_schema_for_execution(
         engine, &mut bound, params, ctes, None,
     )?;
+    crate::sql::select::ensure_select_privileges_for_source(&bound, ctes)?;
     let operator = build_join_operator_with_ctes(engine, &bound, params, ctes, None, None)?;
     let columns = operator.schema().to_vec();
     let output = crate::sql::select::collect_query_operator(

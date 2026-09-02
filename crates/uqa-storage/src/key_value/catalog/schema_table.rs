@@ -253,7 +253,7 @@ impl KeyValueCatalog {
                 "moving a table between schemas is not supported by the catalog".into(),
             ));
         }
-        self.ensure_schema_exists(&to_relation)?;
+        self.require_schema_exists(&to_relation)?;
         let from_key = relation_key(TAG_TABLE, &from_relation)?;
         let to_key = relation_key(TAG_TABLE, &to_relation)?;
         if self.store.get(&to_key)?.is_some()

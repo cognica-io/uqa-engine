@@ -633,7 +633,7 @@ fn sequence_acl_controls_value_functions_catalog_and_inquiry() {
 }
 
 #[test]
-fn sequence_owner_can_revoke_ordinary_privileges_and_transfer_acl_ownership() {
+fn sequence_owner_keeps_implicit_privileges_after_self_revoke_and_transfers_acl_ownership() {
     let engine = Engine::new();
     for sql in [
         "CREATE ROLE acl_self_owner",
@@ -661,7 +661,7 @@ fn sequence_owner_can_revoke_ordinary_privileges_and_transfer_acl_ownership() {
             &engine,
             "SELECT has_sequence_privilege('acl_self_owner', 'acl_owner_ids', 'USAGE') AS v",
         ),
-        Value::Bool(false)
+        Value::Bool(true)
     );
     assert_eq!(
         scalar(
@@ -671,8 +671,8 @@ fn sequence_owner_can_revoke_ordinary_privileges_and_transfer_acl_ownership() {
         Value::Bool(true)
     );
     assert_eq!(
-        sqlstate(&engine, "SELECT nextval('acl_owner_ids')"),
-        "42501"
+        scalar(&engine, "SELECT nextval('acl_owner_ids') AS v"),
+        Value::Int(1)
     );
     engine
         .sql("ALTER SEQUENCE acl_owner_ids CACHE 2", &[])

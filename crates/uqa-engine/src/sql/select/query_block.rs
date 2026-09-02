@@ -7,10 +7,11 @@
 //! Query-block preparation and column-pruning analysis.
 
 use super::{
-    bind_source_plan_schema, execute_query_block_operator_output, expand_from_star_columns,
-    expr_contains_subquery, expr_contains_volatile_function, final_filter_after_qualifier_pushdown,
-    has_window, overlay_outer_schema, projection_columns, qualifier_filters_for_stmt,
-    resolve_row_locks, run_select_without_from_output, run_single_foreign_select_output,
+    bind_source_plan_schema, ensure_select_privileges_for_source,
+    execute_query_block_operator_output, expand_from_star_columns, expr_contains_subquery,
+    expr_contains_volatile_function, final_filter_after_qualifier_pushdown, has_window,
+    overlay_outer_schema, projection_columns, qualifier_filters_for_stmt, resolve_row_locks,
+    run_select_without_from_output, run_single_foreign_select_output,
     run_single_table_select_output, validate_query_block_expression_types,
     validate_query_block_references, validate_query_set_contexts,
     validate_source_set_contexts_before_build, with_query_table_pseudo_columns, BTreeSet,
@@ -140,6 +141,7 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
                     expression_schema.clone()
                 };
                 validate_query_block_references(engine, stmt, &reference_schema, params, ctes)?;
+                ensure_select_privileges_for_source(from, ctes)?;
                 return run_single_table_select_output(
                     engine,
                     SingleRelation {
@@ -186,6 +188,7 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
     let projection_schema = with_query_table_pseudo_columns(&source_schema);
     let projection_schema = overlay_outer_schema(&projection_schema, outer.as_ref());
     validate_query_block_references(engine, stmt, &projection_schema, params, ctes)?;
+    ensure_select_privileges_for_source(from, ctes)?;
     let physical_filter = final_filter_after_qualifier_pushdown(
         engine,
         stmt,

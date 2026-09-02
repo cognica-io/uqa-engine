@@ -38,7 +38,7 @@ impl KeyValueCatalog {
         Ok(())
     }
 
-    pub(super) fn ensure_schema_exists(
+    pub(super) fn require_schema_exists(
         &self,
         relation: &RelationIdentity,
     ) -> StorageBackendResult<()> {
@@ -62,7 +62,7 @@ impl KeyValueCatalog {
         relation: &RelationIdentity,
         kind: RelationKind,
     ) -> StorageBackendResult<()> {
-        self.ensure_schema_exists(relation)?;
+        self.require_schema_exists(relation)?;
         let key = relation_key(TAG_RELATION, relation)?;
         if let Some(value) = self.store.get(&key)? {
             let existing = decode_value::<StoredRelation>(&value)?.kind;

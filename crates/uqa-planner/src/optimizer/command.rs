@@ -176,6 +176,7 @@ pub(super) fn optimize_command(
         | CommandPlan::AlterRoutine(_)
         | CommandPlan::AlterRoutineOwner(_)
         | CommandPlan::GrantRoutine(_)
+        | CommandPlan::GrantTable(_)
         | CommandPlan::GrantSequence(_)
         | CommandPlan::GrantDatabase(_)
         | CommandPlan::GrantSchema(_)

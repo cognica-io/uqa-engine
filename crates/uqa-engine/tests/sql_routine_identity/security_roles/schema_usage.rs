@@ -198,6 +198,7 @@ fn pg18_bound_routine_identities_do_not_repeat_schema_name_checks() {
         "CREATE FUNCTION routine_bound_visible.atomic_probe() RETURNS integer LANGUAGE SQL RETURN routine_bound_hidden.value_probe()",
         "CREATE FUNCTION routine_bound_visible.invoker_probe() RETURNS integer LANGUAGE SQL SECURITY INVOKER AS 'SELECT routine_bound_hidden.value_probe()'",
         "CREATE FUNCTION routine_bound_visible.definer_probe() RETURNS integer LANGUAGE SQL SECURITY DEFINER AS 'SELECT routine_bound_hidden.value_probe()'",
+        "GRANT INSERT, SELECT ON TABLE routine_bound_visible.value_generated TO routine_bound_caller",
         "GRANT USAGE ON SCHEMA routine_bound_visible TO routine_bound_caller",
         "SET ROLE routine_bound_caller",
     ] {

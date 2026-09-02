@@ -18,6 +18,7 @@ fn empty_table(schema: &str, name: &str) -> TableSchema {
     TableSchema {
         relation: RelationIdentity::new(schema, name),
         role_owner: "uqa".into(),
+        acl: None,
         object_id: [1; 16],
         storage_generation: [1; 16],
         analyzer_json: "{}".into(),
@@ -44,6 +45,22 @@ fn sample_sequence_acl() -> Vec<crate::catalog::SequenceAclEntry> {
     }]
 }
 
+fn sample_table_acl() -> Vec<crate::catalog::TableAclEntry> {
+    vec![crate::catalog::TableAclEntry {
+        role: "article_reader".into(),
+        grantor: Some("article_owner".into()),
+        privileges: crate::catalog::TablePrivileges {
+            select: true,
+            maintain: true,
+            ..crate::catalog::TablePrivileges::default()
+        },
+        grant_options: crate::catalog::TablePrivileges {
+            select: true,
+            ..crate::catalog::TablePrivileges::default()
+        },
+    }]
+}
+
 #[test]
 fn migration_creates_tables_table() {
     let cat = fresh();
@@ -63,9 +80,11 @@ fn migration_creates_tables_table() {
 #[test]
 fn save_load_round_trip() {
     let cat = fresh();
+    let acl = sample_table_acl();
     let schema = TableSchema {
         relation: RelationIdentity::new("public", "articles"),
         role_owner: "article_owner".into(),
+        acl: Some(acl.clone()),
         object_id: [1; 16],
         storage_generation: [1; 16],
         analyzer_json:
@@ -84,6 +103,7 @@ fn save_load_round_trip() {
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].relation.qualified_name(), "public.articles");
     assert_eq!(loaded[0].role_owner, "article_owner");
+    assert_eq!(loaded[0].acl, Some(acl));
     assert_eq!(loaded[0].object_id, [1; 16]);
     assert_eq!(loaded[0].storage_generation, [1; 16]);
     assert_eq!(loaded[0].fts_fields, vec!["title", "body"]);
@@ -101,6 +121,7 @@ fn catalog_facade_trait_object_round_trips_table() {
     let schema = TableSchema {
         relation: RelationIdentity::new("public", "facade_articles"),
         role_owner: "facade_owner".into(),
+        acl: None,
         object_id: [2; 16],
         storage_generation: [2; 16],
         analyzer_json:

@@ -458,6 +458,10 @@ pub(super) fn run_vacuum(engine: &Engine, statement: &VacuumStmt) -> Result<SQLR
                 });
             }
         }
+        engine.ensure_table_privilege(
+            &canonical,
+            crate::engine_table_security::TableAclPrivilege::Maintain,
+        )?;
         resolved_targets.push(ResolvedVacuumTarget {
             table: canonical,
             include_descendants: target.include_descendants,
@@ -483,9 +487,13 @@ pub(super) fn run_vacuum(engine: &Engine, statement: &VacuumStmt) -> Result<SQLR
 
     if execution.analyze() {
         if resolved_targets.is_empty() {
-            engine
-                .run_analyze(None)
-                .map_err(|error| SQLError::Internal(format!("VACUUM ANALYZE failed: {error}")))?;
+            for table in engine.maintenance_table_names("vacuum")? {
+                engine
+                    .run_analyze_target(&table, &[], true)
+                    .map_err(|error| {
+                        SQLError::Internal(format!("VACUUM ANALYZE failed: {error}"))
+                    })?;
+            }
         } else {
             for target in &resolved_targets {
                 engine

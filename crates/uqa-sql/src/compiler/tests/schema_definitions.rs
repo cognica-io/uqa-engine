@@ -154,10 +154,7 @@ fn sequence_grants_preserve_privileges_targets_and_grant_paths() {
     );
     assert!(matches!(
         grant.target,
-        GrantSequenceTarget::Sequences {
-            ref names,
-            require_sequence: true,
-        } if names == &["app.ids", "ids2"]
+        GrantSequenceTarget::Sequences { ref names } if names == &["app.ids", "ids2"]
     ));
     assert_eq!(grant.grantees, ["caller", "PUBLIC"]);
     assert_eq!(grant.grantor.as_deref(), Some("CURRENT_USER"));
@@ -184,17 +181,21 @@ fn sequence_grants_preserve_privileges_targets_and_grant_paths() {
             if schemas == &["app", "public"]
     ));
 
-    let Statement::GrantSequence(historical) = first("GRANT SELECT ON TABLE app.ids TO caller")
+    let Statement::GrantTable(table_grant) = first("GRANT SELECT ON TABLE app.ids TO caller")
     else {
-        panic!("not historical sequence-compatible GRANT");
+        panic!("not table GRANT");
     };
     assert!(matches!(
-        historical.target,
-        GrantSequenceTarget::Sequences {
-            require_sequence: false,
-            ..
-        }
+        table_grant.target,
+        crate::ast::GrantTableTarget::Relations { ref names } if names == &["app.ids"]
     ));
+    assert_eq!(
+        table_grant.privileges,
+        [crate::ast::TablePrivilegeSpec {
+            privilege: crate::ast::TablePrivilege::Select,
+            columns: Vec::new(),
+        }]
+    );
 
     let Statement::GrantSequence(invalid) = first("GRANT INSERT ON SEQUENCE ids TO caller") else {
         panic!("not deferred invalid sequence privilege");

@@ -54,6 +54,23 @@ pub(in crate::sql) fn run_delete_inner(
         let rewritten = super::view_automatic::rewrite_delete_to_base(engine, stmt, params)?;
         return run_delete_inner(engine, &rewritten, params);
     }
+    engine.ensure_table_privilege(
+        &stmt.table,
+        crate::engine_table_security::TableAclPrivilege::Delete,
+    )?;
+    let privilege_expressions = stmt
+        .predicate
+        .iter()
+        .chain(stmt.returning.iter().map(|projection| &projection.expr))
+        .collect::<Vec<_>>();
+    super::ensure_target_table_select_for_expressions(
+        engine,
+        &stmt.table,
+        &stmt.target_qualifier,
+        &stmt.returning_aliases,
+        &privilege_expressions,
+        false,
+    )?;
     let _transition_capture_scope = crate::sql::triggers::TransitionCaptureScope::enter();
     engine.lock_relation(
         &stmt.table,

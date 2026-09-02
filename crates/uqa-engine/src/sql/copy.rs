@@ -49,7 +49,12 @@ impl Engine {
                 message: "COPY FROM requires a relation target".into(),
             });
         };
-        let columns = self.copy_relation_columns(relation, qualifier, requested_columns, false)?;
+        let (canonical, columns) =
+            self.copy_relation_columns(relation, qualifier, requested_columns, false)?;
+        self.ensure_table_privilege(
+            &canonical,
+            crate::engine_table_security::TableAclPrivilege::Insert,
+        )?;
         let mut bytes = Vec::new();
         input
             .read_to_end(&mut bytes)
@@ -121,8 +126,12 @@ impl Engine {
                 qualifier,
                 columns: requested_columns,
             } => {
-                let columns =
+                let (canonical, columns) =
                     self.copy_relation_columns(relation, qualifier, requested_columns, true)?;
+                self.ensure_table_privilege(
+                    &canonical,
+                    crate::engine_table_security::TableAclPrivilege::Select,
+                )?;
                 let projection = columns
                     .iter()
                     .map(|column| uqa_sql::expr::quote_ident(column))
@@ -161,7 +170,7 @@ impl Engine {
         display_name: &str,
         requested: &[String],
         reject_partitioned_output: bool,
-    ) -> Result<Vec<String>, SQLError> {
+    ) -> Result<(String, Vec<String>), SQLError> {
         let canonical = match self.try_resolve_visible_relation_kind(relation)? {
             Some((canonical, "table")) => canonical,
             Some(_) | None => return Err(SQLError::UnknownTable(relation.to_string())),
@@ -218,7 +227,7 @@ impl Engine {
                 ),
             });
         }
-        Ok(columns)
+        Ok((canonical, columns))
     }
 }
 

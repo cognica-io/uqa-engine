@@ -42,6 +42,7 @@ use crate::{Engine, HNSWIndexParams, IVFIndexParams, ScoredEntry, VectorIndexSpe
 mod age_cypher;
 mod aggregates;
 mod catalog;
+pub(crate) use catalog::snapshot_table_relation_oid;
 mod copy;
 mod correlation;
 mod cursor;
@@ -340,6 +341,7 @@ pub(crate) fn builtin_function_dispatch_name(name: &str) -> String {
                         | "pg_get_triggerdef"
                         | "pg_get_ruledef"
                         | "pg_has_role"
+                        | "has_table_privilege"
                         | "has_database_privilege"
                         | "has_schema_privilege"
                         | "has_sequence_privilege"

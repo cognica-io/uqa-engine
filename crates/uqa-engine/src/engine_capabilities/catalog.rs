@@ -31,6 +31,7 @@ impl CatalogTableSnapshot {
         Self {
             object_id: [1; 16],
             role_owner: "uqa".into(),
+            acl: None,
             columns,
             checks: Vec::new(),
             foreign_keys: Vec::new(),
@@ -377,6 +378,36 @@ impl CatalogReadView {
         crate::engine_sequence_security::role_can_view_sequence(
             security,
             role,
+            &self.snapshot.durable.roles,
+            &self.snapshot.durable.role_memberships,
+        )
+    }
+
+    pub(crate) fn table_is_visible_to(&self, table: &CatalogTableSnapshot, role: &str) -> bool {
+        crate::engine_table_security::role_can_view_table(
+            &crate::engine_state::TableSecurity {
+                role_owner: table.role_owner.clone(),
+                acl: table.acl.clone(),
+            },
+            role,
+            &self.snapshot.durable.roles,
+            &self.snapshot.durable.role_memberships,
+        )
+    }
+
+    pub(crate) fn table_has_privilege_to(
+        &self,
+        table: &CatalogTableSnapshot,
+        role: &str,
+        privilege: crate::engine_table_security::TableAclPrivilege,
+    ) -> bool {
+        crate::engine_table_security::role_has_table_privilege(
+            &crate::engine_state::TableSecurity {
+                role_owner: table.role_owner.clone(),
+                acl: table.acl.clone(),
+            },
+            role,
+            privilege,
             &self.snapshot.durable.roles,
             &self.snapshot.durable.role_memberships,
         )

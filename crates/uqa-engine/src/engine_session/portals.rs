@@ -629,7 +629,7 @@ impl Engine {
         Ok(std::sync::Arc::new(TableState {
             lifecycle_id: std::sync::atomic::AtomicU64::new(metadata.lifecycle_id()),
             object_id: metadata.object_id(),
-            role_owner: parking_lot::RwLock::new(metadata.role_owner()),
+            security: parking_lot::RwLock::new(metadata.security()),
             storage_generation: parking_lot::RwLock::new(metadata.storage_generation()),
             document_store: parking_lot::RwLock::new(Box::new(document_store)),
             inverted_index: parking_lot::RwLock::new(Box::new(inverted_index)),

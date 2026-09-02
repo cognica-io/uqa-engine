@@ -99,6 +99,7 @@ fn forbidden_command(
         CommandPlan::AlterRoutine(_) => Ok(Some("ALTER ROUTINE")),
         CommandPlan::AlterRoutineOwner(_) => Ok(Some("ALTER ROUTINE")),
         CommandPlan::GrantRoutine(_) => Ok(Some("GRANT ON ROUTINE")),
+        CommandPlan::GrantTable(_) => Ok(Some("GRANT ON TABLE")),
         CommandPlan::GrantSequence(_) => Ok(Some("GRANT ON SEQUENCE")),
         CommandPlan::GrantDatabase(_) => Ok(Some("GRANT ON DATABASE")),
         CommandPlan::GrantSchema(_) => Ok(Some("GRANT ON SCHEMA")),

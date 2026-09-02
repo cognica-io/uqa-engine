@@ -746,5 +746,8 @@ mod relation_schema_usage;
 #[path = "sql_information_schema/table_ownership.rs"]
 mod table_ownership;
 
+#[path = "sql_information_schema/table_privileges.rs"]
+mod table_privileges;
+
 #[path = "sql_information_schema/pg18_routines.rs"]
 mod pg18_routines;

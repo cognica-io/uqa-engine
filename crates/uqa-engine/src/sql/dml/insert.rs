@@ -173,6 +173,51 @@ pub(in crate::sql) fn run_insert_inner(
     } else {
         None
     };
+    if stmt.view_rule_relations.is_empty() && !stmt.columns.is_empty() {
+        validate_mutation_columns(
+            engine,
+            &stmt.table,
+            stmt.columns.iter().map(String::as_str),
+            "INSERT",
+        )?;
+    }
+    engine.ensure_table_privilege(
+        &stmt.table,
+        crate::engine_table_security::TableAclPrivilege::Insert,
+    )?;
+    if conflict_update_columns.is_some() {
+        engine.ensure_table_privilege(
+            &stmt.table,
+            crate::engine_table_security::TableAclPrivilege::Update,
+        )?;
+    }
+    let mut privilege_expressions = stmt
+        .returning
+        .iter()
+        .map(|projection| &projection.expr)
+        .collect::<Vec<_>>();
+    if let Some(ConflictPlan {
+        action:
+            ConflictActionPlan::Update {
+                assignments,
+                predicate,
+            },
+        ..
+    }) = stmt.on_conflict.as_ref()
+    {
+        privilege_expressions.extend(assignments.iter().map(|assignment| &assignment.value));
+        privilege_expressions.extend(predicate.iter());
+    }
+    super::ensure_target_table_select_for_expressions(
+        engine,
+        &stmt.table,
+        &stmt.target_qualifier,
+        &stmt.returning_aliases,
+        &privilege_expressions,
+        stmt.on_conflict
+            .as_ref()
+            .is_some_and(|conflict| !conflict.conflict_columns.is_empty()),
+    )?;
     let view_original_query = !stmt.view_rule_relations.iter().try_fold(
         false,
         |suppressed, relation| -> Result<bool, SQLError> {

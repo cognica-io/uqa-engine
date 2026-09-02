@@ -734,6 +734,7 @@ impl Statement {
             | Self::AlterRoutine(_)
             | Self::AlterRoutineOwner(_)
             | Self::GrantRoutine(_)
+            | Self::GrantTable(_)
             | Self::GrantSequence(_)
             | Self::GrantDatabase(_)
             | Self::GrantSchema(_)

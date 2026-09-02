@@ -16,8 +16,10 @@ use serde::{Deserialize, Serialize};
 use crate::backend::{StorageBackendError, StorageBackendResult};
 
 mod schema;
+mod table;
 
 pub use schema::{SchemaAclEntry, SchemaPrivileges, SchemaRow};
+pub use table::{TableAclEntry, TablePrivileges};
 
 /// Durable identity of a SQL relation.
 ///
@@ -203,6 +205,9 @@ pub struct TableSchema {
     /// SQL role that owns the relation. Catalogs created before table role ownership was persisted belong to the bootstrap role.
     #[serde(default = "legacy_table_role_owner")]
     pub role_owner: String,
+    /// Explicit table ACL paths. `None` represents `PostgreSQL`'s null default ACL, in which the owner has every ordinary table privilege.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acl: Option<Vec<TableAclEntry>>,
     /// Stable logical relation identity. `CREATE TABLE` allocates a new value, while renames, schema changes, `TRUNCATE`, and reopen preserve it. A zero value marks a legacy catalog row that the engine upgrades during open.
     #[serde(default)]
     pub object_id: [u8; 16],

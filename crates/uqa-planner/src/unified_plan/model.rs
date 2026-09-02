@@ -532,6 +532,7 @@ pub enum CommandPlan {
     AlterRoutine(uqa_sql::ast::AlterRoutineStmt),
     AlterRoutineOwner(uqa_sql::ast::AlterRoutineOwnerStmt),
     GrantRoutine(uqa_sql::ast::GrantRoutineStmt),
+    GrantTable(uqa_sql::ast::GrantTableStmt),
     GrantSequence(uqa_sql::ast::GrantSequenceStmt),
     GrantDatabase(uqa_sql::ast::GrantDatabaseStmt),
     GrantSchema(uqa_sql::ast::GrantSchemaStmt),

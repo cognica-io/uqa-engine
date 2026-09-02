@@ -33,7 +33,10 @@ impl Engine {
             on_commit: table.on_commit,
             hierarchy: table.hierarchy.read().clone(),
         };
+        let security = table.security();
         serde_json::to_vec(&(
+            security.role_owner,
+            security.acl,
             table.analyzer.read().clone(),
             table.fts_fields.read().clone(),
             vector_dimensions,

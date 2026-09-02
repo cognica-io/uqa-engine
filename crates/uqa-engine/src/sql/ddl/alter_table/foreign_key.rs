@@ -158,6 +158,10 @@ pub(in crate::sql::ddl) fn validate_bound_foreign_key_definition_with_local_stat
             ));
         }
     }
+    engine.ensure_table_privilege(
+        &referenced,
+        crate::engine_table_security::TableAclPrivilege::References,
+    )?;
     foreign_key.ref_table = referenced;
     Ok(())
 }

@@ -1,0 +1,36 @@
+default|true|uqa_table_acl_owner
+chain-catalog|{uqa_table_acl_owner=arwdDxtm/uqa_table_acl_owner,uqa_table_acl_delegate=r*/uqa_table_acl_owner,uqa_table_acl_outsider=a/uqa_table_acl_owner,uqa_table_acl_reader=r/uqa_table_acl_delegate}
+select-granted|ok
+insert-denied|42501
+insert-constant-returning|ok
+insert-column-returning-denied|42501
+insert-column-returning-granted|ok
+update-constant|ok
+update-read-denied|42501
+delete-read-denied|42501
+delete-without-read|ok
+truncate-granted|ok
+analyze-granted|ok
+implicit-owner|true
+dependent-restrict|2BP01
+cascade|true|false|false
+all-tables-schema|true|false
+sequence-table-target|true|false|true
+sequence-catalog|{uqa_table_acl_owner=rwU/uqa_table_acl_owner,uqa_table_acl_reader=rw/uqa_table_acl_owner}
+explicit-overloads|true|true|true|true
+current-overloads|true|true
+missing-oids|NULL|false
+nulls|NULL|NULL
+numeric-table-name|42P01
+invalid-inquiry-privilege|22023
+missing-target-before-role|42P01
+missing-role-before-invalid-privilege|42704
+invalid-grant-privilege|0LP01
+information-schema|1
+catalog|1922|has_table_privilege(name,text,text)|has_table_privilege_name_name|true|s|s|false|16|19 25 25
+catalog|1923|has_table_privilege(name,oid,text)|has_table_privilege_name_id|true|s|s|false|16|19 26 25
+catalog|1924|has_table_privilege(oid,text,text)|has_table_privilege_id_name|true|s|s|false|16|26 25 25
+catalog|1925|has_table_privilege(oid,oid,text)|has_table_privilege_id_id|true|s|s|false|16|26 26 25
+catalog|1926|has_table_privilege(text,text)|has_table_privilege_name|true|s|s|false|16|25 25
+catalog|1927|has_table_privilege(oid,text)|has_table_privilege_id|true|s|s|false|16|26 25
+transfer|uqa_table_acl_new_owner|{uqa_table_acl_delegate=r/uqa_table_acl_new_owner,uqa_table_acl_outsider=arwdDxtm/uqa_table_acl_new_owner,uqa_table_acl_reader=r/uqa_table_acl_new_owner,uqa_table_acl_new_owner=a*r*w*d*D*x*t*m*/uqa_table_acl_new_owner}

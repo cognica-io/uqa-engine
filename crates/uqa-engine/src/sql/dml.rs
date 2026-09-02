@@ -77,6 +77,69 @@ fn resolve_dml_target_name(
         .ok_or_else(|| SQLError::UnknownTable(name.to_string()))
 }
 
+fn expression_reads_target_table(
+    expression: &ScalarExpr,
+    target_columns: &BTreeSet<String>,
+    target_qualifiers: &BTreeSet<String>,
+) -> bool {
+    let mut reads_target = false;
+    expression.visit(&mut |node| match node {
+        ScalarExpr::Column(column) => {
+            reads_target |= target_columns.is_empty() || target_columns.contains(column);
+        }
+        ScalarExpr::QualifiedColumn {
+            qualifier, column, ..
+        } => {
+            reads_target |= target_qualifiers.contains(qualifier)
+                && (target_columns.is_empty() || target_columns.contains(column));
+        }
+        ScalarExpr::Star => reads_target = true,
+        ScalarExpr::QualifiedStar(qualifier) => {
+            reads_target |= target_qualifiers.contains(qualifier);
+        }
+        ScalarExpr::Position(_) => reads_target = true,
+        _ => {}
+    });
+    reads_target
+}
+
+pub(super) fn ensure_target_table_select_for_expressions(
+    engine: &Engine,
+    table: &str,
+    target_qualifier: &str,
+    returning_aliases: &uqa_sql::ast::ReturningAliases,
+    expressions: &[&ScalarExpr],
+    required_without_expression: bool,
+) -> Result<(), SQLError> {
+    let definitions = engine
+        .try_describe_table(table)
+        .map_err(|error| dml_storage_error("table privilege", error))?
+        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+    let target_columns = definitions
+        .iter()
+        .map(|column| column.name.clone())
+        .collect::<BTreeSet<_>>();
+    let relation = RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
+    let target_qualifiers = BTreeSet::from([
+        target_qualifier.to_string(),
+        table.to_string(),
+        relation.name,
+        returning_aliases.old.clone(),
+        returning_aliases.new.clone(),
+    ]);
+    if required_without_expression
+        || expressions.iter().any(|expression| {
+            expression_reads_target_table(expression, &target_columns, &target_qualifiers)
+        })
+    {
+        engine.ensure_table_privilege(
+            table,
+            crate::engine_table_security::TableAclPrivilege::Select,
+        )?;
+    }
+    Ok(())
+}
+
 pub(crate) fn update_lock_strength(
     engine: &Engine,
     table: &str,

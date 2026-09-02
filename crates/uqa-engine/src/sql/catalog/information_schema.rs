@@ -71,9 +71,16 @@ pub(super) fn build_info_schemata(
 pub(super) fn build_info_tables(
     engine: &Engine,
     catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut out = Vec::new();
     for name in catalog.table_names() {
+        let table_snapshot = catalog
+            .table(resolution, &name)?
+            .ok_or_else(|| SQLError::UnknownTable(name.clone()))?;
+        if !catalog.table_is_visible_to(table_snapshot, resolution.current_user()) {
+            continue;
+        }
         let (schema, table) = split_schema_name(&name)?;
         out.push(row([
             ("table_catalog", catalog_name()),
@@ -295,10 +302,13 @@ pub(super) fn build_info_columns(
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut out: Vec<ResultRow> = Vec::new();
     for tname in catalog.table_names() {
-        let cols = &catalog
+        let table_snapshot = catalog
             .table(resolution, &tname)?
-            .ok_or_else(|| SQLError::UnknownTable(tname.clone()))?
-            .columns;
+            .ok_or_else(|| SQLError::UnknownTable(tname.clone()))?;
+        if !catalog.table_is_visible_to(table_snapshot, resolution.current_user()) {
+            continue;
+        }
+        let cols = &table_snapshot.columns;
         let (schema, table) = split_schema_name(&tname)?;
         for (idx, col) in cols.iter().enumerate() {
             out.push(information_schema_column_row(

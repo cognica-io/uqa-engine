@@ -7,10 +7,10 @@
 //! Statistics-driven DPccp join reordering and predicate attachment.
 
 use super::{
-    BTreeMap, BTreeSet, BinaryOp, CommandPlan, JoinAlgorithm, JoinExecutionStrategy,
-    JoinGraphError, JoinGraphResult, JoinOrderOptimizer, JoinOrderTree, JoinPredicate,
-    JoinRelation, QueryPlan, RelationalPlan, ScalarExpr, ScalarFrameBound, SourcePlan,
-    SourceStatistics, UnifiedPlan,
+    BTreeMap, BTreeSet, BinaryOp, CommandPlan, ExpressionPlan, JoinAlgorithm,
+    JoinExecutionStrategy, JoinGraphError, JoinGraphResult, JoinOrderOptimizer, JoinOrderTree,
+    JoinPredicate, JoinRelation, QueryPlan, RelationalPlan, ScalarExpr, ScalarFrameBound,
+    SourcePlan, SourceStatistics, UnifiedPlan,
 };
 
 const DEFAULT_JOIN_CARDINALITY: u64 = 1_000;
@@ -117,11 +117,7 @@ fn reorder_command_joins(
             reorder_unified_plan_joins(body, statistics)?;
         }
         CommandPlan::Execute { params, .. } | CommandPlan::Call { args: params, .. } => {
-            for expression in params {
-                for subquery in &mut expression.subqueries {
-                    reorder_query_joins(subquery, statistics)?;
-                }
-            }
+            reorder_expression_subquery_joins(params, statistics)?;
         }
         CommandPlan::CreateTable(_)
         | CommandPlan::CreateIndex(_)
@@ -153,6 +149,7 @@ fn reorder_command_joins(
         | CommandPlan::AlterRoutine(_)
         | CommandPlan::AlterRoutineOwner(_)
         | CommandPlan::GrantRoutine(_)
+        | CommandPlan::GrantTable(_)
         | CommandPlan::GrantSequence(_)
         | CommandPlan::GrantDatabase(_)
         | CommandPlan::GrantSchema(_)
@@ -165,6 +162,18 @@ fn reorder_command_joins(
         | CommandPlan::CreateRule(_)
         | CommandPlan::DropRule(_)
         | CommandPlan::DoBlock { .. } => {}
+    }
+    Ok(())
+}
+
+fn reorder_expression_subquery_joins(
+    expressions: &mut [ExpressionPlan],
+    statistics: &dyn SourceStatistics,
+) -> JoinGraphResult<()> {
+    for expression in expressions {
+        for subquery in &mut expression.subqueries {
+            reorder_query_joins(subquery, statistics)?;
+        }
     }
     Ok(())
 }

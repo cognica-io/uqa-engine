@@ -38,7 +38,8 @@ pub use catalog::{
     EdgeRow, ForeignTableRow, GraphSnapshot, GraphVertexRow, RelationIdentity, RelationKind,
     SchemaAclEntry, SchemaPrivileges, SchemaRow, SequenceAclEntry, SequenceOptions, SequenceOwner,
     SequenceOwnerDependency, SequencePrivileges, SequenceReservationResult, SequenceRow,
-    SequenceValuePosition, SequenceValueReservation, TableSchema, VectorFieldSchema, ViewRow,
+    SequenceValuePosition, SequenceValueReservation, TableAclEntry, TablePrivileges, TableSchema,
+    VectorFieldSchema, ViewRow,
 };
 pub use clustered_postings::{
     MaterializedPostingCursor, PostingCursor, PostingScore, POSTING_CLUSTER_DOCS,
