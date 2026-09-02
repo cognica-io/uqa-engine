@@ -50,9 +50,10 @@ use select_source::{
 
 pub(in crate::sql) fn run_insert(
     engine: &Engine,
-    stmt: InsertPlan,
+    mut stmt: InsertPlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
+    stmt.table = super::resolve_dml_target_name(engine, &stmt.table)?;
     super::run_mutation_command(engine, move |engine| {
         run_insert_inner(engine, &stmt, params)
     })

@@ -180,8 +180,7 @@ impl Engine {
             Value::Null => Ok(None),
             Value::Int(oid) => Ok(Some(*oid)),
             Value::Str(name) | Value::FixedChar(name) => {
-                crate::sql::resolve_regclass_oid(self, name)
-                    .map_err(SQLError::Internal)?
+                crate::sql::resolve_regclass_oid(self, name)?
                     .map(Some)
                     .ok_or_else(|| SQLError::Routine {
                         sqlstate: "42P01".into(),

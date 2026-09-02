@@ -12,7 +12,7 @@ use uqa_sql::SQLError;
 
 use crate::engine_capabilities::{CatalogReadView, RelationNameResolution};
 
-use super::{query_plan_output_columns, SourcePlan, TABLE_OID_COLUMN, XMIN_COLUMN};
+use super::{query_plan_output_columns, CteScope, SourcePlan, TABLE_OID_COLUMN, XMIN_COLUMN};
 
 pub(super) type ColumnOwners = BTreeMap<String, Option<String>>;
 
@@ -20,9 +20,10 @@ pub(super) fn source_column_owners(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     source: &SourcePlan,
+    ctes: &CteScope,
 ) -> Result<ColumnOwners, SQLError> {
     let mut owners = ColumnOwners::new();
-    collect_source_column_owners(catalog, resolution, source, &mut owners)?;
+    collect_source_column_owners(catalog, resolution, source, ctes, &mut owners)?;
     Ok(owners)
 }
 
@@ -30,6 +31,7 @@ fn collect_source_column_owners(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     source: &SourcePlan,
+    ctes: &CteScope,
     owners: &mut ColumnOwners,
 ) -> Result<(), SQLError> {
     match source {
@@ -40,15 +42,19 @@ fn collect_source_column_owners(
             ..
         } => {
             let qualifier = alias.as_deref().unwrap_or(qualifier);
-            let columns = relation_source_columns(catalog, resolution, name)?;
+            let columns = if ctes.is_visible_cte(name) {
+                Vec::new()
+            } else {
+                relation_source_columns(catalog, resolution, name)?
+            };
             register_column_owners(owners, qualifier, columns);
         }
         SourcePlan::Join {
             left, right, alias, ..
         } => {
             if alias.is_none() {
-                collect_source_column_owners(catalog, resolution, left, owners)?;
-                collect_source_column_owners(catalog, resolution, right, owners)?;
+                collect_source_column_owners(catalog, resolution, left, ctes, owners)?;
+                collect_source_column_owners(catalog, resolution, right, ctes, owners)?;
             }
         }
         SourcePlan::Values {

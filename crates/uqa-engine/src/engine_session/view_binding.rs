@@ -124,7 +124,9 @@ pub(super) fn bind_query_plan_relations<E>(
         bind_query_plan_relations(&mut cte.query, &body_ctes, resolve)?;
         visible_ctes.insert(cte.name.clone());
     }
-    bind_relational_plan_relations(&mut plan.root, &visible_ctes, resolve)
+    bind_relational_plan_relations(&mut plan.root, &visible_ctes, resolve)?;
+    plan.relations_bound = true;
+    Ok(())
 }
 
 pub(super) fn bind_relational_plan_relations<E>(

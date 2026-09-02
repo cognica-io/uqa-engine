@@ -13,17 +13,15 @@ use uqa_sql::SQLError;
 pub(super) fn lock_table_function_relations(
     engine: &Engine,
     relations: Option<&OperatorJoinRelations>,
+    relations_bound: bool,
     locked: &mut std::collections::BTreeSet<String>,
 ) -> Result<(), SQLError> {
     let Some(relations) = relations else {
         return Ok(());
     };
     for relation in [&relations.left, &relations.right] {
-        let Some(table) = engine.try_resolve_table_name(relation).map_err(|error| {
-            SQLError::Internal(format!(
-                "resolve table-function relation `{relation}`: {error}"
-            ))
-        })?
+        let Some((table, "table")) =
+            engine.try_resolve_relation_kind_for_query(relation, relations_bound)?
         else {
             continue;
         };

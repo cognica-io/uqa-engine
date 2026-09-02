@@ -1,0 +1,26 @@
+unqualified-skip|ok|2
+unqualified-missing|42P01|relation "only_table" does not exist
+qualified-existing|42501|permission denied for schema uqa_rel_hidden
+qualified-missing|42501|permission denied for schema uqa_rel_hidden
+missing-schema|42P01|relation "uqa_rel_absent.missing_table" does not exist
+column-precedence|42501|permission denied for schema uqa_rel_hidden
+where-column-precedence|42501|permission denied for schema uqa_rel_hidden
+insert-schema|42501|permission denied for schema uqa_rel_hidden
+update-schema|42501|permission denied for schema uqa_rel_hidden
+delete-schema|42501|permission denied for schema uqa_rel_hidden
+truncate-schema|42501|permission denied for schema uqa_rel_hidden
+alter-schema|42501|permission denied for schema uqa_rel_hidden
+drop-schema|42501|permission denied for schema uqa_rel_hidden
+regclass-hard|42501|permission denied for schema uqa_rel_hidden
+regclass-soft|42501|permission denied for schema uqa_rel_hidden
+bound-view|ok|7
+invoker-view|ok|7
+bound-matview|ok|7
+bound-function|ok|7
+dynamic-invoker|42501|permission denied for schema uqa_rel_hidden
+dynamic-definer|ok|7
+first-visible|ok|1
+prepare-with-usage|ok
+prepared-after-revoke|42501|permission denied for schema uqa_rel_hidden
+bound-cursor|ok|7
+inherited-usage|ok|7

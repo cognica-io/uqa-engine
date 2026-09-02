@@ -330,6 +330,34 @@ impl Engine {
         }
     }
 
+    /// Resolve a SQL relation reference through the current user's effective namespace. This is the dynamic-name boundary; code operating on a returned canonical identity must use exact catalog access rather than repeating name resolution.
+    pub(crate) fn try_resolve_visible_relation_kind(
+        &self,
+        name: &str,
+    ) -> Result<Option<(String, &'static str)>, SQLError> {
+        self.try_resolve_relation_kind_for_query(name, false)
+    }
+
+    /// Resolve a query source with the namespace semantics recorded by its owning plan. Dynamic plans use the current effective namespace; stored plans accept only canonical identities captured by their binder.
+    pub(crate) fn try_resolve_relation_kind_for_query(
+        &self,
+        name: &str,
+        relations_bound: bool,
+    ) -> Result<Option<(String, &'static str)>, SQLError> {
+        self.synchronize_table_catalog()
+            .map_err(|error| SQLError::Internal(format!("load table catalog: {error}")))?;
+        self.synchronize_catalog_registries()
+            .map_err(|error| SQLError::Internal(format!("load relation catalog: {error}")))?;
+        self.refresh_sequences_from_catalog()
+            .map_err(|error| SQLError::Internal(format!("load sequence catalog: {error}")))?;
+        let mut resolution = self.session_execution_view().relation_name_resolution();
+        if relations_bound {
+            resolution.set_lookup_mode(crate::engine_capabilities::RelationLookupMode::Bound);
+        }
+        self.catalog_read_view()
+            .relation_kind_resolved(&resolution, name)
+    }
+
     /// Resolve one name through the shared relation namespace, retaining its
     /// concrete kind. `IF EXISTS` callers use this to distinguish a genuinely
     /// absent object from an object of the wrong kind.

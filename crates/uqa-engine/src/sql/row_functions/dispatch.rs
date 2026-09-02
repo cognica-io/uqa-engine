@@ -14,16 +14,18 @@ use super::{
 pub(in crate::sql) fn execute_function(
     engine: &Engine,
     table: &str,
+    signal_table: &str,
     name: &str,
     args: &[ScalarExpr],
     params: &[SQLParam],
 ) -> Result<Vec<ScoredEntry>, SQLError> {
-    execute_function_with_top_k(engine, table, name, args, params, None)
+    execute_function_with_top_k(engine, table, signal_table, name, args, params, None)
 }
 
 pub(in crate::sql) fn execute_function_with_top_k(
     engine: &Engine,
     table: &str,
+    signal_table: &str,
     name: &str,
     args: &[ScalarExpr],
     params: &[SQLParam],
@@ -82,8 +84,12 @@ pub(in crate::sql) fn execute_function_with_top_k(
                 None => tree,
             };
             let posting = crate::operator_tree_bridge::expect_posting_output(
-                crate::operator_tree_bridge::execute_operator_tree_in_execution(
-                    engine, table, params, &tree,
+                crate::operator_tree_bridge::execute_relation_operator_tree_in_execution(
+                    engine,
+                    table,
+                    signal_table,
+                    params,
+                    &tree,
                 )?,
                 name,
             )?;

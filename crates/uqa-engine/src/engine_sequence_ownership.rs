@@ -84,10 +84,7 @@ impl Engine {
                 )))
             }
         };
-        let Some((canonical, kind)) = self
-            .try_resolve_relation_kind(relation_name)
-            .map_err(|error| SQLError::Internal(format!("resolve relation: {error}")))?
-        else {
+        let Some((canonical, kind)) = self.try_resolve_visible_relation_kind(relation_name)? else {
             return Err(SQLError::Routine {
                 sqlstate: "42P01".into(),
                 message: format!("relation \"{relation_name}\" does not exist"),
@@ -229,13 +226,12 @@ impl Engine {
         let uqa_sql::ast::SequenceOwnership::Column { table, column } = ownership else {
             return Ok(None);
         };
-        let (table_name, kind) = self
-            .try_resolve_relation_kind(table)
-            .map_err(|error| SQLError::Internal(format!("resolve OWNED BY relation: {error}")))?
-            .ok_or_else(|| SQLError::Routine {
-                sqlstate: "42P01".into(),
-                message: format!("relation \"{table}\" does not exist"),
-            })?;
+        let (table_name, kind) =
+            self.try_resolve_visible_relation_kind(table)?
+                .ok_or_else(|| SQLError::Routine {
+                    sqlstate: "42P01".into(),
+                    message: format!("relation \"{table}\" does not exist"),
+                })?;
         if kind != "table" {
             return Err(SQLError::Routine {
                 sqlstate: "42809".into(),

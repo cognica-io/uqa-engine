@@ -829,10 +829,7 @@ fn read_hierarchy(engine: &Engine, table: &str) -> Result<TableHierarchy, SQLErr
 }
 
 fn resolve_table(engine: &Engine, requested: &str) -> Result<String, SQLError> {
-    match engine
-        .try_resolve_relation_kind(requested)
-        .map_err(|error| ddl_storage_error("ALTER TABLE hierarchy", error))?
-    {
+    match engine.try_resolve_visible_relation_kind(requested)? {
         Some((canonical, "table")) => Ok(canonical),
         Some((canonical, kind)) => Err(wrong_object(format!(
             "relation \"{canonical}\" is a {kind}, not a table"

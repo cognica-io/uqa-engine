@@ -141,15 +141,13 @@ impl Engine {
             });
         }
         self.with_implicit_transaction(move |engine| {
-            let (canonical, kind) = engine
-                .try_resolve_relation_kind(name)
-                .map_err(|error| {
-                    SQLError::Internal(format!("resolve materialized view `{name}`: {error}"))
-                })?
-                .ok_or_else(|| SQLError::Routine {
-                    sqlstate: "42P01".into(),
-                    message: format!("relation \"{name}\" does not exist"),
-                })?;
+            let (canonical, kind) =
+                engine
+                    .try_resolve_visible_relation_kind(name)?
+                    .ok_or_else(|| SQLError::Routine {
+                        sqlstate: "42P01".into(),
+                        message: format!("relation \"{name}\" does not exist"),
+                    })?;
             if kind != "materialized view" {
                 return Err(SQLError::Routine {
                     sqlstate: "0A000".into(),

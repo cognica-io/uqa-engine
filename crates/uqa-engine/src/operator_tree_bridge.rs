@@ -335,6 +335,7 @@ enum DriverExecution {
 pub struct EngineDriver<'a> {
     pub engine: &'a Engine,
     pub table: &'a str,
+    signal_table: &'a str,
     pub params: &'a [SQLParam],
     pub parallel: ParallelExecutor,
     execution: DriverExecution,
@@ -346,6 +347,7 @@ impl<'a> EngineDriver<'a> {
         Self {
             engine,
             table,
+            signal_table: table,
             params,
             parallel: ParallelExecutor::default(),
             execution: DriverExecution::Public,
@@ -360,6 +362,23 @@ impl<'a> EngineDriver<'a> {
         Self {
             engine,
             table,
+            signal_table: table,
+            params,
+            parallel: ParallelExecutor::default(),
+            execution: DriverExecution::InExecution,
+        }
+    }
+
+    fn new_for_relation_in_execution(
+        engine: &'a Engine,
+        table: &'a str,
+        signal_table: &'a str,
+        params: &'a [SQLParam],
+    ) -> EngineDriver<'a> {
+        Self {
+            engine,
+            table,
+            signal_table,
             params,
             parallel: ParallelExecutor::default(),
             execution: DriverExecution::InExecution,
@@ -378,9 +397,11 @@ impl<'a> EngineDriver<'a> {
     fn bayesian_params_for(&self, field: &str) -> DriverResult<uqa_scoring::BayesianBM25Params> {
         match self.execution {
             DriverExecution::Public => self.engine.bayesian_params_for(self.table, field),
-            DriverExecution::InExecution => self
-                .engine
-                .bayesian_params_for_in_execution(self.table, field),
+            DriverExecution::InExecution => self.engine.bayesian_params_for_relation_in_execution(
+                self.table,
+                self.signal_table,
+                field,
+            ),
         }
     }
 
@@ -906,5 +927,6 @@ mod execution;
 pub use execution::run_optimised;
 pub(crate) use execution::{
     combine_signal_priors, direct_vector_retrieval, execute_operator_tree_in_execution,
-    execute_scored_tree, expect_posting_output, run_accelerated,
+    execute_relation_operator_tree_in_execution, execute_scored_tree, expect_posting_output,
+    run_accelerated,
 };

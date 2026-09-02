@@ -51,10 +51,7 @@ pub(in crate::sql) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLRes
         DropKind::Table | DropKind::View | DropKind::MaterializedView => {
             let mut table_targets = Vec::new();
             for name in &stmt.names {
-                if let Some((canonical, kind)) = engine
-                    .try_resolve_relation_kind(name)
-                    .map_err(|err| ddl_storage_error("DROP relation lock", err))?
-                {
+                if let Some((canonical, kind)) = engine.try_resolve_visible_relation_kind(name)? {
                     if stmt.kind == DropKind::Table && kind == "table" {
                         table_targets.push(canonical.clone());
                     }
@@ -132,10 +129,7 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
         DropKind::Table => {
             let mut tables = Vec::new();
             for name in &stmt.names {
-                match engine
-                    .try_resolve_relation_kind(name)
-                    .map_err(|err| ddl_storage_error("DROP TABLE", err))?
-                {
+                match engine.try_resolve_visible_relation_kind(name)? {
                     Some((canonical, "table")) => tables.push(canonical),
                     Some((canonical, kind)) => {
                         return Err(SQLError::Unsupported(format!(
@@ -218,10 +212,7 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
             };
             let mut views = Vec::new();
             for name in &stmt.names {
-                match engine
-                    .try_resolve_relation_kind(name)
-                    .map_err(|err| ddl_storage_error(command, err))?
-                {
+                match engine.try_resolve_visible_relation_kind(name)? {
                     Some((canonical, kind)) if kind == expected_kind => views.push(canonical),
                     Some((canonical, kind)) => {
                         return Err(SQLError::Routine {

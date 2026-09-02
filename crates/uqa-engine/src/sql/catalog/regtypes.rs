@@ -123,10 +123,7 @@ fn lookup_regclass_oid(engine: &Engine, name: &str) -> Result<Option<i64>, SQLEr
         || uqa_sql::expr::quote_ident(local),
         |schema| qualified_name(schema, local),
     );
-    let Some((canonical, kind)) = engine
-        .try_resolve_relation_kind(&reference)
-        .map_err(|error| SQLError::Internal(error.to_string()))?
-    else {
+    let Some((canonical, kind)) = engine.try_resolve_visible_relation_kind(&reference)? else {
         return Ok(None);
     };
     if kind == "sequence" {
@@ -161,8 +158,8 @@ fn lookup_regclass_oid(engine: &Engine, name: &str) -> Result<Option<i64>, SQLEr
     )))
 }
 
-pub(crate) fn resolve_regclass_oid(engine: &Engine, name: &str) -> Result<Option<i64>, String> {
-    lookup_regclass_oid(engine, name).map_err(|error| error.to_string())
+pub(crate) fn resolve_regclass_oid(engine: &Engine, name: &str) -> Result<Option<i64>, SQLError> {
+    lookup_regclass_oid(engine, name)
 }
 
 pub(crate) fn resolve_regclass_kind_by_oid(
@@ -782,9 +779,7 @@ fn qualified_name(schema: &str, local: &str) -> String {
 }
 
 fn visible_relation_schema(engine: &Engine, local: &str) -> Result<Option<String>, SQLError> {
-    let physical = engine
-        .try_resolve_relation_kind(local)
-        .map_err(|error| SQLError::Internal(error.to_string()))?;
+    let physical = engine.try_resolve_visible_relation_kind(local)?;
     if let Some((canonical, _)) = physical.as_ref() {
         if let Some((schema, _)) = canonical.rsplit_once('.') {
             if schema.starts_with("pg_temp_") {

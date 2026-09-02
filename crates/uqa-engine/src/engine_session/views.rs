@@ -260,10 +260,7 @@ impl Engine {
 
     pub fn drop_view(&self, name: &str) -> Result<bool, SQLError> {
         self.with_implicit_transaction(|engine| {
-            match engine
-                .try_resolve_relation_kind(name)
-                .map_err(|err| SQLError::Internal(format!("refresh view catalog: {err}")))?
-            {
+            match engine.try_resolve_visible_relation_kind(name)? {
                 Some((canonical, "view")) => {
                     engine.drop_views_inner(&[canonical])?;
                     Ok(true)

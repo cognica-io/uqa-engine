@@ -82,59 +82,78 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
         include_descendants,
     } = from
     {
-        let catalog = ctes.catalog_read_view()?;
-        let resolution = ctes.relation_name_resolution()?;
-        let foreign_table = catalog.foreign_table_entry_resolved(&resolution, name)?;
-        if alias.is_none() && foreign_table.is_some() {
-            validate_query_block_references(engine, stmt, &expression_schema, params, ctes)?;
-            return run_single_foreign_select_output(
-                engine,
-                SingleRelation {
-                    relation_name: name,
-                    qualifier,
-                },
-                block,
-                stmt,
-                params,
-                ctes,
-                output_mode,
-            );
-        }
-        let local_table = catalog.table_name_resolved(&resolution, name)?;
-        let is_virtual = name.contains('.') || (local_table.is_none() && foreign_table.is_none());
-        let schemaless = local_table.is_some()
-            && catalog
-                .table_resolved(&resolution, name)?
-                .is_some_and(|table| table.columns.is_empty());
-        let command_overlay =
-            ctes.reads_command_overlay() && engine.command_mutation_overlay_active();
-        let has_hierarchy_descendants = local_table.is_some()
-            && catalog
-                .hierarchy_scan_tables(&resolution, name, *include_descendants)?
-                .len()
-                > 1;
-        if alias.is_none() && !is_virtual && !command_overlay && !has_hierarchy_descendants {
-            if let Some(filter) = stmt.r#where.as_ref() {
-                crate::sql::validate_expr_text_match_fields(engine, name, filter)?;
+        if !ctes.is_visible_cte(name) {
+            let catalog = ctes.catalog_read_view()?;
+            let resolution = ctes.relation_name_resolution()?;
+            let foreign_table = catalog.foreign_table_entry_resolved(&resolution, name)?;
+            if alias.is_none() && foreign_table.is_some() {
+                let foreign_name = foreign_table
+                    .as_ref()
+                    .map(|(canonical, _)| canonical.as_str())
+                    .expect("foreign table presence checked above");
+                validate_query_block_references(engine, stmt, &expression_schema, params, ctes)?;
+                return run_single_foreign_select_output(
+                    engine,
+                    SingleRelation {
+                        reference_name: name,
+                        relation_name: foreign_name,
+                        qualifier,
+                    },
+                    block,
+                    stmt,
+                    params,
+                    ctes,
+                    output_mode,
+                );
             }
-            let reference_schema = if schemaless {
-                schemaless_reference_schema(engine, stmt, from, qualifier, outer.as_ref(), ctes)?
-            } else {
-                expression_schema.clone()
-            };
-            validate_query_block_references(engine, stmt, &reference_schema, params, ctes)?;
-            return run_single_table_select_output(
-                engine,
-                SingleRelation {
-                    relation_name: name,
-                    qualifier,
-                },
-                block,
-                stmt,
-                params,
-                ctes,
-                output_mode,
-            );
+            let local_table = catalog.table_name_resolved(&resolution, name)?;
+            let is_virtual =
+                name.contains('.') || (local_table.is_none() && foreign_table.is_none());
+            let schemaless = local_table.is_some()
+                && catalog
+                    .table_resolved(&resolution, name)?
+                    .is_some_and(|table| table.columns.is_empty());
+            let command_overlay =
+                ctes.reads_command_overlay() && engine.command_mutation_overlay_active();
+            let has_hierarchy_descendants = local_table.is_some()
+                && catalog
+                    .hierarchy_scan_tables(&resolution, name, *include_descendants)?
+                    .len()
+                    > 1;
+            if alias.is_none() && !is_virtual && !command_overlay && !has_hierarchy_descendants {
+                let local_table = local_table
+                    .as_deref()
+                    .expect("single-table fast path requires a resolved table");
+                if let Some(filter) = stmt.r#where.as_ref() {
+                    crate::sql::validate_expr_text_match_fields(engine, local_table, filter)?;
+                }
+                let reference_schema = if schemaless {
+                    schemaless_reference_schema(
+                        engine,
+                        stmt,
+                        from,
+                        qualifier,
+                        outer.as_ref(),
+                        ctes,
+                    )?
+                } else {
+                    expression_schema.clone()
+                };
+                validate_query_block_references(engine, stmt, &reference_schema, params, ctes)?;
+                return run_single_table_select_output(
+                    engine,
+                    SingleRelation {
+                        reference_name: name,
+                        relation_name: local_table,
+                        qualifier,
+                    },
+                    block,
+                    stmt,
+                    params,
+                    ctes,
+                    output_mode,
+                );
+            }
         }
     }
 
@@ -255,7 +274,7 @@ pub(in crate::sql) fn column_prune_for_stmt_with_filter(
         return Ok(None);
     }
 
-    let metadata_binding = single_local_table_metadata_binding(&catalog, &resolution, from)?;
+    let metadata_binding = single_local_table_metadata_binding(&catalog, &resolution, from, ctes)?;
     let scope = PruneScope {
         qualifiers: &qualifiers,
         metadata_qualifier: metadata_binding
@@ -343,6 +362,7 @@ fn single_local_table_metadata_binding(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     source: &SourcePlan,
+    ctes: &CteScope,
 ) -> Result<Option<LocalTableMetadataBinding>, SQLError> {
     if source_contains_join_alias(source) {
         return Ok(None);
@@ -351,6 +371,7 @@ fn single_local_table_metadata_binding(
         catalog: &CatalogReadView,
         resolution: &RelationNameResolution,
         source: &SourcePlan,
+        ctes: &CteScope,
         relations: &mut BTreeSet<(String, String)>,
     ) -> Result<(), SQLError> {
         match source {
@@ -360,13 +381,15 @@ fn single_local_table_metadata_binding(
                 alias,
                 ..
             } => {
-                if let Some(name) = catalog.table_name_resolved(resolution, name)? {
-                    relations.insert((alias.as_deref().unwrap_or(qualifier).to_string(), name));
+                if !ctes.is_visible_cte(name) {
+                    if let Some(name) = catalog.table_name_resolved(resolution, name)? {
+                        relations.insert((alias.as_deref().unwrap_or(qualifier).to_string(), name));
+                    }
                 }
             }
             SourcePlan::Join { left, right, .. } => {
-                collect(catalog, resolution, left, relations)?;
-                collect(catalog, resolution, right, relations)?;
+                collect(catalog, resolution, left, ctes, relations)?;
+                collect(catalog, resolution, right, ctes, relations)?;
             }
             SourcePlan::Values { .. }
             | SourcePlan::Function { .. }
@@ -376,7 +399,7 @@ fn single_local_table_metadata_binding(
         Ok(())
     }
     let mut relations = BTreeSet::new();
-    collect(catalog, resolution, source, &mut relations)?;
+    collect(catalog, resolution, source, ctes, &mut relations)?;
     let Some((qualifier, name)) = relations.pop_first() else {
         return Ok(None);
     };

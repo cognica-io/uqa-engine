@@ -15,6 +15,7 @@
     "database_privileges": "tests/parity/pg18/database_privilege_oracle.expected.txt",
     "database_privilege_enforcement": "tests/parity/pg18/database_privilege_enforcement_oracle.expected.txt",
     "schema_privilege_inquiry": "tests/parity/pg18/schema_privilege_inquiry_oracle.expected.txt",
+    "relation_schema_usage": "tests/parity/pg18/relation_schema_usage_oracle.expected.txt",
     "sequence_introspection": "tests/parity/pg18/sequence_introspection_oracle.expected.txt",
     "transaction_catalog_visibility": "tests/parity/pg18/transaction_catalog_visibility_oracle.expected.txt",
     "tpch_fixture": "benchmarks/tpch/expected/pg18.json"
@@ -117,6 +118,7 @@
       "dml.returning-row-images-extended",
       "dml.merge-not-matched-by-source",
       "query.row-locking-complete-matrix",
+      "relations.schema-usage",
       "query.cte-search-cycle-and-materialization",
       "functions.full-pg18-matrix",
       "routines.polymorphic-variadic-pseudotype-overloads",
@@ -427,12 +429,20 @@
       "open_issue": "SQL-standard command-body and parameter-default dependencies, every remaining PostgreSQL dependency-object kind, exact catalog deletion ordering, and complete diagnostic detail remain to be implemented and differentially verified."
     },
     {
+      "id": "relations.schema-usage",
+      "postgresql_reference": "PostgreSQL 18.4 live relation namespace resolution and SQLSTATE transcript in tests/parity/pg18/relation_schema_usage_oracle.expected.txt",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_catalog::sql_information_schema::relation_schema_usage::; tests/parity/pg18/relation_schema_usage_oracle.sql",
+      "supported_version": "PostgreSQL 18.4 schema USAGE enforcement for qualified and effective-search-path table, view, materialized-view, and foreign-table query lookup; INSERT, UPDATE, DELETE, TRUNCATE, ALTER TABLE, DROP TABLE, stored-view creation, and hard or soft regclass lookup; inherited grants and immediate prepared-plan revocation; namespace-check-free exact table identities stored in views, materialized views, SQL-standard query bodies, and declared cursors; and security-context-aware dynamic SQL bodies",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
       "id": "routines.extension-language-privilege-security",
       "postgresql_reference": "PostgreSQL 18.4 CREATE, ALTER, execution, and catalog behavior for procedural and extension languages, ownership, roles, schema privileges, per-grantor ACLs, dependency-aware REVOKE, SECURITY DEFINER and INVOKER, SET clauses, support functions, leakproofness, parallel safety, and routine configuration; tests/parity/pg18/routine_security_cursor_oracle.md, tests/parity/pg18/roles_stateful.expected.json, tests/parity/pg18/schema_privilege_inquiry_oracle.expected.txt, tests/parity/pg18/schema_create_enforcement_oracle.expected.txt, and tests/parity/pg18/routine_schema_usage_oracle.expected.txt",
       "uqa_test": "python3 tests/parity/pg18/run_routines_stateful.py --suite roles; cargo test -p uqa-sql --lib compiler::tests::routines::; cargo test -p uqa-execution --lib has_schema_privilege_registers_every_postgresql_name_and_oid_overload; cargo test -p uqa-engine --test integration sql_sequences::security::schema_inquiry; cargo test -p uqa-engine --test integration sql_information_schema::schema_privilege_enforcement; cargo test -p uqa-engine --test integration engine_functions::sql_routine_identity::security_roles::schema_usage::; cargo test -p uqa-engine --test integration engine_functions::sql_routine_identity::security_roles::; cargo test -p uqa-engine --test integration engine_functions::sql_routine_identity::; cargo test -p uqa-engine --test integration engine_functions::sql_plpgsql::",
       "supported_version": "Durable logical role creation, supported role-attribute alteration and removal with PostgreSQL 18 CREATEROLE delegation limits; CREATE ROLE membership clauses and legacy ALTER GROUP membership changes; per-grantor GRANT and REVOKE ROLE with ADMIN, INHERIT, and SET options, option-only revocation, dependency-aware RESTRICT and CASCADE, cycles, transactions, role-drop lifecycle, pg_auth_members, and transitive privilege inheritance and role assumption; all six name/OID pg_has_role overloads with MEMBER, USAGE, SET, ADMIN or GRANT option aliases, comma lists, strict NULL, exact errors, and pg_proc metadata; all six current-user or explicit-role name/OID has_schema_privilege overloads with USAGE, CREATE, WITH GRANT OPTION, comma-any checks, inherited owner and ACL paths, system and current temporary namespace behavior, strict NULL, missing-object and error precedence, and exact pg_proc metadata; schema CREATE enforcement across supported durable table, CTAS, SELECT INTO, view, materialized-view, sequence, foreign-table, function, procedure, index, and indexed key-constraint creation with effective-search-path USAGE, inherited grants, immediate revocation, transactions, savepoints, inferred temporary views, and exact source-analysis, definition-error, and collision precedence; schema USAGE enforcement for qualified and effective-search-path function and procedure calls, ALTER, DROP, GRANT, and REVOKE target lookup, inherited grants, immediate revocation and prepared-plan invalidation, schema-before-object error precedence, invoker and definer contexts, and namespace-check-free exact bindings stored in views, generated expressions, and SQL-standard bodies; SET and RESET ROLE with distinct current_user and session_user; membership-aware routine implicit ownership, replacement, drop, ownership transfer, and EXECUTE ACL checks; default PUBLIC EXECUTE plus owner, inherited, and non-owner grant-option sources, independent per-grantor ACL paths, GRANTED BY current-user validation, warning no-ops without grant option, dependency-aware RESTRICT and recursive CASCADE with alternate-path retention, owner-transfer grantor rewriting, and exact pg_proc ACL output; SECURITY DEFINER SET ROLE rejection and successful SECURITY INVOKER role persistence with error restoration; routine-local SET configuration; superuser-gated leakproof and recognized PostgreSQL support-function metadata; parallel-safety metadata; pg_roles, pg_user, pg_auth_members, pg_namespace, and pg_proc exposure; atomic persistence and reopen",
       "status": "partial",
-      "open_issue": "Passwords, per-role settings, ordinary relation and remaining object schema USAGE, remaining object ownership and ACL enforcement, default privileges, row-level-security interactions, extension languages, and complete support-function, planner, and server-security consequences remain."
+      "open_issue": "Passwords, per-role settings, remaining object schema USAGE, ordinary relation and remaining object ownership and ACL enforcement, default privileges, row-level-security interactions, extension languages, and complete support-function, planner, and server-security consequences remain."
     },
     {
       "id": "functions.json-null-stripping",

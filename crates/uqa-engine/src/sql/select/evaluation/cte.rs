@@ -10,10 +10,34 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::Ordering;
 
 use uqa_planner::{CtePlan, QueryPlan};
+use uqa_sql::SQLError;
 
 use super::{CteScope, LockIdentityOptions};
+use crate::engine_capabilities::RelationLookupMode;
 
 impl CteScope {
+    /// Select the namespace semantics owned by one query plan and restore the parent plan's mode on every exit path.
+    pub(in crate::sql) fn enter_relation_lookup_mode(
+        &mut self,
+        relations_bound: bool,
+    ) -> Result<RelationLookupScope<'_>, SQLError> {
+        let resolution = self.catalog_resolution.as_mut().ok_or_else(|| {
+            SQLError::Internal(
+                "query execution scope has no statement name-resolution snapshot".into(),
+            )
+        })?;
+        let lookup_mode = if relations_bound {
+            RelationLookupMode::Bound
+        } else {
+            RelationLookupMode::Dynamic
+        };
+        let previous = resolution.set_lookup_mode(lookup_mode);
+        Ok(RelationLookupScope {
+            ctes: self,
+            previous,
+        })
+    }
+
     pub(in crate::sql) fn insert_shared(&mut self, name: String, rows: uqa_execution::SharedSpill) {
         self.deferred_ctes.remove(&name);
         self.rows.insert(name, rows);
@@ -143,6 +167,36 @@ impl CteScope {
 
     pub(in crate::sql) fn scans_backwards(&self) -> bool {
         self.scan_backwards
+    }
+}
+
+pub(in crate::sql) struct RelationLookupScope<'a> {
+    ctes: &'a mut CteScope,
+    previous: RelationLookupMode,
+}
+
+impl std::ops::Deref for RelationLookupScope<'_> {
+    type Target = CteScope;
+
+    fn deref(&self) -> &Self::Target {
+        self.ctes
+    }
+}
+
+impl std::ops::DerefMut for RelationLookupScope<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.ctes
+    }
+}
+
+impl Drop for RelationLookupScope<'_> {
+    fn drop(&mut self) {
+        let resolution = self
+            .ctes
+            .catalog_resolution
+            .as_mut()
+            .expect("relation lookup scope lost its statement resolution");
+        resolution.set_lookup_mode(self.previous);
     }
 }
 

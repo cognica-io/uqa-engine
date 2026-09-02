@@ -9,6 +9,7 @@
     "CatalogTableSnapshot",
     "MutationCoordinator",
     "QueryRuntimeView",
+    "RelationLookupMode",
     "RelationNameResolution",
     "SessionExecutionView"
   ],

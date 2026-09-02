@@ -124,6 +124,11 @@ pub trait EngineHook {
         Ok(None)
     }
 
+    /// Resolve `regclass` input while preserving typed SQL errors. Embedders that implement the historical string-error hook retain its previous behavior; engines with catalog privilege checks override this method directly.
+    fn resolve_regclass_input(&self, name: &str) -> Result<Option<i64>> {
+        self.resolve_regclass(name).map_err(SQLError::Internal)
+    }
+
     /// Resolve an exact routine signature to the OID carrier used by `regprocedure`.
     fn resolve_regprocedure(&self, _name: &str) -> std::result::Result<Option<i64>, String> {
         Ok(None)
@@ -142,7 +147,7 @@ pub trait EngineHook {
     /// Resolve the text argument of one `PostgreSQL` `to_reg*` lookup function. The engine override owns catalog visibility and the lookup function's NULL-versus-error boundary; the default preserves the two historical hooks for embedders that only implement `regclass` or `regprocedure`.
     fn resolve_regobject(&self, ty: &ColumnType, name: &str) -> Result<Option<i64>> {
         match ty {
-            ColumnType::Regclass => self.resolve_regclass(name).map_err(SQLError::Internal),
+            ColumnType::Regclass => self.resolve_regclass_input(name),
             ColumnType::Regprocedure => self.resolve_regprocedure(name).map_err(SQLError::Internal),
             ColumnType::Regrole => self.resolve_regrole(name),
             ColumnType::Regproc | ColumnType::Regnamespace | ColumnType::Regtype => Ok(None),
@@ -340,8 +345,7 @@ pub fn cast_value_with_type_resolution(
     if target_ty.eq_ignore_ascii_case("regclass") {
         if let (Some(engine), Value::Str(name) | Value::FixedChar(name)) = (engine, value) {
             return engine
-                .resolve_regclass(name)
-                .map_err(SQLError::Internal)?
+                .resolve_regclass_input(name)?
                 .map(Value::Int)
                 .ok_or_else(|| SQLError::Routine {
                     sqlstate: "42P01".into(),

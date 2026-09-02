@@ -15,6 +15,16 @@ use super::{
 
 impl Engine {
     pub(super) fn bind_view_plan_for_create(&self, plan: &mut QueryPlan) -> Result<bool, SQLError> {
+        self.bind_stored_query_relations(plan, "CREATE VIEW", true)
+    }
+
+    /// Bind the relation identities owned by a stored SQL query. The resulting plan no longer participates in the executing session's relation namespace.
+    pub(crate) fn bind_stored_query_relations(
+        &self,
+        plan: &mut QueryPlan,
+        context: &str,
+        reject_transition_relations: bool,
+    ) -> Result<bool, SQLError> {
         let temporary_schema = self.temporary_schema_name();
         let transition_relations = crate::sql::active_trigger_transition_relation_names();
         let mut uses_temporary_relation = false;
@@ -35,14 +45,16 @@ impl Engine {
                     schema.is_none() && transition_relations.contains(&relation)
                 })
             {
-                return Err(SQLError::Routine {
-                    sqlstate: "0A000".into(),
-                    message: "transition tables cannot be referenced in a view definition".into(),
-                });
+                if reject_transition_relations {
+                    return Err(SQLError::Routine {
+                        sqlstate: "0A000".into(),
+                        message: "transition tables cannot be referenced in a view definition"
+                            .into(),
+                    });
+                }
+                return Ok(reference.to_string());
             }
-            match self.try_resolve_relation_kind(reference).map_err(|error| {
-                SQLError::Internal(format!("resolve CREATE VIEW source `{reference}`: {error}"))
-            })? {
+            match self.try_resolve_visible_relation_kind(reference)? {
                 Some((canonical, "table" | "view" | "materialized view" | "foreign table")) => {
                     uses_temporary_relation |= RelationIdentity::from_legacy_name(&canonical)
                         .is_ok_and(|relation| relation.schema == temporary_schema);
@@ -51,7 +63,7 @@ impl Engine {
                 Some((canonical, kind)) => Err(SQLError::Routine {
                     sqlstate: "42809".into(),
                     message: format!(
-                        "CREATE VIEW source \"{canonical}\" is a {kind}, not a row relation"
+                        "{context} source \"{canonical}\" is a {kind}, not a row relation"
                     ),
                 }),
                 None => Err(SQLError::UnknownTable(reference.to_string())),
@@ -61,7 +73,7 @@ impl Engine {
             self.resolve_sequence_reference_for_binding(reference)
                 .map_err(|error| {
                     SQLError::Unsupported(format!(
-                        "CREATE VIEW sequence reference `{reference}`: {error}"
+                        "{context} sequence reference `{reference}`: {error}"
                     ))
                 })
         })?;

@@ -20,15 +20,8 @@ impl Engine {
                 AlterViewKind::View => "view",
                 AlterViewKind::MaterializedView => "materialized view",
             };
-            let Some((canonical, actual_kind)) = engine
-                .try_resolve_relation_kind(&statement.name)
-                .map_err(|error| {
-                    SQLError::Internal(format!(
-                        "resolve ALTER {} target `{}`: {error}",
-                        expected_kind.to_ascii_uppercase(),
-                        statement.name
-                    ))
-                })?
+            let Some((canonical, actual_kind)) =
+                engine.try_resolve_visible_relation_kind(&statement.name)?
             else {
                 if statement.if_exists {
                     return Ok(());

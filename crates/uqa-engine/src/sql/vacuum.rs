@@ -432,12 +432,10 @@ pub(super) fn run_vacuum(engine: &Engine, statement: &VacuumStmt) -> Result<SQLR
                 message: format!("cross-database references are not implemented: \"{qualified}\""),
             });
         }
-        let canonical = engine
-            .try_resolve_table_name(&target.table)
-            .map_err(|error| {
-                SQLError::Internal(format!("resolve VACUUM target `{}`: {error}", target.table))
-            })?
-            .ok_or_else(|| SQLError::UnknownTable(target.table.clone()))?;
+        let canonical = match engine.try_resolve_visible_relation_kind(&target.table)? {
+            Some((canonical, "table")) => canonical,
+            Some(_) | None => return Err(SQLError::UnknownTable(target.table.clone())),
+        };
         let table = engine.require_table(&canonical)?;
         if !target.columns.is_empty() {
             let available = table

@@ -26,6 +26,9 @@ pub enum UnifiedPlan {
 /// A relational query with its CTE scope and one relational root.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct QueryPlan {
+    /// Whether relation references in this tree are stored catalog identities rather than names that must be resolved in the executing session.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub relations_bound: bool,
     pub ctes: Vec<CtePlan>,
     pub root: RelationalPlan,
 }

@@ -62,10 +62,7 @@ pub(in crate::sql) fn run_alter_table(
                 .into(),
         });
     }
-    match engine
-        .try_resolve_relation_kind(&stmt.table)
-        .map_err(|err| ddl_storage_error("ALTER TABLE", err))?
-    {
+    match engine.try_resolve_visible_relation_kind(&stmt.table)? {
         Some((canonical, "table")) => stmt.table = canonical,
         Some((canonical, "sequence")) => {
             return run_alter_sequence_with_table_syntax(engine, canonical, &stmt);

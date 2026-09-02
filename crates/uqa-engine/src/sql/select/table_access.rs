@@ -31,6 +31,7 @@ pub(in crate::sql) fn run_single_table_select_output(
     output_mode: QueryOutputMode,
 ) -> Result<QueryOutput, SQLError> {
     let SingleRelation {
+        reference_name,
         relation_name: table,
         qualifier,
     } = relation;
@@ -81,13 +82,20 @@ pub(in crate::sql) fn run_single_table_select_output(
         Some(execute_function_with_top_k(
             engine,
             table,
+            reference_name,
             name,
             args,
             params,
             Some(top_k),
         )?)
     } else {
-        crate::operator_tree_bridge::run_accelerated(engine, table, stmt.r#where.as_ref(), params)?
+        crate::operator_tree_bridge::run_accelerated(
+            engine,
+            table,
+            reference_name,
+            stmt.r#where.as_ref(),
+            params,
+        )?
     };
     let score_bearing_filter = stmt
         .r#where
@@ -101,7 +109,15 @@ pub(in crate::sql) fn run_single_table_select_output(
             AccessPathPlan::Hybrid => {
                 let rows = match stmt.r#where.as_ref() {
                     Some(filter) => ScoredInput::entries(
-                        execute_mixed_where(engine, table, filter, params, ctes)?,
+                        execute_mixed_where(
+                            engine,
+                            table,
+                            reference_name,
+                            qualifier,
+                            filter,
+                            params,
+                            ctes,
+                        )?,
                         uqa_planner::optimizer::contains_retrieval(filter),
                     ),
                     None => ScoredInput::All,
@@ -115,7 +131,7 @@ pub(in crate::sql) fn run_single_table_select_output(
                             && !expr_is_jsonpath_fts_match(filter_expr) =>
                     {
                         ScoredInput::entries(
-                            execute_function(engine, table, name, args, params)?,
+                            execute_function(engine, table, reference_name, name, args, params)?,
                             uqa_planner::optimizer::contains_retrieval(filter_expr),
                         )
                     }

@@ -88,6 +88,7 @@ type OutputColumnMapping = (String, ScalarExpr);
 
 #[derive(Clone, Copy)]
 pub(in crate::sql) struct SingleRelation<'a> {
+    pub reference_name: &'a str,
     pub relation_name: &'a str,
     pub qualifier: &'a str,
 }

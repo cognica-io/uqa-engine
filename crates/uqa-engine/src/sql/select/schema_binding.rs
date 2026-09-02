@@ -194,6 +194,26 @@ impl SchemaScope {
         outer: Option<&RowSchema>,
         preserve_top_level_unknown: bool,
     ) -> Result<RowSchema, SQLError> {
+        let lookup_mode = if plan.relations_bound {
+            crate::engine_capabilities::RelationLookupMode::Bound
+        } else {
+            crate::engine_capabilities::RelationLookupMode::Dynamic
+        };
+        let previous = self.resolution.set_lookup_mode(lookup_mode);
+        let result =
+            self.bind_query_mode_inner(routines, plan, params, outer, preserve_top_level_unknown);
+        self.resolution.set_lookup_mode(previous);
+        result
+    }
+
+    fn bind_query_mode_inner(
+        &mut self,
+        routines: &dyn RoutineResolution,
+        plan: &QueryPlan,
+        params: &[SQLParam],
+        outer: Option<&RowSchema>,
+        preserve_top_level_unknown: bool,
+    ) -> Result<RowSchema, SQLError> {
         let mut previous = Vec::with_capacity(plan.ctes.len());
         for cte in ordered_plan_ctes(plan)? {
             let self_recursive = cte_references_own_name(cte);

@@ -72,6 +72,14 @@ pub(crate) struct RelationNameResolution {
     pub(super) search_path: Vec<String>,
     pub(super) temporary_schema: String,
     pub(super) current_user: String,
+    pub(super) lookup_mode: RelationLookupMode,
+}
+
+/// Whether a query resolves session-visible names or follows catalog identities captured when a stored expression was defined.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RelationLookupMode {
+    Dynamic,
+    Bound,
 }
 
 /// Read-only session values visible to statement execution. Durable registries and storage backends are intentionally absent.
@@ -112,6 +120,7 @@ impl SessionExecutionView<'_> {
             search_path: self.search_path(),
             temporary_schema: self.temporary_schema_name(),
             current_user: self.current_user(),
+            lookup_mode: RelationLookupMode::Dynamic,
         }
     }
 

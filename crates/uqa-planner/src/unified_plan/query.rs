@@ -32,7 +32,11 @@ impl QueryPlan {
         let ctes = lower_ctes(&statement.with, aggregates);
         statement.with.clear();
         let root = lower_relational_root(statement, aggregates);
-        Self { ctes, root }
+        Self {
+            relations_bound: false,
+            ctes,
+            root,
+        }
     }
 }
 
@@ -179,6 +183,7 @@ pub(super) fn lower_relational_root(
         QueryPlan::lower_with(*left, aggregates)
     } else {
         QueryPlan {
+            relations_bound: false,
             ctes: Vec::new(),
             root: RelationalPlan::QueryBlock(Box::new(QueryBlockPlan::lower_with(
                 statement, aggregates,

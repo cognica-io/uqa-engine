@@ -37,7 +37,9 @@ pub(in crate::sql) fn execute_query_plan_output(
     ctes: &mut CteScope,
     output_mode: QueryOutputMode,
 ) -> Result<QueryOutput, SQLError> {
-    let mut visible_ctes = ctes.enter_visible_ctes(plan.ctes.iter().map(|cte| cte.name.as_str()));
+    let mut relation_lookup = ctes.enter_relation_lookup_mode(plan.relations_bound)?;
+    let mut visible_ctes =
+        relation_lookup.enter_visible_ctes(plan.ctes.iter().map(|cte| cte.name.as_str()));
     let ctes = &mut *visible_ctes;
     if !plan.ctes.is_empty() {
         let ordered_ctes = ordered_plan_ctes(plan)?;

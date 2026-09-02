@@ -51,10 +51,9 @@ impl Engine {
         let mut ordered = Vec::new();
         let mut lock_order = std::collections::BTreeSet::new();
         for name in names {
-            let table_name = self
-                .try_resolve_table_name(name)
-                .map_err(|error| SQLError::Internal(format!("resolve table `{name}`: {error}")))?
-                .ok_or_else(|| SQLError::UnknownTable(name.to_string()))?;
+            let Some((table_name, "table")) = self.try_resolve_visible_relation_kind(name)? else {
+                return Err(SQLError::UnknownTable(name.to_string()));
+            };
             if lock_order.insert(table_name.clone()) {
                 ordered.push(table_name);
             }
@@ -159,17 +158,13 @@ fn resolve_sql_truncate_targets(
     let mut targets = BTreeSet::new();
     let mut trigger_targets = Vec::new();
     for requested in tables {
-        let table = engine
-            .try_resolve_table_name(&requested.table)
-            .map_err(|err| {
-                SQLError::Internal(format!("resolve table `{}`: {err}", requested.table))
-            })?
-            .ok_or_else(|| {
-                SQLError::Unsupported(format!(
-                    "TRUNCATE TABLE: relation `{}` does not exist",
-                    requested.table
-                ))
-            })?;
+        let Some((table, "table")) = engine.try_resolve_visible_relation_kind(&requested.table)?
+        else {
+            return Err(SQLError::Unsupported(format!(
+                "TRUNCATE TABLE: relation `{}` does not exist",
+                requested.table
+            )));
+        };
         let hierarchy = engine
             .try_table_hierarchy(&table)
             .map_err(|err| SQLError::Internal(format!("read table hierarchy: {err}")))?;

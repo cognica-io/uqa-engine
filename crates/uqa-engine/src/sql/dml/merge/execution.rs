@@ -46,9 +46,10 @@ pub(super) enum SelectedMergeAction {
 
 pub(in crate::sql) fn run_merge(
     engine: &Engine,
-    stmt: MergePlan,
+    mut stmt: MergePlan,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
+    stmt.target = super::super::resolve_dml_target_name(engine, &stmt.target)?;
     super::super::run_mutation_command(engine, move |engine| run_merge_inner(engine, &stmt, params))
 }
 

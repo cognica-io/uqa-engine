@@ -21,6 +21,8 @@ pub(super) fn try_build_streaming_subquery_operator<'a>(
     params: &'a [SQLParam],
     ctes: &mut CteScope,
 ) -> Result<Option<Box<dyn uqa_execution::PhysicalOperator + 'a>>, SQLError> {
+    let mut relation_lookup = ctes.enter_relation_lookup_mode(body.relations_bound)?;
+    let ctes = &mut *relation_lookup;
     if !body.ctes.is_empty()
         || (!ctes.streams_command_progress() && query_contains_volatile_function(engine, body)?)
     {

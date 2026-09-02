@@ -215,11 +215,14 @@ fn table_filter_schema(
 pub(super) fn execute_mixed_where(
     engine: &Engine,
     table: &str,
+    signal_table: &str,
+    qualifier: &str,
     filter: &ScalarExpr,
     params: &[SQLParam],
     ctes: &CteScope,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
-    let mut rows = execute_mixed_where_expr(engine, table, table, filter, params, ctes)?;
+    let mut rows =
+        execute_mixed_where_expr(engine, table, signal_table, qualifier, filter, params, ctes)?;
     rows.sort_by_key(|e| e.doc_id);
     Ok(rows)
 }
@@ -244,15 +247,17 @@ pub(super) fn collect_where_doc_ids(
         crate::operator_tree_bridge::run_optimised(engine, table, Some(filter), params)?
     };
     let scored = if is_jsonpath_fts_match_filter(filter) {
-        execute_mixed_where_expr(engine, table, qualifier, filter, params, ctes)?
+        execute_mixed_where_expr(engine, table, table, qualifier, filter, params, ctes)?
     } else if let Some(entries) = optimized {
         entries
     } else {
         match filter {
             ScalarExpr::Func { name, args, .. } if uqa_sql::registry::is_registered(name) => {
-                execute_function(engine, table, name, args, params)?
+                execute_function(engine, table, table, name, args, params)?
             }
-            other => execute_mixed_where_expr(engine, table, qualifier, other, params, ctes)?,
+            other => {
+                execute_mixed_where_expr(engine, table, table, qualifier, other, params, ctes)?
+            }
         }
     };
     Ok(scored.into_iter().map(|entry| entry.doc_id).collect())
@@ -273,6 +278,7 @@ fn is_jsonpath_fts_match_filter(filter: &ScalarExpr) -> bool {
 fn execute_mixed_where_expr(
     engine: &Engine,
     table: &str,
+    signal_table: &str,
     qualifier: &str,
     filter: &ScalarExpr,
     params: &[SQLParam],
@@ -284,9 +290,25 @@ fn execute_mixed_where_expr(
             let Some(first) = iter.next() else {
                 return all_table_rows(engine, table);
             };
-            let mut out = execute_mixed_where_expr(engine, table, qualifier, first, params, ctes)?;
+            let mut out = execute_mixed_where_expr(
+                engine,
+                table,
+                signal_table,
+                qualifier,
+                first,
+                params,
+                ctes,
+            )?;
             for part in iter {
-                let rhs = execute_mixed_where_expr(engine, table, qualifier, part, params, ctes)?;
+                let rhs = execute_mixed_where_expr(
+                    engine,
+                    table,
+                    signal_table,
+                    qualifier,
+                    part,
+                    params,
+                    ctes,
+                )?;
                 out = intersect_scored(out, rhs);
             }
             Ok(out)
@@ -296,7 +318,15 @@ fn execute_mixed_where_expr(
             for part in parts {
                 out = union_scored(
                     out,
-                    execute_mixed_where_expr(engine, table, qualifier, part, params, ctes)?,
+                    execute_mixed_where_expr(
+                        engine,
+                        table,
+                        signal_table,
+                        qualifier,
+                        part,
+                        params,
+                        ctes,
+                    )?,
                 );
             }
             Ok(out)
@@ -309,13 +339,13 @@ fn execute_mixed_where_expr(
         ScalarExpr::Not(inner) if expr_is_null_free(inner) => complement_scored(
             engine,
             table,
-            execute_mixed_where_expr(engine, table, qualifier, inner, params, ctes)?,
+            execute_mixed_where_expr(engine, table, signal_table, qualifier, inner, params, ctes)?,
         ),
         ScalarExpr::Func { name, args, .. } if uqa_sql::registry::is_registered(name) => {
             if is_jsonpath_fts_match(name, args) {
                 filter_table_rows(engine, table, qualifier, filter, params, ctes)
             } else {
-                execute_function(engine, table, name, args, params)
+                execute_function(engine, table, signal_table, name, args, params)
             }
         }
         other => filter_table_rows(engine, table, qualifier, other, params, ctes),

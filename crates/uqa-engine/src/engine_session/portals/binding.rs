@@ -18,12 +18,17 @@ pub(super) fn bind_session_portal_function_relations(
     };
     for relation in [&mut relations.left, &mut relations.right] {
         let requested = relation.clone();
-        if let Some(canonical) = engine.try_resolve_table_name(&requested).map_err(|error| {
-            SQLError::Internal(format!(
-                "bind cursor table-function relation `{requested}` at DECLARE: {error}"
-            ))
-        })? {
-            *relation = canonical;
+        match engine.try_resolve_visible_relation_kind(&requested)? {
+            Some((canonical, "table")) => *relation = canonical,
+            Some((canonical, kind)) => {
+                return Err(SQLError::Routine {
+                    sqlstate: "42809".into(),
+                    message: format!(
+                        "cursor table-function relation \"{canonical}\" is a {kind}, not a table"
+                    ),
+                });
+            }
+            None => return Err(SQLError::UnknownTable(requested)),
         }
     }
     Ok(())

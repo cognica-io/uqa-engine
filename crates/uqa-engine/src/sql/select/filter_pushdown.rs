@@ -46,7 +46,7 @@ pub(in crate::sql) fn qualifier_filters_for_stmt(
         .flatten();
     let catalog = ctes.catalog_read_view()?;
     let resolution = ctes.relation_name_resolution()?;
-    let column_owners = source_column_owners(&catalog, &resolution, from)?;
+    let column_owners = source_column_owners(&catalog, &resolution, from, ctes)?;
     let nullable_qualifiers = outer_join_nullable_qualifiers(from);
     let mut filters = QualifierFilters::new();
     for part in flatten_and_filter_parts(filter) {
@@ -253,7 +253,7 @@ pub(in crate::sql) fn final_filter_after_qualifier_pushdown(
         .flatten();
     let catalog = ctes.catalog_read_view()?;
     let resolution = ctes.relation_name_resolution()?;
-    let column_owners = source_column_owners(&catalog, &resolution, from)?;
+    let column_owners = source_column_owners(&catalog, &resolution, from, ctes)?;
     let mut guaranteed = Vec::new();
     collect_guaranteed_join_filters(from, &mut guaranteed);
     let residual: Vec<ScalarExpr> = flatten_and_filter_parts(filter)
@@ -349,7 +349,7 @@ pub(in crate::sql) fn cte_output_filters(
         .flatten();
     let catalog = ctes.catalog_read_view()?;
     let resolution = ctes.relation_name_resolution()?;
-    let column_owners = source_column_owners(&catalog, &resolution, from)?;
+    let column_owners = source_column_owners(&catalog, &resolution, from, ctes)?;
     let mut grouped: BTreeMap<String, (String, Vec<ScalarExpr>)> = BTreeMap::new();
     for part in flatten_and_filter_parts(filter) {
         let Some((qualifier, predicate)) = qualifier_filter_for_part(

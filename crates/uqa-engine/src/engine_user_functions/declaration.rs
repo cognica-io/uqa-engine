@@ -547,6 +547,7 @@ fn compile_sql_routine_plans(
             }
             if bind_catalog_dependencies {
                 if let UnifiedPlan::Query(query) = &mut plan {
+                    engine.bind_stored_query_relations(query, "SQL routine body", false)?;
                     crate::sql::bind_catalog_query_routines_with_outer(
                         engine,
                         query,

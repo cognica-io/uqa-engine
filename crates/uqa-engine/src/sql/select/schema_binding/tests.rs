@@ -110,6 +110,7 @@ fn complete_query_binding_uses_catalog_fixture_without_engine() {
         strategy: uqa_planner::JoinExecutionStrategy::Hash,
     };
     let plan = QueryPlan {
+        relations_bound: false,
         ctes: Vec::new(),
         root: RelationalPlan::QueryBlock(Box::new(QueryBlockPlan {
             projections: vec![

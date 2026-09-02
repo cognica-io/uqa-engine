@@ -64,6 +64,7 @@ pub fn run_optimised(
 pub(crate) fn run_accelerated(
     engine: &Engine,
     table: &str,
+    signal_table: &str,
     where_expr: Option<&ScalarExpr>,
     params: &[SQLParam],
 ) -> Result<Option<Vec<ScoredEntry>>, SQLError> {
@@ -100,8 +101,13 @@ pub(crate) fn run_accelerated(
             return Ok(None);
         }
     }
-    let output =
-        execute_preoptimized_operator_tree_in_execution(engine, table, params, &optimized)?;
+    let output = execute_preoptimized_operator_tree_in_execution(
+        engine,
+        table,
+        signal_table,
+        params,
+        &optimized,
+    )?;
     let posting = expect_posting_output(output, "SQL WHERE")?;
     Ok(Some(posting_list_to_scored(&posting)))
 }
@@ -135,9 +141,9 @@ fn execute_operator_tree_gated(
     // appropriate frame and must not be nested here.
     if engine.transaction_depth() == 0 && tree_may_persist_calibration(tree) {
         return engine
-            .transaction(|engine| execute_operator_tree_inner(engine, table, params, tree));
+            .transaction(|engine| execute_operator_tree_inner(engine, table, table, params, tree));
     }
-    execute_operator_tree_inner(engine, table, params, tree)
+    execute_operator_tree_inner(engine, table, table, params, tree)
 }
 
 /// Execute below a SQL/direct statement boundary that already owns the
@@ -154,23 +160,14 @@ pub(crate) fn execute_operator_tree_in_execution(
             "calibrating operator execution requires an active statement transaction".into(),
         ));
     }
-    execute_operator_tree_inner(engine, table, params, tree)
+    execute_operator_tree_inner(engine, table, table, params, tree)
 }
 
-fn execute_operator_tree_inner(
+/// Execute a SQL retrieval tree against a canonical storage relation while retaining the relation spelling used to address its scoring signal.
+pub(crate) fn execute_relation_operator_tree_in_execution(
     engine: &Engine,
     table: &str,
-    params: &[SQLParam],
-    tree: &OperatorTree,
-) -> DriverResult<OperatorOutput> {
-    validate_text_top_k_placement(tree)?;
-    let optimized = engine_query_optimizer(engine, table, tree)?.optimize(tree.clone());
-    execute_preoptimized_operator_tree_inner(engine, table, params, &optimized)
-}
-
-fn execute_preoptimized_operator_tree_in_execution(
-    engine: &Engine,
-    table: &str,
+    signal_table: &str,
     params: &[SQLParam],
     tree: &OperatorTree,
 ) -> DriverResult<OperatorOutput> {
@@ -179,17 +176,45 @@ fn execute_preoptimized_operator_tree_in_execution(
             "calibrating operator execution requires an active statement transaction".into(),
         ));
     }
-    execute_preoptimized_operator_tree_inner(engine, table, params, tree)
+    execute_operator_tree_inner(engine, table, signal_table, params, tree)
+}
+
+fn execute_operator_tree_inner(
+    engine: &Engine,
+    table: &str,
+    signal_table: &str,
+    params: &[SQLParam],
+    tree: &OperatorTree,
+) -> DriverResult<OperatorOutput> {
+    validate_text_top_k_placement(tree)?;
+    let optimized = engine_query_optimizer(engine, table, tree)?.optimize(tree.clone());
+    execute_preoptimized_operator_tree_inner(engine, table, signal_table, params, &optimized)
+}
+
+fn execute_preoptimized_operator_tree_in_execution(
+    engine: &Engine,
+    table: &str,
+    signal_table: &str,
+    params: &[SQLParam],
+    tree: &OperatorTree,
+) -> DriverResult<OperatorOutput> {
+    if engine.transaction_depth() == 0 && tree_may_persist_calibration(tree) {
+        return Err(SQLError::Internal(
+            "calibrating operator execution requires an active statement transaction".into(),
+        ));
+    }
+    execute_preoptimized_operator_tree_inner(engine, table, signal_table, params, tree)
 }
 
 fn execute_preoptimized_operator_tree_inner(
     engine: &Engine,
     table: &str,
+    signal_table: &str,
     params: &[SQLParam],
     tree: &OperatorTree,
 ) -> DriverResult<OperatorOutput> {
     validate_text_top_k_placement(tree)?;
-    let driver = EngineDriver::new_in_execution(engine, table, params);
+    let driver = EngineDriver::new_for_relation_in_execution(engine, table, signal_table, params);
     let mut executor = PlanExecutor::new(&driver);
     executor.execute(tree)
 }

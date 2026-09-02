@@ -21,7 +21,8 @@ use crate::engine_state::DurableCatalogState;
 #[cfg(test)]
 use super::CatalogReadSnapshot;
 use super::{
-    CatalogReadView, CatalogSequenceSnapshot, CatalogTableSnapshot, RelationNameResolution,
+    CatalogReadView, CatalogSequenceSnapshot, CatalogTableSnapshot, RelationLookupMode,
+    RelationNameResolution,
 };
 
 #[cfg(test)]
@@ -52,7 +53,18 @@ impl RelationNameResolution {
         &self.current_user
     }
 
-    fn relation_lookup_candidates(
+    pub(crate) fn lookup_mode(&self) -> RelationLookupMode {
+        self.lookup_mode
+    }
+
+    pub(crate) fn set_lookup_mode(
+        &mut self,
+        lookup_mode: RelationLookupMode,
+    ) -> RelationLookupMode {
+        std::mem::replace(&mut self.lookup_mode, lookup_mode)
+    }
+
+    fn raw_relation_lookup_candidates(
         &self,
         name: &str,
     ) -> Result<Vec<crate::RelationIdentity>, SQLError> {
@@ -87,16 +99,89 @@ impl RelationNameResolution {
             search_path,
             temporary_schema,
             current_user: "uqa".into(),
+            lookup_mode: RelationLookupMode::Dynamic,
         }
     }
 }
 
 impl CatalogReadView {
+    /// Produce the only relation candidate set exposed to SQL binding and execution. Dynamic names are filtered by namespace `USAGE`; stored bindings must already be canonical and therefore bypass name lookup entirely.
+    fn relation_lookup_candidates(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+    ) -> Result<Vec<crate::RelationIdentity>, SQLError> {
+        if resolution.lookup_mode() == RelationLookupMode::Bound {
+            let (schema, relation) =
+                crate::RelationIdentity::parse_reference(name).map_err(|error| {
+                    SQLError::Internal(format!("decode bound relation `{name}`: {error}"))
+                })?;
+            let schema = schema.ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "bound query contains non-canonical relation reference `{name}`"
+                ))
+            })?;
+            return Ok(vec![crate::RelationIdentity::new(schema, relation)]);
+        }
+
+        let qualified = crate::RelationIdentity::parse_reference(name)
+            .map_err(SQLError::Internal)?
+            .0
+            .is_some();
+        let mut visible = Vec::new();
+        for relation in resolution.raw_relation_lookup_candidates(name)? {
+            if self.snapshot.durable.schemas.contains_key(&relation.schema)
+                && !self.schema_has_privilege_to(
+                    &relation.schema,
+                    &resolution.current_user,
+                    crate::engine_schema_security::SchemaAclPrivilege::Usage,
+                )
+            {
+                if qualified {
+                    return Err(SQLError::Routine {
+                        sqlstate: "42501".into(),
+                        message: format!("permission denied for schema {}", relation.schema),
+                    });
+                }
+                continue;
+            }
+            visible.push(relation);
+        }
+        Ok(visible)
+    }
+
     fn relation_exists(&self, relation: &crate::RelationIdentity) -> bool {
         self.snapshot.tables.contains_key(relation)
             || self.snapshot.durable.views.contains_key(relation)
             || self.snapshot.durable.sequences.contains_key(relation)
             || self.snapshot.durable.foreign_tables.contains_key(relation)
+    }
+
+    pub(crate) fn relation_kind_resolved(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+    ) -> Result<Option<(String, &'static str)>, SQLError> {
+        for relation in self.relation_lookup_candidates(resolution, name)? {
+            let kind = if self.snapshot.tables.contains_key(&relation) {
+                Some("table")
+            } else if let Some(view) = self.snapshot.durable.views.get(&relation) {
+                Some(match view.kind {
+                    crate::StoredViewKind::View => "view",
+                    crate::StoredViewKind::Materialized => "materialized view",
+                })
+            } else if self.snapshot.durable.sequences.contains_key(&relation) {
+                Some("sequence")
+            } else if self.snapshot.durable.foreign_tables.contains_key(&relation) {
+                Some("foreign table")
+            } else {
+                None
+            };
+            if let Some(kind) = kind {
+                return Ok(Some((relation.qualified_name(), kind)));
+            }
+        }
+        Ok(None)
     }
 
     pub(crate) fn all_schema_names(&self, resolution: &RelationNameResolution) -> Vec<String> {
@@ -288,26 +373,7 @@ impl CatalogReadView {
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<Option<CatalogSequenceSnapshot>, SQLError> {
-        let qualified = crate::RelationIdentity::parse_reference(name)
-            .map_err(SQLError::Internal)?
-            .0
-            .is_some();
-        for relation in resolution.relation_lookup_candidates(name)? {
-            if self.snapshot.durable.schemas.contains_key(&relation.schema)
-                && !self.schema_has_privilege_to(
-                    &relation.schema,
-                    &resolution.current_user,
-                    crate::engine_schema_security::SchemaAclPrivilege::Usage,
-                )
-            {
-                if qualified {
-                    return Err(SQLError::Routine {
-                        sqlstate: "42501".into(),
-                        message: format!("permission denied for schema {}", relation.schema),
-                    });
-                }
-                continue;
-            }
+        for relation in self.relation_lookup_candidates(resolution, name)? {
             if let Some(state) = self.snapshot.durable.sequences.get(&relation) {
                 return Ok(Some(CatalogSequenceSnapshot {
                     relation: relation.clone(),
@@ -541,7 +607,7 @@ impl CatalogReadView {
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<Option<&CatalogTableSnapshot>, SQLError> {
-        for relation in resolution.relation_lookup_candidates(name)? {
+        for relation in self.relation_lookup_candidates(resolution, name)? {
             if let Some(table) = self.snapshot.tables.get(&relation) {
                 return Ok(Some(table));
             }
@@ -565,7 +631,7 @@ impl CatalogReadView {
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<Option<String>, SQLError> {
-        for relation in resolution.relation_lookup_candidates(name)? {
+        for relation in self.relation_lookup_candidates(resolution, name)? {
             if self.snapshot.tables.contains_key(&relation) {
                 return Ok(Some(relation.qualified_name()));
             }
@@ -582,8 +648,8 @@ impl CatalogReadView {
         name: &str,
         include_descendants: bool,
     ) -> Result<Vec<String>, SQLError> {
-        let root = resolution
-            .relation_lookup_candidates(name)?
+        let root = self
+            .relation_lookup_candidates(resolution, name)?
             .into_iter()
             .find(|relation| self.snapshot.tables.contains_key(relation))
             .ok_or_else(|| SQLError::UnknownTable(name.to_string()))?;
@@ -619,8 +685,8 @@ impl CatalogReadView {
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<bool, SQLError> {
-        let relation = resolution
-            .relation_lookup_candidates(name)?
+        let relation = self
+            .relation_lookup_candidates(resolution, name)?
             .into_iter()
             .find(|relation| self.snapshot.tables.contains_key(relation))
             .ok_or_else(|| SQLError::UnknownTable(name.to_string()))?;
@@ -637,8 +703,8 @@ impl CatalogReadView {
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<bool, SQLError> {
-        let relation = resolution
-            .relation_lookup_candidates(name)?
+        let relation = self
+            .relation_lookup_candidates(resolution, name)?
             .into_iter()
             .find(|relation| {
                 self.snapshot.tables.contains_key(relation)
@@ -673,8 +739,8 @@ impl CatalogReadView {
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<Vec<crate::RelationIdentity>, SQLError> {
-        let mut current = resolution
-            .relation_lookup_candidates(name)?
+        let mut current = self
+            .relation_lookup_candidates(resolution, name)?
             .into_iter()
             .find(|relation| self.snapshot.tables.contains_key(relation))
             .ok_or_else(|| SQLError::UnknownTable(name.to_string()))?;
@@ -717,7 +783,7 @@ impl CatalogReadView {
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<Option<&crate::StoredView>, SQLError> {
-        for relation in resolution.relation_lookup_candidates(name)? {
+        for relation in self.relation_lookup_candidates(resolution, name)? {
             if let Some(view) = self.snapshot.durable.views.get(&relation) {
                 return Ok(Some(view));
             }
@@ -733,7 +799,7 @@ impl CatalogReadView {
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<Option<String>, SQLError> {
-        for relation in resolution.relation_lookup_candidates(name)? {
+        for relation in self.relation_lookup_candidates(resolution, name)? {
             if self.snapshot.durable.views.contains_key(&relation) {
                 return Ok(Some(relation.qualified_name()));
             }
@@ -749,7 +815,7 @@ impl CatalogReadView {
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<Option<&uqa_fdw::ForeignTable>, SQLError> {
-        for relation in resolution.relation_lookup_candidates(name)? {
+        for relation in self.relation_lookup_candidates(resolution, name)? {
             if let Some(table) = self.snapshot.durable.foreign_tables.get(&relation) {
                 return Ok(Some(table));
             }
@@ -765,7 +831,7 @@ impl CatalogReadView {
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<Option<(String, uqa_fdw::ForeignTable)>, SQLError> {
-        for relation in resolution.relation_lookup_candidates(name)? {
+        for relation in self.relation_lookup_candidates(resolution, name)? {
             if let Some(table) = self.snapshot.durable.foreign_tables.get(&relation) {
                 return Ok(Some((relation.qualified_name(), table.clone())));
             }

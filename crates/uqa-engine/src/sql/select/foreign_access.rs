@@ -22,6 +22,7 @@ pub(in crate::sql) fn run_single_foreign_select_output(
     output_mode: QueryOutputMode,
 ) -> Result<QueryOutput, SQLError> {
     let SingleRelation {
+        reference_name: _,
         relation_name: table,
         qualifier,
     } = relation;

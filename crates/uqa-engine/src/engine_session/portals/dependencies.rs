@@ -377,7 +377,9 @@ pub(super) fn bind_session_portal_query_relations(
         bind_session_portal_query_relations(engine, &mut cte.query, &definition_scope)?;
         visible_ctes.insert(cte.name.clone());
     }
-    bind_session_portal_relational_plan(engine, &mut query.root, &visible_ctes)
+    bind_session_portal_relational_plan(engine, &mut query.root, &visible_ctes)?;
+    query.relations_bound = true;
+    Ok(())
 }
 
 pub(super) fn bind_session_portal_relational_plan(
@@ -428,20 +430,30 @@ pub(super) fn bind_session_portal_source_plan(
                 return Ok(());
             }
             let requested = name.clone();
-            if let Some(canonical) = engine.try_resolve_table_name(&requested).map_err(|error| {
-                SQLError::Internal(format!(
-                    "bind cursor relation `{requested}` at DECLARE: {error}"
-                ))
-            })? {
-                *name = canonical;
-            } else if let Some(canonical) =
-                engine.try_resolve_view_name(&requested).map_err(|error| {
-                    SQLError::Internal(format!(
-                        "bind cursor view `{requested}` at DECLARE: {error}"
-                    ))
-                })?
+            if let Some(canonical) = super::super::canonical_virtual_relation_reference(&requested)
             {
                 *name = canonical;
+                return Ok(());
+            }
+            if crate::RelationIdentity::parse_reference(&requested)
+                .ok()
+                .is_some_and(|(schema, relation)| {
+                    schema.is_none()
+                        && crate::sql::active_trigger_transition_relation_names()
+                            .contains(&relation)
+                })
+            {
+                return Ok(());
+            }
+            if let Some(canonical) =
+                crate::sql::resolve_age_label_relation_name(engine, &requested)?
+            {
+                *name = canonical;
+                return Ok(());
+            }
+            match engine.try_resolve_visible_relation_kind(&requested)? {
+                Some((canonical, _)) => *name = canonical,
+                None => return Err(SQLError::UnknownTable(requested)),
             }
             Ok(())
         }

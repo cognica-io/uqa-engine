@@ -161,12 +161,10 @@ impl Engine {
         requested: &[String],
         reject_partitioned_output: bool,
     ) -> Result<Vec<String>, SQLError> {
-        let canonical = self
-            .try_resolve_table_name(relation)
-            .map_err(|error| {
-                SQLError::Internal(format!("resolve COPY relation `{relation}`: {error}"))
-            })?
-            .ok_or_else(|| SQLError::UnknownTable(relation.to_string()))?;
+        let canonical = match self.try_resolve_visible_relation_kind(relation)? {
+            Some((canonical, "table")) => canonical,
+            Some(_) | None => return Err(SQLError::UnknownTable(relation.to_string())),
+        };
         let table = self
             .try_table(&canonical)
             .map_err(|error| {

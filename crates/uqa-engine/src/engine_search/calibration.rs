@@ -81,8 +81,17 @@ impl Engine {
         table: &str,
         field: &str,
     ) -> Result<BayesianBM25Params, SQLError> {
+        self.bayesian_params_for_signal(table, table, field)
+    }
+
+    fn bayesian_params_for_signal(
+        &self,
+        table: &str,
+        signal_table: &str,
+        field: &str,
+    ) -> Result<BayesianBM25Params, SQLError> {
         self.validate_text_search_field(table, field)?;
-        if let Some(params) = self.load_fresh_bayesian_params(table, field)? {
+        if let Some(params) = self.load_fresh_bayesian_params(table, signal_table, field)? {
             return Ok(params);
         }
 
@@ -92,7 +101,7 @@ impl Engine {
         // this caller waited for the writer. The common cached read above
         // deliberately avoids the writer lock.
         self.with_implicit_transaction(|engine| {
-            engine.resolve_missing_bayesian_params_in_transaction(table, field)
+            engine.resolve_missing_bayesian_params_in_transaction(table, signal_table, field)
         })
     }
 
@@ -108,12 +117,22 @@ impl Engine {
         table: &str,
         field: &str,
     ) -> Result<BayesianBM25Params, SQLError> {
+        self.bayesian_params_for_relation_in_execution(table, table, field)
+    }
+
+    /// Resolve calibration for a canonical storage relation while preserving the signal namespace selected by the SQL relation reference.
+    pub(crate) fn bayesian_params_for_relation_in_execution(
+        &self,
+        table: &str,
+        signal_table: &str,
+        field: &str,
+    ) -> Result<BayesianBM25Params, SQLError> {
         self.validate_text_search_field(table, field)?;
-        let key = format!("{table}.{field}");
+        let key = format!("{signal_table}.{field}");
         if let Some(params) = self.runtime.bayesian_params_cache.read().get(&key).copied() {
             return Ok(params);
         }
-        if let Some(params) = self.load_fresh_bayesian_params(table, field)? {
+        if let Some(params) = self.load_fresh_bayesian_params(table, signal_table, field)? {
             self.runtime
                 .bayesian_params_cache
                 .write()
@@ -125,7 +144,8 @@ impl Engine {
                 "Bayesian calibration execution requires an active statement transaction".into(),
             ));
         }
-        let params = self.resolve_missing_bayesian_params_in_transaction(table, field)?;
+        let params =
+            self.resolve_missing_bayesian_params_in_transaction(table, signal_table, field)?;
         self.runtime
             .bayesian_params_cache
             .write()
@@ -136,21 +156,25 @@ impl Engine {
     pub(super) fn resolve_missing_bayesian_params_in_transaction(
         &self,
         table: &str,
+        signal_table: &str,
         field: &str,
     ) -> Result<BayesianBM25Params, SQLError> {
         self.validate_text_search_field(table, field)?;
-        if let Some(params) = self.load_fresh_bayesian_params(table, field)? {
+        if let Some(params) = self.load_fresh_bayesian_params(table, signal_table, field)? {
             return Ok(params);
         }
-        Ok(self.auto_estimate_params(table, field)?.unwrap_or_default())
+        Ok(self
+            .auto_estimate_params(table, signal_table, field)?
+            .unwrap_or_default())
     }
 
     pub(super) fn load_fresh_bayesian_params(
         &self,
         table: &str,
+        signal_table: &str,
         field: &str,
     ) -> Result<Option<BayesianBM25Params>, SQLError> {
-        let key = format!("{table}.{field}");
+        let key = format!("{signal_table}.{field}");
         let saved = match self.try_load_scoring_params(&key)? {
             Some(json) => Some(
                 serde_json::from_str::<BTreeMap<String, f64>>(&json).map_err(|error| {
@@ -273,6 +297,7 @@ impl Engine {
     pub(super) fn auto_estimate_params(
         &self,
         table: &str,
+        signal_table: &str,
         field: &str,
     ) -> Result<Option<BayesianBM25Params>, SQLError> {
         let table_state = self.require_query_table(table)?;
@@ -320,7 +345,7 @@ impl Engine {
         ]);
         let json = serde_json::to_string(&values)
             .map_err(|error| SQLError::Internal(format!("serialize scoring params: {error}")))?;
-        self.save_scoring_params_inner(&format!("{table}.{field}"), &json)?;
+        self.save_scoring_params_inner(&format!("{signal_table}.{field}"), &json)?;
         Ok(Some(params))
     }
 }
