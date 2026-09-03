@@ -59,6 +59,45 @@ fn sequence_create_and_nextval_via_sql() {
 }
 
 #[test]
+fn insert_default_values_produces_one_row_and_applies_defaults() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE default_value_rows(id BIGSERIAL PRIMARY KEY, payload INTEGER DEFAULT 9)",
+            &[],
+        )
+        .unwrap();
+
+    for expected_id in [1, 2] {
+        let result = engine
+            .sql(
+                "INSERT INTO default_value_rows DEFAULT VALUES RETURNING id, payload",
+                &[],
+            )
+            .unwrap();
+        assert_eq!(result.affected_rows, 1);
+        assert_eq!(result.rows[0]["id"], Value::Int(expected_id));
+        assert_eq!(result.rows[0]["payload"], Value::Int(9));
+    }
+
+    engine
+        .sql(
+            "CREATE TABLE default_identity_rows(id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY, payload INTEGER DEFAULT 11)",
+            &[],
+        )
+        .unwrap();
+    let identity = engine
+        .sql(
+            "INSERT INTO default_identity_rows DEFAULT VALUES RETURNING id, payload",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(identity.affected_rows, 1);
+    assert_eq!(identity.rows[0]["id"], Value::Int(1));
+    assert_eq!(identity.rows[0]["payload"], Value::Int(11));
+}
+
+#[test]
 fn sequence_currval_via_sql() {
     let eng = Engine::new();
     eng.sql("CREATE SEQUENCE s2 START 10", &[]).unwrap();

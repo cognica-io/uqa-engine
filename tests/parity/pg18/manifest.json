@@ -82,6 +82,7 @@
       "query.rows-from-and-multi-array-unnest",
       "query.named-window",
       "dml.returning-row-images",
+      "dml.insert-default-values",
       "ddl.constraint-metadata",
       "ddl.ctas-column-names",
       "ddl.ctas-with-no-data",
@@ -140,6 +141,7 @@
       "ddl.trigger-privilege-security",
       "ddl.foreign-table-trigger-catalog-security",
       "ddl.rewrite-rule-relation-security",
+      "ddl.rewrite-rule-expression-security",
       "ddl.rewrite-rules",
       "graph.age-default-label-drop",
       "graph.age-cypher-complete-matrix",
@@ -263,6 +265,14 @@
       "postgresql_reference": "PostgreSQL 18.4 DML RETURNING row-image syntax, results, row descriptions, errors, and SQLSTATEs plus tests/parity/pg18/merge_returning_oracle.md",
       "uqa_test": "cargo test -p uqa-sql --lib returning; cargo test -p uqa-engine --test integration engine_catalog::sql_update_delete::postgresql_18_returning_exposes_old_and_new_row_images; cargo test -p uqa-engine --test integration engine_catalog::sql_update_delete::returning_old_and_new_stars_preserve_duplicate_output_positions; cargo test -p uqa-engine --test integration engine_catalog::sql_merge::; cargo test -p uqa-engine --test integration merge_action_does_not_collide_with_user_column_name; cargo test -p uqa-engine --test integration user_columns_that_resemble_engine_metadata_remain_visible",
       "supported_version": "PostgreSQL 18.4 old and new row images, default and explicit aliases, duplicate output positions, declared result types, alias conflicts, and implemented INSERT, UPDATE, DELETE, ON CONFLICT, and all MERGE action kinds with source columns, merge_action(), DO NOTHING exclusion, source-before-target star layout, and structural internal attributes that do not collide with user `_doc_id`, `_score`, `_merge_action`, or former `__uqa_*` names",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "dml.insert-default-values",
+      "postgresql_reference": "PostgreSQL 18.4 INSERT documentation and tests/parity/pg18/rule_privilege_oracle.expected.txt",
+      "uqa_test": "cargo test -p uqa-sql --lib compiler::tests::data_commands::insert_default_values_preserves_one_input_row; cargo test -p uqa-engine --test integration engine_catalog::sql_sequences::insert_default_values_produces_one_row_and_applies_defaults; cargo test -p uqa-engine --test integration engine_catalog::sql_rules::insert_default_values_rule_actions_preserve_event_cardinality; tests/parity/pg18/rule_privilege_oracle.sql",
+      "supported_version": "PostgreSQL 18.4 direct and rewrite-rule-action INSERT DEFAULT VALUES represented as exactly one input row, with ordinary defaults, serial and identity generation, RETURNING, multi-row rule-event cardinality, and zero-row INSERT SELECT rule-event behavior",
       "status": "verified",
       "open_issue": null
     },
@@ -667,12 +677,20 @@
       "open_issue": null
     },
     {
+      "id": "ddl.rewrite-rule-expression-security",
+      "postgresql_reference": "PostgreSQL 18.4 Rules and Privileges, function privilege, and sequence manipulation documentation plus tests/parity/pg18/rule_privilege_oracle.expected.txt",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_catalog::sql_rules::privilege_subjects::; tests/parity/pg18/rule_privilege_oracle.sql",
+      "supported_version": "PostgreSQL 18.4 invoker-authorized user-function EXECUTE checks in rewrite-rule conditions and actions; invoker-authorized nextval, currval, lastval, and setval sequence-function checks including action-target defaults; rule-relation-owner authorization for direct sequence range-table scans; unchanged expression subjects across rule-relation owner transfer; exact failure atomicity, SQLSTATEs, and primary messages",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
       "id": "ddl.rewrite-rules",
       "postgresql_reference": "PostgreSQL 18.4 with Apache AGE stateful table-rule DDL, rewrite execution, ordering, cardinality, catalog, dependency, persistence, view _RETURN, ON CONFLICT, MERGE, and SQLSTATE behavior in tests/parity/pg18/rules_stateful.expected.json plus official rewrite-rule regression cases",
       "uqa_test": "cargo test -p uqa-sql --lib compiler::tests::ddl_lifecycle::rule_statements; cargo test -p uqa-engine --test integration engine_catalog::sql_rules::; env UQA_USQL=target/release/usql python3 tests/parity/pg18/run_routines_stateful.py --suite rules",
-      "supported_version": "Durable PostgreSQL 18.4 table rewrite rules for INSERT VALUES, INSERT SELECT, UPDATE, and DELETE, with OLD- or NEW-referencing actions executed set-oriented over matching event rows and row-independent UPDATE and DELETE actions following original-command qualification cardinality for no-predicate, false-predicate, empty-target, UPDATE FROM, and DELETE USING cases, including nullable integer images, collision-free and correlated LATERAL action sources, PostgreSQL CTE, set-operation member, conditional set-operation action, unconditional ON INSERT set-operation one-row success and multi-row 0A000, and ON CONFLICT event-reference scope errors, unqualified INSERT and DELETE conditions, alphabetical ALSO and conditional or unconditional INSTEAD action ordering, DO NOTHING suppression, action statement-trigger cardinality, positional DML RETURNING with exact event-row type and type-modifier validation, one-provider restrictions, lazy projection evaluation, provider current/OLD/NEW images and aliases, UPDATE FROM source projections for UPDATE-provider actions, and DELETE USING source projections for DELETE-provider actions, canonical recursion detection, active-rule ON CONFLICT and MERGE rejection, CREATE OR REPLACE state retention, Origin, Replica, Always, and Disabled enable modes selected by session_replication_role, rename and drop lifecycle, relation and token-safe target-column dependencies, reserved _RETURN naming, view _RETURN replacement and protection, materialized-view rejection, pg_rewrite, pg_rules, relhasrules, hasrules, and compact or pretty pg_get_ruledef",
+      "supported_version": "Durable PostgreSQL 18.4 table rewrite rules for INSERT VALUES, INSERT DEFAULT VALUES, INSERT SELECT, UPDATE, and DELETE, with OLD- or NEW-referencing actions executed set-oriented over matching event rows and row-independent UPDATE and DELETE actions following original-command qualification cardinality for no-predicate, false-predicate, empty-target, UPDATE FROM, and DELETE USING cases, including nullable integer images, collision-free and correlated LATERAL action sources, PostgreSQL CTE, set-operation member, conditional set-operation action, unconditional ON INSERT set-operation one-row success and multi-row 0A000, and ON CONFLICT event-reference scope errors, unqualified INSERT and DELETE conditions, alphabetical ALSO and conditional or unconditional INSTEAD action ordering, DO NOTHING suppression, action statement-trigger cardinality, positional DML RETURNING with exact event-row type and type-modifier validation, one-provider restrictions, lazy projection evaluation, provider current/OLD/NEW images and aliases, UPDATE FROM source projections for UPDATE-provider actions, and DELETE USING source projections for DELETE-provider actions, canonical recursion detection, active-rule ON CONFLICT and MERGE rejection, CREATE OR REPLACE state retention, Origin, Replica, Always, and Disabled enable modes selected by session_replication_role, rename and drop lifecycle, relation and token-safe target-column dependencies, reserved _RETURN naming, view _RETURN replacement and protection, materialized-view rejection, pg_rewrite, pg_rules, relhasrules, hasrules, and compact or pretty pg_get_ruledef",
       "status": "partial",
-      "open_issue": "Rule-condition subqueries, OLD.* and NEW.* record expansion, NOTIFY actions, cross-relation and routine dependencies, inheritance and partition routing, routine, sequence, and remaining privilege subjects, exact pg_node_tree serialization and deparsing, dump/restore, and the complete PostgreSQL 18 rewrite-rule regression schedule remain."
+      "open_issue": "Rule-condition subqueries, OLD.* and NEW.* record expansion, NOTIFY actions, cross-relation and routine dependencies, inheritance and partition routing, remaining privilege object kinds, exact pg_node_tree serialization and deparsing, dump/restore, and the complete PostgreSQL 18 rewrite-rule regression schedule remain."
     },
     {
       "id": "graph.age-default-label-drop",

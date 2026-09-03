@@ -23,3 +23,32 @@ new-owner-rename|ok
 runtime-new-owner-denied|42501|permission denied for table runtime_log
 runtime-new-owner-granted|ok
 runtime-final|uqa_rule_caller:42,uqa_rule_caller:45,uqa_rule_caller:47
+routine-owner-only|42501|permission denied for function owner_only
+routine-caller-only|ok
+condition-owner-only|42501|permission denied for function owner_only
+condition-caller-only|ok
+nextval-owner-only|42501|permission denied for sequence owner_sequence
+currval-owner-only|42501|permission denied for sequence owner_sequence
+lastval-owner-only|42501|permission denied for sequence owner_sequence
+nextval-caller-only|ok
+currval-caller-only|ok
+lastval-caller-only|ok
+setval-owner-only|42501|permission denied for sequence owner_sequence
+setval-caller-only|ok
+sequence-owner-scan|ok
+sequence-caller-scan|42501|permission denied for sequence caller_sequence
+default-owner-sequence|42501|permission denied for sequence owner_sequence
+default-caller-sequence|ok
+expression-log|condition-caller:7,currval-caller:1,lastval:1,nextval-caller:1,routine-caller:102,sequence-owner-scan:1,setval-caller:20
+default-targets|0|21
+default-multi-row|ok
+default-empty-source|ok
+default-cardinality|3|21,22,23
+direct-default|1|9
+direct-default|2|9
+direct-identity|1|11
+transfer-routine-still-caller|42501|permission denied for function owner_only
+transfer-nextval-still-caller|42501|permission denied for sequence owner_sequence
+transfer-routine-caller-granted|ok
+transfer-nextval-caller-granted|ok
+expression-transfer|nextval-owner:2,routine-owner:101

@@ -36,49 +36,51 @@ pub(in crate::compiler) fn compile_insert(
             ))),
         })
         .collect::<Result<Vec<_>>>()?;
-    let select_node = stmt
-        .select_stmt
-        .as_ref()
-        .ok_or_else(|| SQLError::Unsupported("INSERT without VALUES".into()))?;
-    let select_inner = select_node
-        .node
-        .as_ref()
-        .ok_or_else(|| SQLError::Internal("INSERT select_stmt empty".into()))?;
-    let select = match select_inner {
-        NodeEnum::SelectStmt(s) => s,
-        _ => return Err(SQLError::Unsupported("INSERT body must be SELECT".into())),
-    };
     let mut rows = Vec::new();
-    for row_node in &select.values_lists {
-        let inner = row_node
+    let select_source = if let Some(select_node) = stmt.select_stmt.as_ref() {
+        let select_inner = select_node
             .node
             .as_ref()
-            .ok_or_else(|| SQLError::Internal("INSERT VALUES contains an empty row".into()))?;
-        let list = match inner {
-            NodeEnum::List(l) => l,
-            other => {
-                return Err(SQLError::Internal(format!(
-                    "INSERT VALUES expected a row list, got {other:?}"
-                )));
-            }
+            .ok_or_else(|| SQLError::Internal("INSERT select_stmt empty".into()))?;
+        let select = match select_inner {
+            NodeEnum::SelectStmt(s) => s,
+            _ => return Err(SQLError::Unsupported("INSERT body must be SELECT".into())),
         };
-        let row: Vec<Expr> = list
-            .items
-            .iter()
-            .map(compile_expr)
-            .collect::<Result<Vec<_>>>()?;
-        rows.push(row);
-    }
-    // INSERT ... SELECT: when the body has no values_lists but does
-    // have a from_clause / target_list, treat it as `INSERT FROM
-    // SELECT` and forward the inner SELECT.
-    let select_source = if rows.is_empty()
-        && (select.op != pg_query::protobuf::SetOperation::SetopNone as i32
-            || !select.from_clause.is_empty()
-            || !select.target_list.is_empty())
-    {
-        Some(Box::new(compile_select(select)?))
+        for row_node in &select.values_lists {
+            let inner = row_node
+                .node
+                .as_ref()
+                .ok_or_else(|| SQLError::Internal("INSERT VALUES contains an empty row".into()))?;
+            let list = match inner {
+                NodeEnum::List(l) => l,
+                other => {
+                    return Err(SQLError::Internal(format!(
+                        "INSERT VALUES expected a row list, got {other:?}"
+                    )));
+                }
+            };
+            let row: Vec<Expr> = list
+                .items
+                .iter()
+                .map(compile_expr)
+                .collect::<Result<Vec<_>>>()?;
+            rows.push(row);
+        }
+        // INSERT ... SELECT: when the body has no values_lists but does
+        // have a from_clause / target_list, treat it as `INSERT FROM
+        // SELECT` and forward the inner SELECT.
+        if rows.is_empty()
+            && (select.op != pg_query::protobuf::SetOperation::SetopNone as i32
+                || !select.from_clause.is_empty()
+                || !select.target_list.is_empty())
+        {
+            Some(Box::new(compile_select(select)?))
+        } else {
+            None
+        }
     } else {
+        // PostgreSQL represents DEFAULT VALUES by omitting select_stmt; one empty input row preserves its one-row cardinality while letting the ordinary default pipeline fill it.
+        rows.push(Vec::new());
         None
     };
     let on_conflict = stmt

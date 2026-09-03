@@ -246,9 +246,7 @@ pub struct InsertStmt {
     pub columns: Vec<String>,
     /// Common table expressions defined with `WITH [RECURSIVE] ...`.
     pub with: Vec<CTE>,
-    /// Inline `VALUES (...) (...)` rows. Empty when the statement is
-    /// an `INSERT ... SELECT` form; in that case `select_source` is
-    /// populated with the underlying SELECT.
+    /// Inline `VALUES (...) (...)` rows. `DEFAULT VALUES` is represented by one empty row; the vector itself is empty only for `INSERT ... SELECT`, whose query is in `select_source`.
     pub rows: Vec<Vec<ValueExpr>>,
     /// Populated when the statement is `INSERT INTO t (...) SELECT ...`.
     /// The engine materialises the inner select first and then writes

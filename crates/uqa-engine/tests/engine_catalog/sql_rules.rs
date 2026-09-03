@@ -12,6 +12,8 @@ use uqa_engine::Engine;
 
 #[path = "sql_rules/persistence.rs"]
 mod persistence;
+#[path = "sql_rules/privilege_subjects.rs"]
+mod privilege_subjects;
 #[path = "sql_rules/privileges.rs"]
 mod privileges;
 #[path = "sql_rules/returning.rs"]
@@ -78,6 +80,39 @@ fn insert_rules_run_by_name_bind_new_and_apply_conditional_instead() {
             .map(|row| row.get("id"))
             .collect::<Vec<_>>(),
         [Some(&Value::Int(1))]
+    );
+}
+
+#[test]
+fn insert_default_values_rule_actions_preserve_event_cardinality() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE default_rule_events(id INTEGER); CREATE TABLE default_rule_empty(id INTEGER); CREATE TABLE default_rule_log(id BIGSERIAL PRIMARY KEY, payload INTEGER DEFAULT 9)",
+    );
+    exec(
+        &engine,
+        "CREATE RULE default_rule AS ON INSERT TO default_rule_events DO ALSO INSERT INTO default_rule_log DEFAULT VALUES",
+    );
+
+    exec(&engine, "INSERT INTO default_rule_events VALUES (1), (2)");
+    exec(
+        &engine,
+        "INSERT INTO default_rule_events SELECT id FROM default_rule_empty",
+    );
+    assert_eq!(
+        exec(
+            &engine,
+            "SELECT id || ':' || payload AS value FROM default_rule_log ORDER BY id",
+        )
+        .rows
+        .iter()
+        .map(|row| row.get("value"))
+        .collect::<Vec<_>>(),
+        [
+            Some(&Value::Str("1:9".into())),
+            Some(&Value::Str("2:9".into())),
+        ]
     );
 }
 

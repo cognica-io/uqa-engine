@@ -297,9 +297,12 @@ INSERT INTO tasks (task_id, title, state)
 VALUES (1, 'write manual', 'open'),
        (2, 'verify links', 'open')
 RETURNING task_id, state;
+
+INSERT INTO queued_jobs DEFAULT VALUES
+RETURNING job_id, state;
 ```
 
-Insert can use literal values or a query source. Defaults, generated serial values, constraints, indexes, and referential actions are updated in the same mutation boundary.
+Insert accepts `VALUES`, `DEFAULT VALUES`, or a query source. `DEFAULT VALUES` contributes exactly one input row and applies every column default, including serial and identity generation, before constraints and `RETURNING`; defaults, generated values, indexes, and referential actions are updated in the same mutation boundary.
 
 ## UPDATE
 
