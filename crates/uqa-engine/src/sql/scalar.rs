@@ -216,6 +216,35 @@ pub(crate) fn eval_lowered_expression_with_schema(
     eval_physical(&expression, &context)
 }
 
+/// Execute a catalog-bound scalar plan against one typed physical row while applying an independent relation-privilege subject to every nested query.
+pub(super) fn eval_stored_expression_plan_with_row(
+    engine: &Engine,
+    expression: &ExpressionPlan,
+    schema: &RowSchema,
+    row: &PhysicalRow,
+    params: &[SQLParam],
+    privilege_subject: Option<&str>,
+) -> Result<Value, SQLError> {
+    let mut expression = expression.clone();
+    let mut scope = CteScope::new_for_statement(engine, privilege_subject);
+    scope.scalar_subqueries.clone_from(&expression.subqueries);
+    let hook = ScopedEngineHook::new(engine, &scope);
+    uqa_execution::scalar_type_with_resolver(&expression.scalar, schema, params, &hook)?;
+    expression.scalar = uqa_execution::bind_type_introspection_with_resolver(
+        expression.scalar,
+        schema,
+        params,
+        &hook,
+    );
+    let view = schema.view(row);
+    let context = PhysicalEvalContext::from_row_lookup(&view, params)
+        .with_row_schema(schema)
+        .with_function_hook(&hook)
+        .with_subquery_runner(&hook)
+        .with_physical_outer_row(schema, row);
+    eval_physical(&expression, &context)
+}
+
 pub(super) fn eval_physical_call_arguments(
     arguments: &[ExpressionPlan],
     context: &PhysicalEvalContext<'_>,

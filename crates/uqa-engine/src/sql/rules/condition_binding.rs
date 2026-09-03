@@ -5,8 +5,9 @@
 //
 
 use super::{
-    bind_expr, eval_lowered_expression, BTreeMap, BinaryOp, Engine, Expr,
-    ProjectedRuntimeRuleResolver, RuleColumnMetadata, RuleRowImage, RuleRowSide, SQLError, Value,
+    bind_expr, eval_lowered_expression, eval_stored_expression_plan_with_row, BTreeMap, BinaryOp,
+    Engine, Expr, ProjectedRuntimeRuleResolver, RuleColumnMetadata, RuleRowImage, RuleRowSide,
+    SQLError, Value,
 };
 
 fn evaluate_rule_condition_piece<F>(
@@ -198,9 +199,60 @@ where
     })
 }
 
+fn materialize_rule_condition_row<F>(
+    rule: &crate::engine_events::StoredRule,
+    required_columns: &std::collections::BTreeSet<String>,
+    resolver: &mut ProjectedRuntimeRuleResolver<'_, F>,
+) -> Result<(uqa_execution::RowSchema, uqa_execution::PhysicalRow), SQLError>
+where
+    F: FnMut(usize, RuleRowSide, &str) -> Result<Option<Value>, SQLError>,
+{
+    let sides: &[(&str, RuleRowSide)] = match rule.definition.event {
+        uqa_sql::ast::RuleEvent::Insert => &[(
+            crate::engine_events::RULE_NEW_PLAN_QUALIFIER,
+            RuleRowSide::New,
+        )],
+        uqa_sql::ast::RuleEvent::Update => &[
+            (
+                crate::engine_events::RULE_OLD_PLAN_QUALIFIER,
+                RuleRowSide::Old,
+            ),
+            (
+                crate::engine_events::RULE_NEW_PLAN_QUALIFIER,
+                RuleRowSide::New,
+            ),
+        ],
+        uqa_sql::ast::RuleEvent::Delete => &[(
+            crate::engine_events::RULE_OLD_PLAN_QUALIFIER,
+            RuleRowSide::Old,
+        )],
+        uqa_sql::ast::RuleEvent::Select => &[],
+    };
+    let mut names = Vec::with_capacity(resolver.columns.len() * sides.len());
+    let mut identities = Vec::with_capacity(resolver.columns.len() * sides.len());
+    let mut types = Vec::with_capacity(resolver.columns.len() * sides.len());
+    let mut values = Vec::with_capacity(resolver.columns.len() * sides.len());
+    for (qualifier, side) in sides {
+        for (name, metadata) in resolver.columns {
+            if !required_columns.contains(name) {
+                continue;
+            }
+            names.push(name.clone());
+            identities.push(uqa_execution::ColumnIdentity::qualified(*qualifier, name));
+            types.push(Some(metadata.ty.clone()));
+            values.push(resolver.record_field(*side, name)?.value);
+        }
+    }
+    Ok((
+        uqa_execution::RowSchema::with_identities(names, identities, types),
+        uqa_execution::PhysicalRow::from_values(values),
+    ))
+}
+
 pub(super) fn rule_condition_matches<F>(
     engine: &Engine,
-    condition: Option<&Expr>,
+    rule: &crate::engine_events::StoredRule,
+    privilege_subject: &str,
     row_index: usize,
     row: &mut RuleRowImage,
     columns: &BTreeMap<String, RuleColumnMetadata>,
@@ -209,9 +261,30 @@ pub(super) fn rule_condition_matches<F>(
 where
     F: FnMut(usize, RuleRowSide, &str) -> Result<Option<Value>, SQLError>,
 {
-    let Some(condition) = condition else {
+    let Some(condition) = rule.definition.condition.as_ref() else {
         return Ok(true);
     };
+    if let Some(plan) = rule.condition_plan.as_ref() {
+        let required_columns = crate::engine_events::rule_condition_plan_row_columns(plan);
+        let mut resolver = ProjectedRuntimeRuleResolver {
+            row_index,
+            row,
+            columns,
+            project,
+        };
+        let (schema, physical_row) =
+            materialize_rule_condition_row(rule, &required_columns, &mut resolver)?;
+        return Ok(uqa_sql::expr::truthy(
+            &eval_stored_expression_plan_with_row(
+                engine,
+                plan,
+                &schema,
+                &physical_row,
+                &[],
+                Some(privilege_subject),
+            )?,
+        ));
+    }
     let condition = bind_rule_condition_expression(
         engine,
         condition,

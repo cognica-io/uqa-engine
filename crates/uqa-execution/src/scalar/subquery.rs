@@ -125,9 +125,10 @@ impl SubqueryResult {
             return Ok(Value::Null);
         };
         if self.rows.next().transpose()?.is_some() {
-            return Err(SQLError::TypeMismatch(
-                "scalar subquery returned more than one row".into(),
-            ));
+            return Err(SQLError::Routine {
+                sqlstate: "21000".into(),
+                message: "more than one row returned by a subquery used as an expression".into(),
+            });
         }
         if self.columns.is_empty() {
             return Err(SQLError::TypeMismatch(

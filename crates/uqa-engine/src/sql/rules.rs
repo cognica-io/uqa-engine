@@ -29,7 +29,7 @@ use returning::{
 };
 pub(in crate::sql) use returning::{validate_rule_returning_contract, RuleReturningResult};
 
-use super::scalar::eval_lowered_expression;
+use super::scalar::{eval_lowered_expression, eval_stored_expression_plan_with_row};
 
 thread_local! {
     static RULE_EXECUTION_STACK: RefCell<Vec<(String, RuleEvent)>> = const { RefCell::new(Vec::new()) };
@@ -47,6 +47,10 @@ struct PreparedRule {
 struct RuleColumnMetadata {
     ty: uqa_sql::ast::ColumnType,
     uses_document_id: bool,
+}
+
+fn rule_condition_plan_references_row(plan: &uqa_planner::ExpressionPlan) -> bool {
+    !crate::engine_events::rule_condition_plan_row_columns(plan).is_empty()
 }
 
 pub(in crate::sql) struct PreparedRuleBatch {
@@ -190,12 +194,39 @@ impl PreparedRuleBatch {
                             "rewrite rule lost its prepared action column contract".into(),
                         )
                     })?;
+                let mut reevaluated_rows;
+                let reevaluated_matching_rows;
+                let (action_matching_rows, action_rows) =
+                    if self.event == RuleEvent::Insert && prepared.rule.condition_plan.is_some() {
+                        reevaluated_rows = self.rows.clone();
+                        let mut matched = Vec::new();
+                        for (row_index, row) in reevaluated_rows.iter_mut().enumerate() {
+                            if rule_condition_matches(
+                                engine,
+                                &prepared.rule,
+                                &privilege_subject,
+                                row_index,
+                                row,
+                                &columns,
+                                &mut |_, _, _| Ok(None),
+                            )? {
+                                matched.push(row_index);
+                            }
+                        }
+                        reevaluated_matching_rows = matched;
+                        (
+                            reevaluated_matching_rows.as_slice(),
+                            reevaluated_rows.as_slice(),
+                        )
+                    } else {
+                        (prepared.matching_rows.as_slice(), self.rows.as_slice())
+                    };
                 let action_returns = statement_has_returning(action);
                 let captures_action = request.captures() && action_returns;
                 let captures_source_context = captures_action
                     && matches!(action, Statement::Update(_) | Statement::Delete(_))
-                    && prepared.matching_rows.iter().any(|row_index| {
-                        self.rows
+                    && action_matching_rows.iter().any(|row_index| {
+                        action_rows
                             .get(*row_index)
                             .is_some_and(|row| row.context.is_some())
                     });
@@ -219,7 +250,8 @@ impl PreparedRuleBatch {
                         let mut row = RuleRowImage::empty();
                         if rule_condition_matches(
                             engine,
-                            prepared.rule.definition.condition.as_ref(),
+                            &prepared.rule,
+                            &privilege_subject,
                             qualification_index,
                             &mut row,
                             &columns,
@@ -235,7 +267,7 @@ impl PreparedRuleBatch {
                         qualification_rows.as_slice(),
                     )
                 } else {
-                    (prepared.matching_rows.as_slice(), self.rows.as_slice())
+                    (action_matching_rows, action_rows)
                 };
                 let needs_row_source = self.event == RuleEvent::Insert
                     || prepared.condition_references_row
@@ -363,14 +395,18 @@ where
     }
     ensure_not_recursive(&table, event)?;
     let columns = rule_columns(engine, &table)?;
+    let privilege_subject = engine.rule_privilege_subject(&table)?;
     let mut suppress_original = vec![false; rows.len()];
     let mut prepared_rules = Vec::with_capacity(rules.len());
     for rule in rules {
-        let condition_references_row = rule
-            .definition
-            .condition
-            .as_ref()
-            .is_some_and(crate::engine_events::rule_expr_references_row);
+        let condition_references_row = if let Some(plan) = rule.condition_plan.as_ref() {
+            rule_condition_plan_references_row(plan)
+        } else {
+            rule.definition
+                .condition
+                .as_ref()
+                .is_some_and(crate::engine_events::rule_expr_references_row)
+        };
         let action_columns = rule
             .definition
             .actions
@@ -399,7 +435,8 @@ where
         for (index, row) in rows.iter_mut().enumerate() {
             if rule_condition_matches(
                 engine,
-                rule.definition.condition.as_ref(),
+                &rule,
+                &privilege_subject,
                 index,
                 row,
                 &columns,
@@ -458,12 +495,15 @@ pub(in crate::sql) fn relation_rules_reference_row(
     event: RuleEvent,
 ) -> Result<bool, SQLError> {
     for rule in engine.rules_for(table, event)? {
-        if rule
-            .definition
-            .condition
-            .as_ref()
-            .is_some_and(crate::engine_events::rule_expr_references_row)
-        {
+        let condition_references_row = if let Some(plan) = rule.condition_plan.as_ref() {
+            rule_condition_plan_references_row(plan)
+        } else {
+            rule.definition
+                .condition
+                .as_ref()
+                .is_some_and(crate::engine_events::rule_expr_references_row)
+        };
+        if condition_references_row {
             return Ok(true);
         }
         for action in &rule.definition.actions {
@@ -524,6 +564,10 @@ pub(in crate::sql) fn relation_condition_row_columns(
 ) -> Result<BTreeSet<String>, SQLError> {
     let mut columns = BTreeSet::new();
     for rule in engine.rules_for(table, event)? {
+        if let Some(plan) = rule.condition_plan.as_ref() {
+            columns.extend(crate::engine_events::rule_condition_plan_row_columns(plan));
+            continue;
+        }
         if let Some(condition) = rule.definition.condition.as_ref() {
             columns.extend(crate::engine_events::rule_expr_row_columns(condition));
         }
@@ -539,7 +583,11 @@ pub(in crate::sql) fn relation_rule_row_columns(
     let mut columns = BTreeSet::new();
     let mut references_row = false;
     for rule in engine.rules_for(table, event)? {
-        if let Some(condition) = rule.definition.condition.as_ref() {
+        if let Some(plan) = rule.condition_plan.as_ref() {
+            let plan_references_row = rule_condition_plan_references_row(plan);
+            references_row |= plan_references_row;
+            columns.extend(crate::engine_events::rule_condition_plan_row_columns(plan));
+        } else if let Some(condition) = rule.definition.condition.as_ref() {
             references_row |= crate::engine_events::rule_expr_references_row(condition);
             columns.extend(crate::engine_events::rule_expr_row_columns(condition));
         }

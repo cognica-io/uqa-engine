@@ -41,15 +41,20 @@ pub(in crate::sql) fn materialize_plan_ctes_with_filters<'a>(
             continue;
         }
 
+        let outer_row = ctes.row_lock_outer_row().cloned();
         let result = {
             let mut cte_scope = ctes.enter_lock_identity_emission(false);
-            execute_query_plan_output(
-                engine,
-                &plan.query,
-                params,
-                &mut cte_scope,
-                QueryOutputMode::SharedSpill,
-            )?
+            if let Some(outer_row) = outer_row.as_ref() {
+                execute_lateral_subquery_output(engine, &plan.query, outer_row, params, &cte_scope)?
+            } else {
+                execute_query_plan_output(
+                    engine,
+                    &plan.query,
+                    params,
+                    &mut cte_scope,
+                    QueryOutputMode::SharedSpill,
+                )?
+            }
         };
         let mut columns = result.columns.clone();
         let source_columns = result.internal_columns.clone();

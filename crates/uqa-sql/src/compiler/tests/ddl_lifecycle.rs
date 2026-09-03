@@ -162,9 +162,20 @@ fn rule_statements_preserve_event_actions_and_lifecycle_shape() {
     assert_eq!(rule.event, crate::ast::RuleEvent::Insert);
     assert!(!rule.instead);
     assert!(rule.condition.is_some());
+    assert_eq!(rule.condition_sql.as_deref(), Some("new.id > 0"));
     assert_eq!(rule.actions.len(), 2);
     assert_eq!(rule.action_sql.len(), 2);
     assert!(rule.or_replace);
+
+    let Statement::CreateRule(subquery) = first(
+        "CREATE RULE subquery_rule AS ON INSERT TO app.items WHERE EXISTS (SELECT 1 FROM app.lookup WHERE id = NEW.id) DO NOTHING",
+    ) else {
+        panic!("expected CREATE RULE with a subquery condition");
+    };
+    assert_eq!(
+        subquery.condition_sql.as_deref(),
+        Some("EXISTS (SELECT 1 FROM app.lookup WHERE id = new.id)")
+    );
 
     let Statement::CreateRule(nothing) =
         first("CREATE RULE suppress_delete AS ON DELETE TO app.items DO INSTEAD NOTHING")

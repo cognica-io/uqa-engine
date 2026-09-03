@@ -6,12 +6,13 @@
 
 //! `pg_trigger`, `pg_rewrite`, and their definition helpers.
 
+mod rules;
+
 use std::collections::BTreeMap;
 
 use uqa_core::Value;
 use uqa_sql::ast::{
-    BinaryOp, CreateRule, CreateTrigger, Expr, FunctionDispatch, RuleEvent, TriggerEvent,
-    TriggerTiming,
+    BinaryOp, CreateTrigger, Expr, FunctionDispatch, RuleEvent, TriggerEvent, TriggerTiming,
 };
 use uqa_sql::{ResultRow, SQLError};
 
@@ -28,6 +29,8 @@ use super::helpers::rows::{bool_value, catalog_usize, int_value, row, str_value}
 use super::helpers::views::view_columns_for;
 use super::pg_catalog::table_relation_oid_from;
 use super::pg_proc::user_routine_catalog_oid;
+
+use rules::{render_rule_definition, render_rule_relation, rule_condition_text};
 
 const TRIGGER_TYPE_ROW: i64 = 1;
 const TRIGGER_TYPE_BEFORE: i64 = 2;
@@ -456,10 +459,8 @@ pub(super) fn build_pg_rewrite(
                 ("is_instead", bool_value(definition.instead)),
                 (
                     "ev_qual",
-                    definition.condition.as_ref().map_or_else(
-                        || str_value("<>"),
-                        |condition| str_value(schema_expr_text(condition)),
-                    ),
+                    rule_condition_text(definition, false)
+                        .map_or_else(|| str_value("<>"), str_value),
                 ),
                 (
                     "ev_action",
@@ -634,67 +635,6 @@ const fn rule_event_code(event: RuleEvent) -> &'static str {
         RuleEvent::Insert => "3",
         RuleEvent::Delete => "4",
     }
-}
-
-fn render_rule_definition(
-    catalog: &CatalogReadView,
-    resolution: &RelationNameResolution,
-    definition: &CreateRule,
-    pretty: bool,
-) -> Result<String, SQLError> {
-    let mut rendered = format!(
-        "CREATE RULE {} AS ON {} TO {}",
-        uqa_sql::expr::quote_ident(&definition.name),
-        match definition.event {
-            RuleEvent::Select => "SELECT",
-            RuleEvent::Insert => "INSERT",
-            RuleEvent::Update => "UPDATE",
-            RuleEvent::Delete => "DELETE",
-        },
-        render_rule_relation(catalog, resolution, &definition.table, pretty)?
-    );
-    if let Some(condition) = &definition.condition {
-        rendered.push_str(" WHERE (");
-        rendered.push_str(&render_trigger_condition(condition, pretty));
-        rendered.push(')');
-    }
-    rendered.push_str(if definition.instead {
-        " DO INSTEAD"
-    } else {
-        " DO ALSO"
-    });
-    match definition.action_sql.as_slice() {
-        [] => rendered.push_str(" NOTHING"),
-        [action] => {
-            rendered.push(' ');
-            rendered.push_str(action);
-        }
-        actions => {
-            rendered.push_str(" (");
-            rendered.push_str(&actions.join("; "));
-            rendered.push_str(";)");
-        }
-    }
-    Ok(rendered)
-}
-
-fn render_rule_relation(
-    catalog: &CatalogReadView,
-    resolution: &RelationNameResolution,
-    name: &str,
-    pretty: bool,
-) -> Result<String, SQLError> {
-    let relation = RelationIdentity::from_legacy_name(name)
-        .map_err(|error| SQLError::Internal(format!("decode rule relation `{name}`: {error}")))?;
-    if pretty {
-        let local = uqa_sql::expr::quote_ident(&relation.name);
-        let visible_table = catalog.table_name_resolved(resolution, &local)?;
-        let visible_view = catalog.view_name_resolved(resolution, &local)?;
-        if visible_table.as_deref() == Some(name) || visible_view.as_deref() == Some(name) {
-            return Ok(local);
-        }
-    }
-    Ok(render_qualified_name(name))
 }
 
 #[expect(

@@ -211,6 +211,7 @@ fn execute_lateral_subquery_output_inner(
     ctes: &CteScope,
 ) -> Result<QueryOutput, SQLError> {
     let mut scoped_ctes = ctes.clone();
+    scoped_ctes.set_row_lock_outer_row(outer_row.clone());
     crate::sql::select::materialize_plan_ctes(engine, &plan.ctes, params, &mut scoped_ctes)?;
     execute_lateral_relational_root_output(engine, &plan.root, outer_row, params, &mut scoped_ctes)
 }

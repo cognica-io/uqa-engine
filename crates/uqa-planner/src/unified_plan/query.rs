@@ -563,7 +563,7 @@ impl ExpressionPlan {
         Self::lower_with(expression, &NoRegisteredAggregates)
     }
 
-    pub(super) fn lower_with(expression: Expr, aggregates: &dyn AggregateClassifier) -> Self {
+    pub fn lower_with(expression: Expr, aggregates: &dyn AggregateClassifier) -> Self {
         let mut subqueries = Vec::new();
         let scalar = lower_scalar_expression(expression, aggregates, &mut subqueries);
         Self { scalar, subqueries }

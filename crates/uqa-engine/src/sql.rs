@@ -236,6 +236,17 @@ pub(crate) fn bind_catalog_query_routines_with_outer(
     select::bind_query_plan_routines_for_storage(engine, query, params, &ctes, Some(outer))
 }
 
+/// Bind a catalog-owned scalar expression, including all nested query plans, against a statically typed outer row.
+pub(crate) fn bind_catalog_expression_routines_with_outer(
+    engine: &Engine,
+    expression: &mut uqa_planner::ExpressionPlan,
+    params: &[SQLParam],
+    outer: &uqa_execution::RowSchema,
+) -> Result<Option<uqa_sql::ast::ColumnType>, SQLError> {
+    let ctes = CteScope::new_for_catalog_binding(engine);
+    select::bind_expression_plan_routines_for_storage(engine, expression, params, &ctes, outer)
+}
+
 pub(crate) fn validate_stored_view_check_option(
     engine: &Engine,
     name: &str,

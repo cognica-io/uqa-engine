@@ -99,8 +99,8 @@ impl Engine {
     }
 
     pub(crate) fn register_rule(&self, mut definition: CreateRule) -> Result<(), SQLError> {
-        let relation =
-            self.validate_rule_definition(&mut definition, RelationLookupMode::Dynamic)?;
+        let (relation, condition_plan) =
+            self.validate_rule_definition(&mut definition, RelationLookupMode::Dynamic, None)?;
         if definition.event == uqa_sql::ast::RuleEvent::Select {
             if !definition.or_replace {
                 return Err(duplicate_object(
@@ -155,6 +155,7 @@ impl Engine {
             StoredRule {
                 definition,
                 enabled,
+                condition_plan,
             },
         );
         self.persist_rule_catalog_snapshot(&next)?;

@@ -9,14 +9,67 @@
 use super::{
     cte_references_own_name, expr_contains_subquery, extend_cte_generated_schema,
     extend_recursive_cte_binding_schema, operator_join_relation_schemas, ordered_plan_ctes,
-    overlay_outer_schema, rename_schema, CteScope, QueryPlan, RelationalPlan, RowSchema, SQLError,
-    SQLParam, ScalarExpr, SchemaScope, SourcePlan,
+    overlay_outer_schema, rename_schema, ColumnType, CteScope, QueryPlan, RelationalPlan,
+    RowSchema, SQLError, SQLParam, ScalarExpr, SchemaScope, SourcePlan,
 };
 use crate::engine_user_functions::RoutineResolution;
-use uqa_execution::FunctionTypeResolver;
+use uqa_execution::{ColumnIdentity, FunctionTypeResolver};
+use uqa_planner::ExpressionPlan;
 use uqa_sql::ast::FunctionBinding;
 
 impl SchemaScope {
+    fn canonicalize_stored_outer_columns(&self, expression: &mut ScalarExpr, schema: &RowSchema) {
+        let Some(outer) = self.stored_expression_outer.as_ref() else {
+            return;
+        };
+        let Some(outer_start) = schema.physical_width().checked_sub(outer.physical_width()) else {
+            return;
+        };
+        uqa_planner::rewrite_scalar_expression(expression, &mut |node| {
+            let lookup = match node {
+                ScalarExpr::Column(column) => ColumnIdentity::unqualified(column.as_str()),
+                ScalarExpr::QualifiedColumn { qualifier, column } => {
+                    ColumnIdentity::qualified(qualifier.as_str(), column.as_str())
+                }
+                _ => return,
+            };
+            let Some(slot) = schema.physical_slot_for_identity(&lookup) else {
+                return;
+            };
+            if slot < outer_start {
+                return;
+            }
+            let public_qualifier = match node {
+                ScalarExpr::QualifiedColumn { qualifier, .. } => Some(qualifier.as_str()),
+                ScalarExpr::Column(column) => {
+                    let mut qualifiers = outer
+                        .identities()
+                        .iter()
+                        .filter(|identity| identity.column() == column)
+                        .filter_map(ColumnIdentity::qualifier);
+                    let qualifier = qualifiers.next();
+                    (qualifiers.next().is_none()).then_some(qualifier).flatten()
+                }
+                _ => None,
+            };
+            let Some(qualifier) = public_qualifier.and_then(|qualifier| {
+                if qualifier.eq_ignore_ascii_case("old") {
+                    Some(crate::engine_events::RULE_OLD_PLAN_QUALIFIER)
+                } else if qualifier.eq_ignore_ascii_case("new") {
+                    Some(crate::engine_events::RULE_NEW_PLAN_QUALIFIER)
+                } else {
+                    None
+                }
+            }) else {
+                return;
+            };
+            *node = ScalarExpr::QualifiedColumn {
+                qualifier: qualifier.to_string(),
+                column: lookup.column().to_string(),
+            };
+        });
+    }
+
     fn bind_query_routines_for_storage(
         &mut self,
         routines: &dyn RoutineResolution,
@@ -469,6 +522,7 @@ impl SchemaScope {
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<(), SQLError> {
+        self.canonicalize_stored_outer_columns(expression, schema);
         let mut failure = None;
         uqa_planner::rewrite_scalar_expression(expression, &mut |expression| {
             if failure.is_some() {
@@ -558,4 +612,28 @@ pub(in crate::sql) fn bind_query_plan_routines_for_storage(
     outer: Option<&RowSchema>,
 ) -> Result<RowSchema, SQLError> {
     SchemaScope::for_analysis(ctes)?.bind_query_routines_for_storage(engine, plan, params, outer)
+}
+
+/// Bind every routine call owned by a stored scalar expression and validate its complete query-valued descendants against the expression's row scope.
+pub(in crate::sql) fn bind_expression_plan_routines_for_storage(
+    engine: &dyn RoutineResolution,
+    plan: &mut ExpressionPlan,
+    params: &[SQLParam],
+    ctes: &CteScope,
+    schema: &RowSchema,
+) -> Result<Option<ColumnType>, SQLError> {
+    let mut scope = SchemaScope::for_analysis(ctes)?;
+    scope.stored_expression_outer = Some(schema.clone());
+    for subquery in &mut plan.subqueries {
+        scope.bind_query_routines_for_storage(engine, subquery, params, Some(schema))?;
+    }
+    scope.bind_scalar_routines_for_storage(
+        engine,
+        &mut plan.scalar,
+        schema,
+        &plan.subqueries,
+        params,
+        None,
+    )?;
+    scope.bind_expression_type(engine, &plan.scalar, schema, &plan.subqueries, params, None)
 }

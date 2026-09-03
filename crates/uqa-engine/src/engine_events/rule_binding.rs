@@ -8,6 +8,8 @@
 
 use std::collections::BTreeSet;
 
+use uqa_execution::ScalarExpr;
+use uqa_planner::ExpressionPlan;
 use uqa_sql::ast::{
     Expr, FrameBound, FromClause, InsertStmt, OnConflictAction, OrderBy, Projection, SelectStmt,
     Statement, UpdateStmt, CTE,
@@ -112,6 +114,46 @@ pub(crate) fn rule_expr_row_columns(expr: &Expr) -> BTreeSet<String> {
     let mut collector = RuleRowColumnCollector::default();
     let _ = bind_rule_expr_scoped(expr, &mut collector, &BTreeSet::new());
     collector.columns
+}
+
+fn collect_condition_plan_row_column(expression: &ScalarExpr, columns: &mut BTreeSet<String>) {
+    if let ScalarExpr::QualifiedColumn { qualifier, column } = expression {
+        if qualifier == super::RULE_OLD_PLAN_QUALIFIER
+            || qualifier == super::RULE_NEW_PLAN_QUALIFIER
+        {
+            columns.insert(column.clone());
+        }
+    }
+}
+
+pub(crate) fn rule_condition_plan_row_columns(plan: &ExpressionPlan) -> BTreeSet<String> {
+    let mut columns = BTreeSet::new();
+    plan.scalar
+        .visit(&mut |expression| collect_condition_plan_row_column(expression, &mut columns));
+    for subquery in &plan.subqueries {
+        let mut subquery = subquery.clone();
+        subquery.rewrite_scalar_expressions(&mut |expression| {
+            collect_condition_plan_row_column(expression, &mut columns);
+        });
+    }
+    columns
+}
+
+pub(crate) fn rename_rule_condition_plan_column(plan: &mut ExpressionPlan, from: &str, to: &str) {
+    let mut rewrite = |expression: &mut ScalarExpr| {
+        if let ScalarExpr::QualifiedColumn { qualifier, column } = expression {
+            if (qualifier == super::RULE_OLD_PLAN_QUALIFIER
+                || qualifier == super::RULE_NEW_PLAN_QUALIFIER)
+                && column == from
+            {
+                *column = to.to_string();
+            }
+        }
+    };
+    uqa_planner::rewrite_scalar_expression(&mut plan.scalar, &mut rewrite);
+    for subquery in &mut plan.subqueries {
+        subquery.rewrite_scalar_expressions(&mut rewrite);
+    }
 }
 
 pub(crate) fn rule_statement_row_columns(

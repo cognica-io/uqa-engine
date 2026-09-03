@@ -105,11 +105,17 @@ impl Engine {
             for action in &mut rule.definition.actions {
                 action.upgrade_legacy_serialized_dispatches();
             }
-            let relation = self
-                .validate_rule_definition(&mut rule.definition, RelationLookupMode::Bound)
+            let stored_condition_plan = rule.condition_plan.clone();
+            let (relation, condition_plan) = self
+                .validate_rule_definition(
+                    &mut rule.definition,
+                    RelationLookupMode::Bound,
+                    stored_condition_plan.as_ref(),
+                )
                 .map_err(|error| {
                     StorageBackendError::Other(format!("restore rule catalog: {error}"))
                 })?;
+            rule.condition_plan = condition_plan;
             let name = rule.definition.name.clone();
             if rules
                 .entry(relation)

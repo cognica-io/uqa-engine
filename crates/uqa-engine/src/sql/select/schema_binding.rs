@@ -30,7 +30,9 @@ pub(in crate::sql) use projection::{
     analyze_projection_output_schema, bind_projection_output_schema,
     validate_query_block_expression_types, validate_query_block_references,
 };
-pub(in crate::sql) use routine_binding::bind_query_plan_routines_for_storage;
+pub(in crate::sql) use routine_binding::{
+    bind_expression_plan_routines_for_storage, bind_query_plan_routines_for_storage,
+};
 pub(in crate::sql) use scope::{
     analyze_query_plan_schema, analyze_query_plan_schema_with_catalog, bind_expression_plan_type,
     bind_query_plan_schema,
@@ -72,6 +74,7 @@ struct SchemaScope {
     deferred_ctes: BTreeMap<String, uqa_planner::CtePlan>,
     visiting_views: BTreeSet<String>,
     validate_references: bool,
+    stored_expression_outer: Option<RowSchema>,
 }
 
 impl SchemaScope {
@@ -146,6 +149,7 @@ impl SchemaScope {
             deferred_ctes: ctes.deferred_ctes().clone(),
             visiting_views: BTreeSet::new(),
             validate_references: false,
+            stored_expression_outer: None,
         })
     }
 
@@ -163,6 +167,7 @@ impl SchemaScope {
             deferred_ctes: BTreeMap::new(),
             visiting_views: BTreeSet::new(),
             validate_references: true,
+            stored_expression_outer: None,
         }
     }
 

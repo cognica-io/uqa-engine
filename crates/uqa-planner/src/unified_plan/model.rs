@@ -257,7 +257,7 @@ pub struct OrderPlan {
 }
 
 /// Executable scalar IR plus every query-valued descendant it owns.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ExpressionPlan {
     pub scalar: ScalarExpr,
     pub subqueries: Vec<QueryPlan>,

@@ -13,7 +13,8 @@ use uqa_sql::SQLError;
 
 pub(crate) use rule_binding::{
     bind_rule_action, bind_rule_expr_scoped, first_rule_row_reference_in_expr,
-    first_rule_row_reference_in_select, rule_action_has_set_operation, rule_expr_references_row,
+    first_rule_row_reference_in_select, rename_rule_condition_plan_column,
+    rule_action_has_set_operation, rule_condition_plan_row_columns, rule_expr_references_row,
     rule_expr_row_columns, rule_statement_references_row, rule_statement_row_columns,
 };
 
@@ -33,7 +34,12 @@ pub(crate) struct StoredRule {
     pub(crate) definition: CreateRule,
     #[serde(default)]
     pub(crate) enabled: EventEnableMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) condition_plan: Option<uqa_planner::ExpressionPlan>,
 }
+
+pub(crate) const RULE_OLD_PLAN_QUALIFIER: &str = "\0uqa_rule_old";
+pub(crate) const RULE_NEW_PLAN_QUALIFIER: &str = "\0uqa_rule_new";
 
 #[derive(Default, Serialize, Deserialize)]
 struct StoredTriggerCatalog {

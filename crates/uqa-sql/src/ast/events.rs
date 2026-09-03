@@ -114,6 +114,8 @@ pub struct CreateRule {
     pub event: RuleEvent,
     pub instead: bool,
     pub condition: Option<Expr>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub condition_sql: Option<String>,
     pub actions: Vec<Statement>,
     #[serde(default)]
     pub action_sql: Vec<String>,

@@ -156,7 +156,30 @@ impl Engine {
         if let Some(entries) = next_rules.get_mut(&relation) {
             for rule in entries.values_mut() {
                 if let Some(condition) = rule.definition.condition.as_mut() {
-                    crate::engine_table_storage::rename_schema_expr_column(condition, from, to)?;
+                    if let Some(condition_plan) = rule.condition_plan.as_mut() {
+                        *condition = super::bind_rule_expr_scoped(
+                            condition,
+                            &mut RuleColumnResolver {
+                                from,
+                                to: Some(to),
+                                referenced: false,
+                            },
+                            &std::collections::BTreeSet::new(),
+                        )
+                        .map_err(|error| {
+                            StorageBackendError::Other(format!(
+                                "rename rule condition column: {error}"
+                            ))
+                        })?;
+                        super::rename_rule_condition_plan_column(condition_plan, from, to);
+                    } else {
+                        crate::engine_table_storage::rename_schema_expr_column(
+                            condition, from, to,
+                        )?;
+                    }
+                }
+                if let Some(condition_sql) = rule.definition.condition_sql.as_mut() {
+                    *condition_sql = rename_rule_action_sql_column(condition_sql, from, to);
                 }
                 for action in &mut rule.definition.actions {
                     *action = rename_rule_statement_column(action, from, to).map_err(|error| {
@@ -218,9 +241,16 @@ impl Engine {
             .into_iter()
             .flat_map(BTreeMap::values)
             .filter(|rule| {
-                rule.definition.condition.as_ref().is_some_and(|condition| {
-                    crate::engine_table_storage::schema_expr_references_column(condition, column)
-                }) || rule
+                rule.condition_plan.as_ref().map_or_else(
+                    || {
+                        rule.definition.condition.as_ref().is_some_and(|condition| {
+                            crate::engine_table_storage::schema_expr_references_column(
+                                condition, column,
+                            )
+                        })
+                    },
+                    |plan| super::rule_condition_plan_row_columns(plan).contains(column),
+                ) || rule
                     .definition
                     .actions
                     .iter()
