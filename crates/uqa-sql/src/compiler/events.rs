@@ -179,11 +179,25 @@ pub(super) fn compile_create_rule(stmt: &pg_query::protobuf::RuleStmt) -> Result
                 | crate::ast::Statement::Insert(_)
                 | crate::ast::Statement::Update(_)
                 | crate::ast::Statement::Delete(_)
+                | crate::ast::Statement::Notify { .. }
         ) {
             return Err(SQLError::Unsupported(
-                "rewrite-rule actions currently support SELECT, INSERT, UPDATE, and DELETE".into(),
+                "rewrite-rule actions currently support SELECT, INSERT, UPDATE, DELETE, and NOTIFY"
+                    .into(),
             ));
         }
+    }
+    if condition.is_some()
+        && actions
+            .iter()
+            .any(|action| matches!(action, crate::ast::Statement::Notify { .. }))
+    {
+        return Err(SQLError::Routine {
+            sqlstate: "42P17".into(),
+            message:
+                "rules with WHERE conditions can only have SELECT, INSERT, UPDATE, or DELETE actions"
+                    .into(),
+        });
     }
     Ok(CreateRule {
         name: stmt.rulename.clone(),

@@ -243,6 +243,9 @@ pub(super) fn rewrite_command_scalars(
         | CommandPlan::AlterView(_)
         | CommandPlan::RefreshMaterializedView { .. }
         | CommandPlan::CreateSchema { .. }
+        | CommandPlan::Notify { .. }
+        | CommandPlan::Listen { .. }
+        | CommandPlan::Unlisten { .. }
         | CommandPlan::SetVariable { .. }
         | CommandPlan::ResetVariable { .. }
         | CommandPlan::ResetAllVariables

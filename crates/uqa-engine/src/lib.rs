@@ -47,6 +47,8 @@
 //!   `multi_field_match`, `staged_retrieval`, `graph_*`, `deep_predict`).
 //! - [`Engine::sql_cursor`] / [`Engine::sql_columnar`] - bounded, schema-ordered
 //!   column batches for result sets that should not be retained in memory.
+//! - [`Engine::take_sql_notifications`] - drain committed `LISTEN`/`NOTIFY`
+//!   messages for the current session.
 //! - [`Engine::search`] - direct text-only retrieval returning a posting
 //!   list.
 //! - [`Engine::knn_search`], [`Engine::vector_similarity_search`] - k-NN
@@ -91,6 +93,7 @@ mod engine_graphs;
 mod engine_hierarchy;
 mod engine_hook;
 mod engine_models;
+mod engine_notifications;
 mod engine_open;
 mod engine_prepared;
 mod engine_relations;
@@ -152,6 +155,7 @@ use uqa_storage::{
     VectorIndexOpenMode, VectorIndexSpec, ViewRow,
 };
 
+pub use engine_notifications::SQLNotification;
 pub use sql::{SQLCursor, SQLCursorSummary};
 pub use uqa_execution::{ColumnVector, ColumnarBatch};
 pub use uqa_sql::{
@@ -160,6 +164,7 @@ pub use uqa_sql::{
 };
 pub use uqa_storage::{DatabaseFileFormat, SQLiteCompressionOptions, SQLiteError};
 
+use engine_notifications::{NotificationHub, PendingNotification};
 use engine_state::{
     DurableCatalogSnapshot, DurableCatalogState, EpochCoordinator, QueryRuntime, RuntimeExtensions,
     SessionContext, StorageContext, StoredView, StoredViewKind,
@@ -329,6 +334,7 @@ pub struct Engine {
     epochs: EpochCoordinator,
     runtime: QueryRuntime,
     row_locks: Arc<row_locks::RowLockManager>,
+    notification_hub: Arc<NotificationHub>,
     session_id: u64,
     owns_session_registration: bool,
     query_table_snapshots: Option<SessionPortalTableSnapshots>,
@@ -465,6 +471,8 @@ struct TransactionFrame {
     row_changes: Vec<TransactionRowChange>,
     deferred_foreign_key_checks: Vec<DeferredForeignKeyCheck>,
     deferred_constraint_trigger_events: Vec<sql::DeferredConstraintTriggerEvent>,
+    pending_notifications: Vec<PendingNotification>,
+    notification_queue_len_at_begin: usize,
     constraint_modes: ConstraintModeState,
     /// Statistics written by ANALYZE are nontransactional in `PostgreSQL`. Keep the latest values outside savepoint snapshots so any rollback can restore them after transactional storage state is rolled back.
     nontransactional_column_stats: NontransactionalColumnStats,
@@ -527,6 +535,7 @@ struct TransactionSavepoint {
     row_changes: Vec<TransactionRowChange>,
     deferred_foreign_key_checks: Vec<DeferredForeignKeyCheck>,
     deferred_constraint_trigger_events: Vec<sql::DeferredConstraintTriggerEvent>,
+    pending_notifications: Vec<PendingNotification>,
     constraint_modes: ConstraintModeState,
 }
 
@@ -542,6 +551,7 @@ struct SessionStateSnapshot {
     sql_statement_cache: SQLStatementCache,
     /// Names of portals that existed at this transaction or savepoint boundary. Rollback removes portals created later without rewinding cursor positions or resurrecting closed portals.
     portal_names: BTreeSet<String>,
+    listened_channels: BTreeSet<String>,
     current_user: String,
     session_user: String,
 }
@@ -882,12 +892,6 @@ fn normalize_analyzer_phase(phase: &str) -> std::result::Result<(String, Analyze
     Ok((normalized.to_string(), phase))
 }
 
-impl Default for Engine {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Drop for Engine {
     fn drop(&mut self) {
         if self.owns_session_registration {
@@ -898,31 +902,7 @@ impl Drop for Engine {
                 }
             }
             self.row_locks.release_session(self.session_id);
-        }
-    }
-}
-
-impl Engine {
-    /// In-memory engine. State lives only as long as this `Engine`.
-    pub fn new() -> Self {
-        let row_locks = Arc::new(row_locks::RowLockManager::new());
-        let session_id = row_locks.allocate_session();
-        Self {
-            storage: StorageContext::memory(),
-            durable: Arc::new(DurableCatalogState::new()),
-            session: Arc::new(SessionContext::new(initial_random_state())),
-            extensions: RuntimeExtensions::new(),
-            epochs: EpochCoordinator::new(),
-            runtime: QueryRuntime::new(SQL_FUNCTION_DEPTH_LIMIT),
-            row_locks,
-            session_id,
-            owns_session_registration: true,
-            query_table_snapshots: None,
-            query_view_snapshots: None,
-            query_sql_function_snapshots: None,
-            query_catalog_snapshot: None,
-            query_transaction_overlay: None,
-            query_transaction_origin: None,
+            self.notification_hub.unregister(self.session_id);
         }
     }
 }

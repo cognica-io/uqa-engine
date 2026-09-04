@@ -776,6 +776,7 @@ impl Engine {
         runtime.statement_gate = std::sync::Arc::clone(&self.runtime.statement_gate);
         runtime.cancellation = self.runtime.cancellation.clone();
         runtime.notices = std::sync::Arc::clone(&self.runtime.notices);
+        runtime.notifications = std::sync::Arc::clone(&self.runtime.notifications);
         Engine {
             storage: StorageContext::shared_from(&self.storage),
             durable: std::sync::Arc::clone(&self.durable),
@@ -784,6 +785,7 @@ impl Engine {
             epochs,
             runtime,
             row_locks: std::sync::Arc::clone(&self.row_locks),
+            notification_hub: std::sync::Arc::clone(&self.notification_hub),
             session_id: self.session_id,
             owns_session_registration: false,
             query_table_snapshots: Some(table_snapshots),

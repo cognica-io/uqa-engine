@@ -61,6 +61,8 @@ impl Engine {
         } else {
             None
         };
+        let notification_commit =
+            self.begin_notification_commit(storage_savepoint.is_none(), frame);
         let savepoints_deferred = Self::backend_savepoints_deferred(stack);
         if let Some(backend) = self.storage.backend.as_ref() {
             let commit_result = if let Some(savepoint) = storage_savepoint {
@@ -95,6 +97,9 @@ impl Engine {
             drop(change_publication);
             self.row_locks.release_session(self.session_id);
             self.publish_committed_transaction_epochs();
+            if let Some(notification_commit) = notification_commit.as_ref() {
+                self.commit_notification_state(notification_commit, &committed);
+            }
             publication_result?;
             self.session
                 .portals
@@ -108,6 +113,7 @@ impl Engine {
             parent.deferred_foreign_key_checks = committed.deferred_foreign_key_checks;
             parent.deferred_constraint_trigger_events =
                 committed.deferred_constraint_trigger_events;
+            parent.merge_pending_notifications(committed.pending_notifications);
             parent.first_snapshot_set |= committed.first_snapshot_set;
         }
         Ok(())

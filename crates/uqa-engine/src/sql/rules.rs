@@ -271,11 +271,12 @@ impl PreparedRuleBatch {
                 } else {
                     (action_matching_rows, action_rows)
                 };
-                let needs_row_source = self.event == RuleEvent::Insert
-                    || prepared.condition_references_row
-                    || action_references_row
-                    || captures_source_context
-                    || uses_action_qualification;
+                let needs_row_source = !matches!(action, Statement::Notify { .. })
+                    && (self.event == RuleEvent::Insert
+                        || prepared.condition_references_row
+                        || action_references_row
+                        || captures_source_context
+                        || uses_action_qualification);
                 if needs_row_source
                     && matching_rows.len() > 1
                     && crate::engine_events::rule_action_has_set_operation(action)

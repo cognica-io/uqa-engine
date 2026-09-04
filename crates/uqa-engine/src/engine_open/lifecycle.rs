@@ -29,7 +29,38 @@ impl PersistentStorageProvider for BackendSessionProvider {
     }
 }
 
+impl Default for Engine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Engine {
+    /// In-memory engine. State lives only as long as this `Engine`.
+    pub fn new() -> Self {
+        let row_locks = Arc::new(crate::row_locks::RowLockManager::new());
+        let notification_hub = Arc::new(crate::NotificationHub::default());
+        let session_id = row_locks.allocate_session();
+        Self {
+            storage: super::StorageContext::memory(),
+            durable: Arc::new(super::DurableCatalogState::new()),
+            session: Arc::new(super::SessionContext::new(super::initial_random_state())),
+            extensions: super::RuntimeExtensions::new(),
+            epochs: super::EpochCoordinator::new(),
+            runtime: super::QueryRuntime::new(super::SQL_FUNCTION_DEPTH_LIMIT),
+            row_locks,
+            notification_hub,
+            session_id,
+            owns_session_registration: true,
+            query_table_snapshots: None,
+            query_view_snapshots: None,
+            query_sql_function_snapshots: None,
+            query_catalog_snapshot: None,
+            query_transaction_overlay: None,
+            query_transaction_origin: None,
+        }
+    }
+
     pub fn open(path: &Path) -> Result<Self, SQLiteError> {
         let conn = ManagedConnection::open(path)?;
         Self::open_with_connection(&conn)
@@ -183,6 +214,7 @@ impl Engine {
         let mut session =
             Self::from_initialized_persistent_session(storage_session, Some(Arc::clone(provider)))?;
         session.row_locks = Arc::clone(&self.row_locks);
+        session.notification_hub = Arc::clone(&self.notification_hub);
         session.session_id = self.row_locks.allocate_session();
         let storage_version_after_restore = session
             .storage
@@ -224,9 +256,12 @@ impl Engine {
         let identity = provider.storage_identity()?;
         let session = provider.open_session()?;
         let mut engine = Self::from_persistent_session(session, Some(Arc::clone(&provider)))?;
-        let row_locks = crate::row_locks::shared_provider_manager(identity, &provider);
+        let row_locks = crate::row_locks::shared_provider_manager(identity.clone(), &provider);
+        let notification_hub =
+            crate::engine_notifications::shared_provider_notification_hub(identity, &provider);
         engine.session_id = row_locks.allocate_session();
         engine.row_locks = row_locks;
+        engine.notification_hub = notification_hub;
         Ok(engine)
     }
 
@@ -236,7 +271,9 @@ impl Engine {
         backend: Arc<dyn PersistentStorageBackend>,
     ) -> StorageBackendResult<Self> {
         let identity = backend.storage_identity()?;
-        let row_locks = crate::row_locks::shared_backend_manager(identity, &backend);
+        let row_locks = crate::row_locks::shared_backend_manager(identity.clone(), &backend);
+        let notification_hub =
+            crate::engine_notifications::shared_backend_notification_hub(identity, &backend);
         let provider: Arc<dyn PersistentStorageProvider> = Arc::new(BackendSessionProvider {
             backend: Arc::clone(&backend),
         });
@@ -246,6 +283,7 @@ impl Engine {
         )?;
         engine.session_id = row_locks.allocate_session();
         engine.row_locks = row_locks;
+        engine.notification_hub = notification_hub;
         Ok(engine)
     }
 
@@ -272,6 +310,7 @@ impl Engine {
         let restore_catalog = Arc::clone(&catalog);
         let restore_backend = Arc::clone(&backend);
         let row_locks = Arc::new(crate::row_locks::RowLockManager::new());
+        let notification_hub = Arc::new(crate::NotificationHub::default());
         let session_id = row_locks.allocate_session();
         let mut engine = Self {
             storage: super::StorageContext::persistent(catalog, backend, provider),
@@ -281,6 +320,7 @@ impl Engine {
             epochs: super::EpochCoordinator::new(),
             runtime: super::QueryRuntime::new(super::SQL_FUNCTION_DEPTH_LIMIT),
             row_locks,
+            notification_hub,
             session_id,
             owns_session_registration: true,
             query_table_snapshots: None,

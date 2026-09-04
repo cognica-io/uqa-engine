@@ -317,12 +317,16 @@ impl Engine {
                 session.prepared.clear();
                 session.sequence_currvals.clear();
                 session.last_sequence = None;
+                session.listened_channels.clear();
                 session.sql_statement_cache.clear();
                 session.search_path = vec!["public".to_string()];
                 let session_user = session.session_user.clone();
                 session.current_user = session_user;
                 drop(session);
                 self.session.portals.lock().clear();
+                if self.transaction_depth() == 0 {
+                    self.synchronize_notification_listener();
+                }
                 return Ok(());
             }
             DiscardTarget::Plans => {

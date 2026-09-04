@@ -113,6 +113,9 @@ fn forbidden_command(
         CommandPlan::CreateRule(_) => Ok(Some("CREATE RULE")),
         CommandPlan::DropRule(_) => Ok(Some("DROP RULE")),
         CommandPlan::SetVariable { .. }
+        | CommandPlan::Notify { .. }
+        | CommandPlan::Listen { .. }
+        | CommandPlan::Unlisten { .. }
         | CommandPlan::ResetVariable { .. }
         | CommandPlan::ResetAllVariables
         | CommandPlan::SetConstraints { .. }
@@ -137,6 +140,9 @@ pub(super) fn plan_sets_transaction_snapshot(plan: &UnifiedPlan) -> bool {
             if matches!(
                 command.as_ref(),
                 CommandPlan::SetVariable { .. }
+                    | CommandPlan::Notify { .. }
+                    | CommandPlan::Listen { .. }
+                    | CommandPlan::Unlisten { .. }
                     | CommandPlan::ResetVariable { .. }
                     | CommandPlan::ResetAllVariables
                     | CommandPlan::SetConstraints { .. }

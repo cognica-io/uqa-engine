@@ -531,6 +531,19 @@ pub enum Statement {
         name: String,
         if_not_exists: bool,
     },
+    /// `NOTIFY channel [, 'payload']` queues one asynchronous notification for delivery when the outer transaction commits.
+    Notify {
+        channel: String,
+        payload: String,
+    },
+    /// `LISTEN channel` transactionally subscribes the current SQL session.
+    Listen {
+        channel: String,
+    },
+    /// `UNLISTEN channel | *` transactionally removes one or every subscription. `None` represents `*`.
+    Unlisten {
+        channel: Option<String>,
+    },
     /// `SET <name> [TO|=] <value>` - runtime parameter assignment.
     /// The engine gives `search_path` resolution semantics and stores other
     /// parameters in the logical session for subsequent `SHOW` statements.

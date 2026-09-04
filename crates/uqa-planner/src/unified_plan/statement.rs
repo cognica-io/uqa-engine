@@ -249,6 +249,15 @@ impl UnifiedPlan {
                 name,
                 if_not_exists,
             })),
+            Statement::Notify { channel, payload } => {
+                Self::Command(Box::new(CommandPlan::Notify { channel, payload }))
+            }
+            Statement::Listen { channel } => {
+                Self::Command(Box::new(CommandPlan::Listen { channel }))
+            }
+            Statement::Unlisten { channel } => {
+                Self::Command(Box::new(CommandPlan::Unlisten { channel }))
+            }
             Statement::SetVariable { name, value } => {
                 Self::Command(Box::new(CommandPlan::SetVariable { name, value }))
             }
@@ -474,6 +483,9 @@ impl CommandPlan {
             Self::CreateMaterializedView { .. } => "CreateMaterializedView",
             Self::RefreshMaterializedView { .. } => "RefreshMaterializedView",
             Self::CreateSchema { .. } => "CreateSchema",
+            Self::Notify { .. } => "Notify",
+            Self::Listen { .. } => "Listen",
+            Self::Unlisten { .. } => "Unlisten",
             Self::SetVariable { .. } => "SetVariable",
             Self::ResetVariable { .. } => "ResetVariable",
             Self::ResetAllVariables => "ResetAllVariables",

@@ -610,6 +610,18 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 name,
                 if_not_exists,
             } => self.execute_create_schema(name, *if_not_exists),
+            CommandPlan::Notify { channel, payload } => {
+                self.engine.notify(channel, payload)?;
+                Ok(SQLResult::empty())
+            }
+            CommandPlan::Listen { channel } => {
+                self.engine.listen(channel);
+                Ok(SQLResult::empty())
+            }
+            CommandPlan::Unlisten { channel } => {
+                self.engine.unlisten(channel.as_deref());
+                Ok(SQLResult::empty())
+            }
             CommandPlan::SetVariable { name, value } => {
                 if name.eq_ignore_ascii_case("role") {
                     self.engine.set_role(value)?;

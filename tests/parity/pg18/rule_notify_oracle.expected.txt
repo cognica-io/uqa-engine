@@ -1,0 +1,23 @@
+Asynchronous notification "uqa_rule_notify_late" with payload "before-listen" received from server process with PID <pid>.
+final-listen|done
+final-unlisten|done
+Asynchronous notification "*" with payload "quoted-star" received from server process with PID <pid>.
+quoted-star|done
+definition|true
+Asynchronous notification "uqa_rule_notify_events" with payload "inserted" received from server process with PID <pid>.
+multi-insert|2
+Asynchronous notification "uqa_rule_notify_events" with payload "inserted" received from server process with PID <pid>.
+zero-insert|2
+Asynchronous notification "uqa_rule_notify_events" with payload "updated" received from server process with PID <pid>.
+zero-update|2
+Asynchronous notification "uqa_rule_notify_events" with payload "deleted" received from server process with PID <pid>.
+zero-delete|2
+Asynchronous notification "uqa_rule_notify_events" with payload "deduplicated" received from server process with PID <pid>.
+dedupe|done
+Asynchronous notification "uqa_rule_notify_events" with payload "kept" received from server process with PID <pid>.
+savepoint|done
+rollback|2
+Asynchronous notification "uqa_rule_notify_events" with payload "replaced" received from server process with PID <pid>.
+instead|0
+conditional|42P17
+payload-limit|22023

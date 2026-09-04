@@ -713,6 +713,9 @@ impl Statement {
             | Self::AlterView(_)
             | Self::RefreshMaterializedView { .. }
             | Self::CreateSchema { .. }
+            | Self::Notify { .. }
+            | Self::Listen { .. }
+            | Self::Unlisten { .. }
             | Self::SetVariable { .. }
             | Self::ResetVariable { .. }
             | Self::ResetAllVariables

@@ -38,6 +38,8 @@ mod sql_index_catalog_lifecycle;
 mod sql_information_schema;
 #[path = "sql_merge.rs"]
 mod sql_merge;
+#[path = "engine_catalog/sql_notifications.rs"]
+mod sql_notifications;
 #[path = "sql_on_conflict.rs"]
 mod sql_on_conflict;
 #[path = "sql_point_update.rs"]

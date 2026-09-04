@@ -7,7 +7,7 @@
 //! Ownership boundaries for storage, catalog, session, runtime, and epochs.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -427,6 +427,7 @@ impl SessionContext {
             prepared: BTreeMap::new(),
             sql_statement_cache: SQLStatementCache::default(),
             portal_names: BTreeSet::new(),
+            listened_channels: BTreeSet::new(),
             current_user: "uqa".to_string(),
             session_user: "uqa".to_string(),
         };
@@ -526,6 +527,7 @@ pub(super) struct QueryRuntime {
     pub(super) sql_execution_depth: AtomicUsize,
     pub(super) cancellation: uqa_core::CancellationToken,
     pub(super) notices: Arc<Mutex<Vec<(String, String)>>>,
+    pub(super) notifications: Arc<Mutex<VecDeque<crate::SQLNotification>>>,
     pub(super) function_depth_limit: AtomicUsize,
     pub(super) bayesian_params_cache: RwLock<BTreeMap<String, BayesianBM25Params>>,
     pub(super) regtype_output_cache: Mutex<Option<Arc<crate::sql::RegtypeOutputCatalog>>>,
@@ -539,6 +541,7 @@ impl QueryRuntime {
             sql_execution_depth: AtomicUsize::new(0),
             cancellation: uqa_core::CancellationToken::new(),
             notices: Arc::new(Mutex::new(Vec::new())),
+            notifications: Arc::new(Mutex::new(VecDeque::new())),
             function_depth_limit: AtomicUsize::new(function_depth_limit),
             bayesian_params_cache: RwLock::new(BTreeMap::new()),
             regtype_output_cache: Mutex::new(None),

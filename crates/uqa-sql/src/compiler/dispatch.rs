@@ -81,6 +81,16 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
         NodeEnum::AlterObjectSchemaStmt(stmt) => compile_alter_object_schema(stmt),
         NodeEnum::ViewStmt(stmt) => compile_create_view(stmt),
         NodeEnum::CreateSchemaStmt(stmt) => compile_create_schema(stmt),
+        NodeEnum::NotifyStmt(stmt) => Ok(Statement::Notify {
+            channel: stmt.conditionname.clone(),
+            payload: stmt.payload.clone(),
+        }),
+        NodeEnum::ListenStmt(stmt) => Ok(Statement::Listen {
+            channel: stmt.conditionname.clone(),
+        }),
+        NodeEnum::UnlistenStmt(stmt) => Ok(Statement::Unlisten {
+            channel: (!stmt.conditionname.is_empty()).then(|| stmt.conditionname.clone()),
+        }),
         NodeEnum::ExplainStmt(stmt) => compile_explain(stmt),
         NodeEnum::VacuumStmt(stmt) => compile_analyze(stmt),
         NodeEnum::TruncateStmt(stmt) => compile_truncate(stmt),

@@ -141,6 +141,25 @@ Do not issue concurrent statements through the same session while an explicit tr
 
 Session creation is available for engines backed by one persistent provider. An engine assembled from separate persistent backends does not provide the single provider needed to create a new session.
 
+## Receive SQL notifications
+
+Execute `LISTEN`, `UNLISTEN`, and `NOTIFY` through `Engine::sql`. `Engine::take_sql_notifications()` drains the current session's committed messages as `SQLNotification { sender_session_id, channel, payload }`. Sessions made with `new_session()` and independently opened engines over the same durable database share notification delivery inside one process, while their subscriptions and receive queues remain independent.
+
+```rust
+let directory = tempfile::tempdir()?;
+let root = uqa_engine::Engine::open(&directory.path().join("notifications.db"))?;
+let listener = root.new_session()?;
+let sender = root.new_session()?;
+listener.sql("LISTEN jobs", &[])?;
+sender.sql("NOTIFY jobs, 'ready'", &[])?;
+let messages = listener.take_sql_notifications();
+assert_eq!(messages[0].channel, "jobs");
+assert_eq!(messages[0].payload, "ready");
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+Subscription changes and outgoing messages take effect at outer commit, rollback and savepoint rollback discard their transactional changes, and identical channel-and-payload pairs are delivered once per transaction. A receive drain attempted while the listener has an open transaction returns no messages and leaves them queued until the transaction ends. Cross-process delivery and live server forwarding remain open compatibility work.
+
 ## Document and retrieval APIs
 
 The API also exposes typed operations that bypass SQL text:

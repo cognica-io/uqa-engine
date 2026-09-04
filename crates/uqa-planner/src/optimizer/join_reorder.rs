@@ -68,17 +68,7 @@ fn reorder_command_joins(
     statistics: &dyn SourceStatistics,
 ) -> JoinGraphResult<()> {
     match command {
-        CommandPlan::Insert(plan) => {
-            for cte in &mut plan.ctes {
-                reorder_query_joins(&mut cte.query, statistics)?;
-            }
-            if let Some(source) = &mut plan.source {
-                reorder_query_joins(source, statistics)?;
-            }
-            for subquery in &mut plan.subqueries {
-                reorder_query_joins(subquery, statistics)?;
-            }
-        }
+        CommandPlan::Insert(plan) => reorder_insert_joins(plan, statistics)?,
         CommandPlan::Update(plan) => {
             for cte in &mut plan.ctes {
                 reorder_query_joins(&mut cte.query, statistics)?;
@@ -127,6 +117,9 @@ fn reorder_command_joins(
         | CommandPlan::AlterForeignTable(_)
         | CommandPlan::AlterView(_)
         | CommandPlan::CreateSchema { .. }
+        | CommandPlan::Notify { .. }
+        | CommandPlan::Listen { .. }
+        | CommandPlan::Unlisten { .. }
         | CommandPlan::SetVariable { .. }
         | CommandPlan::ResetVariable { .. }
         | CommandPlan::ResetAllVariables
@@ -163,6 +156,22 @@ fn reorder_command_joins(
         | CommandPlan::CreateRule(_)
         | CommandPlan::DropRule(_)
         | CommandPlan::DoBlock { .. } => {}
+    }
+    Ok(())
+}
+
+fn reorder_insert_joins(
+    plan: &mut crate::unified_plan::InsertPlan,
+    statistics: &dyn SourceStatistics,
+) -> JoinGraphResult<()> {
+    for cte in &mut plan.ctes {
+        reorder_query_joins(&mut cte.query, statistics)?;
+    }
+    if let Some(source) = &mut plan.source {
+        reorder_query_joins(source, statistics)?;
+    }
+    for subquery in &mut plan.subqueries {
+        reorder_query_joins(subquery, statistics)?;
     }
     Ok(())
 }

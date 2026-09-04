@@ -154,6 +154,9 @@ pub(super) fn optimize_command(
         | CommandPlan::AlterView(_)
         | CommandPlan::RefreshMaterializedView { .. }
         | CommandPlan::CreateSchema { .. }
+        | CommandPlan::Notify { .. }
+        | CommandPlan::Listen { .. }
+        | CommandPlan::Unlisten { .. }
         | CommandPlan::SetVariable { .. }
         | CommandPlan::ResetVariable { .. }
         | CommandPlan::ResetAllVariables

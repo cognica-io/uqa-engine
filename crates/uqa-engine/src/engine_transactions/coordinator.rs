@@ -315,6 +315,8 @@ impl Engine {
             row_changes: Vec::new(),
             deferred_foreign_key_checks,
             deferred_constraint_trigger_events,
+            pending_notifications: Vec::new(),
+            notification_queue_len_at_begin: self.runtime.notifications.lock().len(),
             constraint_modes,
             nontransactional_column_stats: NontransactionalColumnStats::new(),
             nontransactional_sequence_values: NontransactionalSequenceValues::new(),

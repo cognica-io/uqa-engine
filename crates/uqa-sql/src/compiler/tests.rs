@@ -152,6 +152,46 @@ fn transaction_control_preserves_postgresql_modes_and_chaining() {
 }
 
 #[test]
+fn asynchronous_notification_statements_preserve_channels_and_payloads() {
+    assert!(matches!(
+        first("NOTIFY events, 'ready'"),
+        Statement::Notify {
+            ref channel,
+            ref payload,
+        } if channel == "events" && payload == "ready"
+    ));
+    assert!(matches!(
+        first("LISTEN \"Mixed Channel\""),
+        Statement::Listen { ref channel } if channel == "Mixed Channel"
+    ));
+    assert!(matches!(
+        first("UNLISTEN \"Mixed Channel\""),
+        Statement::Unlisten { channel: Some(ref channel) } if channel == "Mixed Channel"
+    ));
+    assert!(matches!(
+        first("UNLISTEN *"),
+        Statement::Unlisten { channel: None }
+    ));
+    assert!(matches!(
+        first("UNLISTEN \"*\""),
+        Statement::Unlisten { channel: Some(ref channel) } if channel == "*"
+    ));
+}
+
+#[test]
+fn conditional_notify_rule_action_uses_postgresql_error() {
+    let error = compile(
+        "CREATE RULE conditional_notify AS ON INSERT TO items WHERE NEW.id > 0 DO ALSO NOTIFY events, 'ready'",
+    )
+    .expect_err("conditional NOTIFY action must fail");
+    assert_eq!(error.sqlstate(), Some("42P17"));
+    assert_eq!(
+        error.to_string(),
+        "rules with WHERE conditions can only have SELECT, INSERT, UPDATE, or DELETE actions"
+    );
+}
+
+#[test]
 fn reset_runtime_parameters_remains_distinct_from_empty_set() {
     assert!(matches!(
         first("RESET default_transaction_read_only"),

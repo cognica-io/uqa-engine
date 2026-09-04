@@ -470,6 +470,16 @@ pub enum CommandPlan {
         name: String,
         if_not_exists: bool,
     },
+    Notify {
+        channel: String,
+        payload: String,
+    },
+    Listen {
+        channel: String,
+    },
+    Unlisten {
+        channel: Option<String>,
+    },
     SetVariable {
         name: String,
         value: String,
