@@ -240,7 +240,7 @@ impl Engine {
         let outer = stack.is_empty();
         let session_snapshot = self.snapshot_session_state();
         let (storage_savepoint, data_snapshot, snapshot_change_baseline) = if outer {
-            let (data_snapshot, baseline) = self.begin_outer_transaction_snapshot(
+            let (data_snapshot, baseline) = self.begin_outer_transaction_with_notifications(
                 read_only,
                 defer_write_lock,
                 &session_snapshot,
@@ -322,11 +322,30 @@ impl Engine {
             nontransactional_column_stats: NontransactionalColumnStats::new(),
             nontransactional_sequence_values: NontransactionalSequenceValues::new(),
         });
-        if outer {
-            self.begin_notification_transaction();
-        }
         self.update_statement_row_lock_baseline(snapshot_change_baseline);
         Ok(())
+    }
+
+    fn begin_outer_transaction_with_notifications(
+        &self,
+        read_only: bool,
+        defer_write_lock: bool,
+        session_snapshot: &SessionStateSnapshot,
+    ) -> Result<
+        (
+            Option<EngineDataSnapshot>,
+            crate::row_locks::RowChangeBaseline,
+        ),
+        SQLError,
+    > {
+        self.begin_notification_transaction()?;
+        self.begin_outer_transaction_snapshot(read_only, defer_write_lock, session_snapshot)
+            .map_err(|error| match self.rollback_notification_state() {
+                Ok(()) => error,
+                Err(notification_error) => SQLError::Internal(format!(
+                    "{error}; asynchronous notification begin rollback failed: {notification_error}"
+                )),
+            })
     }
 
     /// Return the transaction ID that creates a new tuple version. IDs are allocated lazily, and a first write below a savepoint allocates every missing ancestor ID before the active subtransaction ID, matching `PostgreSQL`'s top-XID/sub-XID hierarchy. Direct in-memory APIs intentionally omit a heavyweight transaction snapshot when no frame is open; each such autocommit row write still receives its own durable XID.

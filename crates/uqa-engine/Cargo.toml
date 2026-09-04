@@ -48,6 +48,9 @@ thiserror = { workspace = true }
 [target.'cfg(not(target_os = "emscripten"))'.dependencies]
 rusqlite = { workspace = true }
 
+[target.'cfg(any(windows, all(unix, not(target_os = "emscripten"))))'.dependencies]
+fs2 = { workspace = true }
+
 [target.'cfg(target_os = "emscripten")'.dependencies]
 rusqlite = { version = "0.39", default-features = false, features = ["bundled", "blob", "cache"] }
 

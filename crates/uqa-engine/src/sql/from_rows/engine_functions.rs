@@ -168,7 +168,7 @@ pub(in crate::sql) fn engine_catalog_scalar_value(
             }),
         },
         "pg_notification_queue_usage" => match arguments {
-            [] => Ok(Value::Float(engine.notification_queue_usage())),
+            [] => engine.notification_queue_usage().map(Value::Float),
             _ => Err(SQLError::BadArity {
                 name: lower,
                 expected: "0".into(),

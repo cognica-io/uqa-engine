@@ -214,7 +214,7 @@ impl Engine {
         let mut session =
             Self::from_initialized_persistent_session(storage_session, Some(Arc::clone(provider)))?;
         session.row_locks = Arc::clone(&self.row_locks);
-        session.notification_hub = Arc::clone(&self.notification_hub);
+        session.install_notification_hub(Arc::clone(&self.notification_hub))?;
         session.session_id = self.row_locks.allocate_session();
         let storage_version_after_restore = session
             .storage
@@ -261,7 +261,7 @@ impl Engine {
             crate::engine_notifications::shared_provider_notification_hub(identity, &provider);
         engine.session_id = row_locks.allocate_session();
         engine.row_locks = row_locks;
-        engine.notification_hub = notification_hub;
+        engine.install_notification_hub(notification_hub)?;
         Ok(engine)
     }
 
@@ -283,8 +283,26 @@ impl Engine {
         )?;
         engine.session_id = row_locks.allocate_session();
         engine.row_locks = row_locks;
-        engine.notification_hub = notification_hub;
+        engine.install_notification_hub(notification_hub)?;
         Ok(engine)
+    }
+
+    fn install_notification_hub(
+        &mut self,
+        notification_hub: Arc<crate::NotificationHub>,
+    ) -> StorageBackendResult<()> {
+        let process_id = notification_hub
+            .allocate_backend_process_id()
+            .map_err(|error| {
+                StorageBackendError::Other(format!(
+                    "allocate database backend process identifier: {error}"
+                ))
+            })?;
+        self.notification_hub = notification_hub;
+        if let Some(process_id) = process_id {
+            self.session.install_database_backend_process_id(process_id);
+        }
+        Ok(())
     }
 
     fn from_persistent_session(

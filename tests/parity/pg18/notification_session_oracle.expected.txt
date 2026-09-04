@@ -1,0 +1,9 @@
+listen|LISTEN
+sender-pid|true
+notify-idle|NOTIFY
+idle|uqa_notification_session_oracle|true|idle
+begin|BEGIN
+notify-deferred|NOTIFY
+inside-transaction|0
+commit|COMMIT
+after-commit|uqa_notification_session_oracle|true|deferred

@@ -6,6 +6,9 @@
 
 //! `PostgreSQL` 18 asynchronous notification and rewrite-rule action coverage.
 
+#[path = "sql_notifications/cross_process.rs"]
+mod cross_process;
+
 use tempfile::TempDir;
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLNotification};

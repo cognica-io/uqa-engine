@@ -6,14 +6,13 @@
 
 //! COMMIT, ROLLBACK, and nontransactional statistics restoration.
 
-use parking_lot::MutexGuard;
-
 use super::{
     Engine, NontransactionalColumnStats, NontransactionalSequenceValues, SQLError,
     SessionLastSequenceReference, SessionStateSnapshot, StorageBackendError, StorageBackendResult,
     StorageSavepointId, TransactionDirtyState, TransactionFrame, TransactionIntent,
     TransactionRelationStates, TransactionStatus,
 };
+use crate::engine_notifications::NotificationCommitGuard;
 
 impl Engine {
     pub(super) fn commit_transaction_frame(
@@ -34,28 +33,9 @@ impl Engine {
             .last()
             .ok_or_else(|| SQLError::Internal("COMMIT without an open transaction".into()))?;
         let read_only = frame.intent == TransactionIntent::ReadOnly;
-        if read_only && storage_savepoint.is_none() {
-            if let Some(backend) = self.storage.backend.as_ref() {
-                let violation = match backend.transaction_has_written() {
-                    Ok(false) => None,
-                    Ok(true) => Some(SQLError::Internal(
-                        "read-only SQL execution attempted to mutate persistent storage".into(),
-                    )),
-                    Err(error) => Some(SQLError::Internal(format!(
-                        "inspect read-only transaction before COMMIT: {error}"
-                    ))),
-                };
-                if let Some(violation) = violation {
-                    return Err(match self.rollback_transaction_frame(stack) {
-                        Ok(()) => violation,
-                        Err(rollback_error) => SQLError::Internal(format!(
-                            "{violation}; read-only violation rollback also failed: {rollback_error}"
-                        )),
-                    });
-                }
-            }
-        }
-        let change_publication = if storage_savepoint.is_none() && !frame.row_changes.is_empty() {
+        let has_row_changes = !frame.row_changes.is_empty();
+        self.validate_read_only_commit(stack, read_only, storage_savepoint.is_none())?;
+        let change_publication = if storage_savepoint.is_none() && has_row_changes {
             Some(
                 self.row_locks
                     .begin_change_publication(&self.runtime.cancellation)?,
@@ -100,14 +80,15 @@ impl Engine {
             drop(change_publication);
             self.row_locks.release_session(self.session_id);
             self.publish_committed_transaction_epochs();
-            if let Some(notification_commit) = notification_commit.as_ref() {
-                self.commit_notification_state(notification_commit, &committed);
-            }
-            publication_result?;
+            let notification_result = notification_commit.map_or(Ok(()), |notification_commit| {
+                self.commit_notification_state(notification_commit, &committed)
+            });
             self.session
                 .portals
                 .lock()
                 .retain(|_, portal| portal.holdable);
+            publication_result?;
+            notification_result?;
         }
         if let Some(parent) = stack.last_mut() {
             parent.next_lock_mark = parent.next_lock_mark.max(committed.next_lock_mark);
@@ -123,11 +104,40 @@ impl Engine {
         Ok(())
     }
 
+    fn validate_read_only_commit(
+        &self,
+        stack: &mut Vec<TransactionFrame>,
+        read_only: bool,
+        outer: bool,
+    ) -> Result<(), SQLError> {
+        if !read_only || !outer {
+            return Ok(());
+        }
+        let Some(backend) = self.storage.backend.as_ref() else {
+            return Ok(());
+        };
+        let violation = match backend.transaction_has_written() {
+            Ok(false) => return Ok(()),
+            Ok(true) => SQLError::Internal(
+                "read-only SQL execution attempted to mutate persistent storage".into(),
+            ),
+            Err(error) => SQLError::Internal(format!(
+                "inspect read-only transaction before COMMIT: {error}"
+            )),
+        };
+        Err(match self.rollback_transaction_frame(stack) {
+            Ok(()) => violation,
+            Err(rollback_error) => SQLError::Internal(format!(
+                "{violation}; read-only violation rollback also failed: {rollback_error}"
+            )),
+        })
+    }
+
     fn prepare_notification_commit<'a>(
         &'a self,
         stack: &mut Vec<TransactionFrame>,
         outer: bool,
-    ) -> Result<Option<MutexGuard<'a, ()>>, SQLError> {
+    ) -> Result<Option<NotificationCommitGuard<'a>>, SQLError> {
         let notification_commit = {
             let frame = stack
                 .last()
@@ -139,7 +149,7 @@ impl Engine {
             Err(error) => Err(match self.rollback_transaction_frame(stack) {
                 Ok(()) => error,
                 Err(rollback_error) => SQLError::Internal(format!(
-                    "{error}; notification queue capacity rollback also failed: {rollback_error}"
+                    "{error}; notification commit preparation rollback also failed: {rollback_error}"
                 )),
             }),
         }
@@ -227,7 +237,9 @@ impl Engine {
             self.restore_session_state(snapshot);
         }
         if outer_notification_transaction {
-            self.rollback_notification_state();
+            if let Err(error) = self.rollback_notification_state() {
+                cleanup_errors.push(format!("notification state restore: {error}"));
+            }
         }
         self.apply_nontransactional_sequence_values(&nontransactional_sequence_values);
         if cleanup_errors.is_empty() {
@@ -367,7 +379,9 @@ impl Engine {
         let first_snapshot_set = frame.first_snapshot_set;
         stack.pop();
         if stack.is_empty() {
-            self.rollback_notification_state();
+            if let Err(error) = self.rollback_notification_state() {
+                cleanup_errors.push(format!("notification state restore: {error}"));
+            }
             self.row_locks.release_session(self.session_id);
         } else {
             self.row_locks

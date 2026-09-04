@@ -47,8 +47,9 @@
 //!   `multi_field_match`, `staged_retrieval`, `graph_*`, `deep_predict`).
 //! - [`Engine::sql_cursor`] / [`Engine::sql_columnar`] - bounded, schema-ordered
 //!   column batches for result sets that should not be retained in memory.
-//! - [`Engine::take_sql_notifications`] - drain committed `LISTEN`/`NOTIFY`
-//!   messages for the current session.
+//! - [`Engine::poll_sql_notifications`], [`Engine::wait_for_sql_notifications`],
+//!   and [`Engine::take_sql_notifications`] - receive committed
+//!   `LISTEN`/`NOTIFY` messages for the current session.
 //! - [`Engine::search`] - direct text-only retrieval returning a posting
 //!   list.
 //! - [`Engine::knn_search`], [`Engine::vector_similarity_search`] - k-NN

@@ -8,7 +8,7 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use parking_lot::{Mutex, ReentrantMutex, RwLock};
@@ -397,7 +397,8 @@ impl DurableCatalogState {
 
 pub(super) struct SessionContext {
     /// Positive process identifier exposed by `pg_backend_pid()` and asynchronous notification responses. Portal workers share the owning session context and therefore retain the same identifier.
-    pub(super) backend_process_id: i32,
+    pub(super) backend_process_id: AtomicI32,
+    pub(super) backend_process_id_is_local: AtomicBool,
     /// Transactional session values share one lock so snapshots and restores
     /// cannot observe a mixture of old and new search-path, sequence,
     /// prepared-plan, or statement-cache state.
@@ -434,7 +435,10 @@ impl SessionContext {
             session_user: "uqa".to_string(),
         };
         Self {
-            backend_process_id: crate::engine_notifications::allocate_backend_process_id(),
+            backend_process_id: AtomicI32::new(
+                crate::engine_notifications::allocate_backend_process_id(),
+            ),
+            backend_process_id_is_local: AtomicBool::new(true),
             state: RwLock::new(state),
             sequence_caches: Mutex::new(BTreeMap::new()),
             random_state: Mutex::new(random_state),
@@ -446,11 +450,27 @@ impl SessionContext {
             next_portal_transaction_origin: Mutex::new(1),
         }
     }
+
+    pub(super) fn install_database_backend_process_id(&self, process_id: i32) {
+        let local_process_id = self.backend_process_id.swap(process_id, Ordering::AcqRel);
+        let was_local = self
+            .backend_process_id_is_local
+            .swap(false, Ordering::AcqRel);
+        assert!(
+            was_local,
+            "database backend process identifier installed twice"
+        );
+        crate::engine_notifications::release_backend_process_id(local_process_id);
+    }
 }
 
 impl Drop for SessionContext {
     fn drop(&mut self) {
-        crate::engine_notifications::release_backend_process_id(self.backend_process_id);
+        if *self.backend_process_id_is_local.get_mut() {
+            crate::engine_notifications::release_backend_process_id(
+                *self.backend_process_id.get_mut(),
+            );
+        }
     }
 }
 
@@ -537,6 +557,7 @@ pub(super) struct QueryRuntime {
     pub(super) cancellation: uqa_core::CancellationToken,
     pub(super) notices: Arc<Mutex<Vec<(String, String)>>>,
     pub(super) notifications: Arc<Mutex<VecDeque<crate::SQLNotification>>>,
+    pub(super) notification_wake: Arc<parking_lot::Condvar>,
     pub(super) function_depth_limit: AtomicUsize,
     pub(super) bayesian_params_cache: RwLock<BTreeMap<String, BayesianBM25Params>>,
     pub(super) regtype_output_cache: Mutex<Option<Arc<crate::sql::RegtypeOutputCatalog>>>,
@@ -551,6 +572,7 @@ impl QueryRuntime {
             cancellation: uqa_core::CancellationToken::new(),
             notices: Arc::new(Mutex::new(Vec::new())),
             notifications: Arc::new(Mutex::new(VecDeque::new())),
+            notification_wake: Arc::new(parking_lot::Condvar::new()),
             function_depth_limit: AtomicUsize::new(function_depth_limit),
             bayesian_params_cache: RwLock::new(BTreeMap::new()),
             regtype_output_cache: Mutex::new(None),

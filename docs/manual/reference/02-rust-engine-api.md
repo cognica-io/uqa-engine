@@ -143,7 +143,7 @@ Session creation is available for engines backed by one persistent provider. An 
 
 ## Receive SQL notifications
 
-Execute `LISTEN`, `UNLISTEN`, `NOTIFY`, and `pg_notify` through `Engine::sql`. `Engine::take_sql_notifications()` drains the current session's committed messages as `SQLNotification { process_id, channel, payload }`, where `process_id` matches the sending session's `Engine::backend_process_id()` and SQL `pg_backend_pid()`. Sessions made with `new_session()` and independently opened engines over the same durable database share one bounded notification queue inside the process, while their subscriptions, queue cursors, and drained messages remain independent.
+Execute `LISTEN`, `UNLISTEN`, `NOTIFY`, and `pg_notify` through `Engine::sql`. `Engine::poll_sql_notifications()` imports committed messages without draining them, `Engine::wait_for_sql_notifications(timeout)` waits for availability, and `Engine::take_sql_notifications()` drains them as `SQLNotification { process_id, channel, payload }`, where `process_id` matches the sending session's `Engine::backend_process_id()` and SQL `pg_backend_pid()`. Sessions made with `new_session()` and independently opened engines share one bounded database-scoped queue while retaining independent subscriptions, cursors, and drained messages; on native file-backed databases the same queue also coordinates independent OS processes.
 
 ```rust
 let directory = tempfile::tempdir()?;
@@ -152,6 +152,7 @@ let listener = root.new_session()?;
 let sender = root.new_session()?;
 listener.sql("LISTEN jobs", &[])?;
 sender.sql("NOTIFY jobs, 'ready'", &[])?;
+assert!(listener.wait_for_sql_notifications(std::time::Duration::from_secs(1))?);
 let messages = listener.take_sql_notifications();
 assert_eq!(messages[0].channel, "jobs");
 assert_eq!(messages[0].payload, "ready");
@@ -159,7 +160,7 @@ assert_eq!(messages[0].process_id, sender.backend_process_id());
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-Subscription changes and outgoing messages take effect at outer commit, rollback and savepoint rollback discard their transactional changes, and identical channel-and-payload pairs are delivered once per transaction. A receive drain attempted while the listener has an open transaction returns no messages and leaves them queued until the transaction ends. SQL exposes committed channels through `pg_listening_channels()` and queue occupancy through `pg_notification_queue_usage()`. Cross-process delivery and live server forwarding remain open compatibility work.
+Subscription changes and outgoing messages take effect at outer commit, rollback and savepoint rollback discard their transactional changes, and identical channel-and-payload pairs are delivered once per transaction. Polling, waiting, or draining while the listener has an open transaction returns no messages and leaves them queued until the transaction ends. SQL exposes committed channels through `pg_listening_channels()` and queue occupancy through `pg_notification_queue_usage()`. Native file-backed coordination uses an explicitly versioned sidecar for the queue, database-wide backend-process identifier allocation, and listener-liveness leases; opaque identities and targets without native process support remain process-local. An embedding server must drain messages and encode the existing `uqa-pg-wire::NotificationResponse` itself because the engine does not own its client connection.
 
 ## Document and retrieval APIs
 

@@ -312,7 +312,7 @@ impl Engine {
         }
         if target == DiscardTarget::All {
             if self.transaction_depth() == 0 {
-                self.clear_notification_listener_without_transaction();
+                self.clear_notification_listener_without_transaction()?;
             } else {
                 self.unlisten(None)?;
             }
