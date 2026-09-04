@@ -265,7 +265,10 @@ where
         return Ok(true);
     };
     if let Some(plan) = rule.condition_plan.as_ref() {
-        let required_columns = crate::engine_events::rule_condition_plan_row_columns(plan);
+        let mut required_columns = crate::engine_events::rule_condition_plan_row_columns(plan);
+        if crate::engine_events::rule_condition_plan_references_whole_row(plan) {
+            required_columns.extend(columns.keys().cloned());
+        }
         let mut resolver = ProjectedRuntimeRuleResolver {
             row_index,
             row,

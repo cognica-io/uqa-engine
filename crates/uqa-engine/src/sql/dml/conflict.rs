@@ -658,6 +658,7 @@ pub(in crate::sql) fn returning_row_context(
         .map_err(|error| dml_storage_error("RETURNING schema lookup", error))?
         .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
     let target = returning_target_schema(engine, table)?;
+    let composite_width = target.len();
     let mut columns = target.columns().to_vec();
     let mut types = target.column_types().to_vec();
     if !columns.iter().any(|column| column == DOC_ID_COLUMN) {
@@ -668,7 +669,8 @@ pub(in crate::sql) fn returning_row_context(
     types.push(Some(uqa_sql::ast::ColumnType::Oid));
     columns.push(crate::sql::XMIN_COLUMN.into());
     types.push(Some(uqa_sql::ast::ColumnType::Xid));
-    let schema = returning_context_schema(&columns, &types, target_qualifier, aliases);
+    let schema =
+        returning_context_schema(&columns, &types, composite_width, target_qualifier, aliases);
     let current_values = returning_image_values(engine, Some(current), &columns, &definitions)?;
     let old_values = returning_image_values(engine, images.old.as_ref(), &columns, &definitions)?;
     let new_values = returning_image_values(engine, images.new.as_ref(), &columns, &definitions)?;

@@ -47,10 +47,12 @@ struct PreparedRule {
 struct RuleColumnMetadata {
     ty: uqa_sql::ast::ColumnType,
     uses_document_id: bool,
+    position: usize,
 }
 
 fn rule_condition_plan_references_row(plan: &uqa_planner::ExpressionPlan) -> bool {
-    !crate::engine_events::rule_condition_plan_row_columns(plan).is_empty()
+    crate::engine_events::rule_condition_plan_references_whole_row(plan)
+        || !crate::engine_events::rule_condition_plan_row_columns(plan).is_empty()
 }
 
 pub(in crate::sql) struct PreparedRuleBatch {
@@ -290,6 +292,7 @@ impl PreparedRuleBatch {
                 {
                     (
                         bind_insert_values_action(
+                            engine,
                             action,
                             matching_rows,
                             rows,
@@ -300,6 +303,7 @@ impl PreparedRuleBatch {
                     )
                 } else if needs_row_source {
                     let bound = bind_set_oriented_action(
+                        engine,
                         action,
                         matching_rows,
                         rows,
@@ -429,7 +433,7 @@ where
             .iter()
             .zip(&action_columns)
             .map(|(action, columns)| {
-                crate::engine_events::rule_statement_references_row(action, columns)
+                crate::engine_events::rule_statement_references_row(engine, action, columns)
             })
             .collect::<Result<Vec<_>, SQLError>>()?;
         let action_row_columns = rule
@@ -437,8 +441,16 @@ where
             .actions
             .iter()
             .zip(&action_columns)
-            .map(|(action, columns)| {
-                crate::engine_events::rule_statement_row_columns(action, columns)
+            .map(|(action, action_columns)| {
+                if crate::engine_events::rule_statement_references_whole_row(
+                    engine,
+                    action,
+                    action_columns,
+                )? {
+                    Ok(columns.keys().cloned().collect())
+                } else {
+                    crate::engine_events::rule_statement_row_columns(engine, action, action_columns)
+                }
             })
             .collect::<Result<Vec<_>, SQLError>>()?;
         let mut matching_rows = Vec::new();
@@ -518,7 +530,8 @@ pub(in crate::sql) fn relation_rules_reference_row(
         }
         for action in &rule.definition.actions {
             let target_columns = engine.rule_action_target_columns(action)?;
-            if crate::engine_events::rule_statement_references_row(action, &target_columns)? {
+            if crate::engine_events::rule_statement_references_row(engine, action, &target_columns)?
+            {
                 return Ok(true);
             }
         }
@@ -592,26 +605,39 @@ pub(in crate::sql) fn relation_rule_row_columns(
 ) -> Result<Option<BTreeSet<String>>, SQLError> {
     let mut columns = BTreeSet::new();
     let mut references_row = false;
+    let mut references_whole_row = false;
     for rule in engine.rules_for(table, event)? {
         if let Some(plan) = rule.condition_plan.as_ref() {
             let plan_references_row = rule_condition_plan_references_row(plan);
             references_row |= plan_references_row;
+            references_whole_row |=
+                crate::engine_events::rule_condition_plan_references_whole_row(plan);
             columns.extend(crate::engine_events::rule_condition_plan_row_columns(plan));
         } else if let Some(condition) = rule.definition.condition.as_ref() {
             references_row |= crate::engine_events::rule_expr_references_row(condition);
+            references_whole_row |= crate::engine_events::rule_expr_references_whole_row(condition);
             columns.extend(crate::engine_events::rule_expr_row_columns(condition));
         }
         for action in &rule.definition.actions {
             let action_columns = engine.rule_action_target_columns(action)?;
-            references_row |=
-                crate::engine_events::rule_statement_references_row(action, &action_columns)?;
+            references_row |= crate::engine_events::rule_statement_references_row(
+                engine,
+                action,
+                &action_columns,
+            )?;
+            references_whole_row |= crate::engine_events::rule_statement_references_whole_row(
+                engine,
+                action,
+                &action_columns,
+            )?;
             columns.extend(crate::engine_events::rule_statement_row_columns(
+                engine,
                 action,
                 &action_columns,
             )?);
         }
     }
-    if references_row && columns.is_empty() {
+    if references_whole_row || references_row && columns.is_empty() {
         Ok(None)
     } else {
         Ok(Some(columns))
@@ -674,13 +700,15 @@ fn rule_columns(
     if let Some(columns) = columns {
         return Ok(columns
             .into_iter()
-            .map(|column| {
+            .enumerate()
+            .map(|(position, column)| {
                 let uses_document_id = column.primary_key && column.ty.is_integer();
                 (
                     column.name,
                     RuleColumnMetadata {
                         ty: column.ty,
                         uses_document_id,
+                        position,
                     },
                 )
             })
@@ -689,12 +717,14 @@ fn rule_columns(
     Ok(engine
         .rule_relation_columns(table)?
         .into_iter()
-        .map(|(name, ty)| {
+        .enumerate()
+        .map(|(position, (name, ty))| {
             (
                 name,
                 RuleColumnMetadata {
                     ty,
                     uses_document_id: false,
+                    position,
                 },
             )
         })
@@ -738,10 +768,33 @@ impl RuntimeRuleResolver<'_> {
             declared_type: Some(metadata.ty.sql_name()),
         })
     }
+
+    fn record(
+        &self,
+        record: Option<&Document>,
+        doc_id: Option<DocId>,
+    ) -> Result<ResolvedVariable, SQLError> {
+        let mut columns = self.columns.iter().collect::<Vec<_>>();
+        columns.sort_by_key(|(_, metadata)| metadata.position);
+        let fields = columns
+            .into_iter()
+            .map(|(column, _)| {
+                self.record_field(record, doc_id, column)
+                    .map(|field| (column.clone(), field.value))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(ResolvedVariable::untyped(Value::Record(fields)))
+    }
 }
 
 impl VariableResolver for RuntimeRuleResolver<'_> {
-    fn resolve_name(&mut self, _name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
+    fn resolve_name(&mut self, name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
+        if name.eq_ignore_ascii_case("old") {
+            return self.record(self.old, self.old_doc_id).map(Some);
+        }
+        if name.eq_ignore_ascii_case("new") {
+            return self.record(self.new, self.new_doc_id).map(Some);
+        }
         Ok(None)
     }
 
@@ -765,6 +818,12 @@ impl VariableResolver for RuntimeRuleResolver<'_> {
 
     fn resolve_param(&mut self, _index: usize) -> Result<Option<ResolvedVariable>, SQLError> {
         Ok(None)
+    }
+
+    fn rewrite_qualified_whole_row(&mut self, qualifier: &str) -> Result<Option<Expr>, SQLError> {
+        Ok(self
+            .resolve_name(qualifier)?
+            .map(|record| Expr::Literal(record.value)))
     }
 }
 
@@ -819,13 +878,36 @@ where
             declared_type: Some(metadata.ty.sql_name()),
         })
     }
+
+    fn record(&mut self, side: RuleRowSide) -> Result<ResolvedVariable, SQLError> {
+        let mut columns = self
+            .columns
+            .iter()
+            .map(|(column, metadata)| (column.clone(), metadata.position))
+            .collect::<Vec<_>>();
+        columns.sort_by_key(|(_, position)| *position);
+        let fields = columns
+            .into_iter()
+            .map(|(column, _)| {
+                self.record_field(side, &column)
+                    .map(|field| (column, field.value))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(ResolvedVariable::untyped(Value::Record(fields)))
+    }
 }
 
 impl<F> VariableResolver for ProjectedRuntimeRuleResolver<'_, F>
 where
     F: FnMut(usize, RuleRowSide, &str) -> Result<Option<Value>, SQLError>,
 {
-    fn resolve_name(&mut self, _name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
+    fn resolve_name(&mut self, name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
+        if name.eq_ignore_ascii_case("old") {
+            return self.record(RuleRowSide::Old).map(Some);
+        }
+        if name.eq_ignore_ascii_case("new") {
+            return self.record(RuleRowSide::New).map(Some);
+        }
         Ok(None)
     }
 
@@ -845,6 +927,12 @@ where
 
     fn resolve_param(&mut self, _index: usize) -> Result<Option<ResolvedVariable>, SQLError> {
         Ok(None)
+    }
+
+    fn rewrite_qualified_whole_row(&mut self, qualifier: &str) -> Result<Option<Expr>, SQLError> {
+        Ok(self
+            .resolve_name(qualifier)?
+            .map(|record| Expr::Literal(record.value)))
     }
 }
 

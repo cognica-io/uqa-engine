@@ -13,12 +13,14 @@ use uqa_sql::plpgsql::{ResolvedVariable, VariableResolver};
 use uqa_sql::SQLError;
 
 pub(crate) fn expand_rule_action_row_stars(
+    engine: &crate::Engine,
     action: &Statement,
     action_columns: &BTreeSet<String>,
     event_columns: &[(String, ColumnType)],
     event: RuleEvent,
 ) -> Result<Statement, SQLError> {
     super::bind_rule_action(
+        engine,
         action,
         action_columns,
         &mut RuleRowStarExpander {
@@ -51,7 +53,10 @@ impl RuleRowStarExpander<'_> {
 }
 
 impl VariableResolver for RuleRowStarExpander<'_> {
-    fn resolve_name(&mut self, _name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
+    fn resolve_name(&mut self, name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
+        if let Some(error) = self.invalid_reference(name) {
+            return Err(error);
+        }
         Ok(None)
     }
 
@@ -80,6 +85,13 @@ impl VariableResolver for RuleRowStarExpander<'_> {
                 .map(|(column, _)| Expr::qualified_column(qualifier, column))
                 .collect(),
         ))
+    }
+
+    fn rewrite_qualified_whole_row(&mut self, qualifier: &str) -> Result<Option<Expr>, SQLError> {
+        if let Some(error) = self.invalid_reference(qualifier) {
+            return Err(error);
+        }
+        Ok(None)
     }
 }
 

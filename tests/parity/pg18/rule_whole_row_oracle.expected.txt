@@ -1,0 +1,26 @@
+scalar-add|{"a": 1, "b": "one", "c": 7}
+scalar-rename|{"a": 2, "c": 8, "renamed": "two"}
+scalar-drop|ok
+scalar-drop-row|{"a": 3, "c": 9}
+scalar-definition|true
+condition-same|0
+condition-change|{"a": 1, "b": "one!"},{"a": 2, "b": "two!"}
+condition-add|{"a": 1, "b": "one!", "c": 8}
+invalid-insert-old|42P17
+invalid-insert-old-star|42P17
+invalid-delete-new|42P17
+invalid-delete-new-star|42P17
+local-shadow|"cte","derived","local","old-local","table-local",{"x": 42},{"x": 43}
+return-insert|{"i": 42}
+return-update|{"payload": {"after": 2}}
+return-alias|{"i": 9}
+star-add|1:one
+star-target|1:one:9
+star-rename-definition|true
+star-rename-row|2:two
+star-drop-restrict|2BP01
+star-drop-cascade|0
+star-new|3:new-image
+star-target-alias|4:target-alias
+star-explicit-image|5:explicit-image
+system-image|{"i": 6}|true|true

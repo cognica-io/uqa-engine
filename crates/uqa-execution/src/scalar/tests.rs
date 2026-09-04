@@ -7,7 +7,7 @@
 use super::{
     eval_call_arguments, eval_scalar, scalar_call_arguments, ScalarEvalContext, ScalarExpr,
 };
-use crate::{PhysicalRow, RowSchema};
+use crate::{ColumnIdentity, PhysicalRow, RowSchema};
 use uqa_core::Value;
 use uqa_sql::ast::{BinaryOp, ColumnType, FunctionBinding, FunctionDispatch};
 use uqa_sql::{SQLError, SQLParam};
@@ -53,6 +53,75 @@ fn cast_preserves_unknown_type_for_string_literals() {
     assert_eq!(
         eval_scalar(&expression, &ScalarEvalContext::new(None, &[])).unwrap(),
         Value::Str("[1,5)".into())
+    );
+}
+
+#[test]
+fn scalar_relation_stars_and_aliases_materialize_named_whole_rows() {
+    let schema = RowSchema::with_identities(
+        vec!["a".into(), "b".into()],
+        vec![
+            ColumnIdentity::qualified("item", "a"),
+            ColumnIdentity::qualified("item", "b"),
+        ],
+        vec![Some(ColumnType::Integer), Some(ColumnType::Text)],
+    );
+    let row = PhysicalRow::from_values(vec![Value::Int(7), Value::Str("seven".into())]);
+    let view = schema.view(&row);
+    let context = ScalarEvalContext::from_row_lookup(&view, &[]).with_row_schema(&schema);
+    let expected = Value::Record(vec![
+        ("a".into(), Value::Int(7)),
+        ("b".into(), Value::Str("seven".into())),
+    ]);
+    assert_eq!(
+        eval_scalar(&ScalarExpr::QualifiedStar("item".into()), &context).unwrap(),
+        expected
+    );
+    assert_eq!(
+        eval_scalar(&ScalarExpr::Column("item".into()), &context).unwrap(),
+        expected
+    );
+}
+
+#[test]
+fn scalar_whole_rows_read_hidden_physical_identity_aliases() {
+    let visible = RowSchema::with_qualified_types(
+        "target",
+        vec!["i".into(), "xmin".into()],
+        vec![Some(ColumnType::Integer), Some(ColumnType::Xid)],
+    );
+    let visible = RowSchema::with_wildcard_hidden_positions(&visible, [1]);
+    let schema = RowSchema::append_hidden_typed(
+        &visible,
+        &[Some(ColumnType::Integer), Some(ColumnType::Xid)],
+    );
+    let schema = RowSchema::with_physical_identity_aliases(
+        &schema,
+        &[
+            (
+                ColumnIdentity::qualified("new", "i"),
+                2,
+                Some(ColumnType::Integer),
+            ),
+            (
+                ColumnIdentity::qualified("new", "xmin"),
+                3,
+                Some(ColumnType::Xid),
+            ),
+        ],
+    );
+    let row = PhysicalRow::from_values(vec![
+        Value::Int(41),
+        Value::Int(1),
+        Value::Int(42),
+        Value::Int(2),
+    ]);
+    let view = schema.view(&row);
+    let context = ScalarEvalContext::from_row_lookup(&view, &[]).with_row_schema(&schema);
+
+    assert_eq!(
+        eval_scalar(&ScalarExpr::Column("new".into()), &context).unwrap(),
+        Value::Record(vec![("i".into(), Value::Int(42))])
     );
 }
 

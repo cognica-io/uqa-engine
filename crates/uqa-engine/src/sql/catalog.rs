@@ -152,6 +152,53 @@ pub(crate) fn resolve_age_label_relation_name(
     ag_catalog::resolve_age_label_relation_name(&catalog, &resolution, name)
 }
 
+pub(crate) fn query_source_column_names(
+    engine: &Engine,
+    name: &str,
+) -> Result<Option<Vec<String>>, SQLError> {
+    let catalog = engine.catalog_read_view();
+    let resolution = engine.session_execution_view().relation_name_resolution();
+    if catalog.sequence_resolved(&resolution, name)?.is_some() {
+        return Ok(Some(vec![
+            "last_value".into(),
+            "log_cnt".into(),
+            "is_called".into(),
+        ]));
+    }
+    if let Some(view) = catalog.view_resolved(&resolution, name)? {
+        let schema =
+            engine.stored_view_schema_with_catalog(view, catalog.clone(), resolution.clone())?;
+        return Ok(Some(
+            schema
+                .columns()
+                .iter()
+                .enumerate()
+                .map(|(position, name)| schema.public_name(position).unwrap_or(name).to_string())
+                .collect(),
+        ));
+    }
+    if let Some(table) = catalog.table_resolved(&resolution, name)? {
+        return Ok(Some(
+            table
+                .columns
+                .iter()
+                .map(|column| column.name.clone())
+                .collect(),
+        ));
+    }
+    if let Some(table) = catalog.foreign_table_resolved(&resolution, name)? {
+        return Ok(Some(
+            table
+                .columns
+                .iter()
+                .map(|column| column.name.clone())
+                .collect(),
+        ));
+    }
+    Ok(virtual_relation_schema(&catalog, &resolution, name)?
+        .map(|columns| columns.into_iter().map(|(name, _)| name).collect()))
+}
+
 use ag_catalog::{build_ag_graph, build_ag_label};
 use events::{build_pg_rewrite, build_pg_rules, build_pg_trigger};
 pub(in crate::sql) use events::{

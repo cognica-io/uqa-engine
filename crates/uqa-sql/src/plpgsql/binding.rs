@@ -73,6 +73,11 @@ pub trait VariableResolver {
         Ok(None)
     }
 
+    /// Resolve `qualifier.*` when it appears in a scalar context and therefore denotes one composite whole-row value rather than a projection list.
+    fn rewrite_qualified_whole_row(&mut self, _qualifier: &str) -> Result<Option<Expr>> {
+        Ok(None)
+    }
+
     /// Expression-level counterpart of [`Self::resolve_param`].
     fn rewrite_param(&mut self, index: usize) -> Result<Option<Expr>> {
         Ok(self
@@ -113,7 +118,10 @@ pub fn bind_expr(expr: &Expr, r: &mut dyn VariableResolver) -> Result<Expr> {
             Some(value) => value,
             None => expr.clone(),
         },
-        Expr::Default | Expr::Literal(_) | Expr::Star | Expr::QualifiedStar(_) => expr.clone(),
+        Expr::QualifiedStar(qualifier) => r
+            .rewrite_qualified_whole_row(qualifier)?
+            .unwrap_or_else(|| expr.clone()),
+        Expr::Default | Expr::Literal(_) | Expr::Star => expr.clone(),
         Expr::Func {
             name,
             binding,

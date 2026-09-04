@@ -12,11 +12,14 @@ use uqa_sql::ast::{CreateRule, CreateTrigger, EventEnableMode};
 use uqa_sql::SQLError;
 
 pub(crate) use rule_binding::{
-    bind_rule_action, bind_rule_expr_scoped, expand_rule_action_row_stars,
-    first_rule_row_reference_in_expr, first_rule_row_reference_in_select,
+    bind_rule_action, bind_rule_expr_scoped, expand_rule_action_returning_stars,
+    expand_rule_action_row_stars, first_rule_row_reference_in_expr,
+    first_rule_row_reference_in_select, rename_rule_action_returning_target_column,
     rename_rule_condition_plan_column, rule_action_has_set_operation,
-    rule_condition_plan_row_columns, rule_expr_references_row, rule_expr_row_columns,
-    rule_statement_references_row, rule_statement_row_columns,
+    rule_action_returning_references_target_column, rule_condition_plan_references_whole_row,
+    rule_condition_plan_row_columns, rule_expr_references_row, rule_expr_references_whole_row,
+    rule_expr_row_columns, rule_statement_references_row, rule_statement_references_whole_row,
+    rule_statement_row_columns,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

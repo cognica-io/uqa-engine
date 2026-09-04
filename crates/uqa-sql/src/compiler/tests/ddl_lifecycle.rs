@@ -238,6 +238,32 @@ fn rule_action_returning_preserves_qualified_row_stars() {
 }
 
 #[test]
+fn rule_actions_preserve_scalar_whole_row_spellings() {
+    let Statement::CreateRule(rule) = first(
+        "CREATE RULE capture_row AS ON INSERT TO event_rows DO ALSO
+         INSERT INTO log_rows VALUES (to_jsonb(NEW), to_jsonb(NEW.*))",
+    ) else {
+        panic!("expected CREATE RULE");
+    };
+    let [Statement::Insert(action)] = rule.actions.as_slice() else {
+        panic!("expected one INSERT rule action");
+    };
+    let [first, second] = action.rows[0].as_slice() else {
+        panic!("expected two scalar whole-row expressions");
+    };
+    assert!(matches!(
+        first,
+        crate::ast::Expr::Func { args, .. }
+            if matches!(args.as_slice(), [crate::ast::Expr::Column(name)] if name == "new")
+    ));
+    assert!(matches!(
+        second,
+        crate::ast::Expr::Func { args, .. }
+            if matches!(args.as_slice(), [crate::ast::Expr::QualifiedStar(name)] if name == "new")
+    ));
+}
+
+#[test]
 fn alter_table_add_key_constraint_preserves_tuple_shape() {
     let Statement::AlterTable(alter) =
         first("ALTER TABLE labels ADD CONSTRAINT labels_tenant_slug_key UNIQUE (tenant, slug)")

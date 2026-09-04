@@ -32,10 +32,19 @@ pub fn eval_scalar(
         ScalarExpr::Default => Err(SQLError::Internal(
             "DEFAULT reached scalar expression evaluation without a mutation target".into(),
         )),
-        ScalarExpr::Star | ScalarExpr::QualifiedStar(_) => {
-            Err(SQLError::Internal("`*` cannot be evaluated".into()))
+        ScalarExpr::Star => Err(SQLError::Internal("`*` cannot be evaluated".into())),
+        ScalarExpr::QualifiedStar(qualifier) => evaluate_qualified_whole_row(qualifier, context),
+        ScalarExpr::Column(name) => {
+            if context.row_schema().is_some_and(|schema| {
+                !schema.has_unqualified_column(name)
+                    && !schema.column_is_ambiguous(name)
+                    && schema.has_qualifier(name)
+            }) {
+                evaluate_qualified_whole_row(name, context)
+            } else {
+                context.sql_context().column_value(name)
+            }
         }
-        ScalarExpr::Column(name) => context.sql_context().column_value(name),
         ScalarExpr::Position(position) => context
             .row_lookup()
             .and_then(|row| row.positional_column(*position))
@@ -188,6 +197,69 @@ pub fn eval_scalar(
             }))
         }
     }
+}
+
+fn evaluate_qualified_whole_row(
+    qualifier: &str,
+    context: &ScalarEvalContext<'_>,
+) -> Result<Value, SQLError> {
+    if let Some(schema) = context
+        .row_schema()
+        .filter(|schema| schema.has_qualifier(qualifier))
+    {
+        let row = context
+            .row_lookup()
+            .ok_or_else(|| SQLError::Internal("whole-row reference without row context".into()))?;
+        return materialize_qualified_whole_row(schema, row, qualifier);
+    }
+    if let Some((schema, row)) = context
+        .physical_outer_row()
+        .filter(|(schema, _)| schema.has_qualifier(qualifier))
+    {
+        let view = schema.view(row);
+        return materialize_qualified_whole_row(schema, &view, qualifier);
+    }
+    Err(SQLError::UnknownTable(qualifier.to_string()))
+}
+
+fn materialize_qualified_whole_row(
+    schema: &crate::RowSchema,
+    row: &dyn uqa_sql::expr::RowLookup,
+    qualifier: &str,
+) -> Result<Value, SQLError> {
+    schema
+        .qualified_star_position_layout(qualifier)
+        .into_iter()
+        .filter(|(column, logical, _, _)| {
+            logical.map_or_else(
+                || {
+                    let mut matching = false;
+                    let mut visible = false;
+                    for (position, identity) in schema.identities().iter().enumerate() {
+                        if identity.column() == column {
+                            matching = true;
+                            visible |= schema.wildcard_position_visible(position);
+                        }
+                    }
+                    !matching || visible
+                },
+                |position| schema.wildcard_position_visible(position),
+            )
+        })
+        .map(|(column, logical, _, _)| {
+            let value = row
+                .qualified_column(qualifier, &column)
+                .or_else(|| logical.and_then(|position| row.positional_column(position)))
+                .cloned()
+                .ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "whole-row attribute {qualifier}.{column} is unavailable"
+                    ))
+                })?;
+            Ok((column, value))
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Value::Record)
 }
 
 fn eval_parameter(index: usize, params: &[SQLParam]) -> Result<Value, SQLError> {

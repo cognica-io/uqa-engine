@@ -35,11 +35,17 @@ pub(super) fn validate_unqualified_column(
     if schema.has_unqualified_column(column) {
         return Ok(());
     }
+    if schema.has_qualifier(column) {
+        return Ok(());
+    }
     if let Some(fallback) = fallback {
         if fallback.column_is_ambiguous(column) {
             return Err(SQLError::AmbiguousColumn(column.to_string()));
         }
         if fallback.has_unqualified_column(column) {
+            return Ok(());
+        }
+        if fallback.has_qualifier(column) {
             return Ok(());
         }
     }

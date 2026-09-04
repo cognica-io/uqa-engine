@@ -19,6 +19,7 @@ use uqa_sql::SQLError;
 use super::{RuleColumnMetadata, RuleRowImage, RuntimeRuleResolver};
 
 pub(super) fn bind_insert_values_action(
+    engine: &crate::Engine,
     action: &Statement,
     matching_rows: &[usize],
     rows: &[RuleRowImage],
@@ -27,6 +28,7 @@ pub(super) fn bind_insert_values_action(
 ) -> Result<Statement, SQLError> {
     if matching_rows.is_empty() {
         let mut bound = crate::engine_events::bind_rule_action(
+            engine,
             action,
             action_columns,
             &mut RuntimeRuleResolver {
@@ -51,6 +53,7 @@ pub(super) fn bind_insert_values_action(
             SQLError::Internal("rewrite rule lost its qualified row image".into())
         })?;
         let bound = crate::engine_events::bind_rule_action(
+            engine,
             action,
             action_columns,
             &mut runtime_rule_resolver(row, columns),
@@ -124,6 +127,8 @@ struct RuleRowSource {
     relation: InternalRelationId,
     old_columns: BTreeMap<String, InternalColumnRef>,
     new_columns: BTreeMap<String, InternalColumnRef>,
+    old_row: InternalColumnRef,
+    new_row: InternalColumnRef,
     source_index: InternalColumnRef,
 }
 
@@ -133,6 +138,7 @@ pub(super) struct BoundSetOrientedAction {
 }
 
 pub(super) fn bind_set_oriented_action(
+    engine: &crate::Engine,
     action: &Statement,
     matching_rows: &[usize],
     rows: &[RuleRowImage],
@@ -142,11 +148,14 @@ pub(super) fn bind_set_oriented_action(
     let source = rule_row_source(matching_rows, rows, columns)?;
     let source_index = Expr::InternalColumn(source.source_index);
     let mut bound = crate::engine_events::bind_rule_action(
+        engine,
         action,
         action_columns,
         &mut RuleSourceResolver {
             old_columns: &source.old_columns,
             new_columns: &source.new_columns,
+            old_row: source.old_row,
+            new_row: source.new_row,
         },
     )?;
     attach_rule_row_source(&mut bound, source.clause, source.relation)?;
@@ -162,7 +171,7 @@ fn rule_row_source(
     columns: &BTreeMap<String, RuleColumnMetadata>,
 ) -> Result<RuleRowSource, SQLError> {
     let relation = InternalRelationId::allocate();
-    let mut internal_column_types = Vec::with_capacity(columns.len() * 2 + 1);
+    let mut internal_column_types = Vec::with_capacity(columns.len() * 2 + 3);
     let mut old_columns = BTreeMap::new();
     let mut new_columns = BTreeMap::new();
     for (index, (column, metadata)) in columns.iter().enumerate() {
@@ -173,6 +182,10 @@ fn rule_row_source(
         internal_column_types.push(Some(metadata.ty.clone()));
         internal_column_types.push(Some(metadata.ty.clone()));
     }
+    let old_row = relation.column(internal_column_types.len());
+    internal_column_types.push(Some(ColumnType::Record));
+    let new_row = relation.column(internal_column_types.len());
+    internal_column_types.push(Some(ColumnType::Record));
     let source_index = relation.column(internal_column_types.len());
     internal_column_types.push(Some(ColumnType::BigInteger));
     let values = matching_rows
@@ -195,6 +208,12 @@ fn rule_row_source(
                     column,
                 )?));
             }
+            values.push(resolved_variable_expr(
+                resolver.record(row.old.as_ref(), row.old_doc_id)?,
+            ));
+            values.push(resolved_variable_expr(
+                resolver.record(row.new.as_ref(), row.new_doc_id)?,
+            ));
             let row_index = i64::try_from(*row_index).map_err(|_| {
                 SQLError::Internal("rewrite rule event row index exceeds BIGINT".into())
             })?;
@@ -213,6 +232,8 @@ fn rule_row_source(
         relation,
         old_columns,
         new_columns,
+        old_row,
+        new_row,
         source_index,
     })
 }
@@ -234,6 +255,8 @@ fn resolved_variable_expr(variable: ResolvedVariable) -> Expr {
 struct RuleSourceResolver<'a> {
     old_columns: &'a BTreeMap<String, InternalColumnRef>,
     new_columns: &'a BTreeMap<String, InternalColumnRef>,
+    old_row: InternalColumnRef,
+    new_row: InternalColumnRef,
 }
 
 impl VariableResolver for RuleSourceResolver<'_> {
@@ -253,6 +276,16 @@ impl VariableResolver for RuleSourceResolver<'_> {
         Ok(None)
     }
 
+    fn rewrite_name(&mut self, name: &str) -> Result<Option<Expr>, SQLError> {
+        Ok(if name.eq_ignore_ascii_case("old") {
+            Some(Expr::InternalColumn(self.old_row))
+        } else if name.eq_ignore_ascii_case("new") {
+            Some(Expr::InternalColumn(self.new_row))
+        } else {
+            None
+        })
+    }
+
     fn rewrite_qualified(
         &mut self,
         qualifier: &str,
@@ -269,6 +302,10 @@ impl VariableResolver for RuleSourceResolver<'_> {
             .get(column)
             .ok_or_else(|| SQLError::UnknownColumn(format!("{qualifier}.{column}")))?;
         Ok(Some(Expr::InternalColumn(*source_column)))
+    }
+
+    fn rewrite_qualified_whole_row(&mut self, qualifier: &str) -> Result<Option<Expr>, SQLError> {
+        self.rewrite_name(qualifier)
     }
 }
 

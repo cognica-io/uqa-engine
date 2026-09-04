@@ -287,17 +287,69 @@ impl Engine {
         &self,
         action: &Statement,
     ) -> Result<std::collections::BTreeSet<String>, SQLError> {
+        Ok(self
+            .rule_action_target_row_type(action)?
+            .into_iter()
+            .map(|(column, _)| column)
+            .collect())
+    }
+
+    fn rule_action_target_row_type(
+        &self,
+        action: &Statement,
+    ) -> Result<Vec<(String, ColumnType)>, SQLError> {
         let table = match action {
             Statement::Insert(statement) => &statement.table,
             Statement::Update(statement) => &statement.table,
             Statement::Delete(statement) => &statement.table,
-            _ => return Ok(std::collections::BTreeSet::new()),
+            _ => return Ok(Vec::new()),
         };
-        Ok(self
-            .rule_relation_columns(table)?
-            .into_iter()
-            .map(|(column, _)| column)
-            .collect())
+        self.rule_relation_columns(table)
+    }
+
+    fn validate_rule_action_definition(
+        &self,
+        action: &mut Statement,
+        event_columns: &[(String, ColumnType)],
+        event: RuleEvent,
+        lookup_mode: RelationLookupMode,
+    ) -> Result<(), SQLError> {
+        self.canonicalize_rule_action_target(action, lookup_mode)?;
+        let action_row_type = self.rule_action_target_row_type(action)?;
+        let action_columns: std::collections::BTreeSet<String> = action_row_type
+            .iter()
+            .map(|(column, _)| column.clone())
+            .collect();
+        if lookup_mode == RelationLookupMode::Dynamic {
+            *action = crate::engine_events::expand_rule_action_row_stars(
+                self,
+                action,
+                &action_columns,
+                event_columns,
+                event,
+            )?;
+            *action =
+                crate::engine_events::expand_rule_action_returning_stars(action, &action_row_type);
+        }
+        validate_rule_action_reference_scopes(self, action)?;
+        let bound = crate::engine_events::bind_rule_action(
+            self,
+            action,
+            &action_columns,
+            &mut RuleRowTypeResolver {
+                columns: event_columns,
+                event,
+            },
+        )?;
+        let schema = crate::sql::analyze_rule_action_returning_schema(self, bound.clone())?;
+        let mut stored_plan = uqa_planner::UnifiedPlan::lower_with(bound, &|name: &str| {
+            self.has_registered_aggregate_function(name)
+        });
+        crate::sql::reject_stored_plan_regrole_constants(self, &mut stored_plan)?;
+        if let Some(schema) = schema {
+            validate_rule_returning_shape(&schema, event_columns)?;
+        }
+        Ok(())
     }
 
     pub(in crate::engine_events) fn validate_rule_definition(
@@ -371,33 +423,7 @@ impl Engine {
             });
         }
         for action in &mut definition.actions {
-            self.canonicalize_rule_action_target(action, lookup_mode)?;
-            let action_columns = self.rule_action_target_columns(action)?;
-            if lookup_mode == RelationLookupMode::Dynamic {
-                *action = crate::engine_events::expand_rule_action_row_stars(
-                    action,
-                    &action_columns,
-                    &columns,
-                    definition.event,
-                )?;
-            }
-            validate_rule_action_reference_scopes(action)?;
-            let bound = crate::engine_events::bind_rule_action(
-                action,
-                &action_columns,
-                &mut RuleRowTypeResolver {
-                    columns: &columns,
-                    event: definition.event,
-                },
-            )?;
-            let schema = crate::sql::analyze_rule_action_returning_schema(self, bound.clone())?;
-            let mut stored_plan = uqa_planner::UnifiedPlan::lower_with(bound, &|name: &str| {
-                self.has_registered_aggregate_function(name)
-            });
-            crate::sql::reject_stored_plan_regrole_constants(self, &mut stored_plan)?;
-            if let Some(schema) = schema {
-                validate_rule_returning_shape(&schema, &columns)?;
-            }
+            self.validate_rule_action_definition(action, &columns, definition.event, lookup_mode)?;
         }
         Ok((relation, condition_plan))
     }

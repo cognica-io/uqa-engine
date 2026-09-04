@@ -758,6 +758,15 @@ fn collect_expr_prune_columns(
 ) {
     match expr {
         ScalarExpr::Column(column) => {
+            for qualifier in scope.qualifiers {
+                if qualifier.eq_ignore_ascii_case(column) {
+                    let Some(source) = prune.get_mut(qualifier) else {
+                        *valid = false;
+                        return;
+                    };
+                    source.retain_all();
+                }
+            }
             if let Some(qualifier) = scope.metadata_qualifier {
                 let metadata = match column.as_str() {
                     DOC_ID_COLUMN if scope.legacy_doc_id => Some(true),

@@ -49,11 +49,13 @@ pub(super) fn returning_image_values(
 pub(super) fn returning_context_schema(
     columns: &[String],
     types: &[Option<uqa_sql::ast::ColumnType>],
+    composite_width: usize,
     target_qualifier: &str,
     aliases: &ReturningAliases,
 ) -> RowSchema {
     let target =
         RowSchema::with_qualified_types(target_qualifier, columns.to_vec(), types.to_vec());
+    let target = RowSchema::with_wildcard_hidden_positions(&target, composite_width..columns.len());
     let hidden_types = types
         .iter()
         .cloned()
@@ -176,7 +178,13 @@ pub(in crate::sql) fn returning_value_context(
     if append_doc_id {
         current.push(Value::Null);
     }
-    let schema = returning_context_schema(&columns, &types, input.target_qualifier, input.aliases);
+    let schema = returning_context_schema(
+        &columns,
+        &types,
+        width,
+        input.target_qualifier,
+        input.aliases,
+    );
     let values = current
         .into_iter()
         .chain(image(input.old))
@@ -422,6 +430,7 @@ pub(in crate::sql) fn returning_expression_schema(
     aliases: &ReturningAliases,
     supplemental: Option<&RowSchema>,
 ) -> RowSchema {
+    let composite_width = target.len();
     let mut columns = target.columns().to_vec();
     let mut types = target.column_types().to_vec();
     if !columns.iter().any(|column| column == DOC_ID_COLUMN) {
@@ -432,7 +441,8 @@ pub(in crate::sql) fn returning_expression_schema(
     types.push(Some(uqa_sql::ast::ColumnType::Oid));
     columns.push(crate::sql::XMIN_COLUMN.into());
     types.push(Some(uqa_sql::ast::ColumnType::Xid));
-    let target = returning_context_schema(&columns, &types, target_qualifier, aliases);
+    let target =
+        returning_context_schema(&columns, &types, composite_width, target_qualifier, aliases);
     supplemental.map_or(target.clone(), |source| {
         RowSchema::join(&target, source, std::iter::empty())
     })

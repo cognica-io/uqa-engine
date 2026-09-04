@@ -140,6 +140,10 @@ fn correlation_column_scope(expression: &ScalarExpr, scope: &QueryScope) -> Opti
                 .names
                 .iter()
                 .any(|local| local.eq_ignore_ascii_case(column))
+                || scope
+                    .qualifiers
+                    .iter()
+                    .any(|local| local.eq_ignore_ascii_case(column))
             {
                 Some(ColumnScope::Inner)
             } else if scope.columns.complete {
@@ -618,6 +622,12 @@ fn expression_has_external_reference(expr: &ScalarExpr, scopes: &[QueryScope]) -
                 .iter()
                 .any(|local| local.eq_ignore_ascii_case(qualifier))
         }),
+        ScalarExpr::QualifiedStar(qualifier) => !scopes.iter().rev().any(|scope| {
+            scope
+                .qualifiers
+                .iter()
+                .any(|local| local.eq_ignore_ascii_case(qualifier))
+        }),
         ScalarExpr::InternalColumn(column) => !scopes
             .iter()
             .rev()
@@ -696,7 +706,6 @@ fn expression_has_external_reference(expr: &ScalarExpr, scopes: &[QueryScope]) -
         ScalarExpr::InSubquery { expr, .. } => expression_has_external_reference(expr, scopes),
         ScalarExpr::Default
         | ScalarExpr::Star
-        | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Position(_)
         | ScalarExpr::Literal(_)
         | ScalarExpr::Param(_)
@@ -712,6 +721,10 @@ fn resolves_unqualified(column: &str, scopes: &[QueryScope]) -> bool {
             .names
             .iter()
             .any(|local| local.eq_ignore_ascii_case(column))
+            || scope
+                .qualifiers
+                .iter()
+                .any(|local| local.eq_ignore_ascii_case(column))
         {
             return true;
         }

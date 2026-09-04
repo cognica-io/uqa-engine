@@ -144,6 +144,12 @@ docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/pa
 docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/rule_returning_event_row_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/rule_returning_event_row_oracle.expected.txt -
 ```
 
+`rule_whole_row_oracle.sql` records PostgreSQL 18.4 scalar rewrite-rule whole-row composites and action-target `RETURNING` stars. The checked-in transcript verifies live event-row shape across add, rename, and drop, whole-row conditions, exact invalid-side SQLSTATEs, local relation, column, derived-table, and CTE shadowing, command-specific event versus action row images, creation-bound target stars and namespaces, target-column dependencies, and exclusion of system attributes from composite row values while retaining their individual visibility.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/rule_whole_row_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/rule_whole_row_oracle.expected.txt -
+```
+
 `foreign_table_trigger_oracle.sql` records PostgreSQL 18.4 foreign-table trigger definition and lifecycle behavior. The checked-in transcript verifies ordinary row and statement forms, replacement, `UPDATE OF`, `WHEN`, `TRUNCATE`, invalid constraint, transition, and `INSTEAD OF` forms, target and function authorization, `pg_trigger`, `relhastriggers`, enable, rename, drop, owner transfer, rollback, function dependencies, and relation-drop cleanup.
 
 ```sh

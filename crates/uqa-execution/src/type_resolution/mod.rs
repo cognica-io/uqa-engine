@@ -215,7 +215,15 @@ pub(super) fn scalar_type_inner(
         return scalar_type_inner(argument.value, schema, params, resolver);
     }
     match expression {
-        ScalarExpr::Column(column) => Ok(schema.type_of(column).cloned()),
+        ScalarExpr::Column(column) => {
+            if schema.has_unqualified_column(column) || schema.column_is_ambiguous(column) {
+                Ok(schema.type_of(column).cloned())
+            } else if schema.has_qualifier(column) {
+                Ok(Some(ColumnType::Record))
+            } else {
+                Ok(None)
+            }
+        }
         ScalarExpr::Position(position) => Ok(schema.column_type(*position).cloned()),
         ScalarExpr::InternalColumn(column) => Ok(schema.internal_type(*column).cloned()),
         ScalarExpr::QualifiedColumn { qualifier, column } => {
@@ -372,6 +380,9 @@ pub(super) fn scalar_type_inner(
         ScalarExpr::ScalarSubquery(subquery) => resolver.map_or(Ok(None), |resolver| {
             resolver.resolve_scalar_subquery_type(*subquery, schema, params)
         }),
+        ScalarExpr::QualifiedStar(qualifier) if schema.has_qualifier(qualifier) => {
+            Ok(Some(ColumnType::Record))
+        }
         ScalarExpr::Star | ScalarExpr::QualifiedStar(_) | ScalarExpr::Default => Ok(None),
     }
 }

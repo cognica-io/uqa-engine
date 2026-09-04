@@ -136,7 +136,17 @@ impl Engine {
             RelationIdentity::from_legacy_name(table).map_err(StorageBackendError::Other)?;
         let mut triggers = self.durable.triggers.write();
         let mut rules = self.durable.rules.write();
-        if !triggers.contains_key(&relation) && !rules.contains_key(&relation) {
+        let qualified = relation.qualified_name();
+        let referenced_by_rule_action = rules_reference_action_target_column(
+            self, &rules, &qualified, from,
+        )
+        .map_err(|error| {
+            StorageBackendError::Other(format!("inspect rule action RETURNING dependency: {error}"))
+        })?;
+        if !triggers.contains_key(&relation)
+            && !rules.contains_key(&relation)
+            && !referenced_by_rule_action
+        {
             return Ok(());
         }
         let mut next_triggers = triggers.clone();
@@ -191,6 +201,20 @@ impl Engine {
                 }
             }
         }
+        for entries in next_rules.values_mut() {
+            for rule in entries.values_mut() {
+                for action in &mut rule.definition.actions {
+                    if rule_action_target(action) == Some(qualified.as_str()) {
+                        super::rename_rule_action_returning_target_column(self, action, from, to)
+                            .map_err(|error| {
+                            StorageBackendError::Other(format!(
+                                "rename rule action RETURNING column: {error}"
+                            ))
+                        })?;
+                    }
+                }
+            }
+        }
         self.persist_trigger_catalog_snapshot(&next_triggers)
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         self.persist_rule_catalog_snapshot(&next_rules)
@@ -233,31 +257,11 @@ impl Engine {
             })
             .map(|trigger| trigger.definition.name.clone())
             .collect::<Vec<_>>();
-        let dependent_rules = self
-            .durable
-            .rules
-            .read()
-            .get(&relation)
-            .into_iter()
-            .flat_map(BTreeMap::values)
-            .filter(|rule| {
-                rule.condition_plan.as_ref().map_or_else(
-                    || {
-                        rule.definition.condition.as_ref().is_some_and(|condition| {
-                            crate::engine_table_storage::schema_expr_references_column(
-                                condition, column,
-                            )
-                        })
-                    },
-                    |plan| super::rule_condition_plan_row_columns(plan).contains(column),
-                ) || rule
-                    .definition
-                    .actions
-                    .iter()
-                    .any(|action| rule_statement_references_column(action, column))
-            })
-            .map(|rule| rule.definition.name.clone())
-            .collect::<Vec<_>>();
+        let qualified = relation.qualified_name();
+        let rules = self.durable.rules.read();
+        let dependent_rules =
+            dependent_rules_for_column(self, &rules, &relation, &qualified, column)?;
+        drop(rules);
         if dependent_triggers.is_empty() && dependent_rules.is_empty() {
             return Ok(());
         }
@@ -266,7 +270,11 @@ impl Engine {
                 .iter()
                 .map(|name| format!("trigger {name}"))
                 .collect::<Vec<_>>();
-            objects.extend(dependent_rules.iter().map(|name| format!("rule {name}")));
+            objects.extend(
+                dependent_rules
+                    .iter()
+                    .map(|(_, name)| format!("rule {name}")),
+            );
             return Err(SQLError::Routine {
                 sqlstate: "2BP01".into(),
                 message: format!(
@@ -287,20 +295,104 @@ impl Engine {
                 &format!("drop cascades to trigger {name} on table {table}"),
             );
         }
-        for name in dependent_rules {
+        for (event_relation, name) in dependent_rules {
+            let event_table = event_relation.qualified_name();
             self.drop_rule(&DropRule {
                 name: name.clone(),
-                table: table.to_string(),
+                table: event_table.clone(),
                 if_exists: false,
                 cascade: true,
             })?;
             self.push_sql_notice(
                 "NOTICE",
-                &format!("drop cascades to rule {name} on table {table}"),
+                &format!("drop cascades to rule {name} on table {event_table}"),
             );
         }
         Ok(())
     }
+}
+
+fn rule_action_target(action: &Statement) -> Option<&str> {
+    match action {
+        Statement::Insert(statement) => Some(&statement.table),
+        Statement::Update(statement) => Some(&statement.table),
+        Statement::Delete(statement) => Some(&statement.table),
+        _ => None,
+    }
+}
+
+fn rules_reference_action_target_column(
+    engine: &Engine,
+    rules: &BTreeMap<RelationIdentity, BTreeMap<String, super::StoredRule>>,
+    target: &str,
+    column: &str,
+) -> Result<bool, SQLError> {
+    for entries in rules.values() {
+        for rule in entries.values() {
+            for action in &rule.definition.actions {
+                if rule_action_target(action) == Some(target)
+                    && super::rule_action_returning_references_target_column(
+                        engine, action, column,
+                    )?
+                {
+                    return Ok(true);
+                }
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn dependent_rules_for_column(
+    engine: &Engine,
+    rules: &BTreeMap<RelationIdentity, BTreeMap<String, super::StoredRule>>,
+    relation: &RelationIdentity,
+    target: &str,
+    column: &str,
+) -> Result<Vec<(RelationIdentity, String)>, SQLError> {
+    let mut dependent = Vec::new();
+    if let Some(entries) = rules.get(relation) {
+        for rule in entries.values() {
+            let references_event_column = rule.condition_plan.as_ref().map_or_else(
+                || {
+                    rule.definition.condition.as_ref().is_some_and(|condition| {
+                        crate::engine_table_storage::schema_expr_references_column(
+                            condition, column,
+                        )
+                    })
+                },
+                |plan| super::rule_condition_plan_row_columns(plan).contains(column),
+            ) || rule
+                .definition
+                .actions
+                .iter()
+                .any(|action| rule_statement_references_column(action, column));
+            if references_event_column {
+                dependent.push((relation.clone(), rule.definition.name.clone()));
+            }
+        }
+    }
+    for (event_relation, entries) in rules {
+        for rule in entries.values() {
+            let references_action_target = rule.definition.actions.iter().try_fold(
+                false,
+                |found, action| -> Result<bool, SQLError> {
+                    if found || rule_action_target(action) != Some(target) {
+                        return Ok(found);
+                    }
+                    super::rule_action_returning_references_target_column(engine, action, column)
+                },
+            )?;
+            if references_action_target
+                && !dependent.iter().any(|(candidate_relation, name)| {
+                    candidate_relation == event_relation && name == &rule.definition.name
+                })
+            {
+                dependent.push((event_relation.clone(), rule.definition.name.clone()));
+            }
+        }
+    }
+    Ok(dependent)
 }
 
 struct RuleColumnResolver<'a> {
