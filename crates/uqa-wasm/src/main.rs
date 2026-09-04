@@ -592,6 +592,7 @@ const ENCRYPTION_UNAVAILABLE: &str = "encryption is not available in browser bui
 fn value_to_json(value: Value) -> Result<JSON, String> {
     match value {
         Value::Null => Ok(JSON::Null),
+        Value::Void => Ok(json!("")),
         Value::Bool(value) => Ok(json!(value)),
         Value::Int(value) => json_i64(value, "SQL integer"),
         Value::Float(value) => json_number(value, "SQL float"),

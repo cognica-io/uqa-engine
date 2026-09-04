@@ -9,6 +9,7 @@ use super::{SQLError, Value};
 pub(super) fn render_value(value: &Value) -> Result<String, SQLError> {
     let rendered = match value {
         Value::Null => "NULL".into(),
+        Value::Void => "''::void".into(),
         Value::Bool(b) => b.to_string(),
         Value::Int(n) => n.to_string(),
         Value::Float(f) if f.is_finite() => format!("{f}"),

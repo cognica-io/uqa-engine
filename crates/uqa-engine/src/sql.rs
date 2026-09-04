@@ -114,7 +114,8 @@ use ddl::{
 };
 pub(crate) use ddl::{
     convert_value_to_column_type, convert_value_to_column_type_with_engine,
-    validate_postgres_column_name, validate_vector_dimensions,
+    validate_postgres_column_name, validate_postgres_relation_column_type,
+    validate_vector_dimensions,
 };
 use dml::{index_vectors_for_type, run_delete, run_insert, run_merge, run_update};
 use from_rows::{build_join_spill_with_ctes, engine_func_intercept, ColumnPrune, QualifierFilters};
@@ -351,6 +352,10 @@ pub(crate) fn builtin_function_dispatch_name(name: &str) -> String {
                         | "setval"
                         | "current_schema"
                         | "current_schemas"
+                        | "pg_backend_pid"
+                        | "pg_listening_channels"
+                        | "pg_notify"
+                        | "pg_notification_queue_usage"
                         | "pg_get_expr"
                         | "pg_get_partkeydef"
                         | "pg_get_serial_sequence"

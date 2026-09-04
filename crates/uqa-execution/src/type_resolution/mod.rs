@@ -14,6 +14,7 @@ use crate::{RowSchema, ScalarExpr};
 use uqa_core::Value;
 
 mod array_transform;
+mod cast_compatibility;
 mod checksum;
 mod common;
 mod containment;
@@ -56,6 +57,8 @@ pub use json_strip::{resolve_json_strip_overload, ResolvedJsonStripOverload};
 pub use length::{resolve_length_overload, ResolvedLengthOverload};
 #[doc(hidden)]
 pub use md5::{resolve_md5_overload, ResolvedMd5Overload};
+#[doc(hidden)]
+pub use operators::{require_equality_operator, require_ordering_operator};
 #[doc(hidden)]
 pub use overload_resolution::{
     builtin_binding_matches, builtin_name_matches, canonical_column_type_name,
@@ -235,8 +238,8 @@ pub(super) fn scalar_type_inner(
             .and_then(|index| params.get(index))
             .and_then(common::parameter_type)),
         ScalarExpr::Cast { expr, ty } => {
-            scalar_type_inner(expr, schema, params, resolver)?;
-            match ColumnType::from_sql_name(ty) {
+            let source = scalar_type_inner(expr, schema, params, resolver)?;
+            let target = match ColumnType::from_sql_name(ty) {
                 Ok(ty) => Ok(Some(ty)),
                 Err(error @ SQLError::Unsupported(_)) => match resolver {
                     Some(resolver) => resolver
@@ -245,7 +248,11 @@ pub(super) fn scalar_type_inner(
                     None => Err(error),
                 },
                 Err(error) => Err(error),
+            }?;
+            if let Some(target) = target.as_ref() {
+                cast_compatibility::validate_void_cast(source.as_ref(), target)?;
             }
+            Ok(target)
         }
         ScalarExpr::Array(items) => {
             let mut element = None;
@@ -283,20 +290,44 @@ pub(super) fn scalar_type_inner(
             Ok(Some(ColumnType::Boolean))
         }
         ScalarExpr::Between { expr, low, high } => {
-            scalar_type_inner(expr, schema, params, resolver)?;
-            scalar_type_inner(low, schema, params, resolver)?;
-            scalar_type_inner(high, schema, params, resolver)?;
+            let value = scalar_type_inner(expr, schema, params, resolver)?;
+            let low = scalar_type_inner(low, schema, params, resolver)?;
+            let high = scalar_type_inner(high, schema, params, resolver)?;
+            operators::binary_result_type(
+                uqa_sql::ast::BinaryOp::GreaterEqual,
+                value.as_ref(),
+                low.as_ref(),
+            )?;
+            operators::binary_result_type(
+                uqa_sql::ast::BinaryOp::LessEqual,
+                value.as_ref(),
+                high.as_ref(),
+            )?;
             Ok(Some(ColumnType::Boolean))
         }
         ScalarExpr::InList { expr, list, .. } => {
-            scalar_type_inner(expr, schema, params, resolver)?;
+            let needle = scalar_type_inner(expr, schema, params, resolver)?;
             for item in list {
-                scalar_type_inner(item, schema, params, resolver)?;
+                let candidate = scalar_type_inner(item, schema, params, resolver)?;
+                operators::binary_result_type(
+                    uqa_sql::ast::BinaryOp::Equal,
+                    needle.as_ref(),
+                    candidate.as_ref(),
+                )?;
             }
             Ok(Some(ColumnType::Boolean))
         }
-        ScalarExpr::InSubquery { expr, .. } => {
-            scalar_type_inner(expr, schema, params, resolver)?;
+        ScalarExpr::InSubquery { expr, subquery, .. } => {
+            let needle = scalar_type_inner(expr, schema, params, resolver)?;
+            let candidate = resolver
+                .map(|resolver| resolver.resolve_scalar_subquery_type(*subquery, schema, params))
+                .transpose()?
+                .flatten();
+            operators::binary_result_type(
+                uqa_sql::ast::BinaryOp::Equal,
+                needle.as_ref(),
+                candidate.as_ref(),
+            )?;
             Ok(Some(ColumnType::Boolean))
         }
         ScalarExpr::Exists { .. } => Ok(Some(ColumnType::Boolean)),
@@ -305,12 +336,22 @@ pub(super) fn scalar_type_inner(
             when,
             else_branch,
         } => {
-            if let Some(base) = base {
-                scalar_type_inner(base, schema, params, resolver)?;
-            }
+            let simple = base.is_some();
+            let base_type = base
+                .as_deref()
+                .map(|base| scalar_type_inner(base, schema, params, resolver))
+                .transpose()?
+                .flatten();
             let mut result = None;
             for (condition, value) in when {
-                scalar_type_inner(condition, schema, params, resolver)?;
+                let condition_type = scalar_type_inner(condition, schema, params, resolver)?;
+                if simple {
+                    operators::binary_result_type(
+                        uqa_sql::ast::BinaryOp::Equal,
+                        base_type.as_ref(),
+                        condition_type.as_ref(),
+                    )?;
+                }
                 result = common::merge_optional_types(
                     result,
                     common::common_context_expression_type(value, schema, params, resolver)?,
@@ -328,9 +369,9 @@ pub(super) fn scalar_type_inner(
             name,
             binding,
             args,
+            distinct,
             order_by,
             filter,
-            ..
         } => {
             if let Some(uqa_sql::ast::FunctionResolutionError::UndefinedFunction { signature }) =
                 binding
@@ -345,6 +386,18 @@ pub(super) fn scalar_type_inner(
             if let Some(filter) = filter {
                 scalar_type_inner(filter, schema, params, resolver)?;
             }
+            if *distinct {
+                for argument in args {
+                    if let Some(ty) = scalar_type_inner(argument, schema, params, resolver)? {
+                        require_equality_operator(&ty)?;
+                    }
+                }
+            }
+            for order in order_by {
+                if let Some(ty) = scalar_type_inner(&order.expr, schema, params, resolver)? {
+                    require_ordering_operator(&ty)?;
+                }
+            }
             functions::builtin_function_type_inner(
                 name,
                 binding.as_ref(),
@@ -357,10 +410,14 @@ pub(super) fn scalar_type_inner(
         }
         ScalarExpr::WindowCall { name, args, spec } => {
             for expression in &spec.partition_by {
-                scalar_type_inner(expression, schema, params, resolver)?;
+                if let Some(ty) = scalar_type_inner(expression, schema, params, resolver)? {
+                    require_equality_operator(&ty)?;
+                }
             }
             for order in &spec.order_by {
-                scalar_type_inner(&order.expr, schema, params, resolver)?;
+                if let Some(ty) = scalar_type_inner(&order.expr, schema, params, resolver)? {
+                    require_ordering_operator(&ty)?;
+                }
             }
             if let Some(frame) = &spec.frame {
                 for bound in [&frame.start, &frame.end] {

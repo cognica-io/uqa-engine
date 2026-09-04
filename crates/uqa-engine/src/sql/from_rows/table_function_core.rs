@@ -137,6 +137,7 @@ fn build_table_function_value_row_stream_with_row(
         && matches!(
             lower.as_str(),
             "generate_series"
+                | "pg_listening_channels"
                 | "unnest"
                 | "regexp_split_to_table"
                 | "string_to_table"
@@ -179,6 +180,22 @@ fn build_table_function_value_row_stream_with_row(
             scalar_table_function_default_column(&lower, output_name, alias, column_aliases);
 
         let values: Box<dyn Iterator<Item = Value> + Send> = match lower.as_str() {
+            "pg_listening_channels" => {
+                if !evaluated.is_empty() {
+                    return Err(SQLError::BadArity {
+                        name: lower,
+                        expected: "0".into(),
+                        actual: evaluated.len(),
+                    });
+                }
+                Box::new(
+                    context
+                        .engine
+                        .listening_channels()
+                        .into_iter()
+                        .map(Value::Str),
+                )
+            }
             "generate_series" => generate_series_values(evaluated)?,
             "regexp_split_to_table" => regexp_split_values(evaluated)?,
             "string_to_table" => string_to_table_values(evaluated)?,

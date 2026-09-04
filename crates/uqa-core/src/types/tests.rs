@@ -399,6 +399,14 @@ fn decimal_value_uses_tagged_json() {
     assert_eq!(serde_json::from_str::<Value>(&json).unwrap(), value);
 }
 
+#[test]
+fn void_value_uses_a_distinct_non_null_tagged_json_encoding() {
+    let json = serde_json::to_string(&Value::Void).unwrap();
+    assert_eq!(json, r#"{"$uqa_type":"void"}"#);
+    assert_eq!(decode(&json), Value::Void);
+    assert_ne!(decode(&json), Value::Null);
+}
+
 fn decode(json: &str) -> Value {
     serde_json::from_str::<Value>(json).expect("decodable JSON value")
 }
@@ -739,6 +747,7 @@ fn value_json_decoding_matches_untagged_derive() {
 fn value_json_round_trips_every_variant() {
     let values = vec![
         Value::Null,
+        Value::Void,
         Value::Bool(true),
         Value::Int(-5),
         Value::Float(2.25),

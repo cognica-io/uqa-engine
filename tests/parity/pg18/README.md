@@ -150,7 +150,7 @@ docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/pa
 docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/rule_whole_row_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/rule_whole_row_oracle.expected.txt -
 ```
 
-`rule_notify_oracle.sql` records PostgreSQL 18.4 rewrite-rule `NOTIFY` actions and asynchronous transaction behavior. The checked-in transcript verifies zero-row and multi-row statement cardinality, unconditional `ALSO` and `INSTEAD`, durable deparsing, final subscription state, transaction-wide duplicate collapse, rollback and savepoint rollback, conditional-rule SQLSTATE `42P17`, and the 8,000-byte payload boundary.
+`rule_notify_oracle.sql` records PostgreSQL 18.4 rewrite-rule `NOTIFY` actions and asynchronous transaction behavior. The checked-in transcript verifies zero-row and multi-row statement cardinality, unconditional `ALSO` and `INSTEAD`, durable deparsing, final subscription state, transaction-wide duplicate collapse, rollback and savepoint rollback, conditional-rule SQLSTATE `42P17`, channel and payload byte boundaries, NULL handling, notification inquiry functions, backend process identifiers, exact `pg_proc` identities, and the non-null `void` result boundary.
 
 ```sh
 docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/rule_notify_oracle.sql 2>&1 | sed -E 's/PID [0-9]+/PID <pid>/' | diff -u tests/parity/pg18/rule_notify_oracle.expected.txt -

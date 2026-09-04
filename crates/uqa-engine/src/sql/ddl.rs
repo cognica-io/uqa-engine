@@ -58,6 +58,31 @@ pub(crate) fn validate_postgres_column_name(name: &str) -> Result<(), SQLError> 
     Ok(())
 }
 
+pub(crate) fn validate_postgres_relation_column_type(
+    name: &str,
+    ty: &ColumnType,
+) -> Result<(), SQLError> {
+    let pseudo_type = match ty {
+        ColumnType::Void | ColumnType::AnyArray | ColumnType::Record => Some(ty.sql_name()),
+        ColumnType::Array(element)
+            if matches!(
+                element.as_ref(),
+                ColumnType::Void | ColumnType::AnyArray | ColumnType::Record
+            ) =>
+        {
+            Some(ty.sql_name())
+        }
+        _ => None,
+    };
+    if let Some(pseudo_type) = pseudo_type {
+        return Err(SQLError::Routine {
+            sqlstate: "42P16".into(),
+            message: format!("column \"{name}\" has pseudo-type {pseudo_type}"),
+        });
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 use value_conversion::coerce_json_value;
 

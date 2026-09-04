@@ -50,6 +50,7 @@ pub(super) unsafe fn value_to_napi(env: sys::napi_env, value: Value) -> Result<s
     unsafe {
         match value {
             Value::Null => Null::to_napi_value(env, Null),
+            Value::Void => String::to_napi_value(env, String::new()),
             Value::Bool(value) => bool::to_napi_value(env, value),
             Value::Int(value) => {
                 if value.unsigned_abs() <= MAX_SAFE_INTEGER as u64 {

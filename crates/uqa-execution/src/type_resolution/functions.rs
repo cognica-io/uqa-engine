@@ -5,7 +5,7 @@
 //
 
 use uqa_core::Value;
-use uqa_sql::ast::{ColumnType, FunctionBinding, FunctionDispatch};
+use uqa_sql::ast::{BinaryOp, ColumnType, FunctionBinding, FunctionDispatch};
 use uqa_sql::{SQLError, SQLParam};
 
 use crate::{scalar_call_argument, scalar_call_arguments, RowSchema, ScalarExpr};
@@ -119,10 +119,43 @@ pub(super) fn builtin_function_type_inner(
                 return Ok(first().and_then(array_element_type));
             }
             FunctionDispatch::ArraySlices | FunctionDispatch::Slice => return Ok(first()),
-            FunctionDispatch::AnyOperator
-            | FunctionDispatch::AllOperator
-            | FunctionDispatch::IsDistinct
-            | FunctionDispatch::BetweenSymmetric => return Ok(Some(ColumnType::Boolean)),
+            FunctionDispatch::AnyOperator | FunctionDispatch::AllOperator => {
+                let operator = match args.get(2) {
+                    Some(ScalarExpr::Literal(Value::Str(operator))) => match operator.as_str() {
+                        "=" => Some(BinaryOp::Equal),
+                        "<>" | "!=" => Some(BinaryOp::NotEqual),
+                        "<" => Some(BinaryOp::Less),
+                        "<=" => Some(BinaryOp::LessEqual),
+                        ">" => Some(BinaryOp::Greater),
+                        ">=" => Some(BinaryOp::GreaterEqual),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                if let Some(operator) = operator {
+                    super::operators::binary_result_type(operator, argument(0).as_ref(), None)?;
+                }
+                return Ok(Some(ColumnType::Boolean));
+            }
+            FunctionDispatch::IsDistinct => {
+                super::operators::binary_result_type(
+                    BinaryOp::Equal,
+                    argument(0).as_ref(),
+                    argument(1).as_ref(),
+                )?;
+                return Ok(Some(ColumnType::Boolean));
+            }
+            FunctionDispatch::BetweenSymmetric => {
+                let value = argument(0);
+                for bound in [argument(1), argument(2)] {
+                    super::operators::binary_result_type(
+                        BinaryOp::GreaterEqual,
+                        value.as_ref(),
+                        bound.as_ref(),
+                    )?;
+                }
+                return Ok(Some(ColumnType::Boolean));
+            }
             FunctionDispatch::ToBinInt4
             | FunctionDispatch::ToBinInt8
             | FunctionDispatch::ToHexInt4

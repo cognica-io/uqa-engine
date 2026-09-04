@@ -194,7 +194,7 @@ fn add_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<
     }
     add_size(total, 1, "value tag")?;
     match value {
-        Value::Null => Ok(()),
+        Value::Null | Value::Void => Ok(()),
         Value::Bool(_) => add_size(total, 1, "boolean value"),
         Value::Int(_) | Value::Float(_) => add_size(total, 8, "numeric value"),
         Value::Str(value) => add_string_size(total, value, "string value"),
@@ -431,6 +431,7 @@ fn encode_value(writer: &mut impl Write, value: &Value, depth: usize) -> ExecRes
     }
     match value {
         Value::Null => write_tag(writer, 0),
+        Value::Void => write_tag(writer, 16),
         Value::Bool(value) => {
             write_tag(writer, 1)?;
             writer

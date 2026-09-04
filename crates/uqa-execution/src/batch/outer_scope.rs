@@ -247,16 +247,17 @@ impl RowSchema {
         let mut internal = input.index.executor_attributes.clone();
         let mut internal_types = input.index.cold.executor_attribute_types.clone();
         for (column, slot) in &outer.index.executor_attributes {
-            assert!(
-                internal.insert(*column, shifted_slot(*slot)).is_none(),
-                "duplicate internal relation attribute in outer scope"
-            );
+            internal.insert(*column, shifted_slot(*slot));
         }
         for (column, ty) in &outer.index.cold.executor_attribute_types {
-            assert!(
-                internal_types.insert(*column, ty.clone()).is_none(),
-                "duplicate internal relation attribute type in outer scope"
-            );
+            if let Some(existing) = internal_types.get(column) {
+                assert_eq!(
+                    existing, ty,
+                    "structural identity type changed across correlated scopes"
+                );
+            } else {
+                internal_types.insert(*column, ty.clone());
+            }
         }
         let mut score_sources = input.index.cold.score_sources.clone();
         score_sources.extend(outer.index.cold.score_sources.iter().cloned());

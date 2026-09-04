@@ -79,7 +79,19 @@ INSERT INTO uqa_rule_notify_oracle.replaced_items VALUES (1), (2);
 SELECT 'instead|' || count(*) FROM uqa_rule_notify_oracle.replaced_items;
 
 SELECT pg_temp.rule_notify_probe('conditional', 'CREATE RULE conditional_notification AS ON INSERT TO uqa_rule_notify_oracle.items WHERE NEW.id > 0 DO ALSO NOTIFY uqa_rule_notify_events, ''conditional''');
+SELECT pg_temp.rule_notify_probe('payload-accepted', 'SELECT pg_notify(''uqa_rule_notify_unobserved'', repeat(''x'', 7999))');
 SELECT pg_temp.rule_notify_probe('payload-limit', 'NOTIFY uqa_rule_notify_events, ' || quote_literal(repeat('x', 8000)));
+SELECT pg_temp.rule_notify_probe('channel-accepted', 'SELECT pg_notify(repeat(''c'', 63), '''')');
+SELECT pg_temp.rule_notify_probe('channel-limit', 'SELECT pg_notify(repeat(''c'', 64), '''')');
+SELECT pg_temp.rule_notify_probe('null-channel', 'SELECT pg_notify(NULL, '''')');
+SELECT 'backend-pid|' || (pg_backend_pid() > 0)::text;
+SELECT 'listening|' || string_agg(channel, ',' ORDER BY channel) FROM pg_listening_channels() AS channels(channel);
+SELECT 'pg-notify|' || pg_typeof(pg_notify('uqa_rule_notify_unobserved', NULL))::text || '|' || (pg_notify('uqa_rule_notify_unobserved', NULL) IS NULL)::text;
+SELECT 'void|' || length(('ignored'::void)::text)::text || '|' || to_json('ignored'::void)::text || '|' || ('ignored'::void IS NULL)::text;
+SELECT 'queue-usage|' || (pg_notification_queue_usage() BETWEEN 0.0 AND 1.0)::text;
+SELECT 'catalog|' || string_agg(oid::text || ':' || proname || ':' || prorettype::regtype::text || ':' || proretset::text || ':' || prorows::integer::text || ':' || provolatile::text || ':' || proparallel::text || ':' || proisstrict::text, ',' ORDER BY oid) FROM pg_proc WHERE oid IN (2026, 3035, 3036, 3296);
+SELECT pg_temp.rule_notify_probe('void-equality', 'SELECT ''left''::void = ''right''::void');
+SELECT pg_temp.rule_notify_probe('void-column', 'CREATE TABLE uqa_rule_notify_oracle.bad_void(value void)');
 
 UNLISTEN *;
 DROP SCHEMA uqa_rule_notify_oracle CASCADE;

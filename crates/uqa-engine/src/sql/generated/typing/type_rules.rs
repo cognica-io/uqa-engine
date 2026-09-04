@@ -91,6 +91,7 @@ pub(super) fn temporal_plus_interval_type(
 pub(super) fn value_generation_type(value: &Value) -> GenerationType {
     match value {
         Value::Null => GenerationType::Null,
+        Value::Void => GenerationType::Void,
         Value::Bool(_) => GenerationType::Boolean,
         Value::Int(value) if i32::try_from(*value).is_ok() => GenerationType::Integer,
         Value::Int(_) => GenerationType::BigInteger,

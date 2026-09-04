@@ -209,6 +209,7 @@ pub(super) fn schema_expr_text(expr: &Expr) -> String {
 fn schema_literal_text(value: &Value) -> String {
     match value {
         Value::Null => "NULL".into(),
+        Value::Void => "''::void".into(),
         Value::Bool(value) => if *value { "true" } else { "false" }.into(),
         Value::Int(value) => value.to_string(),
         Value::Float(value) if value.is_finite() => value.to_string(),

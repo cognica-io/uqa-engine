@@ -31,8 +31,38 @@ pub fn cast_value(v: &Value, ty: &str) -> Result<Value> {
     reason = "cast matrix preserves source-target and error precedence"
 )]
 pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<Value> {
+    let normalized_type = ty.trim().to_ascii_lowercase();
+    if normalized_type
+        .strip_suffix("[]")
+        .is_some_and(|element| element.trim() == "void" || element.trim() == "pg_catalog.void")
+    {
+        return Err(SQLError::Routine {
+            sqlstate: "42704".into(),
+            message: "type \"void[]\" does not exist".into(),
+        });
+    }
     if matches!(v, Value::Null) {
         return Ok(Value::Null);
+    }
+    let (base, modifier) = split_type_modifier(ty);
+    let target = base
+        .trim()
+        .strip_prefix("pg_catalog.")
+        .unwrap_or(base.trim());
+    if matches!(v, Value::Void)
+        && !matches!(
+            target,
+            "void"
+                | "text"
+                | "name"
+                | "varchar"
+                | "character varying"
+                | "bpchar"
+                | "character"
+                | "char"
+        )
+    {
+        return Err(undefined_cast("void", postgres_type_display_name(target)));
     }
     if let Some(elem_ty) = ty.strip_suffix("[]") {
         let source_elem_ty = source_ty
@@ -52,8 +82,18 @@ pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<V
             .map(Value::Array)
             .ok_or_else(|| SQLError::TypeMismatch("array dimensions changed during cast".into()));
     }
-    let (base, modifier) = split_type_modifier(ty);
     match base {
+        "void" | "pg_catalog.void" => {
+            let source = canonical_cast_source(source_ty, v);
+            if matches!(
+                source.as_str(),
+                "unknown" | "text" | "name" | "varchar" | "bpchar" | "void"
+            ) {
+                Ok(Value::Void)
+            } else {
+                Err(undefined_cast(postgres_type_display_name(&source), "void"))
+            }
+        }
         "smallint" | "int2" | "pg_catalog.int2" => cast_integer(v, "smallint"),
         "integer" | "int" | "int4" | "serial" | "serial4" | "pg_catalog.int4" => {
             cast_integer(v, "integer")
@@ -361,6 +401,7 @@ fn canonical_cast_source(source_ty: Option<&str>, value: &Value) -> String {
         Value::Row(_) | Value::Record(_) => "record",
         Value::Map(_) => "jsonb",
         Value::Null => "unknown",
+        Value::Void => "void",
     });
     let (source, _) = split_type_modifier(source);
     let source = source
@@ -387,6 +428,20 @@ fn undefined_cast(source: &str, target: &str) -> SQLError {
     SQLError::Routine {
         sqlstate: "42846".into(),
         message: format!("cannot cast type {source} to {target}"),
+    }
+}
+
+fn postgres_type_display_name(name: &str) -> &str {
+    match name {
+        "int2" => "smallint",
+        "int4" => "integer",
+        "int8" => "bigint",
+        "float4" => "real",
+        "float8" => "double precision",
+        "bool" => "boolean",
+        "varchar" => "character varying",
+        "bpchar" => "character",
+        other => other,
     }
 }
 

@@ -76,6 +76,11 @@ impl Engine {
             for column in &output_columns {
                 crate::sql::validate_postgres_column_name(column)?;
             }
+            for (position, column) in output_columns.iter().enumerate() {
+                if let Some(ty) = query_schema.column_type(position) {
+                    crate::sql::validate_postgres_relation_column_type(column, ty)?;
+                }
+            }
             let name = engine.resolve_relation_name_for_sql_create(name)?;
             if let Some(kind) = engine.relation_kind_at(&name).map_err(|error| {
                 SQLError::Internal(format!("resolve relation `{name}`: {error}"))

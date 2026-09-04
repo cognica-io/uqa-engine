@@ -134,6 +134,25 @@ pub(in crate::sql) fn validate_query_block_expression_types(
     {
         uqa_execution::scalar_type_with_resolver(expression, schema, params, &resolver)?;
     }
+    for expression in statement
+        .group_by
+        .iter()
+        .chain(statement.grouping_sets.iter().flatten())
+        .chain(statement.distinct_on.iter())
+    {
+        if let Some(ty) =
+            uqa_execution::scalar_type_with_resolver(expression, schema, params, &resolver)?
+        {
+            uqa_execution::require_equality_operator(&ty)?;
+        }
+    }
+    for order in &statement.order_by {
+        if let Some(ty) =
+            uqa_execution::scalar_type_with_resolver(&order.expr, schema, params, &resolver)?
+        {
+            uqa_execution::require_ordering_operator(&ty)?;
+        }
+    }
     Ok(())
 }
 
@@ -154,6 +173,11 @@ pub(in crate::sql) fn validate_query_block_references(
         params,
         ctes,
     )?;
+    if statement.distinct && statement.distinct_on.is_empty() {
+        for ty in output.column_types().iter().flatten() {
+            uqa_execution::require_equality_operator(ty)?;
+        }
+    }
     SchemaScope::for_analysis(ctes)?
         .validate_query_block_clauses(routines, statement, schema, &output, params)
 }

@@ -15,12 +15,13 @@ pub(crate) use rule_binding::{
     bind_rule_action, bind_rule_expr_scoped, expand_rule_action_returning_stars,
     expand_rule_action_row_stars, first_rule_row_reference_in_expr,
     first_rule_row_reference_in_select, rename_rule_action_returning_target_column,
-    rename_rule_condition_plan_column, rule_action_has_set_operation,
+    rename_rule_condition_binding_column, rule_action_has_set_operation,
     rule_action_returning_references_target_column, rule_condition_plan_references_whole_row,
     rule_condition_plan_row_columns, rule_expr_references_row, rule_expr_references_whole_row,
     rule_expr_row_columns, rule_statement_references_row, rule_statement_references_whole_row,
     rule_statement_row_columns,
 };
+pub(crate) use rule_condition_binding::RuleConditionBinding;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct StoredTrigger {
@@ -40,10 +41,19 @@ pub(crate) struct StoredRule {
     pub(crate) enabled: EventEnableMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) condition_plan: Option<uqa_planner::ExpressionPlan>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) condition_binding: Option<RuleConditionBinding>,
 }
 
-pub(crate) const RULE_OLD_PLAN_QUALIFIER: &str = "\0uqa_rule_old";
-pub(crate) const RULE_NEW_PLAN_QUALIFIER: &str = "\0uqa_rule_new";
+impl StoredRule {
+    pub(crate) fn bound_condition_plan(
+        &self,
+    ) -> Option<(&uqa_planner::ExpressionPlan, &RuleConditionBinding)> {
+        self.condition_plan
+            .as_ref()
+            .zip(self.condition_binding.as_ref())
+    }
+}
 
 #[derive(Default, Serialize, Deserialize)]
 struct StoredTriggerCatalog {
@@ -83,4 +93,5 @@ mod lookup;
 mod persistence;
 mod registry;
 mod rule_binding;
+mod rule_condition_binding;
 mod validation;

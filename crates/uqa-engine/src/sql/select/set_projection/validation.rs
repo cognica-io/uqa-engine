@@ -18,6 +18,7 @@ pub(in crate::sql) fn builtin_returns_set(name: &str) -> bool {
     matches!(
         name,
         "generate_series"
+            | "pg_listening_channels"
             | "unnest"
             | "regexp_split_to_table"
             | "string_to_table"

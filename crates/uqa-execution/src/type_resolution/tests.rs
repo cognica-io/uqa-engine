@@ -449,6 +449,10 @@ fn equality_resolution_rejects_postgresql_undefined_operators() {
             ColumnType::Array(Box::new(ColumnType::Integer)),
             ColumnType::Array(Box::new(ColumnType::BigInteger)),
         ),
+        (
+            ColumnType::Array(Box::new(ColumnType::Json)),
+            ColumnType::Array(Box::new(ColumnType::Json)),
+        ),
     ] {
         let error = equality_operand_type(&left, &right).unwrap_err();
         assert_eq!(error.sqlstate(), Some("42883"));

@@ -103,6 +103,7 @@ pub(super) fn sql_type_name(ty: &ColumnType) -> String {
         ColumnType::BigInteger => "bigint".into(),
         ColumnType::Oid => "oid".into(),
         ColumnType::Xid => "xid".into(),
+        ColumnType::Void => "void".into(),
         ColumnType::Boolean => "boolean".into(),
         ColumnType::Text => "text".into(),
         ColumnType::Name => "name".into(),
@@ -157,6 +158,7 @@ pub(super) fn fdw_type_name(ty: &uqa_fdw::ColumnType) -> String {
         uqa_fdw::ColumnType::BigInteger => "bigint".into(),
         uqa_fdw::ColumnType::Oid => "oid".into(),
         uqa_fdw::ColumnType::Xid => "xid".into(),
+        uqa_fdw::ColumnType::Void => "void".into(),
         uqa_fdw::ColumnType::Real => "real".into(),
         uqa_fdw::ColumnType::DoublePrecision => "double precision".into(),
         uqa_fdw::ColumnType::Numeric { precision, scale } => match (precision, scale) {

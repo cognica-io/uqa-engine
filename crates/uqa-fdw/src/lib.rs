@@ -80,6 +80,7 @@ pub enum ColumnType {
     Bpchar,
     Character(u32),
     Bool,
+    Void,
     Bytes,
     InternalChar,
     Regproc,

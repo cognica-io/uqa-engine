@@ -152,6 +152,11 @@ pub(super) fn finish_query_block_operator_output<'a>(
     if original.distinct {
         let work_mem_bytes = physical_work_mem_bytes(runtime)?;
         operator = if original.distinct_on.is_empty() {
+            for position in 0..columns.len() {
+                if let Some(ty) = operator.row_schema().column_type(position) {
+                    uqa_execution::require_equality_operator(ty)?;
+                }
+            }
             Box::new(Distinct::all_with_work_mem(operator, work_mem_bytes))
         } else {
             let output = identity_order_columns(&columns);
@@ -175,6 +180,13 @@ pub(super) fn finish_query_block_operator_output<'a>(
                     expression.clone()
                 };
                 distinct_on.push(key);
+            }
+            for expression in &distinct_on {
+                if let Some(ty) =
+                    uqa_execution::scalar_type(expression, operator.row_schema(), params)?
+                {
+                    uqa_execution::require_equality_operator(&ty)?;
+                }
             }
             Box::new(Distinct::on_with_work_mem(
                 operator,

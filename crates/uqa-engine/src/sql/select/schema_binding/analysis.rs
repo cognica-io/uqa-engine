@@ -192,6 +192,8 @@ impl SchemaScope {
         subqueries: &[QueryPlan],
         params: &[SQLParam],
     ) -> Result<(), SQLError> {
+        let schema = self.with_stored_outer_internal_aliases(schema);
+        let schema = &schema;
         let resolver = self.query_function_type_resolver(
             engine,
             expression,

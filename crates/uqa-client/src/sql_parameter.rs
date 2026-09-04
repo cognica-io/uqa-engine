@@ -90,6 +90,9 @@ fn scalar_parameter(value: &Value) -> Result<SQLParameter, HttpEngineError> {
     }
     let parameter = match value {
         Value::Null => SQLParameter::Null,
+        Value::Void => SQLParameter::Text {
+            value: String::new(),
+        },
         Value::Bool(value) => SQLParameter::Boolean { value: *value },
         Value::Int(value) => SQLParameter::Int64 { value: *value },
         Value::Float(value) if value.is_finite() => SQLParameter::Float64 { value: *value },
@@ -126,6 +129,7 @@ fn finite_value(value: &Value) -> bool {
         Value::Record(values) => values.iter().all(|(_, value)| finite_value(value)),
         Value::Map(values) => values.values().all(finite_value),
         Value::Null
+        | Value::Void
         | Value::Bool(_)
         | Value::Int(_)
         | Value::Str(_)
@@ -175,6 +179,7 @@ mod tests {
     fn engine_parameters_use_the_stable_wire_contract() {
         let parameters = [
             SQLParam::scalar(Value::Int(42)),
+            SQLParam::scalar(Value::Void),
             SQLParam::scalar(Value::Bytes(vec![0x00, 0x0f, 0xff])),
             SQLParam::vector(vec![0.25, 0.75]),
         ];
@@ -188,6 +193,7 @@ mod tests {
             encoded,
             [
                 json!({"type": "int64", "value": 42}),
+                json!({"type": "text", "value": ""}),
                 json!({"type": "bytes", "hex": "000fff"}),
                 json!({"type": "vector", "value": [0.25, 0.75]}),
             ]

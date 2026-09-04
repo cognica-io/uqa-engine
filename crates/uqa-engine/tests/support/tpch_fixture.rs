@@ -220,6 +220,7 @@ pub fn canonical_result(result: &uqa_engine::SQLResult) -> CanonicalResult {
 fn canonical_value(value: &Value) -> String {
     match value {
         Value::Null => "<NULL>".into(),
+        Value::Void => String::new(),
         Value::Bool(value) => {
             if *value {
                 "t".into()

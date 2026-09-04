@@ -19,6 +19,8 @@ use super::{
 pub enum Value {
     #[default]
     Null,
+    /// Non-null zero-width value of `PostgreSQL`'s `void` pseudo-type.
+    Void,
     Bool(bool),
     Int(i64),
     Float(f64),
@@ -57,6 +59,12 @@ struct TaggedText<'a> {
 }
 
 #[derive(Serialize)]
+struct TaggedUnit {
+    #[serde(rename = "$uqa_type")]
+    kind: &'static str,
+}
+
+#[derive(Serialize)]
 struct TaggedBytes<'a> {
     #[serde(rename = "$uqa_type")]
     kind: &'static str,
@@ -92,6 +100,7 @@ impl Serialize for Value {
     {
         match self {
             Self::Null => serializer.serialize_unit(),
+            Self::Void => TaggedUnit { kind: "void" }.serialize(serializer),
             Self::Bool(value) => serializer.serialize_bool(*value),
             Self::Int(value) => serializer.serialize_i64(*value),
             Self::Float(value) => serializer.serialize_f64(*value),
@@ -212,6 +221,7 @@ fn value_from_tagged_map(
         return Ok(tagged_temporal_value(tag, map).map(Value::Temporal));
     }
     match tag {
+        "void" if map.len() == 1 => Ok(Some(Value::Void)),
         "decimal" => {
             let Some(Value::Str(text)) = map.get("value") else {
                 return Ok(None);
@@ -590,7 +600,7 @@ impl Ord for Value {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         use std::cmp::Ordering;
         match (self, other) {
-            (Value::Null, Value::Null) => Ordering::Equal,
+            (Value::Null, Value::Null) | (Value::Void, Value::Void) => Ordering::Equal,
             (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
             (Value::Int(a), Value::Int(b)) => a.cmp(b),
             (Value::Float(a), Value::Float(b)) => compare_floats(*a, *b),
@@ -632,18 +642,19 @@ impl Ord for Value {
 fn discriminant(v: &Value) -> u8 {
     match v {
         Value::Null => 0,
-        Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Decimal(_) => 1,
-        Value::Str(_) => 2,
-        Value::FixedChar(_) => 3,
-        Value::Bytes(_) => 4,
-        Value::Temporal(_) => 5,
-        Value::Json(_) => 6,
-        Value::JsonB(_) => 7,
-        Value::Array(_) => 8,
-        Value::List(_) => 9,
-        Value::Row(_) => 10,
-        Value::Record(_) => 11,
-        Value::Map(_) => 12,
+        Value::Void => 1,
+        Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Decimal(_) => 2,
+        Value::Str(_) => 3,
+        Value::FixedChar(_) => 4,
+        Value::Bytes(_) => 5,
+        Value::Temporal(_) => 6,
+        Value::Json(_) => 7,
+        Value::JsonB(_) => 8,
+        Value::Array(_) => 9,
+        Value::List(_) => 10,
+        Value::Row(_) => 11,
+        Value::Record(_) => 12,
+        Value::Map(_) => 13,
     }
 }
 

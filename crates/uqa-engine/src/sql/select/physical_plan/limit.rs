@@ -51,7 +51,7 @@ pub(in crate::sql) fn attach_order_limit<'a>(
     let mut tie_keys = None;
     if !statement.order_by.is_empty() {
         let work_mem_bytes = physical_work_mem_bytes(runtime)?;
-        let keys = resolved_sort_keys(statement, output_columns, None)?;
+        let keys = resolved_sort_keys(statement, output_columns, Some(operator.row_schema()))?;
         if with_ties {
             tie_keys = Some(keys.clone());
         }
@@ -140,13 +140,18 @@ pub(in crate::sql) fn attach_order_limit<'a>(
 pub(super) fn resolved_sort_keys(
     statement: &QueryBlockPlan,
     output_columns: &[OutputColumnMapping],
-    _hidden_schema: Option<&uqa_execution::RowSchema>,
+    hidden_schema: Option<&uqa_execution::RowSchema>,
 ) -> Result<Vec<uqa_execution::SortKey>, SQLError> {
     statement
         .order_by
         .iter()
         .try_fold(Vec::<uqa_execution::SortKey>::new(), |mut keys, order| {
             let expr = resolve_order_expression(&order.expr, output_columns)?;
+            if let Some(schema) = hidden_schema {
+                if let Some(ty) = uqa_execution::scalar_type(&expr, schema, &[])? {
+                    uqa_execution::require_ordering_operator(&ty)?;
+                }
+            }
             let key = uqa_execution::SortKey {
                 expr,
                 descending: order.descending,

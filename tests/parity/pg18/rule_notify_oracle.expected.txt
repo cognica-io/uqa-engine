@@ -20,4 +20,16 @@ rollback|2
 Asynchronous notification "uqa_rule_notify_events" with payload "replaced" received from server process with PID <pid>.
 instead|0
 conditional|42P17
+payload-accepted|ok
 payload-limit|22023
+channel-accepted|ok
+channel-limit|22023
+null-channel|22023
+backend-pid|true
+listening|uqa_rule_notify_events
+pg-notify|void|false
+void|0|""|false
+queue-usage|true
+catalog|2026:pg_backend_pid:integer:false:0:s:r:true,3035:pg_listening_channels:text:true:10:s:r:true,3036:pg_notify:void:false:0:v:r:false,3296:pg_notification_queue_usage:double precision:false:0:v:r:true
+void-equality|42883
+void-column|42P16

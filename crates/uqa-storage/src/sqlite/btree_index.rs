@@ -40,6 +40,7 @@ fn decode_doc_id(doc_id: i64) -> Result<DocId> {
 #[serde(tag = "type", content = "value")]
 enum StoredValue {
     Null,
+    Void,
     Bool(bool),
     Int(i64),
     /// IEEE-754 bits preserve NaN payloads, infinities, and signed zero.
@@ -62,6 +63,7 @@ impl From<&Value> for StoredValue {
     fn from(value: &Value) -> Self {
         match value {
             Value::Null => Self::Null,
+            Value::Void => Self::Void,
             Value::Bool(value) => Self::Bool(*value),
             Value::Int(value) => Self::Int(*value),
             Value::Float(value) => Self::Float(value.to_bits()),
@@ -95,6 +97,7 @@ impl StoredValue {
     fn into_value(self) -> Value {
         match self {
             Self::Null => Value::Null,
+            Self::Void => Value::Void,
             Self::Bool(value) => Value::Bool(value),
             Self::Int(value) => Value::Int(value),
             Self::Float(bits) => Value::Float(f64::from_bits(bits)),

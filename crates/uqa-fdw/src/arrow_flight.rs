@@ -42,6 +42,11 @@ use crate::{FDWPredicate, ForeignTable, PredicateOp};
 pub fn quote_literal(value: &Value) -> Result<String, ArrowFlightPrepareError> {
     Ok(match value {
         Value::Null => "NULL".into(),
+        Value::Void => {
+            return Err(ArrowFlightPrepareError::UnsupportedLiteral(
+                "void values have no Flight SQL literal".into(),
+            ));
+        }
         Value::Bool(b) => {
             if *b {
                 "TRUE".into()

@@ -65,10 +65,14 @@ fn failed_commit_clears_engine_transaction_state_and_restores_caches() {
             &[],
         )
         .unwrap();
+    engine.sql("LISTEN commit_failure_channel", &[]).unwrap();
 
     engine.begin().unwrap();
     engine
         .sql("INSERT INTO commit_t VALUES (1, 'uncommitted')", &[])
+        .unwrap();
+    engine
+        .sql("NOTIFY commit_failure_channel, 'uncommitted'", &[])
         .unwrap();
     let poisoned = connection.with(|conn| {
         conn.execute("INSERT INTO table_that_does_not_exist VALUES (1)", [])?;
@@ -84,6 +88,19 @@ fn failed_commit_clears_engine_transaction_state_and_restores_caches() {
         .unwrap()
         .rows
         .is_empty());
+    assert!(engine.take_sql_notifications().is_empty());
+
+    engine
+        .sql("NOTIFY commit_failure_channel, 'committed'", &[])
+        .unwrap();
+    assert_eq!(
+        engine
+            .take_sql_notifications()
+            .into_iter()
+            .map(|notification| notification.payload)
+            .collect::<Vec<_>>(),
+        ["committed"]
+    );
 }
 
 #[test]

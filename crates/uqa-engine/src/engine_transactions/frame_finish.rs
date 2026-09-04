@@ -6,6 +6,8 @@
 
 //! COMMIT, ROLLBACK, and nontransactional statistics restoration.
 
+use parking_lot::MutexGuard;
+
 use super::{
     Engine, NontransactionalColumnStats, NontransactionalSequenceValues, SQLError,
     SessionLastSequenceReference, SessionStateSnapshot, StorageBackendError, StorageBackendResult,
@@ -62,7 +64,7 @@ impl Engine {
             None
         };
         let notification_commit =
-            self.begin_notification_commit(storage_savepoint.is_none(), frame);
+            self.prepare_notification_commit(stack, storage_savepoint.is_none())?;
         let savepoints_deferred = Self::backend_savepoints_deferred(stack);
         if let Some(backend) = self.storage.backend.as_ref() {
             let commit_result = if let Some(savepoint) = storage_savepoint {
@@ -79,6 +81,7 @@ impl Engine {
                     .map_err(|err| Self::storage_tx_error("COMMIT", &err))
             };
             if let Err(commit_error) = commit_result {
+                drop(notification_commit);
                 return Err(self.recover_failed_transaction_finish(
                     stack,
                     storage_savepoint.is_some(),
@@ -113,10 +116,33 @@ impl Engine {
             parent.deferred_foreign_key_checks = committed.deferred_foreign_key_checks;
             parent.deferred_constraint_trigger_events =
                 committed.deferred_constraint_trigger_events;
+            parent.merge_pending_listen_actions(committed.pending_listen_actions);
             parent.merge_pending_notifications(committed.pending_notifications);
             parent.first_snapshot_set |= committed.first_snapshot_set;
         }
         Ok(())
+    }
+
+    fn prepare_notification_commit<'a>(
+        &'a self,
+        stack: &mut Vec<TransactionFrame>,
+        outer: bool,
+    ) -> Result<Option<MutexGuard<'a, ()>>, SQLError> {
+        let notification_commit = {
+            let frame = stack
+                .last()
+                .ok_or_else(|| SQLError::Internal("COMMIT without an open transaction".into()))?;
+            self.begin_notification_commit(outer, frame)
+        };
+        match notification_commit {
+            Ok(commit) => Ok(commit),
+            Err(error) => Err(match self.rollback_transaction_frame(stack) {
+                Ok(()) => error,
+                Err(rollback_error) => SQLError::Internal(format!(
+                    "{error}; notification queue capacity rollback also failed: {rollback_error}"
+                )),
+            }),
+        }
     }
 
     /// A failed outer backend COMMIT/ROLLBACK has already ended the managed
@@ -159,6 +185,7 @@ impl Engine {
                 }
             }
         }
+        let outer_notification_transaction = !stack.is_empty();
         stack.clear();
         self.row_locks.release_session(self.session_id);
         self.restore_transaction_dirty_state(dirty_at_begin);
@@ -198,6 +225,9 @@ impl Engine {
         }
         if let Some(snapshot) = session_snapshot.as_ref() {
             self.restore_session_state(snapshot);
+        }
+        if outer_notification_transaction {
+            self.rollback_notification_state();
         }
         self.apply_nontransactional_sequence_values(&nontransactional_sequence_values);
         if cleanup_errors.is_empty() {
@@ -337,6 +367,7 @@ impl Engine {
         let first_snapshot_set = frame.first_snapshot_set;
         stack.pop();
         if stack.is_empty() {
+            self.rollback_notification_state();
             self.row_locks.release_session(self.session_id);
         } else {
             self.row_locks

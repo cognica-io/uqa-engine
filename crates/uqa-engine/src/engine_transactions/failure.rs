@@ -30,6 +30,7 @@ struct StatementAbortSnapshot {
     row_changes: Vec<TransactionRowChange>,
     deferred_foreign_key_checks: Vec<crate::DeferredForeignKeyCheck>,
     deferred_constraint_trigger_events: Vec<crate::sql::DeferredConstraintTriggerEvent>,
+    pending_listen_actions: Vec<crate::PendingListenAction>,
     pending_notifications: Vec<crate::PendingNotification>,
     constraint_modes: ConstraintModeState,
     intent: TransactionIntent,
@@ -51,6 +52,7 @@ fn statement_abort_snapshot(frame: &TransactionFrame) -> StatementAbortSnapshot 
             deferred_constraint_trigger_events: savepoint
                 .deferred_constraint_trigger_events
                 .clone(),
+            pending_listen_actions: savepoint.pending_listen_actions.clone(),
             pending_notifications: savepoint.pending_notifications.clone(),
             constraint_modes: savepoint.constraint_modes.clone(),
             intent: savepoint.intent,
@@ -72,6 +74,7 @@ fn statement_abort_snapshot(frame: &TransactionFrame) -> StatementAbortSnapshot 
         row_changes: Vec::new(),
         deferred_foreign_key_checks: Vec::new(),
         deferred_constraint_trigger_events: Vec::new(),
+        pending_listen_actions: Vec::new(),
         pending_notifications: Vec::new(),
         constraint_modes: ConstraintModeState::default(),
         intent: frame.intent,
@@ -178,6 +181,7 @@ impl Engine {
             frame.deferred_foreign_key_checks = rollback_state.deferred_foreign_key_checks;
             frame.deferred_constraint_trigger_events =
                 rollback_state.deferred_constraint_trigger_events;
+            frame.pending_listen_actions = rollback_state.pending_listen_actions;
             frame.pending_notifications = rollback_state.pending_notifications;
             frame.constraint_modes = rollback_state.constraint_modes;
             frame.intent = rollback_state.intent;

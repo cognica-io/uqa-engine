@@ -18,6 +18,19 @@ use uqa_planner::ExpressionPlan;
 use uqa_sql::ast::FunctionBinding;
 
 impl SchemaScope {
+    pub(super) fn with_stored_outer_internal_aliases(&self, schema: &RowSchema) -> RowSchema {
+        self.stored_expression_outer.as_ref().map_or_else(
+            || schema.clone(),
+            |outer| {
+                if schema.physical_width() < outer.physical_width() {
+                    schema.clone()
+                } else {
+                    RowSchema::with_trailing_internal_aliases(schema, outer)
+                }
+            },
+        )
+    }
+
     fn canonicalize_stored_outer_columns(&self, expression: &mut ScalarExpr, schema: &RowSchema) {
         let Some(outer) = self.stored_expression_outer.as_ref() else {
             return;
@@ -52,21 +65,19 @@ impl SchemaScope {
                 }
                 _ => None,
             };
-            let Some(qualifier) = public_qualifier.and_then(|qualifier| {
-                if qualifier.eq_ignore_ascii_case("old") {
-                    Some(crate::engine_events::RULE_OLD_PLAN_QUALIFIER)
-                } else if qualifier.eq_ignore_ascii_case("new") {
-                    Some(crate::engine_events::RULE_NEW_PLAN_QUALIFIER)
-                } else {
-                    None
-                }
+            let Some(public_qualifier) = public_qualifier.filter(|qualifier| {
+                qualifier.eq_ignore_ascii_case("old") || qualifier.eq_ignore_ascii_case("new")
             }) else {
                 return;
             };
-            *node = ScalarExpr::QualifiedColumn {
-                qualifier: qualifier.to_string(),
-                column: lookup.column().to_string(),
+            let outer_lookup = ColumnIdentity::qualified(public_qualifier, lookup.column());
+            let Some(outer_slot) = outer.physical_slot_for_identity(&outer_lookup) else {
+                return;
             };
+            let Some(column) = outer.unique_internal_column_for_slot(outer_slot) else {
+                return;
+            };
+            *node = ScalarExpr::InternalColumn(column);
         });
     }
 
@@ -522,6 +533,8 @@ impl SchemaScope {
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<(), SQLError> {
+        let schema = self.with_stored_outer_internal_aliases(schema);
+        let schema = &schema;
         self.canonicalize_stored_outer_columns(expression, schema);
         let mut failure = None;
         uqa_planner::rewrite_scalar_expression(expression, &mut |expression| {

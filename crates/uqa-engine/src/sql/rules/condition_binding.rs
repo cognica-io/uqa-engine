@@ -200,51 +200,46 @@ where
 }
 
 fn materialize_rule_condition_row<F>(
-    rule: &crate::engine_events::StoredRule,
+    binding: &crate::engine_events::RuleConditionBinding,
     required_columns: &std::collections::BTreeSet<String>,
     resolver: &mut ProjectedRuntimeRuleResolver<'_, F>,
 ) -> Result<(uqa_execution::RowSchema, uqa_execution::PhysicalRow), SQLError>
 where
     F: FnMut(usize, RuleRowSide, &str) -> Result<Option<Value>, SQLError>,
 {
-    let sides: &[(&str, RuleRowSide)] = match rule.definition.event {
-        uqa_sql::ast::RuleEvent::Insert => &[(
-            crate::engine_events::RULE_NEW_PLAN_QUALIFIER,
-            RuleRowSide::New,
-        )],
-        uqa_sql::ast::RuleEvent::Update => &[
-            (
-                crate::engine_events::RULE_OLD_PLAN_QUALIFIER,
-                RuleRowSide::Old,
-            ),
-            (
-                crate::engine_events::RULE_NEW_PLAN_QUALIFIER,
-                RuleRowSide::New,
-            ),
-        ],
-        uqa_sql::ast::RuleEvent::Delete => &[(
-            crate::engine_events::RULE_OLD_PLAN_QUALIFIER,
-            RuleRowSide::Old,
-        )],
-        uqa_sql::ast::RuleEvent::Select => &[],
-    };
-    let mut names = Vec::with_capacity(resolver.columns.len() * sides.len());
-    let mut identities = Vec::with_capacity(resolver.columns.len() * sides.len());
-    let mut types = Vec::with_capacity(resolver.columns.len() * sides.len());
-    let mut values = Vec::with_capacity(resolver.columns.len() * sides.len());
-    for (qualifier, side) in sides {
+    let mut names = Vec::with_capacity(resolver.columns.len() * 2);
+    let mut identities = Vec::with_capacity(resolver.columns.len() * 2);
+    let mut types = Vec::with_capacity(resolver.columns.len() * 2);
+    let mut values = Vec::with_capacity(resolver.columns.len() * 2);
+    let mut internal = Vec::with_capacity(resolver.columns.len() * 2);
+    for (qualifier, side, relation) in [
+        ("old", RuleRowSide::Old, binding.old_relation()),
+        ("new", RuleRowSide::New, binding.new_relation()),
+    ] {
+        if relation.is_none() {
+            continue;
+        }
         for (name, metadata) in resolver.columns {
             if !required_columns.contains(name) {
                 continue;
             }
+            let slot = names.len();
             names.push(name.clone());
-            identities.push(uqa_execution::ColumnIdentity::qualified(*qualifier, name));
+            identities.push(uqa_execution::ColumnIdentity::qualified(qualifier, name));
             types.push(Some(metadata.ty.clone()));
-            values.push(resolver.record_field(*side, name)?.value);
+            values.push(resolver.record_field(side, name)?.value);
+            let column = match side {
+                RuleRowSide::Old => binding.old_column(name),
+                RuleRowSide::New => binding.new_column(name),
+            };
+            if let Some(column) = column {
+                internal.push((column, slot, Some(metadata.ty.clone())));
+            }
         }
     }
+    let schema = uqa_execution::RowSchema::with_identities(names, identities, types);
     Ok((
-        uqa_execution::RowSchema::with_identities(names, identities, types),
+        uqa_execution::RowSchema::with_physical_internal_aliases(&schema, &internal),
         uqa_execution::PhysicalRow::from_values(values),
     ))
 }
@@ -264,8 +259,9 @@ where
     let Some(condition) = rule.definition.condition.as_ref() else {
         return Ok(true);
     };
-    if let Some(plan) = rule.condition_plan.as_ref() {
-        let mut required_columns = crate::engine_events::rule_condition_plan_row_columns(plan);
+    if let Some((plan, binding)) = rule.bound_condition_plan() {
+        let mut required_columns =
+            crate::engine_events::rule_condition_plan_row_columns(plan, binding);
         if crate::engine_events::rule_condition_plan_references_whole_row(plan) {
             required_columns.extend(columns.keys().cloned());
         }
@@ -276,7 +272,7 @@ where
             project,
         };
         let (schema, physical_row) =
-            materialize_rule_condition_row(rule, &required_columns, &mut resolver)?;
+            materialize_rule_condition_row(binding, &required_columns, &mut resolver)?;
         return Ok(uqa_sql::expr::truthy(
             &eval_stored_expression_plan_with_row(
                 engine,

@@ -280,7 +280,7 @@ fn function_may_mutate_engine(
     let builtin_requires_mutating_execution =
         matches!(
             dispatch_name.as_str(),
-            "random" | "setseed" | "fts_match" | "multi_field_match"
+            "random" | "setseed" | "pg_notify" | "fts_match" | "multi_field_match"
         ) || (matches!(dispatch_name.as_str(), "nextval" | "setval") && !temporary_sequence_call);
     let sql_routine_mutates = classification.include_session_mutations
         && sql_routine_may_mutate_engine(

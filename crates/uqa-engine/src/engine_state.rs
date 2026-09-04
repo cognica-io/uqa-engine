@@ -396,6 +396,8 @@ impl DurableCatalogState {
 }
 
 pub(super) struct SessionContext {
+    /// Positive process identifier exposed by `pg_backend_pid()` and asynchronous notification responses. Portal workers share the owning session context and therefore retain the same identifier.
+    pub(super) backend_process_id: i32,
     /// Transactional session values share one lock so snapshots and restores
     /// cannot observe a mixture of old and new search-path, sequence,
     /// prepared-plan, or statement-cache state.
@@ -427,11 +429,12 @@ impl SessionContext {
             prepared: BTreeMap::new(),
             sql_statement_cache: SQLStatementCache::default(),
             portal_names: BTreeSet::new(),
-            listened_channels: BTreeSet::new(),
+            listened_channels: Vec::new(),
             current_user: "uqa".to_string(),
             session_user: "uqa".to_string(),
         };
         Self {
+            backend_process_id: crate::engine_notifications::allocate_backend_process_id(),
             state: RwLock::new(state),
             sequence_caches: Mutex::new(BTreeMap::new()),
             random_state: Mutex::new(random_state),
@@ -442,6 +445,12 @@ impl SessionContext {
             next_portal_id: Mutex::new(1),
             next_portal_transaction_origin: Mutex::new(1),
         }
+    }
+}
+
+impl Drop for SessionContext {
+    fn drop(&mut self) {
+        crate::engine_notifications::release_backend_process_id(self.backend_process_id);
     }
 }
 

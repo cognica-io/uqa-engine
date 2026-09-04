@@ -49,6 +49,7 @@ impl Engine {
         let row_changes = frame.row_changes.clone();
         let deferred_foreign_key_checks = frame.deferred_foreign_key_checks.clone();
         let deferred_constraint_trigger_events = frame.deferred_constraint_trigger_events.clone();
+        let pending_listen_actions = frame.pending_listen_actions.clone();
         let pending_notifications = frame.pending_notifications.clone();
         let constraint_modes = frame.constraint_modes.clone();
         frame.savepoints.push(TransactionSavepoint {
@@ -64,6 +65,7 @@ impl Engine {
             row_changes,
             deferred_foreign_key_checks,
             deferred_constraint_trigger_events,
+            pending_listen_actions,
             pending_notifications,
             constraint_modes,
         });
@@ -184,12 +186,12 @@ impl Engine {
         frame
             .deferred_constraint_trigger_events
             .clone_from(&savepoint.deferred_constraint_trigger_events);
-        frame.pending_notifications = savepoint.pending_notifications.clone();
         frame
             .constraint_modes
             .clone_from(&savepoint.constraint_modes);
         frame.intent = savepoint.intent;
         frame.characteristics = savepoint.characteristics;
+        frame.restore_pending_notification_savepoint(position);
         frame.savepoints.truncate(position + 1);
         frame.xid_levels.truncate(position + 2);
         let current_xid = frame.xid_levels.last_mut().ok_or_else(|| {

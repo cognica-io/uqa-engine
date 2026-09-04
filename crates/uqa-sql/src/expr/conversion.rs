@@ -13,6 +13,7 @@ use super::{
 pub fn value_to_string(v: &Value) -> String {
     match v {
         Value::Null => "".into(),
+        Value::Void => "".into(),
         Value::Int(i) => i.to_string(),
         Value::Float(f) => f.to_string(),
         Value::Decimal(d) => d.to_sql_string(),

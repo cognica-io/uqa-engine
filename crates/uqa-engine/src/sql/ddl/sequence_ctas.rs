@@ -267,7 +267,7 @@ fn create_table_as_columns(
             });
         }
     }
-    Ok(names
+    let columns = names
         .into_iter()
         .enumerate()
         .map(|(position, name)| uqa_sql::ast::ColumnDef {
@@ -295,5 +295,9 @@ fn create_table_as_columns(
             check_no_inherit: false,
             references: None,
         })
-        .collect())
+        .collect::<Vec<_>>();
+    for column in &columns {
+        super::validate_postgres_relation_column_type(&column.name, &column.ty)?;
+    }
+    Ok(columns)
 }

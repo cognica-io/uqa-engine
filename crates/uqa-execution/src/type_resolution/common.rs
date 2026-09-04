@@ -154,6 +154,7 @@ pub(super) fn parameter_type(parameter: &SQLParam) -> Option<ColumnType> {
 pub(super) fn value_type(value: &Value) -> Option<ColumnType> {
     match value {
         Value::Null | Value::Map(_) => None,
+        Value::Void => Some(ColumnType::Void),
         Value::Row(_) | Value::Record(_) => Some(ColumnType::Record),
         Value::Bool(_) => Some(ColumnType::Boolean),
         Value::Int(value) if i32::try_from(*value).is_ok() => Some(ColumnType::Integer),

@@ -9,6 +9,49 @@ use uqa_sql::SQLError;
 
 use super::common::{base_type, common_numeric_type, merge_optional_types, numeric_rank};
 
+/// Require the equality semantics used by grouping, duplicate elimination, and set operations. `PostgreSQL` exposes `void` as a result pseudo-type but does not register an equality operator for it.
+pub fn require_equality_operator(ty: &ColumnType) -> Result<(), SQLError> {
+    require_operator_capability(ty, "equality", equality_operator_available(ty))
+}
+
+/// Require the ordering semantics used by ORDER BY and window ordering. `PostgreSQL` exposes `void` as a result pseudo-type but does not register an ordering operator for it.
+pub fn require_ordering_operator(ty: &ColumnType) -> Result<(), SQLError> {
+    require_operator_capability(ty, "ordering", ordering_operator_available(ty))
+}
+
+fn require_operator_capability(
+    ty: &ColumnType,
+    capability: &str,
+    available: bool,
+) -> Result<(), SQLError> {
+    if !available {
+        return Err(SQLError::Routine {
+            sqlstate: "42883".into(),
+            message: format!(
+                "could not identify an {capability} operator for type {}",
+                ty.sql_name()
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn equality_operator_available(ty: &ColumnType) -> bool {
+    match base_type(ty) {
+        ColumnType::Void | ColumnType::Json => false,
+        ColumnType::Array(element) => equality_operator_available(element),
+        _ => true,
+    }
+}
+
+fn ordering_operator_available(ty: &ColumnType) -> bool {
+    match base_type(ty) {
+        ColumnType::Void | ColumnType::Json => false,
+        ColumnType::Array(element) => ordering_operator_available(element),
+        _ => true,
+    }
+}
+
 pub(super) fn unary_minus_result_type(ty: &ColumnType) -> Result<ColumnType, SQLError> {
     match base_type(ty) {
         ty @ (ColumnType::SmallInteger
@@ -39,6 +82,15 @@ pub(super) fn binary_result_type(
             | BinaryOp::Greater
             | BinaryOp::GreaterEqual
     ) {
+        let available: fn(&ColumnType) -> bool =
+            if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual) {
+                equality_operator_available
+            } else {
+                ordering_operator_available
+            };
+        if left.is_some_and(|ty| !available(ty)) || right.is_some_and(|ty| !available(ty)) {
+            return Err(undefined_binary_operator(op, left, right));
+        }
         return Ok(Some(ColumnType::Boolean));
     }
     let (Some(left), Some(right)) = (left, right) else {
@@ -69,6 +121,24 @@ pub(super) fn binary_result_type(
             right.sql_name()
         ),
     })
+}
+
+fn undefined_binary_operator(
+    op: BinaryOp,
+    left: Option<&ColumnType>,
+    right: Option<&ColumnType>,
+) -> SQLError {
+    let type_name =
+        |ty: Option<&ColumnType>| ty.map_or_else(|| "unknown".to_string(), ColumnType::sql_name);
+    SQLError::Routine {
+        sqlstate: "42883".into(),
+        message: format!(
+            "operator does not exist: {} {} {}",
+            type_name(left),
+            binary_operator_name(op),
+            type_name(right)
+        ),
+    }
 }
 
 fn temporal_binary_result_type(

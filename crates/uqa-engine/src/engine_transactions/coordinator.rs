@@ -237,8 +237,9 @@ impl Engine {
             characteristics.read_only = true;
         }
         let read_only = read_only || characteristics.read_only;
+        let outer = stack.is_empty();
         let session_snapshot = self.snapshot_session_state();
-        let (storage_savepoint, data_snapshot, snapshot_change_baseline) = if stack.is_empty() {
+        let (storage_savepoint, data_snapshot, snapshot_change_baseline) = if outer {
             let (data_snapshot, baseline) = self.begin_outer_transaction_snapshot(
                 read_only,
                 defer_write_lock,
@@ -315,12 +316,15 @@ impl Engine {
             row_changes: Vec::new(),
             deferred_foreign_key_checks,
             deferred_constraint_trigger_events,
+            pending_listen_actions: Vec::new(),
             pending_notifications: Vec::new(),
-            notification_queue_len_at_begin: self.runtime.notifications.lock().len(),
             constraint_modes,
             nontransactional_column_stats: NontransactionalColumnStats::new(),
             nontransactional_sequence_values: NontransactionalSequenceValues::new(),
         });
+        if outer {
+            self.begin_notification_transaction();
+        }
         self.update_statement_row_lock_baseline(snapshot_change_baseline);
         Ok(())
     }

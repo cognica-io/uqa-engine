@@ -162,6 +162,7 @@ pub(super) fn format_raise_message(format: &str, args: &[Value]) -> Result<Strin
 pub(super) fn raise_text(value: &Value) -> String {
     match value {
         Value::Null => "<NULL>".into(),
+        Value::Void => String::new(),
         Value::Bool(b) => (if *b { "t" } else { "f" }).into(),
         Value::Int(v) => v.to_string(),
         Value::Float(v) => v.to_string(),

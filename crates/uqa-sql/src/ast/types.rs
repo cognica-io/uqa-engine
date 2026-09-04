@@ -18,6 +18,8 @@ pub enum ColumnType {
     /// `PostgreSQL` transaction identifier (`pg_catalog.xid`).
     Xid,
     Boolean,
+    /// `PostgreSQL`'s non-null zero-width `void` pseudo-type.
+    Void,
     Text,
     /// `PostgreSQL` cursor portal name (`pg_catalog.refcursor`).
     RefCursor,
@@ -195,7 +197,14 @@ impl ColumnType {
             return Self::from_sql_name(element).map(|ty| Self::Array(Box::new(ty)));
         }
         if let Some(element) = normalized.strip_suffix("[]") {
-            return Self::from_sql_name(element).map(|ty| Self::Array(Box::new(ty)));
+            let element_type = Self::from_sql_name(element)?;
+            if matches!(element_type, Self::Void) {
+                return Err(crate::SQLError::Routine {
+                    sqlstate: "42704".into(),
+                    message: format!("type \"{normalized}\" does not exist"),
+                });
+            }
+            return Ok(Self::Array(Box::new(element_type)));
         }
         let (base, modifier) = normalized
             .strip_suffix(')')
@@ -226,6 +235,7 @@ impl ColumnType {
             "oid" => Ok(Self::Oid),
             "xid" => Ok(Self::Xid),
             "boolean" | "bool" => Ok(Self::Boolean),
+            "void" => Ok(Self::Void),
             "text" => Ok(Self::Text),
             "refcursor" => Ok(Self::RefCursor),
             "name" => Ok(Self::Name),
@@ -327,6 +337,7 @@ impl ColumnType {
             Self::Oid => "oid".into(),
             Self::Xid => "xid".into(),
             Self::Boolean => "boolean".into(),
+            Self::Void => "void".into(),
             Self::Text => "text".into(),
             Self::RefCursor => "refcursor".into(),
             Self::Name => "name".into(),

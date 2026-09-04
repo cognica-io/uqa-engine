@@ -184,6 +184,8 @@ impl RowSchema {
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
+                extra_ambiguous_unqualified: input.index.ambiguous_unqualified.clone(),
+                extra_ambiguous_qualified: input.index.ambiguous_qualified.clone(),
                 ..SchemaBuildMetadata::default()
             },
         )
@@ -254,6 +256,58 @@ impl RowSchema {
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
+                extra_ambiguous_unqualified: input.index.ambiguous_unqualified.clone(),
+                extra_ambiguous_qualified: input.index.ambiguous_qualified.clone(),
+                ..SchemaBuildMetadata::default()
+            },
+        )
+    }
+
+    /// Restore structural identities from a row scope that occupies the trailing physical slots of this schema.
+    pub fn with_trailing_internal_aliases(input: &Self, trailing: &Self) -> Self {
+        let offset = input
+            .physical_width()
+            .checked_sub(trailing.physical_width())
+            .expect("trailing internal-alias scope exceeds input row width");
+        let mut internal = input.index.executor_attributes.clone();
+        let mut internal_types = input.index.cold.executor_attribute_types.clone();
+        for (column, slot) in &trailing.index.executor_attributes {
+            let slot = if *slot == NULL_SLOT {
+                NULL_SLOT
+            } else {
+                offset + *slot
+            };
+            if let Some(previous) = internal.insert(*column, slot) {
+                assert_eq!(
+                    previous, slot,
+                    "structural identity moved between row scopes"
+                );
+            }
+        }
+        for (column, ty) in &trailing.index.cold.executor_attribute_types {
+            if let Some(previous) = internal_types.insert(*column, ty.clone()) {
+                assert_eq!(
+                    previous, *ty,
+                    "structural identity type changed between row scopes"
+                );
+            }
+        }
+        Self::from_typed_parts_with_aliases_and_exact_precedence(
+            input.columns().to_vec(),
+            input.identities().to_vec(),
+            input.column_types().to_vec(),
+            input.index.slots.to_vec(),
+            input.physical_width(),
+            SchemaBuildMetadata {
+                aliases: input.index.aliases.clone(),
+                alias_types: input.index.cold.aliases.clone(),
+                internal,
+                internal_types,
+                score_sources: input.index.cold.score_sources.clone(),
+                wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
+                binding_only: input.index.cold.binding_only.clone(),
+                extra_ambiguous_unqualified: input.index.ambiguous_unqualified.clone(),
+                extra_ambiguous_qualified: input.index.ambiguous_qualified.clone(),
                 ..SchemaBuildMetadata::default()
             },
         )
@@ -293,6 +347,18 @@ impl RowSchema {
             .get(&column)
             .copied()
             .filter(|slot| *slot != NULL_SLOT)
+    }
+
+    /// Return the sole executor-only identity attached to a physical slot. Slots with no structural identity or with multiple aliases are intentionally unresolved.
+    #[must_use]
+    pub fn unique_internal_column_for_slot(&self, slot: usize) -> Option<InternalColumnRef> {
+        let mut columns = self
+            .index
+            .executor_attributes
+            .iter()
+            .filter_map(|(column, candidate)| (*candidate == slot).then_some(*column));
+        let column = columns.next()?;
+        columns.next().is_none().then_some(column)
     }
 
     #[must_use]

@@ -374,7 +374,12 @@ fn value_retained_bytes(value: &Value) -> usize {
                 .saturating_add(value_retained_bytes(value))
                 .saturating_add(3 * std::mem::size_of::<usize>())
         }),
-        Value::Null | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Temporal(_) => 0,
+        Value::Null
+        | Value::Void
+        | Value::Bool(_)
+        | Value::Int(_)
+        | Value::Float(_)
+        | Value::Temporal(_) => 0,
         Value::Decimal(value) => value.retained_bytes(),
     })
 }

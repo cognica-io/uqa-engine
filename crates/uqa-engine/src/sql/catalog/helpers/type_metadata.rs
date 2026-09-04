@@ -63,6 +63,7 @@ pub(in crate::sql::catalog) fn pg_type_oid(ty: &ColumnType) -> i64 {
         ColumnType::Oid => 26,
         ColumnType::Xid => 28,
         ColumnType::Boolean => 16,
+        ColumnType::Void => 2278,
         ColumnType::Text => 25,
         ColumnType::RefCursor => 1790,
         ColumnType::Name => 19,
@@ -111,6 +112,7 @@ pub(in crate::sql::catalog) fn pg_type_oid(ty: &ColumnType) -> i64 {
             ColumnType::Oid => 1028,
             ColumnType::Xid => 1011,
             ColumnType::Boolean => 1000,
+            ColumnType::Void => 0,
             ColumnType::Text => 1009,
             ColumnType::RefCursor => 2201,
             ColumnType::Name => 1003,
@@ -495,6 +497,7 @@ pub(in crate::sql::catalog) fn pg_type_routine_oids(ty: &ColumnType) -> PgTypeRo
     }
     match ty {
         ColumnType::Boolean => PgTypeRoutineOids::new(1242, 1243, 2436, 2437),
+        ColumnType::Void => PgTypeRoutineOids::new(2298, 2299, 3120, 3121),
         ColumnType::Bytea => PgTypeRoutineOids::new(1244, 31, 2412, 2413),
         ColumnType::InternalChar => PgTypeRoutineOids::new(1245, 33, 2434, 2435),
         ColumnType::Name => PgTypeRoutineOids::new(34, 35, 2422, 2423),

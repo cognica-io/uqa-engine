@@ -164,7 +164,7 @@ pub use uqa_sql::{
 };
 pub use uqa_storage::{DatabaseFileFormat, SQLiteCompressionOptions, SQLiteError};
 
-use engine_notifications::{NotificationHub, PendingNotification};
+use engine_notifications::{NotificationHub, PendingListenAction, PendingNotification};
 use engine_state::{
     DurableCatalogSnapshot, DurableCatalogState, EpochCoordinator, QueryRuntime, RuntimeExtensions,
     SessionContext, StorageContext, StoredView, StoredViewKind,
@@ -471,8 +471,8 @@ struct TransactionFrame {
     row_changes: Vec<TransactionRowChange>,
     deferred_foreign_key_checks: Vec<DeferredForeignKeyCheck>,
     deferred_constraint_trigger_events: Vec<sql::DeferredConstraintTriggerEvent>,
+    pending_listen_actions: Vec<PendingListenAction>,
     pending_notifications: Vec<PendingNotification>,
-    notification_queue_len_at_begin: usize,
     constraint_modes: ConstraintModeState,
     /// Statistics written by ANALYZE are nontransactional in `PostgreSQL`. Keep the latest values outside savepoint snapshots so any rollback can restore them after transactional storage state is rolled back.
     nontransactional_column_stats: NontransactionalColumnStats,
@@ -535,6 +535,7 @@ struct TransactionSavepoint {
     row_changes: Vec<TransactionRowChange>,
     deferred_foreign_key_checks: Vec<DeferredForeignKeyCheck>,
     deferred_constraint_trigger_events: Vec<sql::DeferredConstraintTriggerEvent>,
+    pending_listen_actions: Vec<PendingListenAction>,
     pending_notifications: Vec<PendingNotification>,
     constraint_modes: ConstraintModeState,
 }
@@ -551,7 +552,7 @@ struct SessionStateSnapshot {
     sql_statement_cache: SQLStatementCache,
     /// Names of portals that existed at this transaction or savepoint boundary. Rollback removes portals created later without rewinding cursor positions or resurrecting closed portals.
     portal_names: BTreeSet<String>,
-    listened_channels: BTreeSet<String>,
+    listened_channels: Vec<String>,
     current_user: String,
     session_user: String,
 }

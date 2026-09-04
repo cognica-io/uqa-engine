@@ -107,6 +107,19 @@ pub(in crate::sql) fn build_table_function_rows_with_row(
         return Err(unknown_function_error(&lower, &call_args));
     }
     match lower.as_str() {
+        "pg_listening_channels" => {
+            if !evaluated.is_empty() {
+                return Err(SQLError::BadArity {
+                    name: lower,
+                    expected: "0".into(),
+                    actual: evaluated.len(),
+                });
+            }
+            for channel in engine.listening_channels() {
+                push_scalar(&mut out, Value::Str(channel));
+            }
+            Ok(TableFunctionRows::materialized(vec![default_col], out))
+        }
         "generate_series" => {
             for value in generate_series_values(evaluated)? {
                 push_scalar(&mut out, value);

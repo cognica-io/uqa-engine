@@ -250,6 +250,7 @@ pub(crate) fn convert_value_to_column_type(
                 "cannot cast {other:?} to boolean"
             ))),
         },
+        ColumnType::Void => Ok(Value::Void),
         ColumnType::Text | ColumnType::RefCursor => Ok(Value::Str(value_to_text(&value))),
         ColumnType::Name => uqa_sql::expr::cast_value(&value, "name"),
         ColumnType::Uuid => uqa_sql::expr::cast_value(&value, "uuid"),
@@ -546,6 +547,7 @@ pub(in crate::sql) fn column_type_name(ty: &ColumnType) -> &str {
         ColumnType::Oid => "oid",
         ColumnType::Xid => "xid",
         ColumnType::Boolean => "boolean",
+        ColumnType::Void => "void",
         ColumnType::Text => "text",
         ColumnType::RefCursor => "refcursor",
         ColumnType::Name => "name",
@@ -602,6 +604,7 @@ fn convert_temporal_value(value: Value, ty: &ColumnType) -> Result<Value, SQLErr
 pub(in crate::sql) fn value_to_text(value: &Value) -> String {
     match value {
         Value::Null => String::new(),
+        Value::Void => String::new(),
         Value::Bool(b) => b.to_string(),
         Value::Int(i) => i.to_string(),
         Value::Float(f) => f.to_string(),
@@ -655,6 +658,7 @@ pub(in crate::sql) fn json_to_core_value(json: serde_json::Value) -> Value {
 pub(in crate::sql) fn core_value_to_json(value: &Value) -> serde_json::Value {
     match value {
         Value::Null => serde_json::Value::Null,
+        Value::Void => serde_json::Value::String(String::new()),
         Value::Bool(b) => serde_json::Value::Bool(*b),
         Value::Int(i) => serde_json::Value::Number((*i).into()),
         Value::Float(f) => serde_json::Number::from_f64(*f).map_or_else(

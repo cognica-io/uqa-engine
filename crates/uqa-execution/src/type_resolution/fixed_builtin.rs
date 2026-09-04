@@ -312,6 +312,10 @@ fn builtin_binding_is_non_immutable(binding: &FunctionBinding) -> bool {
                 | "uuidv7"
                 | "pg_get_expr"
                 | "pg_get_partkeydef"
+                | "pg_backend_pid"
+                | "pg_listening_channels"
+                | "pg_notify"
+                | "pg_notification_queue_usage"
                 | "pg_get_serial_sequence"
                 | "pg_get_sequence_data"
                 | "pg_sequence_last_value"
@@ -570,6 +574,16 @@ fn overloads(name: &str) -> Option<Vec<BuiltinFunctionOverload>> {
             ),
         ],
         "pg_get_partkeydef" => vec![overload(&local, &[ColumnType::Oid], ColumnType::Text)],
+        "pg_backend_pid" => vec![overload(&local, &[], ColumnType::Integer)],
+        "pg_listening_channels" => vec![overload(&local, &[], ColumnType::Text)],
+        "pg_notify" => vec![overload(
+            &local,
+            &[ColumnType::Text, ColumnType::Text],
+            ColumnType::Void,
+        )],
+        "pg_notification_queue_usage" => {
+            vec![overload(&local, &[], ColumnType::DoublePrecision)]
+        }
         "pg_get_serial_sequence" => vec![overload(
             &local,
             &[ColumnType::Text, ColumnType::Text],
@@ -807,6 +821,10 @@ fn local_name(name: &str) -> Option<String> {
             | "to_regtype"
             | "pg_get_expr"
             | "pg_get_partkeydef"
+            | "pg_backend_pid"
+            | "pg_listening_channels"
+            | "pg_notify"
+            | "pg_notification_queue_usage"
             | "pg_get_serial_sequence"
             | "pg_get_sequence_data"
             | "pg_sequence_last_value"

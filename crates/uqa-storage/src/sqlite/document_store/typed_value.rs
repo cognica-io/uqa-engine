@@ -16,6 +16,7 @@ use super::{
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub(super) enum StoredValue {
     Null,
+    Void,
     Bool(bool),
     Int(i64),
     FloatBits(u64),
@@ -37,6 +38,7 @@ impl StoredValue {
     pub(super) fn from_value(value: Value) -> Self {
         match value {
             Value::Null => Self::Null,
+            Value::Void => Self::Void,
             Value::Bool(value) => Self::Bool(value),
             Value::Int(value) => Self::Int(value),
             Value::Float(value) => Self::FloatBits(value.to_bits()),
@@ -68,6 +70,7 @@ impl StoredValue {
     pub(super) fn into_value(self) -> Value {
         match self {
             Self::Null => Value::Null,
+            Self::Void => Value::Void,
             Self::Bool(value) => Value::Bool(value),
             Self::Int(value) => Value::Int(value),
             Self::FloatBits(value) => Value::Float(f64::from_bits(value)),

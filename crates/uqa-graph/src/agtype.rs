@@ -174,7 +174,7 @@ pub fn agtype_type_ordinal(value: &Value) -> u8 {
         Some(EntityKind::Path) => 8,
         None => match value {
             Value::Null => 0,
-            Value::Str(_) | Value::FixedChar(_) => 1,
+            Value::Void | Value::Str(_) | Value::FixedChar(_) => 1,
             Value::Decimal(_) => 2,
             Value::Int(_) => 3,
             Value::Float(_) => 4,
@@ -196,11 +196,11 @@ pub fn agtype_type_name(value: &Value) -> &'static str {
         Some(EntityKind::Path) => "path",
         None => match value {
             Value::Null => "null",
+            Value::Void | Value::Str(_) | Value::FixedChar(_) => "string",
             Value::Bool(_) => "boolean",
             Value::Int(_) => "integer",
             Value::Float(_) => "float",
             Value::Decimal(_) => "numeric",
-            Value::Str(_) | Value::FixedChar(_) => "string",
             Value::Array(_) | Value::List(_) | Value::Row(_) => "list",
             Value::Record(_) | Value::Map(_) => "map",
             Value::Json(text) | Value::JsonB(text) => json_type_name(text),
@@ -318,6 +318,7 @@ fn render_into(value: &Value, out: &mut String) {
         }
         None => match value {
             Value::Null => out.push_str("null"),
+            Value::Void => render_json_string("", out),
             Value::Bool(true) => out.push_str("true"),
             Value::Bool(false) => out.push_str("false"),
             Value::Int(n) => out.push_str(&n.to_string()),
@@ -442,7 +443,11 @@ fn sort_priority(value: &Value) -> u8 {
             Value::Record(_) | Value::Map(_) => 3,
             Value::Array(_) | Value::List(_) | Value::Row(_) => 4,
             Value::Json(text) | Value::JsonB(text) => json_sort_priority(text),
-            Value::Str(_) | Value::FixedChar(_) | Value::Bytes(_) | Value::Temporal(_) => 5,
+            Value::Void
+            | Value::Str(_)
+            | Value::FixedChar(_)
+            | Value::Bytes(_)
+            | Value::Temporal(_) => 5,
             Value::Bool(_) => 6,
             Value::Int(_) | Value::Float(_) | Value::Decimal(_) => 7,
             Value::Null => 8,

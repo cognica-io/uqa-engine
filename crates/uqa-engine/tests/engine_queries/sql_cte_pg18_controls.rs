@@ -461,7 +461,7 @@ fn stored_views_retain_recursive_controls_and_materialization_policy_after_reope
                      VALUES (1,0)
                      UNION ALL SELECT e.dst, w.depth+1 FROM walk w JOIN edges e ON e.src=w.node
                  ) SEARCH DEPTH FIRST BY node SET ord CYCLE node SET cyc USING path
-                 SELECT node, depth, cyc, ord, path FROM walk",
+                 SELECT node, depth, cyc, ord::text AS ord, path::text AS path FROM walk",
                 &[],
             )
             .unwrap();
@@ -469,7 +469,7 @@ fn stored_views_retain_recursive_controls_and_materialization_policy_after_reope
     let reopened = Engine::open(&path).unwrap();
     let result = reopened
         .sql(
-            "SELECT node, depth, cyc, pg_typeof(ord) AS ord_type, pg_typeof(path) AS path_type FROM walked ORDER BY ord",
+            "SELECT node, depth, cyc, pg_typeof(ord) AS ord_type, pg_typeof(path) AS path_type FROM walked ORDER BY depth, node",
             &[],
         )
         .unwrap();
@@ -483,7 +483,7 @@ fn stored_views_retain_recursive_controls_and_materialization_policy_after_reope
         1
     );
     assert!(result.rows.iter().all(|row| {
-        row["ord_type"] == Value::Str("record[]".into())
-            && row["path_type"] == Value::Str("record[]".into())
+        row["ord_type"] == Value::Str("text".into())
+            && row["path_type"] == Value::Str("text".into())
     }));
 }

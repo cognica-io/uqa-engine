@@ -123,6 +123,9 @@ fn is_engine_catalog_scalar(name: &str) -> bool {
         name,
         "pg_get_expr"
             | "pg_get_partkeydef"
+            | "pg_backend_pid"
+            | "pg_notify"
+            | "pg_notification_queue_usage"
             | "pg_get_serial_sequence"
             | "pg_get_sequence_data"
             | "pg_sequence_last_value"
@@ -143,6 +146,35 @@ pub(in crate::sql) fn engine_catalog_scalar_value(
 ) -> Option<Result<Value, SQLError>> {
     let lower = crate::sql::builtin_function_dispatch_name(name);
     Some(match lower.as_str() {
+        "pg_backend_pid" => match arguments {
+            [] => Ok(Value::Int(i64::from(engine.backend_process_id()))),
+            _ => Err(SQLError::BadArity {
+                name: lower,
+                expected: "0".into(),
+                actual: arguments.len(),
+            }),
+        },
+        "pg_notify" => match arguments {
+            [channel, payload] => (|| {
+                let channel = notification_text_argument(channel, "channel")?;
+                let payload = notification_text_argument(payload, "payload")?;
+                engine.notify(channel, payload)?;
+                Ok(Value::Void)
+            })(),
+            _ => Err(SQLError::BadArity {
+                name: lower,
+                expected: "2".into(),
+                actual: arguments.len(),
+            }),
+        },
+        "pg_notification_queue_usage" => match arguments {
+            [] => Ok(Value::Float(engine.notification_queue_usage())),
+            _ => Err(SQLError::BadArity {
+                name: lower,
+                expected: "0".into(),
+                actual: arguments.len(),
+            }),
+        },
         "pg_get_expr" => crate::sql::catalog::pg_get_expr_value(engine, arguments),
         "pg_get_partkeydef" => crate::sql::catalog::pg_get_partkeydef_value(engine, arguments),
         "pg_get_triggerdef" => crate::sql::catalog::pg_get_triggerdef_value(engine, arguments),
@@ -159,6 +191,17 @@ pub(in crate::sql) fn engine_catalog_scalar_value(
         "has_sequence_privilege" => engine.has_sequence_privilege_value(arguments),
         _ => return None,
     })
+}
+
+fn notification_text_argument<'a>(value: &'a Value, label: &str) -> Result<&'a str, SQLError> {
+    match value {
+        Value::Null => Ok(""),
+        Value::Str(value) => Ok(value),
+        Value::FixedChar(value) => Ok(value.trim_end_matches(' ')),
+        other => Err(SQLError::TypeMismatch(format!(
+            "pg_notify {label} must be text, got {other:?}"
+        ))),
+    }
 }
 
 pub(in crate::sql) fn score_projection_value(

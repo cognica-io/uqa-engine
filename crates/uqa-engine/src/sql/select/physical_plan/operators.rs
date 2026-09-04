@@ -428,6 +428,15 @@ pub(in crate::sql) fn build_relational_operator<'a>(
                 .map_or(statement, |keys| &keys.statement);
             let schema = projection_columns(&statement.projections[..public_projection_count]);
             let input_schema = operator.row_schema().clone();
+            for expression in statement
+                .group_by
+                .iter()
+                .chain(statement.grouping_sets.iter().flatten())
+            {
+                if let Some(ty) = evaluator.expression_type(expression, &input_schema)? {
+                    uqa_execution::require_equality_operator(&ty)?;
+                }
+            }
             let work_mem_bytes = physical_work_mem_bytes(runtime)?;
             let output_plan =
                 prepare_aggregate_output_projection(engine, statement, internal_targets);

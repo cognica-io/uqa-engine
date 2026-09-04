@@ -284,6 +284,7 @@ fn run_alter_table_action(
             if_not_exists,
         } => {
             super::validate_postgres_column_name(&column.name)?;
+            super::validate_postgres_relation_column_type(&column.name, &column.ty)?;
             let col_name = column.name.clone();
             if engine
                 .try_table_has_column(&stmt.table, &col_name)
@@ -727,6 +728,7 @@ fn run_alter_table_action(
         }
         AlterTableAction::AlterColumnType { name, ty, using } => {
             ensure_column_exists(engine, &stmt.table, &name)?;
+            super::validate_postgres_relation_column_type(&name, &ty)?;
             let mut candidate_columns = engine
                 .try_describe_table(&stmt.table)
                 .map_err(|error| ddl_storage_error("ALTER COLUMN TYPE", error))?

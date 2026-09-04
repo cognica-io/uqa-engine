@@ -11,6 +11,7 @@ use super::{
     RelationLookupMode, RelationResolution, RuleConditionNameResolver, RuleEvent,
     RuleRowTypeResolver, SQLError, Statement, StoredViewKind, Value,
 };
+use crate::engine_events::RuleConditionBinding;
 
 fn rule_condition_has_subquery(condition: &Expr) -> bool {
     condition.any_node(&|node| {
@@ -23,34 +24,29 @@ fn rule_condition_has_subquery(condition: &Expr) -> bool {
 
 fn rule_condition_row_schema(
     columns: &[(String, ColumnType)],
-    event: RuleEvent,
+    binding: &RuleConditionBinding,
 ) -> uqa_execution::RowSchema {
-    let sides: &[(&str, &str)] = match event {
-        RuleEvent::Insert => &[("new", crate::engine_events::RULE_NEW_PLAN_QUALIFIER)],
-        RuleEvent::Update => &[
-            ("old", crate::engine_events::RULE_OLD_PLAN_QUALIFIER),
-            ("new", crate::engine_events::RULE_NEW_PLAN_QUALIFIER),
-        ],
-        RuleEvent::Delete => &[("old", crate::engine_events::RULE_OLD_PLAN_QUALIFIER)],
-        RuleEvent::Select => &[],
-    };
-    let mut names = Vec::with_capacity(columns.len() * sides.len());
-    let mut identities = Vec::with_capacity(columns.len() * sides.len());
-    let mut types = Vec::with_capacity(columns.len() * sides.len());
-    let mut internal = Vec::with_capacity(columns.len() * sides.len());
-    for (side, internal_side) in sides {
-        for (name, ty) in columns {
+    let mut names = Vec::with_capacity(columns.len() * 2);
+    let mut identities = Vec::with_capacity(columns.len() * 2);
+    let mut types = Vec::with_capacity(columns.len() * 2);
+    let mut internal = Vec::with_capacity(columns.len() * 2);
+    for (side, relation) in [
+        ("old", binding.old_relation()),
+        ("new", binding.new_relation()),
+    ] {
+        let Some(relation) = relation else {
+            continue;
+        };
+        for (attribute, (name, ty)) in columns.iter().enumerate() {
+            let slot = names.len();
             names.push(name.clone());
-            identities.push(uqa_execution::ColumnIdentity::qualified(*side, name));
+            identities.push(uqa_execution::ColumnIdentity::qualified(side, name));
             types.push(Some(ty.clone()));
-            internal.push((
-                uqa_execution::ColumnIdentity::qualified(*internal_side, name),
-                Some(ty.clone()),
-            ));
+            internal.push((relation.column(attribute), slot, Some(ty.clone())));
         }
     }
     let schema = uqa_execution::RowSchema::with_identities(names, identities, types);
-    uqa_execution::RowSchema::with_typed_virtual_identities(&schema, &internal)
+    uqa_execution::RowSchema::with_physical_internal_aliases(&schema, &internal)
 }
 
 impl Engine {
@@ -174,7 +170,8 @@ impl Engine {
         columns: &[(String, ColumnType)],
         event: RuleEvent,
         stored_plan: Option<&uqa_planner::ExpressionPlan>,
-    ) -> Result<Option<uqa_planner::ExpressionPlan>, SQLError> {
+        stored_binding: Option<&RuleConditionBinding>,
+    ) -> Result<Option<(uqa_planner::ExpressionPlan, RuleConditionBinding)>, SQLError> {
         let has_subquery = rule_condition_has_subquery(condition);
         if condition.contains_aggregate()
             || condition.contains_window()
@@ -198,17 +195,32 @@ impl Engine {
             });
         }
         if has_subquery {
-            let mut plan = stored_plan.cloned().unwrap_or_else(|| {
-                uqa_planner::ExpressionPlan::lower_with(condition.clone(), &|name: &str| {
-                    self.has_registered_aggregate_function(name)
-                })
-            });
-            if stored_plan.is_none() {
+            let (mut plan, binding, reused) =
+                if let Some((plan, binding)) = stored_plan.zip(stored_binding) {
+                    let mut plan = plan.clone();
+                    let binding = binding.reallocate_plan_relations(&mut plan);
+                    (plan, binding, true)
+                } else {
+                    let plan = uqa_planner::ExpressionPlan::lower_with(
+                        condition.clone(),
+                        &|name: &str| self.has_registered_aggregate_function(name),
+                    );
+                    let column_names = columns
+                        .iter()
+                        .map(|(name, _)| name.clone())
+                        .collect::<Vec<_>>();
+                    (
+                        plan,
+                        RuleConditionBinding::for_event(&column_names, event),
+                        false,
+                    )
+                };
+            if !reused {
                 for subquery in &mut plan.subqueries {
                     self.bind_stored_query_relations(subquery, "CREATE RULE", false)?;
                 }
             }
-            let schema = rule_condition_row_schema(columns, event);
+            let schema = rule_condition_row_schema(columns, &binding);
             let ty = crate::sql::bind_catalog_expression_routines_with_outer(
                 self,
                 &mut plan,
@@ -224,7 +236,7 @@ impl Engine {
                 }
             }
             crate::sql::reject_stored_regrole_constants(self, condition, None)?;
-            return Ok(Some(plan));
+            return Ok(Some((plan, binding)));
         }
         let bound = bind_expr(condition, &mut RuleRowTypeResolver { columns, event })?;
         let lowered = uqa_planner::ExpressionPlan::lower(bound);
@@ -357,7 +369,15 @@ impl Engine {
         definition: &mut CreateRule,
         lookup_mode: RelationLookupMode,
         stored_condition_plan: Option<&uqa_planner::ExpressionPlan>,
-    ) -> Result<(RelationIdentity, Option<uqa_planner::ExpressionPlan>), SQLError> {
+        stored_condition_binding: Option<&RuleConditionBinding>,
+    ) -> Result<
+        (
+            RelationIdentity,
+            Option<uqa_planner::ExpressionPlan>,
+            Option<RuleConditionBinding>,
+        ),
+        SQLError,
+    > {
         let (relation, _) = self.resolve_event_relation_kind(&definition.table, lookup_mode)?;
         definition.table = relation.qualified_name();
         if lookup_mode == RelationLookupMode::Dynamic {
@@ -378,7 +398,7 @@ impl Engine {
         let is_view = stored_view_kind == Some(StoredViewKind::View);
         Self::validate_select_rule_contract(definition, is_view)?;
         let columns = self.rule_relation_columns(&definition.table)?;
-        let condition_plan = definition
+        let condition = definition
             .condition
             .as_mut()
             .map(|condition| {
@@ -387,10 +407,15 @@ impl Engine {
                     &columns,
                     definition.event,
                     stored_condition_plan,
+                    stored_condition_binding,
                 )
             })
             .transpose()?
             .flatten();
+        let (condition_plan, condition_binding) = condition.map_or_else(
+            || (None, None),
+            |(plan, binding)| (Some(plan), Some(binding)),
+        );
         if definition.condition.is_some()
             && definition.actions.iter().any(rule_action_has_set_operation)
         {
@@ -425,6 +450,6 @@ impl Engine {
         for action in &mut definition.actions {
             self.validate_rule_action_definition(action, &columns, definition.event, lookup_mode)?;
         }
-        Ok((relation, condition_plan))
+        Ok((relation, condition_plan, condition_binding))
     }
 }

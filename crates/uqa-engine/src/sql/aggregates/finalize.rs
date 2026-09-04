@@ -95,6 +95,7 @@ pub(in crate::sql) fn aggregate_value_with_args(
                 .iter()
                 .map(|v| match v {
                     Value::Null => Ok(None),
+                    Value::Void => Ok(Some(String::new())),
                     Value::Str(s) => Ok(Some(s.clone())),
                     Value::FixedChar(s) => Ok(Some(s.trim_end_matches(' ').to_string())),
                     Value::Int(n) => Ok(Some(n.to_string())),
@@ -268,6 +269,7 @@ pub(in crate::sql) fn percentile_fraction(args: &[ScalarExpr]) -> Result<f64, SQ
 pub(in crate::sql) fn aggregate_json_key(value: &Value) -> String {
     match value {
         Value::Null => String::new(),
+        Value::Void => String::new(),
         Value::Bool(b) => b.to_string(),
         Value::Int(i) => i.to_string(),
         Value::Float(f) => f.to_string(),

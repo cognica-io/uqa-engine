@@ -165,6 +165,7 @@ impl<H: Hasher> KeyOutput for HasherOutput<'_, H> {
 fn encode_value(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
     match value {
         Value::Null => output.push_byte(0),
+        Value::Void => output.push_byte(13),
         Value::Bool(value) => {
             encode_decimal_numeric(&DecimalValue::from_bool(*value), output)?;
         }

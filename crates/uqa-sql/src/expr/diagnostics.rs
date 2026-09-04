@@ -13,6 +13,7 @@ use crate::error::SQLError;
 pub fn value_type_name(v: &Value) -> &'static str {
     match v {
         Value::Null => "unknown",
+        Value::Void => "void",
         Value::Bool(_) => "boolean",
         Value::Int(_) => "integer",
         Value::Float(_) => "double precision",

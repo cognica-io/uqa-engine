@@ -15,6 +15,7 @@ use super::{to_f64, value_to_string, Result, SQLError, TemporalValue, Value};
 pub(super) fn typeof_value(v: &Value) -> String {
     match v {
         Value::Null => "null".into(),
+        Value::Void => "void".into(),
         Value::Bool(_) => "boolean".into(),
         Value::Int(_) => "integer".into(),
         Value::Float(_) => "double precision".into(),

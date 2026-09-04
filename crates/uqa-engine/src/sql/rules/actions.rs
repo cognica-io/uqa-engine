@@ -18,27 +18,22 @@ use uqa_sql::SQLError;
 
 use super::{RuleColumnMetadata, RuleRowImage, RuntimeRuleResolver};
 
+type BindRuleAction<'a> = dyn Fn(&mut dyn VariableResolver) -> Result<Statement, SQLError> + 'a;
+
 pub(super) fn bind_insert_values_action(
-    engine: &crate::Engine,
-    action: &Statement,
     matching_rows: &[usize],
     rows: &[RuleRowImage],
     columns: &BTreeMap<String, RuleColumnMetadata>,
-    action_columns: &std::collections::BTreeSet<String>,
+    bind_action: &BindRuleAction<'_>,
 ) -> Result<Statement, SQLError> {
     if matching_rows.is_empty() {
-        let mut bound = crate::engine_events::bind_rule_action(
-            engine,
-            action,
-            action_columns,
-            &mut RuntimeRuleResolver {
-                old: None,
-                new: None,
-                old_doc_id: None,
-                new_doc_id: None,
-                columns,
-            },
-        )?;
+        let mut bound = bind_action(&mut RuntimeRuleResolver {
+            old: None,
+            new: None,
+            old_doc_id: None,
+            new_doc_id: None,
+            columns,
+        })?;
         let Statement::Insert(insert) = &mut bound else {
             return Err(SQLError::Internal(
                 "rewrite rule INSERT VALUES action changed statement kind".into(),
@@ -52,12 +47,7 @@ pub(super) fn bind_insert_values_action(
         let row = rows.get(*row_index).ok_or_else(|| {
             SQLError::Internal("rewrite rule lost its qualified row image".into())
         })?;
-        let bound = crate::engine_events::bind_rule_action(
-            engine,
-            action,
-            action_columns,
-            &mut runtime_rule_resolver(row, columns),
-        )?;
+        let bound = bind_action(&mut runtime_rule_resolver(row, columns))?;
         let Statement::Insert(mut insert) = bound else {
             return Err(SQLError::Internal(
                 "rewrite rule INSERT VALUES action changed statement kind".into(),
@@ -138,26 +128,19 @@ pub(super) struct BoundSetOrientedAction {
 }
 
 pub(super) fn bind_set_oriented_action(
-    engine: &crate::Engine,
-    action: &Statement,
     matching_rows: &[usize],
     rows: &[RuleRowImage],
     columns: &BTreeMap<String, RuleColumnMetadata>,
-    action_columns: &std::collections::BTreeSet<String>,
+    bind_action: &BindRuleAction<'_>,
 ) -> Result<BoundSetOrientedAction, SQLError> {
     let source = rule_row_source(matching_rows, rows, columns)?;
     let source_index = Expr::InternalColumn(source.source_index);
-    let mut bound = crate::engine_events::bind_rule_action(
-        engine,
-        action,
-        action_columns,
-        &mut RuleSourceResolver {
-            old_columns: &source.old_columns,
-            new_columns: &source.new_columns,
-            old_row: source.old_row,
-            new_row: source.new_row,
-        },
-    )?;
+    let mut bound = bind_action(&mut RuleSourceResolver {
+        old_columns: &source.old_columns,
+        new_columns: &source.new_columns,
+        old_row: source.old_row,
+        new_row: source.new_row,
+    })?;
     attach_rule_row_source(&mut bound, source.clause, source.relation)?;
     Ok(BoundSetOrientedAction {
         statement: bound,

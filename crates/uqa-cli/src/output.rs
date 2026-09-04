@@ -270,6 +270,7 @@ pub(super) fn history_path() -> Option<PathBuf> {
 pub(super) fn value_to_display(v: Option<&Value>) -> String {
     match v {
         Some(Value::Null) | None => "NULL".to_string(),
+        Some(Value::Void) => String::new(),
         Some(Value::Bool(b)) => b.to_string(),
         Some(Value::Int(n)) => n.to_string(),
         Some(Value::Float(f)) => uqa_graph::agtype::format_float_pg(*f),
@@ -331,6 +332,7 @@ pub(super) fn pg_array_display(items: &[Value]) -> String {
 pub(super) fn json_value_display(v: &Value) -> String {
     match v {
         Value::Null => "null".to_string(),
+        Value::Void => serde_json::Value::String(String::new()).to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Int(n) => n.to_string(),
         Value::Float(f) => uqa_graph::agtype::format_float_pg(*f),

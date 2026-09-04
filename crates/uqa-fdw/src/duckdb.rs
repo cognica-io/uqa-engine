@@ -305,6 +305,11 @@ fn uqa_value_to_duck_value(value: &Value) -> Result<::duckdb::types::Value, FDWE
     use ::duckdb::types::{TimeUnit, Value as DuckValue};
     Ok(match value {
         Value::Null => DuckValue::Null,
+        Value::Void => {
+            return Err(FDWError::UnsupportedValue(
+                "void values cannot be bound to DuckDB parameters".into(),
+            ));
+        }
         Value::Bool(v) => DuckValue::Boolean(*v),
         Value::Int(v) => DuckValue::BigInt(*v),
         Value::Float(v) => DuckValue::Double(*v),

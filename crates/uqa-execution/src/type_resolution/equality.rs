@@ -10,13 +10,16 @@ use uqa_sql::ast::ColumnType;
 use uqa_sql::SQLError;
 
 use super::{
-    canonical_column_type_name, common::base_type, common_type, routine_type_accepts_implicit_cast,
+    canonical_column_type_name, common::base_type, common_type, require_equality_operator,
+    routine_type_accepts_implicit_cast,
 };
 
 pub fn equality_operand_type(
     left: &ColumnType,
     right: &ColumnType,
 ) -> Result<ColumnType, SQLError> {
+    require_equality_operator(left).map_err(|_| undefined_equality_operator(left, right))?;
+    require_equality_operator(right).map_err(|_| undefined_equality_operator(left, right))?;
     if matches!(left, ColumnType::Json) || matches!(right, ColumnType::Json) {
         return Err(undefined_equality_operator(left, right));
     }

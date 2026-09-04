@@ -360,6 +360,7 @@ pub(super) fn compile_pg_type_name(
         "bigint" | "int8" | "bigserial" | "serial8" => Ok(ColumnType::BigInteger),
         "oid" => Ok(ColumnType::Oid),
         "xid" => Ok(ColumnType::Xid),
+        "void" => Ok(ColumnType::Void),
         "text" => Ok(ColumnType::Text),
         "name" => Ok(ColumnType::Name),
         "uuid" => Ok(ColumnType::Uuid),
@@ -463,6 +464,8 @@ pub(super) fn compile_pg_type_name(
         "aclitem" => Ok(ColumnType::AclItem),
         "int2vector" => Ok(ColumnType::Int2Vector),
         "oidvector" => Ok(ColumnType::OidVector),
+        "anyarray" => Ok(ColumnType::AnyArray),
+        "record" => Ok(ColumnType::Record),
         "vector" => {
             // VECTOR(N): the dimension is the only typmod argument.
             let [arg] = type_name.typmods.as_slice() else {
@@ -509,6 +512,12 @@ pub(super) fn compile_pg_type_name(
             "column `{column_name}` type `{other}` is not supported"
         ))),
     }?;
+    if matches!(base, ColumnType::Void) && !type_name.array_bounds.is_empty() {
+        return Err(SQLError::Routine {
+            sqlstate: "42704".into(),
+            message: "type \"void[]\" does not exist".into(),
+        });
+    }
     Ok(type_name
         .array_bounds
         .iter()

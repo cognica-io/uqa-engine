@@ -193,6 +193,11 @@ impl Engine {
         let query_schema = crate::sql::bind_catalog_query_routines(self, &mut plan, params)?;
         crate::sql::reject_stored_query_regrole_constants(self, &mut plan)?;
         let output_columns = create_view_output_columns(&query_schema, column_names)?;
+        for (position, column) in output_columns.iter().enumerate() {
+            if let Some(ty) = query_schema.column_type(position) {
+                crate::sql::validate_postgres_relation_column_type(column, ty)?;
+            }
+        }
         let replacement_schema = named_view_schema(&query_schema, &output_columns)?;
         let existing_view =
             self.replacement_view(&name, &relation, or_replace, &replacement_schema)?;

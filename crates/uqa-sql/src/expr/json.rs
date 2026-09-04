@@ -138,6 +138,7 @@ fn validate_jsonb_numbers(value: &serde_json::Value) -> Result<()> {
 pub fn value_to_json_text(value: &Value) -> String {
     match value {
         Value::Null => "null".to_string(),
+        Value::Void => "\"\"".to_string(),
         Value::Bool(value) => value.to_string(),
         Value::Int(value) => value.to_string(),
         Value::Float(value) => match serde_json::Number::from_f64(*value) {
@@ -243,6 +244,7 @@ pub(super) fn json_build_object_value(args: &[Value], jsonb: bool) -> Result<Val
 pub(super) fn value_to_json(v: &Value) -> serde_json::Value {
     match v {
         Value::Null => serde_json::Value::Null,
+        Value::Void => serde_json::Value::String(String::new()),
         Value::Bool(b) => serde_json::Value::Bool(*b),
         Value::Int(i) => serde_json::Value::Number((*i).into()),
         Value::Float(f) => serde_json::Number::from_f64(*f).map_or_else(

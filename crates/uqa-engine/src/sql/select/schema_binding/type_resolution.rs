@@ -7,10 +7,32 @@
 //! Function and scalar-subquery type resolution for schema binding.
 
 use uqa_execution::{FunctionTypeResolver, ResolvedFunctionOverload, RowSchema};
-use uqa_sql::ast::ColumnType;
+use uqa_sql::ast::{ColumnType, SetOpKind};
 use uqa_sql::{SQLError, SQLParam};
 
 use crate::engine_user_functions::RoutineResolution;
+
+use super::scope::merge_types;
+
+pub(super) fn set_operation_output_schema(
+    left: &RowSchema,
+    right: &RowSchema,
+    kind: SetOpKind,
+    all: bool,
+) -> Result<RowSchema, SQLError> {
+    let types = left
+        .column_types()
+        .iter()
+        .zip(right.column_types())
+        .map(|(left, right)| merge_types(left.as_ref(), right.as_ref()))
+        .collect::<Result<Vec<_>, _>>()?;
+    if !matches!((kind, all), (SetOpKind::Union, true)) {
+        for ty in types.iter().flatten() {
+            uqa_execution::require_equality_operator(ty)?;
+        }
+    }
+    Ok(RowSchema::with_types(left.columns().to_vec(), types))
+}
 
 pub(super) struct QueryFunctionTypeResolver<'a> {
     pub(super) routines: &'a dyn RoutineResolution,

@@ -12,6 +12,7 @@ pub(crate) fn sql_column_type_to_fdw(
 ) -> uqa_fdw::ColumnType {
     match column_type {
         uqa_sql::ast::ColumnType::Boolean => uqa_fdw::ColumnType::Bool,
+        uqa_sql::ast::ColumnType::Void => uqa_fdw::ColumnType::Void,
         uqa_sql::ast::ColumnType::SmallInteger => uqa_fdw::ColumnType::SmallInteger,
         uqa_sql::ast::ColumnType::Integer => uqa_fdw::ColumnType::Integer,
         uqa_sql::ast::ColumnType::BigInteger => uqa_fdw::ColumnType::BigInteger,
@@ -100,6 +101,7 @@ pub(crate) fn fdw_column_type_to_sql(
         uqa_fdw::ColumnType::Bpchar => uqa_sql::ast::ColumnType::Bpchar,
         uqa_fdw::ColumnType::Character(length) => uqa_sql::ast::ColumnType::Character(*length),
         uqa_fdw::ColumnType::Bool => uqa_sql::ast::ColumnType::Boolean,
+        uqa_fdw::ColumnType::Void => uqa_sql::ast::ColumnType::Void,
         uqa_fdw::ColumnType::Bytes => uqa_sql::ast::ColumnType::Bytea,
         uqa_fdw::ColumnType::InternalChar => uqa_sql::ast::ColumnType::InternalChar,
         uqa_fdw::ColumnType::Regproc => uqa_sql::ast::ColumnType::Regproc,

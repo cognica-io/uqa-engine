@@ -66,6 +66,8 @@ pub(super) fn function_volatility_with_binding(
         lower.as_str(),
         "random"
             | "setseed"
+            | "pg_notify"
+            | "pg_notification_queue_usage"
             | "array_sample"
             | "nextval"
             | "currval"
@@ -128,6 +130,8 @@ pub(super) fn function_volatility_with_binding(
             lower.as_str(),
             "current_schema"
                 | "current_schemas"
+                | "pg_backend_pid"
+                | "pg_listening_channels"
                 | "to_regclass"
                 | "to_regnamespace"
                 | "to_regproc"

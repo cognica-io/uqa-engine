@@ -19,6 +19,43 @@ fn array_literal_rejects_postgresql_unrepresentable_upper_bound() {
 use uqa_core::DecimalValue;
 
 #[test]
+fn void_casts_are_limited_to_postgresql_string_categories() {
+    assert_eq!(
+        cast_value_from(&Value::Str("ignored".into()), "void", Some("text")).unwrap(),
+        Value::Void
+    );
+    assert_eq!(
+        cast_value_from(&Value::Void, "character varying", Some("void")).unwrap(),
+        Value::Str(String::new())
+    );
+    assert_eq!(
+        cast_value_from(&Value::Null, "void", Some("text")).unwrap(),
+        Value::Null
+    );
+    for (value, target, source, message) in [
+        (
+            Value::Int(1),
+            "void",
+            "integer",
+            "cannot cast type integer to void",
+        ),
+        (
+            Value::Void,
+            "integer",
+            "void",
+            "cannot cast type void to integer",
+        ),
+    ] {
+        let error = cast_value_from(&value, target, Some(source)).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42846"));
+        assert_eq!(error.to_string(), message);
+    }
+    let error = cast_value(&Value::Null, "void[]").unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42704"));
+    assert_eq!(error.to_string(), "type \"void[]\" does not exist");
+}
+
+#[test]
 fn temporal_cross_casts_convert_the_carrier_kind() {
     let date = Value::Temporal(TemporalValue::parse_date("2020-01-02").unwrap());
     assert_eq!(

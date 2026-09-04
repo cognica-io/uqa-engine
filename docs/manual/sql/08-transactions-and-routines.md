@@ -40,21 +40,29 @@ LISTEN channel;
 NOTIFY channel [, 'payload'];
 UNLISTEN channel;
 UNLISTEN *;
+SELECT pg_notify(channel, payload);
+SELECT pg_backend_pid();
+SELECT * FROM pg_listening_channels();
+SELECT pg_notification_queue_usage();
 ```
 
 ### Arguments
 
-The channel is an SQL identifier. The optional `NOTIFY` payload is a string literal, defaults to the empty string, and must be shorter than 8,000 UTF-8 bytes.
+The command form takes an SQL identifier as its channel. `pg_notify` accepts text expressions; a NULL payload becomes the empty string, while a NULL or empty channel is invalid. Channel names must be shorter than 64 UTF-8 bytes, and payloads must be shorter than 8,000 UTF-8 bytes.
 
 ### Result and effects
 
-These commands return no rows and are legal in read-only transactions. `LISTEN` and `UNLISTEN` change the current session's subscriptions only when the outer transaction commits, while rollback restores the prior subscription set. `NOTIFY` queues delivery until that same boundary; rollback or savepoint rollback removes the affected pending messages, and identical channel-and-payload pairs in one transaction collapse to the first occurrence while distinct payloads retain order. A transaction that both subscribes and sends uses its final subscription set when its messages commit. That final set also filters messages received while the listener transaction was open, without retracting messages that were already queued before the transaction began.
+`LISTEN`, `UNLISTEN`, and `NOTIFY` return no rows and are legal in read-only transactions. `LISTEN` and `UNLISTEN` change the current session's subscriptions only when the outer transaction commits, while rollback restores the prior subscription set. `NOTIFY` queues delivery until that same boundary; rollback or savepoint rollback removes the affected pending messages, and identical channel-and-payload pairs in one transaction collapse to the first occurrence while distinct payloads retain order. A transaction that both subscribes and sends uses its final subscription set when its messages commit. That final set also filters messages received while the listener transaction was open, without retracting messages that were already queued before the transaction began.
 
-Committed messages reach subscribed `Engine::new_session()` sessions and independently opened engines for the same durable database inside one process. `Engine::take_sql_notifications()` drains `SQLNotification` values containing `sender_session_id`, `channel`, and `payload`; messages received while that session has an open transaction remain queued until it ends. `DISCARD ALL` removes every subscription.
+Committed messages append once to a database-scoped in-process queue and reach subscribed `Engine::new_session()` sessions and independently opened engines for the same durable database through per-session cursors. `Engine::take_sql_notifications()` drains `SQLNotification` values containing `process_id`, `channel`, and `payload`; messages received while that session has an open transaction remain queued until it ends. `DISCARD ALL` removes every subscription.
+
+`pg_backend_pid()` returns the positive identifier used in `SQLNotification::process_id`. `pg_listening_channels()` returns the current committed subscriptions. `pg_notify` follows the same transactional queue path as `NOTIFY` and returns PostgreSQL's non-null, zero-width `void` pseudo-value; `void` renders as an empty field but has no equality or ordering operator and cannot be a stored relation column. `pg_notification_queue_usage()` returns the fraction of the PostgreSQL-sized 8 GiB page queue retained by listener cursors.
+
+An open transaction in a subscribed session retains its queue cursor so messages remain available under the transaction's final subscription set. Queue entries are reclaimed after every live listener advances past them; a commit that would overrun the bounded queue fails atomically, and a sender receives PostgreSQL-compatible throttled warnings once an old listener transaction keeps at least half of the queue occupied.
 
 ### Errors
 
-A payload of 8,000 bytes or more reports SQLSTATE `22023` as `payload string too long`. Cross-process delivery, `pg_notify`, `pg_listening_channels`, `pg_notification_queue_usage`, queue-capacity behavior, and live server forwarding beyond the existing wire message codec remain PostgreSQL compatibility bugs.
+A payload of 8,000 bytes or more reports SQLSTATE `22023` as `payload string too long`; a channel of 64 bytes or more reports `22023` as `channel name too long`, and an empty channel reports `22023` as `channel name cannot be empty`. Cross-process delivery and live server forwarding beyond the existing wire message codec remain PostgreSQL compatibility bugs.
 
 ### Example
 

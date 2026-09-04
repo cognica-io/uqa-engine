@@ -215,6 +215,7 @@ fn has_builtin_table_function_overloads(name: &str) -> bool {
     matches!(
         name,
         "generate_series"
+            | "pg_listening_channels"
             | "unnest"
             | "regexp_split_to_table"
             | "string_to_table"
@@ -248,6 +249,7 @@ fn builtin_table_function_overloads(
         return_type,
     };
     match name {
+        "pg_listening_channels" => vec![overload(Vec::new(), 0, ColumnType::Text)],
         "generate_series" => vec![
             overload(
                 vec![
@@ -305,6 +307,7 @@ pub(in crate::sql) fn is_builtin_table_function(name: &str) -> bool {
     matches!(
         name,
         "generate_series"
+            | "pg_listening_channels"
             | "unnest"
             | "regexp_split_to_table"
             | "string_to_table"
@@ -577,6 +580,7 @@ pub(in crate::sql) fn table_function_empty_schema(
                 vec!["left_doc_id".into(), "right_doc_id".into(), "_score".into()]
             }
             "generate_series"
+            | "pg_listening_channels"
             | "regexp_split_to_table"
             | "string_to_table"
             | "json_array_elements"
@@ -712,6 +716,7 @@ pub(in crate::sql) fn table_function_column_types(
                 .flatten()
         };
         align(match normalized.as_str() {
+            "pg_listening_channels" => vec![Some(ColumnType::Text)],
             "generate_series" => vec![argument_type(0)],
             "unnest" => args
                 .iter()

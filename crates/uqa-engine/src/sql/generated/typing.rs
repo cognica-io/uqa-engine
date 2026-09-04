@@ -18,6 +18,7 @@ pub(super) enum GenerationType {
     Null,
     UnknownLiteral(String),
     Boolean,
+    Void,
     SmallInteger,
     Integer,
     BigInteger,
@@ -263,6 +264,7 @@ pub(super) fn column_generation_type(ty: &ColumnType) -> GenerationType {
         ColumnType::Oid => GenerationType::Oid,
         ColumnType::Xid => GenerationType::Xid,
         ColumnType::Boolean => GenerationType::Boolean,
+        ColumnType::Void => GenerationType::Void,
         ColumnType::Text
         | ColumnType::RefCursor
         | ColumnType::Name
@@ -316,6 +318,7 @@ pub(super) fn generation_type_name(ty: &GenerationType) -> String {
     match ty {
         GenerationType::Null | GenerationType::UnknownLiteral(_) => "unknown".into(),
         GenerationType::Boolean => "boolean".into(),
+        GenerationType::Void => "void".into(),
         GenerationType::SmallInteger => "smallint".into(),
         GenerationType::Integer => "integer".into(),
         GenerationType::BigInteger => "bigint".into(),

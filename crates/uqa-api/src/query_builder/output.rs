@@ -127,7 +127,8 @@ pub(super) fn infer_arrow_type(column_index: usize, column: &str, result: &SQLRe
             Value::Bool(_) => DataType::Boolean,
             Value::Int(_) => DataType::Int64,
             Value::Float(_) => DataType::Float64,
-            Value::Decimal(_)
+            Value::Void
+            | Value::Decimal(_)
             | Value::Str(_)
             | Value::FixedChar(_)
             | Value::Json(_)
@@ -280,6 +281,7 @@ fn i64_to_f64_exact(value: i64) -> Option<f64> {
 fn value_kind(value: &Value) -> &'static str {
     match value {
         Value::Null => "null",
+        Value::Void => "void",
         Value::Bool(_) => "boolean",
         Value::Int(_) => "integer",
         Value::Float(_) => "float",
@@ -300,6 +302,7 @@ fn value_kind(value: &Value) -> &'static str {
 fn value_to_arrow_string(value: &Value) -> Option<String> {
     match value {
         Value::Null => None,
+        Value::Void => Some(String::new()),
         Value::Bool(v) => Some(v.to_string()),
         Value::Int(v) => Some(v.to_string()),
         Value::Float(v) => Some(v.to_string()),

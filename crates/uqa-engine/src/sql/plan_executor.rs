@@ -392,6 +392,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
     ) -> Result<SQLResult, SQLError> {
         for column in &statement.columns {
             super::validate_postgres_column_name(&column.name)?;
+            super::validate_postgres_relation_column_type(&column.name, &column.ty)?;
         }
         let name = self
             .engine
@@ -615,11 +616,11 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 Ok(SQLResult::empty())
             }
             CommandPlan::Listen { channel } => {
-                self.engine.listen(channel);
+                self.engine.listen(channel)?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::Unlisten { channel } => {
-                self.engine.unlisten(channel.as_deref());
+                self.engine.unlisten(channel.as_deref())?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::SetVariable { name, value } => {

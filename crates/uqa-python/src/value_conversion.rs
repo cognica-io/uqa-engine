@@ -55,6 +55,7 @@ pub(super) fn value_from_py(value: &Bound<'_, PyAny>) -> PyResult<Value> {
 pub(super) fn value_to_py(py: Python<'_>, value: &Value) -> PyResult<Py<PyAny>> {
     match value {
         Value::Null => Ok(py.None()),
+        Value::Void => String::new().into_py_any(py),
         Value::Bool(value) => value.into_py_any(py),
         Value::Int(value) => value.into_py_any(py),
         Value::Float(value) => value.into_py_any(py),

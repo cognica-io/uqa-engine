@@ -429,6 +429,7 @@ impl<'a> BinaryReader<'a> {
                     .map(Value::Array)
                     .ok_or_else(|| spill_error("invalid array dimensions in spill file"))
             }
+            16 => Ok(Value::Void),
             tag => Err(spill_error(format!("invalid spill value tag {tag}"))),
         }
     }

@@ -48,7 +48,7 @@ use cte_controls::{extend_recursive_cte_binding_schema, hide_recursive_generated
 use projection::{projection_star_columns, rename_schema};
 use scope::merge_types;
 use sources::{table_function_member_source, JoinSchemaBinding};
-use type_resolution::QueryFunctionTypeResolver;
+use type_resolution::{set_operation_output_schema, QueryFunctionTypeResolver};
 
 use super::{
     cte_references_own_name, expr_contains_subquery, ordered_plan_ctes, projection_columns,
@@ -292,6 +292,8 @@ impl SchemaScope {
                 self.bind_query_block(routines, block, params, outer, preserve_top_level_unknown)
             }
             RelationalPlan::SetOp {
+                kind,
+                all,
                 left,
                 right,
                 order_by,
@@ -309,13 +311,7 @@ impl SchemaScope {
                         right.len()
                     )));
                 }
-                let types = left
-                    .column_types()
-                    .iter()
-                    .zip(right.column_types())
-                    .map(|(left, right)| merge_types(left.as_ref(), right.as_ref()))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let output = RowSchema::with_types(left.columns().to_vec(), types);
+                let output = set_operation_output_schema(&left, &right, *kind, *all)?;
                 if self.validate_references {
                     self.validate_set_operation_clauses(
                         routines,
@@ -424,6 +420,8 @@ impl SchemaScope {
             let output = self.bind_query(routines, plan, params, subquery_outer)?;
             return Ok(output.column_type(0).cloned());
         }
+        let schema = self.with_stored_outer_internal_aliases(schema);
+        let schema = &schema;
         let resolver = self.query_function_type_resolver(
             routines, expression, schema, subqueries, params, outer,
         )?;

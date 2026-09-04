@@ -166,7 +166,7 @@ impl Engine {
         if let Some(entries) = next_rules.get_mut(&relation) {
             for rule in entries.values_mut() {
                 if let Some(condition) = rule.definition.condition.as_mut() {
-                    if let Some(condition_plan) = rule.condition_plan.as_mut() {
+                    if let Some(condition_binding) = rule.condition_binding.as_mut() {
                         *condition = super::bind_rule_expr_scoped(
                             condition,
                             &mut RuleColumnResolver {
@@ -181,7 +181,7 @@ impl Engine {
                                 "rename rule condition column: {error}"
                             ))
                         })?;
-                        super::rename_rule_condition_plan_column(condition_plan, from, to);
+                        super::rename_rule_condition_binding_column(condition_binding, from, to);
                     } else {
                         crate::engine_table_storage::rename_schema_expr_column(
                             condition, from, to,
@@ -353,7 +353,7 @@ fn dependent_rules_for_column(
     let mut dependent = Vec::new();
     if let Some(entries) = rules.get(relation) {
         for rule in entries.values() {
-            let references_event_column = rule.condition_plan.as_ref().map_or_else(
+            let references_event_column = rule.bound_condition_plan().map_or_else(
                 || {
                     rule.definition.condition.as_ref().is_some_and(|condition| {
                         crate::engine_table_storage::schema_expr_references_column(
@@ -361,7 +361,9 @@ fn dependent_rules_for_column(
                         )
                     })
                 },
-                |plan| super::rule_condition_plan_row_columns(plan).contains(column),
+                |(plan, binding)| {
+                    super::rule_condition_plan_row_columns(plan, binding).contains(column)
+                },
             ) || rule
                 .definition
                 .actions
