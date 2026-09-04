@@ -50,19 +50,33 @@ pub(super) fn resolve_alter_routine_identity_types(
     engine: &Engine,
     stmt: &AlterRoutineStmt,
 ) -> Result<Option<Vec<String>>, SQLError> {
-    let Some(types) = stmt.arg_types.as_ref() else {
-        if !stmt.arg_type_references.is_empty() {
-            return Err(SQLError::Internal(
-                "ALTER routine omitted its identity types but retained type references".into(),
-            ));
+    resolve_routine_identity_types(
+        engine,
+        stmt.arg_types.as_deref(),
+        &stmt.arg_type_references,
+        "ALTER routine",
+    )
+}
+
+pub(super) fn resolve_routine_identity_types(
+    engine: &Engine,
+    types: Option<&[String]>,
+    references: &[Option<RoutineColumnTypeReference>],
+    context: &str,
+) -> Result<Option<Vec<String>>, SQLError> {
+    let Some(types) = types else {
+        if !references.is_empty() {
+            return Err(SQLError::Internal(format!(
+                "{context} omitted its identity types but retained type references"
+            )));
         }
         return Ok(None);
     };
-    if !stmt.arg_type_references.is_empty() && stmt.arg_type_references.len() != types.len() {
+    if !references.is_empty() && references.len() != types.len() {
         return Err(SQLError::Internal(format!(
-            "ALTER routine has {} identity types but {} type references",
+            "{context} has {} identity types but {} type references",
             types.len(),
-            stmt.arg_type_references.len()
+            references.len()
         )));
     }
     types
@@ -73,7 +87,7 @@ pub(super) fn resolve_alter_routine_identity_types(
                 engine,
                 type_name,
                 ROUTINE_PARAMETER_PSEUDO_TYPES,
-                stmt.arg_type_references.get(index).and_then(Option::as_ref),
+                references.get(index).and_then(Option::as_ref),
             )
             .map(|resolved| canonical_routine_type_name(&resolved))
         })

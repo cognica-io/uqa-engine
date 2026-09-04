@@ -527,7 +527,7 @@ fn infer_function(
                 .ok_or_else(|| SQLError::UnknownFunction(binding.name.clone()));
         }
         let function = engine
-            .lookup_bound_sql_functions(&binding.name)
+            .lookup_bound_sql_functions_by_binding(binding)
             .and_then(|overloads| {
                 overloads.into_iter().find(|function| {
                     routine_signature_types(&function.def) == binding.argument_types
@@ -846,7 +846,7 @@ pub(super) fn validate_bound_function(
     argument_types: &[GenerationType],
 ) -> Result<FunctionBinding, SQLError> {
     let function = engine
-        .lookup_bound_sql_functions(&binding.name)
+        .lookup_bound_sql_functions_by_binding(binding)
         .and_then(|overloads| {
             overloads
                 .into_iter()

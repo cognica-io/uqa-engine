@@ -13,6 +13,7 @@ use uqa_sql::ast::RelationPersistence;
 use uqa_sql::SQLError;
 
 use crate::engine_capabilities::RelationLookupMode;
+use crate::engine_open::CatalogRestoreMode;
 use crate::{
     CatalogFacade, Engine, RelationIdentity, StorageBackendError, StorageBackendResult,
     RULES_METADATA_KEY, TRIGGERS_METADATA_KEY,
@@ -87,6 +88,7 @@ impl Engine {
     pub(crate) fn restore_rules_from_metadata(
         &self,
         catalog: &dyn CatalogFacade,
+        mode: CatalogRestoreMode,
     ) -> StorageBackendResult<()> {
         let stored = match catalog.get_metadata(RULES_METADATA_KEY)? {
             Some(json) => serde_json::from_str::<StoredRuleCatalog>(&json)?,
@@ -99,6 +101,11 @@ impl Engine {
             )));
         }
         let migrating_catalog = stored.format_version < RULE_CATALOG_FORMAT_VERSION;
+        if migrating_catalog && !mode.allows_migration() {
+            return Err(StorageBackendError::Other(
+                "rule catalog requires an initial-open format migration".into(),
+            ));
+        }
         let temporary_rules = self
             .durable
             .rules
@@ -198,6 +205,7 @@ impl Engine {
     pub(crate) fn restore_triggers_from_metadata(
         &self,
         catalog: &dyn CatalogFacade,
+        mode: CatalogRestoreMode,
     ) -> StorageBackendResult<()> {
         let stored = match catalog.get_metadata(TRIGGERS_METADATA_KEY)? {
             Some(json) => serde_json::from_str::<StoredTriggerCatalog>(&json)?,
@@ -214,6 +222,7 @@ impl Engine {
             .map(|(relation, entries)| (relation.clone(), entries.clone()))
             .collect::<BTreeMap<_, _>>();
         let mut triggers = temporary_triggers;
+        let mut migrated = false;
         for mut trigger in stored.triggers {
             if trigger.definition.constraint && trigger.constraint_name.is_none() {
                 trigger.constraint_name = Some(trigger.definition.name.clone());
@@ -226,8 +235,49 @@ impl Engine {
                 .map_err(|error| {
                     StorageBackendError::Other(format!("restore trigger catalog: {error}"))
                 })?;
+            let function_object_id = self
+                .resolve_trigger_function(&trigger.definition.function, RelationLookupMode::Bound)
+                .map_err(|error| {
+                    StorageBackendError::Other(format!(
+                        "restore trigger function identity: {error}"
+                    ))
+                })?
+                .def
+                .object_id
+                .ok_or_else(|| {
+                    StorageBackendError::Other(format!(
+                        "restore trigger catalog: function `{}` has no object identity",
+                        trigger.definition.function
+                    ))
+                })?;
+            if trigger
+                .function_object_id
+                .is_some_and(|stored| stored != function_object_id)
+            {
+                return Err(StorageBackendError::Other(format!(
+                    "restore trigger catalog: function identity for trigger `{}` does not match `{}`",
+                    trigger.definition.name, trigger.definition.function
+                )));
+            }
+            if trigger.function_object_id.is_none() {
+                if !mode.allows_migration() {
+                    return Err(StorageBackendError::Other(format!(
+                        "trigger `{}` requires an initial-open function-identity migration",
+                        trigger.definition.name
+                    )));
+                }
+                trigger.function_object_id = Some(function_object_id);
+                migrated = true;
+            }
             if trigger.object_id.is_none() {
+                if !mode.allows_migration() {
+                    return Err(StorageBackendError::Other(format!(
+                        "trigger `{}` requires an initial-open object-identity migration",
+                        trigger.definition.name
+                    )));
+                }
                 trigger.object_id = Some(legacy_trigger_object_id(&trigger.definition));
+                migrated = true;
             }
             let name = trigger.definition.name.clone();
             if triggers
@@ -242,6 +292,11 @@ impl Engine {
             }
         }
         *self.durable.triggers.write() = triggers;
+        if migrated {
+            let triggers = self.durable.triggers.read();
+            self.persist_trigger_catalog_snapshot(&triggers)
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+        }
         Ok(())
     }
 }

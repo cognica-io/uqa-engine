@@ -640,7 +640,9 @@ impl Statement {
                     } = &mut conflict.action
                     {
                         changed |= upgrade_assignments(assignments);
-                        changed |= upgrade_optional(r#where);
+                        changed |= r#where
+                            .as_deref_mut()
+                            .is_some_and(Expr::upgrade_legacy_serialized_dispatches);
                     }
                 }
                 changed | upgrade_projections(&mut insert.returning)
@@ -737,6 +739,7 @@ impl Statement {
             | Self::DropFunction(_)
             | Self::AlterRoutine(_)
             | Self::AlterRoutineOwner(_)
+            | Self::RenameRoutine(_)
             | Self::GrantRoutine(_)
             | Self::GrantTable(_)
             | Self::GrantSequence(_)

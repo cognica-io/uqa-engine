@@ -19,21 +19,23 @@ impl Engine {
     pub(super) fn restore_engine_registries_from_catalog(
         &self,
         catalog: &dyn CatalogFacade,
+        mode: super::CatalogRestoreMode,
     ) -> StorageBackendResult<()> {
         self.restore_sequences_from_catalog(catalog)?;
         self.restore_roles_from_metadata(catalog)?;
         self.restore_database_security_from_metadata(catalog)?;
-        self.restore_sql_functions_from_metadata(catalog)?;
+        self.restore_sql_functions_from_metadata(catalog, mode)?;
+        self.restore_generated_routine_identities(mode)?;
         self.restore_analyzers_from_catalog(catalog)?;
         self.restore_foreign_registries_from_catalog(catalog)?;
         // Stored view plans are rebound only after every row-producing
         // relation kind is present. Legacy unqualified sources may refer to a
         // foreign table and must not be classified as missing during reopen.
-        self.restore_views_from_catalog(catalog)?;
+        self.restore_views_from_catalog(catalog, mode)?;
         // Triggers and rules may target views, so both event registries must be
         // restored only after the complete relation namespace is available.
-        self.restore_triggers_from_metadata(catalog)?;
-        self.restore_rules_from_metadata(catalog)?;
+        self.restore_triggers_from_metadata(catalog, mode)?;
+        self.restore_rules_from_metadata(catalog, mode)?;
         self.restore_catalog_indexes_from_catalog(catalog)?;
         self.restore_path_indexes_from_catalog(catalog)?;
         Ok(())

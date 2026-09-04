@@ -168,7 +168,7 @@ fn sql_routine_volatility(
 ) -> Option<FunctionVolatility> {
     let overloads = match binding {
         Some(binding) if binding.builtin => None,
-        Some(binding) => engine.lookup_bound_sql_functions(&binding.name),
+        Some(binding) => engine.lookup_bound_sql_functions_by_binding(binding),
         None => engine
             .lookup_visible_sql_functions_for_analysis(identity)
             .ok()

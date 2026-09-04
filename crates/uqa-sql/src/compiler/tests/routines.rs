@@ -272,6 +272,36 @@ fn alter_function_preserves_an_omitted_signature_for_unique_resolution() {
 }
 
 #[test]
+fn routine_rename_preserves_kind_identity_and_new_identifier() {
+    let Statement::RenameRoutine(function) =
+        first("ALTER FUNCTION app.f(integer) RENAME TO renamed")
+    else {
+        panic!("expected function rename");
+    };
+    assert_eq!(function.kind, AlterRoutineKind::Function);
+    assert_eq!(function.name, "app.f");
+    assert_eq!(function.arg_types.as_deref().unwrap(), ["int4"]);
+    assert_eq!(function.new_name, "renamed");
+
+    let Statement::RenameRoutine(procedure) =
+        first("ALTER PROCEDURE app.p RENAME TO \"Case.Name\"")
+    else {
+        panic!("expected procedure rename");
+    };
+    assert_eq!(procedure.kind, AlterRoutineKind::Procedure);
+    assert_eq!(procedure.arg_types, None);
+    assert_eq!(procedure.new_name, "\"Case.Name\"");
+
+    let Statement::RenameRoutine(routine) =
+        first("ALTER ROUTINE app.f(source.value%TYPE) RENAME TO g")
+    else {
+        panic!("expected routine rename");
+    };
+    assert_eq!(routine.kind, AlterRoutineKind::Routine);
+    assert_eq!(routine.arg_type_references.len(), 1);
+}
+
+#[test]
 fn pg18_role_membership_statements_preserve_options_and_legacy_entry_points() {
     let Statement::GrantRole(grant) = first(
         "GRANT parent_role, audit_role TO member_role, CURRENT_USER WITH ADMIN OPTION, INHERIT FALSE, SET TRUE GRANTED BY grantor_role",

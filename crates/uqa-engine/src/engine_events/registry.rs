@@ -290,6 +290,16 @@ impl Engine {
     pub(crate) fn register_trigger(&self, mut definition: CreateTrigger) -> Result<(), SQLError> {
         let relation =
             self.validate_trigger_definition(&mut definition, RelationLookupMode::Dynamic)?;
+        let function_object_id = self
+            .resolve_trigger_function(&definition.function, RelationLookupMode::Bound)?
+            .def
+            .object_id
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "trigger function `{}` has no catalog object identity",
+                    definition.function
+                ))
+            })?;
         self.ensure_partition_trigger_name_available(
             &relation,
             &definition.name,
@@ -325,6 +335,7 @@ impl Engine {
             definition.name.clone(),
             StoredTrigger {
                 definition,
+                function_object_id: Some(function_object_id),
                 enabled: EventEnableMode::Origin,
                 object_id,
                 constraint_name,

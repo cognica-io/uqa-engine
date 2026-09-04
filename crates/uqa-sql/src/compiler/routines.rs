@@ -16,7 +16,8 @@ mod roles;
 
 pub(super) use roles::{
     compile_alter_role, compile_alter_routine_owner, compile_create_role, compile_drop_role,
-    compile_grant, compile_grant_role, compile_role_spec,
+    compile_grant, compile_grant_role, compile_object_with_args, compile_role_spec,
+    CompiledRoutineTarget,
 };
 
 struct CompiledFunctionTypeName {
@@ -391,6 +392,7 @@ pub(super) fn compile_create_function(
     }
 
     Ok(CreateFunction {
+        object_id: None,
         name,
         or_replace: stmt.replace,
         is_procedure: stmt.is_procedure,

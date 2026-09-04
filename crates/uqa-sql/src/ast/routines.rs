@@ -137,6 +137,9 @@ pub enum FunctionBody {
 /// `CREATE [OR REPLACE] FUNCTION | PROCEDURE`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateFunction {
+    /// Stable catalog identity. The engine assigns this once when the routine is created and preserves it across replacement and rename.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub object_id: Option<[u8; 16]>,
     pub name: String,
     pub or_replace: bool,
     pub is_procedure: bool,

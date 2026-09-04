@@ -359,6 +359,11 @@ pub trait PersistentStorageBackend: Send + Sync {
         self.begin_transaction()
     }
 
+    /// Begin an atomic transaction that may remain read-only or perform writes after its initial reads. Backends without read-to-write promotion acquire a writer transaction immediately.
+    fn begin_upgradeable_transaction(&self) -> StorageBackendResult<()> {
+        self.begin_transaction()
+    }
+
     /// Whether this session currently owns a pinned storage transaction.
     fn in_transaction(&self) -> bool;
 
@@ -644,6 +649,11 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
     }
 
     fn begin_read_transaction(&self) -> StorageBackendResult<()> {
+        self.conn.begin_deferred_transaction()?;
+        Ok(())
+    }
+
+    fn begin_upgradeable_transaction(&self) -> StorageBackendResult<()> {
         self.conn.begin_deferred_transaction()?;
         Ok(())
     }

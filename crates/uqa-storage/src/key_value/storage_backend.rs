@@ -170,6 +170,10 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
         self.store.begin_read_transaction()
     }
 
+    fn begin_upgradeable_transaction(&self) -> StorageBackendResult<()> {
+        self.store.begin_upgradeable_transaction()
+    }
+
     fn in_transaction(&self) -> bool {
         self.store.in_transaction()
     }

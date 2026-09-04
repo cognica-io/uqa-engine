@@ -172,6 +172,7 @@ fn gamma_binding_preserves_the_float8_signature_and_function_identity() {
     assert!(resolved.binding.builtin);
 
     let wrong_function = FunctionBinding {
+        object_id: None,
         name: "pg_catalog.lgamma".into(),
         argument_types: vec!["double precision".into()],
         builtin: true,

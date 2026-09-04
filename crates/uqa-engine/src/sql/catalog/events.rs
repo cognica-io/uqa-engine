@@ -307,7 +307,7 @@ fn pg_trigger_row(
         ),
         ("tgparentid", int_value(parent_oid)),
         ("tgname", str_value(definition.name.clone())),
-        ("tgfoid", int_value(user_routine_catalog_oid(&function))),
+        ("tgfoid", int_value(user_routine_catalog_oid(&function)?)),
         ("tgtype", int_value(trigger_type(definition))),
         ("tgenabled", str_value(trigger.enabled.catalog_code())),
         ("tgisinternal", bool_value(false)),

@@ -349,10 +349,40 @@ impl Engine {
             query_transaction_origin: None,
         };
         if initialize_catalog {
-            Self::prepare_catalog_for_initial_restore(restore_catalog.as_ref())?;
             restore_backend.migrate_inverted_index_storage()?;
+            // A clean restore remains read-only on backends that can promote a transaction, while backends without promotion reserve their writer before the atomic migration scan.
+            restore_backend.begin_upgradeable_transaction()?;
+            let restore_result = (|| {
+                Self::prepare_catalog_for_initial_restore(restore_catalog.as_ref())?;
+                engine.restore_from_catalog(
+                    restore_catalog.as_ref(),
+                    restore_backend.as_ref(),
+                    super::CatalogRestoreMode::InitialMigration,
+                )
+            })();
+            if let Err(error) = restore_result {
+                return match restore_backend.rollback_transaction() {
+                    Ok(()) => Err(error),
+                    Err(rollback_error) => Err(StorageBackendError::Other(format!(
+                        "rollback initial catalog migration after `{error}` failed: {rollback_error}"
+                    ))),
+                };
+            }
+            if let Err(error) = restore_backend.commit_transaction() {
+                return match restore_backend.rollback_transaction() {
+                    Ok(()) => Err(error),
+                    Err(rollback_error) => Err(StorageBackendError::Other(format!(
+                        "rollback failed initial catalog migration commit `{error}`: {rollback_error}"
+                    ))),
+                };
+            }
+        } else {
+            engine.restore_from_catalog(
+                restore_catalog.as_ref(),
+                restore_backend.as_ref(),
+                super::CatalogRestoreMode::LoadOnly,
+            )?;
         }
-        engine.restore_from_catalog(restore_catalog.as_ref(), restore_backend.as_ref())?;
         if initialize_catalog {
             engine.repair_reset_fts_storage(restore_catalog.as_ref())?;
             engine.repair_persistent_value_indexes_on_open()?;

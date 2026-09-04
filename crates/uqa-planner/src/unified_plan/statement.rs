@@ -84,7 +84,11 @@ impl UnifiedPlan {
                                 &mut subqueries,
                             ),
                             predicate: r#where.map(|expr| {
-                                lower_scalar_expression(expr, aggregates, &mut subqueries)
+                                Box::new(lower_scalar_expression(
+                                    *expr,
+                                    aggregates,
+                                    &mut subqueries,
+                                ))
                             }),
                         },
                     };
@@ -411,6 +415,9 @@ impl UnifiedPlan {
             Statement::AlterRoutineOwner(value) => {
                 Self::Command(Box::new(CommandPlan::AlterRoutineOwner(value)))
             }
+            Statement::RenameRoutine(value) => {
+                Self::Command(Box::new(CommandPlan::RenameRoutine(value)))
+            }
             Statement::GrantRoutine(value) => {
                 Self::Command(Box::new(CommandPlan::GrantRoutine(value)))
             }
@@ -518,6 +525,7 @@ impl CommandPlan {
             Self::DropFunction(_) => "DropFunction",
             Self::AlterRoutine(_) => "AlterRoutine",
             Self::AlterRoutineOwner(_) => "AlterRoutineOwner",
+            Self::RenameRoutine(_) => "RenameRoutine",
             Self::GrantRoutine(_) => "GrantRoutine",
             Self::GrantTable(_) => "GrantTable",
             Self::GrantSequence(_) => "GrantSequence",

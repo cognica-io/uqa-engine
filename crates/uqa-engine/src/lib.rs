@@ -850,6 +850,10 @@ fn new_sequence_definition_generation() -> StorageBackendResult<[u8; 16]> {
     new_nonzero_catalog_identity("sequence", "definition generation")
 }
 
+fn new_routine_object_id() -> StorageBackendResult<[u8; 16]> {
+    new_nonzero_catalog_identity("routine", "object identity")
+}
+
 fn normalize_analyzer_config_value(value: &mut serde_json::Value) {
     if let Some(tokenizer) = value.get_mut("tokenizer") {
         if let Some(name) = tokenizer.as_str() {

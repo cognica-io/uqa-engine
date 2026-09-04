@@ -337,7 +337,7 @@ pub enum ConflictActionPlan {
     Nothing,
     Update {
         assignments: Vec<AssignmentPlan>,
-        predicate: Option<ScalarExpr>,
+        predicate: Option<Box<ScalarExpr>>,
     },
 }
 
@@ -566,6 +566,7 @@ pub enum CommandPlan {
     DropFunction(uqa_sql::ast::DropFunctionStmt),
     AlterRoutine(uqa_sql::ast::AlterRoutineStmt),
     AlterRoutineOwner(uqa_sql::ast::AlterRoutineOwnerStmt),
+    RenameRoutine(uqa_sql::ast::RenameRoutineStmt),
     GrantRoutine(uqa_sql::ast::GrantRoutineStmt),
     GrantTable(uqa_sql::ast::GrantTableStmt),
     GrantSequence(uqa_sql::ast::GrantSequenceStmt),

@@ -170,6 +170,10 @@ pub trait KeyValueStore: Send + Sync {
         self.begin_transaction()
     }
 
+    fn begin_upgradeable_transaction(&self) -> StorageBackendResult<()> {
+        self.begin_transaction()
+    }
+
     fn in_transaction(&self) -> bool;
 
     fn transaction_has_written(&self) -> StorageBackendResult<bool>;

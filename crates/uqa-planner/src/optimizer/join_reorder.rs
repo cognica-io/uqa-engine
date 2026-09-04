@@ -142,6 +142,7 @@ fn reorder_command_joins(
         | CommandPlan::DropFunction(_)
         | CommandPlan::AlterRoutine(_)
         | CommandPlan::AlterRoutineOwner(_)
+        | CommandPlan::RenameRoutine(_)
         | CommandPlan::GrantRoutine(_)
         | CommandPlan::GrantTable(_)
         | CommandPlan::GrantSequence(_)

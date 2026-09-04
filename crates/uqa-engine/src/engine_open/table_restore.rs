@@ -203,6 +203,7 @@ impl Engine {
         &mut self,
         catalog: &dyn CatalogFacade,
         backend: &dyn PersistentStorageBackend,
+        mode: super::CatalogRestoreMode,
     ) -> StorageBackendResult<()> {
         self.restore_schemas_from_catalog(catalog)?;
         let schemas = catalog.load_tables()?;
@@ -213,7 +214,7 @@ impl Engine {
         }
         self.synchronize_partition_identity_watermarks()?;
         self.restore_graphs_from_catalog(catalog)?;
-        self.restore_engine_registries_from_catalog(catalog)?;
+        self.restore_engine_registries_from_catalog(catalog, mode)?;
         Ok(())
     }
 

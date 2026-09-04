@@ -219,7 +219,7 @@ pub(in crate::sql) fn run_insert_inner(
     }) = stmt.on_conflict.as_ref()
     {
         privilege_expressions.extend(assignments.iter().map(|assignment| &assignment.value));
-        privilege_expressions.extend(predicate.iter());
+        privilege_expressions.extend(predicate.iter().map(Box::as_ref));
     }
     super::ensure_target_table_select_for_expressions(
         engine,

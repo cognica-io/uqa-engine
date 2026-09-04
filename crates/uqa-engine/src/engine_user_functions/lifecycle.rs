@@ -7,6 +7,7 @@
 //! Routine registration, catalog persistence, alteration, and removal.
 
 mod drop_planning;
+mod rename;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -17,8 +18,9 @@ use uqa_sql::ast::{
 use uqa_sql::SQLError;
 
 use crate::{
-    engine_roles::role_inherits, engine_schema_security::SchemaAclPrivilege, Arc, CatalogFacade,
-    Engine, RelationIdentity, StorageBackendError, StorageBackendResult, FUNCTIONS_METADATA_KEY,
+    engine_open::CatalogRestoreMode, engine_roles::role_inherits,
+    engine_schema_security::SchemaAclPrivilege, Arc, CatalogFacade, Engine, RelationIdentity,
+    StorageBackendError, StorageBackendResult, FUNCTIONS_METADATA_KEY,
 };
 
 use super::declaration::{
@@ -52,6 +54,7 @@ struct RoutineObjectDependents {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct RoutineDropTarget {
+    object_id: Option<[u8; 16]>,
     name: String,
     argument_types: Vec<String>,
     is_procedure: bool,
@@ -72,6 +75,7 @@ impl RoutineDropTarget {
 
     fn binding(&self) -> FunctionBinding {
         FunctionBinding {
+            object_id: self.object_id,
             name: self.name.clone(),
             argument_types: self.argument_types.clone(),
             builtin: false,
@@ -116,6 +120,7 @@ fn sql_standard_routine_dependents(
                     uqa_planner::UnifiedPlan::Command(_) => false,
                 });
                 references_target.then(|| RoutineDropTarget {
+                    object_id: function.def.object_id,
                     name: name.clone(),
                     argument_types: routine_signature_types(&function.def),
                     is_procedure: function.def.is_procedure,
@@ -189,6 +194,33 @@ fn append_routine_cascade_notice(
     }
 }
 
+fn allocate_routine_object_id(
+    registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
+    name: &str,
+) -> Result<[u8; 16], SQLError> {
+    loop {
+        let candidate = crate::new_routine_object_id().map_err(|error| {
+            SQLError::Internal(format!("allocate routine `{name}` identity: {error}"))
+        })?;
+        if registry
+            .values()
+            .flat_map(|overloads| overloads.iter())
+            .all(|function| function.def.object_id != Some(candidate))
+        {
+            return Ok(candidate);
+        }
+    }
+}
+
+fn persisted_routine_object_id(def: &CreateFunction) -> Result<[u8; 16], SQLError> {
+    def.object_id.ok_or_else(|| {
+        SQLError::Internal(format!(
+            "existing routine `{}` has no catalog object identity",
+            def.name
+        ))
+    })
+}
+
 impl Engine {
     /// Register (or replace) a user-defined routine. Applies the
     /// `PostgreSQL` conflict rules for `(schema, name, argument types)`
@@ -212,6 +244,7 @@ impl Engine {
             def.creation_search_path.clear();
         }
         let compiled = compile_function_body(self, &def)?;
+        self.bind_sql_standard_body_routines(&mut def, &compiled)?;
         let name = def.name.clone();
         let signature = routine_signature_types(&def);
         let kind = routine_kind(&def);
@@ -271,10 +304,12 @@ impl Engine {
                     });
                 }
                 // CREATE OR REPLACE changes the definition but not object ownership or privileges.
+                def.object_id = Some(persisted_routine_object_id(existing)?);
                 def.owner.clone_from(&existing.owner);
                 def.execute_acl.clone_from(&existing.execute_acl);
                 overloads[pos] = Arc::new(SQLUserFunction { def, compiled });
             } else {
+                def.object_id = Some(allocate_routine_object_id(&registry, &name)?);
                 overloads.push(Arc::new(SQLUserFunction { def, compiled }));
             }
             overloads.sort_by(|left, right| {
@@ -451,6 +486,30 @@ impl Engine {
         self.lookup_sql_functions_by_keys(std::iter::once(name.to_string()))
     }
 
+    /// Resolve a catalog-bound routine by its durable object identity. Legacy bindings without an identity retain exact canonical-name lookup only during catalog migration.
+    pub(crate) fn lookup_bound_sql_functions_by_binding(
+        &self,
+        binding: &FunctionBinding,
+    ) -> Option<Vec<Arc<SQLUserFunction>>> {
+        let Some(object_id) = binding.object_id else {
+            return self.lookup_bound_sql_functions(&binding.name);
+        };
+        let live_registry;
+        let registry = if let Some(snapshot) = self.query_sql_function_snapshots.as_ref() {
+            snapshot.as_ref()
+        } else {
+            live_registry = self.durable.sql_user_functions.read();
+            &live_registry
+        };
+        let matches = registry
+            .values()
+            .flat_map(|overloads| overloads.iter())
+            .filter(|function| function.def.object_id == Some(object_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        (!matches.is_empty()).then_some(matches)
+    }
+
     fn lookup_sql_functions_by_keys(
         &self,
         keys: impl IntoIterator<Item = String>,
@@ -490,11 +549,15 @@ impl Engine {
         Ok(self.lookup_sql_routine_candidates_by_keys(keys))
     }
 
-    pub(super) fn lookup_bound_sql_routine_candidates(
+    pub(super) fn lookup_bound_sql_routine_candidates_by_binding(
         &self,
-        name: &str,
+        binding: &FunctionBinding,
     ) -> Option<Vec<Arc<SQLUserFunction>>> {
-        self.lookup_sql_routine_candidates_by_keys(std::iter::once(name.to_string()))
+        if binding.object_id.is_some() {
+            self.lookup_bound_sql_functions_by_binding(binding)
+        } else {
+            self.lookup_sql_routine_candidates_by_keys(std::iter::once(binding.name.clone()))
+        }
     }
 
     fn lookup_sql_routine_candidates_by_keys(
@@ -585,11 +648,46 @@ impl Engine {
         compiled
     }
 
+    fn bind_sql_standard_body_routines(
+        &self,
+        def: &mut CreateFunction,
+        compiled: &CompiledFunctionBody,
+    ) -> Result<bool, SQLError> {
+        let FunctionBody::Statements(statements) = &mut def.body else {
+            return Ok(false);
+        };
+        let CompiledFunctionBody::SQL(plans) = compiled else {
+            return Err(SQLError::Internal(format!(
+                "SQL-standard routine `{}` did not compile to SQL plans",
+                def.name
+            )));
+        };
+        if statements.len() != plans.len() {
+            return Err(SQLError::Internal(format!(
+                "SQL-standard routine `{}` has {} statements but {} plans",
+                def.name,
+                statements.len(),
+                plans.len()
+            )));
+        }
+        let mut changed = false;
+        for (statement, plan) in statements.iter_mut().zip(plans) {
+            let routines = crate::sql::bind_catalog_rule_action_routines(self, plan)?;
+            changed |= crate::engine_events::bind_rule_statement_routines(
+                statement,
+                &routines.references,
+            )?;
+        }
+        Ok(changed)
+    }
+
     fn canonicalize_persisted_sql_functions(
         &self,
         defs: BTreeMap<String, Vec<CreateFunction>>,
-    ) -> StorageBackendResult<BTreeMap<String, Vec<CreateFunction>>> {
+    ) -> StorageBackendResult<(BTreeMap<String, Vec<CreateFunction>>, bool)> {
         let mut canonical_defs: BTreeMap<String, Vec<CreateFunction>> = BTreeMap::new();
+        let mut object_ids = BTreeSet::new();
+        let mut migrated = false;
         for (stored_name, overloads) in defs {
             let stored_relation =
                 RelationIdentity::from_legacy_name(&stored_name).map_err(|error| {
@@ -610,9 +708,28 @@ impl Engine {
             }
             let canonical_name = stored_relation.qualified_name();
             for mut def in overloads {
+                if def.object_id.is_none() || def.object_id == Some([0; 16]) {
+                    def.object_id = Some(crate::new_routine_object_id()?);
+                    migrated = true;
+                }
+                let object_id = def.object_id.ok_or_else(|| {
+                    StorageBackendError::Other(format!(
+                        "persisted routine `{stored_name}` has no object identity"
+                    ))
+                })?;
+                if !object_ids.insert(object_id) {
+                    return Err(StorageBackendError::Other(format!(
+                        "duplicate persisted routine object identity for `{stored_name}`"
+                    )));
+                }
                 for parameter in &mut def.params {
                     if let Some(default) = &mut parameter.default {
-                        default.upgrade_legacy_serialized_dispatches();
+                        migrated |= default.upgrade_legacy_serialized_dispatches();
+                    }
+                }
+                if let FunctionBody::Statements(statements) = &mut def.body {
+                    for statement in statements {
+                        migrated |= statement.upgrade_legacy_serialized_dispatches();
                     }
                 }
                 let definition_relation =
@@ -643,18 +760,24 @@ impl Engine {
                 definitions.push(def);
             }
         }
-        Ok(canonical_defs)
+        Ok((canonical_defs, migrated))
     }
 
     pub(crate) fn restore_sql_functions_from_metadata(
         &self,
         catalog: &dyn CatalogFacade,
+        mode: CatalogRestoreMode,
     ) -> StorageBackendResult<()> {
         let Some(json) = catalog.get_metadata(FUNCTIONS_METADATA_KEY)? else {
             return Ok(());
         };
         let defs = serde_json::from_str::<BTreeMap<String, Vec<CreateFunction>>>(&json)?;
-        let canonical_defs = self.canonicalize_persisted_sql_functions(defs)?;
+        let (canonical_defs, mut migrated) = self.canonicalize_persisted_sql_functions(defs)?;
+        if migrated && !mode.allows_migration() {
+            return Err(StorageBackendError::Other(
+                "routine catalog requires an initial-open object-identity migration".into(),
+            ));
+        }
 
         // Install definition-only placeholders before compiling stored SQL-standard bodies so every exact routine identity is visible while durable function bindings are rebuilt. No routine can execute during engine construction, and any compile failure restores the previous registry atomically.
         let placeholders = canonical_defs
@@ -679,9 +802,12 @@ impl Engine {
             let mut restored: BTreeMap<String, Vec<Arc<SQLUserFunction>>> = BTreeMap::new();
             for (name, definitions) in canonical_defs {
                 let mut overloads = Vec::with_capacity(definitions.len());
-                for def in definitions {
+                for mut def in definitions {
                     let compiled = self
                         .compile_persisted_sql_function(&def)
+                        .map_err(|err| StorageBackendError::Other(err.to_string()))?;
+                    migrated |= self
+                        .bind_sql_standard_body_routines(&mut def, &compiled)
                         .map_err(|err| StorageBackendError::Other(err.to_string()))?;
                     overloads.push(Arc::new(SQLUserFunction { def, compiled }));
                 }
@@ -701,6 +827,19 @@ impl Engine {
                 return Err(error);
             }
         };
+        if migrated && !mode.allows_migration() {
+            *self.durable.sql_user_functions.write() = previous;
+            return Err(StorageBackendError::Other(
+                "SQL-standard routine bodies require an initial-open object-identity migration"
+                    .into(),
+            ));
+        }
+        if migrated {
+            if let Err(error) = self.persist_sql_functions_snapshot(&restored) {
+                *self.durable.sql_user_functions.write() = previous;
+                return Err(StorageBackendError::Other(error.to_string()));
+            }
+        }
         *self.durable.sql_user_functions.write() = restored;
         Ok(())
     }

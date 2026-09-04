@@ -19,12 +19,12 @@ use super::helpers::information_schema_types::{
     info_character_maximum_length, info_character_octet_length, info_data_type,
     info_datetime_precision, info_numeric_precision, info_numeric_scale, info_udt_name,
 };
-use super::helpers::oids::{current_user_name, split_schema_name, stable_oid};
+use super::helpers::oids::{current_user_name, split_schema_name};
 use super::helpers::rows::{catalog_name, catalog_ordinal, int_value, row, str_value};
 use super::helpers::type_metadata::{catalog_regtype_name, catalog_type_name};
 use super::helpers::views::{all_schema_names, view_columns_for};
+use super::pg_proc::user_routine_catalog_oid;
 use crate::engine_capabilities::{CatalogReadView, RelationNameResolution, SessionExecutionView};
-use crate::engine_user_functions::routine_signature_types;
 use crate::sql::value_to_text;
 use crate::{Engine, SequenceOwnerDependency};
 use uqa_core::Value;
@@ -745,17 +745,7 @@ pub(super) fn build_info_routines(catalog: &CatalogReadView) -> Result<Vec<Resul
     for function in catalog.all_sql_functions() {
         let def = &function.def;
         let (routine_schema, routine_name) = split_schema_name(&def.name)?;
-        let signature = routine_signature_types(def);
-        let identity = format!(
-            "{}:{}:{}",
-            def.name,
-            if def.is_procedure {
-                "procedure"
-            } else {
-                "function"
-            },
-            signature.join(",")
-        );
+        let catalog_oid = user_routine_catalog_oid(&function)?;
         let routine_type = if def.is_procedure {
             "PROCEDURE"
         } else {
@@ -781,11 +771,7 @@ pub(super) fn build_info_routines(catalog: &CatalogReadView) -> Result<Vec<Resul
             ("specific_schema", str_value(routine_schema.clone())),
             (
                 "specific_name",
-                str_value(format!(
-                    "{}_{}",
-                    routine_name,
-                    stable_oid("routine", &identity)
-                )),
+                str_value(format!("{routine_name}_{catalog_oid}")),
             ),
             ("routine_catalog", catalog_name()),
             ("routine_schema", str_value(routine_schema)),

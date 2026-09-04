@@ -183,6 +183,7 @@ pub(crate) struct StaticFunctionMatch {
 impl StaticFunctionMatch {
     pub(crate) fn binding(&self) -> FunctionBinding {
         FunctionBinding {
+            object_id: self.function.def.object_id,
             name: self.function.def.name.clone(),
             argument_types: routine_signature_types(&self.function.def),
             builtin: false,
@@ -282,7 +283,7 @@ impl FunctionTypeResolver for Engine {
             return Ok(false);
         }
         let function = self
-            .lookup_bound_sql_functions(&binding.name)
+            .lookup_bound_sql_functions_by_binding(binding)
             .and_then(|overloads| {
                 overloads.into_iter().find(|function| {
                     !function.def.is_procedure
@@ -419,7 +420,7 @@ impl Engine {
                 return Ok(None);
             }
             let function = self
-                .lookup_bound_sql_routine_candidates(&binding.name)
+                .lookup_bound_sql_routine_candidates_by_binding(binding)
                 .and_then(|overloads| {
                     overloads.into_iter().find(|function| {
                         function.def.is_procedure == kind.is_procedure()

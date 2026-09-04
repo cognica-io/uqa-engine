@@ -562,7 +562,7 @@ impl InsertConflictLocks {
             existing.doc_id,
             document,
             assignments,
-            predicate.as_ref(),
+            predicate.as_deref(),
             params,
             scope,
         )? {

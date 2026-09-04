@@ -118,6 +118,7 @@ fn function_binding_builtin_identity_is_backward_compatible() {
     assert!(!legacy.builtin);
 
     let builtin = FunctionBinding {
+        object_id: None,
         name: "pg_catalog.reverse".into(),
         argument_types: vec!["text".into()],
         builtin: true,
@@ -153,6 +154,7 @@ fn polymorphic_builtin_syntax_binding_has_stable_serde_shape() {
         ));
     }
     let fixed = FunctionBinding {
+        object_id: None,
         name: "coalesce".into(),
         argument_types: vec!["text".into(), "text".into()],
         builtin: true,
@@ -179,6 +181,7 @@ fn legacy_compiler_function_names_upgrade_only_at_the_catalog_boundary() {
 
     let mut builtin_name = "__to_hex_int4".to_string();
     let mut builtin_binding = Some(FunctionBinding {
+        object_id: None,
         name: "pg_catalog.to_hex".into(),
         argument_types: vec!["integer".into()],
         builtin: true,
@@ -198,6 +201,7 @@ fn legacy_compiler_function_names_upgrade_only_at_the_catalog_boundary() {
 
     let mut user_name = "__subscript".to_string();
     let user_binding = FunctionBinding {
+        object_id: None,
         name: "app.__subscript".into(),
         argument_types: vec!["integer".into()],
         builtin: false,
@@ -231,9 +235,11 @@ fn legacy_compiler_function_names_upgrade_only_at_the_catalog_boundary() {
 fn routine_invocation_binding_round_trips_and_legacy_bindings_default_to_none() {
     let legacy: FunctionBinding =
         serde_json::from_str(r#"{"name":"app.f","argument_types":["anyelement"]}"#).unwrap();
+    assert!(legacy.object_id.is_none());
     assert!(legacy.invocation.is_none());
 
     let binding = FunctionBinding {
+        object_id: Some([7; 16]),
         name: "app.f".into(),
         argument_types: vec!["anyelement".into(), "anyarray".into()],
         builtin: false,
@@ -268,6 +274,7 @@ fn routine_identity_and_call_parameters_are_distinct() {
         default: None,
     };
     let function = CreateFunction {
+        object_id: None,
         name: "f".into(),
         or_replace: false,
         is_procedure: false,

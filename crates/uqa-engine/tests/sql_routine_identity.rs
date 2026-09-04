@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Routine identity is `(schema, name, input types)`, while call shape and expected kind are validated separately.
+//! Routine lookup uses `(schema, name, input types)`, while durable object identity survives replacement and rename and call shape and expected kind are validated separately.
 
 use tempfile::TempDir;
 use uqa_core::Value;
@@ -18,6 +18,8 @@ mod alter_routine;
 mod polymorphic_variadic;
 #[path = "sql_routine_identity/routine_cascade.rs"]
 mod routine_cascade;
+#[path = "sql_routine_identity/routine_rename.rs"]
+mod routine_rename;
 #[path = "sql_routine_identity/scalar_overloads.rs"]
 mod scalar_overloads;
 #[path = "sql_routine_identity/security_roles.rs"]
@@ -584,6 +586,7 @@ fn builtin_set_projection_binding_survives_same_named_user_routine_family() {
         panic!("expected function projection");
     };
     *binding = Some(FunctionBinding {
+        object_id: None,
         name: "pg_catalog.generate_series".into(),
         argument_types: vec!["integer".into(), "integer".into()],
         builtin: true,

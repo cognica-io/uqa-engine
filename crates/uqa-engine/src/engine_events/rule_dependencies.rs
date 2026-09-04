@@ -483,12 +483,13 @@ pub(super) fn rewrite_rule_statement_relation(
     Ok(changed)
 }
 
-pub(super) fn bind_rule_statement_routines(
+pub(crate) fn bind_rule_statement_routines(
     statement: &mut Statement,
     references: &[crate::sql::BoundRuleRoutineReference],
-) -> Result<(), SQLError> {
+) -> Result<bool, SQLError> {
     let mut ignore_relation = |_: &mut String| -> Result<(), SQLError> { Ok(()) };
     let mut references = references.iter();
+    let mut changed = false;
     let mut bind =
         |name: &mut String, binding: Option<&mut Option<uqa_sql::ast::FunctionBinding>>| {
             let reference = references.next().ok_or_else(|| {
@@ -496,7 +497,8 @@ pub(super) fn bind_rule_statement_routines(
                     "stored rule routine binding has no entry for call `{name}`"
                 ))
             })?;
-            apply_routine_reference(name, binding, reference)
+            changed |= apply_routine_reference(name, binding, reference)?;
+            Ok(())
         };
     RuleAstVisitor {
         visit_relation: &mut ignore_relation,
@@ -509,7 +511,63 @@ pub(super) fn bind_rule_statement_routines(
             reference.name
         )));
     }
-    Ok(())
+    Ok(changed)
+}
+
+pub(crate) fn rewrite_statement_routine_identity(
+    statement: &mut Statement,
+    target: &uqa_sql::ast::FunctionBinding,
+    new_name: &str,
+) -> Result<bool, SQLError> {
+    let mut changed = false;
+    let mut ignore_relation = |_: &mut String| -> Result<(), SQLError> { Ok(()) };
+    let mut rewrite = |name: &mut String,
+                       binding: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
+     -> Result<(), SQLError> {
+        let Some(binding) = binding.and_then(Option::as_mut) else {
+            return Ok(());
+        };
+        if crate::engine_session::function_binding_matches(binding, target) {
+            *name = new_name.to_string();
+            binding.name = new_name.to_string();
+            changed = true;
+        }
+        Ok(())
+    };
+    RuleAstVisitor {
+        visit_relation: &mut ignore_relation,
+        visit_routine: &mut rewrite,
+    }
+    .bind_statement(statement)?;
+    Ok(changed)
+}
+
+pub(crate) fn rewrite_expression_routine_identity(
+    expression: &mut Expr,
+    target: &uqa_sql::ast::FunctionBinding,
+    new_name: &str,
+) -> Result<bool, SQLError> {
+    let mut changed = false;
+    let mut ignore_relation = |_: &mut String| -> Result<(), SQLError> { Ok(()) };
+    let mut rewrite = |name: &mut String,
+                       binding: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
+     -> Result<(), SQLError> {
+        let Some(binding) = binding.and_then(Option::as_mut) else {
+            return Ok(());
+        };
+        if crate::engine_session::function_binding_matches(binding, target) {
+            *name = new_name.to_string();
+            binding.name = new_name.to_string();
+            changed = true;
+        }
+        Ok(())
+    };
+    RuleAstVisitor {
+        visit_relation: &mut ignore_relation,
+        visit_routine: &mut rewrite,
+    }
+    .bind_expr(expression, &BTreeSet::new())?;
+    Ok(changed)
 }
 
 pub(super) fn bind_rule_expr_routines(
@@ -525,7 +583,8 @@ pub(super) fn bind_rule_expr_routines(
                     "stored rule routine binding has no entry for call `{name}`"
                 ))
             })?;
-            apply_routine_reference(name, binding, reference)
+            apply_routine_reference(name, binding, reference)?;
+            Ok(())
         };
     RuleAstVisitor {
         visit_relation: &mut ignore_relation,
@@ -545,7 +604,7 @@ fn apply_routine_reference(
     name: &mut String,
     binding: Option<&mut Option<uqa_sql::ast::FunctionBinding>>,
     reference: &crate::sql::BoundRuleRoutineReference,
-) -> Result<(), SQLError> {
+) -> Result<bool, SQLError> {
     let (_, local_name) = RelationIdentity::parse_reference(name).map_err(|error| {
         SQLError::Internal(format!("decode stored rule routine `{name}`: {error}"))
     })?;
@@ -562,15 +621,21 @@ fn apply_routine_reference(
             reference.name
         )));
     }
-    if let Some(exact) = &reference.binding {
-        if !exact.builtin {
-            name.clone_from(&exact.name);
-        }
-        if let Some(binding) = binding {
+    let Some(exact) = &reference.binding else {
+        return Ok(false);
+    };
+    let mut changed = false;
+    if !exact.builtin && name != &exact.name {
+        name.clone_from(&exact.name);
+        changed = true;
+    }
+    if let Some(binding) = binding {
+        if binding.as_ref() != Some(exact) {
             *binding = Some(exact.clone());
+            changed = true;
         }
     }
-    Ok(())
+    Ok(changed)
 }
 
 pub(super) fn rewrite_stored_rule_relation(
@@ -813,6 +878,7 @@ fn insert_routine_dependency(
 ) {
     if !binding.builtin {
         dependencies.routines.insert(RuleRoutineDependency {
+            object_id: binding.object_id,
             name: binding.name.clone(),
             argument_types: binding.argument_types.clone(),
         });

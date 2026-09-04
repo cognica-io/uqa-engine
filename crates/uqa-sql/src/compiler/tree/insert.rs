@@ -160,7 +160,7 @@ pub(in crate::compiler) fn compile_on_conflict(
                 .transpose()?;
             OnConflictAction::Update {
                 assignments,
-                r#where: where_clause,
+                r#where: where_clause.map(Box::new),
             }
         }
         PgAction::OnconflictNone | PgAction::Undefined => {

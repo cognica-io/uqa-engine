@@ -145,7 +145,9 @@ pub(super) fn rewrite_command_scalars(
                 } = &mut conflict.action
                 {
                     rewrite_assignments(assignments, rewrite);
-                    rewrite_optional_scalar(predicate, rewrite);
+                    if let Some(predicate) = predicate {
+                        rewrite_scalar(predicate, rewrite);
+                    }
                 }
             }
             rewrite_projections(&mut plan.returning, rewrite);
@@ -268,6 +270,7 @@ pub(super) fn rewrite_command_scalars(
         | CommandPlan::DropFunction(_)
         | CommandPlan::AlterRoutine(_)
         | CommandPlan::AlterRoutineOwner(_)
+        | CommandPlan::RenameRoutine(_)
         | CommandPlan::GrantRoutine(_)
         | CommandPlan::GrantTable(_)
         | CommandPlan::GrantSequence(_)

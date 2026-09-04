@@ -279,7 +279,7 @@ fn current_rule_catalog_rejects_missing_bound_routine_state() {
         let catalog = Catalog::open(ManagedConnection::open(&path).unwrap()).unwrap();
         let encoded = catalog.get_metadata("sql_rules_json").unwrap().unwrap();
         let mut metadata: serde_json::Value = serde_json::from_str(&encoded).unwrap();
-        assert_eq!(metadata["format_version"], serde_json::Value::from(2));
+        assert_eq!(metadata["format_version"], serde_json::Value::from(3));
         assert!(remove_first_binding(&mut metadata));
         catalog
             .set_metadata("sql_rules_json", &serde_json::to_string(&metadata).unwrap())
@@ -350,7 +350,7 @@ fn older_rule_catalog_rebuilds_and_persists_column_dependencies() {
     let catalog = Catalog::open(ManagedConnection::open(&path).unwrap()).unwrap();
     let encoded = catalog.get_metadata("sql_rules_json").unwrap().unwrap();
     let metadata: serde_json::Value = serde_json::from_str(&encoded).unwrap();
-    assert_eq!(metadata["format_version"], serde_json::Value::from(2));
+    assert_eq!(metadata["format_version"], serde_json::Value::from(3));
     assert!(metadata["rules"][0]["dependencies"]["columns"]
         .as_array()
         .is_some_and(|columns| !columns.is_empty()));
@@ -391,7 +391,7 @@ fn current_rule_catalog_rejects_missing_column_dependency_state() {
         let catalog = Catalog::open(ManagedConnection::open(&path).unwrap()).unwrap();
         let encoded = catalog.get_metadata("sql_rules_json").unwrap().unwrap();
         let mut metadata: serde_json::Value = serde_json::from_str(&encoded).unwrap();
-        assert_eq!(metadata["format_version"], serde_json::Value::from(2));
+        assert_eq!(metadata["format_version"], serde_json::Value::from(3));
         let dependencies = metadata["rules"][0]["dependencies"]
             .as_object_mut()
             .expect("stored rule dependencies");

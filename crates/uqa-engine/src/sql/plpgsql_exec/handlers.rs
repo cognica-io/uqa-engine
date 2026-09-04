@@ -44,6 +44,7 @@ pub(in crate::sql) fn run_do_block(
     }
     let parsed = uqa_sql::plpgsql::parse_do_block(body)?;
     let def = CreateFunction {
+        object_id: None,
         name: "inline_code_block".into(),
         or_replace: false,
         is_procedure: false,

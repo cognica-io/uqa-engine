@@ -6,6 +6,8 @@
 
 //! DDL target resolution, relation dependencies, and catalog index references.
 
+mod routines;
+
 use super::{
     rename_schema_expr_column, rename_schema_expr_qualified_column, rename_schema_expr_relation,
     rewrite_sequence_function_references, schema_expr_references_column,

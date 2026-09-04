@@ -129,7 +129,7 @@ pub(super) fn ensure_insert(engine: &Engine, statement: &InsertPlan) -> Result<S
             )?;
         }
         expressions.extend(assignments.iter().map(|assignment| &assignment.value));
-        expressions.extend(predicate.iter());
+        expressions.extend(predicate.iter().map(Box::as_ref));
         conflict_columns.as_slice()
     } else {
         &[]

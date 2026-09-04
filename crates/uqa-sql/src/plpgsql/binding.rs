@@ -479,7 +479,7 @@ pub fn bind_statement(stmt: &Statement, r: &mut dyn VariableResolver) -> Result<
                             r#where,
                         } => crate::ast::OnConflictAction::Update {
                             assignments: bind_assignments(assignments, r)?,
-                            r#where: bind_opt_expr(r#where.as_ref(), r)?,
+                            r#where: bind_opt_expr(r#where.as_deref(), r)?.map(Box::new),
                         },
                     },
                 }),

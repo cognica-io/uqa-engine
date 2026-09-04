@@ -10,6 +10,9 @@ use super::RangeSubtype;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FunctionBinding {
+    /// Stable identity of a bound user routine. Built-ins and unbound calls leave this unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub object_id: Option<[u8; 16]>,
     pub name: String,
     pub argument_types: Vec<String>,
     #[serde(default)]
@@ -243,6 +246,7 @@ impl FunctionBinding {
     pub fn polymorphic_builtin_syntax(name: &str) -> Self {
         assert!(Self::is_polymorphic_builtin_syntax_name(name));
         Self {
+            object_id: None,
             name: name.into(),
             argument_types: Vec::new(),
             builtin: true,
@@ -256,6 +260,7 @@ impl FunctionBinding {
     #[must_use]
     pub fn dispatched(dispatch: FunctionDispatch) -> Self {
         Self {
+            object_id: None,
             name: dispatch.label().into(),
             argument_types: Vec::new(),
             builtin: true,
@@ -269,6 +274,7 @@ impl FunctionBinding {
     #[must_use]
     pub fn undefined_function(name: impl Into<String>, signature: impl Into<String>) -> Self {
         Self {
+            object_id: None,
             name: name.into(),
             argument_types: Vec::new(),
             builtin: false,

@@ -183,7 +183,7 @@ fn insert_action_routine_inputs(
                     .iter()
                     .map(|assignment| assignment.value.clone()),
             );
-            expressions.extend(predicate.iter().cloned());
+            expressions.extend(predicate.iter().map(Box::as_ref).cloned());
         }
     }
     expressions.extend(

@@ -96,8 +96,7 @@ impl Engine {
 
     pub(crate) fn rules_depending_on_routine(
         &self,
-        name: &str,
-        argument_types: &[String],
+        target: &uqa_sql::ast::FunctionBinding,
     ) -> StorageBackendResult<Vec<(RelationIdentity, String)>> {
         let rules = self.durable.rules.read();
         let mut dependents = Vec::new();
@@ -111,7 +110,14 @@ impl Engine {
                     ))
                 })?;
                 if dependencies.routines.iter().any(|dependency| {
-                    dependency.name == name && dependency.argument_types == argument_types
+                    match (dependency.object_id, target.object_id) {
+                        (Some(dependency), Some(target)) => dependency == target,
+                        (None, None) => {
+                            dependency.name == target.name
+                                && dependency.argument_types == target.argument_types
+                        }
+                        _ => false,
+                    }
                 }) {
                     dependents.push((event_relation.clone(), rule.definition.name.clone()));
                 }
@@ -119,6 +125,98 @@ impl Engine {
         }
         dependents.sort();
         Ok(dependents)
+    }
+
+    pub(crate) fn rewrite_event_routine_identity(
+        &self,
+        target: &uqa_sql::ast::FunctionBinding,
+        new_name: &str,
+    ) -> Result<(), SQLError> {
+        let mut next_triggers = self.durable.triggers.read().clone();
+        let mut triggers_changed = false;
+        for trigger in next_triggers.values_mut().flat_map(BTreeMap::values_mut) {
+            let matches = match (trigger.function_object_id, target.object_id) {
+                (Some(stored), Some(target)) => stored == target,
+                (None, None) => {
+                    target.argument_types.is_empty() && trigger.definition.function == target.name
+                }
+                _ => false,
+            };
+            if matches {
+                trigger.definition.function = new_name.to_string();
+                triggers_changed = true;
+            }
+        }
+        if triggers_changed {
+            self.persist_trigger_catalog_snapshot(&next_triggers)?;
+            *self.durable.triggers.write() = next_triggers;
+        }
+
+        let mut next_rules = self.durable.rules.read().clone();
+        let mut rules_changed = false;
+        for (event_relation, entries) in &mut next_rules {
+            for rule in entries.values_mut() {
+                let references_target = rule
+                    .dependencies
+                    .as_ref()
+                    .ok_or_else(|| {
+                        SQLError::Internal(format!(
+                            "rule `{}` on `{}` has no bound dependency state",
+                            rule.definition.name,
+                            event_relation.qualified_name()
+                        ))
+                    })?
+                    .routines
+                    .iter()
+                    .any(
+                        |dependency| match (dependency.object_id, target.object_id) {
+                            (Some(dependency), Some(target)) => dependency == target,
+                            (None, None) => {
+                                dependency.name == target.name
+                                    && dependency.argument_types == target.argument_types
+                            }
+                            _ => false,
+                        },
+                    );
+                if !references_target {
+                    continue;
+                }
+                if let Some(condition) = &mut rule.definition.condition {
+                    super::rewrite_expression_routine_identity(condition, target, new_name)?;
+                }
+                for action in &mut rule.definition.actions {
+                    super::rewrite_statement_routine_identity(action, target, new_name)?;
+                }
+                super::synchronize_rule_sql_text(&mut rule.definition)?;
+                let (validated_relation, condition_plan, condition_binding, dependencies) = self
+                    .validate_rule_definition(
+                        &mut rule.definition,
+                        RelationLookupMode::Bound,
+                        None,
+                        None,
+                    )?;
+                if &validated_relation != event_relation {
+                    return Err(SQLError::Internal(format!(
+                        "rewritten rule `{}` moved from `{}` to `{}`",
+                        rule.definition.name,
+                        event_relation.qualified_name(),
+                        validated_relation.qualified_name()
+                    )));
+                }
+                rule.condition_plan = condition_plan;
+                rule.condition_binding = condition_binding;
+                rule.dependencies = Some(dependencies);
+                rules_changed = true;
+            }
+        }
+        if rules_changed {
+            self.persist_rule_catalog_snapshot(&next_rules)?;
+            *self.durable.rules.write() = next_rules;
+        }
+        if triggers_changed || rules_changed {
+            self.note_catalog_registry_changed();
+        }
+        Ok(())
     }
 
     pub(crate) fn drop_relation_events_inner(

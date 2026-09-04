@@ -9,7 +9,7 @@
 use super::relations::{
     collect_def_elem_options, validate_materialized_view_options, validate_view_options,
 };
-use super::routines::compile_drop_function;
+use super::routines::{compile_drop_function, compile_object_with_args, CompiledRoutineTarget};
 use super::types::{
     compile_foreign_key_action, compile_foreign_key_match, validate_foreign_key_set_columns,
 };
@@ -20,7 +20,8 @@ use super::{
     TableKeyConstraint, TableKeyConstraintKind,
 };
 use crate::ast::{
-    AlterSequence, EventEnableMode, ForeignKey, RelationPersistence, SequenceLifecycle, TableCheck,
+    AlterRoutineKind, AlterSequence, EventEnableMode, ForeignKey, RelationPersistence,
+    RenameRoutineStmt, SequenceLifecycle, TableCheck,
 };
 
 fn extract_strings(nodes: &[pg_query::protobuf::Node]) -> Result<Vec<String>> {
@@ -824,6 +825,35 @@ fn collect_reset_reloption_names(nodes: &[Node], kind: AlterViewKind) -> Result<
 
 pub(super) fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<Statement> {
     use pg_query::protobuf::ObjectType;
+    let (routine_kind, context) = match stmt.rename_type() {
+        ObjectType::ObjectFunction => (Some(AlterRoutineKind::Function), "ALTER FUNCTION"),
+        ObjectType::ObjectProcedure => (Some(AlterRoutineKind::Procedure), "ALTER PROCEDURE"),
+        ObjectType::ObjectRoutine => (Some(AlterRoutineKind::Routine), "ALTER ROUTINE"),
+        _ => (None, "RENAME"),
+    };
+    if let Some(kind) = routine_kind {
+        let Some(NodeEnum::ObjectWithArgs(object)) = stmt
+            .object
+            .as_deref()
+            .and_then(|object| object.node.as_ref())
+        else {
+            return Err(SQLError::Internal(format!(
+                "{context}: malformed routine target"
+            )));
+        };
+        let CompiledRoutineTarget {
+            name,
+            arg_types,
+            arg_type_references,
+        } = compile_object_with_args(object, context)?;
+        return Ok(Statement::RenameRoutine(RenameRoutineStmt {
+            kind,
+            name,
+            arg_types,
+            arg_type_references,
+            new_name: render_relation_component(&stmt.newname),
+        }));
+    }
     let relation = stmt
         .relation
         .as_ref()

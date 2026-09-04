@@ -21,8 +21,12 @@ pub(crate) use rule_binding::{
     rule_statement_references_row, rule_statement_references_whole_row, rule_statement_row_columns,
 };
 pub(crate) use rule_condition_binding::RuleConditionBinding;
+pub(crate) use rule_dependencies::{
+    bind_rule_statement_routines, rewrite_expression_routine_identity,
+    rewrite_statement_routine_identity,
+};
 
-const RULE_CATALOG_FORMAT_VERSION: u32 = 2;
+const RULE_CATALOG_FORMAT_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct RuleDependencies {
@@ -42,6 +46,8 @@ pub(crate) struct RuleColumnDependency {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub(crate) struct RuleRoutineDependency {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) object_id: Option<[u8; 16]>,
     pub(crate) name: String,
     pub(crate) argument_types: Vec<String>,
 }
@@ -49,6 +55,8 @@ pub(crate) struct RuleRoutineDependency {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct StoredTrigger {
     pub(crate) definition: CreateTrigger,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) function_object_id: Option<[u8; 16]>,
     #[serde(default)]
     pub(crate) enabled: EventEnableMode,
     #[serde(default)]

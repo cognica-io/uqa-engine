@@ -549,11 +549,12 @@ fn bind_insert(
                             })
                             .collect::<Result<Vec<_>, SQLError>>()?,
                         r#where: bind_optional_expr(
-                            r#where.as_ref(),
+                            r#where.as_deref(),
                             resolver,
                             &conflict_scope,
                             &context,
-                        )?,
+                        )?
+                        .map(Box::new),
                     },
                 },
             })

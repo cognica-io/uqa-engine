@@ -144,7 +144,7 @@ impl<'a> SetProjection<'a> {
             Some(binding) if binding.builtin => false,
             Some(binding) => self
                 .engine
-                .lookup_bound_sql_functions(&binding.name)
+                .lookup_bound_sql_functions_by_binding(binding)
                 .is_some(),
             None => self
                 .engine

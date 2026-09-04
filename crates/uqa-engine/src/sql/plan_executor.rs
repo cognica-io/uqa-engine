@@ -500,6 +500,10 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 self.engine.alter_sql_routine_owner(statement)?;
                 Ok(SQLResult::empty())
             }
+            CommandPlan::RenameRoutine(statement) => {
+                self.engine.rename_sql_routine(statement)?;
+                Ok(SQLResult::empty())
+            }
             CommandPlan::GrantRoutine(statement) => {
                 self.engine.grant_sql_routine(statement)?;
                 Ok(SQLResult::empty())

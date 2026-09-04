@@ -92,6 +92,18 @@ pub struct AlterRoutineOwnerStmt {
     pub new_owner: String,
 }
 
+/// `ALTER FUNCTION | PROCEDURE | ROUTINE name[(input_types)] RENAME TO new_name`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenameRoutineStmt {
+    pub kind: AlterRoutineKind,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arg_types: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub arg_type_references: Vec<Option<RoutineColumnTypeReference>>,
+    pub new_name: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GrantRoutineItem {
     pub name: String,

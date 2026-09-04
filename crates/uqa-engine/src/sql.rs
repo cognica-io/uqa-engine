@@ -124,7 +124,7 @@ pub(crate) use ddl::{
 };
 use dml::{index_vectors_for_type, run_delete, run_insert, run_merge, run_update};
 use from_rows::{build_join_spill_with_ctes, engine_func_intercept, ColumnPrune, QualifierFilters};
-pub(crate) use generated::refresh_stored_generated_columns;
+pub(crate) use generated::{prepare_generated_columns, refresh_stored_generated_columns};
 pub(in crate::sql) use hierarchy::{
     partition_constraint_accepts_document, partition_insert_target,
     prospective_partition_bound_accepts_document, validate_hash_partition_spec,

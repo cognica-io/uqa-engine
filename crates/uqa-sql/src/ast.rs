@@ -301,7 +301,7 @@ pub enum OnConflictAction {
     /// target matches.
     Update {
         assignments: Vec<(String, Expr)>,
-        r#where: Option<Expr>,
+        r#where: Option<Box<Expr>>,
     },
 }
 
@@ -665,6 +665,7 @@ pub enum Statement {
     /// `ALTER FUNCTION | PROCEDURE | ROUTINE name[(input_types)]` volatility and null-input attributes.
     AlterRoutine(AlterRoutineStmt),
     AlterRoutineOwner(AlterRoutineOwnerStmt),
+    RenameRoutine(RenameRoutineStmt),
     GrantRoutine(GrantRoutineStmt),
     GrantTable(GrantTableStmt),
     GrantSequence(GrantSequenceStmt),

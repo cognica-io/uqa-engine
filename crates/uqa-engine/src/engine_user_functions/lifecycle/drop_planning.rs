@@ -99,6 +99,7 @@ impl Engine {
             if let Some((key, position)) = target {
                 let function = &registry[&key][position];
                 let target = RoutineDropTarget {
+                    object_id: function.def.object_id,
                     name: key,
                     argument_types: routine_signature_types(&function.def),
                     is_procedure: function.def.is_procedure,
@@ -179,17 +180,23 @@ impl Engine {
         let mut dependent_rules = Vec::new();
         for target in targets {
             if !target.is_procedure {
-                let columns =
-                    self.generated_function_dependents(&target.name, &target.argument_types)?;
+                let binding = target.binding();
+                let columns = self.generated_function_dependents(&binding)?;
                 let views = self
-                    .views_depending_on_function(&target.name, &target.argument_types)
+                    .views_depending_on_function(&binding)
                     .map_err(|error| {
                         SQLError::Internal(format!("read view function dependencies: {error}"))
                     })?;
                 let triggers = if target.argument_types.is_empty() {
                     self.list_triggers()
                         .into_iter()
-                        .filter(|trigger| trigger.definition.function == target.name)
+                        .filter(
+                            |trigger| match (trigger.function_object_id, target.object_id) {
+                                (Some(trigger), Some(target)) => trigger == target,
+                                (None, None) => trigger.definition.function == target.name,
+                                _ => false,
+                            },
+                        )
                         .map(|trigger| {
                             (
                                 trigger.definition.table.clone(),
@@ -201,7 +208,7 @@ impl Engine {
                     Vec::new()
                 };
                 let rules = self
-                    .rules_depending_on_routine(&target.name, &target.argument_types)
+                    .rules_depending_on_routine(&binding)
                     .map_err(|error| {
                         SQLError::Internal(format!("read rule function dependencies: {error}"))
                     })?
@@ -359,8 +366,7 @@ impl Engine {
 
     fn generated_function_dependents(
         &self,
-        name: &str,
-        argument_types: &[String],
+        target: &uqa_sql::ast::FunctionBinding,
     ) -> Result<Vec<(String, String)>, SQLError> {
         let mut dependents = Vec::new();
         for table in self.table_names().map_err(|error| {
@@ -377,7 +383,7 @@ impl Engine {
                     continue;
                 };
                 if generated.function_dependencies.iter().any(|dependency| {
-                    dependency.name == name && dependency.argument_types == argument_types
+                    crate::engine_session::function_binding_matches(dependency, target)
                 }) {
                     dependents.push((table.clone(), column.name));
                 }

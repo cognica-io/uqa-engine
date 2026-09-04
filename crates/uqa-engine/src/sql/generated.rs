@@ -12,7 +12,7 @@ use uqa_storage::document_store::Document;
 
 mod typing;
 
-pub(in crate::sql) fn prepare_generated_columns(
+pub(crate) fn prepare_generated_columns(
     engine: &Engine,
     qualifier: &str,
     columns: &mut [ColumnDef],

@@ -177,6 +177,49 @@ impl Engine {
         Ok(function)
     }
 
+    pub(crate) fn resolve_bound_trigger_function(
+        &self,
+        name: &str,
+        object_id: Option<[u8; 16]>,
+    ) -> Result<Arc<SQLUserFunction>, SQLError> {
+        let Some(object_id) = object_id else {
+            return self.resolve_trigger_function(name, RelationLookupMode::Bound);
+        };
+        let binding = uqa_sql::ast::FunctionBinding {
+            object_id: Some(object_id),
+            name: name.to_string(),
+            argument_types: Vec::new(),
+            builtin: false,
+            dispatch: None,
+            invocation: None,
+            resolution_error: None,
+        };
+        let candidates = self
+            .lookup_bound_sql_functions_by_binding(&binding)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|function| {
+                !function.def.is_procedure && routine_signature_types(&function.def).is_empty()
+            })
+            .collect::<Vec<_>>();
+        let function = match candidates.as_slice() {
+            [function] => function.clone(),
+            [] => {
+                return Err(SQLError::Routine {
+                    sqlstate: "42883".into(),
+                    message: format!("function {name}() does not exist"),
+                })
+            }
+            _ => {
+                return Err(SQLError::Internal(format!(
+                    "routine object identity for trigger function `{name}` is not unique"
+                )))
+            }
+        };
+        Self::validate_trigger_function(&function)?;
+        Ok(function)
+    }
+
     fn ensure_trigger_creation_privilege(
         &self,
         relation: &RelationIdentity,
