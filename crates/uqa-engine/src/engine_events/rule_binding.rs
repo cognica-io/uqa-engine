@@ -717,6 +717,7 @@ fn bind_from(
         },
         FromClause::Function {
             name,
+            binding,
             output_name,
             relations,
             args,
@@ -726,6 +727,7 @@ fn bind_from(
             column_types,
         } => FromClause::Function {
             name: name.clone(),
+            binding: binding.clone(),
             output_name: output_name.clone(),
             relations: relations.clone(),
             args: bind_exprs(args, resolver, inherited, context)?,
@@ -745,6 +747,7 @@ fn bind_from(
                 .map(|function| {
                     Ok(uqa_sql::ast::TableFunction {
                         name: function.name.clone(),
+                        binding: function.binding.clone(),
                         output_name: function.output_name.clone(),
                         relations: function.relations.clone(),
                         args: bind_exprs(&function.args, resolver, inherited, context)?,

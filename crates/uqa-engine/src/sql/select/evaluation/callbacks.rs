@@ -65,9 +65,11 @@ impl CteScope {
     }
 
     pub(in crate::sql) fn new_for_catalog_binding(engine: &Engine) -> Self {
+        let mut resolution = engine.session_execution_view().relation_name_resolution();
+        resolution.set_lookup_mode(crate::engine_capabilities::RelationLookupMode::Bound);
         Self {
             catalog: Some(engine.restored_catalog_read_view()),
-            catalog_resolution: Some(engine.session_execution_view().relation_name_resolution()),
+            catalog_resolution: Some(resolution),
             ..Self::default()
         }
     }

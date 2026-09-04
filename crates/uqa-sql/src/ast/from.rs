@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{Expr, InternalRelationId, SelectStmt};
+use super::{Expr, FunctionBinding, InternalRelationId, SelectStmt};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum FromClause {
@@ -74,6 +74,9 @@ pub enum FromClause {
     /// dispatches by name.
     Function {
         name: String,
+        /// Exact catalog routine identity for a stored expression tree. Parser-produced trees leave this unset and catalog owners bind it before persistence.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        binding: Option<FunctionBinding>,
         /// Local function identifier used as `PostgreSQL`'s default output column label. Kept separate from the catalog-qualified lookup name so quoted identifiers containing `.` remain indivisible.
         output_name: String,
         /// Catalog relations bound to a tuple-producing operator join, kept separate from scalar arguments so each operand retains its own name-resolution, dependency, planning, and execution context.
@@ -132,6 +135,9 @@ const fn default_include_descendants() -> bool {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TableFunction {
     pub name: String,
+    /// Exact catalog routine identity for a stored expression tree. Parser-produced trees leave this unset and catalog owners bind it before persistence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding: Option<FunctionBinding>,
     pub output_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relations: Option<OperatorJoinRelations>,

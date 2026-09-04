@@ -412,6 +412,7 @@ fn legacy_stored_rule_actions_restore_as_bound_relation_identities() {
         let encoded = catalog.get_metadata("sql_rules_json").unwrap().unwrap();
         let mut metadata: serde_json::Value = serde_json::from_str(&encoded).unwrap();
         assert_eq!(remove_target_binding_marker(&mut metadata), 1);
+        metadata["format_version"] = serde_json::Value::from(0);
         catalog
             .set_metadata("sql_rules_json", &serde_json::to_string(&metadata).unwrap())
             .unwrap();

@@ -13,6 +13,38 @@ use crate::engine_capabilities::RelationResolution;
 use crate::engine_state::SequenceSecurity;
 use uqa_sql::ast::RelationPersistence;
 
+struct SequenceDropDependents {
+    columns: Vec<(String, String)>,
+    views: Vec<String>,
+    rules: Vec<(RelationIdentity, String)>,
+}
+
+impl SequenceDropDependents {
+    fn ensure_empty_for_restrict(&self, name: &str) -> Result<(), SQLError> {
+        if self.columns.is_empty() && self.views.is_empty() && self.rules.is_empty() {
+            return Ok(());
+        }
+        let mut dependents = self
+            .columns
+            .iter()
+            .map(|(table, column)| format!("{table}.{column}"))
+            .collect::<Vec<_>>();
+        dependents.extend(self.views.iter().map(|view| format!("view {view}")));
+        dependents.extend(
+            self.rules
+                .iter()
+                .map(|(table, rule)| format!("rule {rule} on table {}", table.qualified_name())),
+        );
+        Err(SQLError::Routine {
+            sqlstate: "2BP01".into(),
+            message: format!(
+                "cannot drop sequence {name} because other objects depend on it: {}",
+                dependents.join(", ")
+            ),
+        })
+    }
+}
+
 impl Engine {
     /// Resolve a sequence reference at DDL binding time using the current
     /// `search_path`. Persisted expressions must store the returned canonical
@@ -724,6 +756,51 @@ impl Engine {
         self.drop_sequences_sql_inner_with_owner(names, cascade, false)
     }
 
+    fn sequence_drop_dependents(&self, name: &str) -> Result<SequenceDropDependents, SQLError> {
+        let columns = self
+            .sequence_schema_expression_dependents(name)
+            .map_err(|error| {
+                SQLError::Internal(format!(
+                    "inspect column dependencies for sequence `{name}`: {error}"
+                ))
+            })?;
+        let views = self.views_depending_on_sequence(name).map_err(|error| {
+            SQLError::Internal(format!(
+                "inspect view dependencies for sequence `{name}`: {error}"
+            ))
+        })?;
+        let rules = self
+            .rules_depending_on_relations(&[name.to_string()])
+            .map_err(|error| {
+                SQLError::Internal(format!(
+                    "inspect rule dependencies for sequence `{name}`: {error}"
+                ))
+            })?;
+        Ok(SequenceDropDependents {
+            columns,
+            views,
+            rules,
+        })
+    }
+
+    fn drop_rules_for_sequence_cascade(
+        &self,
+        names: &[String],
+        cascade_views: &[String],
+    ) -> Result<(), SQLError> {
+        self.drop_rules_depending_on_relations_inner(names)
+            .map_err(|error| {
+                SQLError::Internal(format!("drop rules depending on sequence: {error}"))
+            })?;
+        if !cascade_views.is_empty() {
+            self.drop_rules_depending_on_relations_inner(cascade_views)
+                .map_err(|error| {
+                    SQLError::Internal(format!("drop rules depending on cascading views: {error}"))
+                })?;
+        }
+        Ok(())
+    }
+
     fn drop_sequences_sql_inner_with_owner(
         &self,
         names: &[String],
@@ -759,38 +836,19 @@ impl Engine {
                     });
                 }
             }
-            let columns = self
-                .sequence_schema_expression_dependents(name)
-                .map_err(|error| {
-                    SQLError::Internal(format!(
-                        "inspect column dependencies for sequence `{name}`: {error}"
-                    ))
-                })?;
-            let views = self.views_depending_on_sequence(name).map_err(|error| {
-                SQLError::Internal(format!(
-                    "inspect view dependencies for sequence `{name}`: {error}"
-                ))
-            })?;
-            if !cascade && (!columns.is_empty() || !views.is_empty()) {
-                let mut dependents = columns
-                    .iter()
-                    .map(|(table, column)| format!("{table}.{column}"))
-                    .collect::<Vec<_>>();
-                dependents.extend(views.iter().map(|view| format!("view {view}")));
-                return Err(SQLError::Routine {
-                    sqlstate: "2BP01".into(),
-                    message: format!(
-                        "cannot drop sequence {name} because other objects depend on it: {}",
-                        dependents.join(", ")
-                    ),
-                });
+            let dependents = self.sequence_drop_dependents(name)?;
+            if !cascade {
+                dependents.ensure_empty_for_restrict(name)?;
             }
-            cascade_columns.extend(columns);
-            direct_views.extend(views);
+            cascade_columns.extend(dependents.columns);
+            direct_views.extend(dependents.views);
         }
         cascade_columns.sort();
         cascade_columns.dedup();
         let cascade_views = self.cascade_view_closure(direct_views)?;
+        if cascade {
+            self.drop_rules_for_sequence_cascade(names, &cascade_views)?;
+        }
         if cascade && !cascade_views.is_empty() {
             self.drop_views_inner(&cascade_views, false)?;
         }

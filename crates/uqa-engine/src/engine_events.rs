@@ -7,6 +7,7 @@
 //! Durable row-trigger and rewrite-rule registries with PostgreSQL-compatible lifecycle.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 use uqa_sql::ast::{CreateRule, CreateTrigger, EventEnableMode};
 use uqa_sql::SQLError;
@@ -22,6 +23,22 @@ pub(crate) use rule_binding::{
     rule_statement_row_columns,
 };
 pub(crate) use rule_condition_binding::RuleConditionBinding;
+
+const RULE_CATALOG_FORMAT_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct RuleDependencies {
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub(crate) relations: BTreeSet<crate::RelationIdentity>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub(crate) routines: BTreeSet<RuleRoutineDependency>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub(crate) struct RuleRoutineDependency {
+    pub(crate) name: String,
+    pub(crate) argument_types: Vec<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct StoredTrigger {
@@ -43,6 +60,8 @@ pub(crate) struct StoredRule {
     pub(crate) condition_plan: Option<uqa_planner::ExpressionPlan>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) condition_binding: Option<RuleConditionBinding>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) dependencies: Option<RuleDependencies>,
 }
 
 impl StoredRule {
@@ -63,6 +82,8 @@ struct StoredTriggerCatalog {
 
 #[derive(Default, Serialize, Deserialize)]
 struct StoredRuleCatalog {
+    #[serde(default)]
+    format_version: u32,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     rules: Vec<StoredRule>,
 }
@@ -94,4 +115,5 @@ mod persistence;
 mod registry;
 mod rule_binding;
 mod rule_condition_binding;
+mod rule_dependencies;
 mod validation;

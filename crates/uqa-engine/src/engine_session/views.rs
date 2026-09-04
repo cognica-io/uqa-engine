@@ -253,6 +253,7 @@ impl Engine {
             }
         }
         let views = views.into_iter().collect::<Vec<_>>();
+        self.drop_rules_depending_on_relations_inner(&views)?;
         self.drop_views_inner(&views, false)
             .map_err(|error| StorageBackendError::Other(error.to_string()))
     }
@@ -284,8 +285,34 @@ impl Engine {
         })
     }
 
-    pub(crate) fn drop_views(&self, names: &[String]) -> Result<(), SQLError> {
-        self.with_implicit_transaction(|engine| engine.drop_views_inner(names, true))
+    pub(crate) fn drop_views(&self, names: &[String], cascade: bool) -> Result<(), SQLError> {
+        self.with_implicit_transaction(|engine| {
+            if !cascade {
+                return engine.drop_views_inner(names, true);
+            }
+            engine.ensure_view_drop_authorities(names)?;
+            let closure = engine.cascade_view_closure(names.to_vec())?;
+            engine
+                .drop_rules_depending_on_relations_inner(&closure)
+                .map_err(|error| {
+                    SQLError::Internal(format!("drop rules depending on cascading views: {error}"))
+                })?;
+            engine.drop_views_inner(&closure, false)
+        })
+    }
+
+    fn ensure_view_drop_authorities(&self, names: &[String]) -> Result<(), SQLError> {
+        let views = self.durable.views.read();
+        for name in names {
+            let relation = RelationIdentity::from_legacy_name(name).map_err(|error| {
+                SQLError::Internal(format!("resolve DROP VIEW target `{name}`: {error}"))
+            })?;
+            let view = views.get(&relation).ok_or_else(|| {
+                SQLError::Internal(format!("view `{name}` disappeared before owner check"))
+            })?;
+            self.ensure_view_drop_authority(name, view)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn drop_views_inner(
@@ -298,16 +325,27 @@ impl Engine {
             .cloned()
             .collect::<std::collections::BTreeSet<_>>();
         if check_authority {
-            let views = self.durable.views.read();
-            for name in names {
-                let relation = RelationIdentity::from_legacy_name(name).map_err(|error| {
-                    SQLError::Internal(format!("resolve DROP VIEW target `{name}`: {error}"))
-                })?;
-                let view = views.get(&relation).ok_or_else(|| {
-                    SQLError::Internal(format!("view `{name}` disappeared before owner check"))
-                })?;
-                self.ensure_view_drop_authority(name, view)?;
-            }
+            self.ensure_view_drop_authorities(names)?;
+        }
+        let dependent_rules = self
+            .rules_depending_on_relations(names)
+            .map_err(|error| SQLError::Internal(format!("inspect rule dependencies: {error}")))?;
+        if !dependent_rules.is_empty() {
+            return Err(SQLError::Routine {
+                sqlstate: "2BP01".into(),
+                message: format!(
+                    "cannot drop view {} because other objects depend on it: {}",
+                    names.join(", "),
+                    dependent_rules
+                        .into_iter()
+                        .map(|(table, rule)| format!(
+                            "rule {rule} on table {}",
+                            table.qualified_name()
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            });
         }
         for name in names {
             let dependents = self

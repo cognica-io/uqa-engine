@@ -15,6 +15,111 @@ use uqa_sql::SQLError;
 use crate::{Engine, RelationIdentity, StorageBackendError, StorageBackendResult};
 
 impl Engine {
+    pub(crate) fn rules_depending_on_relations(
+        &self,
+        relations: &[String],
+    ) -> StorageBackendResult<Vec<(RelationIdentity, String)>> {
+        let targets = relations
+            .iter()
+            .map(|relation| {
+                RelationIdentity::from_legacy_name(relation).map_err(StorageBackendError::Other)
+            })
+            .collect::<StorageBackendResult<std::collections::BTreeSet<_>>>()?;
+        let rules = self.durable.rules.read();
+        let mut dependents = Vec::new();
+        for (event_relation, entries) in rules.iter() {
+            if targets.contains(event_relation) {
+                continue;
+            }
+            for rule in entries.values() {
+                let dependencies = rule.dependencies.as_ref().ok_or_else(|| {
+                    StorageBackendError::Other(format!(
+                        "rule `{}` on `{}` has no bound dependency state",
+                        rule.definition.name,
+                        event_relation.qualified_name()
+                    ))
+                })?;
+                if dependencies
+                    .relations
+                    .iter()
+                    .any(|dependency| targets.contains(dependency))
+                {
+                    dependents.push((event_relation.clone(), rule.definition.name.clone()));
+                }
+            }
+        }
+        dependents.sort();
+        Ok(dependents)
+    }
+
+    pub(crate) fn drop_rules_depending_on_relations_inner(
+        &self,
+        relations: &[String],
+    ) -> StorageBackendResult<()> {
+        let dependents = self.rules_depending_on_relations(relations)?;
+        if dependents.is_empty() {
+            return Ok(());
+        }
+        let mut rules = self.durable.rules.write();
+        let mut next = rules.clone();
+        for (event_relation, name) in &dependents {
+            let removed = next
+                .get_mut(event_relation)
+                .and_then(|entries| entries.remove(name));
+            if removed.is_none() {
+                return Err(StorageBackendError::Other(format!(
+                    "dependent rule `{name}` on `{}` disappeared after DROP preflight",
+                    event_relation.qualified_name()
+                )));
+            }
+            if next.get(event_relation).is_some_and(BTreeMap::is_empty) {
+                next.remove(event_relation);
+            }
+        }
+        self.persist_rule_catalog_snapshot(&next)
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+        *rules = next;
+        drop(rules);
+        for (event_relation, name) in dependents {
+            self.push_sql_notice(
+                "NOTICE",
+                &format!(
+                    "drop cascades to rule {name} on table {}",
+                    event_relation.qualified_name()
+                ),
+            );
+        }
+        self.note_catalog_registry_changed();
+        Ok(())
+    }
+
+    pub(crate) fn rules_depending_on_routine(
+        &self,
+        name: &str,
+        argument_types: &[String],
+    ) -> StorageBackendResult<Vec<(RelationIdentity, String)>> {
+        let rules = self.durable.rules.read();
+        let mut dependents = Vec::new();
+        for (event_relation, entries) in rules.iter() {
+            for rule in entries.values() {
+                let dependencies = rule.dependencies.as_ref().ok_or_else(|| {
+                    StorageBackendError::Other(format!(
+                        "rule `{}` on `{}` has no bound dependency state",
+                        rule.definition.name,
+                        event_relation.qualified_name()
+                    ))
+                })?;
+                if dependencies.routines.iter().any(|dependency| {
+                    dependency.name == name && dependency.argument_types == argument_types
+                }) {
+                    dependents.push((event_relation.clone(), rule.definition.name.clone()));
+                }
+            }
+        }
+        dependents.sort();
+        Ok(dependents)
+    }
+
     pub(crate) fn drop_relation_events_inner(
         &self,
         relation: &RelationIdentity,
@@ -90,7 +195,24 @@ impl Engine {
                 trigger.definition.referenced_table.as_deref() == Some(from_name.as_str())
             })
         });
-        if !triggers.contains_key(from) && !rules.contains_key(from) && !referenced_by_trigger {
+        let mut referenced_by_rule = false;
+        for (event_relation, entries) in rules.iter() {
+            for rule in entries.values() {
+                let dependencies = rule.dependencies.as_ref().ok_or_else(|| {
+                    StorageBackendError::Other(format!(
+                        "rule `{}` on `{}` has no bound dependency state",
+                        rule.definition.name,
+                        event_relation.qualified_name()
+                    ))
+                })?;
+                referenced_by_rule |= dependencies.relations.contains(from);
+            }
+        }
+        if !triggers.contains_key(from)
+            && !rules.contains_key(from)
+            && !referenced_by_trigger
+            && !referenced_by_rule
+        {
             return Ok(());
         }
         let mut next_triggers = triggers.clone();
@@ -113,6 +235,18 @@ impl Engine {
                 rule.definition.table = to.qualified_name();
             }
             next_rules.insert(to.clone(), entries);
+        }
+        for entries in next_rules.values_mut() {
+            for rule in entries.values_mut() {
+                super::rule_dependencies::rewrite_stored_rule_relation(rule, from, to).map_err(
+                    |error| {
+                        StorageBackendError::Other(format!(
+                            "rewrite rule `{}` relation dependency: {error}",
+                            rule.definition.name
+                        ))
+                    },
+                )?;
+            }
         }
         self.persist_trigger_catalog_snapshot(&next_triggers)
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;

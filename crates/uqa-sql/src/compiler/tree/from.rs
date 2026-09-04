@@ -119,6 +119,7 @@ fn compile_table_function(call: &Node, column_definitions: &[Node]) -> Result<Ta
     let column_definitions = compile_column_definitions(column_definitions)?;
     Ok(TableFunction {
         name,
+        binding: None,
         output_name,
         relations,
         args,
@@ -147,6 +148,7 @@ fn compile_range_function_members(node: &Node) -> Result<Vec<TableFunction>> {
             .map(|argument| {
                 Ok(TableFunction {
                     name: "pg_catalog.unnest".into(),
+                    binding: None,
                     output_name: "unnest".into(),
                     relations: None,
                     args: vec![compile_expr(argument)?],
@@ -320,6 +322,7 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
             let coldef_aliases: Vec<String> = coldefs.into_iter().map(|(name, _)| name).collect();
             Ok(FromClause::Function {
                 name: function.name,
+                binding: function.binding,
                 output_name: function.output_name,
                 relations: function.relations,
                 args: function.args,

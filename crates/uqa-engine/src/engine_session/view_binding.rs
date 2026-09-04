@@ -9,7 +9,7 @@
 use super::{QueryPlan, RelationIdentity, RelationalPlan, ScalarExpr, SourcePlan, Value};
 use uqa_sql::ast::FunctionBinding;
 
-pub(super) fn canonical_virtual_relation_reference(reference: &str) -> Option<String> {
+pub(crate) fn canonical_virtual_relation_reference(reference: &str) -> Option<String> {
     let (schema, relation) = RelationIdentity::parse_reference(reference).ok()?;
     let relation = relation.to_ascii_lowercase();
     let schema = schema.map(|schema| schema.to_ascii_lowercase());
@@ -105,7 +105,7 @@ pub(super) fn bind_query_plan_sequence_references<E>(
     error.map_or(Ok(()), Err)
 }
 
-pub(super) fn bind_query_plan_relations<E>(
+pub(crate) fn bind_query_plan_relations<E>(
     plan: &mut QueryPlan,
     inherited_ctes: &std::collections::BTreeSet<String>,
     resolve: &mut impl FnMut(&str) -> Result<String, E>,

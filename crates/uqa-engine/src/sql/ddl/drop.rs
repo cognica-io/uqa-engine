@@ -33,23 +33,12 @@ pub(in crate::sql) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLRes
         return run_drop_index(engine, stmt);
     }
     if stmt.cascade
-        && matches!(
-            stmt.kind,
-            DropKind::View | DropKind::MaterializedView | DropKind::Schema
-        )
-        && !(stmt.kind == DropKind::Schema
-            && only_graph_namespaces(engine, &stmt.names, stmt.if_exists)?)
+        && stmt.kind == DropKind::Schema
+        && !only_graph_namespaces(engine, &stmt.names, stmt.if_exists)?
     {
-        return Err(SQLError::Unsupported(format!(
-            "DROP {} CASCADE is not supported; no objects were changed",
-            match stmt.kind {
-                DropKind::View => "VIEW",
-                DropKind::MaterializedView => "MATERIALIZED VIEW",
-                DropKind::Schema => "SCHEMA",
-                DropKind::Table | DropKind::ForeignTable | DropKind::Index | DropKind::Sequence =>
-                    unreachable!(),
-            }
-        )));
+        return Err(SQLError::Unsupported(
+            "DROP SCHEMA CASCADE is not supported; no objects were changed".into(),
+        ));
     }
     let mut lock_targets = std::collections::BTreeSet::new();
     match stmt.kind {
@@ -222,10 +211,27 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
             }
             let mut dependents = std::collections::BTreeSet::new();
             for table in &foreign_tables {
-                dependents.extend(engine.views_depending_on_relation(table).map_err(|error| {
-                    ddl_storage_error("DROP FOREIGN TABLE dependency preflight", error)
-                })?);
+                dependents.extend(
+                    engine
+                        .views_depending_on_relation(table)
+                        .map_err(|error| {
+                            ddl_storage_error("DROP FOREIGN TABLE dependency preflight", error)
+                        })?
+                        .into_iter()
+                        .map(|view| format!("view {view}")),
+                );
             }
+            dependents.extend(
+                engine
+                    .rules_depending_on_relations(&foreign_tables)
+                    .map_err(|error| {
+                        ddl_storage_error("DROP FOREIGN TABLE dependency preflight", error)
+                    })?
+                    .into_iter()
+                    .map(|(table, rule)| {
+                        format!("rule {rule} on table {}", table.qualified_name())
+                    }),
+            );
             if !stmt.cascade && !dependents.is_empty() {
                 return Err(SQLError::Routine {
                     sqlstate: "2BP01".into(),
@@ -237,6 +243,9 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
                 });
             }
             if stmt.cascade {
+                engine
+                    .drop_rules_depending_on_relations_inner(&foreign_tables)
+                    .map_err(|error| ddl_storage_error("DROP FOREIGN TABLE CASCADE", error))?;
                 engine
                     .drop_views_depending_on_relations(&foreign_tables)
                     .map_err(|error| ddl_storage_error("DROP FOREIGN TABLE CASCADE", error))?;
@@ -285,7 +294,7 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
                     }
                 }
             }
-            engine.drop_views(&views)?;
+            engine.drop_views(&views, stmt.cascade)?;
         }
         DropKind::Sequence => {
             let mut sequences = Vec::new();

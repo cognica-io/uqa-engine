@@ -241,6 +241,57 @@ fn rule_catalog_enable_rename_drop_and_reopen_are_durable() {
 }
 
 #[test]
+fn current_rule_catalog_rejects_missing_bound_routine_state() {
+    use uqa_storage::{Catalog, ManagedConnection};
+
+    fn remove_first_binding(value: &mut serde_json::Value) -> bool {
+        match value {
+            serde_json::Value::Object(fields) => {
+                if fields
+                    .get("binding")
+                    .is_some_and(|binding| !binding.is_null())
+                {
+                    fields.remove("binding");
+                    return true;
+                }
+                fields.values_mut().any(remove_first_binding)
+            }
+            serde_json::Value::Array(values) => values.iter_mut().any(remove_first_binding),
+            _ => false,
+        }
+    }
+
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("rule-binding-corruption.uqa");
+    {
+        let engine = Engine::open(&path).unwrap();
+        exec(
+            &engine,
+            "CREATE FUNCTION bound_rule_value(value INTEGER) RETURNS INTEGER
+               LANGUAGE SQL IMMUTABLE AS 'SELECT $1';
+             CREATE TABLE bound_rule_events(id INTEGER);
+             CREATE TABLE bound_rule_log(id INTEGER);
+             CREATE RULE bound_rule_catalog AS ON INSERT TO bound_rule_events DO ALSO
+               INSERT INTO bound_rule_log VALUES (bound_rule_value(NEW.id))",
+        );
+    }
+    {
+        let catalog = Catalog::open(ManagedConnection::open(&path).unwrap()).unwrap();
+        let encoded = catalog.get_metadata("sql_rules_json").unwrap().unwrap();
+        let mut metadata: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(metadata["format_version"], serde_json::Value::from(1));
+        assert!(remove_first_binding(&mut metadata));
+        catalog
+            .set_metadata("sql_rules_json", &serde_json::to_string(&metadata).unwrap())
+            .unwrap();
+    }
+    let Err(error) = Engine::open(&path) else {
+        panic!("current rule catalog must not repair missing binding state");
+    };
+    assert!(error.to_string().contains("is not fully bound"), "{error}");
+}
+
+#[test]
 fn returning_rule_action_targets_restore_without_session_search_path() {
     let directory = TempDir::new().unwrap();
     let path = directory.path().join("returning-rules.db");

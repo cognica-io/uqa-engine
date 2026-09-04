@@ -48,7 +48,6 @@ fn cascade_flags_and_wrong_relation_kinds_fail_before_side_effects() {
 
     for (sql, expected) in [
         ("DROP SCHEMA app CASCADE", "DROP SCHEMA CASCADE"),
-        ("DROP VIEW app.items_view CASCADE", "DROP VIEW CASCADE"),
         (
             "ALTER TABLE app.items DROP COLUMN id CASCADE",
             "DROP COLUMN CASCADE",
@@ -91,6 +90,8 @@ fn cascade_flags_and_wrong_relation_kinds_fail_before_side_effects() {
         engine.table_columns("app.items").unwrap(),
         vec!["id", "kept"]
     );
+    engine.sql("DROP VIEW app.items_view CASCADE", &[]).unwrap();
+    assert!(engine.view("app.items_view").unwrap().is_none());
 
     engine.sql("CREATE SCHEMA routine_app", &[]).unwrap();
     engine

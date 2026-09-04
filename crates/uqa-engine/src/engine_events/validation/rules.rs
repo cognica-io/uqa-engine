@@ -12,6 +12,7 @@ use super::{
     RuleRowTypeResolver, SQLError, Statement, StoredViewKind, Value,
 };
 use crate::engine_events::RuleConditionBinding;
+use crate::engine_events::RuleDependencies;
 
 fn rule_condition_has_subquery(condition: &Expr) -> bool {
     condition.any_node(&|node| {
@@ -47,6 +48,41 @@ fn rule_condition_row_schema(
     }
     let schema = uqa_execution::RowSchema::with_identities(names, identities, types);
     uqa_execution::RowSchema::with_physical_internal_aliases(&schema, &internal)
+}
+
+fn validate_rule_action_contract(definition: &CreateRule) -> Result<(), SQLError> {
+    if definition.condition.is_some()
+        && definition.actions.iter().any(rule_action_has_set_operation)
+    {
+        return Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: "conditional UNION/INTERSECT/EXCEPT statements are not implemented".into(),
+        });
+    }
+    let returning_actions = definition
+        .actions
+        .iter()
+        .filter(|action| rule_action_has_returning(action))
+        .count();
+    if returning_actions > 1 {
+        return Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: "cannot have multiple RETURNING lists in a rule".into(),
+        });
+    }
+    if returning_actions != 0 && definition.condition.is_some() {
+        return Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: "RETURNING lists are not supported in conditional rules".into(),
+        });
+    }
+    if returning_actions != 0 && !definition.instead {
+        return Err(SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: "RETURNING lists are not supported in non-INSTEAD rules".into(),
+        });
+    }
+    Ok(())
 }
 
 impl Engine {
@@ -325,8 +361,9 @@ impl Engine {
         event_columns: &[(String, ColumnType)],
         event: RuleEvent,
         lookup_mode: RelationLookupMode,
-    ) -> Result<(), SQLError> {
+    ) -> Result<RuleDependencies, SQLError> {
         self.canonicalize_rule_action_target(action, lookup_mode)?;
+        let mut dependencies = self.bind_rule_action_relation_dependencies(action, lookup_mode)?;
         let action_row_type = self.rule_action_target_row_type(action)?;
         let action_columns: std::collections::BTreeSet<String> = action_row_type
             .iter()
@@ -358,10 +395,68 @@ impl Engine {
             self.has_registered_aggregate_function(name)
         });
         crate::sql::reject_stored_plan_regrole_constants(self, &mut stored_plan)?;
+        let bound_routines = crate::sql::bind_catalog_rule_action_routines(self, &stored_plan)?;
+        if let Some(routine_plan) = &bound_routines.query {
+            super::super::rule_dependencies::collect_query_routine_dependencies(
+                routine_plan,
+                &mut dependencies,
+            );
+        }
+        super::super::rule_dependencies::bind_rule_statement_routines(
+            action,
+            &bound_routines.references,
+        )?;
         if let Some(schema) = schema {
             validate_rule_returning_shape(&schema, event_columns)?;
         }
-        Ok(())
+        Ok(dependencies)
+    }
+
+    fn bind_rule_condition_object_dependencies(
+        &self,
+        condition: &mut Expr,
+        condition_plan: Option<&uqa_planner::ExpressionPlan>,
+        columns: &[(String, ColumnType)],
+        event: RuleEvent,
+        dependencies: &mut RuleDependencies,
+    ) -> Result<(), SQLError> {
+        if let Some(plan) = condition_plan {
+            super::super::rule_dependencies::collect_expression_routine_dependencies(
+                plan,
+                dependencies,
+            );
+            for subquery in &plan.subqueries {
+                super::super::rule_dependencies::collect_query_relation_dependencies(
+                    subquery,
+                    dependencies,
+                    &std::collections::BTreeSet::new(),
+                )?;
+            }
+            let routine_references = crate::sql::collect_expression_routine_references(plan)?;
+            super::super::rule_dependencies::bind_rule_expr_routines(
+                condition,
+                &routine_references,
+            )?;
+            return Ok(());
+        }
+
+        let bound = bind_expr(condition, &mut RuleRowTypeResolver { columns, event })?;
+        let mut dependency_plan = uqa_planner::ExpressionPlan::lower_with(bound, &|name: &str| {
+            self.has_registered_aggregate_function(name)
+        });
+        crate::sql::bind_catalog_expression_routines_with_outer(
+            self,
+            &mut dependency_plan,
+            &[],
+            &uqa_execution::RowSchema::default(),
+        )?;
+        super::super::rule_dependencies::collect_expression_routine_dependencies(
+            &dependency_plan,
+            dependencies,
+        );
+        let routine_references =
+            crate::sql::collect_expression_routine_references(&dependency_plan)?;
+        super::super::rule_dependencies::bind_rule_expr_routines(condition, &routine_references)
     }
 
     pub(in crate::engine_events) fn validate_rule_definition(
@@ -375,6 +470,7 @@ impl Engine {
             RelationIdentity,
             Option<uqa_planner::ExpressionPlan>,
             Option<RuleConditionBinding>,
+            RuleDependencies,
         ),
         SQLError,
     > {
@@ -398,6 +494,14 @@ impl Engine {
         let is_view = stored_view_kind == Some(StoredViewKind::View);
         Self::validate_select_rule_contract(definition, is_view)?;
         let columns = self.rule_relation_columns(&definition.table)?;
+        let mut dependencies = RuleDependencies::default();
+        if let Some(condition) = &mut definition.condition {
+            let condition_dependencies =
+                self.bind_rule_condition_relation_dependencies(condition, lookup_mode)?;
+            dependencies
+                .relations
+                .extend(condition_dependencies.relations);
+        }
         let condition = definition
             .condition
             .as_mut()
@@ -416,40 +520,26 @@ impl Engine {
             || (None, None),
             |(plan, binding)| (Some(plan), Some(binding)),
         );
-        if definition.condition.is_some()
-            && definition.actions.iter().any(rule_action_has_set_operation)
-        {
-            return Err(SQLError::Routine {
-                sqlstate: "0A000".into(),
-                message: "conditional UNION/INTERSECT/EXCEPT statements are not implemented".into(),
-            });
+        if let Some(condition) = &mut definition.condition {
+            self.bind_rule_condition_object_dependencies(
+                condition,
+                condition_plan.as_ref(),
+                &columns,
+                definition.event,
+                &mut dependencies,
+            )?;
         }
-        let returning_actions = definition
-            .actions
-            .iter()
-            .filter(|action| rule_action_has_returning(action))
-            .count();
-        if returning_actions > 1 {
-            return Err(SQLError::Routine {
-                sqlstate: "0A000".into(),
-                message: "cannot have multiple RETURNING lists in a rule".into(),
-            });
-        }
-        if returning_actions != 0 && definition.condition.is_some() {
-            return Err(SQLError::Routine {
-                sqlstate: "0A000".into(),
-                message: "RETURNING lists are not supported in conditional rules".into(),
-            });
-        }
-        if returning_actions != 0 && !definition.instead {
-            return Err(SQLError::Routine {
-                sqlstate: "0A000".into(),
-                message: "RETURNING lists are not supported in non-INSTEAD rules".into(),
-            });
-        }
+        validate_rule_action_contract(definition)?;
         for action in &mut definition.actions {
-            self.validate_rule_action_definition(action, &columns, definition.event, lookup_mode)?;
+            let action_dependencies = self.validate_rule_action_definition(
+                action,
+                &columns,
+                definition.event,
+                lookup_mode,
+            )?;
+            dependencies.relations.extend(action_dependencies.relations);
+            dependencies.routines.extend(action_dependencies.routines);
         }
-        Ok((relation, condition_plan, condition_binding))
+        Ok((relation, condition_plan, condition_binding, dependencies))
     }
 }

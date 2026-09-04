@@ -33,6 +33,7 @@ struct SQLFunctionDropPlan {
     dependent_views: Vec<String>,
     dependent_columns: Vec<(String, String)>,
     dependent_triggers: Vec<(String, String)>,
+    dependent_rules: Vec<(String, String)>,
     notices: Vec<(&'static str, String)>,
 }
 
@@ -46,6 +47,7 @@ struct RoutineObjectDependents {
     views: Vec<String>,
     columns: Vec<(String, String)>,
     triggers: Vec<(String, String)>,
+    rules: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -168,6 +170,12 @@ fn append_routine_cascade_notice(
             .triggers
             .iter()
             .map(|(table, trigger)| format!("trigger {trigger} on table {table}")),
+    );
+    cascaded.extend(
+        dependents
+            .rules
+            .iter()
+            .map(|(table, rule)| format!("rule {rule} on table {table}")),
     );
     cascaded.sort();
     cascaded.dedup();

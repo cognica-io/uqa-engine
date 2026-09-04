@@ -309,6 +309,73 @@ fn rename_shadowing_query_qualifier(
     }
 }
 
+fn collect_query_source_qualifiers(query: &QueryPlan, qualifiers: &mut BTreeSet<String>) {
+    for cte in &query.ctes {
+        qualifiers.insert(cte.name.clone());
+        collect_query_source_qualifiers(&cte.query, qualifiers);
+    }
+    match &query.root {
+        RelationalPlan::QueryBlock(block) => {
+            if let Some(source) = &block.from {
+                collect_source_qualifiers(source, qualifiers);
+            }
+            for subquery in &block.subqueries {
+                collect_query_source_qualifiers(subquery, qualifiers);
+            }
+        }
+        RelationalPlan::SetOp {
+            left,
+            right,
+            subqueries,
+            ..
+        } => {
+            collect_query_source_qualifiers(left, qualifiers);
+            collect_query_source_qualifiers(right, qualifiers);
+            for subquery in subqueries {
+                collect_query_source_qualifiers(subquery, qualifiers);
+            }
+        }
+        RelationalPlan::Values { subqueries, .. } => {
+            for subquery in subqueries {
+                collect_query_source_qualifiers(subquery, qualifiers);
+            }
+        }
+    }
+}
+
+fn collect_source_qualifiers(source: &SourcePlan, qualifiers: &mut BTreeSet<String>) {
+    if let Some(qualifier) = source.visible_qualifier() {
+        qualifiers.insert(qualifier.to_string());
+    }
+    match source {
+        SourcePlan::Join { left, right, .. } => {
+            collect_source_qualifiers(left, qualifiers);
+            collect_source_qualifiers(right, qualifiers);
+        }
+        SourcePlan::Subquery { body, .. } => collect_query_source_qualifiers(body, qualifiers),
+        SourcePlan::Table { .. }
+        | SourcePlan::Values { .. }
+        | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. } => {}
+    }
+}
+
+fn fresh_query_qualifier(query: &QueryPlan) -> String {
+    let mut qualifiers = BTreeSet::new();
+    collect_query_source_qualifiers(query, &mut qualifiers);
+    let mut query = query.clone();
+    query.rewrite_scalar_expressions(&mut |expression| match expression {
+        ScalarExpr::QualifiedColumn { qualifier, .. } | ScalarExpr::QualifiedStar(qualifier) => {
+            qualifiers.insert(qualifier.clone());
+        }
+        _ => {}
+    });
+    (0..=qualifiers.len())
+        .map(|index| format!("__uqa_view_subquery_local_{index}"))
+        .find(|candidate| !qualifiers.contains(candidate))
+        .expect("one of N+1 generated qualifiers must be absent from an N-name set")
+}
+
 struct LayerSubqueryRewriteContext<'a> {
     engine: &'a Engine,
     layer: &'a AutomaticViewLayer,
@@ -599,12 +666,8 @@ pub(super) fn embed_layer_expression(
         target_qualifier,
     };
     for subquery in &mut subqueries {
-        rename_shadowing_query_qualifier(
-            subquery,
-            target_qualifier,
-            "\0uqa_view_subquery_local",
-            false,
-        );
+        let local_qualifier = fresh_query_qualifier(subquery);
+        rename_shadowing_query_qualifier(subquery, target_qualifier, &local_qualifier, false);
         rewrite_layer_source_query(
             &context,
             subquery,

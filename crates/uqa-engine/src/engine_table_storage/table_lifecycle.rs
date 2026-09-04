@@ -90,6 +90,11 @@ impl Engine {
                     .map(|view| format!("view {view}")),
             );
         }
+        dependents.extend(
+            self.rules_depending_on_relations(canonical_names)?
+                .into_iter()
+                .map(|(table, rule)| format!("rule {rule} on table {}", table.qualified_name())),
+        );
         for (candidate_name, table) in entries {
             if target_names.contains(candidate_name) {
                 continue;
@@ -258,6 +263,7 @@ impl Engine {
             )));
         }
         if cascade {
+            self.drop_rules_depending_on_relations_inner(&canonical_names)?;
             self.drop_views_depending_on_relations(&canonical_names)?;
             for (name, table, columns, checks, foreign_keys, key_constraints) in &updates {
                 self.persist_constraint_candidate(

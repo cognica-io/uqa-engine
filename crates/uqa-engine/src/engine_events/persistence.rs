@@ -18,7 +18,9 @@ use crate::{
     RULES_METADATA_KEY, TRIGGERS_METADATA_KEY,
 };
 
-use super::{StoredRule, StoredRuleCatalog, StoredTrigger, StoredTriggerCatalog};
+use super::{
+    StoredRule, StoredRuleCatalog, StoredTrigger, StoredTriggerCatalog, RULE_CATALOG_FORMAT_VERSION,
+};
 
 impl Engine {
     fn rule_relation_is_temporary(&self, relation: &RelationIdentity) -> bool {
@@ -68,6 +70,7 @@ impl Engine {
             return Ok(());
         };
         let snapshot = StoredRuleCatalog {
+            format_version: RULE_CATALOG_FORMAT_VERSION,
             rules: rules
                 .iter()
                 .filter(|(relation, _)| !self.rule_relation_is_temporary(relation))
@@ -89,6 +92,13 @@ impl Engine {
             Some(json) => serde_json::from_str::<StoredRuleCatalog>(&json)?,
             None => StoredRuleCatalog::default(),
         };
+        if stored.format_version > RULE_CATALOG_FORMAT_VERSION {
+            return Err(StorageBackendError::Other(format!(
+                "rule catalog format {} is newer than supported format {RULE_CATALOG_FORMAT_VERSION}",
+                stored.format_version
+            )));
+        }
+        let legacy_catalog = stored.format_version == 0;
         let temporary_rules = self
             .durable
             .rules
@@ -99,6 +109,11 @@ impl Engine {
             .collect::<BTreeMap<_, _>>();
         let mut rules = temporary_rules;
         for mut rule in stored.rules {
+            let persisted_definition = if legacy_catalog {
+                None
+            } else {
+                Some(serde_json::to_string(&rule.definition)?)
+            };
             if let Some(condition) = &mut rule.definition.condition {
                 condition.upgrade_legacy_serialized_dispatches();
             }
@@ -107,7 +122,7 @@ impl Engine {
             }
             let stored_condition_plan = rule.condition_plan.clone();
             let stored_condition_binding = rule.condition_binding.clone();
-            let (relation, condition_plan, condition_binding) = self
+            let (relation, condition_plan, condition_binding, dependencies) = self
                 .validate_rule_definition(
                     &mut rule.definition,
                     RelationLookupMode::Bound,
@@ -117,8 +132,24 @@ impl Engine {
                 .map_err(|error| {
                     StorageBackendError::Other(format!("restore rule catalog: {error}"))
                 })?;
+            if !legacy_catalog && rule.dependencies.as_ref() != Some(&dependencies) {
+                return Err(StorageBackendError::Other(format!(
+                    "restore rule catalog: persisted dependencies for rule `{}` do not match its definition",
+                    rule.definition.name
+                )));
+            }
+            if let Some(persisted_definition) = persisted_definition {
+                let validated_definition = serde_json::to_string(&rule.definition)?;
+                if persisted_definition != validated_definition {
+                    return Err(StorageBackendError::Other(format!(
+                        "restore rule catalog: persisted definition for rule `{}` is not fully bound",
+                        rule.definition.name
+                    )));
+                }
+            }
             rule.condition_plan = condition_plan;
             rule.condition_binding = condition_binding;
+            rule.dependencies = Some(dependencies);
             let name = rule.definition.name.clone();
             if rules
                 .entry(relation)
@@ -132,6 +163,11 @@ impl Engine {
             }
         }
         *self.durable.rules.write() = rules;
+        if legacy_catalog {
+            let rules = self.durable.rules.read();
+            self.persist_rule_catalog_snapshot(&rules)
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+        }
         Ok(())
     }
 

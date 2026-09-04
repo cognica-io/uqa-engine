@@ -44,6 +44,7 @@ impl Engine {
             dependent_views: dependents.views,
             dependent_columns: dependents.columns,
             dependent_triggers: dependents.triggers,
+            dependent_rules: dependents.rules,
             notices: resolution.notices,
         })
     }
@@ -175,6 +176,7 @@ impl Engine {
         let mut dependent_views = Vec::new();
         let mut dependent_columns = Vec::new();
         let mut dependent_triggers = Vec::new();
+        let mut dependent_rules = Vec::new();
         for target in targets {
             if !target.is_procedure {
                 let columns =
@@ -198,10 +200,19 @@ impl Engine {
                 } else {
                     Vec::new()
                 };
+                let rules = self
+                    .rules_depending_on_routine(&target.name, &target.argument_types)
+                    .map_err(|error| {
+                        SQLError::Internal(format!("read rule function dependencies: {error}"))
+                    })?
+                    .into_iter()
+                    .map(|(table, rule)| (table.qualified_name(), rule))
+                    .collect::<Vec<_>>();
                 if cascade {
                     dependent_columns.extend(columns);
                     dependent_views.extend(views);
                     dependent_triggers.extend(triggers);
+                    dependent_rules.extend(rules);
                 } else {
                     Self::ensure_no_function_dependencies(
                         &target.name,
@@ -209,6 +220,7 @@ impl Engine {
                         &columns,
                         &views,
                         &triggers,
+                        &rules,
                     )?;
                 }
             }
@@ -216,12 +228,27 @@ impl Engine {
         dependent_columns.sort();
         dependent_columns.dedup();
         dependent_views = self.cascade_view_closure(dependent_views)?;
+        if cascade && !dependent_views.is_empty() {
+            dependent_rules.extend(
+                self.rules_depending_on_relations(&dependent_views)
+                    .map_err(|error| {
+                        SQLError::Internal(format!(
+                            "read rules depending on cascading function views: {error}"
+                        ))
+                    })?
+                    .into_iter()
+                    .map(|(table, rule)| (table.qualified_name(), rule)),
+            );
+        }
         dependent_triggers.sort();
         dependent_triggers.dedup();
+        dependent_rules.sort();
+        dependent_rules.dedup();
         Ok(RoutineObjectDependents {
             views: dependent_views,
             columns: dependent_columns,
             triggers: dependent_triggers,
+            rules: dependent_rules,
         })
     }
 
@@ -235,8 +262,17 @@ impl Engine {
             dependent_views,
             dependent_columns,
             dependent_triggers,
+            dependent_rules,
             notices,
         } = plan;
+        for (table, name) in &dependent_rules {
+            self.drop_rule(&uqa_sql::ast::DropRule {
+                name: name.clone(),
+                table: table.clone(),
+                if_exists: false,
+                cascade: true,
+            })?;
+        }
         for (table, name) in &dependent_triggers {
             self.drop_trigger(&uqa_sql::ast::DropTrigger {
                 name: name.clone(),
@@ -357,8 +393,9 @@ impl Engine {
         generated: &[(String, String)],
         views: &[String],
         triggers: &[(String, String)],
+        rules: &[(String, String)],
     ) -> Result<(), SQLError> {
-        if generated.is_empty() && views.is_empty() && triggers.is_empty() {
+        if generated.is_empty() && views.is_empty() && triggers.is_empty() && rules.is_empty() {
             return Ok(());
         }
         let mut dependency_kinds = Vec::new();
@@ -381,6 +418,16 @@ impl Engine {
                 triggers
                     .iter()
                     .map(|(table, trigger)| format!("{trigger} on {table}"))
+                    .collect::<Vec<_>>()
+                    .join("`, `")
+            ));
+        }
+        if !rules.is_empty() {
+            dependency_kinds.push(format!(
+                "rule(s) `{}`",
+                rules
+                    .iter()
+                    .map(|(table, rule)| format!("{rule} on {table}"))
                     .collect::<Vec<_>>()
                     .join("`, `")
             ));

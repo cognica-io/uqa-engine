@@ -58,6 +58,12 @@ impl Engine {
         } else {
             self.move_sequence_state(source, &target)?;
         }
+        self.rename_relation_events_inner(source, &target)
+            .map_err(|error| {
+                SQLError::Internal(format!(
+                    "rewrite rule dependencies for sequence `{source_name}`: {error}"
+                ))
+            })?;
         self.note_catalog_registry_changed();
         Ok(())
     }

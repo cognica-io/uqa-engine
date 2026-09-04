@@ -394,6 +394,7 @@ pub(super) fn bind_from(from: &FromClause, r: &mut dyn VariableResolver) -> Resu
         },
         FromClause::Function {
             name,
+            binding,
             output_name,
             relations,
             args,
@@ -403,6 +404,7 @@ pub(super) fn bind_from(from: &FromClause, r: &mut dyn VariableResolver) -> Resu
             column_types,
         } => FromClause::Function {
             name: name.clone(),
+            binding: binding.clone(),
             output_name: output_name.clone(),
             relations: relations.clone(),
             args: bind_exprs(args, r)?,
@@ -422,6 +424,7 @@ pub(super) fn bind_from(from: &FromClause, r: &mut dyn VariableResolver) -> Resu
                 .map(|function| {
                     Ok(crate::ast::TableFunction {
                         name: function.name.clone(),
+                        binding: function.binding.clone(),
                         output_name: function.output_name.clone(),
                         relations: function.relations.clone(),
                         args: bind_exprs(&function.args, r)?,
