@@ -65,6 +65,14 @@ pub trait VariableResolver {
             .map(ResolvedVariable::into_expression))
     }
 
+    /// Expand `qualifier.*` when the containing SQL construct treats it as a
+    /// list item. Scalar binding deliberately does not call this hook because
+    /// `PostgreSQL` treats the same syntax as a composite whole-row value in
+    /// scalar contexts.
+    fn rewrite_qualified_star(&mut self, _qualifier: &str) -> Result<Option<Vec<Expr>>> {
+        Ok(None)
+    }
+
     /// Expression-level counterpart of [`Self::resolve_param`].
     fn rewrite_param(&mut self, index: usize) -> Result<Option<Expr>> {
         Ok(self

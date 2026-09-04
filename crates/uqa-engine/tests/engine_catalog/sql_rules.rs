@@ -20,6 +20,8 @@ mod privilege_subjects;
 mod privileges;
 #[path = "sql_rules/returning.rs"]
 mod returning;
+#[path = "sql_rules/row_expansion.rs"]
+mod row_expansion;
 
 fn exec(engine: &Engine, sql: &str) -> uqa_engine::SQLResult {
     engine

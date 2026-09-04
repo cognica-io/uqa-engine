@@ -17,6 +17,9 @@ use uqa_sql::ast::{
 use uqa_sql::plpgsql::{bind_statement, ResolvedVariable, VariableResolver};
 use uqa_sql::SQLError;
 
+mod row_expansion;
+pub(crate) use row_expansion::expand_rule_action_row_stars;
+
 #[derive(Default)]
 struct RuleRowReferenceDetector {
     qualifier: Option<String>,
@@ -250,7 +253,7 @@ pub(crate) fn bind_rule_expr_scoped(
         Expr::Default | Expr::Literal(_) | Expr::Star | Expr::QualifiedStar(_) => expr.clone(),
         Expr::Func { .. } => bind_rule_function_expression(expr, resolver, shadowed)?,
         Expr::Array(items) => Expr::Array(bind_exprs(items, resolver, shadowed)?),
-        Expr::Row(items) => Expr::Row(bind_exprs(items, resolver, shadowed)?),
+        Expr::Row(items) => Expr::Row(bind_expanding_exprs(items, resolver, shadowed)?),
         Expr::Binary { op, lhs, rhs } => Expr::Binary {
             op: *op,
             lhs: Box::new(bind_rule_expr_scoped(lhs, resolver, shadowed)?),
@@ -449,7 +452,7 @@ fn bind_insert(
     output.rows = insert
         .rows
         .iter()
-        .map(|row| bind_exprs(row, resolver, inherited))
+        .map(|row| bind_expanding_exprs(row, resolver, inherited))
         .collect::<Result<Vec<_>, SQLError>>()?;
     output.select_source = insert
         .select_source
@@ -536,7 +539,7 @@ fn bind_select_with_scope(
         values: select
             .values
             .iter()
-            .map(|row| bind_exprs(row, resolver, &scope))
+            .map(|row| bind_expanding_exprs(row, resolver, &scope))
             .collect::<Result<Vec<_>, SQLError>>()?,
         from: select
             .from
@@ -775,15 +778,51 @@ fn bind_projections(
     resolver: &mut dyn VariableResolver,
     shadowed: &BTreeSet<String>,
 ) -> Result<Vec<Projection>, SQLError> {
-    projections
-        .iter()
-        .map(|projection| {
-            Ok(Projection {
+    let mut bound = Vec::with_capacity(projections.len());
+    for projection in projections {
+        if let Some(expressions) = expand_qualified_star(&projection.expr, resolver, shadowed)? {
+            bound.extend(expressions.into_iter().map(|expr| Projection {
+                expr,
+                alias: projection.alias.clone(),
+            }));
+        } else {
+            bound.push(Projection {
                 expr: bind_rule_expr_scoped(&projection.expr, resolver, shadowed)?,
                 alias: projection.alias.clone(),
-            })
-        })
-        .collect()
+            });
+        }
+    }
+    Ok(bound)
+}
+
+fn bind_expanding_exprs(
+    expressions: &[Expr],
+    resolver: &mut dyn VariableResolver,
+    shadowed: &BTreeSet<String>,
+) -> Result<Vec<Expr>, SQLError> {
+    let mut bound = Vec::with_capacity(expressions.len());
+    for expression in expressions {
+        if let Some(expressions) = expand_qualified_star(expression, resolver, shadowed)? {
+            bound.extend(expressions);
+        } else {
+            bound.push(bind_rule_expr_scoped(expression, resolver, shadowed)?);
+        }
+    }
+    Ok(bound)
+}
+
+fn expand_qualified_star(
+    expression: &Expr,
+    resolver: &mut dyn VariableResolver,
+    shadowed: &BTreeSet<String>,
+) -> Result<Option<Vec<Expr>>, SQLError> {
+    let Expr::QualifiedStar(qualifier) = expression else {
+        return Ok(None);
+    };
+    if qualifier_is_shadowed(shadowed, qualifier) {
+        return Ok(None);
+    }
+    resolver.rewrite_qualified_star(qualifier)
 }
 
 fn bind_exprs(

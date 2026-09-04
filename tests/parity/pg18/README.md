@@ -132,6 +132,12 @@ docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/pa
 docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/rule_condition_subquery_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/rule_condition_subquery_oracle.expected.txt -
 ```
 
+`rule_row_expansion_oracle.sql` records PostgreSQL 18.4 rewrite-rule action-row expansion. The checked-in transcript verifies multi-row `OLD.*` and `NEW.*` expansion in `VALUES` rows, `SELECT` target lists, and `ROW` constructors; event-side SQLSTATEs; nested local-alias shadowing; CTE and set-operation scope rejection; creation-time stability across added columns; rename and drop dependencies; and cascade cleanup.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/rule_row_expansion_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/rule_row_expansion_oracle.expected.txt -
+```
+
 `foreign_table_trigger_oracle.sql` records PostgreSQL 18.4 foreign-table trigger definition and lifecycle behavior. The checked-in transcript verifies ordinary row and statement forms, replacement, `UPDATE OF`, `WHEN`, `TRUNCATE`, invalid constraint, transition, and `INSTEAD OF` forms, target and function authorization, `pg_trigger`, `relhastriggers`, enable, rename, drop, owner transfer, rollback, function dependencies, and relation-drop cleanup.
 
 ```sh

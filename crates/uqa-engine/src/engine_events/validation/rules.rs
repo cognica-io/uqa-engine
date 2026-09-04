@@ -372,8 +372,16 @@ impl Engine {
         }
         for action in &mut definition.actions {
             self.canonicalize_rule_action_target(action, lookup_mode)?;
-            validate_rule_action_reference_scopes(action)?;
             let action_columns = self.rule_action_target_columns(action)?;
+            if lookup_mode == RelationLookupMode::Dynamic {
+                *action = crate::engine_events::expand_rule_action_row_stars(
+                    action,
+                    &action_columns,
+                    &columns,
+                    definition.event,
+                )?;
+            }
+            validate_rule_action_reference_scopes(action)?;
             let bound = crate::engine_events::bind_rule_action(
                 action,
                 &action_columns,
