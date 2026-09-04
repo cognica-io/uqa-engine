@@ -85,6 +85,12 @@ DROP ROLE uqa_routine_rename_owner;
 
 CREATE FUNCTION uqa_routine_rename_oracle.base(value integer) RETURNS integer LANGUAGE SQL IMMUTABLE RETURN value + 1;
 CREATE FUNCTION uqa_routine_rename_oracle.standard_caller(value integer) RETURNS integer LANGUAGE SQL RETURN uqa_routine_rename_oracle.base(value);
+CREATE TABLE uqa_routine_rename_oracle.command_sink(value integer);
+CREATE TABLE uqa_routine_rename_oracle.command_merge_target(id integer PRIMARY KEY, value integer);
+CREATE TABLE uqa_routine_rename_oracle.command_merge_source(id integer, value integer);
+INSERT INTO uqa_routine_rename_oracle.command_merge_source VALUES (1, 4);
+CREATE PROCEDURE uqa_routine_rename_oracle.command_caller(value integer) LANGUAGE SQL BEGIN ATOMIC INSERT INTO uqa_routine_rename_oracle.command_sink VALUES (uqa_routine_rename_oracle.base(value)); UPDATE uqa_routine_rename_oracle.command_sink SET value = uqa_routine_rename_oracle.base(command_sink.value) WHERE false; DELETE FROM uqa_routine_rename_oracle.command_sink WHERE uqa_routine_rename_oracle.base(command_sink.value) < 0; MERGE INTO uqa_routine_rename_oracle.command_merge_target AS target USING uqa_routine_rename_oracle.command_merge_source AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET value = uqa_routine_rename_oracle.base(source.value) WHEN NOT MATCHED THEN INSERT (id, value) VALUES (source.id, uqa_routine_rename_oracle.base(source.value)); END;
+CREATE FUNCTION uqa_routine_rename_oracle.default_caller(value integer DEFAULT uqa_routine_rename_oracle.base(1)) RETURNS integer LANGUAGE SQL AS 'SELECT $1';
 CREATE FUNCTION uqa_routine_rename_oracle.sql_text_caller(value integer) RETURNS integer LANGUAGE SQL AS 'SELECT uqa_routine_rename_oracle.base($1)';
 CREATE FUNCTION uqa_routine_rename_oracle.plpgsql_text_caller(value integer) RETURNS integer LANGUAGE plpgsql AS $$ BEGIN RETURN uqa_routine_rename_oracle.base(value); END $$;
 CREATE VIEW uqa_routine_rename_oracle.bound_view AS SELECT uqa_routine_rename_oracle.base(6) AS value;
@@ -109,6 +115,15 @@ FROM uqa_routine_rename_oids saved
 JOIN pg_proc live ON live.oid = saved.object_id
 WHERE saved.label IN ('base', 'table-base', 'trigger');
 SELECT 'standard-body-deparse|' || (position('renamed_base' in pg_get_functiondef('uqa_routine_rename_oracle.standard_caller(integer)'::regprocedure)) > 0);
+SELECT 'command-body-deparse|' || (position('renamed_base' in pg_get_functiondef('uqa_routine_rename_oracle.command_caller(integer)'::regprocedure)) > 0);
+SELECT 'parameter-default-deparse|' || (position('renamed_base' in pg_get_function_arguments('uqa_routine_rename_oracle.default_caller(integer)'::regprocedure)) > 0);
+SELECT 'routine-dependency-count|' || count(*)
+FROM pg_depend dependency
+JOIN pg_proc dependent ON dependent.oid = dependency.objid
+WHERE dependency.classid = 'pg_proc'::regclass
+  AND dependency.refclassid = 'pg_proc'::regclass
+  AND dependency.refobjid = 'uqa_routine_rename_oracle.renamed_base(integer)'::regprocedure
+  AND dependent.proname IN ('standard_caller', 'command_caller', 'default_caller');
 SELECT 'view-deparse|' || (position('renamed_base' in view_definition) > 0)
 FROM information_schema.views WHERE table_schema = 'uqa_routine_rename_oracle' AND table_name = 'bound_view';
 SELECT 'table-view-deparse|' || (position('renamed_table_base' in view_definition) > 0)
@@ -122,6 +137,10 @@ FROM pg_rewrite WHERE ev_class = 'uqa_routine_rename_oracle.rule_source'::regcla
 SELECT 'trigger-deparse|' || (position('renamed_trigger' in pg_get_triggerdef(oid, true)) > 0)
 FROM pg_trigger WHERE tgrelid = 'uqa_routine_rename_oracle.trigger_source'::regclass AND tgname = 'increment_before';
 SELECT 'standard-call|' || uqa_routine_rename_oracle.standard_caller(4);
+CALL uqa_routine_rename_oracle.command_caller(4);
+SELECT 'command-call|' || value FROM uqa_routine_rename_oracle.command_sink ORDER BY value DESC LIMIT 1;
+SELECT 'merge-command-call|' || value FROM uqa_routine_rename_oracle.command_merge_target WHERE id = 1;
+SELECT 'parameter-default-call|' || uqa_routine_rename_oracle.default_caller();
 SELECT 'view-call|' || value FROM uqa_routine_rename_oracle.bound_view;
 SELECT 'table-view-call|' || output FROM uqa_routine_rename_oracle.bound_table_view;
 INSERT INTO uqa_routine_rename_oracle.generated_source VALUES (8);
@@ -135,7 +154,13 @@ SELECT pg_temp.routine_rename_probe('plpgsql-text-missing', 'SELECT uqa_routine_
 SELECT pg_temp.routine_rename_probe('dependent-restrict', 'DROP FUNCTION uqa_routine_rename_oracle.renamed_base(integer) RESTRICT');
 CREATE FUNCTION uqa_routine_rename_oracle.base(value integer) RETURNS integer LANGUAGE SQL IMMUTABLE RETURN value + 100;
 SELECT 'identity-isolation|' || uqa_routine_rename_oracle.standard_caller(4) || '|' || uqa_routine_rename_oracle.sql_text_caller(4) || '|' || uqa_routine_rename_oracle.plpgsql_text_caller(4);
+CALL uqa_routine_rename_oracle.command_caller(5);
+SELECT 'command-after-recreate|' || value FROM uqa_routine_rename_oracle.command_sink ORDER BY value DESC LIMIT 1;
+SELECT 'merge-command-after-recreate|' || value FROM uqa_routine_rename_oracle.command_merge_target WHERE id = 1;
+SELECT 'parameter-default-after-recreate|' || uqa_routine_rename_oracle.default_caller();
 DROP FUNCTION uqa_routine_rename_oracle.base(integer);
 SELECT 'bound-after-old-drop|' || uqa_routine_rename_oracle.standard_caller(4);
+DROP FUNCTION uqa_routine_rename_oracle.renamed_base(integer) CASCADE;
+SELECT 'routine-cascade|' || (to_regprocedure('uqa_routine_rename_oracle.command_caller(integer)') IS NULL) || '|' || (to_regprocedure('uqa_routine_rename_oracle.default_caller(integer)') IS NULL);
 
 DROP SCHEMA uqa_routine_rename_oracle CASCADE;

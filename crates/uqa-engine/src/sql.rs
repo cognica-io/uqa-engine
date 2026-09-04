@@ -43,6 +43,7 @@ mod age_cypher;
 mod aggregates;
 mod catalog;
 pub(crate) use catalog::snapshot_table_relation_oid;
+mod catalog_statement_routines;
 mod copy;
 mod correlation;
 mod cursor;
@@ -60,7 +61,6 @@ mod plpgsql_exec;
 mod read_only;
 mod regrole_dependencies;
 mod row_functions;
-mod rule_action_routines;
 mod rules;
 mod scalar;
 mod select;
@@ -75,6 +75,10 @@ mod volatility;
 mod where_eval;
 mod window;
 
+pub(crate) use catalog_statement_routines::{
+    bind_catalog_statement_routines, collect_expression_routine_references,
+    mark_catalog_statement_relations_bound, BoundRoutineReference,
+};
 pub use cursor::{SQLCursor, SQLCursorSummary};
 pub(crate) use driver::{execute, execute_nested};
 use mutability::{
@@ -88,10 +92,6 @@ pub(super) use planning::{
     optimize_engine_plan,
 };
 pub(crate) use plpgsql_exec::{call_bound_user_scalar_function, call_user_scalar_function};
-pub(crate) use rule_action_routines::{
-    bind_catalog_rule_action_routines, collect_expression_routine_references,
-    BoundRuleRoutineReference,
-};
 use select::query_has_row_locks;
 pub(crate) use select::{execute_query_plan, RowLockRetryCache};
 pub(crate) use triggers::fire_statement_triggers;

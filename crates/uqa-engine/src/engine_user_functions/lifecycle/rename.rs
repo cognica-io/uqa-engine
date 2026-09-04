@@ -45,7 +45,7 @@ impl Engine {
         *self.durable.sql_user_functions.write() = renamed_registry;
 
         let rewritten_registry =
-            self.rewrite_sql_standard_routine_identity(&target.binding, &target.new_name)?;
+            self.rewrite_routine_owned_dependency_identity(&target.binding, &target.new_name)?;
         *self.durable.sql_user_functions.write() = rewritten_registry.clone();
         self.rewrite_generated_routine_identity(&target.binding, &target.new_name)
             .map_err(|error| {
@@ -190,7 +190,7 @@ impl Engine {
         Ok(registry)
     }
 
-    fn rewrite_sql_standard_routine_identity(
+    fn rewrite_routine_owned_dependency_identity(
         &self,
         target: &FunctionBinding,
         new_name: &str,
@@ -202,6 +202,15 @@ impl Engine {
             for function in overloads {
                 let mut def = function.def.clone();
                 let mut changed = false;
+                for default in def
+                    .params
+                    .iter_mut()
+                    .filter_map(|parameter| parameter.default.as_mut())
+                {
+                    changed |= crate::engine_events::rewrite_expression_routine_identity(
+                        default, target, new_name,
+                    )?;
+                }
                 if let FunctionBody::Statements(statements) = &mut def.body {
                     for statement in statements {
                         changed |= crate::engine_events::rewrite_statement_routine_identity(

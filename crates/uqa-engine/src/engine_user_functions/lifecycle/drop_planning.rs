@@ -7,8 +7,8 @@
 use super::{
     alter_routine_kind_matches, alter_routine_kind_name, append_routine_cascade_notice,
     canonical_routine_type_name, role_inherits, routine_signature_label, routine_signature_types,
-    sql_standard_routine_dependents, wrong_routine_kind_error, AlterRoutineKind, Arc, BTreeMap,
-    BTreeSet, DropFunctionItem, DropFunctionStmt, Engine, RoutineDropResolution, RoutineDropTarget,
+    stored_routine_dependents, wrong_routine_kind_error, AlterRoutineKind, Arc, BTreeMap, BTreeSet,
+    DropFunctionItem, DropFunctionStmt, Engine, RoutineDropResolution, RoutineDropTarget,
     RoutineObjectDependents, SQLError, SQLFunctionDropPlan, SQLUserFunction,
 };
 
@@ -34,7 +34,7 @@ impl Engine {
         let mut resolution = self.resolve_sql_function_drop_targets(stmt, &registry, kind)?;
         self.ensure_routine_drop_owners(&registry, &resolution.targets)?;
         let cascaded_routines =
-            Self::expand_sql_standard_drop_dependents(&registry, stmt.cascade, &mut resolution)?;
+            Self::expand_stored_routine_drop_dependents(&registry, stmt.cascade, &mut resolution)?;
         let dependents = self.routine_object_dependents(&resolution.targets, stmt.cascade)?;
         if stmt.cascade {
             append_routine_cascade_notice(&mut resolution.notices, &cascaded_routines, &dependents);
@@ -132,7 +132,7 @@ impl Engine {
         Ok(resolution)
     }
 
-    fn expand_sql_standard_drop_dependents(
+    fn expand_stored_routine_drop_dependents(
         registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
         cascade: bool,
         resolution: &mut RoutineDropResolution,
@@ -146,7 +146,7 @@ impl Engine {
             if target.is_procedure {
                 continue;
             }
-            for dependent in sql_standard_routine_dependents(registry, &target) {
+            for dependent in stored_routine_dependents(registry, &target)? {
                 if explicit_targets.contains(&dependent)
                     || resolution.seen_targets.contains(&dependent)
                 {

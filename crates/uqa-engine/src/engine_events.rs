@@ -22,8 +22,9 @@ pub(crate) use rule_binding::{
 };
 pub(crate) use rule_condition_binding::RuleConditionBinding;
 pub(crate) use rule_dependencies::{
-    bind_rule_statement_routines, rewrite_expression_routine_identity,
-    rewrite_statement_routine_identity,
+    bind_stored_expression_routines, bind_stored_statement_routines,
+    expression_references_routine_identity, rewrite_expression_routine_identity,
+    rewrite_statement_routine_identity, statement_references_routine_identity,
 };
 
 const RULE_CATALOG_FORMAT_VERSION: u32 = 3;

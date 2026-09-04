@@ -4,30 +4,31 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Exact routine binding for catalog-owned rewrite-rule actions.
+//! Exact routine binding for catalog-owned statements.
 
 use uqa_execution::{RowSchema, ScalarExpr, ScalarFrameBound};
 use uqa_planner::{
     AccessPathPlan, CommandPlan, ComputePlan, ConflictActionPlan, CtePlan, DeletePlan, InsertPlan,
-    ProjectionPlan, QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan, UnifiedPlan, UpdatePlan,
+    JoinExecutionStrategy, MergePlan, ProjectionPlan, QueryBlockPlan, QueryPlan, RelationalPlan,
+    SourcePlan, UnifiedPlan, UpdatePlan,
 };
 use uqa_sql::ast::FunctionBinding;
 use uqa_sql::SQLError;
 
 use super::{Engine, Value};
 
-pub(crate) struct BoundRuleActionRoutines {
+pub(crate) struct BoundStatementRoutines {
     pub(crate) query: Option<QueryPlan>,
-    pub(crate) references: Vec<BoundRuleRoutineReference>,
+    pub(crate) references: Vec<BoundRoutineReference>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct BoundRuleRoutineReference {
+pub(crate) struct BoundRoutineReference {
     pub(crate) name: String,
     pub(crate) binding: Option<FunctionBinding>,
 }
 
-struct RuleCommandRoutineInputs {
+struct CommandRoutineInputs {
     ctes: Vec<CtePlan>,
     source: Option<SourcePlan>,
     expressions: Vec<ScalarExpr>,
@@ -35,10 +36,10 @@ struct RuleCommandRoutineInputs {
     outer: RowSchema,
 }
 
-pub(crate) fn bind_catalog_rule_action_routines(
+pub(crate) fn bind_catalog_statement_routines(
     engine: &Engine,
     plan: &UnifiedPlan,
-) -> Result<BoundRuleActionRoutines, SQLError> {
+) -> Result<BoundStatementRoutines, SQLError> {
     let query = match plan {
         UnifiedPlan::Query(query) => {
             let mut query = (**query).clone();
@@ -46,16 +47,18 @@ pub(crate) fn bind_catalog_rule_action_routines(
             super::bind_catalog_query_routines(engine, &mut query, &[])?;
             Some(query)
         }
-        UnifiedPlan::Command(command) => bind_command_action_routines(engine, command)?,
+        UnifiedPlan::Command(command) => bind_command_statement_routines(engine, command)?,
     };
     let mut references = Vec::new();
     if let Some(query) = &query {
         collect_query_routine_references(query, &mut references)?;
     }
-    Ok(BoundRuleActionRoutines { query, references })
+    Ok(BoundStatementRoutines { query, references })
 }
 
-pub(super) fn mark_rule_action_relations_bound(plan: &mut UnifiedPlan) -> Result<(), SQLError> {
+pub(crate) fn mark_catalog_statement_relations_bound(
+    plan: &mut UnifiedPlan,
+) -> Result<(), SQLError> {
     match plan {
         UnifiedPlan::Query(query) => mark_query_relations_bound(query),
         UnifiedPlan::Command(command) => match command.as_mut() {
@@ -96,9 +99,15 @@ pub(super) fn mark_rule_action_relations_bound(plan: &mut UnifiedPlan) -> Result
                 }
             }
             CommandPlan::Notify { .. } => {}
+            CommandPlan::Merge(plan) => {
+                mark_source_relations_bound(&mut plan.source);
+                for subquery in &mut plan.subqueries {
+                    mark_query_relations_bound(subquery);
+                }
+            }
             _ => {
                 return Err(SQLError::Internal(
-                    "validated rewrite-rule action lowered to an unsupported command".into(),
+                    "catalog-owned statement lowered to an unsupported command".into(),
                 ));
             }
         },
@@ -106,11 +115,11 @@ pub(super) fn mark_rule_action_relations_bound(plan: &mut UnifiedPlan) -> Result
     Ok(())
 }
 
-fn bind_command_action_routines(
+fn bind_command_statement_routines(
     engine: &Engine,
     command: &CommandPlan,
 ) -> Result<Option<QueryPlan>, SQLError> {
-    let Some(inputs) = command_action_routine_inputs(engine, command)? else {
+    let Some(inputs) = command_statement_routine_inputs(engine, command)? else {
         return Ok(None);
     };
     let projections = inputs
@@ -152,25 +161,93 @@ fn bind_command_action_routines(
     Ok(Some(query))
 }
 
-fn command_action_routine_inputs(
+fn command_statement_routine_inputs(
     engine: &Engine,
     command: &CommandPlan,
-) -> Result<Option<RuleCommandRoutineInputs>, SQLError> {
+) -> Result<Option<CommandRoutineInputs>, SQLError> {
     match command {
-        CommandPlan::Insert(plan) => insert_action_routine_inputs(engine, plan).map(Some),
-        CommandPlan::Update(plan) => update_action_routine_inputs(engine, plan).map(Some),
-        CommandPlan::Delete(plan) => delete_action_routine_inputs(engine, plan).map(Some),
+        CommandPlan::Insert(plan) => insert_statement_routine_inputs(engine, plan).map(Some),
+        CommandPlan::Update(plan) => update_statement_routine_inputs(engine, plan).map(Some),
+        CommandPlan::Delete(plan) => delete_statement_routine_inputs(engine, plan).map(Some),
+        CommandPlan::Merge(plan) => Ok(Some(merge_statement_routine_inputs(plan))),
         CommandPlan::Notify { .. } => Ok(None),
         _ => Err(SQLError::Internal(
-            "validated rewrite-rule action lowered to an unsupported command".into(),
+            "catalog-owned statement lowered to an unsupported command".into(),
         )),
     }
 }
 
-fn insert_action_routine_inputs(
+fn merge_statement_routine_inputs(plan: &MergePlan) -> CommandRoutineInputs {
+    let target = SourcePlan::Table {
+        name: plan.target.clone(),
+        qualifier: plan.target_qualifier.clone(),
+        alias: plan.target_alias.clone(),
+        column_aliases: Vec::new(),
+        include_descendants: plan.include_descendants,
+    };
+    let source = SourcePlan::Join {
+        left: Box::new(target),
+        right: plan.source.clone(),
+        kind: uqa_sql::ast::JoinKind::Cross,
+        on: None,
+        using: None,
+        natural: false,
+        alias: None,
+        column_aliases: Vec::new(),
+        lateral: false,
+        strategy: JoinExecutionStrategy::default(),
+    };
+    let mut expressions = vec![plan.join_condition.clone()];
+    for clause in &plan.when_clauses {
+        match clause {
+            uqa_planner::MergeWhenPlan::UpdateMatched {
+                condition,
+                assignments,
+            }
+            | uqa_planner::MergeWhenPlan::UpdateNotMatchedBySource {
+                condition,
+                assignments,
+            } => {
+                expressions.extend(condition.iter().cloned());
+                expressions.extend(
+                    assignments
+                        .iter()
+                        .map(|assignment| assignment.value.clone()),
+                );
+            }
+            uqa_planner::MergeWhenPlan::InsertNotMatched {
+                condition, values, ..
+            } => {
+                expressions.extend(condition.iter().cloned());
+                expressions.extend(values.iter().cloned());
+            }
+            uqa_planner::MergeWhenPlan::DeleteMatched { condition }
+            | uqa_planner::MergeWhenPlan::DeleteNotMatchedBySource { condition }
+            | uqa_planner::MergeWhenPlan::NothingMatched { condition }
+            | uqa_planner::MergeWhenPlan::NothingNotMatched { condition }
+            | uqa_planner::MergeWhenPlan::NothingNotMatchedBySource { condition } => {
+                expressions.extend(condition.iter().cloned());
+            }
+        }
+    }
+    expressions.extend(
+        plan.returning
+            .iter()
+            .map(|projection| projection.expr.clone()),
+    );
+    CommandRoutineInputs {
+        ctes: Vec::new(),
+        source: Some(source),
+        expressions,
+        subqueries: plan.subqueries.clone(),
+        outer: RowSchema::default(),
+    }
+}
+
+fn insert_statement_routine_inputs(
     engine: &Engine,
     plan: &InsertPlan,
-) -> Result<RuleCommandRoutineInputs, SQLError> {
+) -> Result<CommandRoutineInputs, SQLError> {
     let mut expressions = plan.rows.iter().flatten().cloned().collect::<Vec<_>>();
     if let Some(conflict) = &plan.on_conflict {
         if let ConflictActionPlan::Update {
@@ -193,15 +270,15 @@ fn insert_action_routine_inputs(
     );
     let source = plan.source.as_ref().map(|source| SourcePlan::Subquery {
         body: Box::new((**source).clone()),
-        alias: Some("__uqa_rule_action_source".into()),
+        alias: Some("__uqa_catalog_statement_source".into()),
         column_aliases: Vec::new(),
     });
-    Ok(RuleCommandRoutineInputs {
+    Ok(CommandRoutineInputs {
         ctes: plan.ctes.clone(),
         source,
         expressions,
         subqueries: plan.subqueries.clone(),
-        outer: action_target_outer_schema(
+        outer: statement_target_outer_schema(
             engine,
             &plan.table,
             &plan.target_qualifier,
@@ -210,10 +287,10 @@ fn insert_action_routine_inputs(
     })
 }
 
-fn update_action_routine_inputs(
+fn update_statement_routine_inputs(
     engine: &Engine,
     plan: &UpdatePlan,
-) -> Result<RuleCommandRoutineInputs, SQLError> {
+) -> Result<CommandRoutineInputs, SQLError> {
     let mut expressions = plan
         .assignments
         .iter()
@@ -225,12 +302,12 @@ fn update_action_routine_inputs(
             .iter()
             .map(|projection| projection.expr.clone()),
     );
-    Ok(RuleCommandRoutineInputs {
+    Ok(CommandRoutineInputs {
         ctes: plan.ctes.clone(),
         source: plan.source.as_deref().cloned(),
         expressions,
         subqueries: plan.subqueries.clone(),
-        outer: action_target_outer_schema(
+        outer: statement_target_outer_schema(
             engine,
             &plan.table,
             &plan.target_qualifier,
@@ -239,22 +316,22 @@ fn update_action_routine_inputs(
     })
 }
 
-fn delete_action_routine_inputs(
+fn delete_statement_routine_inputs(
     engine: &Engine,
     plan: &DeletePlan,
-) -> Result<RuleCommandRoutineInputs, SQLError> {
+) -> Result<CommandRoutineInputs, SQLError> {
     let mut expressions = plan.predicate.iter().cloned().collect::<Vec<_>>();
     expressions.extend(
         plan.returning
             .iter()
             .map(|projection| projection.expr.clone()),
     );
-    Ok(RuleCommandRoutineInputs {
+    Ok(CommandRoutineInputs {
         ctes: plan.ctes.clone(),
         source: plan.source.as_deref().cloned(),
         expressions,
         subqueries: plan.subqueries.clone(),
-        outer: action_target_outer_schema(
+        outer: statement_target_outer_schema(
             engine,
             &plan.table,
             &plan.target_qualifier,
@@ -269,7 +346,7 @@ fn expression_contains_routine(expression: &ScalarExpr, subqueries: &[QueryPlan]
         && !references.is_empty()
 }
 
-fn action_target_outer_schema(
+fn statement_target_outer_schema(
     engine: &Engine,
     table: &str,
     target_qualifier: &str,
@@ -300,7 +377,7 @@ fn action_target_outer_schema(
 
 pub(crate) fn collect_expression_routine_references(
     expression: &uqa_planner::ExpressionPlan,
-) -> Result<Vec<BoundRuleRoutineReference>, SQLError> {
+) -> Result<Vec<BoundRoutineReference>, SQLError> {
     let mut references = Vec::new();
     collect_scalar_routine_references(&expression.scalar, &expression.subqueries, &mut references)?;
     Ok(references)
@@ -308,7 +385,7 @@ pub(crate) fn collect_expression_routine_references(
 
 fn collect_query_routine_references(
     query: &QueryPlan,
-    references: &mut Vec<BoundRuleRoutineReference>,
+    references: &mut Vec<BoundRoutineReference>,
 ) -> Result<(), SQLError> {
     for cte in &query.ctes {
         collect_query_routine_references(&cte.query, references)?;
@@ -383,7 +460,7 @@ fn collect_query_routine_references(
 fn collect_source_routine_references(
     source: &SourcePlan,
     subqueries: &[QueryPlan],
-    references: &mut Vec<BoundRuleRoutineReference>,
+    references: &mut Vec<BoundRoutineReference>,
 ) -> Result<(), SQLError> {
     match source {
         SourcePlan::Table { .. } => {}
@@ -407,7 +484,7 @@ fn collect_source_routine_references(
             args,
             ..
         } => {
-            references.push(BoundRuleRoutineReference {
+            references.push(BoundRoutineReference {
                 name: name.clone(),
                 binding: binding.clone(),
             });
@@ -417,7 +494,7 @@ fn collect_source_routine_references(
         }
         SourcePlan::FunctionGroup { functions, .. } => {
             for function in functions {
-                references.push(BoundRuleRoutineReference {
+                references.push(BoundRoutineReference {
                     name: function.name.clone(),
                     binding: function.binding.clone(),
                 });
@@ -436,7 +513,7 @@ fn collect_source_routine_references(
 fn collect_scalar_routine_references(
     expression: &ScalarExpr,
     subqueries: &[QueryPlan],
-    references: &mut Vec<BoundRuleRoutineReference>,
+    references: &mut Vec<BoundRoutineReference>,
 ) -> Result<(), SQLError> {
     match expression {
         ScalarExpr::Func {
@@ -456,7 +533,7 @@ fn collect_scalar_routine_references(
             if let Some(filter) = filter {
                 collect_scalar_routine_references(filter, subqueries, references)?;
             }
-            references.push(BoundRuleRoutineReference {
+            references.push(BoundRoutineReference {
                 name: name.clone(),
                 binding: binding.clone(),
             });
@@ -506,7 +583,7 @@ fn collect_scalar_routine_references(
         } => {
             let query = subqueries.get(*index).ok_or_else(|| {
                 SQLError::Internal(format!(
-                    "stored rule routine binding cannot resolve subquery slot {index}"
+                    "stored catalog routine binding cannot resolve subquery slot {index}"
                 ))
             })?;
             collect_query_routine_references(query, references)?;
@@ -519,7 +596,7 @@ fn collect_scalar_routine_references(
             collect_scalar_routine_references(expr, subqueries, references)?;
             let query = subqueries.get(*index).ok_or_else(|| {
                 SQLError::Internal(format!(
-                    "stored rule routine binding cannot resolve subquery slot {index}"
+                    "stored catalog routine binding cannot resolve subquery slot {index}"
                 ))
             })?;
             collect_query_routine_references(query, references)?;
@@ -540,7 +617,7 @@ fn collect_scalar_routine_references(
 fn collect_many_routine_references(
     expressions: &[ScalarExpr],
     subqueries: &[QueryPlan],
-    references: &mut Vec<BoundRuleRoutineReference>,
+    references: &mut Vec<BoundRoutineReference>,
 ) -> Result<(), SQLError> {
     for expression in expressions {
         collect_scalar_routine_references(expression, subqueries, references)?;
@@ -553,7 +630,7 @@ fn collect_case_routine_references(
     when: &[(ScalarExpr, ScalarExpr)],
     else_branch: Option<&ScalarExpr>,
     subqueries: &[QueryPlan],
-    references: &mut Vec<BoundRuleRoutineReference>,
+    references: &mut Vec<BoundRoutineReference>,
 ) -> Result<(), SQLError> {
     if let Some(base) = base {
         collect_scalar_routine_references(base, subqueries, references)?;
@@ -573,7 +650,7 @@ fn collect_window_routine_references(
     args: &[ScalarExpr],
     spec: &uqa_execution::ScalarWindowSpec,
     subqueries: &[QueryPlan],
-    references: &mut Vec<BoundRuleRoutineReference>,
+    references: &mut Vec<BoundRoutineReference>,
 ) -> Result<(), SQLError> {
     for argument in args {
         collect_scalar_routine_references(argument, subqueries, references)?;
@@ -591,7 +668,7 @@ fn collect_window_routine_references(
             }
         }
     }
-    references.push(BoundRuleRoutineReference {
+    references.push(BoundRoutineReference {
         name: name.to_string(),
         binding: None,
     });

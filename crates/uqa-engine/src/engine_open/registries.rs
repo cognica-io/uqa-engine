@@ -24,7 +24,9 @@ impl Engine {
         self.restore_sequences_from_catalog(catalog)?;
         self.restore_roles_from_metadata(catalog)?;
         self.restore_database_security_from_metadata(catalog)?;
-        self.restore_sql_functions_from_metadata(catalog, mode)?;
+        // Install definition-only routine placeholders before any stored expression is rebound. Final compilation waits until every row-producing relation registry is present, which also permits views and routines to bind each other without recursive catalog synchronization.
+        let pending_sql_functions =
+            self.install_sql_function_restore_placeholders(catalog, mode)?;
         self.restore_generated_routine_identities(mode)?;
         self.restore_analyzers_from_catalog(catalog)?;
         self.restore_foreign_registries_from_catalog(catalog)?;
@@ -32,6 +34,9 @@ impl Engine {
         // relation kind is present. Legacy unqualified sources may refer to a
         // foreign table and must not be classified as missing during reopen.
         self.restore_views_from_catalog(catalog, mode)?;
+        if let Some(pending) = pending_sql_functions {
+            self.finalize_sql_function_restore(pending, mode)?;
+        }
         // Triggers and rules may target views, so both event registries must be
         // restored only after the complete relation namespace is available.
         self.restore_triggers_from_metadata(catalog, mode)?;

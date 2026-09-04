@@ -15,12 +15,18 @@ rollback-missing|42883
 schema-create-before-collision|42501
 dependent-oids|true
 standard-body-deparse|true
+command-body-deparse|true
+parameter-default-deparse|true
+routine-dependency-count|3
 view-deparse|true
 table-view-deparse|true
 generated-deparse|true
 rule-deparse|true
 trigger-deparse|true
 standard-call|5
+command-call|5
+merge-command-call|5
+parameter-default-call|2
 view-call|7
 table-view-call|7
 generated-call|9
@@ -30,4 +36,8 @@ sql-text-missing|42883
 plpgsql-text-missing|42883
 dependent-restrict|2BP01
 identity-isolation|5|104|104
+command-after-recreate|6
+merge-command-after-recreate|5
+parameter-default-after-recreate|2
 bound-after-old-drop|5
+routine-cascade|true|true

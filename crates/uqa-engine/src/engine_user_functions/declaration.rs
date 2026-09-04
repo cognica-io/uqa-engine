@@ -459,7 +459,7 @@ pub(super) fn compile_persisted_function_body(
 fn compile_function_body_inner(
     engine: &Engine,
     def: &CreateFunction,
-    upgrade_legacy_dispatches: bool,
+    persisted_definition: bool,
 ) -> Result<CompiledFunctionBody, SQLError> {
     if !matches!(def.language.as_str(), "plpgsql" | "sql") {
         return Err(SQLError::Routine {
@@ -495,7 +495,7 @@ fn compile_function_body_inner(
                 def,
                 statements,
                 bind_catalog_dependencies,
-                upgrade_legacy_dispatches && matches!(def.body, FunctionBody::Statements(_)),
+                persisted_definition && matches!(def.body, FunctionBody::Statements(_)),
             )?;
             if bind_catalog_dependencies {
                 for plan in &mut plans {
@@ -514,7 +514,7 @@ fn compile_sql_routine_plans(
     def: &CreateFunction,
     statements: Vec<Statement>,
     bind_catalog_dependencies: bool,
-    upgrade_legacy_dispatches: bool,
+    persisted_definition: bool,
 ) -> Result<Vec<UnifiedPlan>, SQLError> {
     let local_name = routine_local_name(&def.name)?;
     let signature_params = def.signature_params();
@@ -549,7 +549,7 @@ fn compile_sql_routine_plans(
             let mut plan = UnifiedPlan::lower_with(statement, &|name: &str| {
                 engine.has_registered_aggregate_function(name)
             });
-            if upgrade_legacy_dispatches {
+            if persisted_definition {
                 plan.rewrite_scalar_expressions(&mut |expression| {
                     let ScalarExpr::Func { name, binding, .. } = expression else {
                         return;
@@ -560,14 +560,27 @@ fn compile_sql_routine_plans(
                 });
             }
             if bind_catalog_dependencies {
-                if let UnifiedPlan::Query(query) = &mut plan {
-                    engine.bind_stored_query_relations(query, "SQL routine body", false)?;
-                    crate::sql::bind_catalog_query_routines_with_outer(
-                        engine,
-                        query,
-                        &positional_parameters,
-                        &parameter_scope,
-                    )?;
+                match &mut plan {
+                    UnifiedPlan::Query(query) => {
+                        if persisted_definition {
+                            engine.bind_loaded_stored_query_relations(
+                                query,
+                                "SQL routine body",
+                                false,
+                            )?;
+                        } else {
+                            engine.bind_stored_query_relations(query, "SQL routine body", false)?;
+                        }
+                        crate::sql::bind_catalog_query_routines_with_outer(
+                            engine,
+                            query,
+                            &positional_parameters,
+                            &parameter_scope,
+                        )?;
+                    }
+                    UnifiedPlan::Command(_) => {
+                        crate::sql::mark_catalog_statement_relations_bound(&mut plan)?;
+                    }
                 }
             }
             plan.rewrite_scalar_expressions(&mut |expression| {

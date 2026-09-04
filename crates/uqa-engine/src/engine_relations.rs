@@ -350,6 +350,16 @@ impl Engine {
             .relation_kind_resolution(&resolution, name)
     }
 
+    /// Resolve a dynamic name against registries that the caller has already synchronized. Catalog restoration uses this entry point while holding the synchronization boundary, so dependency binding cannot recursively reload the catalog.
+    pub(crate) fn resolve_loaded_visible_relation_kind(
+        &self,
+        name: &str,
+    ) -> Result<RelationResolution, SQLError> {
+        let resolution = self.session_execution_view().relation_name_resolution();
+        self.catalog_read_view()
+            .relation_kind_resolution(&resolution, name)
+    }
+
     /// Resolve a SQL relation reference through the current user's effective namespace. This is the dynamic-name boundary; code operating on a returned canonical identity must use exact catalog access rather than repeating name resolution.
     pub(crate) fn try_resolve_visible_relation_kind(
         &self,

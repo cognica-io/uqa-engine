@@ -219,7 +219,7 @@ pub(crate) fn execute_compiled_statement_with_privilege_subject(
     let mut plan = uqa_planner::UnifiedPlan::lower_with(statement, &|name: &str| {
         engine.has_registered_aggregate_function(name)
     });
-    super::rule_action_routines::mark_rule_action_relations_bound(&mut plan)?;
+    super::catalog_statement_routines::mark_catalog_statement_relations_bound(&mut plan)?;
     let plan = optimize_engine_plan(engine, plan)?;
     UnifiedPlanExecutor::new_nested(engine, params)
         .with_privilege_subject(privilege_subject)

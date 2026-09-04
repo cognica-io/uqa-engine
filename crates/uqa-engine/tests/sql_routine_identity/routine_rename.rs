@@ -32,6 +32,26 @@ fn remove_routine_identity_fields(value: &mut serde_json::Value) -> usize {
     }
 }
 
+fn remove_function_binding_identities(value: &mut serde_json::Value) -> usize {
+    match value {
+        serde_json::Value::Object(fields) => {
+            let is_binding = fields.contains_key("name")
+                && fields.contains_key("argument_types")
+                && fields.contains_key("builtin");
+            let mut removed = usize::from(is_binding && fields.remove("object_id").is_some());
+            for value in fields.values_mut() {
+                removed += remove_function_binding_identities(value);
+            }
+            removed
+        }
+        serde_json::Value::Array(values) => values
+            .iter_mut()
+            .map(remove_function_binding_identities)
+            .sum(),
+        _ => 0,
+    }
+}
+
 #[test]
 fn routine_rename_preserves_oid_and_replace_identity() {
     let engine = Engine::new();
@@ -448,8 +468,11 @@ fn create_legacy_migration_fixture(engine: &Engine) {
     for ddl in [
         "CREATE FUNCTION migration_base(value integer) RETURNS integer IMMUTABLE RETURN value + 1",
         "CREATE FUNCTION migration_caller(value integer) RETURNS integer RETURN migration_base(value)",
+        "CREATE FUNCTION migration_default(value integer DEFAULT migration_base(1)) RETURNS integer LANGUAGE SQL AS 'SELECT $1'",
         "CREATE VIEW migration_view AS SELECT migration_base(2) AS value",
         "CREATE TABLE migration_generated(id integer, derived integer GENERATED ALWAYS AS (migration_base(id)) STORED)",
+        "CREATE TABLE migration_command_log(value integer)",
+        "CREATE PROCEDURE migration_command(value integer) LANGUAGE SQL BEGIN ATOMIC INSERT INTO migration_command_log VALUES (migration_base(value)); END",
         "CREATE TABLE migration_rule_source(id integer)",
         "CREATE TABLE migration_rule_log(value integer)",
         "CREATE RULE migration_copy AS ON INSERT TO migration_rule_source DO ALSO INSERT INTO migration_rule_log VALUES (migration_base(NEW.id))",
@@ -529,6 +552,10 @@ fn assert_migrated_dependents(engine: &Engine, generated: i64, rule: i64, trigge
         Value::Int(6)
     );
     assert_eq!(
+        scalar(engine, "SELECT migration_default() AS v"),
+        Value::Int(2)
+    );
+    assert_eq!(
         scalar(engine, "SELECT value AS v FROM migration_view"),
         Value::Int(3)
     );
@@ -542,6 +569,16 @@ fn assert_migrated_dependents(engine: &Engine, generated: i64, rule: i64, trigge
         scalar(
             engine,
             &format!("SELECT derived AS v FROM migration_generated WHERE id = {generated}"),
+        ),
+        Value::Int(generated + 1)
+    );
+    engine
+        .sql(&format!("CALL migration_command({generated})"), &[])
+        .unwrap();
+    assert_eq!(
+        scalar(
+            engine,
+            "SELECT value AS v FROM migration_command_log ORDER BY value DESC LIMIT 1",
         ),
         Value::Int(generated + 1)
     );
@@ -681,6 +718,57 @@ fn secondary_session_rejects_legacy_routine_metadata_without_repair() {
     assert_eq!(
         catalog.get_metadata("sql_functions_json").unwrap(),
         Some(legacy)
+    );
+}
+
+#[test]
+fn secondary_session_does_not_repair_routine_owned_dependency_bindings() {
+    use uqa_storage::{Catalog, ManagedConnection};
+
+    let directory = TempDir::new().unwrap();
+    let database = directory.path().join("routine-dependency-load-only.sqlite");
+    let engine = Engine::open(&database).unwrap();
+    for ddl in [
+        "CREATE TABLE dependency_load_log(value integer)",
+        "CREATE FUNCTION dependency_load_base(value integer) RETURNS integer RETURN value + 1",
+        "CREATE FUNCTION dependency_load_default(value integer DEFAULT dependency_load_base(1)) RETURNS integer LANGUAGE SQL AS 'SELECT $1'",
+        "CREATE PROCEDURE dependency_load_command(value integer) LANGUAGE SQL BEGIN ATOMIC INSERT INTO dependency_load_log VALUES (dependency_load_base(value)); END",
+    ] {
+        engine
+            .sql(ddl, &[])
+            .unwrap_or_else(|error| panic!("{ddl}: {error}"));
+    }
+    let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+    let encoded = catalog.get_metadata("sql_functions_json").unwrap().unwrap();
+    let mut definitions: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+    assert!(remove_function_binding_identities(&mut definitions) >= 2);
+    let legacy = serde_json::to_string(&definitions).unwrap();
+    catalog.set_metadata("sql_functions_json", &legacy).unwrap();
+
+    let Err(error) = engine.new_session() else {
+        panic!("secondary session must not repair routine-owned dependency bindings");
+    };
+    assert!(error
+        .to_string()
+        .contains("initial-open object-identity migration"));
+    assert_eq!(
+        catalog.get_metadata("sql_functions_json").unwrap(),
+        Some(legacy)
+    );
+    drop(catalog);
+    drop(engine);
+
+    let reopened = Engine::open(&database).unwrap();
+    assert_eq!(
+        scalar(&reopened, "SELECT dependency_load_default() AS v"),
+        Value::Int(2)
+    );
+    reopened
+        .sql("CALL dependency_load_command(2)", &[])
+        .unwrap();
+    assert_eq!(
+        scalar(&reopened, "SELECT value AS v FROM dependency_load_log"),
+        Value::Int(3)
     );
 }
 

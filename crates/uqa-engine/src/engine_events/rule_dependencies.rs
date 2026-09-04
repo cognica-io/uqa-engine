@@ -4,7 +4,9 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Durable relation binding and dependency traversal for rewrite rules.
+//! Durable catalog AST binding and dependency traversal.
+
+mod routines;
 
 use std::collections::BTreeSet;
 
@@ -17,12 +19,18 @@ use crate::{Engine, RelationIdentity};
 
 use super::{RuleDependencies, RuleRoutineDependency, StoredRule};
 
-struct RuleAstVisitor<'a, R, F> {
+pub(crate) use routines::{
+    bind_stored_expression_routines, bind_stored_statement_routines,
+    expression_references_routine_identity, rewrite_expression_routine_identity,
+    rewrite_statement_routine_identity, statement_references_routine_identity,
+};
+
+struct StoredAstVisitor<'a, R, F> {
     visit_relation: &'a mut R,
     visit_routine: &'a mut F,
 }
 
-impl<R, F> RuleAstVisitor<'_, R, F>
+impl<R, F> StoredAstVisitor<'_, R, F>
 where
     R: FnMut(&mut String) -> Result<(), SQLError>,
     F: FnMut(
@@ -34,72 +42,147 @@ where
         let ctes = BTreeSet::new();
         match statement {
             Statement::Select(query) => self.bind_select(query, &ctes),
-            Statement::Insert(insert) => {
-                (self.visit_relation)(&mut insert.table)?;
-                let visible = self.bind_ctes(&mut insert.with, &ctes)?;
-                if let Some(source) = insert.select_source.as_deref_mut() {
-                    self.bind_select(source, &visible)?;
-                }
-                for row in &mut insert.rows {
-                    for expression in row {
-                        self.bind_expr(expression, &visible)?;
-                    }
-                }
-                if let Some(conflict) = &mut insert.on_conflict {
-                    if let uqa_sql::ast::OnConflictAction::Update {
-                        assignments,
-                        r#where,
-                    } = &mut conflict.action
-                    {
-                        for (_, expression) in assignments {
-                            self.bind_expr(expression, &visible)?;
-                        }
-                        if let Some(expression) = r#where {
-                            self.bind_expr(expression, &visible)?;
-                        }
-                    }
-                }
-                for projection in &mut insert.returning {
-                    self.bind_expr(&mut projection.expr, &visible)?;
-                }
-                Ok(())
-            }
-            Statement::Update(update) => {
-                (self.visit_relation)(&mut update.table)?;
-                let visible = self.bind_ctes(&mut update.with, &ctes)?;
-                if let Some(source) = &mut update.from {
-                    self.bind_from(source, &visible)?;
-                }
-                for (_, expression) in &mut update.assignments {
-                    self.bind_expr(expression, &visible)?;
-                }
-                if let Some(expression) = &mut update.r#where {
-                    self.bind_expr(expression, &visible)?;
-                }
-                for projection in &mut update.returning {
-                    self.bind_expr(&mut projection.expr, &visible)?;
-                }
-                Ok(())
-            }
-            Statement::Delete(delete) => {
-                (self.visit_relation)(&mut delete.table)?;
-                let visible = self.bind_ctes(&mut delete.with, &ctes)?;
-                if let Some(source) = &mut delete.using {
-                    self.bind_from(source, &visible)?;
-                }
-                if let Some(expression) = &mut delete.r#where {
-                    self.bind_expr(expression, &visible)?;
-                }
-                for projection in &mut delete.returning {
-                    self.bind_expr(&mut projection.expr, &visible)?;
-                }
-                Ok(())
-            }
+            Statement::Insert(insert) => self.bind_insert(insert, &ctes),
+            Statement::Update(update) => self.bind_update(update, &ctes),
+            Statement::Delete(delete) => self.bind_delete(delete, &ctes),
             Statement::Notify { .. } => Ok(()),
+            Statement::Values { rows } => {
+                for expression in rows.iter_mut().flatten() {
+                    self.bind_expr(expression, &ctes)?;
+                }
+                Ok(())
+            }
+            Statement::Merge(merge) => self.bind_merge(merge, &ctes),
             _ => Err(SQLError::Internal(
-                "validated rewrite-rule action has an unsupported statement kind".into(),
+                "catalog-owned statement has an unsupported dependency shape".into(),
             )),
         }
+    }
+
+    fn bind_insert(
+        &mut self,
+        insert: &mut uqa_sql::ast::InsertStmt,
+        inherited: &BTreeSet<String>,
+    ) -> Result<(), SQLError> {
+        (self.visit_relation)(&mut insert.table)?;
+        let visible = self.bind_ctes(&mut insert.with, inherited)?;
+        if let Some(source) = insert.select_source.as_deref_mut() {
+            self.bind_select(source, &visible)?;
+        }
+        for expression in insert.rows.iter_mut().flatten() {
+            self.bind_expr(expression, &visible)?;
+        }
+        if let Some(conflict) = &mut insert.on_conflict {
+            if let uqa_sql::ast::OnConflictAction::Update {
+                assignments,
+                r#where,
+            } = &mut conflict.action
+            {
+                for (_, expression) in assignments {
+                    self.bind_expr(expression, &visible)?;
+                }
+                if let Some(expression) = r#where {
+                    self.bind_expr(expression, &visible)?;
+                }
+            }
+        }
+        for projection in &mut insert.returning {
+            self.bind_expr(&mut projection.expr, &visible)?;
+        }
+        Ok(())
+    }
+
+    fn bind_update(
+        &mut self,
+        update: &mut uqa_sql::ast::UpdateStmt,
+        inherited: &BTreeSet<String>,
+    ) -> Result<(), SQLError> {
+        (self.visit_relation)(&mut update.table)?;
+        let visible = self.bind_ctes(&mut update.with, inherited)?;
+        if let Some(source) = &mut update.from {
+            self.bind_from(source, &visible)?;
+        }
+        for (_, expression) in &mut update.assignments {
+            self.bind_expr(expression, &visible)?;
+        }
+        if let Some(expression) = &mut update.r#where {
+            self.bind_expr(expression, &visible)?;
+        }
+        for projection in &mut update.returning {
+            self.bind_expr(&mut projection.expr, &visible)?;
+        }
+        Ok(())
+    }
+
+    fn bind_delete(
+        &mut self,
+        delete: &mut uqa_sql::ast::DeleteStmt,
+        inherited: &BTreeSet<String>,
+    ) -> Result<(), SQLError> {
+        (self.visit_relation)(&mut delete.table)?;
+        let visible = self.bind_ctes(&mut delete.with, inherited)?;
+        if let Some(source) = &mut delete.using {
+            self.bind_from(source, &visible)?;
+        }
+        if let Some(expression) = &mut delete.r#where {
+            self.bind_expr(expression, &visible)?;
+        }
+        for projection in &mut delete.returning {
+            self.bind_expr(&mut projection.expr, &visible)?;
+        }
+        Ok(())
+    }
+
+    fn bind_merge(
+        &mut self,
+        merge: &mut uqa_sql::ast::MergeStmt,
+        ctes: &BTreeSet<String>,
+    ) -> Result<(), SQLError> {
+        (self.visit_relation)(&mut merge.target)?;
+        self.bind_from(&mut merge.source, ctes)?;
+        self.bind_expr(&mut merge.join_condition, ctes)?;
+        for clause in &mut merge.when_clauses {
+            match clause {
+                uqa_sql::ast::MergeWhen::UpdateMatched {
+                    condition,
+                    assignments,
+                }
+                | uqa_sql::ast::MergeWhen::UpdateNotMatchedBySource {
+                    condition,
+                    assignments,
+                } => {
+                    if let Some(condition) = condition {
+                        self.bind_expr(condition, ctes)?;
+                    }
+                    for (_, expression) in assignments {
+                        self.bind_expr(expression, ctes)?;
+                    }
+                }
+                uqa_sql::ast::MergeWhen::InsertNotMatched {
+                    condition, values, ..
+                } => {
+                    if let Some(condition) = condition {
+                        self.bind_expr(condition, ctes)?;
+                    }
+                    for expression in values {
+                        self.bind_expr(expression, ctes)?;
+                    }
+                }
+                uqa_sql::ast::MergeWhen::DeleteMatched { condition }
+                | uqa_sql::ast::MergeWhen::DeleteNotMatchedBySource { condition }
+                | uqa_sql::ast::MergeWhen::NothingMatched { condition }
+                | uqa_sql::ast::MergeWhen::NothingNotMatched { condition }
+                | uqa_sql::ast::MergeWhen::NothingNotMatchedBySource { condition } => {
+                    if let Some(condition) = condition {
+                        self.bind_expr(condition, ctes)?;
+                    }
+                }
+            }
+        }
+        for projection in &mut merge.returning {
+            self.bind_expr(&mut projection.expr, ctes)?;
+        }
+        Ok(())
     }
 
     fn bind_ctes(
@@ -351,10 +434,12 @@ where
 }
 
 impl Engine {
-    fn bind_rule_relation_reference(
+    fn bind_catalog_relation_reference(
         &self,
         reference: &mut String,
         lookup_mode: RelationLookupMode,
+        loaded_catalog: bool,
+        context: &str,
         dependencies: &mut BTreeSet<RelationIdentity>,
     ) -> Result<(), SQLError> {
         if let Some(canonical) =
@@ -373,9 +458,14 @@ impl Engine {
                 return Ok(());
             }
         }
-        let resolution = match lookup_mode {
-            RelationLookupMode::Dynamic => self.resolve_visible_relation_kind(reference)?,
-            RelationLookupMode::Bound => self.resolve_bound_relation_kind(reference)?,
+        let resolution = match (lookup_mode, loaded_catalog) {
+            (RelationLookupMode::Dynamic, true) => {
+                self.resolve_loaded_visible_relation_kind(reference)?
+            }
+            (RelationLookupMode::Dynamic, false) => {
+                self.resolve_visible_relation_kind(reference)?
+            }
+            (RelationLookupMode::Bound, _) => self.resolve_bound_relation_kind(reference)?,
         };
         let canonical = match resolution {
             RelationResolution::Found(
@@ -386,7 +476,7 @@ impl Engine {
                 return Err(SQLError::Routine {
                     sqlstate: "42809".into(),
                     message: format!(
-                        "CREATE RULE source \"{canonical}\" is a {kind}, not a row relation"
+                        "{context} source \"{canonical}\" is a {kind}, not a row relation"
                     ),
                 });
             }
@@ -415,12 +505,18 @@ impl Engine {
     ) -> Result<RuleDependencies, SQLError> {
         let mut dependencies = BTreeSet::new();
         let mut bind = |reference: &mut String| {
-            self.bind_rule_relation_reference(reference, lookup_mode, &mut dependencies)
+            self.bind_catalog_relation_reference(
+                reference,
+                lookup_mode,
+                false,
+                "CREATE RULE",
+                &mut dependencies,
+            )
         };
         let mut ignore_routine = |_: &mut String,
                                   _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
          -> Result<(), SQLError> { Ok(()) };
-        RuleAstVisitor {
+        StoredAstVisitor {
             visit_relation: &mut bind,
             visit_routine: &mut ignore_routine,
         }
@@ -439,12 +535,18 @@ impl Engine {
     ) -> Result<RuleDependencies, SQLError> {
         let mut dependencies = BTreeSet::new();
         let mut bind = |reference: &mut String| {
-            self.bind_rule_relation_reference(reference, lookup_mode, &mut dependencies)
+            self.bind_catalog_relation_reference(
+                reference,
+                lookup_mode,
+                false,
+                "CREATE RULE",
+                &mut dependencies,
+            )
         };
         let mut ignore_routine = |_: &mut String,
                                   _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
          -> Result<(), SQLError> { Ok(()) };
-        RuleAstVisitor {
+        StoredAstVisitor {
             visit_relation: &mut bind,
             visit_routine: &mut ignore_routine,
         }
@@ -454,6 +556,53 @@ impl Engine {
             columns: BTreeSet::new(),
             routines: BTreeSet::new(),
         })
+    }
+
+    pub(crate) fn bind_stored_statement_relations(
+        &self,
+        statement: &mut Statement,
+        lookup_mode: RelationLookupMode,
+        loaded_catalog: bool,
+        context: &str,
+    ) -> Result<bool, SQLError> {
+        let mut dependencies = BTreeSet::new();
+        let mut changed = false;
+        let mut bind = |reference: &mut String| {
+            let previous = reference.clone();
+            self.bind_catalog_relation_reference(
+                reference,
+                lookup_mode,
+                loaded_catalog,
+                context,
+                &mut dependencies,
+            )?;
+            changed |= reference != &previous;
+            Ok(())
+        };
+        let mut ignore_routine = |_: &mut String,
+                                  _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
+         -> Result<(), SQLError> { Ok(()) };
+        StoredAstVisitor {
+            visit_relation: &mut bind,
+            visit_routine: &mut ignore_routine,
+        }
+        .bind_statement(statement)?;
+        match statement {
+            Statement::Insert(insert) => {
+                changed |= !insert.target_relation_bound;
+                insert.target_relation_bound = true;
+            }
+            Statement::Update(update) => {
+                changed |= !update.target_relation_bound;
+                update.target_relation_bound = true;
+            }
+            Statement::Delete(delete) => {
+                changed |= !delete.target_relation_bound;
+                delete.target_relation_bound = true;
+            }
+            _ => {}
+        }
+        Ok(changed)
     }
 }
 
@@ -475,166 +624,11 @@ pub(super) fn rewrite_rule_statement_relation(
     let mut ignore_routine = |_: &mut String,
                               _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
      -> Result<(), SQLError> { Ok(()) };
-    RuleAstVisitor {
+    StoredAstVisitor {
         visit_relation: &mut rewrite,
         visit_routine: &mut ignore_routine,
     }
     .bind_statement(statement)?;
-    Ok(changed)
-}
-
-pub(crate) fn bind_rule_statement_routines(
-    statement: &mut Statement,
-    references: &[crate::sql::BoundRuleRoutineReference],
-) -> Result<bool, SQLError> {
-    let mut ignore_relation = |_: &mut String| -> Result<(), SQLError> { Ok(()) };
-    let mut references = references.iter();
-    let mut changed = false;
-    let mut bind =
-        |name: &mut String, binding: Option<&mut Option<uqa_sql::ast::FunctionBinding>>| {
-            let reference = references.next().ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "stored rule routine binding has no entry for call `{name}`"
-                ))
-            })?;
-            changed |= apply_routine_reference(name, binding, reference)?;
-            Ok(())
-        };
-    RuleAstVisitor {
-        visit_relation: &mut ignore_relation,
-        visit_routine: &mut bind,
-    }
-    .bind_statement(statement)?;
-    if let Some(reference) = references.next() {
-        return Err(SQLError::Internal(format!(
-            "stored rule routine binding entry `{}` has no matching call",
-            reference.name
-        )));
-    }
-    Ok(changed)
-}
-
-pub(crate) fn rewrite_statement_routine_identity(
-    statement: &mut Statement,
-    target: &uqa_sql::ast::FunctionBinding,
-    new_name: &str,
-) -> Result<bool, SQLError> {
-    let mut changed = false;
-    let mut ignore_relation = |_: &mut String| -> Result<(), SQLError> { Ok(()) };
-    let mut rewrite = |name: &mut String,
-                       binding: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
-     -> Result<(), SQLError> {
-        let Some(binding) = binding.and_then(Option::as_mut) else {
-            return Ok(());
-        };
-        if crate::engine_session::function_binding_matches(binding, target) {
-            *name = new_name.to_string();
-            binding.name = new_name.to_string();
-            changed = true;
-        }
-        Ok(())
-    };
-    RuleAstVisitor {
-        visit_relation: &mut ignore_relation,
-        visit_routine: &mut rewrite,
-    }
-    .bind_statement(statement)?;
-    Ok(changed)
-}
-
-pub(crate) fn rewrite_expression_routine_identity(
-    expression: &mut Expr,
-    target: &uqa_sql::ast::FunctionBinding,
-    new_name: &str,
-) -> Result<bool, SQLError> {
-    let mut changed = false;
-    let mut ignore_relation = |_: &mut String| -> Result<(), SQLError> { Ok(()) };
-    let mut rewrite = |name: &mut String,
-                       binding: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
-     -> Result<(), SQLError> {
-        let Some(binding) = binding.and_then(Option::as_mut) else {
-            return Ok(());
-        };
-        if crate::engine_session::function_binding_matches(binding, target) {
-            *name = new_name.to_string();
-            binding.name = new_name.to_string();
-            changed = true;
-        }
-        Ok(())
-    };
-    RuleAstVisitor {
-        visit_relation: &mut ignore_relation,
-        visit_routine: &mut rewrite,
-    }
-    .bind_expr(expression, &BTreeSet::new())?;
-    Ok(changed)
-}
-
-pub(super) fn bind_rule_expr_routines(
-    expression: &mut Expr,
-    references: &[crate::sql::BoundRuleRoutineReference],
-) -> Result<(), SQLError> {
-    let mut ignore_relation = |_: &mut String| -> Result<(), SQLError> { Ok(()) };
-    let mut references = references.iter();
-    let mut bind =
-        |name: &mut String, binding: Option<&mut Option<uqa_sql::ast::FunctionBinding>>| {
-            let reference = references.next().ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "stored rule routine binding has no entry for call `{name}`"
-                ))
-            })?;
-            apply_routine_reference(name, binding, reference)?;
-            Ok(())
-        };
-    RuleAstVisitor {
-        visit_relation: &mut ignore_relation,
-        visit_routine: &mut bind,
-    }
-    .bind_expr(expression, &BTreeSet::new())?;
-    if let Some(reference) = references.next() {
-        return Err(SQLError::Internal(format!(
-            "stored rule routine binding entry `{}` has no matching call",
-            reference.name
-        )));
-    }
-    Ok(())
-}
-
-fn apply_routine_reference(
-    name: &mut String,
-    binding: Option<&mut Option<uqa_sql::ast::FunctionBinding>>,
-    reference: &crate::sql::BoundRuleRoutineReference,
-) -> Result<bool, SQLError> {
-    let (_, local_name) = RelationIdentity::parse_reference(name).map_err(|error| {
-        SQLError::Internal(format!("decode stored rule routine `{name}`: {error}"))
-    })?;
-    let (_, reference_local_name) =
-        RelationIdentity::parse_reference(&reference.name).map_err(|error| {
-            SQLError::Internal(format!(
-                "decode bound rule routine `{}`: {error}",
-                reference.name
-            ))
-        })?;
-    if local_name != reference_local_name {
-        return Err(SQLError::Internal(format!(
-            "stored rule routine call `{name}` does not match bound call `{}`",
-            reference.name
-        )));
-    }
-    let Some(exact) = &reference.binding else {
-        return Ok(false);
-    };
-    let mut changed = false;
-    if !exact.builtin && name != &exact.name {
-        name.clone_from(&exact.name);
-        changed = true;
-    }
-    if let Some(binding) = binding {
-        if binding.as_ref() != Some(exact) {
-            *binding = Some(exact.clone());
-            changed = true;
-        }
-    }
     Ok(changed)
 }
 
@@ -682,7 +676,7 @@ pub(super) fn rewrite_stored_rule_relation(
         let mut ignore_routine = |_: &mut String,
                                   _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
          -> Result<(), SQLError> { Ok(()) };
-        RuleAstVisitor {
+        StoredAstVisitor {
             visit_relation: &mut rewrite,
             visit_routine: &mut ignore_routine,
         }
