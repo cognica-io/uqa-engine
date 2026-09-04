@@ -486,6 +486,24 @@ pub(super) fn capture_rule_returning_result(
     })
 }
 
+pub(super) fn validate_rule_returning_provider_width(
+    provider_width: usize,
+    event_width: usize,
+) -> Result<(), SQLError> {
+    if provider_width < event_width {
+        return Err(SQLError::Internal(format!(
+            "could not find replacement targetlist entry for attno {}",
+            provider_width + 1
+        )));
+    }
+    if provider_width > event_width {
+        return Err(SQLError::Internal(format!(
+            "rewrite-rule RETURNING provider produced {provider_width} columns, expected {event_width}"
+        )));
+    }
+    Ok(())
+}
+
 pub(super) fn augment_rule_returning_action(
     statement: &mut Statement,
     source_index: Option<Expr>,

@@ -25,7 +25,7 @@ use actions::{bind_insert_values_action, bind_set_oriented_action};
 pub(in crate::sql) use returning::RuleReturningRequest;
 use returning::{
     augment_rule_returning_action, capture_rule_returning_result, clear_statement_returning,
-    rule_returning_columns, statement_has_returning,
+    rule_returning_columns, statement_has_returning, validate_rule_returning_provider_width,
 };
 pub(in crate::sql) use returning::{validate_rule_returning_contract, RuleReturningResult};
 
@@ -320,6 +320,16 @@ impl PreparedRuleBatch {
                     }
                     provider_captured = true;
                     let event_width = returning_columns.as_ref().map_or(0, Vec::len);
+                    let provider_width =
+                        crate::sql::analyze_rule_action_returning_schema(engine, bound.clone())?
+                            .ok_or_else(|| {
+                                SQLError::Internal(
+                                    "rewrite-rule RETURNING provider lost its declared row type"
+                                        .into(),
+                                )
+                            })?
+                            .len();
+                    validate_rule_returning_provider_width(provider_width, event_width)?;
                     augment_rule_returning_action(
                         &mut bound,
                         source_index,

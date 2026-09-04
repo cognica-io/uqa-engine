@@ -138,6 +138,12 @@ docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/pa
 docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/rule_row_expansion_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/rule_row_expansion_oracle.expected.txt -
 ```
 
+`rule_returning_event_row_oracle.sql` records PostgreSQL 18.4 rewrite-rule action `RETURNING` event-row behavior. The checked-in transcript verifies INSERT action-image versus UPDATE and DELETE event-row namespaces, explicit action-image aliases, `OLD.*` and `NEW.*` expansion, `RETURNING`-only set-oriented cardinality, event-side and column errors, target-alias ambiguity, inaccessible INSERT event rows, rename and drop dependencies, added-column `XX000` behavior, and statement atomicity.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/rule_returning_event_row_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/rule_returning_event_row_oracle.expected.txt -
+```
+
 `foreign_table_trigger_oracle.sql` records PostgreSQL 18.4 foreign-table trigger definition and lifecycle behavior. The checked-in transcript verifies ordinary row and statement forms, replacement, `UPDATE OF`, `WHEN`, `TRUNCATE`, invalid constraint, transition, and `INSTEAD OF` forms, target and function authorization, `pg_trigger`, `relhastriggers`, enable, rename, drop, owner transfer, rollback, function dependencies, and relation-drop cleanup.
 
 ```sh

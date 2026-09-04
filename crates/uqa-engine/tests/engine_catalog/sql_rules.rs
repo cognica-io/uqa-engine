@@ -20,6 +20,8 @@ mod privilege_subjects;
 mod privileges;
 #[path = "sql_rules/returning.rs"]
 mod returning;
+#[path = "sql_rules/returning_event_rows.rs"]
+mod returning_event_rows;
 #[path = "sql_rules/row_expansion.rs"]
 mod row_expansion;
 

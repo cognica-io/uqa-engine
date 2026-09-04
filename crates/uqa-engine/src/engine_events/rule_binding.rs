@@ -11,14 +11,20 @@ use std::collections::BTreeSet;
 use uqa_execution::ScalarExpr;
 use uqa_planner::ExpressionPlan;
 use uqa_sql::ast::{
-    Expr, FrameBound, FromClause, InsertStmt, OnConflictAction, OrderBy, Projection, SelectStmt,
-    Statement, UpdateStmt, CTE,
+    Expr, FrameBound, FromClause, InsertStmt, OnConflictAction, OrderBy, Projection, RuleEvent,
+    SelectStmt, Statement, UpdateStmt, CTE,
 };
 use uqa_sql::plpgsql::{bind_statement, ResolvedVariable, VariableResolver};
 use uqa_sql::SQLError;
 
+mod namespace;
+mod returning;
 mod row_expansion;
 pub(crate) use row_expansion::expand_rule_action_row_stars;
+
+pub(super) fn action_target_qualifier_referenced(action: &Statement, qualifier: &str) -> bool {
+    namespace::action_target_qualifier_referenced(action, qualifier)
+}
 
 #[derive(Default)]
 struct RuleRowReferenceDetector {
@@ -168,17 +174,17 @@ pub(crate) fn rule_statement_row_columns(
     Ok(collector.columns)
 }
 
-/// Bind an action body's event-row OLD/NEW references while preserving DML
-/// RETURNING OLD/NEW references for the action target's own row images.
+/// Bind an action's event-row OLD/NEW references while preserving the action
+/// row-image aliases visible to its DML RETURNING clause.
 pub(crate) fn bind_rule_action(
     action: &Statement,
     action_columns: &BTreeSet<String>,
     resolver: &mut dyn VariableResolver,
 ) -> Result<Statement, SQLError> {
-    let returning = match action {
-        Statement::Insert(statement) => &statement.returning,
-        Statement::Update(statement) => &statement.returning,
-        Statement::Delete(statement) => &statement.returning,
+    let (returning, action_event) = match action {
+        Statement::Insert(statement) => (&statement.returning, RuleEvent::Insert),
+        Statement::Update(statement) => (&statement.returning, RuleEvent::Update),
+        Statement::Delete(statement) => (&statement.returning, RuleEvent::Delete),
         _ => return bind_rule_statement_body(action, resolver, &BTreeSet::new()),
     };
     let mut body = action.clone();
@@ -201,23 +207,13 @@ pub(crate) fn bind_rule_action(
     if returning.is_empty() {
         return Ok(bound);
     }
-    let mut returning_resolver = RuleActionReturningResolver {
+    let returning = returning::bind_rule_action_returning(
+        returning,
         action_columns,
-        aliases: &aliases,
-    };
-    let returning = returning
-        .iter()
-        .map(|projection| {
-            Ok(Projection {
-                expr: bind_rule_expr_scoped(
-                    &projection.expr,
-                    &mut returning_resolver,
-                    &BTreeSet::new(),
-                )?,
-                alias: projection.alias.clone(),
-            })
-        })
-        .collect::<Result<Vec<_>, SQLError>>()?;
+        &aliases,
+        action_event,
+        resolver,
+    )?;
     match &mut bound {
         Statement::Insert(statement) => statement.returning = returning,
         Statement::Update(statement) => statement.returning = returning,
@@ -926,46 +922,4 @@ fn insert_qualifier(output: &mut BTreeSet<String>, qualifier: &str) {
 
 fn qualifier_is_shadowed(shadowed: &BTreeSet<String>, qualifier: &str) -> bool {
     shadowed.contains(&qualifier.to_ascii_lowercase())
-}
-
-struct RuleActionReturningResolver<'a> {
-    action_columns: &'a BTreeSet<String>,
-    aliases: &'a uqa_sql::ast::ReturningAliases,
-}
-
-impl RuleActionReturningResolver<'_> {
-    fn is_action_image_alias(&self, qualifier: &str) -> bool {
-        qualifier.eq_ignore_ascii_case(&self.aliases.old)
-            || qualifier.eq_ignore_ascii_case(&self.aliases.new)
-    }
-}
-
-impl VariableResolver for RuleActionReturningResolver<'_> {
-    fn resolve_name(&mut self, _name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
-        Ok(None)
-    }
-
-    fn resolve_qualified(
-        &mut self,
-        qualifier: &str,
-        column: &str,
-    ) -> Result<Option<ResolvedVariable>, SQLError> {
-        if self.is_action_image_alias(qualifier) && !self.action_columns.contains(column) {
-            return Err(SQLError::UnknownColumn(format!("{qualifier}.{column}")));
-        }
-        Ok(None)
-    }
-
-    fn resolve_param(&mut self, _index: usize) -> Result<Option<ResolvedVariable>, SQLError> {
-        Ok(None)
-    }
-
-    fn rewrite_qualified(
-        &mut self,
-        qualifier: &str,
-        column: &str,
-    ) -> Result<Option<Expr>, SQLError> {
-        self.resolve_qualified(qualifier, column)?;
-        Ok(None)
-    }
 }

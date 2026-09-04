@@ -219,6 +219,25 @@ fn rule_statements_preserve_event_actions_and_lifecycle_shape() {
 }
 
 #[test]
+fn rule_action_returning_preserves_qualified_row_stars() {
+    let Statement::CreateRule(rule) = first(
+        "CREATE RULE return_event AS ON UPDATE TO event_rows DO INSTEAD UPDATE action_rows AS target SET value = NEW.value RETURNING NEW.*",
+    ) else {
+        panic!("expected CREATE RULE");
+    };
+    let [Statement::Update(action)] = rule.actions.as_slice() else {
+        panic!("expected one UPDATE rule action");
+    };
+    assert!(matches!(
+        action.returning.as_slice(),
+        [crate::ast::Projection {
+            expr: crate::ast::Expr::QualifiedStar(qualifier),
+            alias: None,
+        }] if qualifier == "new"
+    ));
+}
+
+#[test]
 fn alter_table_add_key_constraint_preserves_tuple_shape() {
     let Statement::AlterTable(alter) =
         first("ALTER TABLE labels ADD CONSTRAINT labels_tenant_slug_key UNIQUE (tenant, slug)")

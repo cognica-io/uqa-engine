@@ -407,12 +407,19 @@ fn invalid_rule_set_operation_reference() -> SQLError {
     }
 }
 
-fn invalid_rule_conflict_reference(qualifier: &str) -> SQLError {
+pub(super) fn invalid_rule_action_reference(qualifier: &str) -> SQLError {
     SQLError::Routine {
         sqlstate: "42P01".into(),
         message: format!(
             "invalid reference to FROM-clause entry for table \"{qualifier}\"\nDETAIL: There is an entry for table \"{qualifier}\", but it cannot be referenced from this part of the query."
         ),
+    }
+}
+
+fn ambiguous_rule_pseudo_relation(qualifier: &str) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "42P09".into(),
+        message: format!("table reference \"{qualifier}\" is ambiguous"),
     }
 }
 
@@ -499,6 +506,11 @@ fn validate_rule_action_namespace(action: &Statement) -> Result<(), SQLError> {
             {
                 return Err(duplicate_rule_pseudo_relation(&qualifier));
             }
+            if let Some(qualifier) = rule_pseudo_relation_name(&update.target_qualifier) {
+                if super::rule_binding::action_target_qualifier_referenced(action, &qualifier) {
+                    return Err(ambiguous_rule_pseudo_relation(&qualifier));
+                }
+            }
             (update.with.as_slice(), None)
         }
         Statement::Delete(delete) => {
@@ -508,6 +520,11 @@ fn validate_rule_action_namespace(action: &Statement) -> Result<(), SQLError> {
                 .and_then(first_rule_pseudo_relation_in_from)
             {
                 return Err(duplicate_rule_pseudo_relation(&qualifier));
+            }
+            if let Some(qualifier) = rule_pseudo_relation_name(&delete.target_qualifier) {
+                if super::rule_binding::action_target_qualifier_referenced(action, &qualifier) {
+                    return Err(ambiguous_rule_pseudo_relation(&qualifier));
+                }
             }
             (delete.with.as_slice(), None)
         }
@@ -735,7 +752,7 @@ fn validate_rule_action_reference_scopes(action: &Statement) -> Result<(), SQLEr
                             })
                         });
                     if let Some(qualifier) = reference {
-                        return Err(invalid_rule_conflict_reference(&qualifier));
+                        return Err(invalid_rule_action_reference(&qualifier));
                     }
                     for (_, expr) in assignments {
                         validate_rule_expr_scopes(expr)?;
