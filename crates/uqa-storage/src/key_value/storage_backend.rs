@@ -46,6 +46,10 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
         Box::new(KeyValueDocumentStore::new(Arc::clone(&self.store), table))
     }
 
+    fn migrate_document_storage(&self) -> StorageBackendResult<()> {
+        KeyValueDocumentStore::migrate_legacy_storage(self.store.as_ref())
+    }
+
     fn inverted_index(&self, table: &str, analyzer: Analyzer) -> Box<dyn InvertedIndex> {
         Box::new(KeyValueInvertedIndex::new(
             Arc::clone(&self.store),

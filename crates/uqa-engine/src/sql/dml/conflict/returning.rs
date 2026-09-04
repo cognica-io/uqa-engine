@@ -40,7 +40,12 @@ pub(super) fn returning_image_values(
                     &image.storage_table,
                 )?))
             } else {
-                Ok(document.get(column).cloned().unwrap_or(Value::Null))
+                Ok(crate::sql::project_document_column(
+                    &document,
+                    image.metadata,
+                    column,
+                    definitions,
+                ))
             }
         })
         .collect()

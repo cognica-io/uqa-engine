@@ -57,12 +57,7 @@ pub(in crate::sql) struct EngineTableRowSource {
     recheck_pins: Option<Arc<Vec<crate::sql::select::RecheckDoc>>>,
     recheck_cursor: usize,
     command_changes: Option<
-        Arc<
-            std::collections::BTreeMap<
-                uqa_core::DocId,
-                Option<uqa_storage::document_store::Document>,
-            >,
-        >,
+        Arc<std::collections::BTreeMap<uqa_core::DocId, Option<uqa_storage::StoredDocument>>>,
     >,
     command_change_after: Option<uqa_core::DocId>,
     command_base_after: Option<uqa_core::DocId>,

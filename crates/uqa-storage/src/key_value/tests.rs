@@ -19,12 +19,13 @@ use crate::vector_index::{
 use super::codec::*;
 use super::{
     KeyValueCatalog, KeyValueDocumentStore, KeyValueInvertedIndex, KeyValueStore,
-    KeyValueVectorIndex, MemoryKeyValueStore, DOCUMENT_VALUE_V1_PREFIX, TAG_METADATA,
+    KeyValueVectorIndex, MemoryKeyValueStore, DOCUMENT_VALUE_V2_PREFIX, TAG_METADATA,
 };
 use crate::{PersistentStorageBackend, StorageBackendError};
 
 mod catalog;
 mod indexes;
+mod tuple_metadata;
 
 #[test]
 fn key_segment_length_rejects_values_outside_the_disk_format() {
@@ -357,7 +358,7 @@ fn key_value_document_codec_preserves_legacy_and_new_array_meanings() {
         .get(&document_key("articles", 8).unwrap())
         .unwrap()
         .unwrap()
-        .starts_with(DOCUMENT_VALUE_V1_PREFIX));
+        .starts_with(DOCUMENT_VALUE_V2_PREFIX));
 }
 
 #[test]
@@ -410,7 +411,7 @@ fn key_value_column_rewrites_upgrade_legacy_documents_without_type_loss() {
             .get(&document_key("articles", doc_id).unwrap())
             .unwrap()
             .unwrap()
-            .starts_with(DOCUMENT_VALUE_V1_PREFIX));
+            .starts_with(DOCUMENT_VALUE_V2_PREFIX));
     }
 }
 

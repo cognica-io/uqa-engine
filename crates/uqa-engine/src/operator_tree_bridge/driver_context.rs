@@ -158,9 +158,7 @@ impl EngineDriver<'_> {
             .ok_or_else(|| SQLError::UnknownTable(self.table.to_string()))
     }
 
-    /// Build an operator context whose document snapshot exposes the requested
-    /// virtual generated columns. Only those columns are evaluated, and only
-    /// for the candidate documents the consuming operator can visit.
+    /// Build an operator context whose document snapshot materializes requested virtual generated columns and storage-owned tuple columns for only the candidate documents the consuming operator can visit.
     pub(super) fn bridge_context_for_projection(
         &self,
         doc_ids: &[DocId],
@@ -178,13 +176,16 @@ impl EngineDriver<'_> {
         if !crate::engine_generated::projection_contains_virtual_generated_column(
             &columns,
             &projection,
-        ) {
+        ) && !crate::sql::projections_use_tuple_xmin(&projection, &columns)
+        {
             return self.bridge_context();
         }
 
-        let documents =
-            self.engine
-                .get_documents_with_virtual_projection(self.table, doc_ids, &projection)?;
+        let documents = self.engine.get_documents_with_materialized_projection(
+            self.table,
+            doc_ids,
+            &projection,
+        )?;
         let mut store = uqa_storage::MemoryDocumentStore::new();
         for (doc_id, document) in documents {
             uqa_storage::DocumentStore::put(&mut store, doc_id, document).map_err(|error| {

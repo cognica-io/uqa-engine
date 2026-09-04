@@ -347,17 +347,20 @@ impl LockRows<'_> {
             super::super::RetryRowOverride::Deleted => return Ok(true),
             super::super::RetryRowOverride::Present { document, .. } => document,
         };
-        let Some(snapshot_document) = self.engine.get_document(table, candidate.doc_id)? else {
+        let Some(snapshot_document) = self
+            .engine
+            .get_document_for_mutation(table, candidate.doc_id)?
+        else {
             return Ok(true);
         };
         let mut changed_columns = Vec::new();
-        for (column, value) in committed_document {
+        for (column, value) in committed_document.fields() {
             if snapshot_document.get(column) != Some(value) {
                 changed_columns.push(column.clone());
             }
         }
         for column in snapshot_document.keys() {
-            if !committed_document.contains_key(column) {
+            if !committed_document.fields().contains_key(column) {
                 changed_columns.push(column.clone());
             }
         }

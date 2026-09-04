@@ -123,7 +123,8 @@ mod sequence_state_serde;
 mod value_index;
 
 pub(crate) use sql::dml::{
-    CommandExactIndex, CommandMutationOverlay, DeferredForeignKeyCheck, TransactionRowChange,
+    CommandExactIndex, CommandMutationOverlay, CommandStoredDocument, DeferredForeignKeyCheck,
+    TransactionRowChange,
 };
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -152,8 +153,8 @@ use uqa_storage::{
     PersistentStorageProvider, PersistentStorageSession, RelationIdentity,
     SQLiteCompressedContainerAnchor, SQLiteStorageProvider, SequenceOptions, SequenceOwner,
     SequenceOwnerDependency, SequenceReservationResult, SequenceRow, StorageBackendError,
-    StorageBackendResult, StorageSavepointId, TableSchema, VectorFieldSchema, VectorIndex,
-    VectorIndexOpenMode, VectorIndexSpec, ViewRow,
+    StorageBackendResult, StorageSavepointId, StoredDocument, TableSchema, VectorFieldSchema,
+    VectorIndex, VectorIndexOpenMode, VectorIndexSpec, ViewRow,
 };
 
 pub use engine_notifications::SQLNotification;
@@ -271,7 +272,8 @@ type SessionPortalViewSnapshots = Arc<BTreeMap<RelationIdentity, StoredView>>;
 type SessionPortalSQLFunctionSnapshots =
     Arc<BTreeMap<String, Vec<Arc<engine_user_functions::SQLUserFunction>>>>;
 type SessionPortalCatalogSnapshot = Arc<DurableCatalogSnapshot>;
-type SessionPortalTransactionOverlay = Arc<BTreeMap<String, BTreeMap<DocId, Option<Document>>>>;
+type SessionPortalTransactionOverlay =
+    Arc<BTreeMap<String, BTreeMap<DocId, Option<StoredDocument>>>>;
 type ColumnStatsMap = BTreeMap<String, uqa_planner::ColumnStats>;
 type TransactionRelationStates = BTreeMap<RelationIdentity, u64>;
 type FixedTransactionCatalogBaseline = BTreeMap<[u8; 16], (RelationIdentity, Vec<u8>)>;

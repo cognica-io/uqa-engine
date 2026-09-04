@@ -84,7 +84,6 @@ pub(super) fn prepare_values_insert_row(
             message: "moving row to another partition during a BEFORE FOR EACH ROW trigger is not supported".into(),
         });
     }
-    super::super::stamp_tuple_xmin(engine, &target_table, &mut document)?;
     lock_existing_document_foreign_key_dependencies(engine, &target_table, &document)?;
     let prepared = if let Some(on_conflict) = stmt.on_conflict.as_ref() {
         conflict_locks.prepare_document(
@@ -207,6 +206,7 @@ pub(super) fn stage_prepared_insert_row(
                         storage_table: storage_table.to_string(),
                         doc_id: *doc_id,
                         document,
+                        metadata: super::super::new_tuple_metadata(engine)?,
                     }),
                 },
                 after_row_events,
@@ -247,6 +247,9 @@ pub(super) fn stage_prepared_insert_row(
                 params,
                 scope,
             })?;
+            let old_metadata =
+                super::super::existing_tuple_metadata(engine, &old_storage_table, old_doc_id)?;
+            let new_metadata = super::super::new_tuple_metadata(engine)?;
             let mut after_row_events = Vec::new();
             let doc_id = stage_prepared_document_rewrite(
                 engine,
@@ -261,11 +264,13 @@ pub(super) fn stage_prepared_insert_row(
                         storage_table: old_storage_table,
                         doc_id: old_doc_id,
                         document: &prepared.old_document,
+                        metadata: old_metadata,
                     }),
                     new: Some(MutationRowImage {
                         storage_table: new_storage_table,
                         doc_id,
                         document: &prepared.new_document,
+                        metadata: new_metadata,
                     }),
                 },
                 after_row_events,

@@ -334,14 +334,7 @@ fn build_conflict_update(
         &mut excluded_document,
     )?;
     let excluded_columns = if definitions.is_empty() {
-        excluded_document
-            .keys()
-            .filter(|column| {
-                column.as_str() != crate::sql::XMIN_STORAGE_COLUMN
-                    && column.as_str() != crate::sql::XMIN_USER_STORAGE_COLUMN
-            })
-            .cloned()
-            .collect::<Vec<_>>()
+        excluded_document.keys().cloned().collect::<Vec<_>>()
     } else {
         definitions
             .iter()

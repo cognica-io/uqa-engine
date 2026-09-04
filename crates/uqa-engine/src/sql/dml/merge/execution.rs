@@ -31,17 +31,8 @@ mod privileges;
 
 pub(super) use model::{MergeTargetIdentity, SelectedMergeAction};
 
-pub(in crate::sql) fn run_merge(
-    engine: &Engine,
-    mut stmt: MergePlan,
-    params: &[SQLParam],
-) -> Result<SQLResult, SQLError> {
-    stmt.target = super::super::resolve_dml_target_name(engine, &stmt.target, false)?;
-    super::super::run_mutation_command(engine, move |engine| run_merge_inner(engine, &stmt, params))
-}
-
 #[expect(clippy::too_many_lines, reason = "preserves DML lock and event order")]
-fn run_merge_inner(
+pub(super) fn run_merge_inner(
     engine: &Engine,
     stmt: &MergePlan,
     params: &[SQLParam],
@@ -569,6 +560,12 @@ fn run_merge_inner(
                     params,
                     scope: &snapshot_ctes,
                 })?;
+                let old_metadata = super::super::existing_tuple_metadata(
+                    engine,
+                    &prepared.table,
+                    prepared.doc_id,
+                )?;
+                let new_metadata = super::super::new_tuple_metadata(engine)?;
                 let rewritten_doc_id = stage_prepared_document_rewrite(
                     engine,
                     &mut prepared,
@@ -587,11 +584,13 @@ fn run_merge_inner(
                                     storage_table: old_storage_table,
                                     doc_id: prepared.doc_id,
                                     document: &prepared.old_document,
+                                    metadata: old_metadata,
                                 }),
                                 new: Some(MutationRowImage {
                                     storage_table: new_storage_table,
                                     doc_id: rewritten_doc_id,
                                     document: &prepared.new_document,
+                                    metadata: new_metadata,
                                 }),
                             },
                             returning_aliases: &stmt.returning_aliases,
@@ -652,6 +651,11 @@ fn run_merge_inner(
                 .ok_or_else(|| {
                     SQLError::Internal("MERGE delete dependency tree was cyclic at its root".into())
                 })?;
+                let old_metadata = super::super::existing_tuple_metadata(
+                    engine,
+                    &prepared.table,
+                    prepared.doc_id,
+                )?;
                 stage_prepared_document_delete(
                     engine,
                     &mut prepared,
@@ -669,6 +673,7 @@ fn run_merge_inner(
                                     storage_table: prepared.table.clone(),
                                     doc_id: prepared.doc_id,
                                     document: &prepared.document,
+                                    metadata: old_metadata,
                                 }),
                                 new: None,
                             },
@@ -758,7 +763,6 @@ fn run_merge_inner(
                         message: "moving row to another partition during a BEFORE FOR EACH ROW trigger is not supported".into(),
                     });
                 }
-                super::super::stamp_tuple_xmin(engine, &storage_table, &mut document)?;
                 lock_existing_document_foreign_key_dependencies(engine, &storage_table, &document)?;
                 let _key_locks =
                     lock_document_key_dependencies(engine, &storage_table, &document, None)?;
@@ -805,6 +809,7 @@ fn run_merge_inner(
                                     storage_table: storage_table.clone(),
                                     doc_id,
                                     document: &document,
+                                    metadata: super::super::new_tuple_metadata(engine)?,
                                 }),
                             },
                             returning_aliases: &stmt.returning_aliases,

@@ -44,7 +44,9 @@ pub use catalog::{
 pub use clustered_postings::{
     MaterializedPostingCursor, PostingCursor, PostingScore, POSTING_CLUSTER_DOCS,
 };
-pub use document_store::{DocumentStore, MemoryDocumentStore, SharedDocumentRow};
+pub use document_store::{
+    DocumentMetadata, DocumentStore, MemoryDocumentStore, SharedDocumentRow, StoredDocument,
+};
 pub use hnsw_index::HNSWIndex;
 pub use index_abc::Index;
 pub use index_manager::{BTreeIndexHandle, IndexManager};

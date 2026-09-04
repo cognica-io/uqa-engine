@@ -704,7 +704,8 @@ impl Engine {
                 SQLError::Internal(format!("scan deep_learn table `{table}`: {err}"))
             })?;
         let projection = vec![features_field.to_string(), label_field.to_string()];
-        let documents = self.get_documents_with_virtual_projection(table, &doc_ids, &projection)?;
+        let documents =
+            self.get_documents_with_materialized_projection(table, &doc_ids, &projection)?;
         let mut examples = Vec::new();
         for (doc_id, document) in documents {
             let features = document.get(features_field).ok_or_else(|| {

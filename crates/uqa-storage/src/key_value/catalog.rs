@@ -20,9 +20,9 @@ use crate::catalog::{
 use crate::{StorageBackendError, StorageBackendResult};
 
 use super::codec::{
-    decode_document_value, decode_string, decode_value, doc_length_key, doc_length_key_prefix,
-    document_key_prefix, encode_document_value, encode_value, field_stats_key,
-    field_stats_key_prefix, key_with_tag, posting_cluster_positions_field_prefix,
+    decode_stored_document_value, decode_string, decode_value, doc_length_key,
+    doc_length_key_prefix, document_key_prefix, encode_stored_document_value, encode_value,
+    field_stats_key, field_stats_key_prefix, key_with_tag, posting_cluster_positions_field_prefix,
     posting_cluster_positions_key_prefix, posting_cluster_score_field_prefix,
     posting_cluster_score_key_prefix, posting_document_key, posting_document_key_prefix,
     posting_field_prefix, posting_key_prefix, push_str, push_u64, read_str, read_u64,

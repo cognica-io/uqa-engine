@@ -6,12 +6,24 @@
 
 use super::*;
 use std::sync::Arc;
-use uqa_storage::document_store::{Document, DocumentStore};
+use uqa_storage::document_store::{Document, DocumentStore, StoredDocument};
 
 #[derive(Clone)]
 struct MissingProjectionStore;
 
 impl DocumentStore for MissingProjectionStore {
+    fn put_stored(
+        &mut self,
+        _doc_id: DocId,
+        _document: StoredDocument,
+    ) -> StorageBackendResult<()> {
+        Ok(())
+    }
+
+    fn get_stored(&self, doc_id: DocId) -> StorageBackendResult<Option<StoredDocument>> {
+        Ok((doc_id == 1).then(|| StoredDocument::new(Document::new())))
+    }
+
     fn put(&mut self, _doc_id: DocId, _document: Document) -> StorageBackendResult<()> {
         Ok(())
     }

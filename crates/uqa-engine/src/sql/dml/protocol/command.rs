@@ -12,10 +12,17 @@ use std::sync::Arc;
 use crate::engine_capabilities::MutationCoordinator;
 use crate::{DocId, Document, Engine};
 use uqa_sql::SQLError;
+use uqa_storage::document_store::DocumentMetadata;
+
+#[derive(Clone)]
+pub(crate) struct CommandStoredDocument {
+    pub(crate) fields: Arc<Document>,
+    pub(crate) metadata: DocumentMetadata,
+}
 
 #[derive(Clone, Default)]
 pub(crate) struct CommandMutationOverlay {
-    pub(crate) documents: BTreeMap<String, BTreeMap<DocId, Option<Arc<Document>>>>,
+    pub(crate) documents: BTreeMap<String, BTreeMap<DocId, Option<CommandStoredDocument>>>,
     pub(crate) exact_indexes: BTreeMap<String, BTreeMap<Vec<String>, CommandExactIndex>>,
 }
 

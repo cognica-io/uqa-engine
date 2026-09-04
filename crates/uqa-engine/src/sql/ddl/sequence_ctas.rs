@@ -228,7 +228,6 @@ fn materialize_create_table_as_rows(
                 })?;
             document.insert(column.name.clone(), value);
         }
-        crate::sql::dml::stamp_tuple_xmin(engine, name, &mut document)?;
         let vectors = crate::sql::dml::document_vectors(engine, name, &document)?;
         engine.add_document_with_vector_values(name, doc_id, document, vectors)?;
     }

@@ -349,6 +349,7 @@ impl Engine {
             query_transaction_origin: None,
         };
         if initialize_catalog {
+            restore_backend.migrate_document_storage()?;
             restore_backend.migrate_inverted_index_storage()?;
             // A clean restore remains read-only on backends that can promote a transaction, while backends without promotion reserve their writer before the atomic migration scan.
             restore_backend.begin_upgradeable_transaction()?;

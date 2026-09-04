@@ -44,6 +44,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Separated tuple `xmin` from the user document namespace with a required typed storage-record contract, eager SQLite and key-value migration of legacy sentinel fields, schema-aware preservation of user `xmin` collisions, and metadata-safe scans, command overlays, portal snapshots, row-lock rechecks, OLD/NEW `RETURNING`, schema rewrites, and `VACUUM FULL`.
 - Accepted PostgreSQL 18 `INSERT DEFAULT VALUES` as one input row so direct inserts and rewrite-rule actions apply defaults, serial or identity generation, event cardinality, and `RETURNING` instead of rejecting the parser's source-less AST.
 - Made `DROP TABLE ... CASCADE` remove the complete transitive dependent-view closure without requiring ownership of those dependent views, while preserving owner-error precedence for direct view drops.
 - Corrected implicit `smallserial`/`serial2`, `serial`/`serial4`, and `bigserial`/`serial8` backing sequences to use PostgreSQL's `smallint`, `integer`, and `bigint` types, and made `information_schema.sequences` expose exact type, precision, bounds, start, increment, and cycle metadata while excluding internal identity sequences, filtering rows by owner inheritance or sequence privileges, and hiding other sessions' temporary sequences from both sequence catalog views across durable reopen.

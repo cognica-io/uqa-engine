@@ -496,6 +496,8 @@ pub(in crate::sql) fn run_delete_inner(
             events.referential_actions_mut(),
             false,
         )? {
+            let old_metadata =
+                super::existing_tuple_metadata(engine, &prepared.table, prepared.doc_id)?;
             stage_prepared_document_delete(engine, &mut prepared, params, events.after_rows_mut())?;
             affected += 1;
             if !stmt.returning.is_empty() {
@@ -509,6 +511,7 @@ pub(in crate::sql) fn run_delete_inner(
                                 storage_table: prepared.table.clone(),
                                 doc_id: prepared.doc_id,
                                 document: &prepared.document,
+                                metadata: old_metadata,
                             }),
                             new: None,
                         },

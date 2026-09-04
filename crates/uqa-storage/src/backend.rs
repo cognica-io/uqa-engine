@@ -241,6 +241,11 @@ pub trait PersistentStorageBackend: Send + Sync {
 
     fn document_store(&self, table: &str) -> Box<dyn DocumentStore>;
 
+    /// Upgrade backend-owned document records before table handles are restored. Implementations must make the rewrite atomic and idempotent.
+    fn migrate_document_storage(&self) -> StorageBackendResult<()> {
+        Ok(())
+    }
+
     fn inverted_index(&self, table: &str, analyzer: Analyzer) -> Box<dyn InvertedIndex>;
 
     /// Upgrade backend-owned inverted-index values before table handles are

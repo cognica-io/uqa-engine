@@ -30,6 +30,54 @@ fn put_get_round_trip() {
 }
 
 #[test]
+fn tuple_metadata_round_trips_outside_document_body() {
+    let mut store = store();
+    store
+        .put_stored(
+            1,
+            StoredDocument::with_metadata(
+                doc([("title", Value::Str("rust".into()))]),
+                DocumentMetadata::with_tuple_xmin(42),
+            ),
+        )
+        .unwrap();
+    let stored = store.get_stored(1).unwrap().unwrap();
+    assert_eq!(stored.metadata().tuple_xmin(), Some(42));
+    assert_eq!(
+        stored.fields(),
+        &doc([("title", Value::Str("rust".into()))])
+    );
+    let stored_many = store.get_stored_many(&[1, 99]).unwrap();
+    assert_eq!(stored_many.len(), 1);
+    assert_eq!(stored_many[&1].metadata().tuple_xmin(), Some(42));
+    store
+        .put(1, doc([("title", Value::Str("engine".into()))]))
+        .unwrap();
+    assert_eq!(
+        store
+            .get_stored(1)
+            .unwrap()
+            .unwrap()
+            .metadata()
+            .tuple_xmin(),
+        Some(42)
+    );
+    store
+        .conn
+        .with(|connection| {
+            let (body, tuple_xmin): (String, i64) = connection.query_row(
+                "SELECT body, tuple_xmin FROM _documents WHERE table_name = 'articles' AND doc_id = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            assert!(!body.contains("uqa.system.xmin"), "{body}");
+            assert_eq!(tuple_xmin, 42);
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[test]
 fn typed_lists_round_trip_without_becoming_bytes_or_floats() {
     let mut s = store();
     let expected = doc([

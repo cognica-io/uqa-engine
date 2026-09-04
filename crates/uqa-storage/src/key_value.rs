@@ -20,7 +20,7 @@ use uqa_analysis::Analyzer;
 use uqa_core::{DocId, FieldName, IndexStats, Payload, PostingEntry, PostingList, Value};
 
 use crate::backend::{PersistentStorageBackend, PersistentStorageIdentity};
-use crate::document_store::{Document, DocumentStore};
+use crate::document_store::{Document, DocumentMetadata, DocumentStore, StoredDocument};
 use crate::inverted_index::{AnalyzerPhase, InvertedIndex};
 use crate::vector_index::{
     cosine_similarity, validate_vector_values, VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
@@ -71,6 +71,7 @@ const TAG_HNSW_NODE: u8 = b'h';
 /// therefore cannot start with NUL; the prefix lets reads preserve the old
 /// `Bytes`-before-`List` interpretation without misreading newly written lists.
 const DOCUMENT_VALUE_V1_PREFIX: &[u8] = b"\0uqa-document-json-v1\0";
+const DOCUMENT_VALUE_V2_PREFIX: &[u8] = b"\0uqa-document-record-v2\0";
 
 #[derive(Debug, Clone)]
 enum KeyValueBatchOperation {

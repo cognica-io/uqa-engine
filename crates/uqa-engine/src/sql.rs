@@ -35,7 +35,7 @@ use uqa_sql::ast::{
 };
 use uqa_sql::expr::{value_to_tensor, value_to_vector};
 use uqa_sql::{compile, ResultRow, SQLError, SQLParam, SQLResult};
-use uqa_storage::document_store::Document;
+use uqa_storage::document_store::{Document, DocumentMetadata, StoredDocument};
 
 use crate::{Engine, HNSWIndexParams, IVFIndexParams, ScoredEntry, VectorIndexSpec};
 
@@ -265,27 +265,52 @@ pub(crate) fn validate_stored_view_check_option(
 const SCORE_COLUMN: &str = "_score";
 pub(in crate::sql) const DOC_ID_COLUMN: &str = "_doc_id";
 pub(in crate::sql) const TABLE_OID_COLUMN: &str = "tableoid";
-pub(in crate::sql) const XMIN_COLUMN: &str = "xmin";
-pub(crate) const XMIN_STORAGE_COLUMN: &str = "\0uqa.system.xmin";
-pub(crate) const XMIN_USER_STORAGE_COLUMN: &str = "\0uqa.user.xmin";
+pub(crate) const XMIN_COLUMN: &str = "xmin";
 
-pub(in crate::sql) fn storage_projection_column(column: &str) -> &str {
-    if column == XMIN_COLUMN {
-        XMIN_STORAGE_COLUMN
-    } else {
-        column
-    }
+pub(crate) fn projection_uses_tuple_xmin(
+    column: &str,
+    definitions: &[uqa_sql::ast::ColumnDef],
+) -> bool {
+    column == XMIN_COLUMN
+        && !definitions
+            .iter()
+            .any(|definition| definition.name == XMIN_COLUMN)
 }
 
-pub(in crate::sql) fn storage_projection_column_for_table<'a>(
-    column: &'a str,
+pub(crate) fn projections_use_tuple_xmin(
+    columns: &[String],
     definitions: &[uqa_sql::ast::ColumnDef],
-) -> &'a str {
-    if column == XMIN_COLUMN && !definitions.is_empty() {
-        XMIN_COLUMN
-    } else {
-        storage_projection_column(column)
+) -> bool {
+    columns
+        .iter()
+        .any(|column| projection_uses_tuple_xmin(column, definitions))
+}
+
+pub(crate) fn project_document_column(
+    document: &Document,
+    metadata: DocumentMetadata,
+    column: &str,
+    definitions: &[uqa_sql::ast::ColumnDef],
+) -> Value {
+    if !projection_uses_tuple_xmin(column, definitions) {
+        return document.get(column).cloned().unwrap_or(Value::Null);
     }
+    if definitions.is_empty() {
+        if let Some(value) = document.get(column) {
+            return value.clone();
+        }
+    }
+    metadata
+        .tuple_xmin()
+        .map_or(Value::Null, |xmin| Value::Int(i64::from(xmin)))
+}
+
+pub(crate) fn project_stored_document_column(
+    document: &StoredDocument,
+    column: &str,
+    definitions: &[uqa_sql::ast::ColumnDef],
+) -> Value {
+    project_document_column(document.fields(), document.metadata(), column, definitions)
 }
 
 pub(in crate::sql) const META_QUALIFIER: &str = "_meta";

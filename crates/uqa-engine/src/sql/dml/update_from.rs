@@ -357,6 +357,9 @@ pub(in crate::sql) fn run_update_from(
                 params,
                 scope: &snapshot_ctes,
             })?;
+            let old_metadata =
+                super::existing_tuple_metadata(engine, &prepared.table, prepared.doc_id)?;
+            let new_metadata = super::new_tuple_metadata(engine)?;
             let mut after_row_events = Vec::new();
             let rewritten_doc_id = stage_prepared_document_rewrite(
                 engine,
@@ -376,11 +379,13 @@ pub(in crate::sql) fn run_update_from(
                                 storage_table: prepared.table.clone(),
                                 doc_id: prepared.doc_id,
                                 document: &prepared.old_document,
+                                metadata: old_metadata,
                             }),
                             new: Some(MutationRowImage {
                                 storage_table: rewritten_storage_table,
                                 doc_id: rewritten_doc_id,
                                 document: &prepared.new_document,
+                                metadata: new_metadata,
                             }),
                         },
                         aliases: &stmt.returning_aliases,

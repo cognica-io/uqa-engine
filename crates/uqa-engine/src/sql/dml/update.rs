@@ -11,16 +11,17 @@ use super::{
     dml_target_row_for_storage, eval_mutation_assignment, eval_mutation_expr,
     eval_view_rule_update_assignment, finish_mutation_publication, index_vectors_for_type,
     lock_mutation_target, lock_physical_mutation_target, prepare_partition_update_route,
-    prepare_routed_document_rewrite, referrers_to_for_actions, run_update_from,
-    stage_prepared_document_rewrite, update_lock_strength, validate_dml_expression_qualifiers,
-    validate_mutation_columns, validate_returning_alias_relations, validate_view_checks, BTreeMap,
-    BTreeSet, BinaryOp, ColumnType, CteScope, DmlReturningShape, Engine, MutationAssignmentTarget,
-    MutationLockTarget, MutationOverlayScope, MutationPublicationBatch, MutationRewriteCandidate,
-    MutationRowImage, MutationRowImages, PhysicalDocumentIdentity, PhysicalMutationLockTarget,
+    prepare_routed_document_rewrite, run_update_from, stage_prepared_document_rewrite,
+    update_lock_strength, validate_dml_expression_qualifiers, validate_mutation_columns,
+    validate_returning_alias_relations, validate_view_checks, BTreeMap, BTreeSet, BinaryOp,
+    ColumnType, CteScope, DmlReturningShape, Engine, MutationAssignmentTarget, MutationLockTarget,
+    MutationOverlayScope, MutationPublicationBatch, MutationRewriteCandidate, MutationRowImage,
+    MutationRowImages, PhysicalDocumentIdentity, PhysicalMutationLockTarget,
     PreparedMutationAction, ReturningProjectionRow, RowIndependentUpdateValues, SQLError, SQLParam,
     SQLResult, ScalarExpr, UpdatePlan, Value, ViewCheckContext,
 };
 
+mod patch_eligibility;
 mod privileges;
 
 pub(in crate::sql) fn run_update(
@@ -680,6 +681,8 @@ fn prepare_update_row(
         scope: snapshot_ctes,
     })?;
     let affected = !rewrite.is_partition_move_delete();
+    let old_metadata = super::existing_tuple_metadata(engine, &rewrite.table, rewrite.doc_id)?;
+    let new_metadata = super::new_tuple_metadata(engine)?;
     let mut after_row_events = Vec::new();
     let rewritten_doc_id = stage_prepared_document_rewrite(
         engine,
@@ -701,11 +704,13 @@ fn prepare_update_row(
                         storage_table: rewrite.table.clone(),
                         doc_id: rewrite.doc_id,
                         document: &rewrite.old_document,
+                        metadata: old_metadata,
                     }),
                     new: Some(MutationRowImage {
                         storage_table: rewritten_storage_table,
                         doc_id: rewritten_doc_id,
                         document: &rewrite.new_document,
+                        metadata: new_metadata,
                     }),
                 },
                 aliases: &stmt.returning_aliases,
@@ -752,13 +757,13 @@ pub(in crate::sql) fn try_run_point_update(
     let Some((updates, vectors)) = row_independent_update_values(engine, stmt, params)? else {
         return Ok(None);
     };
-    if !can_patch_update_without_full_row(engine, &stmt.table, &updates)? {
+    if !patch_eligibility::can_patch_update_without_full_row(engine, &stmt.table, &updates)? {
         return Ok(None);
     }
     if matches!(lookup_value, Value::Null) {
         return Ok(Some(SQLResult::from_affected(0)));
     }
-    if !point_lookup_field_is_unique(engine, &stmt.table, &lookup_field)? {
+    if !patch_eligibility::point_lookup_field_is_unique(engine, &stmt.table, &lookup_field)? {
         return Ok(None);
     }
     let Some(doc_id) = engine.find_doc_id_by_field(&stmt.table, &lookup_field, &lookup_value)?
@@ -915,82 +920,4 @@ pub(in crate::sql) fn expr_is_row_independent(expr: &ScalarExpr) -> bool {
         | ScalarExpr::Exists { .. }
         | ScalarExpr::InSubquery { .. } => false,
     }
-}
-
-pub(in crate::sql) fn can_patch_update_without_full_row(
-    engine: &Engine,
-    table: &str,
-    updates: &BTreeMap<String, Value>,
-) -> Result<bool, SQLError> {
-    if engine
-        .try_check_constraint_definitions(table)
-        .map_err(|err| dml_storage_error("UPDATE", err))?
-        .iter()
-        .any(|constraint| constraint.enforced)
-    {
-        return Ok(false);
-    }
-    let update_keys: BTreeSet<&str> = updates.keys().map(String::as_str).collect();
-    if engine
-        .try_describe_table(table)
-        .map_err(|err| dml_storage_error("UPDATE", err))?
-        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?
-        .iter()
-        .any(|col| {
-            col.not_null
-                && col.auto_increment.is_none()
-                && matches!(updates.get(&col.name), Some(Value::Null))
-        })
-    {
-        return Ok(false);
-    }
-    if engine
-        .try_key_constraints(table)
-        .map_err(|err| dml_storage_error("UPDATE", err))?
-        .iter()
-        .any(|constraint| {
-            constraint
-                .columns
-                .iter()
-                .any(|column| update_keys.contains(column.as_str()))
-        })
-    {
-        return Ok(false);
-    }
-    if engine
-        .try_foreign_keys(table)
-        .map_err(|err| dml_storage_error("UPDATE", err))?
-        .iter()
-        .filter(|fk| fk.enforced)
-        .any(|fk| {
-            fk.local_columns
-                .iter()
-                .any(|column| update_keys.contains(column.as_str()))
-        })
-    {
-        return Ok(false);
-    }
-    if referrers_to_for_actions(engine, table)?
-        .iter()
-        .any(|(_, fk)| {
-            fk.ref_columns
-                .iter()
-                .any(|column| update_keys.contains(column.as_str()))
-        })
-    {
-        return Ok(false);
-    }
-    Ok(true)
-}
-
-pub(in crate::sql) fn point_lookup_field_is_unique(
-    engine: &Engine,
-    table: &str,
-    lookup_field: &str,
-) -> Result<bool, SQLError> {
-    Ok(engine
-        .try_key_constraints(table)
-        .map_err(|err| dml_storage_error("UPDATE", err))?
-        .iter()
-        .any(|constraint| constraint.columns.len() == 1 && constraint.columns[0] == lookup_field))
 }

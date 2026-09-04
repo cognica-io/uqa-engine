@@ -11,7 +11,7 @@
 use std::sync::Arc;
 
 use uqa_execution::{PhysicalRow, RowSchema};
-use uqa_storage::document_store::Document;
+use uqa_storage::StoredDocument;
 
 /// One tuple a pinned scan must emit during a recheck.
 #[derive(Clone)]
@@ -19,7 +19,7 @@ pub(in crate::sql) struct RecheckDoc {
     /// Row identity the pinned scan emits, already following any primary-key rewrite to the successor id.
     pub doc_id: uqa_core::DocId,
     /// Latest committed image for a changed tuple; `None` reads the statement snapshot image for `doc_id`.
-    pub document: Option<Arc<Document>>,
+    pub document: Option<Arc<StoredDocument>>,
 }
 
 /// Pins for every lock-target relation of one candidate row.

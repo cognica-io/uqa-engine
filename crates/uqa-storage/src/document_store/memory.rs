@@ -13,20 +13,21 @@ use uqa_core::{DocId, Value};
 
 use crate::backend::StorageBackendResult;
 
-use super::{Document, DocumentStore, SharedDocumentRow};
+use super::{Document, DocumentMetadata, DocumentStore, SharedDocumentRow, StoredDocument};
 
 mod projection;
 
 #[derive(Debug, Default, Clone)]
 pub struct MemoryDocumentStore {
-    documents: BTreeMap<DocId, StoredDocument>,
+    documents: BTreeMap<DocId, MemoryDocumentRow>,
     layouts: Vec<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
-struct StoredDocument {
+pub(super) struct MemoryDocumentRow {
     layout_id: usize,
     values: Arc<Vec<Value>>,
+    metadata: DocumentMetadata,
 }
 
 impl MemoryDocumentStore {
@@ -40,7 +41,7 @@ impl MemoryDocumentStore {
             .map(|(doc_id, stored)| (*doc_id, self.materialize_document(stored)))
     }
 
-    fn materialize_document(&self, stored: &StoredDocument) -> Document {
+    fn materialize_document(&self, stored: &MemoryDocumentRow) -> Document {
         self.layouts[stored.layout_id]
             .iter()
             .cloned()
@@ -48,11 +49,36 @@ impl MemoryDocumentStore {
             .collect()
     }
 
-    fn field<'a>(&'a self, stored: &'a StoredDocument, field: &str) -> Option<&'a Value> {
+    fn materialize_stored_document(&self, stored: &MemoryDocumentRow) -> StoredDocument {
+        StoredDocument::with_metadata(self.materialize_document(stored), stored.metadata)
+    }
+
+    fn field<'a>(&'a self, stored: &'a MemoryDocumentRow, field: &str) -> Option<&'a Value> {
         let slot = self.layouts[stored.layout_id]
             .binary_search_by(|stored| stored.as_str().cmp(field))
             .ok()?;
         stored.values.get(slot)
+    }
+
+    fn put_stored_inner(&mut self, doc_id: DocId, document: StoredDocument) {
+        let (document, metadata) = document.into_parts();
+        let (layout_id, values) =
+            if let Some(layout_id) = document_layout_id(&self.layouts, &document) {
+                (layout_id, document.into_values().collect())
+            } else {
+                let (layout, values): (Vec<_>, Vec<_>) = document.into_iter().unzip();
+                let layout_id = self.layouts.len();
+                self.layouts.push(layout);
+                (layout_id, values)
+            };
+        self.documents.insert(
+            doc_id,
+            MemoryDocumentRow {
+                layout_id,
+                values: Arc::new(values),
+                metadata,
+            },
+        );
     }
 }
 
@@ -68,22 +94,11 @@ fn document_layout_id(layouts: &[Vec<String>], document: &Document) -> Option<us
 
 impl DocumentStore for MemoryDocumentStore {
     fn put(&mut self, doc_id: DocId, document: Document) -> StorageBackendResult<()> {
-        let (layout_id, values) =
-            if let Some(layout_id) = document_layout_id(&self.layouts, &document) {
-                (layout_id, document.into_values().collect())
-            } else {
-                let (layout, values): (Vec<_>, Vec<_>) = document.into_iter().unzip();
-                let layout_id = self.layouts.len();
-                self.layouts.push(layout);
-                (layout_id, values)
-            };
-        self.documents.insert(
-            doc_id,
-            StoredDocument {
-                layout_id,
-                values: Arc::new(values),
-            },
-        );
+        let metadata = self
+            .documents
+            .get(&doc_id)
+            .map_or_else(DocumentMetadata::default, |stored| stored.metadata);
+        self.put_stored_inner(doc_id, StoredDocument::with_metadata(document, metadata));
         Ok(())
     }
 
@@ -92,6 +107,36 @@ impl DocumentStore for MemoryDocumentStore {
             .documents
             .get(&doc_id)
             .map(|stored| self.materialize_document(stored)))
+    }
+
+    fn put_stored(&mut self, doc_id: DocId, document: StoredDocument) -> StorageBackendResult<()> {
+        self.put_stored_inner(doc_id, document);
+        Ok(())
+    }
+
+    fn get_stored(&self, doc_id: DocId) -> StorageBackendResult<Option<StoredDocument>> {
+        Ok(self
+            .documents
+            .get(&doc_id)
+            .map(|stored| self.materialize_stored_document(stored)))
+    }
+
+    fn get_stored_many(
+        &self,
+        doc_ids: &[DocId],
+    ) -> StorageBackendResult<BTreeMap<DocId, StoredDocument>> {
+        Ok(doc_ids
+            .iter()
+            .filter_map(|doc_id| {
+                self.documents
+                    .get(doc_id)
+                    .map(|stored| (*doc_id, self.materialize_stored_document(stored)))
+            })
+            .collect())
+    }
+
+    fn get_metadata(&self, doc_id: DocId) -> StorageBackendResult<Option<DocumentMetadata>> {
+        Ok(self.documents.get(&doc_id).map(|stored| stored.metadata))
     }
 
     fn contains_doc_id(&self, doc_id: DocId) -> StorageBackendResult<bool> {
@@ -211,18 +256,18 @@ impl DocumentStore for MemoryDocumentStore {
         let Some(mut document) = self
             .documents
             .get(&doc_id)
-            .map(|stored| self.materialize_document(stored))
+            .map(|stored| self.materialize_stored_document(stored))
         else {
             return Ok(false);
         };
         for (field, value) in updates {
             if matches!(value, Value::Null) {
-                document.remove(field);
+                document.fields_mut().remove(field);
             } else {
-                document.insert(field.clone(), value.clone());
+                document.fields_mut().insert(field.clone(), value.clone());
             }
         }
-        self.put(doc_id, document)?;
+        self.put_stored(doc_id, document)?;
         Ok(true)
     }
 

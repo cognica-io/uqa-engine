@@ -204,8 +204,7 @@ pub(in crate::sql) struct ScoredDocumentSource {
     input_guarantees_presence: bool,
     lock_origin: Option<(Arc<str>, Arc<str>)>,
     recheck_pinned: bool,
-    recheck_documents:
-        std::collections::BTreeMap<DocId, Arc<uqa_storage::document_store::Document>>,
+    recheck_documents: std::collections::BTreeMap<DocId, Arc<uqa_storage::StoredDocument>>,
 }
 
 pub(in crate::sql) enum ScoredInputCursor {

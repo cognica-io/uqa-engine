@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 enum CommandScanCandidate {
     Persisted(uqa_core::DocId),
-    Overlay(uqa_core::DocId, uqa_storage::document_store::Document),
+    Overlay(uqa_core::DocId, uqa_storage::StoredDocument),
 }
 
 impl EngineTableRowSource {
@@ -30,6 +30,8 @@ impl EngineTableRowSource {
             &self.column_definitions,
             &self.columns,
         );
+        let needs_stored = has_virtual
+            || crate::sql::projections_use_tuple_xmin(&self.columns, &self.column_definitions);
         let mut rows = Vec::with_capacity(max_rows);
         while rows.len() < max_rows {
             let remaining = max_rows - rows.len();
@@ -118,24 +120,16 @@ impl EngineTableRowSource {
             let mut persisted_shared = None;
             if !persisted_ids.is_empty() {
                 let store = self.table.document_store.read();
-                if has_virtual {
-                    persisted_documents = store.get_many(&persisted_ids).map_err(|error| {
-                        SQLError::Internal(format!(
-                            "read command-visible generated rows from `{}`: {error}",
-                            self.table_name
-                        ))
-                    })?;
+                if needs_stored {
+                    persisted_documents =
+                        store.get_stored_many(&persisted_ids).map_err(|error| {
+                            SQLError::Internal(format!(
+                                "read command-visible rows with metadata from `{}`: {error}",
+                                self.table_name
+                            ))
+                        })?;
                 } else {
-                    let fields = self
-                        .columns
-                        .iter()
-                        .map(|column| {
-                            crate::sql::storage_projection_column_for_table(
-                                column,
-                                &self.column_definitions,
-                            )
-                        })
-                        .collect::<Vec<_>>();
+                    let fields = self.columns.iter().map(String::as_str).collect::<Vec<_>>();
                     if let Some(shared_rows) = store
                         .get_shared_fields(&persisted_ids, &fields)
                         .map_err(|error| {
@@ -175,7 +169,7 @@ impl EngineTableRowSource {
             }
             for candidate in candidates {
                 let (doc_id, physical) = match candidate {
-                    CommandScanCandidate::Persisted(doc_id) if has_virtual => {
+                    CommandScanCandidate::Persisted(doc_id) if needs_stored => {
                         let mut document = persisted_documents.remove(&doc_id).ok_or_else(|| {
                             SQLError::Internal(format!(
                                 "table `{}` listed command-visible document {doc_id} but did not return it",
@@ -184,20 +178,18 @@ impl EngineTableRowSource {
                         })?;
                         crate::engine_generated::materialize_projected_virtual_generated_columns(
                             &self.column_definitions,
-                            &mut document,
+                            document.fields_mut(),
                             &self.columns,
                         )?;
                         let values = self
                             .columns
                             .iter()
                             .map(|column| {
-                                document
-                                    .get(crate::sql::storage_projection_column_for_table(
-                                        column,
-                                        &self.column_definitions,
-                                    ))
-                                    .cloned()
-                                    .unwrap_or(Value::Null)
+                                crate::sql::project_stored_document_column(
+                                    &document,
+                                    column,
+                                    &self.column_definitions,
+                                )
                             })
                             .collect();
                         (doc_id, uqa_execution::PhysicalRow::from_values(values))
@@ -225,20 +217,18 @@ impl EngineTableRowSource {
                     CommandScanCandidate::Overlay(doc_id, mut document) => {
                         crate::engine_generated::materialize_projected_virtual_generated_columns(
                             &self.column_definitions,
-                            &mut document,
+                            document.fields_mut(),
                             &self.columns,
                         )?;
                         let values = self
                             .columns
                             .iter()
                             .map(|column| {
-                                document
-                                    .get(crate::sql::storage_projection_column_for_table(
-                                        column,
-                                        &self.column_definitions,
-                                    ))
-                                    .cloned()
-                                    .unwrap_or(Value::Null)
+                                crate::sql::project_stored_document_column(
+                                    &document,
+                                    column,
+                                    &self.column_definitions,
+                                )
                             })
                             .collect();
                         (doc_id, uqa_execution::PhysicalRow::from_values(values))
