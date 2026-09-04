@@ -127,6 +127,37 @@ impl Engine {
         Ok(dependents)
     }
 
+    pub(crate) fn triggers_depending_on_routine(
+        &self,
+        target: &uqa_sql::ast::FunctionBinding,
+    ) -> Result<Vec<(String, String)>, SQLError> {
+        let mut dependents = Vec::new();
+        for trigger in self.list_triggers() {
+            let invokes_target = match (trigger.function_object_id, target.object_id) {
+                (Some(trigger), Some(target)) => trigger == target,
+                (None, None) => {
+                    target.argument_types.is_empty() && trigger.definition.function == target.name
+                }
+                _ => false,
+            };
+            let condition_references_target = trigger
+                .definition
+                .when
+                .as_ref()
+                .map(|condition| super::expression_references_routine_identity(condition, target))
+                .transpose()?
+                .unwrap_or(false);
+            if invokes_target || condition_references_target {
+                dependents.push((
+                    trigger.definition.table.clone(),
+                    trigger.definition.name.clone(),
+                ));
+            }
+        }
+        dependents.sort();
+        Ok(dependents)
+    }
+
     pub(crate) fn rewrite_event_routine_identity(
         &self,
         target: &uqa_sql::ast::FunctionBinding,
@@ -135,16 +166,20 @@ impl Engine {
         let mut next_triggers = self.durable.triggers.read().clone();
         let mut triggers_changed = false;
         for trigger in next_triggers.values_mut().flat_map(BTreeMap::values_mut) {
-            let matches = match (trigger.function_object_id, target.object_id) {
+            let invokes_target = match (trigger.function_object_id, target.object_id) {
                 (Some(stored), Some(target)) => stored == target,
                 (None, None) => {
                     target.argument_types.is_empty() && trigger.definition.function == target.name
                 }
                 _ => false,
             };
-            if matches {
+            if invokes_target {
                 trigger.definition.function = new_name.to_string();
                 triggers_changed = true;
+            }
+            if let Some(condition) = &mut trigger.definition.when {
+                triggers_changed |=
+                    super::rewrite_expression_routine_identity(condition, target, new_name)?;
             }
         }
         if triggers_changed {

@@ -102,7 +102,10 @@ CREATE RULE copy_value AS ON INSERT TO uqa_routine_rename_oracle.rule_source DO 
 CREATE FUNCTION uqa_routine_rename_oracle.table_base(value integer) RETURNS TABLE(output integer) LANGUAGE SQL AS 'SELECT $1 + 2';
 CREATE VIEW uqa_routine_rename_oracle.bound_table_view AS SELECT output FROM uqa_routine_rename_oracle.table_base(5);
 CREATE TABLE uqa_routine_rename_oracle.trigger_source(id integer);
+CREATE TABLE uqa_routine_rename_oracle.trigger_condition_log(value integer);
 CREATE FUNCTION uqa_routine_rename_oracle.increment_trigger() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.id := NEW.id + 1; RETURN NEW; END $$;
+CREATE FUNCTION uqa_routine_rename_oracle.condition_trigger() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO uqa_routine_rename_oracle.trigger_condition_log VALUES (NEW.id); RETURN NEW; END $$;
+CREATE TRIGGER condition_before BEFORE INSERT ON uqa_routine_rename_oracle.trigger_source FOR EACH ROW WHEN (uqa_routine_rename_oracle.base(NEW.id) = NEW.id + 1) EXECUTE FUNCTION uqa_routine_rename_oracle.condition_trigger();
 CREATE TRIGGER increment_before BEFORE INSERT ON uqa_routine_rename_oracle.trigger_source FOR EACH ROW EXECUTE FUNCTION uqa_routine_rename_oracle.increment_trigger();
 INSERT INTO uqa_routine_rename_oids
 SELECT 'base', 'uqa_routine_rename_oracle.base(integer)'::regprocedure
@@ -145,6 +148,8 @@ SELECT 'rule-deparse|' || (position('renamed_base' in pg_get_ruledef(oid, true))
 FROM pg_rewrite WHERE ev_class = 'uqa_routine_rename_oracle.rule_source'::regclass AND rulename = 'copy_value';
 SELECT 'trigger-deparse|' || (position('renamed_trigger' in pg_get_triggerdef(oid, true)) > 0)
 FROM pg_trigger WHERE tgrelid = 'uqa_routine_rename_oracle.trigger_source'::regclass AND tgname = 'increment_before';
+SELECT 'trigger-condition-deparse|' || (position('renamed_base' in pg_get_triggerdef(oid, true)) > 0)
+FROM pg_trigger WHERE tgrelid = 'uqa_routine_rename_oracle.trigger_source'::regclass AND tgname = 'condition_before';
 SELECT 'standard-call|' || uqa_routine_rename_oracle.standard_caller(4);
 CALL uqa_routine_rename_oracle.command_caller(4);
 SELECT 'command-call|' || value FROM uqa_routine_rename_oracle.command_sink ORDER BY value DESC LIMIT 1;
@@ -160,6 +165,7 @@ INSERT INTO uqa_routine_rename_oracle.rule_source VALUES (10);
 SELECT 'rule-call|' || value FROM uqa_routine_rename_oracle.rule_log;
 INSERT INTO uqa_routine_rename_oracle.trigger_source VALUES (12);
 SELECT 'trigger-call|' || id FROM uqa_routine_rename_oracle.trigger_source;
+SELECT 'trigger-condition-call|' || value FROM uqa_routine_rename_oracle.trigger_condition_log;
 SELECT pg_temp.routine_rename_probe('sql-text-missing', 'SELECT uqa_routine_rename_oracle.sql_text_caller(4)');
 SELECT pg_temp.routine_rename_probe('plpgsql-text-missing', 'SELECT uqa_routine_rename_oracle.plpgsql_text_caller(4)');
 SELECT pg_temp.routine_rename_probe('dependent-restrict', 'DROP FUNCTION uqa_routine_rename_oracle.renamed_base(integer) RESTRICT');
@@ -167,6 +173,8 @@ CREATE FUNCTION uqa_routine_rename_oracle.base(value integer) RETURNS integer LA
 SELECT 'identity-isolation|' || uqa_routine_rename_oracle.standard_caller(4) || '|' || uqa_routine_rename_oracle.sql_text_caller(4) || '|' || uqa_routine_rename_oracle.plpgsql_text_caller(4);
 INSERT INTO uqa_routine_rename_oracle.schema_source(value, other) VALUES (3, 4);
 SELECT 'schema-expression-after-recreate|' || id FROM uqa_routine_rename_oracle.schema_source WHERE value = 3;
+INSERT INTO uqa_routine_rename_oracle.trigger_source VALUES (14);
+SELECT 'trigger-condition-after-recreate|' || value FROM uqa_routine_rename_oracle.trigger_condition_log ORDER BY value DESC LIMIT 1;
 CALL uqa_routine_rename_oracle.command_caller(5);
 SELECT 'command-after-recreate|' || value FROM uqa_routine_rename_oracle.command_sink ORDER BY value DESC LIMIT 1;
 SELECT 'merge-command-after-recreate|' || value FROM uqa_routine_rename_oracle.command_merge_target WHERE id = 1;
@@ -176,5 +184,6 @@ SELECT 'bound-after-old-drop|' || uqa_routine_rename_oracle.standard_caller(4);
 DROP FUNCTION uqa_routine_rename_oracle.renamed_base(integer) CASCADE;
 SELECT 'routine-cascade|' || (to_regprocedure('uqa_routine_rename_oracle.command_caller(integer)') IS NULL) || '|' || (to_regprocedure('uqa_routine_rename_oracle.default_caller(integer)') IS NULL);
 SELECT 'schema-expression-cascade|' || (column_default IS NULL) || '|' || (NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'uqa_routine_rename_oracle.schema_source'::regclass AND conname IN ('schema_column_check', 'schema_table_check'))) || '|' || (to_regclass('uqa_routine_rename_oracle.schema_source') IS NOT NULL) FROM information_schema.columns WHERE table_schema = 'uqa_routine_rename_oracle' AND table_name = 'schema_source' AND column_name = 'id';
+SELECT 'trigger-condition-cascade|' || (NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'uqa_routine_rename_oracle.trigger_source'::regclass AND tgname = 'condition_before')) || '|' || (to_regclass('uqa_routine_rename_oracle.trigger_source') IS NOT NULL) || '|' || (to_regprocedure('uqa_routine_rename_oracle.condition_trigger()') IS NOT NULL);
 
 DROP SCHEMA uqa_routine_rename_oracle CASCADE;

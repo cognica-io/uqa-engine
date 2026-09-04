@@ -230,11 +230,20 @@ impl Engine {
             if let Some(condition) = &mut trigger.definition.when {
                 condition.upgrade_legacy_serialized_dispatches();
             }
-            let relation = self
+            let (relation, condition_routine_bindings_changed) = self
                 .validate_trigger_definition(&mut trigger.definition, RelationLookupMode::Bound)
                 .map_err(|error| {
                     StorageBackendError::Other(format!("restore trigger catalog: {error}"))
                 })?;
+            if condition_routine_bindings_changed {
+                if !mode.allows_migration() {
+                    return Err(StorageBackendError::Other(format!(
+                        "trigger `{}` WHEN condition requires an initial-open routine-identity migration",
+                        trigger.definition.name
+                    )));
+                }
+                migrated = true;
+            }
             let function_object_id = self
                 .resolve_trigger_function(&trigger.definition.function, RelationLookupMode::Bound)
                 .map_err(|error| {

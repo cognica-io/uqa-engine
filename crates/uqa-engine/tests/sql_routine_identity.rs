@@ -24,6 +24,8 @@ mod routine_rename;
 mod scalar_overloads;
 #[path = "sql_routine_identity/security_roles.rs"]
 mod security_roles;
+#[path = "sql_routine_identity/trigger_when_dependencies.rs"]
+mod trigger_when_dependencies;
 
 fn scalar(engine: &Engine, sql: &str) -> Value {
     engine

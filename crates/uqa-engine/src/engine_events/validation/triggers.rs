@@ -328,7 +328,7 @@ impl Engine {
         &self,
         definition: &mut CreateTrigger,
         lookup_mode: RelationLookupMode,
-    ) -> Result<RelationIdentity, SQLError> {
+    ) -> Result<(RelationIdentity, bool), SQLError> {
         if definition.constraint && definition.or_replace {
             return Err(SQLError::Routine {
                 sqlstate: "0A000".into(),
@@ -412,11 +412,13 @@ impl Engine {
                 });
             }
         }
+        let mut condition_routine_bindings_changed = false;
         if let Some(mut condition) = definition.when.take() {
-            self.validate_trigger_condition(definition, &columns, &mut condition)?;
+            condition_routine_bindings_changed =
+                self.validate_trigger_condition(definition, &columns, &mut condition)?;
             definition.when = Some(condition);
         }
-        Ok(relation)
+        Ok((relation, condition_routine_bindings_changed))
     }
 
     fn validate_trigger_transition_relations(
@@ -472,35 +474,36 @@ impl Engine {
         definition: &CreateTrigger,
         columns: &[uqa_sql::ast::ColumnDef],
         condition: &mut Expr,
-    ) -> Result<(), SQLError> {
+    ) -> Result<bool, SQLError> {
         validate_trigger_condition_references(definition, columns, condition)?;
         let bound = bind_expr(condition, &mut TriggerConditionTypeResolver { columns })?;
-        let lowered = uqa_planner::ExpressionPlan::lower(bound);
-        match uqa_execution::common_context_expression_type(
-            &lowered.scalar,
-            &uqa_execution::RowSchema::default(),
+        let mut plan = uqa_planner::ExpressionPlan::lower_with(bound, &|name: &str| {
+            self.has_registered_aggregate_function(name)
+        });
+        let ty = crate::sql::bind_catalog_expression_routines_with_outer(
+            self,
+            &mut plan,
             &[],
-            Some(self),
-        )? {
-            Some(ty) if !is_boolean_type(&ty) => {
+            &uqa_execution::RowSchema::default(),
+        )?;
+        if !ty.as_ref().is_some_and(is_boolean_type) {
+            if let Expr::Literal(value @ (Value::Str(_) | Value::FixedChar(_))) = condition {
+                *value = uqa_sql::expr::cast_value(value, "boolean")?;
+            } else if let Some(ty) = ty {
                 return Err(SQLError::TypeMismatch(format!(
                     "argument of WHEN must be type boolean, not type {}",
                     ty.sql_name()
-                )))
+                )));
+            } else {
+                *condition = Expr::Cast {
+                    expr: Box::new(condition.clone()),
+                    ty: "boolean".into(),
+                };
             }
-            None => {
-                if let Expr::Literal(value @ (Value::Str(_) | Value::FixedChar(_))) = condition {
-                    *value = uqa_sql::expr::cast_value(value, "boolean")?;
-                } else {
-                    *condition = Expr::Cast {
-                        expr: Box::new(condition.clone()),
-                        ty: "boolean".into(),
-                    };
-                }
-            }
-            Some(_) => {}
         }
-        crate::sql::reject_stored_regrole_constants(self, condition, None)
+        crate::sql::reject_stored_regrole_constants(self, condition, None)?;
+        let references = crate::sql::collect_expression_routine_references(&plan)?;
+        super::super::bind_stored_expression_routines(condition, &references)
     }
 }
 

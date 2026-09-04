@@ -288,7 +288,7 @@ impl Engine {
     }
 
     pub(crate) fn register_trigger(&self, mut definition: CreateTrigger) -> Result<(), SQLError> {
-        let relation =
+        let (relation, _) =
             self.validate_trigger_definition(&mut definition, RelationLookupMode::Dynamic)?;
         let function_object_id = self
             .resolve_trigger_function(&definition.function, RelationLookupMode::Bound)?

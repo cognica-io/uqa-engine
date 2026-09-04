@@ -187,26 +187,7 @@ impl Engine {
                     .map_err(|error| {
                         SQLError::Internal(format!("read view function dependencies: {error}"))
                     })?;
-                let triggers = if target.argument_types.is_empty() {
-                    self.list_triggers()
-                        .into_iter()
-                        .filter(
-                            |trigger| match (trigger.function_object_id, target.object_id) {
-                                (Some(trigger), Some(target)) => trigger == target,
-                                (None, None) => trigger.definition.function == target.name,
-                                _ => false,
-                            },
-                        )
-                        .map(|trigger| {
-                            (
-                                trigger.definition.table.clone(),
-                                trigger.definition.name.clone(),
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                } else {
-                    Vec::new()
-                };
+                let triggers = self.triggers_depending_on_routine(&binding)?;
                 let rules = self
                     .rules_depending_on_routine(&binding)
                     .map_err(|error| {
