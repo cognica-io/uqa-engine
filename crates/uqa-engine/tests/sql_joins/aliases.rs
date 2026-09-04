@@ -7,6 +7,146 @@
 use super::*;
 
 #[test]
+fn table_range_alias_renames_columns_positionally() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE table_alias_source (id INTEGER, label TEXT)",
+    );
+    exec(
+        &engine,
+        "INSERT INTO table_alias_source VALUES (2, 'two'), (1, 'one')",
+    );
+    let result = query(
+        &engine,
+        "SELECT source.key, source.value FROM table_alias_source AS source(key, value) WHERE source.key > 1 ORDER BY source.key",
+    );
+    assert_eq!(result.columns, ["key", "value"]);
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0]["key"], Value::Int(2));
+    assert_eq!(result.rows[0]["value"], Value::Str("two".into()));
+
+    let partial = query(
+        &engine,
+        "SELECT source.* FROM table_alias_source AS source(key) WHERE source.key = 1",
+    );
+    assert_eq!(partial.columns, ["key", "label"]);
+    assert_eq!(partial.rows[0]["key"], Value::Int(1));
+    assert_eq!(partial.rows[0]["label"], Value::Str("one".into()));
+    let hidden = engine
+        .sql(
+            "SELECT source.id FROM table_alias_source AS source(key)",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(hidden.sqlstate(), Some("42703"));
+
+    let error = engine
+        .sql("SELECT * FROM table_alias_source AS source(a, b, c)", &[])
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42P10"));
+    assert_eq!(
+        error.to_string(),
+        "table \"source\" has 2 columns available but 3 columns specified"
+    );
+}
+
+#[test]
+fn table_range_aliases_apply_to_views_ctes_and_sequences() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE range_alias_base(id INTEGER, label TEXT);
+         INSERT INTO range_alias_base VALUES (1, 'one');
+         CREATE VIEW range_alias_view AS SELECT id, label FROM range_alias_base;
+         CREATE SEQUENCE range_alias_sequence START WITH 5",
+    );
+    for sql in [
+        "SELECT source.key, source.value FROM range_alias_view AS source(key, value)",
+        "WITH items AS MATERIALIZED (SELECT id, label FROM range_alias_base) SELECT source.key, source.value FROM items AS source(key, value)",
+        "WITH items AS NOT MATERIALIZED (SELECT id, label FROM range_alias_base) SELECT source.key, source.value FROM items AS source(key, value)",
+    ] {
+        let result = query(&engine, sql);
+        assert_eq!(result.columns, ["key", "value"], "{sql}");
+        assert_eq!(result.rows[0]["key"], Value::Int(1), "{sql}");
+        assert_eq!(result.rows[0]["value"], Value::Str("one".into()), "{sql}");
+    }
+    let sequence = query(
+        &engine,
+        "SELECT source.current_value, source.called FROM range_alias_sequence AS source(current_value, log_count, called)",
+    );
+    assert_eq!(sequence.rows[0]["current_value"], Value::Int(5));
+    assert_eq!(sequence.rows[0]["called"], Value::Bool(false));
+}
+
+#[test]
+fn table_range_aliases_hide_physical_names_during_correlation_analysis() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE alias_correlation_outer(id INTEGER);
+         CREATE TABLE alias_correlation_inner(id INTEGER);
+         INSERT INTO alias_correlation_outer VALUES (1), (2);
+         INSERT INTO alias_correlation_inner VALUES (100)",
+    );
+    let result = query(
+        &engine,
+        "SELECT outer_source.id
+         FROM alias_correlation_outer AS outer_source
+         WHERE EXISTS (
+           SELECT 1
+           FROM alias_correlation_inner AS inner_source(inner_id)
+           WHERE id = 2
+         )
+         ORDER BY outer_source.id",
+    );
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0]["id"], Value::Int(2));
+}
+
+#[test]
+fn natural_join_uses_table_range_aliases_for_binding_and_pruning() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE range_alias_left(left_id INTEGER, left_value TEXT);
+         CREATE TABLE range_alias_right(right_id INTEGER, right_value TEXT);
+         INSERT INTO range_alias_left VALUES (1, 'left'), (2, 'left-2');
+         INSERT INTO range_alias_right VALUES (1, 'right'), (3, 'right-3')",
+    );
+    let result = query(
+        &engine,
+        "SELECT join_key, left_label, right_label
+         FROM range_alias_left AS left_source(join_key, left_label)
+         NATURAL JOIN range_alias_right AS right_source(join_key, right_label)
+         WHERE join_key = 1",
+    );
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0]["join_key"], Value::Int(1));
+    assert_eq!(result.rows[0]["left_label"], Value::Str("left".into()));
+    assert_eq!(result.rows[0]["right_label"], Value::Str("right".into()));
+}
+
+#[test]
+fn retrieval_fields_follow_table_range_aliases_to_physical_indexes() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE range_alias_search(search_id INTEGER, body TEXT);
+         INSERT INTO range_alias_search VALUES (1, 'rust database'), (2, 'other text');
+         CREATE INDEX range_alias_search_body ON range_alias_search USING gin (body)",
+    );
+    let result = query(
+        &engine,
+        "SELECT document_key
+         FROM range_alias_search AS documents(document_key, content)
+         WHERE text_match(documents.content, 'rust')",
+    );
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0]["document_key"], Value::Int(1));
+}
+
+#[test]
 fn qualified_star_projects_only_the_named_relation() {
     let engine = engine_with_orders();
     let result = query(

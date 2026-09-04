@@ -176,16 +176,12 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
                     "cross-database relation references are not supported".into(),
                 ));
             }
+            let (alias, column_aliases) = compile_alias(r.alias.as_ref())?;
             Ok(FromClause::Table {
                 name: range_var_name(r),
                 qualifier: r.relname.clone(),
-                alias: r.alias.as_ref().and_then(|a| {
-                    if a.aliasname.is_empty() {
-                        None
-                    } else {
-                        Some(a.aliasname.clone())
-                    }
-                }),
+                alias,
+                column_aliases,
                 include_descendants: r.inh,
             })
         }

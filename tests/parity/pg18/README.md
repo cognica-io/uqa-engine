@@ -132,6 +132,18 @@ docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/pa
 docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/rule_condition_subquery_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/rule_condition_subquery_oracle.expected.txt -
 ```
 
+`rule_dependency_oracle.sql` records PostgreSQL 18.4 rewrite-rule object dependencies. The checked-in transcript verifies creation-bound action-target, action-source, and condition-source relations, exact routine overload identities, search-path and later-overload stability, DROP RESTRICT and CASCADE behavior, multi-target failure atomicity, transaction rollback, table and sequence rename, and durable catalog restore.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/rule_dependency_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/rule_dependency_oracle.expected.txt -
+```
+
+`rule_column_dependency_oracle.sql` records PostgreSQL 18.4 rewrite-rule column dependencies. The checked-in transcript verifies source projections and predicates, action target columns, positional INSERT targets, stable ownership of initially unqualified source columns, creation-bound projection stars, live source whole-row composites, one-sided and two-sided `JOIN USING` renames, one-sided `NATURAL JOIN` rename, catalog deparsing through range-table column aliases, unreferenced-column drops, rename execution, DROP COLUMN RESTRICT and CASCADE behavior, and rule removal.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/rule_column_dependency_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/rule_column_dependency_oracle.expected.txt -
+```
+
 `rule_row_expansion_oracle.sql` records PostgreSQL 18.4 rewrite-rule action-row expansion. The checked-in transcript verifies multi-row `OLD.*` and `NEW.*` expansion in `VALUES` rows, `SELECT` target lists, and `ROW` constructors; event-side SQLSTATEs; nested local-alias shadowing; CTE and set-operation scope rejection; creation-time stability across added columns; rename and drop dependencies; and cascade cleanup.
 
 ```sh

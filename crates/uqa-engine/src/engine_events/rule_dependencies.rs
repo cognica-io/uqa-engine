@@ -427,6 +427,7 @@ impl Engine {
         .bind_statement(statement)?;
         Ok(RuleDependencies {
             relations: dependencies,
+            columns: BTreeSet::new(),
             routines: BTreeSet::new(),
         })
     }
@@ -450,6 +451,7 @@ impl Engine {
         .bind_expr(expression, &BTreeSet::new())?;
         Ok(RuleDependencies {
             relations: dependencies,
+            columns: BTreeSet::new(),
             routines: BTreeSet::new(),
         })
     }
@@ -587,6 +589,18 @@ pub(super) fn rewrite_stored_rule_relation(
         dependencies.relations.insert(to.clone());
         changed = true;
     }
+    let renamed_columns = dependencies
+        .columns
+        .iter()
+        .filter(|dependency| &dependency.relation == from)
+        .cloned()
+        .collect::<Vec<_>>();
+    for mut dependency in renamed_columns {
+        dependencies.columns.remove(&dependency);
+        dependency.relation = to.clone();
+        dependencies.columns.insert(dependency);
+        changed = true;
+    }
     for action in &mut rule.definition.actions {
         changed |= rewrite_rule_statement_relation(action, from, to)?;
     }
@@ -631,6 +645,7 @@ pub(super) fn rewrite_stored_rule_relation(
             )?;
         }
     }
+    super::synchronize_rule_sql_text(&mut rule.definition)?;
     Ok(changed)
 }
 

@@ -148,6 +148,7 @@ fn table_lineage(
     name: &str,
     qualifier: &str,
     alias: Option<&str>,
+    column_aliases: &[String],
     ctes: &CteScope,
 ) -> Result<SourceLineage, SQLError> {
     if ctes.is_visible_cte(name) {
@@ -161,10 +162,12 @@ fn table_lineage(
                     .and_then(|cte| super::query_plan_output_columns(&cte.query))
             })
             .unwrap_or_default();
-        return Ok(opaque_lineage(
-            columns,
-            Some(alias.unwrap_or(qualifier).to_string()),
-        ));
+        let mut output = opaque_lineage(columns, Some(alias.unwrap_or(qualifier).to_string()));
+        rename_output_columns(&mut output.output, column_aliases);
+        for columns in output.qualifiers.values_mut() {
+            rename_output_columns(columns, column_aliases);
+        }
+        return Ok(output);
     }
     let catalog = ctes.catalog_read_view()?;
     let resolution = ctes.relation_name_resolution()?;
@@ -205,7 +208,7 @@ fn table_lineage(
             return Ok(SourceLineage::default());
         };
     let visible_qualifier = alias.unwrap_or(qualifier).to_string();
-    let output = columns
+    let mut output = columns
         .iter()
         .map(|column| OutputColumn {
             name: column.clone(),
@@ -215,6 +218,7 @@ fn table_lineage(
             }]),
         })
         .collect::<Vec<_>>();
+    rename_output_columns(&mut output, column_aliases);
     Ok(SourceLineage {
         output: output.clone(),
         qualifiers: BTreeMap::from([(visible_qualifier, output)]),
@@ -545,8 +549,9 @@ fn analyze_source_lineage(
             name,
             qualifier,
             alias,
+            column_aliases,
             ..
-        } => table_lineage(name, qualifier, alias.as_deref(), ctes),
+        } => table_lineage(name, qualifier, alias.as_deref(), column_aliases, ctes),
         source @ SourcePlan::Join { .. } => {
             analyze_join_source_lineage(source, outer_scopes, subqueries, ctes, universe, required)
         }

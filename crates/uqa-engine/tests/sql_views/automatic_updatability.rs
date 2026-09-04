@@ -44,6 +44,7 @@ fn automatic_view_engine() -> Engine {
 
 #[test]
 fn automatically_updatable_views_match_postgresql_18() {
+    classification::assert_table_range_aliases_remain_automatically_updatable();
     insert::assert_simple_view_insert_defaults_upsert_and_computed_columns();
     returning::assert_update_from_delete_using_returning_and_visibility();
     returning::assert_view_row_type_is_the_dml_name_boundary();

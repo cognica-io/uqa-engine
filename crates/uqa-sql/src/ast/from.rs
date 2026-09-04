@@ -17,6 +17,9 @@ pub enum FromClause {
         /// Relation name visible to SQL column binding before an alias is applied.
         qualifier: String,
         alias: Option<String>,
+        /// Positional names exposed by the range-table alias.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        column_aliases: Vec<String>,
         /// Ordinary references include inheritance children; `ONLY table`
         /// clears this flag.
         #[serde(default = "default_include_descendants")]

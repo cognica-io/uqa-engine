@@ -21,6 +21,7 @@
     "rule_privileges": "tests/parity/pg18/rule_privilege_oracle.expected.txt",
     "rule_condition_subqueries": "tests/parity/pg18/rule_condition_subquery_oracle.expected.txt",
     "rule_dependencies": "tests/parity/pg18/rule_dependency_oracle.expected.txt",
+    "rule_column_dependencies": "tests/parity/pg18/rule_column_dependency_oracle.expected.txt",
     "rule_returning_event_rows": "tests/parity/pg18/rule_returning_event_row_oracle.expected.txt",
     "rule_whole_rows": "tests/parity/pg18/rule_whole_row_oracle.expected.txt",
     "rule_notifications": "tests/parity/pg18/rule_notify_oracle.expected.txt",
@@ -150,6 +151,7 @@
       "ddl.rewrite-rule-expression-security",
       "ddl.rewrite-rule-condition-subqueries",
       "ddl.rewrite-rule-object-dependencies",
+      "ddl.rewrite-rule-column-dependencies",
       "ddl.rewrite-rule-action-row-expansion",
       "ddl.rewrite-rule-action-returning-event-rows",
       "ddl.rewrite-rule-whole-row-and-action-returning-stars",
@@ -716,6 +718,14 @@
       "postgresql_reference": "PostgreSQL 18.4 CREATE RULE and dependency-tracking documentation plus tests/parity/pg18/rule_dependency_oracle.expected.txt",
       "uqa_test": "cargo test -p uqa-engine --test integration engine_catalog::sql_rules::relation_dependencies::; cargo test -p uqa-engine --test integration engine_catalog::sql_rules::routine_dependencies::; cargo test -p uqa-engine --test integration engine_catalog::sql_rules::persistence::; tests/parity/pg18/rule_dependency_oracle.sql",
       "supported_version": "PostgreSQL 18.4 creation-bound rewrite-rule action-target, action-source, and condition-source relation identities plus exact scalar and table-function overload identities in conditions and actions; stability across search-path changes, later overload creation, and durable reopen; exact DROP RESTRICT and CASCADE behavior with multi-target failure atomicity and transaction rollback; bound execution and dependency identities across table and sequence rename; current-format catalog integrity validation and explicit legacy migration",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "ddl.rewrite-rule-column-dependencies",
+      "postgresql_reference": "PostgreSQL 18.4 CREATE RULE and dependency-tracking behavior plus tests/parity/pg18/rule_column_dependency_oracle.expected.txt",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_catalog::sql_rules::column_dependencies::; cargo test -p uqa-engine --test integration engine_catalog::sql_rules::persistence::; tests/parity/pg18/rule_column_dependency_oracle.sql",
+      "supported_version": "PostgreSQL 18.4 creation-bound rewrite-rule event-row, condition-source, action-source, action-target assignment, explicit INSERT target, and positional INSERT target column identities; exact owner preservation for unqualified source columns; projection-star expansion versus live whole-row composites; rename rewriting, DROP COLUMN RESTRICT and CASCADE, transaction rollback, durable reopen, older-catalog migration, and current-catalog integrity rejection",
       "status": "verified",
       "open_issue": null
     },

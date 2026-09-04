@@ -39,14 +39,18 @@ fn collect_source_column_owners(
             name,
             qualifier,
             alias,
+            column_aliases,
             ..
         } => {
             let qualifier = alias.as_deref().unwrap_or(qualifier);
-            let columns = if ctes.is_visible_cte(name) {
+            let mut columns = if ctes.is_visible_cte(name) {
                 Vec::new()
             } else {
                 relation_source_columns(catalog, resolution, name)?
             };
+            for (column, alias) in columns.iter_mut().zip(column_aliases) {
+                column.clone_from(alias);
+            }
             register_column_owners(owners, qualifier, columns);
         }
         SourcePlan::Join {

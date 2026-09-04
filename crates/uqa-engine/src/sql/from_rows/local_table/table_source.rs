@@ -9,13 +9,28 @@ use super::{
     alias_query_output_to_shared, apply_propagated_view_lock, attach_qualifier_filter,
     build_hierarchy_retrieval_operator, build_info_schema_rows, combine_filters,
     execute_query_plan_output, execute_view_plan_output_with_parent_cache, materialize_plan_ctes,
-    push_output_filter_into_query_plan, qualifier_filter, qualifier_for, qualify_source_operator,
+    push_output_filter_into_query_plan, qualifier_filter, qualifier_for,
     qualify_source_operator_with_columns, query_contains_volatile_function, query_cte_names,
     query_output_shared, try_build_streaming_subquery_operator, try_streaming_local_table_scan,
     virtual_relation_schema, ColumnPrune, CteScope, Engine, QualifierFilters, QueryOutputMode,
     SQLError, SQLParam, SourcePlan, Value,
 };
 use uqa_execution::PhysicalOperator;
+
+fn table_source_aliases(
+    source_columns: &[String],
+    catalog_aliases: &[String],
+    range_aliases: &[String],
+) -> Vec<String> {
+    let mut aliases = source_columns.to_vec();
+    for (column, alias) in aliases.iter_mut().zip(catalog_aliases) {
+        column.clone_from(alias);
+    }
+    for (column, alias) in aliases.iter_mut().zip(range_aliases) {
+        column.clone_from(alias);
+    }
+    aliases
+}
 
 /// Build the physical operator for a table source.
 #[expect(
@@ -35,6 +50,7 @@ pub(super) fn build_table_source_operator<'a>(
             name,
             qualifier,
             alias,
+            column_aliases,
             ..
         } => {
             let qualifier = qualifier_for(qualifier, alias.as_deref());
@@ -46,12 +62,30 @@ pub(super) fn build_table_source_operator<'a>(
                         Box::new(uqa_execution::ColumnSelection::hiding_trailing_columns(
                             scan, visible, &qualifier,
                         ));
+                    let source_columns = operator.schema().to_vec();
+                    let aliases = table_source_aliases(&source_columns, &[], column_aliases);
+                    let operator = qualify_source_operator_with_columns(
+                        operator,
+                        &source_columns,
+                        &qualifier,
+                        prune,
+                        &aliases,
+                        ctes.lock_identities.emit,
+                    );
                     return Ok(attach_qualifier_filter(
                         operator, &qualifier, filters, engine, params, ctes,
                     ));
                 }
-                let operator =
-                    qualify_source_operator(scan, &qualifier, prune, ctes.lock_identities.emit);
+                let source_columns = scan.schema().to_vec();
+                let aliases = table_source_aliases(&source_columns, &[], column_aliases);
+                let operator = qualify_source_operator_with_columns(
+                    scan,
+                    &source_columns,
+                    &qualifier,
+                    prune,
+                    &aliases,
+                    ctes.lock_identities.emit,
+                );
                 return Ok(attach_qualifier_filter(
                     operator, &qualifier, filters, engine, params, ctes,
                 ));
@@ -69,12 +103,14 @@ pub(super) fn build_table_source_operator<'a>(
                 };
                 if let Some(operator) = streamed {
                     let source_columns = operator.schema().to_vec();
+                    let aliases =
+                        table_source_aliases(&source_columns, &plan.columns, column_aliases);
                     let operator = qualify_source_operator_with_columns(
                         operator,
                         &source_columns,
                         &qualifier,
                         prune,
-                        &plan.columns,
+                        &aliases,
                         false,
                     );
                     return Ok(attach_qualifier_filter(
@@ -104,7 +140,16 @@ pub(super) fn build_table_source_operator<'a>(
                     };
                 let scan: Box<dyn PhysicalOperator + 'a> =
                     Box::new(uqa_execution::SharedSpillScan::new(materialized));
-                let operator = qualify_source_operator(scan, &qualifier, prune, false);
+                let source_columns = scan.schema().to_vec();
+                let aliases = table_source_aliases(&source_columns, &[], column_aliases);
+                let operator = qualify_source_operator_with_columns(
+                    scan,
+                    &source_columns,
+                    &qualifier,
+                    prune,
+                    &aliases,
+                    false,
+                );
                 return Ok(attach_qualifier_filter(
                     operator, &qualifier, filters, engine, params, ctes,
                 ));
@@ -137,13 +182,9 @@ pub(super) fn build_table_source_operator<'a>(
                 let scan: Box<dyn PhysicalOperator + 'a> = Box::new(
                     uqa_execution::TableScan::from_typed_rows(columns.clone(), types, rows),
                 );
+                let aliases = table_source_aliases(&columns, &[], column_aliases);
                 let operator = qualify_source_operator_with_columns(
-                    scan,
-                    &columns,
-                    &qualifier,
-                    prune,
-                    &[],
-                    false,
+                    scan, &columns, &qualifier, prune, &aliases, false,
                 );
                 return Ok(attach_qualifier_filter(
                     operator, &qualifier, filters, engine, params, ctes,
@@ -163,13 +204,9 @@ pub(super) fn build_table_source_operator<'a>(
                     let scan: Box<dyn PhysicalOperator + 'a> = Box::new(
                         uqa_execution::TableScan::from_typed_rows(columns.clone(), types, rows),
                     );
+                    let aliases = table_source_aliases(&columns, &[], column_aliases);
                     let operator = qualify_source_operator_with_columns(
-                        scan,
-                        &columns,
-                        &qualifier,
-                        prune,
-                        &[],
-                        false,
+                        scan, &columns, &qualifier, prune, &aliases, false,
                     );
                     return Ok(attach_qualifier_filter(
                         operator, &qualifier, filters, engine, params, ctes,
@@ -188,7 +225,10 @@ pub(super) fn build_table_source_operator<'a>(
                 // During a tuple-local recheck, a view named as the lock target pins every base scan of its storage inside this subtree to the candidate's tuples.
                 let mut recheck_scope = ctes.enter_recheck_storage_pins(&qualifier);
                 let ctes: &mut CteScope = &mut recheck_scope;
-                let specialized_plan = filters
+                let specialized_plan = column_aliases
+                    .is_empty()
+                    .then_some(filters)
+                    .flatten()
                     .and_then(|filters| filters.get(&qualifier))
                     .filter(|filters| !filters.is_empty())
                     .and_then(|filters| combine_filters(filters.iter().cloned()))
@@ -216,12 +256,14 @@ pub(super) fn build_table_source_operator<'a>(
                     try_build_streaming_subquery_operator(engine, execution_plan, params, ctes)?
                 {
                     let source_columns = operator.schema().to_vec();
+                    let aliases =
+                        table_source_aliases(&source_columns, output_columns, column_aliases);
                     let operator = qualify_source_operator_with_columns(
                         operator,
                         &source_columns,
                         &qualifier,
                         prune,
-                        output_columns,
+                        &aliases,
                         ctes.lock_identities.emit,
                     );
                     return Ok(attach_qualifier_filter(
@@ -252,12 +294,13 @@ pub(super) fn build_table_source_operator<'a>(
                 let shared = query_output_shared(output, "view")?;
                 let scan: Box<dyn PhysicalOperator + 'a> =
                     Box::new(uqa_execution::SharedSpillScan::new(shared));
+                let aliases = table_source_aliases(&columns, output_columns, column_aliases);
                 let operator = qualify_source_operator_with_columns(
                     scan,
                     &columns,
                     &qualifier,
                     prune,
-                    output_columns,
+                    &aliases,
                     ctes.lock_identities.emit,
                 );
                 return Ok(attach_qualifier_filter(
@@ -285,12 +328,13 @@ pub(super) fn build_table_source_operator<'a>(
                 let scan: Box<dyn PhysicalOperator + 'a> = Box::new(
                     uqa_execution::TableScan::from_typed_rows(columns.clone(), types, rows),
                 );
+                let aliases = table_source_aliases(&columns, &[], column_aliases);
                 let operator = qualify_source_operator_with_columns(
                     scan,
                     &columns,
                     &qualifier,
                     prune,
-                    &[],
+                    &aliases,
                     ctes.lock_identities.emit,
                 );
                 return Ok(attach_qualifier_filter(
@@ -328,12 +372,13 @@ pub(super) fn build_table_source_operator<'a>(
                                 .map_err(uqa_execution::ExecError::from)
                         })),
                     ));
+                let aliases = table_source_aliases(&columns, &[], column_aliases);
                 let operator = qualify_source_operator_with_columns(
                     scan,
                     &columns,
                     &qualifier,
                     prune,
-                    &[],
+                    &aliases,
                     ctes.lock_identities.emit,
                 );
                 return Ok(attach_qualifier_filter(

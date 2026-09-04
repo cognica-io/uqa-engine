@@ -380,6 +380,9 @@ impl Engine {
             *action =
                 crate::engine_events::expand_rule_action_returning_stars(action, &action_row_type);
         }
+        dependencies
+            .columns
+            .extend(self.bind_rule_action_column_dependencies(action)?);
         validate_rule_action_reference_scopes(self, action)?;
         let bound = crate::engine_events::bind_rule_action(
             self,
@@ -501,6 +504,9 @@ impl Engine {
             dependencies
                 .relations
                 .extend(condition_dependencies.relations);
+            dependencies
+                .columns
+                .extend(self.bind_rule_condition_column_dependencies(condition)?);
         }
         let condition = definition
             .condition
@@ -528,6 +534,14 @@ impl Engine {
                 definition.event,
                 &mut dependencies,
             )?;
+            dependencies.columns.extend(
+                crate::engine_events::rule_expr_row_columns(condition)
+                    .into_iter()
+                    .map(|column| crate::engine_events::RuleColumnDependency {
+                        relation: relation.clone(),
+                        column,
+                    }),
+            );
         }
         validate_rule_action_contract(definition)?;
         for action in &mut definition.actions {
@@ -538,8 +552,19 @@ impl Engine {
                 lookup_mode,
             )?;
             dependencies.relations.extend(action_dependencies.relations);
+            dependencies.columns.extend(action_dependencies.columns);
             dependencies.routines.extend(action_dependencies.routines);
+            let action_columns = self.rule_action_target_columns(action)?;
+            dependencies.columns.extend(
+                crate::engine_events::rule_statement_row_columns(self, action, &action_columns)?
+                    .into_iter()
+                    .map(|column| crate::engine_events::RuleColumnDependency {
+                        relation: relation.clone(),
+                        column,
+                    }),
+            );
         }
+        super::super::synchronize_rule_sql_text(definition)?;
         Ok((relation, condition_plan, condition_binding, dependencies))
     }
 }

@@ -10,6 +10,8 @@ use tempfile::TempDir;
 use uqa_core::Value;
 use uqa_engine::Engine;
 
+#[path = "sql_rules/column_dependencies.rs"]
+mod column_dependencies;
 #[path = "sql_rules/condition_subqueries.rs"]
 mod condition_subqueries;
 #[path = "sql_rules/persistence.rs"]

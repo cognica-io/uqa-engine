@@ -112,6 +112,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `ddl.rewrite-rule-expression-security` | `M4` | `verified` |
 | `ddl.rewrite-rule-condition-subqueries` | `M4` | `verified` |
 | `ddl.rewrite-rule-object-dependencies` | `M4` | `verified` |
+| `ddl.rewrite-rule-column-dependencies` | `M4` | `verified` |
 | `ddl.rewrite-rule-action-row-expansion` | `M4` | `verified` |
 | `ddl.rewrite-rule-action-returning-event-rows` | `M4` | `verified` |
 | `ddl.rewrite-rule-whole-row-and-action-returning-stars` | `M4` | `verified` |

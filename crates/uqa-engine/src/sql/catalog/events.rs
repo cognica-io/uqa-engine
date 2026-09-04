@@ -459,7 +459,7 @@ pub(super) fn build_pg_rewrite(
                 ("is_instead", bool_value(definition.instead)),
                 (
                     "ev_qual",
-                    rule_condition_text(definition, false)
+                    rule_condition_text(definition, false)?
                         .map_or_else(|| str_value("<>"), str_value),
                 ),
                 (

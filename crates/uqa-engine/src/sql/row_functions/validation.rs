@@ -199,7 +199,7 @@ pub(in crate::sql) fn validate_joined_expr_text_match_fields(
     from: &SourcePlan,
     expr: &ScalarExpr,
 ) -> Result<(), SQLError> {
-    let mut tables: Vec<(Option<String>, String)> = Vec::new();
+    let mut tables: Vec<(Option<String>, String, Vec<String>)> = Vec::new();
     let mut has_opaque_source = false;
     collect_from_tables(from, &mut tables, &mut has_opaque_source);
     walk_text_match_fields(expr, &mut |field_arg, function_name| {
@@ -216,34 +216,35 @@ pub(in crate::sql) fn validate_joined_expr_text_match_fields(
         if let Some(qualifier) = qualifier {
             let resolved = tables
                 .iter()
-                .find(|(alias, name)| alias.as_deref() == Some(qualifier) || name == qualifier);
+                .find(|(alias, name, _)| alias.as_deref() == Some(qualifier) || name == qualifier);
             return match resolved {
-                Some((_, table)) => validate_text_match_field(engine, table, column, function_name),
+                Some((_, table, aliases)) => {
+                    let physical = table_source_physical_column(engine, table, aliases, column)?
+                        .unwrap_or_else(|| column.to_string());
+                    validate_text_match_field(engine, table, &physical, function_name)
+                }
                 // Unknown qualifiers can point at subqueries or CTEs the
                 // validator cannot introspect.
                 None => Ok(()),
             };
         }
-        let mut containing: Vec<&String> = Vec::new();
-        for (_, name) in &tables {
-            if engine
-                .try_query_table_has_column(name, column)
-                .map_err(|err| SQLError::Internal(format!("read table schema: {err}")))?
-            {
-                containing.push(name);
+        let mut containing = Vec::new();
+        for (_, name, aliases) in &tables {
+            if let Some(physical) = table_source_physical_column(engine, name, aliases, column)? {
+                containing.push((name, physical));
             }
         }
-        for name in &containing {
+        for (name, physical) in &containing {
             if engine
                 .fts_fields_for_table(name)?
                 .iter()
-                .any(|f| f == column)
+                .any(|field| field == physical)
             {
                 return Ok(());
             }
         }
-        if let Some(table) = containing.first() {
-            return validate_text_match_field(engine, table, column, function_name);
+        if let Some((table, physical)) = containing.first() {
+            return validate_text_match_field(engine, table, physical, function_name);
         }
         if has_opaque_source {
             return Ok(());
@@ -252,6 +253,32 @@ pub(in crate::sql) fn validate_joined_expr_text_match_fields(
             "{function_name}: column `{column}` does not exist on any joined table"
         )))
     })
+}
+
+fn table_source_physical_column(
+    engine: &Engine,
+    table: &str,
+    aliases: &[String],
+    visible: &str,
+) -> Result<Option<String>, SQLError> {
+    let columns = engine
+        .try_query_table_columns(table)
+        .map_err(|error| SQLError::Internal(format!("read table schema: {error}")))?;
+    if columns.is_empty() {
+        return Ok(Some(visible.to_string()));
+    }
+    Ok(columns
+        .into_iter()
+        .enumerate()
+        .find_map(|(position, physical)| {
+            aliases
+                .get(position)
+                .map_or_else(
+                    || physical.eq_ignore_ascii_case(visible),
+                    |alias| alias.eq_ignore_ascii_case(visible),
+                )
+                .then_some(physical)
+        }))
 }
 
 /// The `@@` operator doubles as a `JSONPath` match when the right-hand
@@ -266,7 +293,7 @@ fn fts_query_is_jsonpath(query_arg: Option<&ScalarExpr>) -> bool {
 
 fn collect_from_tables(
     from: &SourcePlan,
-    out: &mut Vec<(Option<String>, String)>,
+    out: &mut Vec<(Option<String>, String, Vec<String>)>,
     has_opaque_source: &mut bool,
 ) {
     match from {
@@ -274,10 +301,12 @@ fn collect_from_tables(
             name,
             qualifier,
             alias,
+            column_aliases,
             ..
         } => out.push((
             Some(alias.as_ref().unwrap_or(qualifier).clone()),
             name.clone(),
+            column_aliases.clone(),
         )),
         SourcePlan::Join {
             left, right, alias, ..

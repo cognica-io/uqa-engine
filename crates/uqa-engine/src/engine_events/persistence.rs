@@ -98,7 +98,7 @@ impl Engine {
                 stored.format_version
             )));
         }
-        let legacy_catalog = stored.format_version == 0;
+        let migrating_catalog = stored.format_version < RULE_CATALOG_FORMAT_VERSION;
         let temporary_rules = self
             .durable
             .rules
@@ -109,7 +109,7 @@ impl Engine {
             .collect::<BTreeMap<_, _>>();
         let mut rules = temporary_rules;
         for mut rule in stored.rules {
-            let persisted_definition = if legacy_catalog {
+            let persisted_definition = if migrating_catalog {
                 None
             } else {
                 Some(serde_json::to_string(&rule.definition)?)
@@ -132,7 +132,7 @@ impl Engine {
                 .map_err(|error| {
                     StorageBackendError::Other(format!("restore rule catalog: {error}"))
                 })?;
-            if !legacy_catalog && rule.dependencies.as_ref() != Some(&dependencies) {
+            if !migrating_catalog && rule.dependencies.as_ref() != Some(&dependencies) {
                 return Err(StorageBackendError::Other(format!(
                     "restore rule catalog: persisted dependencies for rule `{}` do not match its definition",
                     rule.definition.name
@@ -163,7 +163,7 @@ impl Engine {
             }
         }
         *self.durable.rules.write() = rules;
-        if legacy_catalog {
+        if migrating_catalog {
             let rules = self.durable.rules.read();
             self.persist_rule_catalog_snapshot(&rules)
                 .map_err(|error| StorageBackendError::Other(error.to_string()))?;

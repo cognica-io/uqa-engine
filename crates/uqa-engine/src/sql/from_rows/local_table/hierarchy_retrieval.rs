@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use super::{
-    qualify_source_operator, table_lock_origin, ColumnPrune, CteScope, Engine,
+    qualify_source_operator_with_columns, table_lock_origin, ColumnPrune, CteScope, Engine,
     HierarchyScoredDocumentSource, SQLError, SQLParam, ScalarExpr, ScoredDocumentSource,
     ScoredInput, SharedLockOrigin, SourcePlan, TABLE_OID_COLUMN, XMIN_COLUMN,
 };
@@ -41,6 +41,7 @@ pub(super) fn build_hierarchy_retrieval_operator<'a>(
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
     let SourcePlan::Table {
         name: logical_table,
+        column_aliases,
         include_descendants,
         ..
     } = source
@@ -49,10 +50,34 @@ pub(super) fn build_hierarchy_retrieval_operator<'a>(
             "hierarchy retrieval requires a table source".into(),
         ));
     };
-    let direct_vector =
-        crate::operator_tree_bridge::direct_vector_retrieval(engine, predicate, params)?;
     let catalog = ctes.catalog_read_view()?;
     let resolution = ctes.relation_name_resolution()?;
+    let physical_columns = catalog
+        .table_resolved(&resolution, logical_table)?
+        .ok_or_else(|| SQLError::UnknownTable(logical_table.clone()))?
+        .columns
+        .iter()
+        .map(|column| column.name.clone())
+        .collect::<Vec<_>>();
+    let mut physical_predicate = predicate.clone();
+    uqa_planner::rewrite_scalar_expression(&mut physical_predicate, &mut |expression| {
+        let column = match expression {
+            ScalarExpr::Column(column) | ScalarExpr::QualifiedColumn { column, .. } => column,
+            _ => return,
+        };
+        if let Some((position, _)) = column_aliases
+            .iter()
+            .enumerate()
+            .find(|(_, alias)| alias.eq_ignore_ascii_case(column))
+        {
+            if let Some(physical) = physical_columns.get(position) {
+                column.clone_from(physical);
+            }
+        }
+    });
+    let predicate = &physical_predicate;
+    let direct_vector =
+        crate::operator_tree_bridge::direct_vector_retrieval(engine, predicate, params)?;
     let table_names =
         catalog.hierarchy_scan_tables(&resolution, logical_table, *include_descendants)?;
     let mut physical = Vec::with_capacity(table_names.len());
@@ -123,13 +148,7 @@ pub(super) fn build_hierarchy_retrieval_operator<'a>(
         None => {}
     }
 
-    let mut columns = catalog
-        .table_resolved(&resolution, logical_table)?
-        .ok_or_else(|| SQLError::UnknownTable(logical_table.clone()))?
-        .columns
-        .iter()
-        .map(|column| column.name.clone())
-        .collect::<Vec<_>>();
+    let mut columns = physical_columns;
     if prune
         .and_then(|prune| prune.get(qualifier))
         .is_some_and(|wanted| wanted.contains(TABLE_OID_COLUMN))
@@ -186,10 +205,13 @@ pub(super) fn build_hierarchy_retrieval_operator<'a>(
         )?)
     };
     let scan: Box<dyn PhysicalOperator + 'a> = Box::new(uqa_execution::TableScan::new(source));
-    Ok(qualify_source_operator(
+    let source_columns = scan.schema().to_vec();
+    Ok(qualify_source_operator_with_columns(
         scan,
+        &source_columns,
         qualifier,
         prune,
+        column_aliases,
         ctes.lock_identities.emit,
     ))
 }

@@ -91,8 +91,9 @@ fn source_names(
             name,
             qualifier,
             alias,
+            column_aliases,
             ..
-        } => table_source_names(context, name, qualifier, alias.as_deref()),
+        } => table_source_names(context, name, qualifier, alias.as_deref(), column_aliases),
         FromClause::Join {
             left,
             right,
@@ -162,8 +163,10 @@ fn table_source_names(
     name: &str,
     qualifier: &str,
     alias: Option<&str>,
+    column_aliases: &[String],
 ) -> Result<RuleSourceNames, SQLError> {
-    let columns = context.relation_columns(name)?;
+    let mut columns = context.relation_columns(name)?;
+    apply_positional_aliases(&mut columns, column_aliases);
     let mut names = RuleSourceNames {
         columns: columns.clone(),
         ..RuleSourceNames::default()

@@ -37,7 +37,7 @@ fn rewrite_layer_source_scalar(
             {
                 Some(ScalarExpr::QualifiedColumn {
                     qualifier: target_qualifier.to_string(),
-                    column: column.clone(),
+                    column: layer.physical_source_column(column).to_string(),
                 })
             }
             ScalarExpr::QualifiedColumn { qualifier, column }
@@ -50,7 +50,7 @@ fn rewrite_layer_source_scalar(
             {
                 Some(ScalarExpr::QualifiedColumn {
                     qualifier: target_qualifier.to_string(),
-                    column: column.clone(),
+                    column: layer.physical_source_column(column).to_string(),
                 })
             }
             _ => None,

@@ -8,10 +8,11 @@
 
 use std::collections::BTreeMap;
 
-use uqa_sql::ast::{DropRule, DropTrigger, Expr, Statement};
-use uqa_sql::plpgsql::{bind_statement, ResolvedVariable, VariableResolver};
+use uqa_sql::ast::{DropRule, DropTrigger, Expr};
+use uqa_sql::plpgsql::{ResolvedVariable, VariableResolver};
 use uqa_sql::SQLError;
 
+use crate::engine_capabilities::RelationLookupMode;
 use crate::{Engine, RelationIdentity, StorageBackendError, StorageBackendResult};
 
 impl Engine {
@@ -268,18 +269,22 @@ impl Engine {
     ) -> StorageBackendResult<()> {
         let relation =
             RelationIdentity::from_legacy_name(table).map_err(StorageBackendError::Other)?;
-        let mut triggers = self.durable.triggers.write();
-        let mut rules = self.durable.rules.write();
-        let qualified = relation.qualified_name();
-        let referenced_by_rule_action = rules_reference_action_target_column(
-            self, &rules, &qualified, from,
-        )
-        .map_err(|error| {
-            StorageBackendError::Other(format!("inspect rule action RETURNING dependency: {error}"))
-        })?;
+        let triggers = self.durable.triggers.read().clone();
+        let rules = self.durable.rules.read().clone();
+        let dependency = super::RuleColumnDependency {
+            relation: relation.clone(),
+            column: from.to_string(),
+        };
+        let referenced_by_rule = rules.values().any(|entries| {
+            entries.values().any(|rule| {
+                rule.dependencies
+                    .as_ref()
+                    .is_some_and(|dependencies| dependencies.columns.contains(&dependency))
+            })
+        });
         if !triggers.contains_key(&relation)
             && !rules.contains_key(&relation)
-            && !referenced_by_rule_action
+            && !referenced_by_rule
         {
             return Ok(());
         }
@@ -297,66 +302,212 @@ impl Engine {
                 }
             }
         }
-        if let Some(entries) = next_rules.get_mut(&relation) {
-            for rule in entries.values_mut() {
-                if let Some(condition) = rule.definition.condition.as_mut() {
-                    if let Some(condition_binding) = rule.condition_binding.as_mut() {
-                        *condition = super::bind_rule_expr_scoped(
-                            condition,
-                            &mut RuleColumnResolver {
-                                from,
-                                to: Some(to),
-                                referenced: false,
-                            },
-                            &std::collections::BTreeSet::new(),
-                        )
-                        .map_err(|error| {
-                            StorageBackendError::Other(format!(
-                                "rename rule condition column: {error}"
-                            ))
-                        })?;
-                        super::rename_rule_condition_binding_column(condition_binding, from, to);
-                    } else {
-                        crate::engine_table_storage::rename_schema_expr_column(
-                            condition, from, to,
-                        )?;
-                    }
-                }
-                if let Some(condition_sql) = rule.definition.condition_sql.as_mut() {
-                    *condition_sql = rename_rule_action_sql_column(condition_sql, from, to);
-                }
-                for action in &mut rule.definition.actions {
-                    *action = rename_rule_statement_column(action, from, to).map_err(|error| {
-                        StorageBackendError::Other(format!("rename rule column: {error}"))
-                    })?;
-                }
-                for action_sql in &mut rule.definition.action_sql {
-                    *action_sql = rename_rule_action_sql_column(action_sql, from, to);
-                }
-            }
-        }
-        for entries in next_rules.values_mut() {
-            for rule in entries.values_mut() {
-                for action in &mut rule.definition.actions {
-                    if rule_action_target(action) == Some(qualified.as_str()) {
-                        super::rename_rule_action_returning_target_column(self, action, from, to)
-                            .map_err(|error| {
-                            StorageBackendError::Other(format!(
-                                "rename rule action RETURNING column: {error}"
-                            ))
-                        })?;
-                    }
-                }
-            }
-        }
+        self.rewrite_rule_catalog_column(&mut next_rules, &dependency, &relation, from, to)?;
         self.persist_trigger_catalog_snapshot(&next_triggers)
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         self.persist_rule_catalog_snapshot(&next_rules)
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-        *triggers = next_triggers;
-        *rules = next_rules;
-        drop(rules);
-        drop(triggers);
+        *self.durable.triggers.write() = next_triggers;
+        *self.durable.rules.write() = next_rules;
+        self.note_catalog_registry_changed();
+        Ok(())
+    }
+
+    fn rewrite_rule_catalog_column(
+        &self,
+        rules: &mut BTreeMap<RelationIdentity, BTreeMap<String, super::StoredRule>>,
+        dependency: &super::RuleColumnDependency,
+        relation: &RelationIdentity,
+        from: &str,
+        to: &str,
+    ) -> StorageBackendResult<()> {
+        for (event_relation, entries) in rules {
+            for rule in entries.values_mut() {
+                let dependencies = rule.dependencies.as_ref().ok_or_else(|| {
+                    StorageBackendError::Other(format!(
+                        "rule `{}` on `{}` has no bound dependency state",
+                        rule.definition.name,
+                        event_relation.qualified_name()
+                    ))
+                })?;
+                if dependencies.columns.contains(dependency) {
+                    self.rewrite_stored_rule_column(rule, event_relation, relation, from, to)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn rewrite_stored_rule_column(
+        &self,
+        rule: &mut super::StoredRule,
+        event_relation: &RelationIdentity,
+        relation: &RelationIdentity,
+        from: &str,
+        to: &str,
+    ) -> StorageBackendResult<()> {
+        if event_relation == relation {
+            self.rewrite_rule_event_row_column(rule, from, to)?;
+        }
+        self.rewrite_rule_column_references(&mut rule.definition, relation, from, to)
+            .map_err(|error| {
+                StorageBackendError::Other(format!(
+                    "rewrite rule `{}` column dependency: {error}",
+                    rule.definition.name
+                ))
+            })?;
+        let (validated_relation, condition_plan, condition_binding, dependencies) = self
+            .validate_rule_definition(&mut rule.definition, RelationLookupMode::Bound, None, None)
+            .map_err(|error| {
+                StorageBackendError::Other(format!(
+                    "rebind rule `{}` after column rename: {error}",
+                    rule.definition.name
+                ))
+            })?;
+        if validated_relation != *event_relation {
+            return Err(StorageBackendError::Other(format!(
+                "rule `{}` changed event relation while rebinding column rename",
+                rule.definition.name
+            )));
+        }
+        rule.condition_plan = condition_plan;
+        rule.condition_binding = condition_binding;
+        rule.dependencies = Some(dependencies);
+        Ok(())
+    }
+
+    fn rewrite_rule_event_row_column(
+        &self,
+        rule: &mut super::StoredRule,
+        from: &str,
+        to: &str,
+    ) -> StorageBackendResult<()> {
+        if let Some(condition) = rule.definition.condition.as_mut() {
+            *condition = super::bind_rule_expr_scoped(
+                condition,
+                &mut RuleColumnResolver {
+                    from,
+                    to: Some(to),
+                    referenced: false,
+                },
+                &std::collections::BTreeSet::new(),
+            )
+            .map_err(|error| {
+                StorageBackendError::Other(format!("rename rule condition column: {error}"))
+            })?;
+        }
+        for action in &mut rule.definition.actions {
+            let action_columns = self.rule_action_target_columns(action).map_err(|error| {
+                StorageBackendError::Other(format!(
+                    "read rule action columns during rename: {error}"
+                ))
+            })?;
+            *action = super::bind_rule_action(
+                self,
+                action,
+                &action_columns,
+                &mut RuleColumnResolver {
+                    from,
+                    to: Some(to),
+                    referenced: false,
+                },
+            )
+            .map_err(|error| {
+                StorageBackendError::Other(format!("rename rule event column: {error}"))
+            })?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn prepare_rule_column_drop(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> StorageBackendResult<super::PreparedRuleColumnDrop> {
+        let relation =
+            RelationIdentity::from_legacy_name(table).map_err(StorageBackendError::Other)?;
+        let dependency = super::RuleColumnDependency {
+            relation: relation.clone(),
+            column: column.to_string(),
+        };
+        let mut rules = self.durable.rules.read().clone();
+        let mut rebind = std::collections::BTreeSet::new();
+        for (event_relation, entries) in &mut rules {
+            for (name, rule) in entries {
+                let dependencies = rule.dependencies.as_ref().ok_or_else(|| {
+                    StorageBackendError::Other(format!(
+                        "rule `{}` on `{}` has no bound dependency state",
+                        rule.definition.name,
+                        event_relation.qualified_name()
+                    ))
+                })?;
+                if dependencies.columns.contains(&dependency) {
+                    return Err(StorageBackendError::Other(format!(
+                        "cannot drop column {column} of table {table} because rule {} on {} depends on it",
+                        rule.definition.name,
+                        event_relation.qualified_name()
+                    )));
+                }
+                if event_relation != &relation && !dependencies.relations.contains(&relation) {
+                    continue;
+                }
+                self.remove_rule_source_column_aliases(&mut rule.definition, &dependency)
+                    .map_err(|error| {
+                        StorageBackendError::Other(format!(
+                            "reshape rule `{}` source aliases before column drop: {error}",
+                            rule.definition.name
+                        ))
+                    })?;
+                rebind.insert((event_relation.clone(), name.clone()));
+            }
+        }
+        Ok(super::PreparedRuleColumnDrop { rules, rebind })
+    }
+
+    pub(crate) fn finish_rule_column_drop(
+        &self,
+        mut prepared: super::PreparedRuleColumnDrop,
+    ) -> StorageBackendResult<()> {
+        if prepared.rebind.is_empty() {
+            return Ok(());
+        }
+        for (event_relation, name) in &prepared.rebind {
+            let rule = prepared
+                .rules
+                .get_mut(event_relation)
+                .and_then(|entries| entries.get_mut(name))
+                .ok_or_else(|| {
+                    StorageBackendError::Other(format!(
+                        "rule `{name}` on `{}` disappeared while dropping a column",
+                        event_relation.qualified_name()
+                    ))
+                })?;
+            let (validated_relation, condition_plan, condition_binding, dependencies) = self
+                .validate_rule_definition(
+                    &mut rule.definition,
+                    RelationLookupMode::Bound,
+                    None,
+                    None,
+                )
+                .map_err(|error| {
+                    StorageBackendError::Other(format!(
+                        "rebind rule `{}` after column drop: {error}",
+                        rule.definition.name
+                    ))
+                })?;
+            if validated_relation != *event_relation {
+                return Err(StorageBackendError::Other(format!(
+                    "rule `{}` changed event relation while rebinding column drop",
+                    rule.definition.name
+                )));
+            }
+            rule.condition_plan = condition_plan;
+            rule.condition_binding = condition_binding;
+            rule.dependencies = Some(dependencies);
+        }
+        self.persist_rule_catalog_snapshot(&prepared.rules)
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+        *self.durable.rules.write() = prepared.rules;
         self.note_catalog_registry_changed();
         Ok(())
     }
@@ -391,10 +542,8 @@ impl Engine {
             })
             .map(|trigger| trigger.definition.name.clone())
             .collect::<Vec<_>>();
-        let qualified = relation.qualified_name();
         let rules = self.durable.rules.read();
-        let dependent_rules =
-            dependent_rules_for_column(self, &rules, &relation, &qualified, column)?;
+        let dependent_rules = dependent_rules_for_column(&rules, &relation, column)?;
         drop(rules);
         if dependent_triggers.is_empty() && dependent_rules.is_empty() {
             return Ok(());
@@ -446,84 +595,26 @@ impl Engine {
     }
 }
 
-fn rule_action_target(action: &Statement) -> Option<&str> {
-    match action {
-        Statement::Insert(statement) => Some(&statement.table),
-        Statement::Update(statement) => Some(&statement.table),
-        Statement::Delete(statement) => Some(&statement.table),
-        _ => None,
-    }
-}
-
-fn rules_reference_action_target_column(
-    engine: &Engine,
-    rules: &BTreeMap<RelationIdentity, BTreeMap<String, super::StoredRule>>,
-    target: &str,
-    column: &str,
-) -> Result<bool, SQLError> {
-    for entries in rules.values() {
-        for rule in entries.values() {
-            for action in &rule.definition.actions {
-                if rule_action_target(action) == Some(target)
-                    && super::rule_action_returning_references_target_column(
-                        engine, action, column,
-                    )?
-                {
-                    return Ok(true);
-                }
-            }
-        }
-    }
-    Ok(false)
-}
-
 fn dependent_rules_for_column(
-    engine: &Engine,
     rules: &BTreeMap<RelationIdentity, BTreeMap<String, super::StoredRule>>,
     relation: &RelationIdentity,
-    target: &str,
     column: &str,
 ) -> Result<Vec<(RelationIdentity, String)>, SQLError> {
+    let dependency = super::RuleColumnDependency {
+        relation: relation.clone(),
+        column: column.to_string(),
+    };
     let mut dependent = Vec::new();
-    if let Some(entries) = rules.get(relation) {
-        for rule in entries.values() {
-            let references_event_column = rule.bound_condition_plan().map_or_else(
-                || {
-                    rule.definition.condition.as_ref().is_some_and(|condition| {
-                        crate::engine_table_storage::schema_expr_references_column(
-                            condition, column,
-                        )
-                    })
-                },
-                |(plan, binding)| {
-                    super::rule_condition_plan_row_columns(plan, binding).contains(column)
-                },
-            ) || rule
-                .definition
-                .actions
-                .iter()
-                .any(|action| rule_statement_references_column(action, column));
-            if references_event_column {
-                dependent.push((relation.clone(), rule.definition.name.clone()));
-            }
-        }
-    }
     for (event_relation, entries) in rules {
         for rule in entries.values() {
-            let references_action_target = rule.definition.actions.iter().try_fold(
-                false,
-                |found, action| -> Result<bool, SQLError> {
-                    if found || rule_action_target(action) != Some(target) {
-                        return Ok(found);
-                    }
-                    super::rule_action_returning_references_target_column(engine, action, column)
-                },
-            )?;
-            if references_action_target
-                && !dependent.iter().any(|(candidate_relation, name)| {
-                    candidate_relation == event_relation && name == &rule.definition.name
-                })
-            {
+            let dependencies = rule.dependencies.as_ref().ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "rule `{}` on `{}` has no bound dependency state",
+                    rule.definition.name,
+                    event_relation.qualified_name()
+                ))
+            })?;
+            if dependencies.columns.contains(&dependency) {
                 dependent.push((event_relation.clone(), rule.definition.name.clone()));
             }
         }
@@ -569,141 +660,4 @@ impl VariableResolver for RuleColumnResolver<'_> {
         }
         Ok(None)
     }
-}
-
-fn rename_rule_statement_column(
-    statement: &Statement,
-    from: &str,
-    to: &str,
-) -> Result<Statement, SQLError> {
-    bind_statement(
-        statement,
-        &mut RuleColumnResolver {
-            from,
-            to: Some(to),
-            referenced: false,
-        },
-    )
-}
-
-fn rule_statement_references_column(statement: &Statement, column: &str) -> bool {
-    let mut resolver = RuleColumnResolver {
-        from: column,
-        to: None,
-        referenced: false,
-    };
-    let _ = bind_statement(statement, &mut resolver);
-    resolver.referenced
-}
-
-fn rename_rule_action_sql_column(sql: &str, from: &str, to: &str) -> String {
-    let mut rewritten = String::with_capacity(sql.len());
-    let mut copied_through = 0;
-    let mut cursor = 0;
-    while cursor < sql.len() {
-        if sql.as_bytes()[cursor] == b'\'' {
-            cursor = sql_string_end(sql, cursor);
-            continue;
-        }
-        let Some((qualifier_end, qualifier)) = sql_identifier(sql, cursor) else {
-            cursor += sql[cursor..].chars().next().map_or(1, char::len_utf8);
-            continue;
-        };
-        if !qualifier.eq_ignore_ascii_case("old") && !qualifier.eq_ignore_ascii_case("new") {
-            cursor = qualifier_end;
-            continue;
-        }
-        let dot = skip_sql_whitespace(sql, qualifier_end);
-        if sql.as_bytes().get(dot) != Some(&b'.') {
-            cursor = qualifier_end;
-            continue;
-        }
-        let column_start = skip_sql_whitespace(sql, dot + 1);
-        let Some((column_end, column)) = sql_identifier(sql, column_start) else {
-            cursor = qualifier_end;
-            continue;
-        };
-        if column != from {
-            cursor = column_end;
-            continue;
-        }
-        rewritten.push_str(&sql[copied_through..column_start]);
-        rewritten.push_str(&uqa_sql::expr::quote_ident(to));
-        copied_through = column_end;
-        cursor = column_end;
-    }
-    rewritten.push_str(&sql[copied_through..]);
-    rewritten
-}
-
-fn sql_identifier(sql: &str, start: usize) -> Option<(usize, String)> {
-    let bytes = sql.as_bytes();
-    let first = *bytes.get(start)?;
-    if first == b'"' {
-        let mut value = String::new();
-        let mut cursor = start + 1;
-        while cursor < bytes.len() {
-            if bytes[cursor] == b'"' {
-                if bytes.get(cursor + 1) == Some(&b'"') {
-                    value.push('"');
-                    cursor += 2;
-                    continue;
-                }
-                return Some((cursor + 1, value));
-            }
-            let character = sql[cursor..].chars().next()?;
-            value.push(character);
-            cursor += character.len_utf8();
-        }
-        return None;
-    }
-    if !sql_identifier_start(first) {
-        return None;
-    }
-    let mut cursor = start + 1;
-    while bytes
-        .get(cursor)
-        .is_some_and(|byte| sql_identifier_continue(*byte))
-    {
-        cursor += 1;
-    }
-    Some((cursor, sql[start..cursor].to_string()))
-}
-
-const fn sql_identifier_start(byte: u8) -> bool {
-    byte.is_ascii_alphabetic() || byte == b'_' || byte >= 0x80
-}
-
-const fn sql_identifier_continue(byte: u8) -> bool {
-    sql_identifier_start(byte) || byte.is_ascii_digit() || byte == b'$'
-}
-
-fn skip_sql_whitespace(sql: &str, mut cursor: usize) -> usize {
-    while sql
-        .as_bytes()
-        .get(cursor)
-        .is_some_and(u8::is_ascii_whitespace)
-    {
-        cursor += 1;
-    }
-    cursor
-}
-
-fn sql_string_end(sql: &str, start: usize) -> usize {
-    let bytes = sql.as_bytes();
-    let mut cursor = start + 1;
-    while cursor < bytes.len() {
-        if bytes[cursor] == b'\\' {
-            cursor = (cursor + 2).min(bytes.len());
-        } else if bytes[cursor] == b'\'' {
-            if bytes.get(cursor + 1) == Some(&b'\'') {
-                cursor += 2;
-            } else {
-                return cursor + 1;
-            }
-        } else {
-            cursor += 1;
-        }
-    }
-    bytes.len()
 }

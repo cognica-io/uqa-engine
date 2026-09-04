@@ -15,7 +15,7 @@ pub(super) fn action_target_qualifier_referenced(
     action: &Statement,
     qualifier: &str,
 ) -> bool {
-    let context = super::RuleBindingContext::with_engine(engine);
+    let context = super::RuleBindingContext::with_engine(engine, false);
     match action {
         Statement::Update(update) => {
             if !update.returning.is_empty() {

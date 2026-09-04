@@ -177,6 +177,8 @@ pub enum SourcePlan {
         #[serde(default)]
         qualifier: String,
         alias: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        column_aliases: Vec<String>,
         #[serde(default = "default_include_descendants")]
         include_descendants: bool,
     },
@@ -302,6 +304,8 @@ pub struct ViewRuleUpdatePlan {
 pub struct InsertPlan {
     pub table: String,
     pub target_relation_bound: bool,
+    /// Whether non-target relation references are stored catalog identities rather than names that must be resolved in the executing session.
+    pub relations_bound: bool,
     /// Effective role used for non-target privilege checks in an internally rewritten statement.
     pub statement_privilege_subject: Option<String>,
     /// Effective role used only for privilege checks on an internally rewritten target relation.
@@ -341,6 +345,8 @@ pub enum ConflictActionPlan {
 pub struct UpdatePlan {
     pub table: String,
     pub target_relation_bound: bool,
+    /// Whether non-target relation references are stored catalog identities rather than names that must be resolved in the executing session.
+    pub relations_bound: bool,
     /// Effective role used for non-target privilege checks in an internally rewritten statement.
     pub statement_privilege_subject: Option<String>,
     /// Effective role used only for privilege checks on an internally rewritten target relation.
@@ -364,6 +370,8 @@ pub struct UpdatePlan {
 pub struct DeletePlan {
     pub table: String,
     pub target_relation_bound: bool,
+    /// Whether non-target relation references are stored catalog identities rather than names that must be resolved in the executing session.
+    pub relations_bound: bool,
     /// Effective role used for non-target privilege checks in an internally rewritten statement.
     pub statement_privilege_subject: Option<String>,
     /// Effective role used only for privilege checks on an internally rewritten target relation.

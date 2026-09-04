@@ -22,15 +22,12 @@ mod row_expansion;
 mod scope;
 pub(crate) use references::{
     first_rule_row_reference_in_expr, first_rule_row_reference_in_select,
-    rename_rule_condition_binding_column, rule_action_has_set_operation,
-    rule_condition_plan_references_whole_row, rule_condition_plan_row_columns,
-    rule_expr_references_row, rule_expr_references_whole_row, rule_expr_row_columns,
-    rule_statement_references_row, rule_statement_references_whole_row, rule_statement_row_columns,
+    rule_action_has_set_operation, rule_condition_plan_references_whole_row,
+    rule_condition_plan_row_columns, rule_expr_references_row, rule_expr_references_whole_row,
+    rule_expr_row_columns, rule_statement_references_row, rule_statement_references_whole_row,
+    rule_statement_row_columns,
 };
-pub(crate) use returning::{
-    expand_rule_action_returning_stars, rename_rule_action_returning_target_column,
-    rule_action_returning_references_target_column,
-};
+pub(crate) use returning::expand_rule_action_returning_stars;
 pub(crate) use row_expansion::expand_rule_action_row_stars;
 use scope::{
     apply_positional_aliases, collect_visible_scope, select_output_columns, RuleBindingScope,
@@ -47,13 +44,15 @@ pub(super) fn action_target_qualifier_referenced(
 #[derive(Clone, Default)]
 struct RuleBindingContext<'a> {
     engine: Option<&'a crate::Engine>,
+    relations_bound: bool,
     ctes: BTreeMap<String, Vec<String>>,
 }
 
 impl<'a> RuleBindingContext<'a> {
-    fn with_engine(engine: &'a crate::Engine) -> Self {
+    fn with_engine(engine: &'a crate::Engine, relations_bound: bool) -> Self {
         Self {
             engine: Some(engine),
+            relations_bound,
             ctes: BTreeMap::new(),
         }
     }
@@ -65,7 +64,7 @@ impl<'a> RuleBindingContext<'a> {
         self.engine.map_or_else(
             || Ok(Vec::new()),
             |engine| {
-                crate::sql::query_source_column_names(engine, name)?
+                crate::sql::query_source_column_names(engine, name, self.relations_bound)?
                     .ok_or_else(|| SQLError::UnknownTable(name.to_string()))
             },
         )
@@ -101,7 +100,7 @@ pub(crate) fn bind_rule_action(
     action_columns: &BTreeSet<String>,
     resolver: &mut dyn VariableResolver,
 ) -> Result<Statement, SQLError> {
-    let context = RuleBindingContext::with_engine(engine);
+    let context = RuleBindingContext::with_engine(engine, true);
     let (returning, action_event) = match action {
         Statement::Insert(statement) => (&statement.returning, RuleEvent::Insert),
         Statement::Update(statement) => (&statement.returning, RuleEvent::Update),
@@ -454,7 +453,7 @@ fn bind_rule_select_scoped(
         select,
         resolver,
         &RuleBindingScope::default(),
-        &RuleBindingContext::with_engine(engine),
+        &RuleBindingContext::with_engine(engine, false),
     )
 }
 

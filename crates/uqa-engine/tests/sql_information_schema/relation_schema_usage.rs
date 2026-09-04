@@ -400,7 +400,15 @@ fn legacy_stored_rule_actions_restore_as_bound_relation_identities() {
             "SET ROLE bound_rule_caller",
             "CREATE TABLE bound_rule_visible.event_items(id integer)",
             "CREATE TABLE bound_rule_hidden.event_log(id integer)",
-            "CREATE RULE bound_rule_action AS ON INSERT TO bound_rule_visible.event_items DO ALSO INSERT INTO bound_rule_hidden.event_log VALUES (NEW.id)",
+            "CREATE TABLE bound_rule_hidden.event_source(id integer)",
+            "CREATE TABLE bound_rule_hidden.event_updates(id integer)",
+            "CREATE TABLE bound_rule_hidden.event_deletes(id integer)",
+            "INSERT INTO bound_rule_hidden.event_source VALUES (91)",
+            "INSERT INTO bound_rule_hidden.event_updates VALUES (0)",
+            "INSERT INTO bound_rule_hidden.event_deletes VALUES (91)",
+            "CREATE RULE bound_insert_action AS ON INSERT TO bound_rule_visible.event_items DO ALSO INSERT INTO bound_rule_hidden.event_log SELECT source.id FROM bound_rule_hidden.event_source AS source WHERE source.id = NEW.id",
+            "CREATE RULE bound_update_action AS ON INSERT TO bound_rule_visible.event_items DO ALSO UPDATE bound_rule_hidden.event_updates AS target SET id = source.id FROM bound_rule_hidden.event_source AS source WHERE source.id = NEW.id",
+            "CREATE RULE bound_delete_action AS ON INSERT TO bound_rule_visible.event_items DO ALSO DELETE FROM bound_rule_hidden.event_deletes AS target USING bound_rule_hidden.event_source AS source WHERE target.id = source.id AND source.id = NEW.id",
             "RESET ROLE",
             "REVOKE USAGE ON SCHEMA bound_rule_hidden FROM bound_rule_caller",
         ] {
@@ -411,7 +419,7 @@ fn legacy_stored_rule_actions_restore_as_bound_relation_identities() {
         let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
         let encoded = catalog.get_metadata("sql_rules_json").unwrap().unwrap();
         let mut metadata: serde_json::Value = serde_json::from_str(&encoded).unwrap();
-        assert_eq!(remove_target_binding_marker(&mut metadata), 1);
+        assert_eq!(remove_target_binding_marker(&mut metadata), 3);
         metadata["format_version"] = serde_json::Value::from(0);
         catalog
             .set_metadata("sql_rules_json", &serde_json::to_string(&metadata).unwrap())
@@ -431,6 +439,17 @@ fn legacy_stored_rule_actions_restore_as_bound_relation_identities() {
             "SELECT count(*) FROM bound_rule_hidden.event_log WHERE id = 91"
         ),
         Value::Int(1)
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT id FROM bound_rule_hidden.event_updates"),
+        Value::Int(91)
+    );
+    assert_eq!(
+        scalar(
+            &engine,
+            "SELECT count(*) FROM bound_rule_hidden.event_deletes"
+        ),
+        Value::Int(0)
     );
 }
 

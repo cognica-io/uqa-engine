@@ -156,6 +156,25 @@ fn rule_relation_dependencies_follow_table_rename_and_reopen() {
             exec(&engine, "SELECT id FROM renamed_dependency_log").rows[0].get("id"),
             Some(&Value::Int(1))
         );
+        let definition = exec(
+            &engine,
+            "SELECT pg_get_ruledef(oid, true) AS definition FROM pg_rewrite WHERE rulename = 'rename_dependency_rule'",
+        );
+        let Some(Value::Str(definition)) = definition.rows[0].get("definition") else {
+            panic!("expected rule definition text");
+        };
+        assert!(
+            definition.contains("renamed_dependency_source"),
+            "{definition}"
+        );
+        assert!(
+            definition.contains("renamed_dependency_log"),
+            "{definition}"
+        );
+        assert!(
+            !definition.contains("FROM rename_dependency_source"),
+            "{definition}"
+        );
     }
     let engine = Engine::open(&path).expect("renamed rule dependencies must restore");
     exec(

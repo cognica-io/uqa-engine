@@ -371,11 +371,13 @@ impl SourcePlan {
                 name,
                 qualifier,
                 alias,
+                column_aliases,
                 include_descendants,
             } => Self::Table {
                 name,
                 qualifier,
                 alias,
+                column_aliases,
                 include_descendants,
             },
             FromClause::Join {

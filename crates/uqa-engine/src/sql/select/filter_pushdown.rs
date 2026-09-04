@@ -195,6 +195,9 @@ fn qualifier_filter_for_part(
     column_owners: &ColumnOwners,
     subqueries: &[QueryPlan],
 ) -> Option<(String, ScalarExpr)> {
+    if expression_contains_internal_column(part) {
+        return None;
+    }
     let contains_subquery = expr_contains_subquery(part);
     let unsafe_subquery = contains_subquery
         && (!subqueries_are_uncorrelated_and_stable(engine, part, subqueries)
@@ -232,6 +235,14 @@ fn qualifier_filter_for_part(
         }
     }
     None
+}
+
+fn expression_contains_internal_column(expression: &ScalarExpr) -> bool {
+    let mut found = false;
+    expression.visit(&mut |node| {
+        found |= matches!(node, ScalarExpr::InternalColumn(_));
+    });
+    found
 }
 
 pub(in crate::sql) fn final_filter_after_qualifier_pushdown(

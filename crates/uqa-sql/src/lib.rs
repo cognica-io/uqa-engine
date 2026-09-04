@@ -38,6 +38,7 @@ pub mod fts_query;
 pub mod params;
 pub mod plpgsql;
 pub mod registry;
+pub mod render;
 pub mod result;
 
 pub use ast::{ColumnType, Statement};

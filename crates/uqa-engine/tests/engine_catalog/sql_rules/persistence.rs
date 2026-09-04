@@ -279,7 +279,7 @@ fn current_rule_catalog_rejects_missing_bound_routine_state() {
         let catalog = Catalog::open(ManagedConnection::open(&path).unwrap()).unwrap();
         let encoded = catalog.get_metadata("sql_rules_json").unwrap().unwrap();
         let mut metadata: serde_json::Value = serde_json::from_str(&encoded).unwrap();
-        assert_eq!(metadata["format_version"], serde_json::Value::from(1));
+        assert_eq!(metadata["format_version"], serde_json::Value::from(2));
         assert!(remove_first_binding(&mut metadata));
         catalog
             .set_metadata("sql_rules_json", &serde_json::to_string(&metadata).unwrap())
@@ -289,6 +289,124 @@ fn current_rule_catalog_rejects_missing_bound_routine_state() {
         panic!("current rule catalog must not repair missing binding state");
     };
     assert!(error.to_string().contains("is not fully bound"), "{error}");
+}
+
+#[test]
+fn older_rule_catalog_rebuilds_and_persists_column_dependencies() {
+    use uqa_storage::{Catalog, ManagedConnection};
+
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("rule-column-migration.uqa");
+    {
+        let engine = Engine::open(&path).unwrap();
+        exec(
+            &engine,
+            "CREATE TABLE migrated_rule_events(id INTEGER);
+             CREATE TABLE migrated_rule_source(source_value INTEGER);
+             CREATE TABLE migrated_rule_log(target_value INTEGER);
+             INSERT INTO migrated_rule_source VALUES (17);
+             CREATE RULE migrated_bound_columns AS ON INSERT TO migrated_rule_events DO ALSO
+               INSERT INTO migrated_rule_log(target_value)
+               SELECT source.source_value FROM migrated_rule_source AS source",
+        );
+    }
+    {
+        let catalog = Catalog::open(ManagedConnection::open(&path).unwrap()).unwrap();
+        let encoded = catalog.get_metadata("sql_rules_json").unwrap().unwrap();
+        let mut metadata: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        metadata["format_version"] = serde_json::Value::from(1);
+        let dependencies = metadata["rules"][0]["dependencies"]
+            .as_object_mut()
+            .expect("stored rule dependencies");
+        assert!(dependencies.remove("columns").is_some());
+        catalog
+            .set_metadata("sql_rules_json", &serde_json::to_string(&metadata).unwrap())
+            .unwrap();
+    }
+    {
+        let engine = Engine::open(&path).expect("older catalog must rebuild column dependencies");
+        let restrict = engine
+            .sql(
+                "ALTER TABLE migrated_rule_source DROP COLUMN source_value",
+                &[],
+            )
+            .expect_err("rebuilt source-column dependency must restrict DROP COLUMN");
+        assert_eq!(restrict.sqlstate(), Some("2BP01"));
+        exec(
+            &engine,
+            "ALTER TABLE migrated_rule_source RENAME COLUMN source_value TO renamed_source_value;
+             ALTER TABLE migrated_rule_log RENAME COLUMN target_value TO renamed_target_value;
+             INSERT INTO migrated_rule_events VALUES (1)",
+        );
+        assert_eq!(
+            exec(
+                &engine,
+                "SELECT renamed_target_value FROM migrated_rule_log",
+            )
+            .value_at(0, 0),
+            Some(&Value::Int(17))
+        );
+    }
+    let catalog = Catalog::open(ManagedConnection::open(&path).unwrap()).unwrap();
+    let encoded = catalog.get_metadata("sql_rules_json").unwrap().unwrap();
+    let metadata: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(metadata["format_version"], serde_json::Value::from(2));
+    assert!(metadata["rules"][0]["dependencies"]["columns"]
+        .as_array()
+        .is_some_and(|columns| !columns.is_empty()));
+    let action_sql = metadata["rules"][0]["definition"]["action_sql"][0]
+        .as_str()
+        .expect("canonical stored action SQL");
+    assert!(
+        action_sql.contains("source.renamed_source_value"),
+        "{action_sql}"
+    );
+    assert!(
+        action_sql.contains("(renamed_target_value)"),
+        "{action_sql}"
+    );
+    assert!(!action_sql.contains("source.source_value"), "{action_sql}");
+    assert!(!action_sql.contains("(target_value)"), "{action_sql}");
+}
+
+#[test]
+fn current_rule_catalog_rejects_missing_column_dependency_state() {
+    use uqa_storage::{Catalog, ManagedConnection};
+
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("rule-column-corruption.uqa");
+    {
+        let engine = Engine::open(&path).unwrap();
+        exec(
+            &engine,
+            "CREATE TABLE corrupt_rule_events(id INTEGER);
+             CREATE TABLE corrupt_rule_source(source_value INTEGER);
+             CREATE TABLE corrupt_rule_log(target_value INTEGER);
+             CREATE RULE corrupt_bound_columns AS ON INSERT TO corrupt_rule_events DO ALSO
+               INSERT INTO corrupt_rule_log(target_value)
+               SELECT source.source_value FROM corrupt_rule_source AS source",
+        );
+    }
+    {
+        let catalog = Catalog::open(ManagedConnection::open(&path).unwrap()).unwrap();
+        let encoded = catalog.get_metadata("sql_rules_json").unwrap().unwrap();
+        let mut metadata: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(metadata["format_version"], serde_json::Value::from(2));
+        let dependencies = metadata["rules"][0]["dependencies"]
+            .as_object_mut()
+            .expect("stored rule dependencies");
+        assert!(dependencies.remove("columns").is_some());
+        catalog
+            .set_metadata("sql_rules_json", &serde_json::to_string(&metadata).unwrap())
+            .unwrap();
+    }
+    let Err(error) = Engine::open(&path) else {
+        panic!("current rule catalog must not repair missing column dependencies");
+    };
+    assert!(
+        error.to_string().contains("persisted dependencies"),
+        "{error}"
+    );
 }
 
 #[test]

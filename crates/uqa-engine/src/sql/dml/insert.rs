@@ -297,8 +297,11 @@ pub(in crate::sql) fn run_insert_inner(
         )?;
     }
     let read_engine = statement_snapshot.as_ref().unwrap_or(engine);
-    let mut scope =
-        CteScope::new_for_statement(read_engine, stmt.statement_privilege_subject.as_deref());
+    let mut scope = CteScope::new_for_command(
+        read_engine,
+        stmt.statement_privilege_subject.as_deref(),
+        stmt.relations_bound,
+    )?;
     crate::sql::select::materialize_plan_ctes(read_engine, &stmt.ctes, params, &mut scope)?;
     scope.scalar_subqueries.clone_from(&stmt.subqueries);
     // Resolve the table's primary-key column name. Auto-increment (SERIAL / BIGSERIAL) wins; otherwise the scalar PRIMARY KEY column wins; otherwise use the conventional legacy `id` slot. Both VALUES and SELECT sources must derive the internal doc id from this same column or later primary-key rewrites can address a different row than the one that was inserted.

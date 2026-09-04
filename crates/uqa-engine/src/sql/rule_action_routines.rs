@@ -55,6 +55,57 @@ pub(crate) fn bind_catalog_rule_action_routines(
     Ok(BoundRuleActionRoutines { query, references })
 }
 
+pub(super) fn mark_rule_action_relations_bound(plan: &mut UnifiedPlan) -> Result<(), SQLError> {
+    match plan {
+        UnifiedPlan::Query(query) => mark_query_relations_bound(query),
+        UnifiedPlan::Command(command) => match command.as_mut() {
+            CommandPlan::Insert(plan) => {
+                plan.relations_bound = true;
+                for cte in &mut plan.ctes {
+                    mark_query_relations_bound(&mut cte.query);
+                }
+                if let Some(source) = &mut plan.source {
+                    mark_query_relations_bound(source);
+                }
+                for subquery in &mut plan.subqueries {
+                    mark_query_relations_bound(subquery);
+                }
+            }
+            CommandPlan::Update(plan) => {
+                plan.relations_bound = true;
+                for cte in &mut plan.ctes {
+                    mark_query_relations_bound(&mut cte.query);
+                }
+                if let Some(source) = &mut plan.source {
+                    mark_source_relations_bound(source);
+                }
+                for subquery in &mut plan.subqueries {
+                    mark_query_relations_bound(subquery);
+                }
+            }
+            CommandPlan::Delete(plan) => {
+                plan.relations_bound = true;
+                for cte in &mut plan.ctes {
+                    mark_query_relations_bound(&mut cte.query);
+                }
+                if let Some(source) = &mut plan.source {
+                    mark_source_relations_bound(source);
+                }
+                for subquery in &mut plan.subqueries {
+                    mark_query_relations_bound(subquery);
+                }
+            }
+            CommandPlan::Notify { .. } => {}
+            _ => {
+                return Err(SQLError::Internal(
+                    "validated rewrite-rule action lowered to an unsupported command".into(),
+                ));
+            }
+        },
+    }
+    Ok(())
+}
+
 fn bind_command_action_routines(
     engine: &Engine,
     command: &CommandPlan,
@@ -231,6 +282,7 @@ fn action_target_outer_schema(
             name: table.to_string(),
             qualifier: target_qualifier.to_string(),
             alias: None,
+            column_aliases: Vec::new(),
             include_descendants: true,
         },
         &[],

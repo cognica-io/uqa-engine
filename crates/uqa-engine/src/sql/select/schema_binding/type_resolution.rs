@@ -12,7 +12,7 @@ use uqa_sql::{SQLError, SQLParam};
 
 use crate::engine_user_functions::RoutineResolution;
 
-use super::scope::merge_types;
+use super::{expr_contains_subquery, scope::merge_types, QueryPlan, ScalarExpr, SchemaScope};
 
 pub(super) fn set_operation_output_schema(
     left: &RowSchema,
@@ -38,6 +38,58 @@ pub(super) struct QueryFunctionTypeResolver<'a> {
     pub(super) routines: &'a dyn RoutineResolution,
     pub(super) scalar_subquery_types: Option<Vec<Option<ColumnType>>>,
     pub(super) defer_routine_namespace_errors: bool,
+}
+
+impl SchemaScope {
+    pub(super) fn query_function_type_resolver<'a>(
+        &mut self,
+        routines: &'a dyn RoutineResolution,
+        expression: &ScalarExpr,
+        schema: &RowSchema,
+        subqueries: &[QueryPlan],
+        params: &[SQLParam],
+        outer: Option<&RowSchema>,
+    ) -> Result<QueryFunctionTypeResolver<'a>, SQLError> {
+        self.query_function_type_resolver_for_subqueries(
+            routines,
+            expr_contains_subquery(expression),
+            schema,
+            subqueries,
+            params,
+            outer,
+        )
+    }
+
+    pub(super) fn query_function_type_resolver_for_subqueries<'a>(
+        &mut self,
+        routines: &'a dyn RoutineResolution,
+        contains_subquery: bool,
+        schema: &RowSchema,
+        subqueries: &[QueryPlan],
+        params: &[SQLParam],
+        outer: Option<&RowSchema>,
+    ) -> Result<QueryFunctionTypeResolver<'a>, SQLError> {
+        if subqueries.is_empty() || !contains_subquery {
+            return Ok(QueryFunctionTypeResolver {
+                routines,
+                scalar_subquery_types: None,
+                defer_routine_namespace_errors: false,
+            });
+        }
+        let subquery_outer = self.validate_references.then_some(schema).or(outer);
+        let scalar_subquery_types = subqueries
+            .iter()
+            .map(|plan| {
+                self.bind_query(routines, plan, params, subquery_outer)
+                    .map(|output| output.column_type(0).cloned())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(QueryFunctionTypeResolver {
+            routines,
+            scalar_subquery_types: Some(scalar_subquery_types),
+            defer_routine_namespace_errors: false,
+        })
+    }
 }
 
 impl QueryFunctionTypeResolver<'_> {

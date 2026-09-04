@@ -148,8 +148,11 @@ pub(in crate::sql) fn run_update_inner(
         )?;
     }
     let read_engine = statement_snapshot.as_ref().unwrap_or(engine);
-    let mut ctes =
-        CteScope::new_for_statement(read_engine, stmt.statement_privilege_subject.as_deref());
+    let mut ctes = CteScope::new_for_command(
+        read_engine,
+        stmt.statement_privilege_subject.as_deref(),
+        stmt.relations_bound,
+    )?;
     crate::sql::select::materialize_plan_ctes(read_engine, &stmt.ctes, params, &mut ctes)?;
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
 
@@ -741,6 +744,7 @@ pub(in crate::sql) fn try_run_point_update(
         engine,
         params,
         stmt.statement_privilege_subject.as_deref(),
+        stmt.relations_bound,
     )?
     else {
         return Ok(None);
@@ -793,6 +797,7 @@ pub(in crate::sql) fn point_lookup_filter(
     engine: &Engine,
     params: &[SQLParam],
     privilege_subject: Option<&str>,
+    relations_bound: bool,
 ) -> Result<Option<(String, Value)>, SQLError> {
     let Some(ScalarExpr::Binary {
         op: BinaryOp::Equal,
@@ -804,7 +809,7 @@ pub(in crate::sql) fn point_lookup_filter(
     };
     if let Some(field) = top_level_column(lhs) {
         if expr_is_row_independent(rhs) {
-            let ctes = CteScope::new_for_statement(engine, privilege_subject);
+            let ctes = CteScope::new_for_command(engine, privilege_subject, relations_bound)?;
             return Ok(Some((
                 field.to_string(),
                 eval_mutation_expr(engine, &ctes, rhs, None, params)?,
@@ -813,7 +818,7 @@ pub(in crate::sql) fn point_lookup_filter(
     }
     if let Some(field) = top_level_column(rhs) {
         if expr_is_row_independent(lhs) {
-            let ctes = CteScope::new_for_statement(engine, privilege_subject);
+            let ctes = CteScope::new_for_command(engine, privilege_subject, relations_bound)?;
             return Ok(Some((
                 field.to_string(),
                 eval_mutation_expr(engine, &ctes, lhs, None, params)?,
@@ -838,7 +843,11 @@ pub(in crate::sql) fn row_independent_update_values(
 ) -> Result<Option<RowIndependentUpdateValues>, SQLError> {
     let mut updates = BTreeMap::new();
     let mut vectors = BTreeMap::new();
-    let ctes = CteScope::new_for_statement(engine, stmt.statement_privilege_subject.as_deref());
+    let ctes = CteScope::new_for_command(
+        engine,
+        stmt.statement_privilege_subject.as_deref(),
+        stmt.relations_bound,
+    )?;
     for assignment in &stmt.assignments {
         if !expr_is_row_independent(&assignment.value) {
             return Ok(None);

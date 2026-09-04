@@ -6,7 +6,7 @@
 
 //! `PostgreSQL` 18 automatically updatable view analysis and DML rewriting.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_core::DocId;
 use uqa_execution::{ColumnIdentity, OwnedPhysicalRow, PhysicalRow, RowSchema, ScalarExpr};
@@ -101,12 +101,21 @@ struct AutomaticViewLayer {
     canonical_name: String,
     source_name: String,
     source_qualifier: String,
+    source_column_map: BTreeMap<String, String>,
     source_include_descendants: bool,
     source_schema: RowSchema,
     columns: Vec<ViewColumn>,
     predicate: Option<ScalarExpr>,
     subqueries: Vec<QueryPlan>,
     check_option: ViewCheckOption,
+}
+
+impl AutomaticViewLayer {
+    fn physical_source_column<'a>(&'a self, column: &'a str) -> &'a str {
+        self.source_column_map
+            .get(column)
+            .map_or(column, String::as_str)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -201,7 +210,7 @@ fn direct_source_column(
     expression: &ScalarExpr,
     source_qualifier: &str,
     source_name: &str,
-    source_columns: &BTreeSet<String>,
+    source_columns: &BTreeMap<String, String>,
 ) -> Option<String> {
     let column = match expression {
         ScalarExpr::Column(column) => Some(column.clone()),
@@ -212,7 +221,7 @@ fn direct_source_column(
         }
         _ => None,
     }?;
-    source_columns.contains(&column).then_some(column)
+    source_columns.get(&column).cloned()
 }
 
 fn automatic_view_layer(
@@ -265,7 +274,9 @@ fn automatic_view_layer_from_definition(
             name: source_name,
             qualifier,
             alias,
+            column_aliases,
             include_descendants,
+            ..
         },
     ) = block.from.as_ref()
     else {
@@ -293,17 +304,30 @@ fn automatic_view_layer_from_definition(
     }
     let source_qualifier = alias.as_deref().unwrap_or(qualifier).to_string();
     let source_columns = relation_columns(engine, source_name)?;
-    let source_column_set = source_columns.iter().cloned().collect::<BTreeSet<_>>();
+    let mut visible_source_columns = source_columns.clone();
+    for (column, alias) in visible_source_columns.iter_mut().zip(column_aliases) {
+        column.clone_from(alias);
+    }
+    let source_column_map = visible_source_columns
+        .iter()
+        .cloned()
+        .zip(source_columns.iter().cloned())
+        .collect::<BTreeMap<_, _>>();
     let mut expressions = Vec::new();
     for projection in &block.projections {
         match &projection.expr {
             ScalarExpr::Star => {
-                expressions.extend(source_columns.iter().cloned().map(ScalarExpr::Column));
+                expressions.extend(
+                    visible_source_columns
+                        .iter()
+                        .cloned()
+                        .map(ScalarExpr::Column),
+                );
             }
             ScalarExpr::QualifiedStar(star_qualifier)
                 if source_qualifier_matches(star_qualifier, &source_qualifier, source_name) =>
             {
-                expressions.extend(source_columns.iter().cloned().map(|column| {
+                expressions.extend(visible_source_columns.iter().cloned().map(|column| {
                     ScalarExpr::QualifiedColumn {
                         qualifier: source_qualifier.clone(),
                         column,
@@ -335,7 +359,7 @@ fn automatic_view_layer_from_definition(
                 &expression,
                 &source_qualifier,
                 source_name,
-                &source_column_set,
+                &source_column_map,
             ),
             name,
             expression,
@@ -345,6 +369,7 @@ fn automatic_view_layer_from_definition(
         canonical_name: canonical_name.to_string(),
         source_name: source_name.clone(),
         source_qualifier,
+        source_column_map,
         source_include_descendants: *include_descendants,
         source_schema,
         columns,
@@ -397,12 +422,12 @@ fn automatic_view_rule_document_inner(
         }
         uqa_planner::rewrite_scalar_expression(&mut expression, &mut |node| match node {
             ScalarExpr::Column(column) => {
-                source_dependencies.insert(column.clone());
+                source_dependencies.insert(layer.physical_source_column(column).to_string());
             }
             ScalarExpr::QualifiedColumn { qualifier, column }
                 if qualifier.eq_ignore_ascii_case(&layer.source_qualifier) =>
             {
-                source_dependencies.insert(column.clone());
+                source_dependencies.insert(layer.physical_source_column(column).to_string());
             }
             _ => {}
         });

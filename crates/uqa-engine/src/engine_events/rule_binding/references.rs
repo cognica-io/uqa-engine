@@ -204,14 +204,6 @@ pub(crate) fn rule_condition_plan_row_columns(
     columns
 }
 
-pub(crate) fn rename_rule_condition_binding_column(
-    binding: &mut RuleConditionBinding,
-    from: &str,
-    to: &str,
-) {
-    binding.rename_column(from, to);
-}
-
 pub(crate) fn rule_statement_row_columns(
     engine: &crate::Engine,
     statement: &Statement,

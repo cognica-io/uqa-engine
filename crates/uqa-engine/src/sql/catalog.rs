@@ -155,9 +155,13 @@ pub(crate) fn resolve_age_label_relation_name(
 pub(crate) fn query_source_column_names(
     engine: &Engine,
     name: &str,
+    relations_bound: bool,
 ) -> Result<Option<Vec<String>>, SQLError> {
     let catalog = engine.catalog_read_view();
-    let resolution = engine.session_execution_view().relation_name_resolution();
+    let mut resolution = engine.session_execution_view().relation_name_resolution();
+    if relations_bound {
+        resolution.set_lookup_mode(crate::engine_capabilities::RelationLookupMode::Bound);
+    }
     if catalog.sequence_resolved(&resolution, name)?.is_some() {
         return Ok(Some(vec![
             "last_value".into(),
