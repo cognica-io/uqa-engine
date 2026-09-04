@@ -45,6 +45,11 @@ impl Engine {
         for foreign_key in &mut constraints.foreign_keys {
             foreign_key.ref_table = self.canonical_foreign_key_target(&foreign_key.ref_table)?;
         }
+        self.bind_table_schema_routine_identities(
+            &table_name,
+            &mut columns,
+            &mut constraints.checks,
+        )?;
         let relation =
             RelationIdentity::from_legacy_name(&table_name).map_err(StorageBackendError::Other)?;
         materialize_constraint_metadata(&relation, &mut columns, &mut constraints)?;
@@ -76,7 +81,7 @@ impl Engine {
         })
     }
 
-    pub(in crate::engine_table_storage) fn set_column_default_inner(
+    pub(crate) fn set_column_default_inner(
         &self,
         table: &str,
         column: &str,
@@ -90,6 +95,7 @@ impl Engine {
             .ok_or_else(|| table_not_found(&table_name))?;
         if let Some(default) = &mut default {
             self.bind_sequence_references_in_expr(default)?;
+            self.bind_default_routine_identities(&table_name, column, default)?;
         }
         let mut columns = t.columns.write();
         let mut next = columns.clone();
@@ -287,6 +293,11 @@ impl Engine {
         let relation =
             RelationIdentity::from_legacy_name(&table_name).map_err(StorageBackendError::Other)?;
         let mut columns = t.columns.read().clone();
+        self.bind_table_schema_routine_identities(
+            &table_name,
+            &mut columns,
+            &mut constraints.checks,
+        )?;
         materialize_constraint_metadata(&relation, &mut columns, &mut constraints)?;
         if self.is_persistent() {
             self.try_save_table_schema_with_components(&table_name, &t, &columns, &constraints)?;
@@ -327,6 +338,11 @@ impl Engine {
             key_constraints,
             hierarchy,
         };
+        self.bind_table_schema_routine_identities(
+            &table_name,
+            &mut columns,
+            &mut constraints.checks,
+        )?;
         let relation =
             RelationIdentity::from_legacy_name(&table_name).map_err(StorageBackendError::Other)?;
         materialize_constraint_metadata(&relation, &mut columns, &mut constraints)?;

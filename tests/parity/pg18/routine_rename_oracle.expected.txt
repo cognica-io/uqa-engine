@@ -21,6 +21,9 @@ routine-dependency-count|3
 view-deparse|true
 table-view-deparse|true
 generated-deparse|true
+column-default-deparse|true
+column-check-deparse|true
+table-check-deparse|true
 rule-deparse|true
 trigger-deparse|true
 standard-call|5
@@ -30,14 +33,17 @@ parameter-default-call|2
 view-call|7
 table-view-call|7
 generated-call|9
+schema-expression-call|2
 rule-call|11
 trigger-call|13
 sql-text-missing|42883
 plpgsql-text-missing|42883
 dependent-restrict|2BP01
 identity-isolation|5|104|104
+schema-expression-after-recreate|2
 command-after-recreate|6
 merge-command-after-recreate|5
 parameter-default-after-recreate|2
 bound-after-old-drop|5
 routine-cascade|true|true
+schema-expression-cascade|true|true|true

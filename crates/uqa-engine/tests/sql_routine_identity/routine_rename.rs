@@ -52,6 +52,28 @@ fn remove_function_binding_identities(value: &mut serde_json::Value) -> usize {
     }
 }
 
+fn remove_expression_function_bindings(value: &mut serde_json::Value) -> usize {
+    match value {
+        serde_json::Value::Object(fields) => {
+            let mut removed = fields
+                .get_mut("Func")
+                .and_then(serde_json::Value::as_object_mut)
+                .map_or(0, |function| {
+                    usize::from(function.remove("binding").is_some())
+                });
+            for value in fields.values_mut() {
+                removed += remove_expression_function_bindings(value);
+            }
+            removed
+        }
+        serde_json::Value::Array(values) => values
+            .iter_mut()
+            .map(remove_expression_function_bindings)
+            .sum(),
+        _ => 0,
+    }
+}
+
 #[test]
 fn routine_rename_preserves_oid_and_replace_identity() {
     let engine = Engine::new();
@@ -471,6 +493,7 @@ fn create_legacy_migration_fixture(engine: &Engine) {
         "CREATE FUNCTION migration_default(value integer DEFAULT migration_base(1)) RETURNS integer LANGUAGE SQL AS 'SELECT $1'",
         "CREATE VIEW migration_view AS SELECT migration_base(2) AS value",
         "CREATE TABLE migration_generated(id integer, derived integer GENERATED ALWAYS AS (migration_base(id)) STORED)",
+        "CREATE TABLE migration_schema_expr(id integer DEFAULT migration_base(1), value integer CONSTRAINT migration_column_check CHECK (migration_base(value) > 0), other integer, CONSTRAINT migration_table_check CHECK (migration_base(other) > 0))",
         "CREATE TABLE migration_command_log(value integer)",
         "CREATE PROCEDURE migration_command(value integer) LANGUAGE SQL BEGIN ATOMIC INSERT INTO migration_command_log VALUES (migration_base(value)); END",
         "CREATE TABLE migration_rule_source(id integer)",
@@ -522,6 +545,21 @@ fn remove_legacy_generated_column_identities(catalog: &uqa_storage::Catalog) {
     catalog.save_table(table).unwrap();
 }
 
+fn remove_legacy_schema_expression_bindings(catalog: &uqa_storage::Catalog) {
+    let mut tables = catalog.load_tables().unwrap();
+    let table = tables
+        .iter_mut()
+        .find(|table| table.relation.name == "migration_schema_expr")
+        .unwrap();
+    let mut columns: serde_json::Value = serde_json::from_str(&table.columns_json).unwrap();
+    let mut constraints: serde_json::Value = serde_json::from_str(&table.constraints_json).unwrap();
+    assert_eq!(remove_expression_function_bindings(&mut columns), 2);
+    assert_eq!(remove_expression_function_bindings(&mut constraints), 1);
+    table.columns_json = serde_json::to_string(&columns).unwrap();
+    table.constraints_json = serde_json::to_string(&constraints).unwrap();
+    catalog.save_table(table).unwrap();
+}
+
 fn remove_legacy_rule_and_trigger_identities(catalog: &uqa_storage::Catalog) {
     for metadata_key in ["sql_rules_json", "sql_triggers_json"] {
         let encoded = catalog.get_metadata(metadata_key).unwrap().unwrap();
@@ -543,6 +581,7 @@ fn make_catalog_legacy(database: &std::path::Path) {
     remove_legacy_function_identities(&catalog);
     remove_legacy_view_identities(&catalog);
     remove_legacy_generated_column_identities(&catalog);
+    remove_legacy_schema_expression_bindings(&catalog);
     remove_legacy_rule_and_trigger_identities(&catalog);
 }
 
@@ -558,6 +597,21 @@ fn assert_migrated_dependents(engine: &Engine, generated: i64, rule: i64, trigge
     assert_eq!(
         scalar(engine, "SELECT value AS v FROM migration_view"),
         Value::Int(3)
+    );
+    engine
+        .sql(
+            &format!(
+                "INSERT INTO migration_schema_expr(value, other) VALUES ({generated}, {generated})"
+            ),
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        scalar(
+            engine,
+            &format!("SELECT id AS v FROM migration_schema_expr WHERE value = {generated}"),
+        ),
+        Value::Int(2)
     );
     engine
         .sql(
@@ -653,6 +707,17 @@ fn assert_migrated_identity_metadata(database: &std::path::Path) {
         .find(|table| table.relation.name == "migration_generated")
         .unwrap();
     assert!(table.columns_json.contains("object_id"));
+    let schema_table = catalog
+        .load_tables()
+        .unwrap()
+        .into_iter()
+        .find(|table| table.relation.name == "migration_schema_expr")
+        .unwrap();
+    let mut columns: serde_json::Value = serde_json::from_str(&schema_table.columns_json).unwrap();
+    let mut constraints: serde_json::Value =
+        serde_json::from_str(&schema_table.constraints_json).unwrap();
+    assert_eq!(remove_function_binding_identities(&mut columns), 2);
+    assert_eq!(remove_function_binding_identities(&mut constraints), 1);
     let rules = catalog.get_metadata("sql_rules_json").unwrap().unwrap();
     assert!(rules.contains(r#""format_version":3"#));
     assert!(rules.contains("object_id"));
@@ -773,6 +838,66 @@ fn secondary_session_does_not_repair_routine_owned_dependency_bindings() {
 }
 
 #[test]
+fn secondary_session_does_not_repair_schema_expression_bindings() {
+    use uqa_storage::{Catalog, ManagedConnection};
+
+    let directory = TempDir::new().unwrap();
+    let database = directory.path().join("schema-dependency-load-only.sqlite");
+    let engine = Engine::open(&database).unwrap();
+    for ddl in [
+        "CREATE FUNCTION schema_load_base(value integer) RETURNS integer IMMUTABLE RETURN value + 1",
+        "CREATE TABLE schema_load_rows(id integer DEFAULT schema_load_base(1), value integer CONSTRAINT schema_load_check CHECK (schema_load_base(value) > 0))",
+    ] {
+        engine
+            .sql(ddl, &[])
+            .unwrap_or_else(|error| panic!("{ddl}: {error}"));
+    }
+    let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+    let mut tables = catalog.load_tables().unwrap();
+    let table = tables
+        .iter_mut()
+        .find(|table| table.relation.name == "schema_load_rows")
+        .unwrap();
+    let mut columns: serde_json::Value = serde_json::from_str(&table.columns_json).unwrap();
+    assert_eq!(remove_expression_function_bindings(&mut columns), 2);
+    let legacy_columns = serde_json::to_string(&columns).unwrap();
+    table.columns_json.clone_from(&legacy_columns);
+    catalog.save_table(table).unwrap();
+
+    let Err(error) = engine.new_session() else {
+        panic!("secondary session must not repair schema-expression bindings");
+    };
+    assert!(error
+        .to_string()
+        .contains("initial-open routine-identity migration"));
+    let stored = catalog
+        .load_tables()
+        .unwrap()
+        .into_iter()
+        .find(|table| table.relation.name == "schema_load_rows")
+        .unwrap();
+    assert_eq!(stored.columns_json, legacy_columns);
+    drop(catalog);
+    drop(engine);
+
+    let reopened = Engine::open(&database).unwrap();
+    reopened
+        .sql("INSERT INTO schema_load_rows(value) VALUES (1)", &[])
+        .unwrap();
+    assert_eq!(
+        scalar(&reopened, "SELECT id AS v FROM schema_load_rows"),
+        Value::Int(2)
+    );
+    assert_eq!(
+        sqlstate(
+            &reopened,
+            "DROP FUNCTION schema_load_base(integer) RESTRICT"
+        ),
+        "2BP01"
+    );
+}
+
+#[test]
 fn failed_initial_routine_migration_rolls_back_catalog_writes() {
     use uqa_storage::{Catalog, ManagedConnection};
 
@@ -795,8 +920,21 @@ fn failed_initial_routine_migration_rolls_back_catalog_writes() {
                 &[],
             )
             .unwrap();
+        engine
+            .sql(
+                "CREATE FUNCTION atomic_schema_base(value integer) RETURNS integer IMMUTABLE RETURN value + 1",
+                &[],
+            )
+            .unwrap();
+        engine
+            .sql(
+                "CREATE TABLE atomic_schema_rows(id integer DEFAULT atomic_schema_base(1))",
+                &[],
+            )
+            .unwrap();
     }
     let legacy_functions;
+    let legacy_columns;
     {
         let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
         let encoded = catalog.get_metadata("sql_functions_json").unwrap().unwrap();
@@ -806,6 +944,17 @@ fn failed_initial_routine_migration_rolls_back_catalog_writes() {
         catalog
             .set_metadata("sql_functions_json", &legacy_functions)
             .unwrap();
+
+        let mut tables = catalog.load_tables().unwrap();
+        let table = tables
+            .iter_mut()
+            .find(|table| table.relation.name == "atomic_schema_rows")
+            .unwrap();
+        let mut columns: serde_json::Value = serde_json::from_str(&table.columns_json).unwrap();
+        assert_eq!(remove_expression_function_bindings(&mut columns), 1);
+        legacy_columns = serde_json::to_string(&columns).unwrap();
+        table.columns_json.clone_from(&legacy_columns);
+        catalog.save_table(table).unwrap();
 
         let encoded = catalog.get_metadata("sql_triggers_json").unwrap().unwrap();
         let mut triggers: serde_json::Value = serde_json::from_str(&encoded).unwrap();
@@ -829,4 +978,11 @@ fn failed_initial_routine_migration_rolls_back_catalog_writes() {
         catalog.get_metadata("sql_functions_json").unwrap(),
         Some(legacy_functions)
     );
+    let table = catalog
+        .load_tables()
+        .unwrap()
+        .into_iter()
+        .find(|table| table.relation.name == "atomic_schema_rows")
+        .unwrap();
+    assert_eq!(table.columns_json, legacy_columns);
 }

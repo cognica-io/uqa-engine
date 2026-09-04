@@ -111,16 +111,17 @@ pub(crate) use catalog::{
     view_relation_oid, RegtypeOutputCatalog,
 };
 pub(in crate::sql) use catalog::{virtual_relation_accepts_row_lock, virtual_relation_schema};
+pub(crate) use ddl::{
+    bind_stored_check_expression_routines, bind_stored_schema_expression_routines,
+    convert_value_to_column_type, convert_value_to_column_type_with_engine,
+    drop_constraint_dependency, validate_postgres_column_name,
+    validate_postgres_relation_column_type, validate_vector_dimensions,
+};
 use ddl::{
     coerce_to_column_type, column_type_name, core_value_to_json, json_table_arg,
     json_table_value_to_text, json_to_core_value, run_alter_sequence, run_alter_table,
     run_create_index, run_create_sequence, run_create_table, run_create_table_as, run_drop,
     value_to_text, CreateTableAsExecution,
-};
-pub(crate) use ddl::{
-    convert_value_to_column_type, convert_value_to_column_type_with_engine,
-    validate_postgres_column_name, validate_postgres_relation_column_type,
-    validate_vector_dimensions,
 };
 use dml::{index_vectors_for_type, run_delete, run_insert, run_merge, run_update};
 use from_rows::{build_join_spill_with_ctes, engine_func_intercept, ColumnPrune, QualifierFilters};

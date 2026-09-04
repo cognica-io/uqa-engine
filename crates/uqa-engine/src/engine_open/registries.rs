@@ -27,7 +27,7 @@ impl Engine {
         // Install definition-only routine placeholders before any stored expression is rebound. Final compilation waits until every row-producing relation registry is present, which also permits views and routines to bind each other without recursive catalog synchronization.
         let pending_sql_functions =
             self.install_sql_function_restore_placeholders(catalog, mode)?;
-        self.restore_generated_routine_identities(mode)?;
+        self.restore_schema_routine_identities(mode)?;
         self.restore_analyzers_from_catalog(catalog)?;
         self.restore_foreign_registries_from_catalog(catalog)?;
         // Stored view plans are rebound only after every row-producing

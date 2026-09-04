@@ -30,7 +30,18 @@ impl Engine {
         column: uqa_sql::ast::ColumnDef,
     ) -> StorageBackendResult<()> {
         self.with_implicit_storage_transaction(|engine| {
-            engine.try_register_column_inner(table, column)
+            engine.try_register_column_inner(table, column, None)
+        })
+    }
+
+    pub(crate) fn try_register_column_with_check_columns(
+        &self,
+        table: &str,
+        column: uqa_sql::ast::ColumnDef,
+        check_columns: &[uqa_sql::ast::ColumnDef],
+    ) -> StorageBackendResult<()> {
+        self.with_implicit_storage_transaction(|engine| {
+            engine.try_register_column_inner(table, column, Some(check_columns))
         })
     }
 
@@ -38,6 +49,7 @@ impl Engine {
         &self,
         table: &str,
         mut column: uqa_sql::ast::ColumnDef,
+        check_columns: Option<&[uqa_sql::ast::ColumnDef]>,
     ) -> StorageBackendResult<()> {
         let legacy_auto_increment = column
             .auto_increment
@@ -66,6 +78,16 @@ impl Engine {
             )));
         }
         columns.push(column);
+        if let Some(check_columns) = check_columns {
+            self.bind_table_schema_routine_identities_with_check_columns(
+                &table_name,
+                &mut columns,
+                &mut [],
+                check_columns,
+            )?;
+        } else {
+            self.bind_table_schema_routine_identities(&table_name, &mut columns, &mut [])?;
+        }
         let mut constraints = uqa_sql::ast::TableConstraintSet {
             persistence: t.persistence,
             on_commit: t.on_commit,

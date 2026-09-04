@@ -113,7 +113,27 @@ pub(super) fn validate_check_expression(
             Ok(())
         }
         Some(_) => Ok(()),
-    }
+    }?;
+    bind_stored_check_expression_routines(engine, table, qualifier, columns, expression)?;
+    Ok(())
+}
+
+pub(crate) fn bind_stored_check_expression_routines(
+    engine: &Engine,
+    table: &str,
+    qualifier: &str,
+    columns: &[ColumnDef],
+    expression: &mut Expr,
+) -> Result<bool, SQLError> {
+    let typed_expression = bind_expr(
+        expression,
+        &mut CheckConditionTypeResolver {
+            table,
+            qualifier,
+            columns,
+        },
+    )?;
+    super::defaults::bind_stored_schema_expression_routines(engine, expression, typed_expression)
 }
 
 pub(super) fn validate_foreign_key_definition(

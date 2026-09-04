@@ -743,3 +743,237 @@ fn parameter_default_dependencies_bind_every_body_form_and_creation_path() {
         assert_eq!(sqlstate(&reopened, sql), "42883", "{sql}");
     }
 }
+
+#[test]
+fn table_defaults_and_checks_keep_exact_routine_dependencies() {
+    let engine = Engine::new();
+    for ddl in [
+        "CREATE FUNCTION schema_dep(value integer) RETURNS integer IMMUTABLE RETURN value + 10",
+        "CREATE FUNCTION schema_dep(value text) RETURNS text IMMUTABLE RETURN value || '!'",
+        "CREATE TABLE schema_dependency_rows (id integer DEFAULT schema_dep(1), value integer CONSTRAINT value_dep_check CHECK (schema_dep(value) < 100), other integer, CONSTRAINT other_dep_check CHECK (schema_dep(other) < 100))",
+    ] {
+        engine
+            .sql(ddl, &[])
+            .unwrap_or_else(|error| panic!("{ddl}: {error}"));
+    }
+
+    engine
+        .sql("DROP FUNCTION schema_dep(text) RESTRICT", &[])
+        .unwrap();
+    assert_eq!(
+        sqlstate(&engine, "DROP FUNCTION schema_dep(integer) RESTRICT"),
+        "2BP01"
+    );
+    engine
+        .sql(
+            "ALTER FUNCTION schema_dep(integer) RENAME TO schema_dep_renamed",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "CREATE FUNCTION schema_dep(value integer) RETURNS integer IMMUTABLE RETURN value + 1000",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "INSERT INTO schema_dependency_rows(value, other) VALUES (1, 2)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        scalar(
+            &engine,
+            "SELECT id AS v FROM schema_dependency_rows WHERE value = 1"
+        ),
+        Value::Int(11)
+    );
+    engine
+        .sql("DROP FUNCTION schema_dep(integer) RESTRICT", &[])
+        .unwrap();
+    assert_eq!(
+        sqlstate(
+            &engine,
+            "DROP FUNCTION schema_dep_renamed(integer) RESTRICT"
+        ),
+        "2BP01"
+    );
+
+    engine
+        .sql("DROP FUNCTION schema_dep_renamed(integer) CASCADE", &[])
+        .unwrap();
+    assert_eq!(
+        engine.take_sql_notices(),
+        vec![("NOTICE".into(), "drop cascades to 3 other objects".into())]
+    );
+    assert!(engine
+        .column_default_expr("schema_dependency_rows", "id")
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        scalar(
+            &engine,
+            "SELECT count(*) AS v FROM pg_catalog.pg_constraint WHERE conname IN ('value_dep_check', 'other_dep_check')"
+        ),
+        Value::Int(0)
+    );
+    assert_eq!(
+        engine.table_columns("schema_dependency_rows").unwrap(),
+        vec!["id", "value", "other"]
+    );
+    engine
+        .sql(
+            "INSERT INTO schema_dependency_rows(value, other) VALUES (-1000, -1000)",
+            &[],
+        )
+        .unwrap();
+}
+
+#[test]
+fn altered_defaults_and_checks_replace_their_dependency_sets() {
+    let engine = Engine::new();
+    for ddl in [
+        "CREATE FUNCTION old_schema_dep(value integer) RETURNS integer IMMUTABLE RETURN value + 1",
+        "CREATE FUNCTION new_schema_dep(value integer) RETURNS integer IMMUTABLE RETURN value + 2",
+        "CREATE TABLE altered_schema_dependencies (id integer DEFAULT old_schema_dep(1), value integer, CONSTRAINT old_schema_check CHECK (old_schema_dep(value) > 0))",
+        "ALTER TABLE altered_schema_dependencies ALTER COLUMN id SET DEFAULT new_schema_dep(1)",
+        "ALTER TABLE altered_schema_dependencies DROP CONSTRAINT old_schema_check",
+        "ALTER TABLE altered_schema_dependencies ADD CONSTRAINT new_schema_check CHECK (new_schema_dep(value) > 0)",
+    ] {
+        engine
+            .sql(ddl, &[])
+            .unwrap_or_else(|error| panic!("{ddl}: {error}"));
+    }
+
+    engine
+        .sql("DROP FUNCTION old_schema_dep(integer) RESTRICT", &[])
+        .unwrap();
+    assert_eq!(
+        sqlstate(&engine, "DROP FUNCTION new_schema_dep(integer) RESTRICT"),
+        "2BP01"
+    );
+    engine
+        .sql(
+            "ALTER TABLE altered_schema_dependencies ALTER COLUMN id DROP DEFAULT",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        sqlstate(&engine, "DROP FUNCTION new_schema_dep(integer) RESTRICT"),
+        "2BP01"
+    );
+    engine
+        .sql(
+            "ALTER TABLE altered_schema_dependencies DROP CONSTRAINT new_schema_check",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql("DROP FUNCTION new_schema_dep(integer) RESTRICT", &[])
+        .unwrap();
+}
+
+#[test]
+fn schema_expression_routine_bindings_survive_reopen() {
+    let directory = TempDir::new().unwrap();
+    let database = directory.path().join("schema-routine-dependencies.db");
+    {
+        let engine = Engine::open(&database).unwrap();
+        for ddl in [
+            "CREATE FUNCTION durable_schema_dep(value integer) RETURNS integer IMMUTABLE RETURN value + 10",
+            "CREATE TABLE durable_schema_rows (id integer DEFAULT durable_schema_dep(1), value integer CONSTRAINT durable_schema_check CHECK (durable_schema_dep(value) < 100))",
+            "ALTER FUNCTION durable_schema_dep(integer) RENAME TO durable_schema_dep_renamed",
+            "CREATE FUNCTION durable_schema_dep(value integer) RETURNS integer IMMUTABLE RETURN value + 1000",
+        ] {
+            engine
+                .sql(ddl, &[])
+                .unwrap_or_else(|error| panic!("{ddl}: {error}"));
+        }
+    }
+
+    {
+        let reopened = Engine::open(&database).unwrap();
+        reopened
+            .sql("INSERT INTO durable_schema_rows(value) VALUES (1)", &[])
+            .unwrap();
+        assert_eq!(
+            scalar(&reopened, "SELECT id AS v FROM durable_schema_rows"),
+            Value::Int(11)
+        );
+        reopened
+            .sql("DROP FUNCTION durable_schema_dep(integer) RESTRICT", &[])
+            .unwrap();
+        assert_eq!(
+            sqlstate(
+                &reopened,
+                "DROP FUNCTION durable_schema_dep_renamed(integer) RESTRICT"
+            ),
+            "2BP01"
+        );
+        reopened
+            .sql(
+                "DROP FUNCTION durable_schema_dep_renamed(integer) CASCADE",
+                &[],
+            )
+            .unwrap();
+    }
+
+    let reopened = Engine::open(&database).unwrap();
+    assert!(reopened
+        .column_default_expr("durable_schema_rows", "id")
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        scalar(
+            &reopened,
+            "SELECT count(*) AS v FROM pg_catalog.pg_constraint WHERE conname = 'durable_schema_check'"
+        ),
+        Value::Int(0)
+    );
+}
+
+#[test]
+fn schema_expression_cascade_rolls_back_as_one_catalog_change() {
+    let engine = Engine::new();
+    for ddl in [
+        "CREATE FUNCTION rollback_schema_dep(value integer) RETURNS integer IMMUTABLE RETURN value + 1",
+        "CREATE TABLE rollback_schema_rows(id integer DEFAULT rollback_schema_dep(1), value integer CONSTRAINT rollback_schema_check CHECK (rollback_schema_dep(value) > 0))",
+        "BEGIN",
+        "DROP FUNCTION rollback_schema_dep(integer) CASCADE",
+    ] {
+        engine
+            .sql(ddl, &[])
+            .unwrap_or_else(|error| panic!("{ddl}: {error}"));
+    }
+    assert!(engine
+        .column_default_expr("rollback_schema_rows", "id")
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        scalar(
+            &engine,
+            "SELECT count(*) AS v FROM pg_catalog.pg_constraint WHERE conname = 'rollback_schema_check'"
+        ),
+        Value::Int(0)
+    );
+    engine.sql("ROLLBACK", &[]).unwrap();
+    assert!(engine
+        .column_default_expr("rollback_schema_rows", "id")
+        .unwrap()
+        .is_some());
+    assert_eq!(
+        scalar(
+            &engine,
+            "SELECT count(*) AS v FROM pg_catalog.pg_constraint WHERE conname = 'rollback_schema_check'"
+        ),
+        Value::Int(1)
+    );
+    assert_eq!(
+        sqlstate(
+            &engine,
+            "DROP FUNCTION rollback_schema_dep(integer) RESTRICT"
+        ),
+        "2BP01"
+    );
+}

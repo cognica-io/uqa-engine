@@ -68,7 +68,7 @@ fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResu
     materialize_implicit_sequences(engine, &mut c)?;
     let check_columns = c.columns.clone();
     for column in &mut c.columns {
-        if let Some(default) = &column.default {
+        if let Some(default) = &mut column.default {
             validate_default_expression(engine, default, &column.ty)?;
         }
         if let Some(check) = &mut column.check {
@@ -151,7 +151,7 @@ fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResu
     }
     for col in &c.columns {
         engine
-            .try_register_column(&c.name, col.clone())
+            .try_register_column_with_check_columns(&c.name, col.clone(), &c.columns)
             .map_err(|e| ddl_storage_error("CREATE TABLE column", e))?;
     }
     let mut registered_columns = engine

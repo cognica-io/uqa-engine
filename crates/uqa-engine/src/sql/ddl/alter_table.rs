@@ -24,6 +24,7 @@ mod constraint_lifecycle;
 mod foreign_key;
 mod recursion;
 
+pub(crate) use constraint_drop::drop_constraint_dependency;
 use constraint_drop::{drop_column_cascade, drop_column_restrict, drop_constraint};
 use constraint_lifecycle::{
     add_check_constraint, add_foreign_key_constraint, add_not_null_constraint, alter_constraint,
@@ -305,7 +306,7 @@ fn run_alter_table_action(
                     ),
                 });
             }
-            if let Some(default) = &column.default {
+            if let Some(default) = &mut column.default {
                 validate_default_expression(engine, default, &column.ty)?;
             }
             let mut candidate_columns = engine
@@ -596,13 +597,13 @@ fn run_alter_table_action(
                 "ALTER TABLE SET SCHEMA {schema} is not supported for tables"
             )));
         }
-        AlterTableAction::SetDefault { name, default } => {
+        AlterTableAction::SetDefault { name, mut default } => {
             reject_default_change_on_generated_column(engine, &stmt.table, &name)?;
             let target = engine
                 .column_type(&stmt.table, &name)
                 .map_err(|error| ddl_storage_error("ALTER COLUMN SET DEFAULT", error))?
                 .ok_or_else(|| SQLError::UnknownColumn(format!("{}.{name}", stmt.table)))?;
-            validate_default_expression(engine, &default, &target)?;
+            validate_default_expression(engine, &mut default, &target)?;
             if !engine
                 .set_column_default(&stmt.table, &name, Some(default))
                 .map_err(|err| ddl_storage_error("ALTER COLUMN SET DEFAULT", err))?

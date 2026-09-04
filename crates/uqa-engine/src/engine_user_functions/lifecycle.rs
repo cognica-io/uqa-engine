@@ -34,10 +34,7 @@ use dependencies::{stored_routine_dependents, RoutineCompilationMode};
 
 struct SQLFunctionDropPlan {
     targets: Vec<RoutineDropTarget>,
-    dependent_views: Vec<String>,
-    dependent_columns: Vec<(String, String)>,
-    dependent_triggers: Vec<(String, String)>,
-    dependent_rules: Vec<(String, String)>,
+    dependents: RoutineObjectDependents,
     notices: Vec<(&'static str, String)>,
 }
 
@@ -50,8 +47,16 @@ struct RoutineDropResolution {
 struct RoutineObjectDependents {
     views: Vec<String>,
     columns: Vec<(String, String)>,
+    defaults: Vec<(String, String)>,
+    checks: Vec<(String, String)>,
     triggers: Vec<(String, String)>,
     rules: Vec<(String, String)>,
+}
+
+struct RoutineSchemaDependents {
+    columns: Vec<(String, String)>,
+    defaults: Vec<(String, String)>,
+    checks: Vec<(String, String)>,
 }
 
 pub(crate) struct PendingSQLFunctionRestore {
@@ -139,6 +144,18 @@ fn append_routine_cascade_notice(
             .columns
             .iter()
             .map(|(table, column)| format!("column {column} of table {table}")),
+    );
+    cascaded.extend(
+        dependents
+            .defaults
+            .iter()
+            .map(|(table, column)| format!("default value for column {column} of table {table}")),
+    );
+    cascaded.extend(
+        dependents
+            .checks
+            .iter()
+            .map(|(table, constraint)| format!("constraint {constraint} on table {table}")),
     );
     cascaded.extend(dependents.views.iter().map(|view| format!("view {view}")));
     cascaded.extend(

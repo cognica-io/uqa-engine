@@ -9,7 +9,8 @@ use super::{
     canonical_routine_type_name, role_inherits, routine_signature_label, routine_signature_types,
     stored_routine_dependents, wrong_routine_kind_error, AlterRoutineKind, Arc, BTreeMap, BTreeSet,
     DropFunctionItem, DropFunctionStmt, Engine, RoutineDropResolution, RoutineDropTarget,
-    RoutineObjectDependents, SQLError, SQLFunctionDropPlan, SQLUserFunction,
+    RoutineObjectDependents, RoutineSchemaDependents, SQLError, SQLFunctionDropPlan,
+    SQLUserFunction,
 };
 
 impl Engine {
@@ -41,10 +42,7 @@ impl Engine {
         }
         Ok(SQLFunctionDropPlan {
             targets: resolution.targets,
-            dependent_views: dependents.views,
-            dependent_columns: dependents.columns,
-            dependent_triggers: dependents.triggers,
-            dependent_rules: dependents.rules,
+            dependents,
             notices: resolution.notices,
         })
     }
@@ -176,12 +174,14 @@ impl Engine {
     ) -> Result<RoutineObjectDependents, SQLError> {
         let mut dependent_views = Vec::new();
         let mut dependent_columns = Vec::new();
+        let mut dependent_defaults = Vec::new();
+        let mut dependent_checks = Vec::new();
         let mut dependent_triggers = Vec::new();
         let mut dependent_rules = Vec::new();
         for target in targets {
             if !target.is_procedure {
                 let binding = target.binding();
-                let columns = self.generated_function_dependents(&binding)?;
+                let schema = self.schema_function_dependents(&binding)?;
                 let views = self
                     .views_depending_on_function(&binding)
                     .map_err(|error| {
@@ -215,25 +215,32 @@ impl Engine {
                     .into_iter()
                     .map(|(table, rule)| (table.qualified_name(), rule))
                     .collect::<Vec<_>>();
+                let dependents = RoutineObjectDependents {
+                    views,
+                    columns: schema.columns,
+                    defaults: schema.defaults,
+                    checks: schema.checks,
+                    triggers,
+                    rules,
+                };
                 if cascade {
-                    dependent_columns.extend(columns);
-                    dependent_views.extend(views);
-                    dependent_triggers.extend(triggers);
-                    dependent_rules.extend(rules);
+                    dependent_columns.extend(dependents.columns);
+                    dependent_defaults.extend(dependents.defaults);
+                    dependent_checks.extend(dependents.checks);
+                    dependent_views.extend(dependents.views);
+                    dependent_triggers.extend(dependents.triggers);
+                    dependent_rules.extend(dependents.rules);
                 } else {
-                    Self::ensure_no_function_dependencies(
-                        &target.name,
-                        &target.argument_types,
-                        &columns,
-                        &views,
-                        &triggers,
-                        &rules,
-                    )?;
+                    Self::ensure_no_function_dependencies(target, &dependents)?;
                 }
             }
         }
         dependent_columns.sort();
         dependent_columns.dedup();
+        dependent_defaults.sort();
+        dependent_defaults.dedup();
+        dependent_checks.sort();
+        dependent_checks.dedup();
         dependent_views = self.cascade_view_closure(dependent_views)?;
         if cascade && !dependent_views.is_empty() {
             dependent_rules.extend(
@@ -254,6 +261,8 @@ impl Engine {
         Ok(RoutineObjectDependents {
             views: dependent_views,
             columns: dependent_columns,
+            defaults: dependent_defaults,
+            checks: dependent_checks,
             triggers: dependent_triggers,
             rules: dependent_rules,
         })
@@ -266,13 +275,22 @@ impl Engine {
     ) -> Result<(), SQLError> {
         let SQLFunctionDropPlan {
             targets,
-            dependent_views,
-            dependent_columns,
-            dependent_triggers,
-            dependent_rules,
+            dependents,
             notices,
         } = plan;
-        for (table, name) in &dependent_rules {
+        self.drop_routine_object_dependents(&dependents)?;
+        self.commit_routine_registry_drop(&targets)?;
+        for (level, message) in notices {
+            self.push_sql_notice(level, &message);
+        }
+        Ok(())
+    }
+
+    fn drop_routine_object_dependents(
+        &self,
+        dependents: &RoutineObjectDependents,
+    ) -> Result<(), SQLError> {
+        for (table, name) in &dependents.rules {
             self.drop_rule(&uqa_sql::ast::DropRule {
                 name: name.clone(),
                 table: table.clone(),
@@ -280,7 +298,7 @@ impl Engine {
                 cascade: true,
             })?;
         }
-        for (table, name) in &dependent_triggers {
+        for (table, name) in &dependents.triggers {
             self.drop_trigger(&uqa_sql::ast::DropTrigger {
                 name: name.clone(),
                 table: table.clone(),
@@ -288,10 +306,27 @@ impl Engine {
                 cascade: true,
             })?;
         }
-        if !dependent_views.is_empty() {
-            self.drop_views_inner(&dependent_views, false)?;
+        if !dependents.views.is_empty() {
+            self.drop_views_inner(&dependents.views, false)?;
         }
-        for (table, column) in &dependent_columns {
+        for (table, constraint) in &dependents.checks {
+            crate::sql::drop_constraint_dependency(self, table, constraint)?;
+        }
+        for (table, column) in &dependents.defaults {
+            if !self
+                .set_column_default_inner(table, column, None)
+                .map_err(|error| {
+                    SQLError::Internal(format!(
+                        "drop default `{table}`.`{column}` while cascading routine: {error}"
+                    ))
+                })?
+            {
+                return Err(SQLError::Internal(format!(
+                    "default `{table}`.`{column}` disappeared after routine DROP preflight"
+                )));
+            }
+        }
+        for (table, column) in &dependents.columns {
             if !self.try_drop_column_inner(table, column).map_err(|error| {
                 SQLError::Internal(format!(
                     "drop generated column `{table}`.`{column}` while cascading routine: {error}"
@@ -302,136 +337,204 @@ impl Engine {
                 )));
             }
         }
-        if !targets.is_empty() {
-            let mut registry = self.durable.sql_user_functions.write();
-            let mut next = registry.clone();
-
-            // Revalidate every target before mutating `next`. This retains a concurrently registered unrelated overload and keeps a multi-target DROP all-or-nothing if any preflighted identity has disappeared.
-            for target in &targets {
-                let overloads = next.get(&target.name).ok_or_else(|| {
-                    SQLError::Internal(format!(
-                        "resolved {} registry entry `{}` disappeared before DROP",
-                        target.kind(),
-                        target.name
-                    ))
-                })?;
-                if !overloads.iter().any(|function| {
-                    function.def.is_procedure == target.is_procedure
-                        && routine_signature_types(&function.def) == target.argument_types
-                }) {
-                    return Err(SQLError::Internal(format!(
-                        "resolved {} {} disappeared before DROP",
-                        target.kind(),
-                        target.label()
-                    )));
-                }
-            }
-
-            for target in targets.iter().rev() {
-                let overloads = next.get_mut(&target.name).ok_or_else(|| {
-                    SQLError::Internal(format!(
-                        "resolved {} registry entry `{}` disappeared while applying DROP",
-                        target.kind(),
-                        target.name
-                    ))
-                })?;
-                let position = overloads
-                    .iter()
-                    .position(|function| {
-                        function.def.is_procedure == target.is_procedure
-                            && routine_signature_types(&function.def) == target.argument_types
-                    })
-                    .ok_or_else(|| {
-                        SQLError::Internal(format!(
-                            "resolved {} {} disappeared while applying DROP",
-                            target.kind(),
-                            target.label()
-                        ))
-                    })?;
-                overloads.remove(position);
-                if overloads.is_empty() {
-                    next.remove(&target.name);
-                }
-            }
-            self.persist_sql_functions_snapshot(&next)?;
-            *registry = next;
-            drop(registry);
-            self.note_catalog_registry_changed();
-        }
-        for (level, message) in notices {
-            self.push_sql_notice(level, &message);
-        }
         Ok(())
     }
 
-    fn generated_function_dependents(
+    fn commit_routine_registry_drop(&self, targets: &[RoutineDropTarget]) -> Result<(), SQLError> {
+        if targets.is_empty() {
+            return Ok(());
+        }
+        let mut registry = self.durable.sql_user_functions.write();
+        let mut next = registry.clone();
+
+        // Revalidate every target before mutating `next`. This retains a concurrently registered unrelated overload and keeps a multi-target DROP all-or-nothing if any preflighted identity has disappeared.
+        for target in targets {
+            let overloads = next.get(&target.name).ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "resolved {} registry entry `{}` disappeared before DROP",
+                    target.kind(),
+                    target.name
+                ))
+            })?;
+            if !overloads.iter().any(|function| {
+                function.def.is_procedure == target.is_procedure
+                    && routine_signature_types(&function.def) == target.argument_types
+            }) {
+                return Err(SQLError::Internal(format!(
+                    "resolved {} {} disappeared before DROP",
+                    target.kind(),
+                    target.label()
+                )));
+            }
+        }
+
+        for target in targets.iter().rev() {
+            let overloads = next.get_mut(&target.name).ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "resolved {} registry entry `{}` disappeared while applying DROP",
+                    target.kind(),
+                    target.name
+                ))
+            })?;
+            let position = overloads
+                .iter()
+                .position(|function| {
+                    function.def.is_procedure == target.is_procedure
+                        && routine_signature_types(&function.def) == target.argument_types
+                })
+                .ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "resolved {} {} disappeared while applying DROP",
+                        target.kind(),
+                        target.label()
+                    ))
+                })?;
+            overloads.remove(position);
+            if overloads.is_empty() {
+                next.remove(&target.name);
+            }
+        }
+        self.persist_sql_functions_snapshot(&next)?;
+        *registry = next;
+        drop(registry);
+        self.note_catalog_registry_changed();
+        Ok(())
+    }
+
+    fn schema_function_dependents(
         &self,
         target: &uqa_sql::ast::FunctionBinding,
-    ) -> Result<Vec<(String, String)>, SQLError> {
-        let mut dependents = Vec::new();
-        for table in self.table_names().map_err(|error| {
-            SQLError::Internal(format!("read generated function dependencies: {error}"))
-        })? {
-            let columns = self
-                .try_describe_table(&table)
-                .map_err(|error| {
-                    SQLError::Internal(format!("read generated function dependencies: {error}"))
-                })?
-                .ok_or_else(|| SQLError::UnknownTable(table.clone()))?;
-            for column in columns {
-                let Some(generated) = column.generated else {
-                    continue;
-                };
-                if generated.function_dependencies.iter().any(|dependency| {
-                    crate::engine_session::function_binding_matches(dependency, target)
-                }) {
-                    dependents.push((table.clone(), column.name));
+    ) -> Result<RoutineSchemaDependents, SQLError> {
+        let mut columns = Vec::new();
+        let mut defaults = Vec::new();
+        let mut checks = Vec::new();
+        for (table_name, table) in self.table_entries() {
+            for column in table.columns.read().iter() {
+                if let Some(generated) = &column.generated {
+                    let referenced = generated.function_dependencies.iter().any(|dependency| {
+                        crate::engine_session::function_binding_matches(dependency, target)
+                    })
+                        || crate::engine_events::expression_references_routine_identity(
+                            &generated.expression,
+                            target,
+                        )?;
+                    if referenced {
+                        columns.push((table_name.clone(), column.name.clone()));
+                    }
+                }
+                if let Some(default) = &column.default {
+                    if crate::engine_events::expression_references_routine_identity(
+                        default, target,
+                    )? {
+                        defaults.push((table_name.clone(), column.name.clone()));
+                    }
+                }
+                if let Some(check) = &column.check {
+                    if crate::engine_events::expression_references_routine_identity(check, target)?
+                    {
+                        let name = column.check_name.clone().ok_or_else(|| {
+                            SQLError::Internal(format!(
+                                "CHECK constraint on `{table_name}`.`{}` has no catalog name",
+                                column.name
+                            ))
+                        })?;
+                        checks.push((table_name.clone(), name));
+                    }
+                }
+            }
+            for check in table.table_checks.read().iter() {
+                if crate::engine_events::expression_references_routine_identity(
+                    &check.expr,
+                    target,
+                )? {
+                    let name = check.name.clone().ok_or_else(|| {
+                        SQLError::Internal(format!(
+                            "table CHECK constraint on `{table_name}` has no catalog name"
+                        ))
+                    })?;
+                    checks.push((table_name.clone(), name));
                 }
             }
         }
-        dependents.sort();
-        Ok(dependents)
+        columns.sort();
+        columns.dedup();
+        defaults.sort();
+        defaults.dedup();
+        checks.sort();
+        checks.dedup();
+        Ok(RoutineSchemaDependents {
+            columns,
+            defaults,
+            checks,
+        })
     }
 
     fn ensure_no_function_dependencies(
-        name: &str,
-        argument_types: &[String],
-        generated: &[(String, String)],
-        views: &[String],
-        triggers: &[(String, String)],
-        rules: &[(String, String)],
+        target: &RoutineDropTarget,
+        dependents: &RoutineObjectDependents,
     ) -> Result<(), SQLError> {
-        if generated.is_empty() && views.is_empty() && triggers.is_empty() && rules.is_empty() {
+        if dependents.columns.is_empty()
+            && dependents.defaults.is_empty()
+            && dependents.checks.is_empty()
+            && dependents.views.is_empty()
+            && dependents.triggers.is_empty()
+            && dependents.rules.is_empty()
+        {
             return Ok(());
         }
         let mut dependency_kinds = Vec::new();
-        if !generated.is_empty() {
+        if !dependents.columns.is_empty() {
             dependency_kinds.push(format!(
                 "generated column(s) `{}`",
-                generated
+                dependents
+                    .columns
                     .iter()
                     .map(|(table, column)| format!("{table}.{column}"))
                     .collect::<Vec<_>>()
                     .join("`, `")
             ));
         }
-        if !views.is_empty() {
-            dependency_kinds.push(format!("view(s) `{}`", views.join("`, `")));
+        if !dependents.defaults.is_empty() {
+            dependency_kinds.push(format!(
+                "default value(s) `{}`",
+                dependents
+                    .defaults
+                    .iter()
+                    .map(|(table, column)| format!("{table}.{column}"))
+                    .collect::<Vec<_>>()
+                    .join("`, `")
+            ));
         }
-        if !triggers.is_empty() {
+        if !dependents.checks.is_empty() {
+            dependency_kinds.push(format!(
+                "CHECK constraint(s) `{}`",
+                dependents
+                    .checks
+                    .iter()
+                    .map(|(table, constraint)| format!("{constraint} on {table}"))
+                    .collect::<Vec<_>>()
+                    .join("`, `")
+            ));
+        }
+        if !dependents.views.is_empty() {
+            dependency_kinds.push(format!("view(s) `{}`", dependents.views.join("`, `")));
+        }
+        if !dependents.triggers.is_empty() {
             dependency_kinds.push(format!(
                 "trigger(s) `{}`",
-                triggers
+                dependents
+                    .triggers
                     .iter()
                     .map(|(table, trigger)| format!("{trigger} on {table}"))
                     .collect::<Vec<_>>()
                     .join("`, `")
             ));
         }
-        if !rules.is_empty() {
+        if !dependents.rules.is_empty() {
             dependency_kinds.push(format!(
                 "rule(s) `{}`",
-                rules
+                dependents
+                    .rules
                     .iter()
                     .map(|(table, rule)| format!("{rule} on {table}"))
                     .collect::<Vec<_>>()
@@ -442,7 +545,7 @@ impl Engine {
             sqlstate: "2BP01".into(),
             message: format!(
                 "cannot drop function {} because {} depend on it",
-                routine_signature_label(name, argument_types),
+                target.label(),
                 dependency_kinds.join(" and ")
             ),
         })

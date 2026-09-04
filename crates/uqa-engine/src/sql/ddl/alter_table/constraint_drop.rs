@@ -43,7 +43,11 @@ pub(super) fn drop_constraint(
     drop_constraint_group(engine, &table, name, if_exists, cascade, true)
 }
 
-fn drop_constraint_dependency(engine: &Engine, table: &str, name: &str) -> Result<(), SQLError> {
+pub(crate) fn drop_constraint_dependency(
+    engine: &Engine,
+    table: &str,
+    name: &str,
+) -> Result<(), SQLError> {
     drop_constraint_group(engine, table, name, true, true, false)
 }
 

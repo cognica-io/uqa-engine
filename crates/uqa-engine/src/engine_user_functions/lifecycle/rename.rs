@@ -47,9 +47,9 @@ impl Engine {
         let rewritten_registry =
             self.rewrite_routine_owned_dependency_identity(&target.binding, &target.new_name)?;
         *self.durable.sql_user_functions.write() = rewritten_registry.clone();
-        self.rewrite_generated_routine_identity(&target.binding, &target.new_name)
+        self.rewrite_schema_routine_identity(&target.binding, &target.new_name)
             .map_err(|error| {
-                SQLError::Internal(format!("rewrite generated routine dependencies: {error}"))
+                SQLError::Internal(format!("rewrite schema routine dependencies: {error}"))
             })?;
         self.rewrite_view_routine_identity(&target.binding, &target.new_name)
             .map_err(|error| {

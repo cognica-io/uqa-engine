@@ -139,6 +139,8 @@ CREATE TABLE measurements (
 
 A check rejects rows for which its predicate is false. Follow SQL three-valued logic: a NULL result does not replace a separate `NOT NULL` requirement.
 
+User-routine calls in column defaults and column- or table-level CHECK constraints bind the exact overload when the schema change is published. Renaming that routine rewrites the stored expression without changing its object identity, so recreating the old name cannot retarget the expression. `DROP FUNCTION ... RESTRICT` reports `2BP01` while one of these expressions depends on the routine; `CASCADE` removes only the dependent default or CHECK constraint and retains its column and table. Replacing or dropping a default or CHECK constraint atomically replaces or releases its dependency, and committed bindings survive catalog reopen.
+
 ## Foreign keys
 
 ```sql
