@@ -12,9 +12,11 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
+from urllib.parse import unquote, urlsplit
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -104,8 +106,22 @@ def write_internal_readme(destination: pathlib.Path, name: str) -> None:
     )
 
 
-def write_user_readme(destination: pathlib.Path) -> None:
-    shutil.copyfile(ROOT / "README.md", destination / "README.md")
+def user_readme(version: str) -> str:
+    source = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    def repository_link(match: re.Match[str]) -> str:
+        target = match.group(1)
+        parsed = urlsplit(target)
+        if parsed.scheme or target.startswith(("/", "#")):
+            return match.group(0)
+        kind = "tree" if (ROOT / unquote(parsed.path)).is_dir() else "blob"
+        return f"](https://github.com/cognica-io/uqa-engine/{kind}/v{version}/{target})"
+
+    return re.sub(r"\]\(([^)\s]+)\)", repository_link, source)
+
+
+def write_user_readme(destination: pathlib.Path, version: str) -> None:
+    (destination / "README.md").write_text(user_readme(version), encoding="utf-8")
 
 
 def check_legal_files(destination: pathlib.Path) -> None:
@@ -145,12 +161,12 @@ def main() -> int:
             readme = destination / "README.md"
             if not readme.is_file():
                 raise RuntimeError(f"{readme} is missing")
-            if name in USER_FACING and readme.read_bytes() != (ROOT / "README.md").read_bytes():
-                raise RuntimeError(f"{readme} differs from the repository README")
+            if name in USER_FACING and readme.read_text(encoding="utf-8") != user_readme(str(package["version"])):
+                raise RuntimeError(f"{readme} differs from the versioned repository README")
         else:
             copy_legal_files(destination)
             if name in USER_FACING:
-                write_user_readme(destination)
+                write_user_readme(destination, str(package["version"]))
             else:
                 write_internal_readme(destination, name)
         checked += 1

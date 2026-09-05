@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "uqa"
-version = "0.1.12"
+version = "0.2.0"
 description = "Python bindings and usql CLI for embedded UQA and local or Cloud HTTP SQL"
 readme = "README.md"
 requires-python = ">=3.8"

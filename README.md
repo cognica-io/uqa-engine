@@ -24,7 +24,13 @@ It is designed for applications that need more than a relational table but do no
 - Embed the engine in Rust or use the Python, Node.js, and browser WASM bindings included in the workspace.
 
 > [!NOTE]
-> UQA Engine is under active development at version 0.1.12. The implementation is broad and heavily tested, but public APIs and storage formats may still evolve before a stable release.
+> UQA Engine is under active development at version 0.2.0. The implementation is broad and heavily tested, but public APIs and storage formats may still evolve before a stable release.
+
+## New in 0.2.0
+
+Version 0.2.0 adds durable B-tree expression and unique indexes, stronger SQL object dependencies and privileges, expanded sequence and PL/pgSQL behavior, and transactional notifications across native processes sharing a database. The Node.js HTTP client now runs without native addons and can be installed with `npm install --omit=optional @cognica-io/uqa@0.2.0`.
+
+Read the [release history](HISTORY.md#020---2026-09-05) for the complete changes and the [upgrade guide](docs/manual/reference/10-upgrading.md) before updating a persistent database or a custom Rust storage provider.
 
 ## Mathematical foundation
 
@@ -37,7 +43,7 @@ The manuscript consolidates and revises the published work on [unified query alg
 Install the prebuilt Python package to get both the Python binding and the `usql` command:
 
 ```sh
-python -m pip install uqa
+python -m pip install uqa==0.2.0
 usql
 ```
 
@@ -85,6 +91,12 @@ cargo run -p uqa-cli --bin usql -- -c "SELECT 1 AS ready"
 ```
 
 ## Embed it in Rust
+
+Add the released package to your application:
+
+```sh
+cargo add uqa@0.2.0
+```
 
 `uqa` is the primary Rust package on crates.io. It is a thin facade over `uqa-engine` that also re-exports the core `Value` type; applications that need the implementation package directly can depend on `uqa-engine`. Public component crates including `uqa-engine`, `uqa-client`, `uqa-api`, and `uqa-cli` are also published independently. The following example creates an in-memory engine, inserts data, and runs SQL through the same interface used by a persistent engine.
 
@@ -274,7 +286,7 @@ python3 tests/parity/pg18/run_diff.py --validate-manifest
 python3 tests/parity/pg18/run_diff.py
 ```
 
-Stateful routine, constraint, type-and-temporal, trigger, and rewrite-rule oracles plus the pinned psycopg, pgx, and node-postgres matrix are documented in [PG18 differential probes](https://github.com/cognica-io/uqa-engine/blob/main/tests/parity/pg18/README.md). The current milestone and open-gate ledger is the [PostgreSQL 18 compatibility plan](https://github.com/cognica-io/uqa-engine/blob/main/docs/plans/0003-postgresql-18-compatibility.md).
+Stateful routine, constraint, type-and-temporal, trigger, and rewrite-rule oracles plus the pinned psycopg, pgx, and node-postgres matrix are documented in [PG18 differential probes](tests/parity/pg18/README.md). The current milestone and open-gate ledger is the [PostgreSQL 18 compatibility plan](docs/plans/0003-postgresql-18-compatibility.md).
 
 Release-mode timing uses a machine-readable runner rather than test-profile execution:
 
@@ -305,7 +317,7 @@ Contributor checks, benchmark build gates, and repository conventions are docume
 | [Performance](docs/design/performance.md) | Reproducible baselines, regression gates, bottlenecks, and benchmark limitations |
 | [Parity fixtures](docs/design/parity.md) | SQL, relevance, and vector-calibration compatibility fixtures |
 | [Citation metadata](CITATION.cff) | Software citation and DOI metadata for the underlying research papers |
-| [Licensing policy](https://github.com/cognica-io/uqa-engine/blob/main/LICENSING.md) | AGPL, FOSS, noncommercial, commercial, and contribution paths |
+| [Licensing policy](LICENSING.md) | AGPL, FOSS, noncommercial, commercial, and contribution paths |
 | [History](HISTORY.md) | Release-by-release changes |
 
 ## Project layout
@@ -318,11 +330,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for local gates, test conventions, crate 
 
 ## License
 
-UQA Engine is open-source software licensed under AGPL-3.0-only. See [LICENSE](https://github.com/cognica-io/uqa-engine/blob/main/LICENSE).
+UQA Engine is open-source software licensed under AGPL-3.0-only. See [LICENSE](LICENSE).
 
 Two optional additional permissions are available:
 
-- the [FOSS exception](https://github.com/cognica-io/uqa-engine/blob/main/LICENSES/UQA-FOSS-EXCEPTION-1.0.txt) lets a complete qualifying open-source application retain its OSI-approved license while UQA Engine and modifications to UQA Engine remain under the AGPL; and
-- the [noncommercial application exception](https://github.com/cognica-io/uqa-engine/blob/main/LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt) lets a qualifying personal, educational, academic, or charitable application keep its independent code under terms chosen by its author while UQA Engine and modifications to UQA Engine remain under the AGPL.
+- the [FOSS exception](LICENSES/UQA-FOSS-EXCEPTION-1.0.txt) lets a complete qualifying open-source application retain its OSI-approved license while UQA Engine and modifications to UQA Engine remain under the AGPL; and
+- the [noncommercial application exception](LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt) lets a qualifying personal, educational, academic, or charitable application keep its independent code under terms chosen by its author while UQA Engine and modifications to UQA Engine remain under the AGPL.
 
-Separate [commercial licensing](https://github.com/cognica-io/uqa-engine/blob/main/COMMERCIAL.md) is available for proprietary applications, closed modifications, SaaS, and OEM distribution. The complete decision guide is in the [licensing policy](https://github.com/cognica-io/uqa-engine/blob/main/LICENSING.md).
+Separate [commercial licensing](COMMERCIAL.md) is available for proprietary applications, closed modifications, SaaS, and OEM distribution. The complete decision guide is in the [licensing policy](LICENSING.md).
