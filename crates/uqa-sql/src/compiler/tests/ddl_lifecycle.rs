@@ -8,6 +8,8 @@
 
 use super::*;
 
+mod foreign_tables;
+
 #[test]
 fn trigger_statements_preserve_postgresql_event_and_lifecycle_shape() {
     let Statement::CreateTrigger(trigger) = first(
@@ -810,59 +812,69 @@ fn relation_forms_and_options_preserve_lifecycle_semantics() {
             ..
         }) if owner == "CURRENT_USER"
     ));
+}
+
+#[test]
+fn view_renames_preserve_relation_kind_and_new_name() {
     assert!(matches!(
-        compile("ALTER VIEW temp_v RENAME TO renamed").unwrap_err(),
-        SQLError::Unsupported(_)
+        first("ALTER VIEW temp_v RENAME TO renamed"),
+        Statement::AlterView(crate::ast::AlterViewStmt {
+            kind: crate::ast::AlterViewKind::View,
+            action: crate::ast::AlterViewAction::RenameTo(name),
+            ..
+        }) if name == "renamed"
+    ));
+    assert!(matches!(
+        first("ALTER MATERIALIZED VIEW reports RENAME TO archived_reports"),
+        Statement::AlterView(crate::ast::AlterViewStmt {
+            kind: crate::ast::AlterViewKind::MaterializedView,
+            action: crate::ast::AlterViewAction::RenameTo(name),
+            ..
+        }) if name == "archived_reports"
     ));
 }
 
 #[test]
-fn foreign_table_ownership_and_drop_preserve_relation_lifecycle_semantics() {
-    assert!(matches!(
-        first("ALTER FOREIGN TABLE app.items OWNER TO CURRENT_USER"),
-        Statement::AlterForeignTable(crate::ast::AlterForeignTableStmt {
-            name,
-            if_exists: false,
-            owner,
-        }) if name == "app.items" && owner == "CURRENT_USER"
-    ));
-    assert!(matches!(
-        first("ALTER FOREIGN TABLE IF EXISTS app.items OWNER TO next_owner"),
-        Statement::AlterForeignTable(crate::ast::AlterForeignTableStmt {
-            name,
-            if_exists: true,
-            owner,
-        }) if name == "app.items" && owner == "next_owner"
-    ));
-    let Statement::AlterTable(alter) = first(
-        "ALTER FOREIGN TABLE app.items DISABLE TRIGGER audit, ENABLE ALWAYS TRIGGER normalize",
+fn relation_if_not_exists_defers_definition_analysis_until_execution() {
+    let Statement::CreateTableIfNotExists(table) = first(
+        "CREATE UNLOGGED TABLE IF NOT EXISTS app.items (id missing_type PRIMARY KEY, CHECK (missing_column > 0))",
     ) else {
-        panic!("expected ALTER FOREIGN TABLE trigger actions");
+        panic!("expected deferred CREATE TABLE IF NOT EXISTS");
     };
-    assert!(matches!(
-        alter.actions.as_slice(),
-        [
-            AlterTableAction::SetTriggerEnableMode {
-                name: Some(disabled),
-                mode: crate::ast::EventEnableMode::Disabled,
-                ..
-            },
-            AlterTableAction::SetTriggerEnableMode {
-                name: Some(always),
-                mode: crate::ast::EventEnableMode::Always,
-                ..
-            }
-        ] if disabled == "audit" && always == "normalize"
-    ));
-    let Statement::Drop(drop) =
-        first("DROP FOREIGN TABLE IF EXISTS app.items, archive.items CASCADE")
+    assert_eq!(table.name, "app.items");
+    assert_eq!(table.persistence, crate::ast::RelationPersistence::Unlogged);
+    assert!(table
+        .definition_sql
+        .starts_with("CREATE UNLOGGED TABLE IF NOT EXISTS"));
+    let error = resolve_deferred_create_table(&table)
+        .expect_err("an absent target must analyze the deferred definition");
+    assert!(error.to_string().contains("missing_type"));
+
+    let Statement::CreateTableIfNotExists(table) =
+        first("CREATE TABLE IF NOT EXISTS fresh_items (id integer)")
     else {
-        panic!("expected DROP FOREIGN TABLE");
+        panic!("expected deferred CREATE TABLE IF NOT EXISTS");
     };
-    assert_eq!(drop.kind, crate::ast::DropKind::ForeignTable);
-    assert_eq!(drop.names, ["app.items", "archive.items"]);
-    assert!(drop.if_exists);
-    assert!(drop.cascade);
+    let resolved = resolve_deferred_create_table(&table).unwrap();
+    assert_eq!(resolved.name, "fresh_items");
+    assert_eq!(resolved.columns.len(), 1);
+
+    let Statement::CreateForeignTableIfNotExists(table) = first(
+        "CREATE FOREIGN TABLE IF NOT EXISTS app.external_items (id integer PRIMARY KEY) SERVER missing_server",
+    ) else {
+        panic!("expected deferred CREATE FOREIGN TABLE IF NOT EXISTS");
+    };
+    assert_eq!(table.name, "app.external_items");
+    assert_eq!(table.server_name, "missing_server");
+    assert!(table
+        .definition_sql
+        .starts_with("CREATE FOREIGN TABLE IF NOT EXISTS"));
+    let error = resolve_deferred_create_foreign_table(&table)
+        .expect_err("an absent target must analyze foreign-table constraints");
+    assert_eq!(error.sqlstate(), Some("0A000"));
+    assert!(error
+        .to_string()
+        .contains("primary key constraints are not supported on foreign tables"));
 }
 
 #[test]

@@ -903,7 +903,7 @@ impl Engine {
         Ok(())
     }
 
-    fn table_owned_sequence_owner_updates(
+    pub(crate) fn table_owned_sequence_owner_updates(
         &self,
         table_object_id: [u8; 16],
         new_owner: &str,

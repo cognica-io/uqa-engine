@@ -757,6 +757,12 @@ fn validate_rule_action_reference_scopes(
                 validate_rule_select_scopes(engine, select)?;
             }
             if let Some(conflict) = &insert.on_conflict {
+                for expression in &conflict.expressions {
+                    validate_rule_expr_scopes(engine, expression)?;
+                }
+                if let Some(predicate) = conflict.predicate.as_deref() {
+                    validate_rule_expr_scopes(engine, predicate)?;
+                }
                 if let OnConflictAction::Update {
                     assignments,
                     r#where,

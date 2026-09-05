@@ -338,17 +338,18 @@ fn view_sources_bind_to_creation_namespace_across_nested_query_shapes() {
         ]
     );
 
-    // Dependency checks use the same canonical identity. A same-local-name
-    // table in another schema is unrelated, while the bound source remains
-    // protected from DROP and RENAME.
+    // Dependency checks and renames follow the bound source across search paths.
     eng.sql("DROP TABLE s2.items", &[]).unwrap();
-    for sql in [
-        "DROP TABLE s1.items",
-        "ALTER TABLE s1.items RENAME TO renamed_items",
-    ] {
-        let error = eng.sql(sql, &[]).unwrap_err();
-        assert!(error.to_string().contains("public.bound_items"), "{error}");
-    }
+    eng.sql("ALTER TABLE s1.items RENAME TO renamed_items", &[])
+        .unwrap();
+    assert_eq!(
+        eng.sql("SELECT label FROM public.bound_items ORDER BY label", &[])
+            .unwrap()
+            .rows,
+        result.rows
+    );
+    let error = eng.sql("DROP TABLE s1.renamed_items", &[]).unwrap_err();
+    assert!(error.to_string().contains("public.bound_items"), "{error}");
 }
 
 #[test]

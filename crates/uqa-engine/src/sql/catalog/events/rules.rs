@@ -29,7 +29,7 @@ pub(super) fn render_rule_definition(
         },
         render_rule_relation(catalog, resolution, &definition.table, pretty)?
     );
-    if let Some(condition) = rule_condition_text(definition, pretty) {
+    if let Some(condition) = rule_condition_text(definition, pretty)? {
         rendered.push_str(" WHERE (");
         rendered.push_str(&condition);
         rendered.push(')');
@@ -39,7 +39,12 @@ pub(super) fn render_rule_definition(
     } else {
         " DO ALSO"
     });
-    match definition.action_sql.as_slice() {
+    let actions = definition
+        .actions
+        .iter()
+        .map(uqa_sql::render::statement_sql)
+        .collect::<Result<Vec<_>, _>>()?;
+    match actions.as_slice() {
         [] => rendered.push_str(" NOTHING"),
         [action] => {
             rendered.push(' ');
@@ -54,8 +59,13 @@ pub(super) fn render_rule_definition(
     Ok(rendered)
 }
 
-pub(super) fn rule_condition_text(definition: &CreateRule, pretty: bool) -> Option<String> {
-    let condition = definition.condition.as_ref()?;
+pub(super) fn rule_condition_text(
+    definition: &CreateRule,
+    pretty: bool,
+) -> Result<Option<String>, SQLError> {
+    let Some(condition) = definition.condition.as_ref() else {
+        return Ok(None);
+    };
     let has_subquery = condition.any_node(&|node| {
         matches!(
             node,
@@ -63,11 +73,9 @@ pub(super) fn rule_condition_text(definition: &CreateRule, pretty: bool) -> Opti
         )
     });
     if has_subquery {
-        if let Some(sql) = definition.condition_sql.as_ref() {
-            return Some(sql.clone());
-        }
+        return uqa_sql::render::expression_sql(condition).map(Some);
     }
-    Some(super::render_trigger_condition(condition, pretty))
+    Ok(Some(super::render_trigger_condition(condition, pretty)))
 }
 
 pub(super) fn render_rule_relation(

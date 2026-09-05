@@ -24,7 +24,7 @@ pub(super) fn retarget_source_expression(
         let replacement = match node {
             ScalarExpr::Column(column) => Some(ScalarExpr::QualifiedColumn {
                 qualifier: desired_qualifier.to_string(),
-                column: column.clone(),
+                column: layer.physical_source_column(column).to_string(),
             }),
             ScalarExpr::QualifiedColumn { qualifier, column }
                 if source_qualifier_matches(
@@ -35,7 +35,7 @@ pub(super) fn retarget_source_expression(
             {
                 Some(ScalarExpr::QualifiedColumn {
                     qualifier: desired_qualifier.to_string(),
-                    column: column.clone(),
+                    column: layer.physical_source_column(column).to_string(),
                 })
             }
             _ => None,

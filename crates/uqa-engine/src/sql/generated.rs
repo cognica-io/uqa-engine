@@ -10,9 +10,11 @@ use super::{aggregates, convert_value_to_column_type, ColumnType, Engine, Foreig
 use uqa_sql::ast::{ColumnDef, Expr, GeneratedColumnKind, TableKeyConstraint};
 use uqa_storage::document_store::Document;
 
+mod indexes;
 mod typing;
+pub(in crate::sql) use indexes::{prepare_index_expression, prepare_index_predicate};
 
-pub(in crate::sql) fn prepare_generated_columns(
+pub(crate) fn prepare_generated_columns(
     engine: &Engine,
     qualifier: &str,
     columns: &mut [ColumnDef],

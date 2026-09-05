@@ -8,7 +8,7 @@
 
 use uqa_core::DocId;
 use uqa_execution::OwnedPhysicalRow;
-use uqa_storage::document_store::Document;
+use uqa_storage::{document_store::Document, DocumentMetadata};
 
 #[derive(Clone)]
 pub(in crate::sql) struct RuleRowImage {
@@ -56,6 +56,7 @@ pub(in crate::sql) struct MutationRowImage<'a> {
     pub storage_table: String,
     pub doc_id: DocId,
     pub document: &'a Document,
+    pub metadata: DocumentMetadata,
 }
 
 #[derive(Clone)]

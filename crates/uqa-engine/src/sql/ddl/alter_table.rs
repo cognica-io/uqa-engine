@@ -24,6 +24,7 @@ mod constraint_lifecycle;
 mod foreign_key;
 mod recursion;
 
+pub(crate) use constraint_drop::drop_constraint_dependency;
 use constraint_drop::{drop_column_cascade, drop_column_restrict, drop_constraint};
 use constraint_lifecycle::{
     add_check_constraint, add_foreign_key_constraint, add_not_null_constraint, alter_constraint,
@@ -63,7 +64,20 @@ pub(in crate::sql) fn run_alter_table(
                 .into(),
         });
     }
-    match engine.try_resolve_visible_relation_kind(&stmt.table)? {
+    let resolution = if matches!(
+        stmt.actions.as_slice(),
+        [AlterTableAction::RenameTable { .. }]
+    ) {
+        let Some(resolution) =
+            engine.resolve_relation_rename_source(&stmt.table, stmt.if_exists)?
+        else {
+            return Ok(SQLResult::empty());
+        };
+        Some(resolution)
+    } else {
+        engine.try_resolve_visible_relation_kind(&stmt.table)?
+    };
+    match resolution {
         Some((canonical, "table")) => stmt.table = canonical,
         Some((canonical, "sequence")) => {
             return run_alter_sequence_with_table_syntax(engine, canonical, &stmt);
@@ -71,29 +85,8 @@ pub(in crate::sql) fn run_alter_table(
         Some((canonical, "foreign table")) => {
             return run_alter_foreign_table_with_table_syntax(engine, canonical, &stmt);
         }
-        Some((canonical, "view"))
-            if stmt.actions.iter().all(|action| {
-                matches!(
-                    action,
-                    AlterTableAction::RenameRule { .. } | AlterTableAction::RenameTrigger { .. }
-                )
-            }) =>
-        {
-            stmt.table = canonical;
-            return engine.with_implicit_transaction(move |engine| {
-                for action in stmt.actions {
-                    match action {
-                        AlterTableAction::RenameRule { from, to } => {
-                            engine.rename_rule(&stmt.table, &from, &to)?;
-                        }
-                        AlterTableAction::RenameTrigger { from, to } => {
-                            engine.rename_trigger(&stmt.table, &from, &to)?;
-                        }
-                        _ => unreachable!("view ALTER was restricted to event lifecycle actions"),
-                    }
-                }
-                Ok(SQLResult::empty())
-            });
+        Some((canonical, kind @ ("view" | "materialized view"))) => {
+            return run_alter_view_with_table_syntax(engine, canonical, kind, &stmt);
         }
         Some((canonical, kind)) => {
             return Err(SQLError::Routine {
@@ -120,6 +113,54 @@ pub(in crate::sql) fn run_alter_table(
         crate::row_locks::RelationLockMode::AccessExclusive,
     )?;
     engine.with_implicit_transaction(move |engine| run_alter_table_inner(engine, stmt))
+}
+
+fn run_alter_view_with_table_syntax(
+    engine: &Engine,
+    canonical: String,
+    kind: &str,
+    stmt: &AlterTableStmt,
+) -> Result<SQLResult, SQLError> {
+    if let [AlterTableAction::RenameTable { to }] = stmt.actions.as_slice() {
+        engine.alter_view(&uqa_sql::ast::AlterViewStmt {
+            name: canonical,
+            kind: if kind == "view" {
+                uqa_sql::ast::AlterViewKind::View
+            } else {
+                uqa_sql::ast::AlterViewKind::MaterializedView
+            },
+            if_exists: stmt.if_exists,
+            action: uqa_sql::ast::AlterViewAction::RenameTo(to.clone()),
+        })?;
+        return Ok(SQLResult::empty());
+    }
+    if kind == "view"
+        && stmt.actions.iter().all(|action| {
+            matches!(
+                action,
+                AlterTableAction::RenameRule { .. } | AlterTableAction::RenameTrigger { .. }
+            )
+        })
+    {
+        return engine.with_implicit_transaction(|engine| {
+            for action in &stmt.actions {
+                match action {
+                    AlterTableAction::RenameRule { from, to } => {
+                        engine.rename_rule(&canonical, from, to)?;
+                    }
+                    AlterTableAction::RenameTrigger { from, to } => {
+                        engine.rename_trigger(&canonical, from, to)?;
+                    }
+                    _ => unreachable!("view ALTER was restricted to event lifecycle actions"),
+                }
+            }
+            Ok(SQLResult::empty())
+        });
+    }
+    Err(SQLError::Routine {
+        sqlstate: "42809".into(),
+        message: format!("ALTER TABLE: relation `{canonical}` is a {kind}, not a table"),
+    })
 }
 
 fn run_alter_foreign_table_with_table_syntax(
@@ -149,16 +190,26 @@ fn run_alter_foreign_table_with_table_syntax(
             Ok(SQLResult::empty())
         });
     }
-    let [AlterTableAction::ChangeOwner { owner }] = stmt.actions.as_slice() else {
-        return Err(SQLError::Routine {
-            sqlstate: "42809".into(),
-            message: format!("ALTER TABLE: relation `{canonical}` is a foreign table, not a table"),
-        });
+    let action = match stmt.actions.as_slice() {
+        [AlterTableAction::ChangeOwner { owner }] => {
+            uqa_sql::ast::AlterForeignTableAction::OwnerTo(owner.clone())
+        }
+        [AlterTableAction::RenameTable { to }] => {
+            uqa_sql::ast::AlterForeignTableAction::RenameTo(to.clone())
+        }
+        _ => {
+            return Err(SQLError::Routine {
+                sqlstate: "42809".into(),
+                message: format!(
+                    "ALTER TABLE: relation `{canonical}` is a foreign table, not a table"
+                ),
+            });
+        }
     };
     engine.alter_foreign_table(&uqa_sql::ast::AlterForeignTableStmt {
         name: canonical,
         if_exists: stmt.if_exists,
-        owner: owner.clone(),
+        action,
     })?;
     Ok(SQLResult::empty())
 }
@@ -305,7 +356,7 @@ fn run_alter_table_action(
                     ),
                 });
             }
-            if let Some(default) = &column.default {
+            if let Some(default) = &mut column.default {
                 validate_default_expression(engine, default, &column.ty)?;
             }
             let mut candidate_columns = engine
@@ -433,7 +484,7 @@ fn run_alter_table_action(
                 .try_persist_table_schema(&stmt.table)
                 .map_err(|e| ddl_storage_error("ALTER TABLE ADD COLUMN", e))?;
         }
-        AlterTableAction::AddKeyConstraint { constraint } => {
+        AlterTableAction::AddKeyConstraint { mut constraint } => {
             let mut columns = engine
                 .try_describe_table(&stmt.table)
                 .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?
@@ -446,6 +497,11 @@ fn run_alter_table_action(
                 &declared_constraints,
                 constraint.name.as_deref(),
                 &stmt.table,
+            )?;
+            super::constraint_indexes::name_constraint_indexes(
+                engine,
+                &stmt.table,
+                std::slice::from_mut(&mut constraint),
             )?;
             let mut key_constraints = engine
                 .try_key_constraints(&stmt.table)
@@ -596,13 +652,13 @@ fn run_alter_table_action(
                 "ALTER TABLE SET SCHEMA {schema} is not supported for tables"
             )));
         }
-        AlterTableAction::SetDefault { name, default } => {
+        AlterTableAction::SetDefault { name, mut default } => {
             reject_default_change_on_generated_column(engine, &stmt.table, &name)?;
             let target = engine
                 .column_type(&stmt.table, &name)
                 .map_err(|error| ddl_storage_error("ALTER COLUMN SET DEFAULT", error))?
                 .ok_or_else(|| SQLError::UnknownColumn(format!("{}.{name}", stmt.table)))?;
-            validate_default_expression(engine, &default, &target)?;
+            validate_default_expression(engine, &mut default, &target)?;
             if !engine
                 .set_column_default(&stmt.table, &name, Some(default))
                 .map_err(|err| ddl_storage_error("ALTER COLUMN SET DEFAULT", err))?

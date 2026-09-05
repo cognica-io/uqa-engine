@@ -29,6 +29,10 @@ impl ScoredDocumentSource {
                 &self.column_definitions,
                 &self.projected_fields,
             )
+            || crate::sql::projections_use_tuple_xmin(
+                &self.projected_fields,
+                &self.column_definitions,
+            )
         {
             return Ok(None);
         }
@@ -42,9 +46,7 @@ impl ScoredDocumentSource {
         let fields = self
             .projected_fields
             .iter()
-            .map(|field| {
-                crate::sql::storage_projection_column_for_table(field, &self.column_definitions)
-            })
+            .map(String::as_str)
             .collect::<Vec<_>>();
         let mut last = None;
         let mut aggregate_error = None;
@@ -108,6 +110,10 @@ impl ScoredDocumentSource {
             || crate::engine_generated::projection_contains_virtual_generated_column(
                 &self.column_definitions,
                 &self.projected_fields,
+            )
+            || crate::sql::projections_use_tuple_xmin(
+                &self.projected_fields,
+                &self.column_definitions,
             )
         {
             return Ok(None);
@@ -334,10 +340,13 @@ impl ScoredDocumentSource {
         if crate::engine_generated::projection_contains_virtual_generated_column(
             &self.column_definitions,
             &self.projected_fields,
+        ) || crate::sql::projections_use_tuple_xmin(
+            &self.projected_fields,
+            &self.column_definitions,
         ) {
             let mut documents =
                 store
-                    .get_many(&doc_ids)
+                    .get_stored_many(&doc_ids)
                     .map_err(|error| -> uqa_execution::ExecError {
                         SQLError::Internal(format!(
                             "read `{}` generated documents: {error}",
@@ -354,12 +363,18 @@ impl ScoredDocumentSource {
                 })?;
                 crate::engine_generated::materialize_projected_virtual_generated_columns(
                     &self.column_definitions,
-                    &mut document,
+                    document.fields_mut(),
                     &self.projected_fields,
                 )?;
                 let values = fields
                     .iter()
-                    .map(|field| document.get(*field).cloned().unwrap_or(Value::Null))
+                    .map(|field| {
+                        crate::sql::project_stored_document_column(
+                            &document,
+                            field,
+                            &self.column_definitions,
+                        )
+                    })
                     .collect::<Vec<_>>();
                 let value_refs = values.iter().collect::<Vec<_>>();
                 if let Some(predicate) = self.predicate.as_ref() {
@@ -455,25 +470,22 @@ impl ScoredDocumentSource {
         let fields = self
             .projected_fields
             .iter()
-            .map(|field| {
-                crate::sql::storage_projection_column_for_table(field, &self.column_definitions)
-            })
+            .map(String::as_str)
             .collect::<Vec<_>>();
         let store = self.table.document_store.read();
         for entry in entries {
             let mut document = if let Some(document) = self.recheck_documents.get(&entry.doc_id) {
                 (**document).clone()
             } else {
-                let Some(document) =
-                    store
-                        .get(entry.doc_id)
-                        .map_err(|error| -> uqa_execution::ExecError {
-                            SQLError::Internal(format!(
-                                "read `{}` rows from the pinned command snapshot: {error}",
-                                self.table_name
-                            ))
-                            .into()
-                        })?
+                let Some(document) = store.get_stored(entry.doc_id).map_err(
+                    |error| -> uqa_execution::ExecError {
+                        SQLError::Internal(format!(
+                            "read `{}` rows from the pinned command snapshot: {error}",
+                            self.table_name
+                        ))
+                        .into()
+                    },
+                )?
                 else {
                     continue;
                 };
@@ -481,12 +493,18 @@ impl ScoredDocumentSource {
             };
             crate::engine_generated::materialize_projected_virtual_generated_columns(
                 &self.column_definitions,
-                &mut document,
+                document.fields_mut(),
                 &self.projected_fields,
             )?;
             let values = fields
                 .iter()
-                .map(|field| document.get(*field).cloned().unwrap_or(Value::Null))
+                .map(|field| {
+                    crate::sql::project_stored_document_column(
+                        &document,
+                        field,
+                        &self.column_definitions,
+                    )
+                })
                 .collect::<Vec<_>>();
             let value_refs = values.iter().collect::<Vec<_>>();
             if let Some(predicate) = self.predicate.as_ref() {

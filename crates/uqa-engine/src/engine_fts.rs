@@ -169,7 +169,6 @@ impl Engine {
         known_new: bool,
     ) -> Result<(), SQLError> {
         crate::sql::refresh_stored_generated_columns(self, table, &mut document)?;
-        crate::sql::dml::stamp_tuple_xmin(self, table, &mut document)?;
         self.add_prepared_document_impl(table, doc_id, document, known_new)
     }
 
@@ -180,7 +179,7 @@ impl Engine {
         document: Document,
         known_new: bool,
     ) -> Result<(), SQLError> {
-        self.add_prepared_document_impl_with_fts(table, doc_id, document, known_new, true)
+        self.add_prepared_document_impl_with_fts(table, doc_id, document, known_new, true, None)
     }
 
     pub(crate) fn add_prepared_document_without_fts_impl(
@@ -190,7 +189,25 @@ impl Engine {
         document: Document,
         known_new: bool,
     ) -> Result<(), SQLError> {
-        self.add_prepared_document_impl_with_fts(table, doc_id, document, known_new, false)
+        self.add_prepared_document_impl_with_fts(table, doc_id, document, known_new, false, None)
+    }
+
+    pub(crate) fn add_prepared_stored_document_impl(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        document: uqa_storage::StoredDocument,
+        known_new: bool,
+    ) -> Result<(), SQLError> {
+        let (fields, metadata) = document.into_parts();
+        self.add_prepared_document_impl_with_fts(
+            table,
+            doc_id,
+            fields,
+            known_new,
+            true,
+            Some(metadata),
+        )
     }
 
     pub(crate) fn prepared_document_text_fields(
@@ -239,6 +256,7 @@ impl Engine {
         mut document: Document,
         known_new: bool,
         index_fts: bool,
+        metadata: Option<uqa_storage::DocumentMetadata>,
     ) -> Result<(), SQLError> {
         let Some(table_name) = self
             .try_resolve_table_name(table)
@@ -279,28 +297,36 @@ impl Engine {
         let (old_indexed, indexed_fields) = if known_new {
             (None, Self::value_indexes_built_fields(&t))
         } else {
-            let old = Self::value_indexes_old_values(&t, doc_id)?;
-            let fields = old
-                .as_ref()
-                .map(|old| old.keys().cloned().collect::<Vec<String>>());
+            let old = Self::value_indexes_old_values(&t, doc_id);
+            let fields = old.as_ref().map(|old| {
+                old.keys()
+                    .cloned()
+                    .collect::<Vec<uqa_storage::ValueIndexKey>>()
+            });
             (old, fields)
         };
-        let new_indexed: Option<BTreeMap<String, Value>> = indexed_fields.map(|fields| {
-            fields
-                .into_iter()
-                .map(|k| {
-                    let value = document.get(&k).cloned().unwrap_or(Value::Null);
-                    (k, value)
-                })
-                .collect()
-        });
         let persistent_indexed =
             self.persistent_value_index_document_values(&table_name, &document)?;
+        let new_indexed = indexed_fields
+            .map(|fields| {
+                if let Some(values) = &persistent_indexed {
+                    return Ok(values.clone());
+                }
+                self.value_index_document_values(&table_name, &fields, &document)
+            })
+            .transpose()?;
         let columns = t.columns.read().clone();
         crate::engine_generated::strip_virtual_generated_columns(&columns, &mut document);
+        let metadata = match metadata {
+            Some(metadata) => metadata,
+            None => uqa_storage::DocumentMetadata::with_tuple_xmin(self.tuple_version_xid()?),
+        };
         let mut store = t.document_store.write();
         store
-            .put(doc_id, document)
+            .put_stored(
+                doc_id,
+                uqa_storage::StoredDocument::with_metadata(document, metadata),
+            )
             .map_err(|err| crate::engine_table_storage::document_store_write_error(&err))?;
         if let Some(new) = persistent_indexed.as_ref() {
             self.persist_value_indexes_apply_write(&table_name, doc_id, Some(new))?;

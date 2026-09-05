@@ -14,8 +14,7 @@ use super::{
     partition_insert_target, validate_vector_dimensions, value_to_tensor, value_to_vector,
     BTreeMap, BTreeSet, BinaryOp, ColumnType, CteScope, DocId, Document, Engine, ForeignKey,
     ForeignKeyAction, ForeignKeyMatch, RowIndependentUpdateValues, SQLError, SQLParam, SQLResult,
-    Value, DOC_ID_COLUMN, TABLE_OID_COLUMN, XMIN_COLUMN, XMIN_STORAGE_COLUMN,
-    XMIN_USER_STORAGE_COLUMN,
+    Value, DOC_ID_COLUMN, TABLE_OID_COLUMN, XMIN_COLUMN,
 };
 use crate::RelationIdentity;
 use uqa_execution::{ColumnIdentity, OwnedPhysicalRow, PhysicalRow, RowSchema, ScalarExpr};
@@ -30,7 +29,8 @@ mod view_rules;
 
 pub(in crate::sql) use protocol::*;
 pub(crate) use protocol::{
-    CommandExactIndex, CommandMutationOverlay, DeferredForeignKeyCheck, TransactionRowChange,
+    CommandExactIndex, CommandMutationOverlay, CommandStoredDocument, DeferredForeignKeyCheck,
+    TransactionRowChange,
 };
 use view_rules::{prepare_view_rule_batches, ViewRuleBatchRequest};
 
@@ -137,7 +137,7 @@ pub(crate) fn update_lock_strength(
     table: &str,
     columns: &[String],
 ) -> uqa_sql::ast::LockStrength {
-    let Ok(keys) = engine.try_key_constraints(table) else {
+    let Ok(keys) = engine.referenceable_keys(table) else {
         return uqa_sql::ast::LockStrength::ForUpdate;
     };
     let Ok(Some(definitions)) = engine.try_describe_table(table) else {
@@ -184,43 +184,6 @@ fn is_virtual_document_id_column(column: &str, definitions: &[uqa_sql::ast::Colu
             .any(|definition| definition.name == DOC_ID_COLUMN)
 }
 
-pub(crate) fn stamp_tuple_xmin(
-    engine: &Engine,
-    table: &str,
-    document: &mut Document,
-) -> Result<(), SQLError> {
-    let xmin = Value::Int(i64::from(engine.tuple_version_xid()?));
-    let previous_system_xmin = document.get(XMIN_STORAGE_COLUMN).cloned();
-    let schemaless_user_xmin_marked = document
-        .get(XMIN_USER_STORAGE_COLUMN)
-        .is_some_and(|value| value == &Value::Bool(true));
-    let public_xmin_was_system_mirror = previous_system_xmin
-        .as_ref()
-        .is_some_and(|previous| document.get(XMIN_COLUMN) == Some(previous));
-    let definitions = engine
-        .try_describe_table(table)
-        .map_err(|error| dml_storage_error("resolve tuple-version schema", error))?
-        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-    let has_declared_xmin = definitions
-        .iter()
-        .any(|definition| definition.name == XMIN_COLUMN);
-    let schemaless_user_xmin = definitions.is_empty()
-        && (schemaless_user_xmin_marked
-            || (document.contains_key(XMIN_COLUMN)
-                && (previous_system_xmin.is_none() || !public_xmin_was_system_mirror)));
-    document.insert(XMIN_STORAGE_COLUMN.into(), xmin.clone());
-    if schemaless_user_xmin {
-        document.insert(XMIN_USER_STORAGE_COLUMN.into(), Value::Bool(true));
-    } else {
-        document.remove(XMIN_USER_STORAGE_COLUMN);
-    }
-    if !has_declared_xmin && !schemaless_user_xmin {
-        // Keep the legacy projection mirror while old database rows are migrated lazily. The collision-free key above is authoritative and the mirror is never written when `xmin` belongs to the user schema.
-        document.insert(XMIN_COLUMN.into(), xmin);
-    }
-    Ok(())
-}
-
 fn dml_target_row(
     engine: &Engine,
     table: &str,
@@ -259,6 +222,60 @@ fn dml_target_row_for_storage_optional(
     document: &Document,
     selected_columns: Option<&BTreeSet<String>>,
 ) -> Result<OwnedPhysicalRow, SQLError> {
+    let metadata = match (storage_table, doc_id) {
+        (Some(storage_table), Some(doc_id)) => engine
+            .get_query_document_metadata(storage_table, doc_id)?
+            .unwrap_or_default(),
+        _ => uqa_storage::DocumentMetadata::default(),
+    };
+    dml_target_row_for_storage_optional_with_metadata(
+        engine,
+        table,
+        storage_table,
+        qualifier,
+        doc_id,
+        document,
+        selected_columns,
+        metadata,
+    )
+}
+
+pub(in crate::sql) fn existing_tuple_metadata(
+    engine: &Engine,
+    table: &str,
+    doc_id: DocId,
+) -> Result<uqa_storage::DocumentMetadata, SQLError> {
+    engine
+        .get_query_document_metadata(table, doc_id)?
+        .ok_or_else(|| {
+            SQLError::Internal(format!(
+                "document `{table}` row {doc_id} has no tuple metadata"
+            ))
+        })
+}
+
+pub(in crate::sql) fn new_tuple_metadata(
+    engine: &Engine,
+) -> Result<uqa_storage::DocumentMetadata, SQLError> {
+    Ok(uqa_storage::DocumentMetadata::with_tuple_xmin(
+        engine.tuple_version_xid()?,
+    ))
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "keeps DML row identity and tuple metadata explicit"
+)]
+fn dml_target_row_for_storage_optional_with_metadata(
+    engine: &Engine,
+    table: &str,
+    storage_table: Option<&str>,
+    qualifier: &str,
+    doc_id: Option<DocId>,
+    document: &Document,
+    selected_columns: Option<&BTreeSet<String>>,
+    metadata: uqa_storage::DocumentMetadata,
+) -> Result<OwnedPhysicalRow, SQLError> {
     let definitions = engine
         .try_describe_table(table)
         .map_err(|error| dml_storage_error("DML row schema lookup", error))?
@@ -279,11 +296,7 @@ fn dml_target_row_for_storage_optional(
     let mut columns = if definitions.is_empty() {
         materialized
             .keys()
-            .filter(|column| {
-                column.as_str() != XMIN_STORAGE_COLUMN
-                    && column.as_str() != XMIN_USER_STORAGE_COLUMN
-                    && column.as_str() != XMIN_COLUMN
-            })
+            .filter(|column| column.as_str() != XMIN_COLUMN)
             .cloned()
             .collect::<Vec<_>>()
     } else {
@@ -328,10 +341,12 @@ fn dml_target_row_for_storage_optional(
                     )?))
                 })
             } else if column == XMIN_COLUMN {
-                Ok(materialized
-                    .get(XMIN_STORAGE_COLUMN)
-                    .cloned()
-                    .unwrap_or(Value::Null))
+                Ok(crate::sql::project_document_column(
+                    &materialized,
+                    metadata,
+                    column,
+                    &definitions,
+                ))
             } else {
                 Ok(materialized.get(column).cloned().unwrap_or(Value::Null))
             }
@@ -341,6 +356,26 @@ fn dml_target_row_for_storage_optional(
         RowSchema::with_qualified_types(qualifier, columns, types),
         PhysicalRow::from_values(values),
     ))
+}
+
+fn dml_new_target_row_for_storage(
+    engine: &Engine,
+    table: &str,
+    storage_table: &str,
+    qualifier: &str,
+    doc_id: DocId,
+    document: &Document,
+) -> Result<OwnedPhysicalRow, SQLError> {
+    dml_target_row_for_storage_optional_with_metadata(
+        engine,
+        table,
+        Some(storage_table),
+        qualifier,
+        Some(doc_id),
+        document,
+        None,
+        uqa_storage::DocumentMetadata::with_tuple_xmin(engine.tuple_version_xid()?),
+    )
 }
 
 struct ViewCheckContext<'a> {
@@ -370,7 +405,7 @@ fn validate_view_checks(context: ViewCheckContext<'_>) -> Result<(), SQLError> {
     if checks.is_empty() {
         return Ok(());
     }
-    let row = dml_target_row_for_storage(
+    let row = dml_new_target_row_for_storage(
         engine,
         table,
         storage_table,

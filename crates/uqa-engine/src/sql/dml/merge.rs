@@ -94,8 +94,18 @@ pub(in crate::sql) fn merge_command_returning_schema(
 }
 
 mod execution;
-pub(in crate::sql) use execution::run_merge;
 use execution::{MergeTargetIdentity, SelectedMergeAction};
+
+pub(in crate::sql) fn run_merge(
+    engine: &Engine,
+    mut stmt: MergePlan,
+    params: &[SQLParam],
+) -> Result<SQLResult, SQLError> {
+    stmt.target = super::resolve_dml_target_name(engine, &stmt.target, false)?;
+    super::run_mutation_command(engine, move |engine| {
+        execution::run_merge_inner(engine, &stmt, params)
+    })
+}
 
 fn validate_view_merge_dispatch_contract(
     engine: &Engine,

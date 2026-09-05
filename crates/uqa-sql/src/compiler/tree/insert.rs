@@ -114,25 +114,23 @@ pub(in crate::compiler) fn compile_on_conflict(
     use crate::ast::{OnConflict, OnConflictAction};
     use pg_query::protobuf::OnConflictAction as PgAction;
 
-    let conflict_columns = clause
-        .infer
-        .as_ref()
-        .map(|infer| {
-            infer
-                .index_elems
-                .iter()
-                .map(|elem| match elem.node.as_ref() {
-                    Some(NodeEnum::IndexElem(index)) if !index.name.is_empty() => {
-                        Ok(index.name.clone())
-                    }
-                    other => Err(SQLError::Unsupported(format!(
-                        "ON CONFLICT inference target {other:?}"
-                    ))),
-                })
-                .collect::<Result<Vec<_>>>()
-        })
-        .transpose()?
-        .unwrap_or_default();
+    let mut conflict_columns = Vec::new();
+    let mut expressions = Vec::new();
+    if let Some(infer) = &clause.infer {
+        for elem in &infer.index_elems {
+            let Some(NodeEnum::IndexElem(index)) = elem.node.as_ref() else {
+                return Err(SQLError::Unsupported("ON CONFLICT inference target".into()));
+            };
+            if !index.name.is_empty() {
+                conflict_columns.push(index.name.clone());
+            } else if let Some(expression) = &index.expr {
+                match compile_expr(expression)? {
+                    Expr::Column(column) => conflict_columns.push(column),
+                    expression => expressions.push(expression),
+                }
+            }
+        }
+    }
 
     let action = match clause.action() {
         PgAction::OnconflictNothing => OnConflictAction::Nothing,
@@ -160,7 +158,7 @@ pub(in crate::compiler) fn compile_on_conflict(
                 .transpose()?;
             OnConflictAction::Update {
                 assignments,
-                r#where: where_clause,
+                r#where: where_clause.map(Box::new),
             }
         }
         PgAction::OnconflictNone | PgAction::Undefined => {
@@ -171,7 +169,20 @@ pub(in crate::compiler) fn compile_on_conflict(
     };
 
     Ok(OnConflict {
+        predicate: clause
+            .infer
+            .as_ref()
+            .and_then(|infer| infer.where_clause.as_deref())
+            .map(compile_expr)
+            .transpose()?
+            .map(Box::new),
+        constraint: clause
+            .infer
+            .as_ref()
+            .filter(|infer| !infer.conname.is_empty())
+            .map(|infer| infer.conname.clone()),
         conflict_columns,
+        expressions,
         action,
     })
 }

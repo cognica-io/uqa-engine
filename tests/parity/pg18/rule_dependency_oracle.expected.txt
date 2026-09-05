@@ -1,0 +1,16 @@
+source-bound|1
+source-restrict|2BP01
+target-restrict|2BP01
+source-renamed|1,1
+source-cascade|0
+routine-bound|10|20
+routine-unrelated|ok
+routine-bigint-restrict|2BP01
+routine-text-restrict|2BP01
+routine-cascade|0
+condition-bound|0
+condition-restrict|2BP01
+condition-cascade|0
+table-function-bound|11
+table-function-restrict|2BP01
+table-function-cascade|0

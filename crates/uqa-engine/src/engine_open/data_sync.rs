@@ -217,7 +217,7 @@ impl Engine {
                 self.rebind_persistent_table_stores(&name, &table)?;
                 self.refresh_table_next_id(&name, &table)?;
             } else {
-                Self::value_indexes_clear(&table);
+                Self::value_indexes_clear_column_accelerators(&table);
             }
             table
                 .doc_count_dirty

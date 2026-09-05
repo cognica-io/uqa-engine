@@ -9,7 +9,7 @@
 use super::{QueryPlan, RelationIdentity, RelationalPlan, ScalarExpr, SourcePlan, Value};
 use uqa_sql::ast::FunctionBinding;
 
-pub(super) fn canonical_virtual_relation_reference(reference: &str) -> Option<String> {
+pub(crate) fn canonical_virtual_relation_reference(reference: &str) -> Option<String> {
     let (schema, relation) = RelationIdentity::parse_reference(reference).ok()?;
     let relation = relation.to_ascii_lowercase();
     let schema = schema.map(|schema| schema.to_ascii_lowercase());
@@ -105,7 +105,7 @@ pub(super) fn bind_query_plan_sequence_references<E>(
     error.map_or(Ok(()), Err)
 }
 
-pub(super) fn bind_query_plan_relations<E>(
+pub(crate) fn bind_query_plan_relations<E>(
     plan: &mut QueryPlan,
     inherited_ctes: &std::collections::BTreeSet<String>,
     resolve: &mut impl FnMut(&str) -> Result<String, E>,
@@ -329,11 +329,99 @@ pub(super) fn query_plan_references_sequence(plan: &QueryPlan, target: &Relation
     referenced
 }
 
-fn function_binding_matches(binding: &FunctionBinding, target: &FunctionBinding) -> bool {
+pub(crate) fn function_binding_matches(
+    binding: &FunctionBinding,
+    target: &FunctionBinding,
+) -> bool {
+    if binding.builtin || target.builtin {
+        return false;
+    }
+    match (binding.object_id, target.object_id) {
+        (Some(binding), Some(target)) => binding == target,
+        (None, None) => {
+            binding.name == target.name && binding.argument_types == target.argument_types
+        }
+        _ => false,
+    }
+}
+
+fn function_binding_needs_object_identity(binding: &FunctionBinding) -> bool {
     !binding.builtin
-        && !target.builtin
-        && binding.name == target.name
-        && binding.argument_types == target.argument_types
+        && binding.dispatch.is_none()
+        && binding.resolution_error.is_none()
+        && binding.object_id.is_none()
+}
+
+fn source_plan_has_legacy_routine_identity(source: &SourcePlan) -> bool {
+    match source {
+        SourcePlan::Table { .. } | SourcePlan::Values { .. } => false,
+        SourcePlan::Join { left, right, .. } => {
+            source_plan_has_legacy_routine_identity(left)
+                || source_plan_has_legacy_routine_identity(right)
+        }
+        SourcePlan::Subquery { body, .. } => query_plan_sources_have_legacy_routine_identity(body),
+        SourcePlan::Function { binding, .. } => binding
+            .as_ref()
+            .is_some_and(function_binding_needs_object_identity),
+        SourcePlan::FunctionGroup { functions, .. } => functions.iter().any(|function| {
+            function
+                .binding
+                .as_ref()
+                .is_some_and(function_binding_needs_object_identity)
+        }),
+    }
+}
+
+fn relational_plan_has_legacy_routine_identity(plan: &RelationalPlan) -> bool {
+    match plan {
+        RelationalPlan::QueryBlock(block) => {
+            block
+                .from
+                .as_ref()
+                .is_some_and(source_plan_has_legacy_routine_identity)
+                || block
+                    .subqueries
+                    .iter()
+                    .any(query_plan_sources_have_legacy_routine_identity)
+        }
+        RelationalPlan::SetOp {
+            left,
+            right,
+            subqueries,
+            ..
+        } => {
+            query_plan_sources_have_legacy_routine_identity(left)
+                || query_plan_sources_have_legacy_routine_identity(right)
+                || subqueries
+                    .iter()
+                    .any(query_plan_sources_have_legacy_routine_identity)
+        }
+        RelationalPlan::Values { subqueries, .. } => subqueries
+            .iter()
+            .any(query_plan_sources_have_legacy_routine_identity),
+    }
+}
+
+fn query_plan_sources_have_legacy_routine_identity(plan: &QueryPlan) -> bool {
+    plan.ctes
+        .iter()
+        .any(|cte| query_plan_sources_have_legacy_routine_identity(&cte.query))
+        || relational_plan_has_legacy_routine_identity(&plan.root)
+}
+
+pub(crate) fn query_plan_has_legacy_routine_identity(plan: &QueryPlan) -> bool {
+    let mut scalar_plan = plan.clone();
+    let mut legacy = false;
+    scalar_plan.rewrite_scalar_expressions(&mut |expression| {
+        if let ScalarExpr::Func {
+            binding: Some(binding),
+            ..
+        } = expression
+        {
+            legacy |= function_binding_needs_object_identity(binding);
+        }
+    });
+    legacy || query_plan_sources_have_legacy_routine_identity(plan)
 }
 
 fn source_plan_references_function(source: &SourcePlan, target: &FunctionBinding) -> bool {
@@ -406,4 +494,120 @@ pub(crate) fn query_plan_references_function(plan: &QueryPlan, target: &Function
         }
     });
     referenced || query_plan_sources_reference_function(plan, target)
+}
+
+fn rewrite_source_plan_routine_identity(
+    source: &mut SourcePlan,
+    target: &FunctionBinding,
+    new_name: &str,
+) -> bool {
+    match source {
+        SourcePlan::Table { .. } | SourcePlan::Values { .. } => false,
+        SourcePlan::Join { left, right, .. } => {
+            rewrite_source_plan_routine_identity(left, target, new_name)
+                | rewrite_source_plan_routine_identity(right, target, new_name)
+        }
+        SourcePlan::Subquery { body, .. } => {
+            rewrite_query_source_routine_identity(body, target, new_name)
+        }
+        SourcePlan::Function { name, binding, .. } => {
+            let Some(binding) = binding.as_mut() else {
+                return false;
+            };
+            if !function_binding_matches(binding, target) {
+                return false;
+            }
+            *name = new_name.to_string();
+            binding.name = new_name.to_string();
+            true
+        }
+        SourcePlan::FunctionGroup { functions, .. } => {
+            let mut changed = false;
+            for function in functions {
+                let Some(binding) = function.binding.as_mut() else {
+                    continue;
+                };
+                if function_binding_matches(binding, target) {
+                    function.name = new_name.to_string();
+                    binding.name = new_name.to_string();
+                    changed = true;
+                }
+            }
+            changed
+        }
+    }
+}
+
+fn rewrite_relational_plan_source_routine_identity(
+    plan: &mut RelationalPlan,
+    target: &FunctionBinding,
+    new_name: &str,
+) -> bool {
+    match plan {
+        RelationalPlan::QueryBlock(block) => {
+            let mut changed = block.from.as_mut().is_some_and(|source| {
+                rewrite_source_plan_routine_identity(source, target, new_name)
+            });
+            for subquery in &mut block.subqueries {
+                changed |= rewrite_query_source_routine_identity(subquery, target, new_name);
+            }
+            changed
+        }
+        RelationalPlan::SetOp {
+            left,
+            right,
+            subqueries,
+            ..
+        } => {
+            let mut changed = rewrite_query_source_routine_identity(left, target, new_name)
+                | rewrite_query_source_routine_identity(right, target, new_name);
+            for subquery in subqueries {
+                changed |= rewrite_query_source_routine_identity(subquery, target, new_name);
+            }
+            changed
+        }
+        RelationalPlan::Values { subqueries, .. } => {
+            let mut changed = false;
+            for subquery in subqueries {
+                changed |= rewrite_query_source_routine_identity(subquery, target, new_name);
+            }
+            changed
+        }
+    }
+}
+
+fn rewrite_query_source_routine_identity(
+    plan: &mut QueryPlan,
+    target: &FunctionBinding,
+    new_name: &str,
+) -> bool {
+    let mut changed = false;
+    for cte in &mut plan.ctes {
+        changed |= rewrite_query_source_routine_identity(&mut cte.query, target, new_name);
+    }
+    changed | rewrite_relational_plan_source_routine_identity(&mut plan.root, target, new_name)
+}
+
+pub(crate) fn rewrite_query_plan_routine_identity(
+    plan: &mut QueryPlan,
+    target: &FunctionBinding,
+    new_name: &str,
+) -> bool {
+    let mut changed = false;
+    plan.rewrite_scalar_expressions(&mut |expression| {
+        let ScalarExpr::Func {
+            name,
+            binding: Some(binding),
+            ..
+        } = expression
+        else {
+            return;
+        };
+        if function_binding_matches(binding, target) {
+            *name = new_name.to_string();
+            binding.name = new_name.to_string();
+            changed = true;
+        }
+    });
+    changed | rewrite_query_source_routine_identity(plan, target, new_name)
 }

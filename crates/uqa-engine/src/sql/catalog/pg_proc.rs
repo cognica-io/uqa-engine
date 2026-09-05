@@ -9,40 +9,28 @@
 use super::builtin_routines::PG18_BUILTIN_ROUTINE_GROUPS;
 use super::expression_text::schema_expr_text;
 use super::helpers::acl::acl_identifier;
-use super::helpers::oids::{current_user_oid, schema_oid, split_schema_name, stable_oid};
+use super::helpers::oids::{
+    current_user_oid, schema_oid, split_schema_name, stable_object_oid, stable_oid,
+};
 use super::helpers::rows::{
     bool_value, catalog_array, catalog_usize, int_value, list_int, row, str_value,
 };
 use super::helpers::type_metadata::{routine_type_oid, routine_variadic_element_oid};
 use crate::engine_capabilities::CatalogReadView;
 use crate::engine_roles::role_oid;
-use crate::engine_user_functions::{
-    builtin_routine_support_oid, canonical_routine_type_name, SQLUserFunction,
-};
+use crate::engine_user_functions::{builtin_routine_support_oid, SQLUserFunction};
 use uqa_core::Value;
 use uqa_sql::registry::registered_names;
 use uqa_sql::{ResultRow, SQLError};
 
-pub(super) fn user_routine_catalog_oid(function: &SQLUserFunction) -> i64 {
-    let def = &function.def;
-    let signature = def
-        .identity_params()
-        .iter()
-        .map(|parameter| canonical_routine_type_name(&parameter.type_name))
-        .collect::<Vec<_>>();
-    stable_oid(
-        "proc",
-        &format!(
-            "{}:{}:{}",
-            def.name,
-            if def.is_procedure {
-                "procedure"
-            } else {
-                "function"
-            },
-            signature.join(",")
-        ),
-    )
+pub(super) fn user_routine_catalog_oid(function: &SQLUserFunction) -> Result<i64, SQLError> {
+    let object_id = function.def.object_id.ok_or_else(|| {
+        SQLError::Internal(format!(
+            "routine `{}` has no catalog object identity",
+            function.def.name
+        ))
+    })?;
+    Ok(stable_object_oid("proc", &object_id))
 }
 
 #[expect(
@@ -279,7 +267,7 @@ pub(super) fn build_pg_proc(catalog: &CatalogReadView) -> Result<Vec<ResultRow>,
             }
         };
         rows.push(row([
-            ("oid", int_value(user_routine_catalog_oid(&function))),
+            ("oid", int_value(user_routine_catalog_oid(&function)?)),
             ("proname", str_value(routine_name)),
             ("pronamespace", int_value(schema_oid(&routine_schema))),
             ("proowner", int_value(role_oid(&def.owner))),

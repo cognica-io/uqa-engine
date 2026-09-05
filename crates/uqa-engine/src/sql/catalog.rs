@@ -58,7 +58,7 @@ pub(super) fn build_info_schema_rows(
         VirtualRelation::PgRewrite => build_pg_rewrite(catalog, resolution)?,
         VirtualRelation::PgRules => build_pg_rules(catalog, resolution)?,
         VirtualRelation::PgTables => build_pg_tables(catalog, resolution)?,
-        VirtualRelation::PgViews => build_pg_views(catalog)?,
+        VirtualRelation::PgViews => build_pg_views(catalog, resolution)?,
         VirtualRelation::PgIndexes => build_pg_indexes(catalog, resolution)?,
         VirtualRelation::PgType => build_pg_type(),
         VirtualRelation::PgRange => build_pg_range(),
@@ -69,7 +69,7 @@ pub(super) fn build_info_schema_rows(
         VirtualRelation::PgUser => build_pg_user(catalog),
         VirtualRelation::PgSettings => build_pg_settings(session)?,
         VirtualRelation::PgDescription => Vec::new(),
-        VirtualRelation::PgMatviews => build_pg_matviews(catalog)?,
+        VirtualRelation::PgMatviews => build_pg_matviews(catalog, resolution)?,
         VirtualRelation::PgSequences => build_pg_sequences(catalog, session)?,
         VirtualRelation::AgGraph => build_ag_graph(catalog)?,
         VirtualRelation::AgLabel => build_ag_label(catalog)?,
@@ -80,6 +80,12 @@ mod ag_catalog;
 mod builtin_routines;
 mod events;
 mod expression_text;
+mod index_definition;
+pub(in crate::sql) use index_definition::pg_get_indexdef_value;
+pub(in crate::sql) use regtypes::format_type_value;
+mod view_definition;
+pub(in crate::sql) use view_definition::pg_get_viewdef_value;
+pub(crate) use view_definition::rename_view_column_query;
 mod helpers;
 mod information_schema;
 mod partitioning;
@@ -155,9 +161,13 @@ pub(crate) fn resolve_age_label_relation_name(
 pub(crate) fn query_source_column_names(
     engine: &Engine,
     name: &str,
+    relations_bound: bool,
 ) -> Result<Option<Vec<String>>, SQLError> {
     let catalog = engine.catalog_read_view();
-    let resolution = engine.session_execution_view().relation_name_resolution();
+    let mut resolution = engine.session_execution_view().relation_name_resolution();
+    if relations_bound {
+        resolution.set_lookup_mode(crate::engine_capabilities::RelationLookupMode::Bound);
+    }
     if catalog.sequence_resolved(&resolution, name)?.is_some() {
         return Ok(Some(vec![
             "last_value".into(),
@@ -220,19 +230,20 @@ pub(in crate::sql) fn table_relation_oid(engine: &Engine, table: &str) -> Result
 pub(crate) fn sequence_relation_oid(object_id: [u8; 16]) -> i64 {
     helpers::oids::stable_object_oid("relation", &object_id)
 }
-pub(crate) fn view_relation_oid(
-    relation: &crate::RelationIdentity,
-    kind: crate::StoredViewKind,
-) -> i64 {
-    let relkind = match kind {
-        crate::StoredViewKind::View => "v",
-        crate::StoredViewKind::Materialized => "m",
-    };
-    helpers::oids::relation_oid(relkind, &relation.schema, &relation.name)
+pub(crate) fn view_relation_oid(view: &crate::StoredView) -> i64 {
+    helpers::oids::stable_object_oid("relation", &view.object_id)
 }
 
-pub(crate) fn foreign_table_relation_oid(relation: &crate::RelationIdentity) -> i64 {
-    helpers::oids::relation_oid("f", &relation.schema, &relation.name)
+pub(crate) fn view_rowtype_oid(view: &crate::StoredView) -> i64 {
+    helpers::oids::stable_object_oid("rowtype", &view.object_id)
+}
+
+pub(crate) fn foreign_table_relation_oid(table: &crate::engine_fdw::StoredForeignTable) -> i64 {
+    helpers::oids::stable_object_oid("relation", &table.object_id)
+}
+
+pub(crate) fn foreign_table_rowtype_oid(table: &crate::engine_fdw::StoredForeignTable) -> i64 {
+    helpers::oids::stable_object_oid("rowtype", &table.object_id)
 }
 pub(crate) fn snapshot_table_relation_oid(
     catalog: &CatalogReadView,

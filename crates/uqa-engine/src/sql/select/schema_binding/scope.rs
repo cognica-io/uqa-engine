@@ -6,8 +6,6 @@
 
 //! Outer-scope composition and common row-value typing.
 
-use std::collections::BTreeMap;
-
 use uqa_execution::RowSchema;
 use uqa_planner::{ExpressionPlan, QueryPlan};
 use uqa_sql::ast::ColumnType;
@@ -69,27 +67,10 @@ pub(in crate::sql) fn overlay_outer_schema(
     current: &RowSchema,
     outer: Option<&RowSchema>,
 ) -> RowSchema {
-    let Some(outer) = outer else {
-        return current.clone();
-    };
-    let mut columns = outer
-        .identities()
-        .iter()
-        .enumerate()
-        .map(|(position, identity)| (identity.clone(), outer.column_type(position).cloned()))
-        .collect::<BTreeMap<_, _>>();
-    columns.extend(
-        outer
-            .typed_physical_alias_identities()
-            .map(|(identity, ty)| (identity.clone(), ty.cloned())),
-    );
-    let columns = columns.into_iter().collect::<Vec<_>>();
-    let schema = RowSchema::with_typed_outer_identities(current, &columns);
-    let virtual_identities = outer
-        .typed_virtual_identities()
-        .map(|(identity, ty)| (identity.clone(), ty.cloned()))
-        .collect::<Vec<_>>();
-    RowSchema::with_typed_virtual_identities(&schema, &virtual_identities)
+    outer.map_or_else(
+        || current.clone(),
+        |outer| RowSchema::with_outer_schema(current, outer),
+    )
 }
 
 pub(in crate::sql) fn values_types_in_scope(

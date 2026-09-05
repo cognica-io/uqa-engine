@@ -554,6 +554,50 @@ impl Catalog {
         })
     }
 
+    pub fn rename_view(&self, from: &RelationIdentity, to: &RelationIdentity) -> Result<bool> {
+        if from.schema != to.schema {
+            return Err(SQLiteError::StorageBackend(
+                "moving a view between schemas is not supported by the catalog".into(),
+            ));
+        }
+        self.conn.with_mut(|connection| {
+            let source_exists = connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM _views WHERE schema_name = ?1 AND relation_name = ?2)",
+                params![from.schema, from.name],
+                |row| row.get::<_, bool>(0),
+            )?;
+            if from == to || !source_exists {
+                return Ok(source_exists);
+            }
+            let target_exists = connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM _relations WHERE schema_name = ?1 AND relation_name = ?2)",
+                params![to.schema, to.name],
+                |row| row.get::<_, bool>(0),
+            )?;
+            if target_exists {
+                return Err(SQLiteError::StorageBackend(format!(
+                    "relation `{}` already exists",
+                    to.qualified_name()
+                )));
+            }
+            let tx = connection.savepoint()?;
+            Self::claim_relation(&tx, to, RelationKind::View)?;
+            let updated = tx.execute(
+                "UPDATE _views SET schema_name = ?3, relation_name = ?4 WHERE schema_name = ?1 AND relation_name = ?2",
+                params![from.schema, from.name, to.schema, to.name],
+            )?;
+            if updated != 1 {
+                return Err(SQLiteError::StorageBackend(format!(
+                    "view `{}` disappeared during rename",
+                    from.qualified_name()
+                )));
+            }
+            Self::release_relation(&tx, from, RelationKind::View)?;
+            tx.commit()?;
+            Ok(true)
+        })
+    }
+
     pub fn drop_view(&self, relation: &RelationIdentity) -> Result<bool> {
         self.conn.with_mut(|connection| {
             let tx = connection.savepoint()?;

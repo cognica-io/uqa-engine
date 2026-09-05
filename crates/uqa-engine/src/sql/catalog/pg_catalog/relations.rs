@@ -39,7 +39,8 @@ pub(in crate::sql::catalog) fn build_pg_tables(
                 bool_value(
                     catalog
                         .catalog_indexes()
-                        .any(|index| index.table_name == name),
+                        .any(|index| index.table_name == name)
+                        || !table_snapshot.keys.is_empty(),
                 ),
             ),
             (
@@ -64,10 +65,13 @@ pub(in crate::sql::catalog) fn table_relation_oid_from(
     resolution: &RelationNameResolution,
     table: &str,
 ) -> Result<i64, SQLError> {
-    let table_state = catalog
-        .table(resolution, table)?
-        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-    Ok(stable_object_oid("relation", &table_state.object_id))
+    if let Some(table_state) = catalog.table(resolution, table)? {
+        return Ok(stable_object_oid("relation", &table_state.object_id));
+    }
+    if let Some((_, table)) = catalog.foreign_table_entry_resolved(resolution, table)? {
+        return Ok(crate::sql::foreign_table_relation_oid(&table));
+    }
+    Err(SQLError::UnknownTable(table.to_string()))
 }
 
 pub(in crate::sql::catalog) fn table_rowtype_oid_from(
@@ -173,7 +177,7 @@ pub(in crate::sql::catalog) fn pg_class_catalog_row(
         ("relkind", str_value(relkind)),
         ("relnatts", int_value(natts)),
         ("relchecks", int_value(0)),
-        ("relhasrules", bool_value(relkind == "v")),
+        ("relhasrules", bool_value(matches!(relkind, "v" | "m"))),
         ("relhastriggers", bool_value(false)),
         ("relhassubclass", bool_value(false)),
         ("relrowsecurity", bool_value(false)),
@@ -199,11 +203,14 @@ pub(in crate::sql::catalog) fn pg_class_catalog_row(
 
 pub(in crate::sql::catalog) fn build_pg_views(
     catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows = Vec::new();
     for (name, stored) in catalog.views_of_kind(crate::StoredViewKind::View) {
         let (schema, view) = split_schema_name(&name)?;
-        let definition = format!("{:?}", stored.query);
+        let definition = crate::sql::catalog::view_definition::view_definition(
+            catalog, resolution, &stored, false, 0,
+        )?;
         rows.push(row([
             ("schemaname", str_value(schema)),
             ("viewname", str_value(view)),
@@ -216,6 +223,7 @@ pub(in crate::sql::catalog) fn build_pg_views(
 
 pub(in crate::sql::catalog) fn build_pg_matviews(
     catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows = Vec::new();
     for (name, stored) in catalog.views_of_kind(crate::StoredViewKind::Materialized) {
@@ -223,11 +231,16 @@ pub(in crate::sql::catalog) fn build_pg_matviews(
         rows.push(row([
             ("schemaname", str_value(schema)),
             ("matviewname", str_value(matview)),
-            ("matviewowner", str_value(stored.role_owner)),
+            ("matviewowner", str_value(&stored.role_owner)),
             ("tablespace", Value::Null),
             ("hasindexes", bool_value(false)),
             ("ispopulated", bool_value(stored.populated)),
-            ("definition", str_value(format!("{:?}", stored.query))),
+            (
+                "definition",
+                str_value(crate::sql::catalog::view_definition::view_definition(
+                    catalog, resolution, &stored, false, 0,
+                )?),
+            ),
         ]));
     }
     Ok(rows)

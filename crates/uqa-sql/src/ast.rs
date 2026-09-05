@@ -17,6 +17,7 @@ mod events;
 mod expressions;
 mod from;
 mod function_binding;
+mod indexes;
 mod locking;
 mod ranges;
 mod relation_hierarchy;
@@ -32,6 +33,7 @@ pub use events::*;
 pub use expressions::*;
 pub use from::*;
 pub use function_binding::*;
+pub use indexes::*;
 pub use locking::*;
 pub use ranges::*;
 pub use relation_hierarchy::*;
@@ -63,13 +65,29 @@ pub struct GeneratedColumn {
     pub function_dependencies: Vec<GeneratedFunctionDependency>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IndexColumnOrder {
+    pub descending: bool,
+    pub nulls_first: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateIndex {
+    #[serde(default)]
+    pub included_columns: Vec<String>,
+    #[serde(default)]
+    pub column_order: Vec<IndexColumnOrder>,
+    #[serde(default)]
+    pub predicate: Option<Box<Expr>>,
     pub name: Option<String>,
     pub table: String,
     /// `gin`, `btree`, `ivf`, `hnsw`, `rtree`, ...
     pub access_method: String,
-    pub columns: Vec<String>,
+    pub columns: Vec<IndexKey>,
+    #[serde(default)]
+    pub unique: bool,
+    #[serde(default)]
+    pub nulls_not_distinct: bool,
     /// `CREATE INDEX IF NOT EXISTS`.
     pub if_not_exists: bool,
     /// Storage parameters from `WITH (k = v, ...)`. Stored verbatim;
@@ -285,10 +303,16 @@ impl Default for ReturningAliases {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OnConflict {
+    #[serde(default)]
+    pub predicate: Option<Box<Expr>>,
+    #[serde(default)]
+    pub constraint: Option<String>,
     /// Conflict target columns parsed from the `ON CONFLICT (col, ...)`
     /// list. Empty when the clause uses `ON CONFLICT DO NOTHING` with
     /// no target.
     pub conflict_columns: Vec<String>,
+    #[serde(default)]
+    pub expressions: Vec<Expr>,
     pub action: OnConflictAction,
 }
 
@@ -301,7 +325,7 @@ pub enum OnConflictAction {
     /// target matches.
     Update {
         assignments: Vec<(String, Expr)>,
-        r#where: Option<Expr>,
+        r#where: Option<Box<Expr>>,
     },
 }
 
@@ -480,6 +504,7 @@ pub struct VacuumStmt {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Statement {
     CreateTable(CreateTable),
+    CreateTableIfNotExists(DeferredCreateTable),
     CreateIndex(CreateIndex),
     Insert(InsertStmt),
     /// `SelectStmt` is the largest variant by far (CTEs + set-ops + n-ary
@@ -654,6 +679,8 @@ pub enum Statement {
     CreateForeignServer(CreateForeignServer),
     /// `CREATE FOREIGN TABLE name (...) SERVER server OPTIONS (...)`.
     CreateForeignTable(CreateForeignTable),
+    /// `CREATE FOREIGN TABLE IF NOT EXISTS` retains its raw-parser declaration until execution can check the shared relation namespace.
+    CreateForeignTableIfNotExists(DeferredCreateForeignTable),
     /// `MERGE INTO target USING source ON cond WHEN MATCHED THEN ...
     /// WHEN NOT MATCHED THEN ...`. SQL:2003 conditional UPSERT.
     Merge(MergeStmt),
@@ -665,6 +692,7 @@ pub enum Statement {
     /// `ALTER FUNCTION | PROCEDURE | ROUTINE name[(input_types)]` volatility and null-input attributes.
     AlterRoutine(AlterRoutineStmt),
     AlterRoutineOwner(AlterRoutineOwnerStmt),
+    RenameRoutine(RenameRoutineStmt),
     GrantRoutine(GrantRoutineStmt),
     GrantTable(GrantTableStmt),
     GrantSequence(GrantSequenceStmt),
@@ -760,8 +788,18 @@ pub struct CreateForeignTable {
     pub name: String,
     pub server_name: String,
     pub columns: Vec<ColumnDef>,
+    #[serde(default)]
+    pub checks: Vec<TableCheck>,
     pub options: Vec<(String, String)>,
     pub if_not_exists: bool,
+}
+
+/// A syntactically valid `CREATE FOREIGN TABLE IF NOT EXISTS` whose definition must be analyzed only when its target name is free.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeferredCreateForeignTable {
+    pub name: String,
+    pub server_name: String,
+    pub definition_sql: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -105,6 +105,10 @@ pub(super) fn ensure_insert(engine: &Engine, statement: &InsertPlan) -> Result<S
         .iter()
         .map(|projection| &projection.expr)
         .collect::<Vec<_>>();
+    if let Some(conflict) = &statement.on_conflict {
+        expressions.extend(conflict.expressions.iter());
+        expressions.extend(conflict.predicate.iter().map(Box::as_ref));
+    }
     let required_columns = if let Some(ConflictPlan {
         conflict_columns,
         action:
@@ -112,6 +116,7 @@ pub(super) fn ensure_insert(engine: &Engine, statement: &InsertPlan) -> Result<S
                 assignments,
                 predicate,
             },
+        ..
     }) = statement.on_conflict.as_ref()
     {
         let update_columns = assignments
@@ -129,7 +134,7 @@ pub(super) fn ensure_insert(engine: &Engine, statement: &InsertPlan) -> Result<S
             )?;
         }
         expressions.extend(assignments.iter().map(|assignment| &assignment.value));
-        expressions.extend(predicate.iter());
+        expressions.extend(predicate.iter().map(Box::as_ref));
         conflict_columns.as_slice()
     } else {
         &[]

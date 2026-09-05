@@ -123,7 +123,8 @@ mod sequence_state_serde;
 mod value_index;
 
 pub(crate) use sql::dml::{
-    CommandExactIndex, CommandMutationOverlay, DeferredForeignKeyCheck, TransactionRowChange,
+    CommandExactIndex, CommandMutationOverlay, CommandStoredDocument, DeferredForeignKeyCheck,
+    TransactionRowChange,
 };
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -152,8 +153,8 @@ use uqa_storage::{
     PersistentStorageProvider, PersistentStorageSession, RelationIdentity,
     SQLiteCompressedContainerAnchor, SQLiteStorageProvider, SequenceOptions, SequenceOwner,
     SequenceOwnerDependency, SequenceReservationResult, SequenceRow, StorageBackendError,
-    StorageBackendResult, StorageSavepointId, TableSchema, VectorFieldSchema, VectorIndex,
-    VectorIndexOpenMode, VectorIndexSpec, ViewRow,
+    StorageBackendResult, StorageSavepointId, StoredDocument, TableSchema, VectorFieldSchema,
+    VectorIndex, VectorIndexOpenMode, VectorIndexSpec, ViewRow,
 };
 
 pub use engine_notifications::SQLNotification;
@@ -271,7 +272,8 @@ type SessionPortalViewSnapshots = Arc<BTreeMap<RelationIdentity, StoredView>>;
 type SessionPortalSQLFunctionSnapshots =
     Arc<BTreeMap<String, Vec<Arc<engine_user_functions::SQLUserFunction>>>>;
 type SessionPortalCatalogSnapshot = Arc<DurableCatalogSnapshot>;
-type SessionPortalTransactionOverlay = Arc<BTreeMap<String, BTreeMap<DocId, Option<Document>>>>;
+type SessionPortalTransactionOverlay =
+    Arc<BTreeMap<String, BTreeMap<DocId, Option<StoredDocument>>>>;
 type ColumnStatsMap = BTreeMap<String, uqa_planner::ColumnStats>;
 type TransactionRelationStates = BTreeMap<RelationIdentity, u64>;
 type FixedTransactionCatalogBaseline = BTreeMap<[u8; 16], (RelationIdentity, Vec<u8>)>;
@@ -715,6 +717,7 @@ struct TableDataSnapshot {
     document_store: Arc<dyn DocumentStore>,
     inverted_index: Arc<dyn InvertedIndex>,
     vector_indexes: BTreeMap<FieldName, Arc<dyn VectorIndex>>,
+    value_indexes: BTreeMap<uqa_storage::ValueIndexKey, value_index::ColumnValueIndex>,
     fts_fields: Vec<FieldName>,
     columns: Vec<uqa_sql::ast::ColumnDef>,
     /// One-past-the-last allocated document id. `u128` is intentional: it
@@ -776,7 +779,7 @@ pub(crate) struct TableState {
     /// Lazily built per-column value indexes for PRIMARY KEY / UNIQUE
     /// / `CREATE INDEX` btree columns. Maintained incrementally by the
     /// document write paths; cleared on bulk reloads.
-    value_indexes: RwLock<BTreeMap<FieldName, value_index::ColumnValueIndex>>,
+    value_indexes: RwLock<BTreeMap<uqa_storage::ValueIndexKey, value_index::ColumnValueIndex>>,
     /// Cached `document_store.len()`. Persistent stores answer `len`
     /// with a `COUNT(*)` query, which used to run once per SQL
     /// statement for planner row estimates; the cache is invalidated
@@ -838,6 +841,10 @@ fn new_table_object_id() -> StorageBackendResult<[u8; 16]> {
     new_nonzero_catalog_identity("table", "object identity")
 }
 
+fn new_view_object_id() -> StorageBackendResult<[u8; 16]> {
+    new_nonzero_catalog_identity("view", "object identity")
+}
+
 fn new_table_storage_generation() -> StorageBackendResult<[u8; 16]> {
     new_nonzero_catalog_identity("table", "storage generation")
 }
@@ -848,6 +855,10 @@ fn new_sequence_object_id() -> StorageBackendResult<[u8; 16]> {
 
 fn new_sequence_definition_generation() -> StorageBackendResult<[u8; 16]> {
     new_nonzero_catalog_identity("sequence", "definition generation")
+}
+
+fn new_routine_object_id() -> StorageBackendResult<[u8; 16]> {
+    new_nonzero_catalog_identity("routine", "object identity")
 }
 
 fn normalize_analyzer_config_value(value: &mut serde_json::Value) {

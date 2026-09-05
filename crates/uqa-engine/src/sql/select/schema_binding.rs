@@ -47,7 +47,7 @@ use catalog_sources::operator_join_relation_schemas;
 use cte_controls::{extend_recursive_cte_binding_schema, hide_recursive_generated_schema};
 use projection::{projection_star_columns, rename_schema};
 use scope::merge_types;
-use sources::{table_function_member_source, JoinSchemaBinding};
+use sources::{alias_table_schema, table_function_member_source, JoinSchemaBinding};
 use type_resolution::{set_operation_output_schema, QueryFunctionTypeResolver};
 
 use super::{
@@ -75,58 +75,6 @@ struct SchemaScope {
     visiting_views: BTreeSet<String>,
     validate_references: bool,
     stored_expression_outer: Option<RowSchema>,
-}
-
-impl SchemaScope {
-    fn query_function_type_resolver<'a>(
-        &mut self,
-        routines: &'a dyn RoutineResolution,
-        expression: &ScalarExpr,
-        schema: &RowSchema,
-        subqueries: &[QueryPlan],
-        params: &[SQLParam],
-        outer: Option<&RowSchema>,
-    ) -> Result<QueryFunctionTypeResolver<'a>, SQLError> {
-        self.query_function_type_resolver_for_subqueries(
-            routines,
-            expr_contains_subquery(expression),
-            schema,
-            subqueries,
-            params,
-            outer,
-        )
-    }
-
-    fn query_function_type_resolver_for_subqueries<'a>(
-        &mut self,
-        routines: &'a dyn RoutineResolution,
-        contains_subquery: bool,
-        schema: &RowSchema,
-        subqueries: &[QueryPlan],
-        params: &[SQLParam],
-        outer: Option<&RowSchema>,
-    ) -> Result<QueryFunctionTypeResolver<'a>, SQLError> {
-        if subqueries.is_empty() || !contains_subquery {
-            return Ok(QueryFunctionTypeResolver {
-                routines,
-                scalar_subquery_types: None,
-                defer_routine_namespace_errors: false,
-            });
-        }
-        let subquery_outer = self.validate_references.then_some(schema).or(outer);
-        let scalar_subquery_types = subqueries
-            .iter()
-            .map(|plan| {
-                self.bind_query(routines, plan, params, subquery_outer)
-                    .map(|output| output.column_type(0).cloned())
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(QueryFunctionTypeResolver {
-            routines,
-            scalar_subquery_types: Some(scalar_subquery_types),
-            defer_routine_namespace_errors: false,
-        })
-    }
 }
 
 impl SchemaScope {
@@ -522,17 +470,22 @@ impl SchemaScope {
                 name,
                 qualifier,
                 alias,
+                column_aliases,
                 ..
             } => {
                 let qualifier = alias.as_deref().unwrap_or(qualifier);
-                if let Some(schema) = self.ctes.get(name) {
-                    return Ok(rename_schema(schema, &[], Some(qualifier)));
+                let cte_name = super::cte_reference_name(name);
+                if let Some(schema) = cte_name.as_ref().and_then(|name| self.ctes.get(name)) {
+                    return alias_table_schema(schema, qualifier, column_aliases);
                 }
-                if let Some(plan) = self.deferred_ctes.remove(name) {
+                if let Some(plan) = cte_name.and_then(|name| self.deferred_ctes.remove(&name)) {
                     let result = self
                         .bind_query(routines, &plan.query, params, outer)
-                        .map(|schema| rename_schema(&schema, &plan.columns, Some(qualifier)));
-                    self.deferred_ctes.insert(name.clone(), plan);
+                        .and_then(|schema| {
+                            let schema = rename_schema(&schema, &plan.columns, Some(qualifier));
+                            alias_table_schema(&schema, qualifier, column_aliases)
+                        });
+                    self.deferred_ctes.insert(plan.name.clone(), plan);
                     return result;
                 }
                 if self
@@ -540,7 +493,7 @@ impl SchemaScope {
                     .sequence_resolved(&self.resolution, name)?
                     .is_some()
                 {
-                    return Ok(RowSchema::with_qualified_types(
+                    let schema = RowSchema::with_qualified_types(
                         qualifier,
                         vec!["last_value".into(), "log_cnt".into(), "is_called".into()],
                         vec![
@@ -548,7 +501,8 @@ impl SchemaScope {
                             Some(ColumnType::BigInteger),
                             Some(ColumnType::Boolean),
                         ],
-                    ));
+                    );
+                    return alias_table_schema(&schema, qualifier, column_aliases);
                 }
                 let view = self.catalog.view_resolved(&self.resolution, name)?.cloned();
                 if let Some(view) = view {
@@ -566,7 +520,7 @@ impl SchemaScope {
                             columns,
                             view.materialized_column_types,
                         );
-                        return Ok(schema);
+                        return alias_table_schema(&schema, qualifier, column_aliases);
                     }
                     let key = name.to_ascii_lowercase();
                     if !self.visiting_views.insert(key.clone()) {
@@ -574,15 +528,16 @@ impl SchemaScope {
                             "view `{name}` has a recursive schema dependency"
                         )));
                     }
-                    let result =
-                        self.bind_query(routines, &view.query, params, outer)
-                            .map(|schema| {
-                                rename_schema(
-                                    &schema,
-                                    view.output_columns.as_deref().unwrap_or(&[]),
-                                    Some(qualifier),
-                                )
-                            });
+                    let result = self
+                        .bind_query(routines, &view.query, params, outer)
+                        .and_then(|schema| {
+                            let schema = rename_schema(
+                                &schema,
+                                view.output_columns.as_deref().unwrap_or(&[]),
+                                Some(qualifier),
+                            );
+                            alias_table_schema(&schema, qualifier, column_aliases)
+                        });
                     self.visiting_views.remove(&key);
                     return result;
                 }
@@ -599,6 +554,7 @@ impl SchemaScope {
                         .map(|column| Some(column.ty.clone()))
                         .collect();
                     let schema = RowSchema::with_qualified_types(qualifier, columns, types);
+                    let schema = alias_table_schema(&schema, qualifier, column_aliases)?;
                     return Ok(analysis::with_table_pseudo_columns(&schema, qualifier));
                 }
                 let foreign_table = self
@@ -608,19 +564,15 @@ impl SchemaScope {
                     let typed_columns = foreign_table
                         .columns
                         .iter()
-                        .map(|column| {
-                            (
-                                column.name.clone(),
-                                crate::engine_fdw::fdw_column_type_to_sql(&column.ty),
-                            )
-                        })
+                        .map(|column| (column.name.clone(), column.ty.clone()))
                         .collect::<Vec<_>>();
                     let columns = typed_columns
                         .iter()
                         .map(|(column, _)| column.clone())
                         .collect();
                     let types = typed_columns.into_iter().map(|(_, ty)| Some(ty)).collect();
-                    return Ok(RowSchema::with_qualified_types(qualifier, columns, types));
+                    let schema = RowSchema::with_qualified_types(qualifier, columns, types);
+                    return alias_table_schema(&schema, qualifier, column_aliases);
                 }
                 if let Some(schema) =
                     virtual_relation_schema(&self.catalog, &self.resolution, name)?
@@ -629,7 +581,8 @@ impl SchemaScope {
                         .into_iter()
                         .map(|(column, ty)| (column, Some(ty)))
                         .unzip();
-                    return Ok(RowSchema::with_qualified_types(qualifier, columns, types));
+                    let schema = RowSchema::with_qualified_types(qualifier, columns, types);
+                    return alias_table_schema(&schema, qualifier, column_aliases);
                 }
                 Err(SQLError::UnknownTable(name.clone()))
             }

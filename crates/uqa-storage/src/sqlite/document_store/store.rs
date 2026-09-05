@@ -9,9 +9,9 @@
 use super::{
     blob_marker, decode_json_field_value, decode_legacy_document_body, delete_document_blob,
     document_id_from_sqlite, encode_document_blobs, encode_stored_value, hydrate_document_blobs,
-    params, sqlite_doc_id, upsert_document_blob, BTreeMap, DocId, Document, ManagedConnection,
-    OptionalExtension, SQLiteDocumentStore, SQLiteResult, StorageBackendResult, Value,
-    DOCUMENT_BLOBS_TABLE,
+    params, sqlite_doc_id, upsert_document_blob, BTreeMap, DocId, Document, DocumentMetadata,
+    ManagedConnection, OptionalExtension, SQLiteDocumentStore, SQLiteResult, StorageBackendResult,
+    StoredDocument, Value, DOCUMENT_BLOBS_TABLE,
 };
 
 impl SQLiteDocumentStore {
@@ -31,7 +31,12 @@ impl SQLiteDocumentStore {
         })?)
     }
 
-    pub(super) fn put_inner(&self, doc_id: DocId, document: &Document) -> SQLiteResult<()> {
+    pub(super) fn put_stored_inner(
+        &self,
+        doc_id: DocId,
+        document: &Document,
+        metadata: DocumentMetadata,
+    ) -> SQLiteResult<()> {
         let sqlite_doc_id = sqlite_doc_id(doc_id)?;
         let document: Document = document
             .iter()
@@ -47,12 +52,17 @@ impl SQLiteDocumentStore {
             ))?
             .execute(params![self.table, sqlite_doc_id])?;
             c.prepare_cached(
-                "INSERT INTO _documents (table_name, doc_id, body)
-                 VALUES (?1, ?2, ?3)
+                "INSERT INTO _documents (table_name, doc_id, body, tuple_xmin)
+                 VALUES (?1, ?2, ?3, ?4)
                  ON CONFLICT (table_name, doc_id)
-                 DO UPDATE SET body = excluded.body",
+                 DO UPDATE SET body = excluded.body, tuple_xmin = excluded.tuple_xmin",
             )?
-            .execute(params![self.table, sqlite_doc_id, body])?;
+            .execute(params![
+                self.table,
+                sqlite_doc_id,
+                body,
+                metadata.tuple_xmin().map(i64::from),
+            ])?;
             for (field, bytes) in blobs {
                 c.prepare_cached(&format!(
                     "INSERT OR REPLACE INTO {DOCUMENT_BLOBS_TABLE}
@@ -66,21 +76,41 @@ impl SQLiteDocumentStore {
     }
 
     pub(super) fn get_inner(&self, doc_id: DocId) -> SQLiteResult<Option<Document>> {
+        self.get_stored_inner(doc_id)
+            .map(|document| document.map(StoredDocument::into_fields))
+    }
+
+    pub(super) fn get_stored_inner(&self, doc_id: DocId) -> SQLiteResult<Option<StoredDocument>> {
         let sqlite_doc_id = sqlite_doc_id(doc_id)?;
         self.conn.with(|c| {
-            let body: Option<String> = c
+            let stored: Option<(String, Option<i64>)> = c
                 .prepare_cached(
-                    "SELECT body FROM _documents
+                    "SELECT body, tuple_xmin FROM _documents
                      WHERE table_name = ?1 AND doc_id = ?2",
                 )?
-                .query_row(params![self.table, sqlite_doc_id], |r| r.get(0))
+                .query_row(params![self.table, sqlite_doc_id], |row| {
+                    Ok((row.get(0)?, row.get(1)?))
+                })
                 .optional()?;
-            let Some(body) = body else {
+            let Some((body, tuple_xmin)) = stored else {
                 return Ok(None);
             };
             let mut document = decode_legacy_document_body(&body)?;
             hydrate_document_blobs(c, &self.table, doc_id, &mut document)?;
-            Ok(Some(document))
+            let metadata = tuple_xmin.map_or_else(
+                || Ok(DocumentMetadata::default()),
+                |tuple_xmin| {
+                    u32::try_from(tuple_xmin)
+                        .map(DocumentMetadata::with_tuple_xmin)
+                        .map_err(|_| {
+                            super::SQLiteError::StorageBackend(format!(
+                                "document `{}` row {doc_id} has an out-of-range tuple xmin",
+                                self.table
+                            ))
+                        })
+                },
+            )?;
+            Ok(Some(StoredDocument::with_metadata(document, metadata)))
         })
     }
 

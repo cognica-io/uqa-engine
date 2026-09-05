@@ -634,13 +634,22 @@ impl Statement {
                     changed |= source.upgrade_legacy_serialized_dispatches();
                 }
                 if let Some(conflict) = &mut insert.on_conflict {
+                    for expression in &mut conflict.expressions {
+                        changed |= expression.upgrade_legacy_serialized_dispatches();
+                    }
+                    changed |= conflict
+                        .predicate
+                        .as_deref_mut()
+                        .is_some_and(Expr::upgrade_legacy_serialized_dispatches);
                     if let OnConflictAction::Update {
                         assignments,
                         r#where,
                     } = &mut conflict.action
                     {
                         changed |= upgrade_assignments(assignments);
-                        changed |= upgrade_optional(r#where);
+                        changed |= r#where
+                            .as_deref_mut()
+                            .is_some_and(Expr::upgrade_legacy_serialized_dispatches);
                     }
                 }
                 changed | upgrade_projections(&mut insert.returning)
@@ -706,6 +715,7 @@ impl Statement {
                 changed
             }
             Self::CreateTable(_)
+            | Self::CreateTableIfNotExists(_)
             | Self::CreateIndex(_)
             | Self::Drop(_)
             | Self::AlterTable(_)
@@ -734,9 +744,11 @@ impl Statement {
             | Self::Deallocate { .. }
             | Self::CreateForeignServer(_)
             | Self::CreateForeignTable(_)
+            | Self::CreateForeignTableIfNotExists(_)
             | Self::DropFunction(_)
             | Self::AlterRoutine(_)
             | Self::AlterRoutineOwner(_)
+            | Self::RenameRoutine(_)
             | Self::GrantRoutine(_)
             | Self::GrantTable(_)
             | Self::GrantSequence(_)

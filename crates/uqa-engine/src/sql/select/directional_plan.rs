@@ -399,7 +399,7 @@ fn function_may_return_set_statically(
         return false;
     }
     let overloads = match binding {
-        Some(binding) => engine.lookup_bound_sql_functions(&binding.name),
+        Some(binding) => engine.lookup_bound_sql_functions_by_binding(binding),
         None => engine
             .lookup_visible_sql_functions_for_analysis(name)
             .ok()

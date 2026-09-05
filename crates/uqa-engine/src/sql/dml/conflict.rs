@@ -9,17 +9,20 @@
 use super::{
     bind_projection_output_schema, build_projection_physical_row_with_ctes,
     dml_append_hidden_qualified_row, dml_storage_error, dml_target_row, doc_id_value,
-    eval_mutation_assignment, eval_mutation_expr, key_constraint_values,
-    lock_document_key_dependencies, lock_mutation_target, missing_document_error,
-    prepare_document_rewrite, reject_partition_rewrite, update_lock_strength, BTreeSet,
-    ConflictActionPlan, ConflictPlan, CteScope, DocId, Document, Engine, MutationAssignmentTarget,
-    MutationLockCleanup, MutationLockTarget, MutationRowImage, MutationRowImages,
-    PhysicalDocumentIdentity, PreparedInsertConflict, ProjectionPlan, SQLError, SQLParam,
-    SQLResult, Value, DOC_ID_COLUMN, TABLE_OID_COLUMN,
+    eval_mutation_assignment, eval_mutation_expr, lock_document_key_dependencies,
+    lock_mutation_target, missing_document_error, prepare_document_rewrite,
+    reject_partition_rewrite, update_lock_strength, BTreeSet, ConflictActionPlan, ConflictPlan,
+    CteScope, DocId, Document, Engine, MutationAssignmentTarget, MutationLockCleanup,
+    MutationLockTarget, MutationRowImage, MutationRowImages, PhysicalDocumentIdentity,
+    PreparedInsertConflict, ProjectionPlan, SQLError, SQLParam, SQLResult, Value, DOC_ID_COLUMN,
+    TABLE_OID_COLUMN,
 };
 use rusqlite::OptionalExtension;
 use uqa_execution::{ColumnIdentity, OwnedPhysicalRow, PhysicalRow, RowSchema};
 use uqa_sql::ast::{ReturningAliases, Statement};
+
+mod inference;
+pub(in crate::sql) use inference::{prepare_inference_predicate, validate_conflict_target};
 
 enum CurrentInsertConflict {
     Overlay,
@@ -40,7 +43,7 @@ pub(in crate::sql) struct InsertConflictPreparation<'a> {
 struct InsertConflictOverlay {
     connection: rusqlite::Connection,
     _directory: tempfile::TempDir,
-    constraints: Vec<uqa_sql::ast::TableKeyConstraint>,
+    constraints: Vec<crate::engine_catalog_indexes::EnforcedKey>,
     relevant_constraints: Vec<usize>,
     next_insert_identity: u64,
 }
@@ -48,35 +51,10 @@ struct InsertConflictOverlay {
 impl InsertConflictOverlay {
     fn new(engine: &Engine, table: &str, on_conflict: &ConflictPlan) -> Result<Self, SQLError> {
         let constraints = engine
-            .try_key_constraints(table)
+            .enforced_keys(table)
             .map_err(|error| dml_storage_error("INSERT conflict overlay", error))?;
-        let relevant_constraints = if on_conflict.conflict_columns.is_empty() {
-            (0..constraints.len()).collect()
-        } else {
-            let target = on_conflict
-                .conflict_columns
-                .iter()
-                .map(String::as_str)
-                .collect::<BTreeSet<_>>();
-            let index = constraints
-                .iter()
-                .position(|constraint| {
-                    constraint.columns.len() == target.len()
-                        && constraint
-                            .columns
-                            .iter()
-                            .map(String::as_str)
-                            .collect::<BTreeSet<_>>()
-                            == target
-                })
-                .ok_or_else(|| {
-                    SQLError::TypeMismatch(format!(
-                        "ON CONFLICT target ({}) does not match a PRIMARY KEY or UNIQUE constraint",
-                        on_conflict.conflict_columns.join(", ")
-                    ))
-                })?;
-            vec![index]
-        };
+        let relevant_constraints =
+            inference::conflict_key_indices(engine, table, &constraints, on_conflict)?;
         let directory = tempfile::Builder::new()
             .prefix("uqa-insert-conflict-")
             .tempdir()
@@ -127,7 +105,7 @@ impl InsertConflictOverlay {
             let constraint_index = i64::try_from(index).map_err(|_| {
                 SQLError::Internal("INSERT conflict constraint index exceeds i64".into())
             })?;
-            let Some(values) = key_constraint_values(constraint, document) else {
+            let Some(values) = constraint.values(engine, table, document)? else {
                 continue;
             };
             let key = uqa_execution::canonical_row_key(&values)
@@ -146,7 +124,7 @@ impl InsertConflictOverlay {
             if overlay.is_some() {
                 return Ok(Some(CurrentInsertConflict::Overlay));
             }
-            let Some(doc_id) = engine.find_conflict(table, &constraint.columns, &values)? else {
+            let Some(doc_id) = constraint.find_conflict(engine, table, &values, None)? else {
                 continue;
             };
             let overridden = self
@@ -174,18 +152,24 @@ impl InsertConflictOverlay {
         Ok(None)
     }
 
-    fn note_insert(&mut self, table: &str, document: &Document) -> Result<(), SQLError> {
+    fn note_insert(
+        &mut self,
+        engine: &Engine,
+        table: &str,
+        document: &Document,
+    ) -> Result<(), SQLError> {
         let mut identity = Vec::with_capacity(9);
         identity.push(b'i');
         identity.extend_from_slice(&self.next_insert_identity.to_be_bytes());
         self.next_insert_identity = self.next_insert_identity.checked_add(1).ok_or_else(|| {
             SQLError::Internal("INSERT conflict overlay identity space is exhausted".into())
         })?;
-        self.note_keys(table, &identity, document)
+        self.note_keys(engine, table, &identity, document)
     }
 
     fn note_update(
         &mut self,
+        engine: &Engine,
         base: &PhysicalDocumentIdentity,
         document: &Document,
     ) -> Result<(), SQLError> {
@@ -202,11 +186,12 @@ impl InsertConflictOverlay {
                     "record overridden INSERT conflict document: {error}"
                 ))
             })?;
-        self.note_keys(&base.table, &overlay_identity, document)
+        self.note_keys(engine, &base.table, &overlay_identity, document)
     }
 
     fn note_keys(
         &mut self,
+        engine: &Engine,
         table: &str,
         identity: &[u8],
         document: &Document,
@@ -215,7 +200,7 @@ impl InsertConflictOverlay {
             let constraint_index = i64::try_from(index).map_err(|_| {
                 SQLError::Internal("INSERT conflict constraint index exceeds i64".into())
             })?;
-            let Some(values) = key_constraint_values(constraint, document) else {
+            let Some(values) = constraint.values(engine, table, document)? else {
                 continue;
             };
             let key = uqa_execution::canonical_row_key(&values)
@@ -247,47 +232,14 @@ pub(in crate::sql) fn find_insert_conflict(
     document: &Document,
 ) -> Result<Option<PhysicalDocumentIdentity>, SQLError> {
     let constraints = engine
-        .try_key_constraints(table)
+        .enforced_keys(table)
         .map_err(|err| dml_storage_error("INSERT conflict lookup", err))?;
-    if !on_conflict.conflict_columns.is_empty() {
-        let target: BTreeSet<&str> = on_conflict
-            .conflict_columns
-            .iter()
-            .map(String::as_str)
-            .collect();
-        let constraint = constraints
-            .iter()
-            .find(|constraint| {
-                constraint.columns.len() == target.len()
-                    && constraint
-                        .columns
-                        .iter()
-                        .map(String::as_str)
-                        .collect::<BTreeSet<_>>()
-                        == target
-            })
-            .ok_or_else(|| {
-                SQLError::TypeMismatch(format!(
-                    "ON CONFLICT target ({}) does not match a PRIMARY KEY or UNIQUE constraint",
-                    on_conflict.conflict_columns.join(", ")
-                ))
-            })?;
-        let Some(conflict_values) = key_constraint_values(constraint, document) else {
-            return Ok(None);
-        };
-        return Ok(engine
-            .find_conflict(table, &constraint.columns, &conflict_values)?
-            .map(|doc_id| PhysicalDocumentIdentity {
-                table: table.to_string(),
-                doc_id,
-            }));
-    }
-
-    for constraint in &constraints {
-        let Some(values) = key_constraint_values(constraint, document) else {
+    for index in inference::conflict_key_indices(engine, table, &constraints, on_conflict)? {
+        let constraint = &constraints[index];
+        let Some(values) = constraint.values(engine, table, document)? else {
             continue;
         };
-        if let Some(doc_id) = engine.find_conflict(table, &constraint.columns, &values)? {
+        if let Some(doc_id) = constraint.find_conflict(engine, table, &values, None)? {
             return Ok(Some(PhysicalDocumentIdentity {
                 table: table.to_string(),
                 doc_id,
@@ -334,14 +286,7 @@ fn build_conflict_update(
         &mut excluded_document,
     )?;
     let excluded_columns = if definitions.is_empty() {
-        excluded_document
-            .keys()
-            .filter(|column| {
-                column.as_str() != crate::sql::XMIN_STORAGE_COLUMN
-                    && column.as_str() != crate::sql::XMIN_USER_STORAGE_COLUMN
-            })
-            .cloned()
-            .collect::<Vec<_>>()
+        excluded_document.keys().cloned().collect::<Vec<_>>()
     } else {
         definitions
             .iter()
@@ -512,7 +457,7 @@ impl InsertConflictLocks {
                 self.overlay
                     .as_mut()
                     .ok_or_else(|| SQLError::Internal("INSERT conflict overlay is absent".into()))?
-                    .note_insert(table, document)?;
+                    .note_insert(engine, table, document)?;
                 return Ok(PreparedInsertConflict::Unresolved);
             }
             Some(CurrentInsertConflict::Overlay) => {
@@ -535,7 +480,7 @@ impl InsertConflictLocks {
                 self.overlay
                     .as_mut()
                     .ok_or_else(|| SQLError::Internal("INSERT conflict overlay is absent".into()))?
-                    .note_insert(table, document)?;
+                    .note_insert(engine, table, document)?;
                 return Ok(PreparedInsertConflict::Unresolved);
             }
             Some(CurrentInsertConflict::Overlay) => {
@@ -562,7 +507,7 @@ impl InsertConflictLocks {
             existing.doc_id,
             document,
             assignments,
-            predicate.as_ref(),
+            predicate.as_deref(),
             params,
             scope,
         )? {
@@ -608,7 +553,7 @@ impl InsertConflictLocks {
                 self.overlay
                     .as_mut()
                     .ok_or_else(|| SQLError::Internal("INSERT conflict overlay is absent".into()))?
-                    .note_update(&existing, &prepared.new_document)?;
+                    .note_update(engine, &existing, &prepared.new_document)?;
                 Ok(PreparedInsertConflict::Updated(prepared))
             }
         }

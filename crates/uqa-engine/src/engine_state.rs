@@ -177,6 +177,9 @@ impl StorageContext {
 /// One bound view query together with the fixed public column names captured when the view was created. `None` exists only while the catalog-opening migration reads formats written before column metadata was persisted.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct StoredView {
+    /// Stable logical relation identity. Renames and replacement preserve it; a zero value marks a legacy catalog row upgraded during initial open.
+    #[serde(default)]
+    pub(crate) object_id: [u8; 16],
     /// Durable SQL-role owner loaded from the typed view catalog row. The query-definition JSON deliberately excludes ownership so catalog definition and authorization state cannot disagree.
     #[serde(skip)]
     pub(crate) role_owner: String,
@@ -253,7 +256,8 @@ pub(super) struct DurableCatalogState {
     pub(super) named_analyzers: RwLock<BTreeMap<String, String>>,
     pub(super) table_field_analyzers: RwLock<TableFieldAnalyzerRegistry>,
     pub(super) foreign_servers: RwLock<BTreeMap<String, uqa_fdw::ForeignServer>>,
-    pub(super) foreign_tables: RwLock<BTreeMap<RelationIdentity, uqa_fdw::ForeignTable>>,
+    pub(super) foreign_tables:
+        RwLock<BTreeMap<RelationIdentity, super::engine_fdw::StoredForeignTable>>,
     pub(super) foreign_table_security: RwLock<BTreeMap<RelationIdentity, TableSecurity>>,
     pub(super) sql_user_functions:
         RwLock<BTreeMap<String, Vec<Arc<super::engine_user_functions::SQLUserFunction>>>>,
@@ -289,7 +293,7 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) named_analyzers: BTreeMap<String, String>,
     pub(super) table_field_analyzers: TableFieldAnalyzerRegistry,
     pub(super) foreign_servers: BTreeMap<String, uqa_fdw::ForeignServer>,
-    pub(super) foreign_tables: BTreeMap<RelationIdentity, uqa_fdw::ForeignTable>,
+    pub(super) foreign_tables: BTreeMap<RelationIdentity, super::engine_fdw::StoredForeignTable>,
     pub(super) foreign_table_security: BTreeMap<RelationIdentity, TableSecurity>,
     pub(super) sql_user_functions:
         BTreeMap<String, Vec<Arc<super::engine_user_functions::SQLUserFunction>>>,

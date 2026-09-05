@@ -13,6 +13,21 @@ use super::{
     StoredView, StoredViewKind, ViewRegistration,
 };
 
+fn resolve_loaded_sequence_reference_for_query_binding(
+    engine: &Engine,
+    reference: &str,
+) -> crate::StorageBackendResult<String> {
+    let sequences = engine.durable.sequences.read();
+    engine
+        .relation_lookup_candidates(reference)?
+        .into_iter()
+        .find(|candidate| sequences.contains_key(candidate))
+        .map(|candidate| candidate.qualified_name())
+        .ok_or_else(|| {
+            crate::StorageBackendError::Other(format!("Sequence `{reference}` does not exist"))
+        })
+}
+
 impl Engine {
     pub(super) fn bind_view_plan_for_create(&self, plan: &mut QueryPlan) -> Result<bool, SQLError> {
         self.bind_stored_query_relations(plan, "CREATE VIEW", true)
@@ -24,6 +39,36 @@ impl Engine {
         plan: &mut QueryPlan,
         context: &str,
         reject_transition_relations: bool,
+    ) -> Result<bool, SQLError> {
+        self.bind_stored_query_relations_with_loaded_catalog(
+            plan,
+            context,
+            reject_transition_relations,
+            false,
+        )
+    }
+
+    /// Bind a stored query while catalog restoration already owns the synchronization boundary.
+    pub(crate) fn bind_loaded_stored_query_relations(
+        &self,
+        plan: &mut QueryPlan,
+        context: &str,
+        reject_transition_relations: bool,
+    ) -> Result<bool, SQLError> {
+        self.bind_stored_query_relations_with_loaded_catalog(
+            plan,
+            context,
+            reject_transition_relations,
+            true,
+        )
+    }
+
+    fn bind_stored_query_relations_with_loaded_catalog(
+        &self,
+        plan: &mut QueryPlan,
+        context: &str,
+        reject_transition_relations: bool,
+        loaded_catalog: bool,
     ) -> Result<bool, SQLError> {
         let temporary_schema = self.temporary_schema_name();
         let transition_relations = crate::sql::active_trigger_transition_relation_names();
@@ -54,7 +99,13 @@ impl Engine {
                 }
                 return Ok(reference.to_string());
             }
-            match self.try_resolve_visible_relation_kind(reference)? {
+            let resolved = if loaded_catalog {
+                self.resolve_loaded_visible_relation_kind(reference)?
+                    .into_found()
+            } else {
+                self.try_resolve_visible_relation_kind(reference)?
+            };
+            match resolved {
                 Some((canonical, "table" | "view" | "materialized view" | "foreign table")) => {
                     uses_temporary_relation |= RelationIdentity::from_legacy_name(&canonical)
                         .is_ok_and(|relation| relation.schema == temporary_schema);
@@ -70,12 +121,16 @@ impl Engine {
             }
         })?;
         bind_query_plan_sequence_references(plan, &mut |reference| {
-            self.resolve_sequence_reference_for_binding(reference)
-                .map_err(|error| {
-                    SQLError::Unsupported(format!(
-                        "{context} sequence reference `{reference}`: {error}"
-                    ))
-                })
+            let resolved = if loaded_catalog {
+                resolve_loaded_sequence_reference_for_query_binding(self, reference)
+            } else {
+                self.resolve_sequence_reference_for_binding(reference)
+            };
+            resolved.map_err(|error| {
+                SQLError::Unsupported(format!(
+                    "{context} sequence reference `{reference}`: {error}"
+                ))
+            })
         })?;
         Ok(uses_temporary_relation)
     }
@@ -201,7 +256,15 @@ impl Engine {
         let replacement_schema = named_view_schema(&query_schema, &output_columns)?;
         let existing_view =
             self.replacement_view(&name, &relation, or_replace, &replacement_schema)?;
+        let object_id = if let Some(existing) = existing_view.as_ref() {
+            existing.object_id
+        } else {
+            crate::new_view_object_id().map_err(|error| {
+                SQLError::Internal(format!("allocate view `{name}` identity: {error}"))
+            })?
+        };
         let view = StoredView {
+            object_id,
             role_owner: existing_view
                 .as_ref()
                 .map_or_else(|| self.current_user_name(), |view| view.role_owner.clone()),

@@ -112,6 +112,54 @@ impl Catalog {
         })
     }
 
+    pub fn rename_foreign_table(
+        &self,
+        from: &RelationIdentity,
+        to: &RelationIdentity,
+    ) -> Result<bool> {
+        if from.schema != to.schema {
+            return Err(SQLiteError::StorageBackend(
+                "moving a foreign table between schemas is not supported by the catalog".into(),
+            ));
+        }
+        self.conn.with_mut(|connection| {
+            let source_exists = connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM _foreign_tables WHERE schema_name = ?1 AND relation_name = ?2)",
+                params![from.schema, from.name],
+                |row| row.get::<_, bool>(0),
+            )?;
+            if from == to || !source_exists {
+                return Ok(source_exists);
+            }
+            let target_exists = connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM _relations WHERE schema_name = ?1 AND relation_name = ?2)",
+                params![to.schema, to.name],
+                |row| row.get::<_, bool>(0),
+            )?;
+            if target_exists {
+                return Err(SQLiteError::StorageBackend(format!(
+                    "relation `{}` already exists",
+                    to.qualified_name()
+                )));
+            }
+            let tx = connection.savepoint()?;
+            Self::claim_relation(&tx, to, RelationKind::ForeignTable)?;
+            let updated = tx.execute(
+                "UPDATE _foreign_tables SET schema_name = ?3, relation_name = ?4 WHERE schema_name = ?1 AND relation_name = ?2",
+                params![from.schema, from.name, to.schema, to.name],
+            )?;
+            if updated != 1 {
+                return Err(SQLiteError::StorageBackend(format!(
+                    "foreign table `{}` disappeared during rename",
+                    from.qualified_name()
+                )));
+            }
+            Self::release_relation(&tx, from, RelationKind::ForeignTable)?;
+            tx.commit()?;
+            Ok(true)
+        })
+    }
+
     pub fn drop_foreign_table(&self, relation: &RelationIdentity) -> Result<()> {
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
@@ -176,6 +224,25 @@ impl Catalog {
         columns_json: &str,
         parameters_json: &str,
     ) -> Result<()> {
+        self.save_catalog_index_row(&CatalogIndexRow {
+            relation: relation.clone(),
+            index_type: index_type.to_string(),
+            table_name: table_name.to_string(),
+            columns_json: columns_json.to_string(),
+            parameters_json: parameters_json.to_string(),
+            definition_json: None,
+        })
+    }
+
+    pub fn save_catalog_index_row(&self, index: &CatalogIndexRow) -> Result<()> {
+        let CatalogIndexRow {
+            relation,
+            index_type,
+            table_name,
+            columns_json,
+            parameters_json,
+            definition_json,
+        } = index;
         let table =
             RelationIdentity::from_legacy_name(table_name).map_err(SQLiteError::StorageBackend)?;
         if relation.schema != table.schema {
@@ -191,14 +258,15 @@ impl Catalog {
             tx.execute(
                 "INSERT INTO _catalog_indexes
                     (schema_name, relation_name, kind, index_type, table_schema_name,
-                     table_relation_name, columns, parameters)
-                 VALUES (?1, ?2, 'index', ?3, ?4, ?5, ?6, ?7)
+                     table_relation_name, columns, parameters, definition)
+                 VALUES (?1, ?2, 'index', ?3, ?4, ?5, ?6, ?7, ?8)
                  ON CONFLICT(schema_name, relation_name) DO UPDATE SET
                      index_type = excluded.index_type,
                      table_schema_name = excluded.table_schema_name,
                      table_relation_name = excluded.table_relation_name,
                      columns = excluded.columns,
-                     parameters = excluded.parameters",
+                     parameters = excluded.parameters,
+                     definition = excluded.definition",
                 params![
                     relation.schema,
                     relation.name,
@@ -206,7 +274,8 @@ impl Catalog {
                     table.schema,
                     table.name,
                     columns_json,
-                    parameters_json
+                    parameters_json,
+                    definition_json
                 ],
             )?;
             tx.commit()?;
@@ -274,7 +343,7 @@ impl Catalog {
         self.conn.with(|c| {
             let mut stmt = c.prepare(
                 "SELECT schema_name, relation_name, index_type,
-                        table_schema_name, table_relation_name, columns, parameters
+                        table_schema_name, table_relation_name, columns, parameters, definition
                    FROM _catalog_indexes ORDER BY schema_name, relation_name",
             )?;
             let rows = stmt.query_map([], |r| {
@@ -286,17 +355,20 @@ impl Catalog {
                     r.get::<_, String>(4)?,
                     r.get::<_, String>(5)?,
                     r.get::<_, String>(6)?,
+                    r.get::<_, Option<String>>(7)?,
                 ))
             })?;
             let mut out = Vec::new();
             for row in rows {
-                let (schema, name, ty, table_schema, table_name, cols, params_json) = row?;
+                let (schema, name, ty, table_schema, table_name, cols, params_json, definition) =
+                    row?;
                 out.push(CatalogIndexRow {
                     relation: RelationIdentity::new(schema, name),
                     index_type: ty,
                     table_name: RelationIdentity::new(table_schema, table_name).qualified_name(),
                     columns_json: cols,
                     parameters_json: params_json,
+                    definition_json: definition,
                 });
             }
             Ok(out)

@@ -13,6 +13,10 @@ use crate::engine_capabilities::RelationResolution;
 use crate::engine_state::SequenceSecurity;
 use uqa_sql::ast::RelationPersistence;
 
+mod dependencies;
+
+pub(crate) use dependencies::SequenceSchemaDependent;
+
 impl Engine {
     /// Resolve a sequence reference at DDL binding time using the current
     /// `search_path`. Persisted expressions must store the returned canonical
@@ -51,17 +55,7 @@ impl Engine {
         ))
     }
 
-    /// Resolve a reference read from legacy persisted metadata without using
-    /// the current session's `search_path`. An unqualified local name is safe
-    /// only when exactly one catalog sequence has that name.
-    pub(crate) fn resolve_stored_sequence_reference(
-        &self,
-        reference: &str,
-    ) -> StorageBackendResult<String> {
-        self.refresh_sequences_from_catalog()?;
-        self.resolve_stored_sequence_reference_from_loaded_registry(reference)
-    }
-
+    /// Resolve a reference read from persisted metadata against the loaded registry without using the current session's `search_path`. An unqualified local name is safe only when exactly one catalog sequence has that name.
     pub(crate) fn resolve_stored_sequence_reference_from_loaded_registry(
         &self,
         reference: &str,
@@ -157,29 +151,27 @@ impl Engine {
         })
     }
 
-    pub(crate) fn create_sequence_with_persistence(
+    pub(crate) fn create_implicit_sequence_with_persistence(
         &self,
         name: &str,
         start: i64,
         increment: i64,
         data_type: SequenceDataType,
-        if_not_exists: bool,
         persistence: uqa_sql::ast::RelationPersistence,
-    ) -> Result<bool, String> {
-        self.with_implicit_string_transaction(|engine| {
-            engine
-                .create_sequence_inner(
-                    name,
-                    Self::default_sequence_state(start, increment, data_type),
-                    if_not_exists,
-                    persistence,
-                    &uqa_sql::ast::SequenceOwnership::Unchanged,
-                )
-                .map_err(|error| error.to_string())
+    ) -> Result<(), SQLError> {
+        self.with_implicit_transaction(|engine| {
+            engine.create_sequence_inner(
+                name,
+                Self::default_sequence_state(start, increment, data_type),
+                false,
+                persistence,
+                &uqa_sql::ast::SequenceOwnership::Unchanged,
+            )?;
+            Ok(())
         })
     }
 
-    fn default_sequence_state(
+    pub(crate) fn default_sequence_state(
         start: i64,
         increment: i64,
         data_type: SequenceDataType,
@@ -382,7 +374,7 @@ impl Engine {
             {
                 let owner_table = self
                     .sequence_owner_target(state.owner.expect("identity owner was checked"))
-                    .map_or_else(|| "<missing>".into(), |(table, _)| table);
+                    .map_or_else(|| "<missing>".into(), |(table, _, _)| table);
                 return Err(SQLError::Routine {
                     sqlstate: "0A000".into(),
                     message: format!(
@@ -698,203 +690,6 @@ impl Engine {
             )));
         }
         Ok(())
-    }
-
-    pub fn drop_sequence(&self, name: &str) -> Result<bool, String> {
-        self.with_implicit_string_transaction(|engine| engine.drop_sequence_inner(name))
-    }
-
-    fn drop_sequence_inner(&self, name: &str) -> Result<bool, String> {
-        let Some(name) = self
-            .try_resolve_sequence_name(name)
-            .map_err(|err| format!("load sequence catalog: {err}"))?
-        else {
-            return Ok(false);
-        };
-        self.drop_sequences_sql_inner(std::slice::from_ref(&name), false)
-            .map_err(|error| error.to_string())?;
-        Ok(true)
-    }
-
-    pub(crate) fn drop_sequences_sql_inner(
-        &self,
-        names: &[String],
-        cascade: bool,
-    ) -> Result<(), SQLError> {
-        self.drop_sequences_sql_inner_with_owner(names, cascade, false)
-    }
-
-    fn drop_sequences_sql_inner_with_owner(
-        &self,
-        names: &[String],
-        cascade: bool,
-        owner_initiated: bool,
-    ) -> Result<(), SQLError> {
-        let mut cascade_columns = Vec::new();
-        let mut direct_views = Vec::new();
-        for name in names {
-            if !owner_initiated {
-                let relation = Self::resolved_relation_identity(name).map_err(|error| {
-                    SQLError::Internal(format!("resolve sequence `{name}`: {error}"))
-                })?;
-                self.ensure_sequence_owner(name, &relation)?;
-                let owner = self
-                    .durable
-                    .sequences
-                    .read()
-                    .get(&relation)
-                    .and_then(|state| state.owner)
-                    .filter(|owner| owner.dependency == SequenceOwnerDependency::Internal);
-                if let Some(owner) = owner {
-                    let (table, column) = self.sequence_owner_target(owner).ok_or_else(|| {
-                        SQLError::Internal(format!(
-                            "identity sequence `{name}` has a dangling owner dependency"
-                        ))
-                    })?;
-                    return Err(SQLError::Routine {
-                        sqlstate: "2BP01".into(),
-                        message: format!(
-                            "cannot drop sequence {name} because column {column} of table {table} requires it"
-                        ),
-                    });
-                }
-            }
-            let columns = self
-                .sequence_schema_expression_dependents(name)
-                .map_err(|error| {
-                    SQLError::Internal(format!(
-                        "inspect column dependencies for sequence `{name}`: {error}"
-                    ))
-                })?;
-            let views = self.views_depending_on_sequence(name).map_err(|error| {
-                SQLError::Internal(format!(
-                    "inspect view dependencies for sequence `{name}`: {error}"
-                ))
-            })?;
-            if !cascade && (!columns.is_empty() || !views.is_empty()) {
-                let mut dependents = columns
-                    .iter()
-                    .map(|(table, column)| format!("{table}.{column}"))
-                    .collect::<Vec<_>>();
-                dependents.extend(views.iter().map(|view| format!("view {view}")));
-                return Err(SQLError::Routine {
-                    sqlstate: "2BP01".into(),
-                    message: format!(
-                        "cannot drop sequence {name} because other objects depend on it: {}",
-                        dependents.join(", ")
-                    ),
-                });
-            }
-            cascade_columns.extend(columns);
-            direct_views.extend(views);
-        }
-        cascade_columns.sort();
-        cascade_columns.dedup();
-        let cascade_views = self.cascade_view_closure(direct_views)?;
-        if cascade && !cascade_views.is_empty() {
-            self.drop_views_inner(&cascade_views, false)?;
-        }
-        for name in names {
-            self.detach_sequence_column_dependencies(name, cascade)
-                .map_err(|error| {
-                    SQLError::Internal(format!(
-                        "detach column dependencies for sequence `{name}`: {error}"
-                    ))
-                })?;
-            if !self
-                .remove_sequence_state_inner(name)
-                .map_err(SQLError::Internal)?
-            {
-                return Err(SQLError::Internal(format!(
-                    "resolved sequence `{name}` disappeared before DROP"
-                )));
-            }
-        }
-        if cascade {
-            let mut dependents = cascade_columns
-                .iter()
-                .map(|(table, column)| {
-                    format!("default value for column {column} of table {table}")
-                })
-                .collect::<Vec<_>>();
-            dependents.extend(cascade_views.iter().map(|view| format!("view {view}")));
-            match dependents.as_slice() {
-                [] => {}
-                [dependent] => {
-                    self.push_sql_notice("NOTICE", &format!("drop cascades to {dependent}"));
-                }
-                _ => self.push_sql_notice(
-                    "NOTICE",
-                    &format!("drop cascades to {} other objects", dependents.len()),
-                ),
-            }
-        }
-        Ok(())
-    }
-
-    fn remove_sequence_state_inner(&self, name: &str) -> Result<bool, String> {
-        let relation = Self::resolved_relation_identity(name)
-            .map_err(|err| format!("resolve sequence `{name}`: {err}"))?;
-        let object_id = self
-            .durable
-            .sequence_object_ids
-            .read()
-            .get(&relation)
-            .copied()
-            .ok_or_else(|| format!("Sequence `{name}` has no object identity"))?;
-        let temporary = self
-            .durable
-            .sequence_persistence
-            .read()
-            .get(&relation)
-            .is_some_and(|persistence| {
-                *persistence == uqa_sql::ast::RelationPersistence::Temporary
-            });
-        let removed = if temporary {
-            self.durable.sequences.read().contains_key(&relation)
-        } else if let Some(catalog) = self.storage.catalog.as_ref() {
-            catalog
-                .drop_sequence_row(name)
-                .map_err(|err| format!("persist sequence catalog: {err}"))?
-        } else {
-            self.durable.sequences.read().contains_key(&relation)
-        };
-        if removed {
-            self.durable.sequences.write().remove(&relation);
-            self.durable.sequence_object_ids.write().remove(&relation);
-            self.durable.sequence_persistence.write().remove(&relation);
-            self.durable.sequence_security.write().remove(&relation);
-            let mut session = self.session.state.write();
-            session
-                .sequence_currvals
-                .retain(|_, current| current.object_id != object_id);
-            if session
-                .last_sequence
-                .as_ref()
-                .is_some_and(|last| last.object_id == object_id)
-            {
-                session.last_sequence = None;
-            }
-            drop(session);
-            self.session
-                .sequence_caches
-                .lock()
-                .retain(|_, cache| cache.object_id != object_id);
-            self.note_catalog_registry_changed();
-        }
-        Ok(removed)
-    }
-
-    pub(crate) fn drop_owned_sequence(
-        &self,
-        name: &str,
-        cascade: bool,
-    ) -> StorageBackendResult<()> {
-        let canonical = self.try_resolve_sequence_name(name)?.ok_or_else(|| {
-            StorageBackendError::Other(format!("owned sequence `{name}` does not exist"))
-        })?;
-        self.drop_sequences_sql_inner_with_owner(std::slice::from_ref(&canonical), cascade, true)
-            .map_err(|error| StorageBackendError::Other(error.to_string()))
     }
 
     /// Snapshot of all registered sequences as `(name, state)` pairs.

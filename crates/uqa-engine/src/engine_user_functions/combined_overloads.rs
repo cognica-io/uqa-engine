@@ -408,6 +408,7 @@ fn resolved_builtin_overload(
 ) -> ResolvedFunctionOverload {
     ResolvedFunctionOverload {
         binding: FunctionBinding {
+            object_id: None,
             name: builtin.name,
             argument_types: builtin
                 .argument_types

@@ -80,7 +80,7 @@ fn rewrite_full_vacuum_table(engine: &Engine, table_name: &str) -> Result<(), St
         let store = table.document_store.read();
         let mut ids = store.doc_ids()?;
         ids.sort_unstable();
-        let documents = store.get_many(&ids)?;
+        let documents = store.get_stored_many(&ids)?;
         let mut rows = Vec::with_capacity(ids.len());
         for doc_id in ids {
             let document = documents.get(&doc_id).cloned().ok_or_else(|| {
@@ -88,7 +88,7 @@ fn rewrite_full_vacuum_table(engine: &Engine, table_name: &str) -> Result<(), St
                     "VACUUM FULL relation `{table_name}` listed document {doc_id} but did not return it"
                 ))
             })?;
-            let vectors = Engine::document_vector_values(&table, &document)
+            let vectors = Engine::document_vector_values(&table, document.fields())
                 .map_err(|error| vacuum_storage_error("snapshot VACUUM FULL vectors", error))?;
             rows.push((doc_id, document, vectors));
         }
@@ -105,11 +105,14 @@ fn rewrite_full_vacuum_table(engine: &Engine, table_name: &str) -> Result<(), St
     Engine::value_indexes_clear(&table);
     for (doc_id, document, vectors) in documents {
         engine
-            .add_prepared_document_with_vector_values_inner(
+            .add_prepared_stored_document_with_vector_values_inner(
                 table_name, doc_id, document, vectors, true,
             )
             .map_err(|error| vacuum_storage_error("rewrite VACUUM FULL row", error))?;
     }
+    engine
+        .refresh_value_indexes_for_table(table_name)
+        .map_err(|error| vacuum_storage_error("rebuild VACUUM FULL indexes", error))?;
     *table.column_stats.write() = stats.clone();
     table
         .column_stats_loaded

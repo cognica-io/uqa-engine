@@ -56,12 +56,6 @@ impl RuleConditionBinding {
         self.columns.get(column.attribute()).map(String::as_str)
     }
 
-    pub(crate) fn rename_column(&mut self, from: &str, to: &str) {
-        if let Some(column) = self.columns.iter_mut().find(|column| *column == from) {
-            *column = to.to_string();
-        }
-    }
-
     /// Give a deserialized condition plan process-local row identities before it can be combined with newly planned expressions.
     pub(crate) fn reallocate_plan_relations(&self, plan: &mut ExpressionPlan) -> Self {
         let rebound = Self {

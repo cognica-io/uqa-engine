@@ -333,7 +333,9 @@ mod tests {
     use tempfile::tempdir;
     use uqa_core::DocId;
     use uqa_storage::document_store::Document;
-    use uqa_storage::{DocumentStore, MemoryDocumentStore, StorageBackendResult};
+    use uqa_storage::{
+        DocumentMetadata, DocumentStore, MemoryDocumentStore, StorageBackendResult, StoredDocument,
+    };
 
     use super::Engine;
 
@@ -353,6 +355,29 @@ mod tests {
 
         fn get(&self, doc_id: DocId) -> StorageBackendResult<Option<Document>> {
             self.inner.get(doc_id)
+        }
+
+        fn put_stored(
+            &mut self,
+            doc_id: DocId,
+            document: StoredDocument,
+        ) -> StorageBackendResult<()> {
+            self.inner.put_stored(doc_id, document)
+        }
+
+        fn get_stored(&self, doc_id: DocId) -> StorageBackendResult<Option<StoredDocument>> {
+            self.inner.get_stored(doc_id)
+        }
+
+        fn get_stored_many(
+            &self,
+            doc_ids: &[DocId],
+        ) -> StorageBackendResult<std::collections::BTreeMap<DocId, StoredDocument>> {
+            self.inner.get_stored_many(doc_ids)
+        }
+
+        fn get_metadata(&self, doc_id: DocId) -> StorageBackendResult<Option<DocumentMetadata>> {
+            self.inner.get_metadata(doc_id)
         }
 
         fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {

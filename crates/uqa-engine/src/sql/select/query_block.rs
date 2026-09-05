@@ -80,6 +80,7 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
         name,
         qualifier,
         alias,
+        column_aliases,
         include_descendants,
     } = from
     {
@@ -87,7 +88,7 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
             let catalog = ctes.catalog_read_view()?;
             let resolution = ctes.relation_name_resolution()?;
             let foreign_table = catalog.foreign_table_entry_resolved(&resolution, name)?;
-            if alias.is_none() && foreign_table.is_some() {
+            if alias.is_none() && column_aliases.is_empty() && foreign_table.is_some() {
                 let foreign_name = foreign_table
                     .as_ref()
                     .map(|(canonical, _)| canonical.as_str())
@@ -542,13 +543,21 @@ fn add_all_source_columns_to_prune(
             name,
             qualifier,
             alias,
+            column_aliases,
             ..
         } => {
             let qualifier = alias.as_deref().unwrap_or(qualifier);
             match catalog.table_resolved(resolution, name)? {
                 Some(table) => {
                     if let Some(columns) = prune.get_mut(qualifier) {
-                        columns.extend(table.columns.iter().map(|column| column.name.clone()));
+                        columns.extend(table.columns.iter().enumerate().map(
+                            |(position, column)| {
+                                column_aliases
+                                    .get(position)
+                                    .cloned()
+                                    .unwrap_or_else(|| column.name.clone())
+                            },
+                        ));
                     }
                 }
                 None => {

@@ -6,12 +6,24 @@
 
 use super::*;
 use std::sync::Arc;
-use uqa_storage::document_store::{Document, DocumentStore};
+use uqa_storage::document_store::{Document, DocumentStore, StoredDocument};
 
 #[derive(Clone)]
 struct MissingProjectionStore;
 
 impl DocumentStore for MissingProjectionStore {
+    fn put_stored(
+        &mut self,
+        _doc_id: DocId,
+        _document: StoredDocument,
+    ) -> StorageBackendResult<()> {
+        Ok(())
+    }
+
+    fn get_stored(&self, doc_id: DocId) -> StorageBackendResult<Option<StoredDocument>> {
+        Ok((doc_id == 1).then(|| StoredDocument::new(Document::new())))
+    }
+
     fn put(&mut self, _doc_id: DocId, _document: Document) -> StorageBackendResult<()> {
         Ok(())
     }
@@ -142,7 +154,7 @@ fn rebuild_rejects_a_document_missing_from_the_field_projection() {
     crate::Engine::value_indexes_clear(&table);
 
     let error = engine
-        .ensure_value_index("projection_gap", "id")
+        .ensure_value_index("projection_gap", &"id".into())
         .unwrap_err();
     assert!(error.to_string().contains("lost document 1"), "{error}");
     assert!(table.value_indexes.read().is_empty());
@@ -176,7 +188,9 @@ fn query_builds_missing_durable_index_in_memory_only() {
         .sql("INSERT INTO items (id) VALUES (1)", &[])
         .unwrap();
     let backend = engine.storage.backend.as_ref().unwrap();
-    backend.drop_btree_index("public.items", "id").unwrap();
+    backend
+        .drop_btree_index("public.items", &"id".into())
+        .unwrap();
     let table = engine.try_table("items").unwrap().unwrap();
     crate::Engine::value_indexes_clear(&table);
 
@@ -185,7 +199,7 @@ fn query_builds_missing_durable_index_in_memory_only() {
         .unwrap();
     assert_eq!(result.rows.len(), 1);
     assert!(backend
-        .load_btree_index("public.items", "id")
+        .load_btree_index("public.items", &"id".into())
         .unwrap()
         .is_none());
     assert!(engine
@@ -194,30 +208,37 @@ fn query_builds_missing_durable_index_in_memory_only() {
         .unwrap()
         .value_indexes
         .read()
-        .contains_key("id"));
+        .contains_key(&"id".into()));
 
-    // Rollback recovery clears hot indexes before hydrating them again;
-    // a missing durable marker must remain a memory-only cache miss there
-    // too, rather than silently turning rollback into a new write.
+    // Recovery leaves a missing durable index cold, so it cannot execute SQL callbacks while the transaction state is locked. Its next read builds only the in-memory accelerator.
     engine.reload_persistent_value_indexes().unwrap();
     assert!(backend
-        .load_btree_index("public.items", "id")
+        .load_btree_index("public.items", &"id".into())
         .unwrap()
         .is_none());
-    assert!(engine
-        .try_table("items")
+    assert!(table.value_indexes.read().is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT id FROM items WHERE id=1", &[])
+            .unwrap()
+            .rows
+            .len(),
+        1
+    );
+    assert!(table.value_indexes.read().contains_key(&"id".into()));
+    assert!(backend
+        .load_btree_index("public.items", &"id".into())
         .unwrap()
-        .unwrap()
-        .value_indexes
-        .read()
-        .contains_key("id"));
+        .is_none());
 
     // The explicit persistence path must not mistake the hot memory cache
     // for a durable marker.
-    engine.ensure_persistent_value_index("items", "id").unwrap();
+    engine
+        .ensure_persistent_value_index("items", &"id".into())
+        .unwrap();
     assert_eq!(
         backend
-            .load_btree_index("public.items", "id")
+            .load_btree_index("public.items", &"id".into())
             .unwrap()
             .unwrap(),
         vec![(1, Value::Int(1))]
@@ -236,9 +257,11 @@ fn open_repair_discards_raw_alias_and_rebuilds_canonical_index() {
         .sql("INSERT INTO items (id) VALUES (1)", &[])
         .unwrap();
     let backend = engine.storage.backend.as_ref().unwrap().clone();
-    backend.drop_btree_index("public.items", "id").unwrap();
     backend
-        .replace_btree_index("public.items", "obsolete", &[(1, Value::Int(888))])
+        .drop_btree_index("public.items", &"id".into())
+        .unwrap();
+    backend
+        .replace_btree_index("public.items", &"obsolete".into(), &[(1, Value::Int(888))])
         .unwrap();
     // Bypass the v21 guard only to inject a pre-v17 unqualified alias that
     // a current engine would never create, then restore the guard before
@@ -247,7 +270,7 @@ fn open_repair_discards_raw_alias_and_rebuilds_canonical_index() {
     raw.execute("DROP TRIGGER _btree_entries_document_insert", [])
         .unwrap();
     backend
-        .replace_btree_index("items", "id", &[(1, Value::Int(999))])
+        .replace_btree_index("items", &"id".into(), &[(1, Value::Int(999))])
         .unwrap();
     raw.execute_batch(
         "CREATE TRIGGER _btree_entries_document_insert
@@ -271,14 +294,17 @@ fn open_repair_discards_raw_alias_and_rebuilds_canonical_index() {
     let reopened = crate::Engine::open(&database).unwrap();
     let backend = reopened.storage.backend.as_ref().unwrap();
 
-    assert!(backend.load_btree_index("items", "id").unwrap().is_none());
     assert!(backend
-        .load_btree_index("public.items", "obsolete")
+        .load_btree_index("items", &"id".into())
+        .unwrap()
+        .is_none());
+    assert!(backend
+        .load_btree_index("public.items", &"obsolete".into())
         .unwrap()
         .is_none());
     assert_eq!(
         backend
-            .load_btree_index("public.items", "id")
+            .load_btree_index("public.items", &"id".into())
             .unwrap()
             .unwrap(),
         vec![(1, Value::Int(1))]

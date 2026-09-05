@@ -13,6 +13,7 @@ mod log_count;
 mod schema_security;
 mod schema_version;
 mod table_ownership;
+mod tuple_metadata;
 mod view_ownership;
 
 #[test]

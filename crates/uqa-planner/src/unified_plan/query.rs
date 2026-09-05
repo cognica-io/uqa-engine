@@ -371,11 +371,13 @@ impl SourcePlan {
                 name,
                 qualifier,
                 alias,
+                column_aliases,
                 include_descendants,
             } => Self::Table {
                 name,
                 qualifier,
                 alias,
+                column_aliases,
                 include_descendants,
             },
             FromClause::Join {
@@ -422,6 +424,7 @@ impl SourcePlan {
             },
             FromClause::Function {
                 name,
+                binding,
                 output_name,
                 relations,
                 args,
@@ -431,7 +434,7 @@ impl SourcePlan {
                 column_types,
             } => Self::Function {
                 name,
-                binding: None,
+                binding,
                 output_name,
                 relations,
                 args: args
@@ -453,7 +456,7 @@ impl SourcePlan {
                     .into_iter()
                     .map(|function| TableFunctionPlan {
                         name: function.name,
-                        binding: None,
+                        binding: function.binding,
                         output_name: function.output_name,
                         relations: function.relations,
                         args: function

@@ -51,7 +51,9 @@ fn forbidden_command(
         return query_may_write_database(engine, query).map(|mutates| mutates.then_some("SELECT"));
     };
     match command.as_ref() {
-        CommandPlan::CreateTable(_) => Ok(Some("CREATE TABLE")),
+        CommandPlan::CreateTable(_) | CommandPlan::CreateTableIfNotExists(_) => {
+            Ok(Some("CREATE TABLE"))
+        }
         CommandPlan::CreateIndex(_) => Ok(Some("CREATE INDEX")),
         CommandPlan::Insert(insert) => dml_command(engine, &insert.table, "INSERT", command),
         CommandPlan::Update(update) => dml_command(engine, &update.table, "UPDATE", command),
@@ -86,7 +88,9 @@ fn forbidden_command(
             ..
         } => forbidden_command(engine, body),
         CommandPlan::CreateForeignServer(_) => Ok(Some("CREATE SERVER")),
-        CommandPlan::CreateForeignTable(_) => Ok(Some("CREATE FOREIGN TABLE")),
+        CommandPlan::CreateForeignTable(_) | CommandPlan::CreateForeignTableIfNotExists(_) => {
+            Ok(Some("CREATE FOREIGN TABLE"))
+        }
         CommandPlan::CreateFunction(function) => Ok(Some(if function.is_procedure {
             "CREATE PROCEDURE"
         } else {
@@ -99,6 +103,7 @@ fn forbidden_command(
         })),
         CommandPlan::AlterRoutine(_) => Ok(Some("ALTER ROUTINE")),
         CommandPlan::AlterRoutineOwner(_) => Ok(Some("ALTER ROUTINE")),
+        CommandPlan::RenameRoutine(_) => Ok(Some("ALTER ROUTINE")),
         CommandPlan::GrantRoutine(_) => Ok(Some("GRANT ON ROUTINE")),
         CommandPlan::GrantTable(_) => Ok(Some("GRANT ON TABLE")),
         CommandPlan::GrantSequence(_) => Ok(Some("GRANT ON SEQUENCE")),

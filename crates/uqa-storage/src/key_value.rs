@@ -20,7 +20,7 @@ use uqa_analysis::Analyzer;
 use uqa_core::{DocId, FieldName, IndexStats, Payload, PostingEntry, PostingList, Value};
 
 use crate::backend::{PersistentStorageBackend, PersistentStorageIdentity};
-use crate::document_store::{Document, DocumentStore};
+use crate::document_store::{Document, DocumentMetadata, DocumentStore, StoredDocument};
 use crate::inverted_index::{AnalyzerPhase, InvertedIndex};
 use crate::vector_index::{
     cosine_similarity, validate_vector_values, VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
@@ -60,6 +60,8 @@ const TAG_REVERSE_POSTING: u8 = b'r';
 const TAG_VECTOR: u8 = b'v';
 const TAG_BTREE_INDEX: u8 = b'B';
 const TAG_BTREE_ENTRY: u8 = b'b';
+const TAG_NAMED_BTREE_INDEX: u8 = b'N';
+const TAG_NAMED_BTREE_ENTRY: u8 = b'n';
 const TAG_IVF_METADATA: u8 = b'I';
 const TAG_IVF_CENTROID: u8 = b'i';
 const TAG_IVF_ASSIGNMENT: u8 = b'j';
@@ -71,6 +73,7 @@ const TAG_HNSW_NODE: u8 = b'h';
 /// therefore cannot start with NUL; the prefix lets reads preserve the old
 /// `Bytes`-before-`List` interpretation without misreading newly written lists.
 const DOCUMENT_VALUE_V1_PREFIX: &[u8] = b"\0uqa-document-json-v1\0";
+const DOCUMENT_VALUE_V2_PREFIX: &[u8] = b"\0uqa-document-record-v2\0";
 
 #[derive(Debug, Clone)]
 enum KeyValueBatchOperation {
@@ -167,6 +170,10 @@ pub trait KeyValueStore: Send + Sync {
     }
 
     fn begin_read_transaction(&self) -> StorageBackendResult<()> {
+        self.begin_transaction()
+    }
+
+    fn begin_upgradeable_transaction(&self) -> StorageBackendResult<()> {
         self.begin_transaction()
     }
 

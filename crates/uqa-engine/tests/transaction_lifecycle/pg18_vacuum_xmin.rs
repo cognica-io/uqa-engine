@@ -229,6 +229,59 @@ fn pg18_vacuum_full_rewrites_compressed_storage() {
 }
 
 #[test]
+fn pg18_vacuum_full_preserves_tuple_xmin() {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = Engine::open(&directory.path().join("vacuum-full-xmin.db")).unwrap();
+    engine
+        .sql(
+            "CREATE TABLE vacuum_xmin (id INTEGER PRIMARY KEY); INSERT INTO vacuum_xmin VALUES (1)",
+            &[],
+        )
+        .unwrap();
+    let before = integer_column(
+        &engine.sql("SELECT xmin FROM vacuum_xmin", &[]).unwrap(),
+        "xmin",
+    );
+    engine.sql("VACUUM FULL vacuum_xmin", &[]).unwrap();
+    let after = integer_column(
+        &engine.sql("SELECT xmin FROM vacuum_xmin", &[]).unwrap(),
+        "xmin",
+    );
+    assert_eq!(after, before);
+}
+
+#[test]
+fn schema_field_rewrites_preserve_tuple_xmin() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE schema_xmin (id INTEGER PRIMARY KEY, value TEXT); INSERT INTO schema_xmin VALUES (1, 'one')",
+            &[],
+        )
+        .unwrap();
+    let before = integer_column(
+        &engine.sql("SELECT xmin FROM schema_xmin", &[]).unwrap(),
+        "xmin",
+    );
+    engine
+        .sql("ALTER TABLE schema_xmin RENAME COLUMN value TO label", &[])
+        .unwrap();
+    let renamed = integer_column(
+        &engine.sql("SELECT xmin FROM schema_xmin", &[]).unwrap(),
+        "xmin",
+    );
+    assert_eq!(renamed, before);
+    engine
+        .sql("ALTER TABLE schema_xmin DROP COLUMN label", &[])
+        .unwrap();
+    let dropped = integer_column(
+        &engine.sql("SELECT xmin FROM schema_xmin", &[]).unwrap(),
+        "xmin",
+    );
+    assert_eq!(dropped, before);
+}
+
+#[test]
 fn pg18_xmin_tracks_top_level_and_savepoint_tuple_versions() {
     let eng = Engine::new();
     for column in ["tableoid", "xmin", "cmin", "xmax", "cmax", "ctid"] {
@@ -335,6 +388,35 @@ fn pg18_xmin_tracks_top_level_and_savepoint_tuple_versions() {
 }
 
 #[test]
+fn pg18_point_update_assigns_a_new_tuple_xmin() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE point_update_xmin (id INTEGER PRIMARY KEY, value INTEGER); INSERT INTO point_update_xmin VALUES (1, 10)",
+            &[],
+        )
+        .unwrap();
+    let before = integer_column(
+        &engine
+            .sql("SELECT xmin FROM point_update_xmin WHERE id = 1", &[])
+            .unwrap(),
+        "xmin",
+    );
+
+    engine
+        .sql("UPDATE point_update_xmin SET value = 20 WHERE id = 1", &[])
+        .unwrap();
+
+    let after = integer_column(
+        &engine
+            .sql("SELECT xmin FROM point_update_xmin WHERE id = 1", &[])
+            .unwrap(),
+        "xmin",
+    );
+    assert_ne!(after, before);
+}
+
+#[test]
 fn pg18_xmin_is_explicitly_addressable_but_hidden_from_stars_and_survives_reopen() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("xmin.db");
@@ -358,7 +440,86 @@ fn pg18_xmin_is_explicitly_addressable_but_hidden_from_stars_and_survives_reopen
 }
 
 #[test]
-fn pg18_xmin_reads_legacy_persistent_tuple_metadata_through_qualified_references() {
+fn pg18_xmin_survives_ranked_and_cursor_materialization() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE xmin_paths (id INTEGER PRIMARY KEY, body TEXT)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "CREATE INDEX xmin_paths_body_gin ON xmin_paths USING gin (body)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "INSERT INTO xmin_paths VALUES (1, 'needle one'), (2, 'needle two')",
+            &[],
+        )
+        .unwrap();
+    let ranked = engine
+        .sql(
+            "SELECT id, xmin FROM xmin_paths WHERE text_match(body, 'needle') ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    let expected_ids = integer_column(&ranked, "id");
+    let expected_xmins = integer_column(&ranked, "xmin");
+    assert_eq!(expected_ids, [1, 2]);
+    assert!(expected_xmins.iter().all(|xmin| *xmin > 0));
+
+    engine.sql("BEGIN", &[]).unwrap();
+    engine
+        .sql(
+            "DECLARE xmin_cursor CURSOR FOR SELECT id, xmin FROM xmin_paths WHERE text_match(body, 'needle') ORDER BY id",
+            &[],
+        )
+        .unwrap();
+    let fetched = engine.sql("FETCH ALL FROM xmin_cursor", &[]).unwrap();
+    engine.sql("COMMIT", &[]).unwrap();
+    assert_eq!(integer_column(&fetched, "id"), expected_ids);
+    assert_eq!(integer_column(&fetched, "xmin"), expected_xmins);
+}
+
+#[test]
+fn pg18_returning_keeps_old_and_new_tuple_versions_distinct() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE returning_xmin (id INTEGER PRIMARY KEY, value INTEGER)",
+            &[],
+        )
+        .unwrap();
+    let inserted = engine
+        .sql(
+            "INSERT INTO returning_xmin VALUES (1, 10) RETURNING xmin",
+            &[],
+        )
+        .unwrap();
+    let inserted_xmin = inserted.rows[0]["xmin"].clone();
+    let updated = engine
+        .sql(
+            "UPDATE returning_xmin SET value = 20 RETURNING WITH (OLD AS before, NEW AS after) before.xmin AS old_xmin, after.xmin AS new_xmin",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(updated.rows[0]["old_xmin"], inserted_xmin);
+    assert_ne!(updated.rows[0]["new_xmin"], inserted_xmin);
+    let updated_xmin = updated.rows[0]["new_xmin"].clone();
+    let deleted = engine
+        .sql(
+            "DELETE FROM returning_xmin RETURNING WITH (OLD AS before) before.xmin AS old_xmin",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(deleted.rows[0]["old_xmin"], updated_xmin);
+}
+
+#[test]
+fn pg18_xmin_eagerly_migrates_legacy_persistent_tuple_metadata() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("legacy-xmin.db");
     let expected_xmin = {
@@ -375,14 +536,21 @@ fn pg18_xmin_reads_legacy_persistent_tuple_metadata_through_qualified_references
         })
         .unwrap();
     let mut legacy: Document = serde_json::from_str(&body).unwrap();
-    assert_eq!(
-        legacy.remove("\0uqa.system.xmin"),
-        Some(uqa_core::Value::Int(expected_xmin))
+    legacy.insert(
+        "\0uqa.system.xmin".into(),
+        uqa_core::Value::Int(expected_xmin),
     );
+    legacy.insert("xmin".into(), uqa_core::Value::Int(expected_xmin));
     connection
         .execute(
-            "UPDATE _documents SET body = ?1 WHERE doc_id = 1",
+            "UPDATE _documents SET body = ?1, tuple_xmin = NULL WHERE doc_id = 1",
             [serde_json::to_string(&legacy).unwrap()],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE _metadata SET value = '41' WHERE key = 'schema_version'",
+            [],
         )
         .unwrap();
     drop(connection);
@@ -399,6 +567,22 @@ fn pg18_xmin_reads_legacy_persistent_tuple_metadata_through_qualified_references
         ),
         [expected_xmin]
     );
+    drop(eng);
+
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    let (body, tuple_xmin): (String, i64) = connection
+        .query_row(
+            "SELECT body, tuple_xmin FROM _documents WHERE doc_id = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    let migrated: Document = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        migrated,
+        Document::from([("a".into(), uqa_core::Value::Int(1))])
+    );
+    assert_eq!(tuple_xmin, expected_xmin);
 }
 
 #[test]
@@ -450,7 +634,7 @@ fn legacy_user_xmin_values_are_not_overwritten_by_tuple_version_metadata() {
 }
 
 #[test]
-fn schemaless_system_xmin_mirror_is_refreshed_without_becoming_user_data() {
+fn schemaless_system_xmin_is_projected_from_tuple_metadata() {
     let eng = Engine::new();
     eng.create_default_table("schemaless_xmin", Vec::new())
         .unwrap();

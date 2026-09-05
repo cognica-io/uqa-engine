@@ -20,6 +20,73 @@ use crate::backend::{StorageBackendError, StorageBackendResult};
 /// Document field map. Keys are field names; values are dynamic.
 pub type Document = BTreeMap<FieldName, Value>;
 
+/// Storage-owned tuple metadata that must never share the user field namespace.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DocumentMetadata {
+    tuple_xmin: Option<u32>,
+}
+
+impl DocumentMetadata {
+    #[must_use]
+    pub const fn with_tuple_xmin(tuple_xmin: u32) -> Self {
+        Self {
+            tuple_xmin: Some(tuple_xmin),
+        }
+    }
+
+    #[must_use]
+    pub const fn tuple_xmin(self) -> Option<u32> {
+        self.tuple_xmin
+    }
+}
+
+/// One persisted tuple, split into its public fields and storage-owned metadata.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct StoredDocument {
+    fields: Document,
+    metadata: DocumentMetadata,
+}
+
+impl StoredDocument {
+    #[must_use]
+    pub fn new(fields: Document) -> Self {
+        Self {
+            fields,
+            metadata: DocumentMetadata::default(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_metadata(fields: Document, metadata: DocumentMetadata) -> Self {
+        Self { fields, metadata }
+    }
+
+    #[must_use]
+    pub fn fields(&self) -> &Document {
+        &self.fields
+    }
+
+    #[must_use]
+    pub fn fields_mut(&mut self) -> &mut Document {
+        &mut self.fields
+    }
+
+    #[must_use]
+    pub fn metadata(&self) -> DocumentMetadata {
+        self.metadata
+    }
+
+    #[must_use]
+    pub fn into_fields(self) -> Document {
+        self.fields
+    }
+
+    #[must_use]
+    pub fn into_parts(self) -> (Document, DocumentMetadata) {
+        (self.fields, self.metadata)
+    }
+}
+
 const MISSING_SHARED_SLOT: usize = usize::MAX;
 static SHARED_NULL_VALUE: Value = Value::Null;
 
@@ -96,14 +163,44 @@ impl SharedDocumentRow {
     }
 }
 
-/// Mutating methods are fallible: persistent backends surface their
-/// write failures so callers (engine DML, upserts, referential
-/// rewrites) can abort the enclosing transaction instead of silently
-/// committing a partially-applied statement. A rewrite that deletes a
-/// row and then fails to re-insert it must never look like success.
+/// Mutating methods are fallible: persistent backends surface their write failures so callers (engine DML, upserts, referential rewrites) can abort the enclosing transaction instead of silently committing a partially-applied statement. A rewrite that deletes a row and then fails to re-insert it must never look like success.
 pub trait DocumentStore: Send + Sync {
-    fn put(&mut self, doc_id: DocId, document: Document) -> StorageBackendResult<()>;
-    fn get(&self, doc_id: DocId) -> StorageBackendResult<Option<Document>>;
+    /// Persist one typed storage record. Every backend owns the physical representation of tuple metadata and must keep it outside the public field map.
+    fn put_stored(&mut self, doc_id: DocId, document: StoredDocument) -> StorageBackendResult<()>;
+
+    /// Read one typed storage record without projecting metadata into user fields.
+    fn get_stored(&self, doc_id: DocId) -> StorageBackendResult<Option<StoredDocument>>;
+
+    /// Replace public fields while preserving metadata already owned by the stored tuple. Engine code that creates a new tuple version must call [`DocumentStore::put_stored`] with the new metadata explicitly.
+    fn put(&mut self, doc_id: DocId, document: Document) -> StorageBackendResult<()> {
+        let metadata = self.get_metadata(doc_id)?.unwrap_or_default();
+        self.put_stored(doc_id, StoredDocument::with_metadata(document, metadata))
+    }
+
+    fn get(&self, doc_id: DocId) -> StorageBackendResult<Option<Document>> {
+        self.get_stored(doc_id)
+            .map(|document| document.map(StoredDocument::into_fields))
+    }
+
+    /// Bulk variant of [`DocumentStore::get_stored`].
+    fn get_stored_many(
+        &self,
+        doc_ids: &[DocId],
+    ) -> StorageBackendResult<BTreeMap<DocId, StoredDocument>> {
+        let mut out = BTreeMap::new();
+        for doc_id in doc_ids {
+            if let Some(document) = self.get_stored(*doc_id)? {
+                out.insert(*doc_id, document);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Read one tuple's storage metadata without exposing it as a field.
+    fn get_metadata(&self, doc_id: DocId) -> StorageBackendResult<Option<DocumentMetadata>> {
+        self.get_stored(doc_id)
+            .map(|document| document.map(|document| document.metadata()))
+    }
     fn contains_doc_id(&self, doc_id: DocId) -> StorageBackendResult<bool> {
         Ok(self.get(doc_id)?.is_some())
     }
@@ -144,17 +241,17 @@ pub trait DocumentStore: Send + Sync {
         doc_id: DocId,
         updates: &BTreeMap<String, Value>,
     ) -> StorageBackendResult<bool> {
-        let Some(mut document) = self.get(doc_id)? else {
+        let Some(mut document) = self.get_stored(doc_id)? else {
             return Ok(false);
         };
         for (field, value) in updates {
             if matches!(value, Value::Null) {
-                document.remove(field);
+                document.fields_mut().remove(field);
             } else {
-                document.insert(field.clone(), value.clone());
+                document.fields_mut().insert(field.clone(), value.clone());
             }
         }
-        self.put(doc_id, document)?;
+        self.put_stored(doc_id, document)?;
         Ok(true)
     }
 

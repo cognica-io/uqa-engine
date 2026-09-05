@@ -6,17 +6,15 @@
 
 //! CREATE TABLE execution.
 
+use super::constraint_validation::{
+    resolve_foreign_key_parent, validate_check_expression, validate_foreign_key_definition,
+};
 use super::defaults::validate_default_expression;
 use super::{
     ddl_storage_error, prepare_create_table_hierarchy, ColumnType, CreateTable, Engine, SQLError,
     SQLResult,
 };
 use crate::sql::generated::prepare_generated_columns;
-use uqa_sql::ast::{AutoIncrementKind, AutoIncrementOwner, Expr, SequenceDataType};
-
-use super::constraint_validation::{
-    resolve_foreign_key_parent, validate_check_expression, validate_foreign_key_definition,
-};
 
 // -------------------------------------------------------------------------
 
@@ -27,48 +25,98 @@ pub(in crate::sql) fn run_create_table(
     engine.transaction(move |engine| run_create_table_inner(engine, c))
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves DDL dependency and action order"
-)]
-fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResult, SQLError> {
-    for column in &c.columns {
+pub(in crate::sql) fn run_create_table_if_not_exists(
+    engine: &Engine,
+    deferred: uqa_sql::ast::DeferredCreateTable,
+) -> Result<SQLResult, SQLError> {
+    engine.transaction(move |engine| {
+        let Some(name) =
+            preflight_create_table_target(engine, &deferred.name, deferred.persistence, true)?
+        else {
+            return Ok(SQLResult::empty());
+        };
+        let mut table = uqa_sql::resolve_deferred_create_table(&deferred)?;
+        validate_create_table_columns(&table)?;
+        table.name = name;
+        create_table_after_preflight(engine, table)
+    })
+}
+
+fn validate_create_table_columns(table: &CreateTable) -> Result<(), SQLError> {
+    for column in &table.columns {
         super::validate_postgres_column_name(&column.name)?;
         super::validate_postgres_relation_column_type(&column.name, &column.ty)?;
     }
-    if c.persistence != uqa_sql::ast::RelationPersistence::Temporary {
+    Ok(())
+}
+
+fn preflight_create_table_target(
+    engine: &Engine,
+    name: &str,
+    persistence: uqa_sql::ast::RelationPersistence,
+    if_not_exists: bool,
+) -> Result<Option<String>, SQLError> {
+    if persistence != uqa_sql::ast::RelationPersistence::Temporary {
         engine.prepare_explicit_transaction_writer()?;
     }
-    c.name = if c.persistence == uqa_sql::ast::RelationPersistence::Temporary {
-        engine.try_temporary_relation_name_for_create(&c.name)?
+    let name = if persistence == uqa_sql::ast::RelationPersistence::Temporary {
+        engine.try_temporary_relation_name_for_create(name)?
     } else {
-        engine.try_relation_name_for_sql_create(&c.name)?
+        engine.try_relation_name_for_sql_create(name)?
     };
     if matches!(
-        engine.resolve_bound_relation_kind(&c.name)?,
+        engine.resolve_bound_relation_kind(&name)?,
         crate::engine_capabilities::RelationResolution::Found(_, _)
     ) {
-        let local = crate::RelationIdentity::from_legacy_name(&c.name)
+        let local = crate::RelationIdentity::from_legacy_name(&name)
             .map_err(SQLError::Internal)?
             .name;
-        if c.if_not_exists {
+        if if_not_exists {
             engine.push_sql_notice(
                 "NOTICE",
                 &format!("relation \"{local}\" already exists, skipping"),
             );
-            return Ok(SQLResult::empty());
+            return Ok(None);
         }
         return Err(SQLError::Routine {
             sqlstate: "42P07".into(),
             message: format!("relation \"{local}\" already exists"),
         });
     }
+    Ok(Some(name))
+}
+
+fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResult, SQLError> {
+    validate_create_table_columns(&c)?;
+    let Some(name) =
+        preflight_create_table_target(engine, &c.name, c.persistence, c.if_not_exists)?
+    else {
+        return Ok(SQLResult::empty());
+    };
+    c.name = name;
+    create_table_after_preflight(engine, c)
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves DDL dependency and action order"
+)]
+fn create_table_after_preflight(
+    engine: &Engine,
+    mut c: CreateTable,
+) -> Result<SQLResult, SQLError> {
     prepare_create_table_hierarchy(engine, &mut c)?;
+    super::constraint_indexes::name_constraint_indexes(engine, &c.name, &mut c.key_constraints)?;
     bind_create_table_relation_references(engine, &mut c)?;
-    materialize_implicit_sequences(engine, &mut c)?;
+    engine.materialize_implicit_sequences(
+        "CREATE TABLE",
+        &c.name,
+        &mut c.columns,
+        c.persistence,
+    )?;
     let check_columns = c.columns.clone();
     for column in &mut c.columns {
-        if let Some(default) = &column.default {
+        if let Some(default) = &mut column.default {
             validate_default_expression(engine, default, &column.ty)?;
         }
         if let Some(check) = &mut column.check {
@@ -151,7 +199,7 @@ fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResu
     }
     for col in &c.columns {
         engine
-            .try_register_column(&c.name, col.clone())
+            .try_register_column_with_check_columns(&c.name, col.clone(), &c.columns)
             .map_err(|e| ddl_storage_error("CREATE TABLE column", e))?;
     }
     let mut registered_columns = engine
@@ -180,6 +228,7 @@ fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResu
                 "column FOREIGN KEY disappeared during validation".into(),
             ));
         };
+        reference.referenced_key = foreign_key.referenced_key;
         reference.table = foreign_key.ref_table;
         reference.column = Some(referenced_column.clone());
     }
@@ -254,60 +303,5 @@ fn bind_create_table_reference(
         return Ok(());
     }
     *reference = engine.resolve_visible_table_reference(reference)?;
-    Ok(())
-}
-
-fn materialize_implicit_sequences(
-    engine: &Engine,
-    table: &mut CreateTable,
-) -> Result<(), SQLError> {
-    let relation = crate::RelationIdentity::from_legacy_name(&table.name)
-        .map_err(|error| SQLError::Internal(format!("resolve CREATE TABLE relation: {error}")))?;
-    for column in &mut table.columns {
-        let Some(auto_increment) = column.auto_increment.as_mut() else {
-            continue;
-        };
-        if auto_increment.kind == AutoIncrementKind::Legacy || auto_increment.sequence.is_some() {
-            continue;
-        }
-        let data_type = match &column.ty {
-            ColumnType::SmallInteger => SequenceDataType::SmallInt,
-            ColumnType::Integer => SequenceDataType::Integer,
-            ColumnType::BigInteger => SequenceDataType::BigInt,
-            _ => {
-                return Err(SQLError::Internal(format!(
-                    "implicit sequence column `{}` has non-integer type",
-                    column.name
-                )))
-            }
-        };
-        let sequence = crate::RelationIdentity::new(
-            relation.schema.clone(),
-            format!("{}_{}_seq", relation.name, column.name),
-        )
-        .qualified_name();
-        engine
-            .create_sequence_with_persistence(&sequence, 1, 1, data_type, false, table.persistence)
-            .map_err(|error| {
-                SQLError::Unsupported(format!(
-                    "CREATE TABLE implicit sequence `{sequence}`: {error}"
-                ))
-            })?;
-        auto_increment.sequence = Some(sequence.clone());
-        auto_increment.owner = Some(AutoIncrementOwner {
-            table: table.name.clone(),
-            column: column.name.clone(),
-        });
-        if auto_increment.kind == AutoIncrementKind::Serial {
-            column.default = Some(Expr::Func {
-                name: "nextval".into(),
-                binding: None,
-                args: vec![Expr::Literal(uqa_core::Value::Str(sequence))],
-                distinct: false,
-                order_by: Vec::new(),
-                filter: None,
-            });
-        }
-    }
     Ok(())
 }

@@ -12,8 +12,8 @@
 //! in the private `types` module.
 
 use crate::ast::{
-    AlterTableAction, AlterTableStmt, AlterViewAction, AlterViewKind, AlterViewStmt, ColumnDef,
-    DeleteStmt, DropKind, DropStmt, Expr, Statement, TableKeyConstraint, TableKeyConstraintKind,
+    AlterTableAction, AlterTableStmt, AlterViewAction, AlterViewKind, AlterViewStmt, DeleteStmt,
+    DropKind, DropStmt, Expr, Statement, TableKeyConstraint, TableKeyConstraintKind,
     TransactionStmt, UpdateStmt,
 };
 use crate::error::{Result, SQLError};
@@ -37,7 +37,10 @@ mod sequences;
 mod tree;
 mod types;
 
-pub use dispatch::{compile, plan_only_for_test};
+pub use dispatch::{
+    compile, plan_only_for_test, resolve_deferred_create_foreign_table,
+    resolve_deferred_create_table,
+};
 pub use types::{
     parse_regobject_name, parse_regprocedure_name, parse_regtype_name, ParsedRegprocedureName,
     ParsedRegtypeName,

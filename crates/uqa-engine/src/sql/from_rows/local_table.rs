@@ -12,7 +12,7 @@ use super::{
     decide_join_sides, execute_query_plan_output, execute_view_plan_output_with_parent_cache,
     has_filters_for_qualifier, join_conjuncts, join_using_predicate, null_row_for_schema,
     physical_work_mem_bytes, propagated_join_filters, push_output_filter_into_query_plan,
-    qualifier_filter, qualifier_for, qualify_source_operator, qualify_source_operator_with_columns,
+    qualifier_filter, qualifier_for, qualify_source_operator_with_columns,
     query_contains_volatile_function, query_cte_names, query_output_shared, resolve_join_using,
     resolve_user_table_function, shape_join_using_output, table_function_column_types,
     validate_table_function_alias_count, validate_table_function_column_definition, ColumnPrune,
@@ -57,12 +57,7 @@ pub(in crate::sql) struct EngineTableRowSource {
     recheck_pins: Option<Arc<Vec<crate::sql::select::RecheckDoc>>>,
     recheck_cursor: usize,
     command_changes: Option<
-        Arc<
-            std::collections::BTreeMap<
-                uqa_core::DocId,
-                Option<uqa_storage::document_store::Document>,
-            >,
-        >,
+        Arc<std::collections::BTreeMap<uqa_core::DocId, Option<uqa_storage::StoredDocument>>>,
     >,
     command_change_after: Option<uqa_core::DocId>,
     command_base_after: Option<uqa_core::DocId>,

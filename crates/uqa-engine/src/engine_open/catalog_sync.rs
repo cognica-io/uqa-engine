@@ -636,7 +636,10 @@ impl Engine {
 
         self.restore_schemas_from_catalog(catalog.as_ref())?;
         self.restore_graphs_from_catalog(catalog.as_ref())?;
-        self.restore_engine_registries_from_catalog(catalog.as_ref())?;
+        self.restore_engine_registries_from_catalog(
+            catalog.as_ref(),
+            super::CatalogRestoreMode::LoadOnly,
+        )?;
         for (name, json) in catalog.load_models()? {
             self.durable
                 .models

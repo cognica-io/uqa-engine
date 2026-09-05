@@ -20,7 +20,7 @@ pub(in crate::sql) use candidate::{
     PhysicalMutationLockTarget,
 };
 pub(in crate::sql) use command::{run_mutation_command, MutationOverlayScope};
-pub(crate) use command::{CommandExactIndex, CommandMutationOverlay};
+pub(crate) use command::{CommandExactIndex, CommandMutationOverlay, CommandStoredDocument};
 pub(crate) use deferred::DeferredForeignKeyCheck;
 pub(in crate::sql) use events::{
     MutationEventQueue, ReferentialActionContext, ReferentialRewritePreparation,

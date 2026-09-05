@@ -20,9 +20,9 @@ LIMIT 20 OFFSET 0;
 
 Ascending order defaults to NULLS LAST and descending order defaults to NULLS FIRST. Use explicit `NULLS FIRST` or `NULLS LAST` when portability matters.
 
-## Hierarchy scans and `tableoid`
+## System columns and hierarchy scans
 
-A scan of an inherited or partitioned parent includes its physical descendants unless `ONLY` is specified. The PostgreSQL system column `tableoid` is an `OID` that identifies the physical relation which supplied each row; it can be selected, qualified, joined to `pg_catalog.pg_class`, and used in predicates, but it is omitted from `SELECT *`.
+A scan of an inherited or partitioned parent includes its physical descendants unless `ONLY` is specified. The PostgreSQL system column `tableoid` is an `OID` that identifies the physical relation which supplied each row; it can be selected, qualified, joined to `pg_catalog.pg_class`, and used in predicates. The `xmin` system column is an `XID` that identifies the transaction or savepoint subtransaction that wrote the current tuple version; `INSERT` and `UPDATE` assign it, explicit current/`OLD`/`NEW` projections expose it, persistent reopen and `VACUUM FULL` preserve it, and both system columns are omitted from `SELECT *`.
 
 ```sql
 SELECT e.event_id, c.relname AS physical_table

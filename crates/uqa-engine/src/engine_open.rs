@@ -22,5 +22,17 @@ mod registries;
 mod statistics;
 mod table_restore;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CatalogRestoreMode {
+    InitialMigration,
+    LoadOnly,
+}
+
+impl CatalogRestoreMode {
+    pub(crate) fn allows_migration(self) -> bool {
+        self == Self::InitialMigration
+    }
+}
+
 #[cfg(test)]
 mod tests;

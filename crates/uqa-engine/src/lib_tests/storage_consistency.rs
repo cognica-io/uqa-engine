@@ -9,7 +9,7 @@ use uqa_storage::{Catalog, SQLiteStorageBackend};
 
 #[derive(Clone)]
 struct StoreWithMissingDocId {
-    docs: BTreeMap<DocId, Document>,
+    docs: BTreeMap<DocId, StoredDocument>,
     missing_doc_id: DocId,
     read_snapshot_calls: Arc<std::sync::atomic::AtomicUsize>,
     writable_snapshot_calls: Arc<std::sync::atomic::AtomicUsize>,
@@ -18,7 +18,9 @@ struct StoreWithMissingDocId {
 impl StoreWithMissingDocId {
     fn from_table(engine: &Engine, table: &str, missing_doc_id: DocId) -> Self {
         let table = engine.table(table).unwrap().expect("table");
-        let docs = table.document_store.read().iter_all().unwrap().collect();
+        let store = table.document_store.read();
+        let doc_ids = store.doc_ids().unwrap();
+        let docs = store.get_stored_many(&doc_ids).unwrap();
         Self {
             docs,
             missing_doc_id,
@@ -29,12 +31,12 @@ impl StoreWithMissingDocId {
 }
 
 impl DocumentStore for StoreWithMissingDocId {
-    fn put(&mut self, doc_id: DocId, document: Document) -> StorageBackendResult<()> {
+    fn put_stored(&mut self, doc_id: DocId, document: StoredDocument) -> StorageBackendResult<()> {
         self.docs.insert(doc_id, document);
         Ok(())
     }
 
-    fn get(&self, doc_id: DocId) -> StorageBackendResult<Option<Document>> {
+    fn get_stored(&self, doc_id: DocId) -> StorageBackendResult<Option<StoredDocument>> {
         Ok(self.docs.get(&doc_id).cloned())
     }
 
@@ -93,7 +95,7 @@ fn transaction_snapshot_captures_one_writable_copy_without_probe_clone() {
 
 #[derive(Clone)]
 struct PortalSnapshotProbeStore {
-    docs: BTreeMap<DocId, Document>,
+    docs: BTreeMap<DocId, StoredDocument>,
     doc_id_calls: Arc<std::sync::atomic::AtomicUsize>,
     catalog_was_unlocked: Arc<std::sync::atomic::AtomicBool>,
     tables: Arc<parking_lot::RwLock<BTreeMap<RelationIdentity, Arc<TableState>>>>,
@@ -102,7 +104,9 @@ struct PortalSnapshotProbeStore {
 impl PortalSnapshotProbeStore {
     fn from_table(engine: &Engine, table: &str) -> Self {
         let table = engine.table(table).unwrap().expect("table");
-        let docs = table.document_store.read().iter_all().unwrap().collect();
+        let store = table.document_store.read();
+        let doc_ids = store.doc_ids().unwrap();
+        let docs = store.get_stored_many(&doc_ids).unwrap();
         Self {
             docs,
             doc_id_calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -113,12 +117,12 @@ impl PortalSnapshotProbeStore {
 }
 
 impl DocumentStore for PortalSnapshotProbeStore {
-    fn put(&mut self, doc_id: DocId, document: Document) -> StorageBackendResult<()> {
+    fn put_stored(&mut self, doc_id: DocId, document: StoredDocument) -> StorageBackendResult<()> {
         self.docs.insert(doc_id, document);
         Ok(())
     }
 
-    fn get(&self, doc_id: DocId) -> StorageBackendResult<Option<Document>> {
+    fn get_stored(&self, doc_id: DocId) -> StorageBackendResult<Option<StoredDocument>> {
         Ok(self.docs.get(&doc_id).cloned())
     }
 
@@ -297,14 +301,16 @@ fn sql_update_reports_stale_document_ids() {
 /// of committing the row away (the Maek `global_config` loss shape).
 #[derive(Clone)]
 struct FailingPutStore {
-    docs: BTreeMap<DocId, Document>,
+    docs: BTreeMap<DocId, StoredDocument>,
     fail_budget: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl FailingPutStore {
     fn from_table(engine: &Engine, table: &str, fail_budget: usize) -> Self {
         let table = engine.table(table).unwrap().expect("table");
-        let docs = table.document_store.read().iter_all().unwrap().collect();
+        let store = table.document_store.read();
+        let doc_ids = store.doc_ids().unwrap();
+        let docs = store.get_stored_many(&doc_ids).unwrap();
         Self {
             docs,
             fail_budget: Arc::new(std::sync::atomic::AtomicUsize::new(fail_budget)),
@@ -313,7 +319,7 @@ impl FailingPutStore {
 }
 
 impl DocumentStore for FailingPutStore {
-    fn put(&mut self, doc_id: DocId, document: Document) -> StorageBackendResult<()> {
+    fn put_stored(&mut self, doc_id: DocId, document: StoredDocument) -> StorageBackendResult<()> {
         let remaining = self.fail_budget.load(Ordering::SeqCst);
         if remaining > 0 {
             self.fail_budget.store(remaining - 1, Ordering::SeqCst);
@@ -325,7 +331,7 @@ impl DocumentStore for FailingPutStore {
         Ok(())
     }
 
-    fn get(&self, doc_id: DocId) -> StorageBackendResult<Option<Document>> {
+    fn get_stored(&self, doc_id: DocId) -> StorageBackendResult<Option<StoredDocument>> {
         Ok(self.docs.get(&doc_id).cloned())
     }
 

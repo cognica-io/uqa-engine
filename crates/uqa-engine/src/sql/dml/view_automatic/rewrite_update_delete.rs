@@ -185,12 +185,9 @@ pub(in crate::sql::dml) fn rewrite_update_to_base(
             source: source_schema.as_ref(),
             include_excluded: false,
         };
-        for (position, AssignmentPlan { column, value }) in plan.assignments.iter_mut().enumerate()
-        {
+        for AssignmentPlan { column, value } in &mut plan.assignments {
             rewrite_target_expression(engine, value, &layer, ordinary_scope, &mut plan.subqueries)?;
-            if layer_suppresses {
-                *column = format!("\0uqa_view_rule_update_{position}");
-            } else if !rewrite_suppressed {
+            if !layer_suppresses && !rewrite_suppressed {
                 *column = writable_column(&layer, column, "UPDATE")?;
             }
         }

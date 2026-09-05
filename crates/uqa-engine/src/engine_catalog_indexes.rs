@@ -8,6 +8,10 @@ use super::{
     CatalogIndexRow, Engine, RelationIdentity, SQLError, StorageBackendError, StorageBackendResult,
 };
 
+mod definition;
+mod routines;
+pub(crate) use definition::{index_definition, EnforcedKey, IndexDefinition};
+
 impl Engine {
     pub fn register_catalog_index(
         &self,
@@ -28,8 +32,33 @@ impl Engine {
         columns: &[String],
         options: &[(String, String)],
     ) -> StorageBackendResult<()> {
+        self.register_catalog_index_definition(
+            name,
+            index_type,
+            table,
+            &columns
+                .iter()
+                .cloned()
+                .map(uqa_sql::ast::IndexKey::Column)
+                .collect::<Vec<_>>(),
+            options,
+            &IndexDefinition::default(),
+        )
+    }
+
+    pub(crate) fn register_catalog_index_definition(
+        &self,
+        name: &str,
+        index_type: &str,
+        table: &str,
+        columns: &[uqa_sql::ast::IndexKey],
+        options: &[(String, String)],
+        definition: &IndexDefinition,
+    ) -> StorageBackendResult<()> {
         self.with_implicit_storage_transaction(|engine| {
-            engine.try_register_catalog_index_inner(name, index_type, table, columns, options)
+            engine.try_register_catalog_index_inner(
+                name, index_type, table, columns, options, definition,
+            )
         })
     }
 
@@ -38,8 +67,9 @@ impl Engine {
         name: &str,
         index_type: &str,
         table: &str,
-        columns: &[String],
+        columns: &[uqa_sql::ast::IndexKey],
         options: &[(String, String)],
+        definition: &IndexDefinition,
     ) -> StorageBackendResult<()> {
         self.synchronize_catalog_registries()?;
         let table = self
@@ -87,6 +117,7 @@ impl Engine {
             table_name: table.clone(),
             columns_json: columns_json.clone(),
             parameters_json: parameters_json.clone(),
+            definition_json: Some(serde_json::to_string(definition)?),
         };
         let previous = self
             .durable
@@ -104,13 +135,7 @@ impl Engine {
         }
         if persistence != uqa_sql::ast::RelationPersistence::Temporary {
             if let Some(catalog) = self.storage.catalog.as_ref() {
-                if let Err(err) = catalog.save_catalog_index(
-                    &relation,
-                    index_type,
-                    &table,
-                    &columns_json,
-                    &parameters_json,
-                ) {
+                if let Err(err) = catalog.save_catalog_index_row(&row) {
                     self.restore_catalog_index_entry(&relation, previous.as_ref());
                     if let Err(cleanup) = self.restore_catalog_index_tables(&row, previous.as_ref())
                     {
@@ -127,6 +152,19 @@ impl Engine {
         Ok(())
     }
 
+    fn refresh_catalog_index_table_tree(&self, table: &str) -> StorageBackendResult<()> {
+        let tables = if self.try_table_hierarchy(table)?.partition_spec.is_some() {
+            self.hierarchy_scan_tables(table, true)
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?
+        } else {
+            vec![table.to_string()]
+        };
+        for table in tables {
+            self.refresh_value_indexes_for_table(&table)?;
+        }
+        Ok(())
+    }
+
     fn restore_catalog_index_tables(
         &self,
         current: &CatalogIndexRow,
@@ -140,7 +178,7 @@ impl Engine {
         }
         for table in tables {
             if self.try_resolve_table_name(table)?.is_some() {
-                self.refresh_value_indexes_for_table(table)?;
+                self.refresh_catalog_index_table_tree(table)?;
             }
         }
         Ok(())
@@ -170,7 +208,7 @@ impl Engine {
             }
         }
         for table in tables {
-            self.refresh_value_indexes_for_table(table)?;
+            self.refresh_catalog_index_table_tree(table)?;
         }
         Ok(())
     }
@@ -209,12 +247,13 @@ impl Engine {
         };
         let removed = self.durable.catalog_indexes.write().remove(relation);
         if existing_row.index_type.eq_ignore_ascii_case("btree") {
-            if let Err(err) = self.refresh_value_indexes_for_table(&existing_row.table_name) {
+            if let Err(err) = self.refresh_catalog_index_table_tree(&existing_row.table_name) {
                 self.durable
                     .catalog_indexes
                     .write()
                     .insert(relation.clone(), existing_row.clone());
-                if let Err(cleanup) = self.refresh_value_indexes_for_table(&existing_row.table_name)
+                if let Err(cleanup) =
+                    self.refresh_catalog_index_table_tree(&existing_row.table_name)
                 {
                     return Err(StorageBackendError::Other(format!(
                         "{err}; restoring value indexes after the index drop failure also failed: {cleanup}"
@@ -236,7 +275,7 @@ impl Engine {
                         .insert(relation.clone(), existing_row.clone());
                     if existing_row.index_type.eq_ignore_ascii_case("btree") {
                         if let Err(cleanup) =
-                            self.refresh_value_indexes_for_table(&existing_row.table_name)
+                            self.refresh_catalog_index_table_tree(&existing_row.table_name)
                         {
                             return Err(StorageBackendError::Other(format!(
                                 "{err}; restoring value indexes after the catalog delete failure also failed: {cleanup}"
@@ -256,7 +295,7 @@ impl Engine {
         let Some(relation) = self.try_resolve_catalog_index_relation(name)? else {
             return Ok(None);
         };
-        Ok(self.durable.catalog_indexes.read().get(&relation).cloned())
+        self.bound_catalog_index(&relation.qualified_name())
     }
 
     pub fn has_catalog_index(&self, name: &str) -> StorageBackendResult<bool> {
@@ -268,11 +307,12 @@ impl Engine {
         name: &str,
     ) -> StorageBackendResult<Option<RelationIdentity>> {
         self.synchronize_catalog_registries()?;
+        let candidates = self.relation_lookup_candidates(name)?;
+        let catalog = self.catalog_read_view();
         let indexes = self.durable.catalog_indexes.read();
-        Ok(self
-            .relation_lookup_candidates(name)?
-            .into_iter()
-            .find(|candidate| indexes.contains_key(candidate)))
+        Ok(candidates.into_iter().find(|candidate| {
+            indexes.contains_key(candidate) || catalog.has_constraint_index(candidate)
+        }))
     }
 
     pub(crate) fn bound_catalog_index(
@@ -287,12 +327,13 @@ impl Engine {
                 "bound index identity `{canonical_name}` is not schema-qualified"
             ))
         })?;
-        Ok(self
-            .durable
-            .catalog_indexes
-            .read()
-            .get(&RelationIdentity::new(schema, name))
-            .cloned())
+        let relation = RelationIdentity::new(schema, name);
+        if let Some(index) = self.durable.catalog_indexes.read().get(&relation).cloned() {
+            return Ok(Some(index));
+        }
+        self.catalog_read_view()
+            .constraint_index(&relation)
+            .map_err(|error| StorageBackendError::Other(error.to_string()))
     }
 
     /// An index has no independent owner: `PostgreSQL` derives its owner from the indexed table and additionally permits the containing schema's owner to drop it.

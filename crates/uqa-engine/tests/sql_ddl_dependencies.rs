@@ -4,6 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use uqa_core::Value;
 use uqa_engine::Engine;
 use uqa_sql::ast::{ColumnDef, ColumnType, Expr};
 
@@ -48,7 +49,6 @@ fn cascade_flags_and_wrong_relation_kinds_fail_before_side_effects() {
 
     for (sql, expected) in [
         ("DROP SCHEMA app CASCADE", "DROP SCHEMA CASCADE"),
-        ("DROP VIEW app.items_view CASCADE", "DROP VIEW CASCADE"),
         (
             "ALTER TABLE app.items DROP COLUMN id CASCADE",
             "DROP COLUMN CASCADE",
@@ -91,6 +91,8 @@ fn cascade_flags_and_wrong_relation_kinds_fail_before_side_effects() {
         engine.table_columns("app.items").unwrap(),
         vec!["id", "kept"]
     );
+    engine.sql("DROP VIEW app.items_view CASCADE", &[]).unwrap();
+    assert!(engine.view("app.items_view").unwrap().is_none());
 
     engine.sql("CREATE SCHEMA routine_app", &[]).unwrap();
     engine
@@ -105,7 +107,7 @@ fn cascade_flags_and_wrong_relation_kinds_fail_before_side_effects() {
 }
 
 #[test]
-fn dependent_views_block_restrict_and_column_ddl_but_cascade_with_the_table() {
+fn dependent_views_follow_table_and_column_renames_but_block_restrict() {
     let engine = Engine::new();
     engine
         .sql("CREATE TABLE items (id INTEGER, kept INTEGER)", &[])
@@ -120,12 +122,7 @@ fn dependent_views_block_restrict_and_column_ddl_but_cascade_with_the_table() {
         )
         .unwrap();
 
-    for sql in [
-        "DROP TABLE items",
-        "ALTER TABLE items RENAME TO renamed_items",
-        "ALTER TABLE items RENAME COLUMN id TO item_id",
-        "ALTER TABLE items DROP COLUMN id",
-    ] {
+    for sql in ["DROP TABLE items", "ALTER TABLE items DROP COLUMN id"] {
         let error = engine.sql(sql, &[]).unwrap_err();
         assert!(
             error.to_string().contains("public.item_ids"),
@@ -137,6 +134,35 @@ fn dependent_views_block_restrict_and_column_ddl_but_cascade_with_the_table() {
     assert!(!engine.has_table("renamed_items").unwrap());
     assert_eq!(engine.table_columns("items").unwrap(), vec!["id", "kept"]);
     assert!(engine.view("item_ids").unwrap().is_some());
+
+    engine.sql("INSERT INTO items VALUES (7, 9)", &[]).unwrap();
+    engine
+        .sql("ALTER TABLE items RENAME TO renamed_items", &[])
+        .unwrap();
+    assert_eq!(
+        engine
+            .sql("SELECT id FROM nested_item_ids", &[])
+            .unwrap()
+            .rows[0]
+            .get("id"),
+        Some(&Value::Int(7))
+    );
+    assert!(!engine.has_table("items").unwrap());
+    assert!(engine.has_table("renamed_items").unwrap());
+    engine
+        .sql("ALTER TABLE renamed_items RENAME TO items", &[])
+        .unwrap();
+
+    engine
+        .sql("ALTER TABLE items RENAME COLUMN id TO item_id", &[])
+        .unwrap();
+    assert_eq!(
+        engine
+            .sql("SELECT id FROM nested_item_ids", &[])
+            .unwrap()
+            .rows[0]["id"],
+        Value::Int(7)
+    );
 
     let error = engine.drop_view("item_ids").unwrap_err();
     assert!(

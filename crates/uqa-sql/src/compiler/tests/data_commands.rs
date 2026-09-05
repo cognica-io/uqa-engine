@@ -25,7 +25,10 @@ fn create_index_records_access_method() {
     };
     assert_eq!(ci.table, "docs");
     assert_eq!(ci.access_method, "gin");
-    assert_eq!(ci.columns, vec!["body"]);
+    assert_eq!(
+        ci.columns,
+        vec![crate::ast::IndexKey::Column("body".into())]
+    );
 }
 
 #[test]

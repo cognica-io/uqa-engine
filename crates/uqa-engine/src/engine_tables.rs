@@ -733,6 +733,22 @@ impl Engine {
         Ok(())
     }
 
+    pub(crate) fn add_prepared_stored_document_with_vector_values_inner(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        document: uqa_storage::StoredDocument,
+        vectors: BTreeMap<FieldName, Vec<Vec<f32>>>,
+        known_new: bool,
+    ) -> Result<(), SQLError> {
+        self.validate_vector_values(table, &vectors)?;
+        self.add_prepared_stored_document_impl(table, doc_id, document, known_new)?;
+        for (field, vectors) in vectors {
+            self.add_vector_values_inner(table, doc_id, &field, vectors)?;
+        }
+        Ok(())
+    }
+
     pub fn create_default_table(
         &self,
         name: impl Into<String>,

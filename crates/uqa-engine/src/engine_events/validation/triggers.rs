@@ -41,7 +41,7 @@ impl Engine {
     ) -> Result<Vec<ColumnDef>, SQLError> {
         if kind == "table" {
             return self
-                .try_describe_table(&relation.qualified_name())
+                .try_describe_table_row_type(&relation.qualified_name())
                 .map_err(|error| SQLError::Internal(format!("read trigger columns: {error}")))?
                 .ok_or_else(|| SQLError::UnknownTable(relation.qualified_name()));
         }
@@ -56,12 +56,7 @@ impl Engine {
             return Ok(table
                 .columns
                 .into_iter()
-                .map(|column| {
-                    trigger_column(
-                        column.name,
-                        crate::engine_fdw::fdw_column_type_to_sql(&column.ty),
-                    )
-                })
+                .map(|column| trigger_column(column.name, column.ty))
                 .collect());
         }
         let view = self
@@ -177,6 +172,49 @@ impl Engine {
         Ok(function)
     }
 
+    pub(crate) fn resolve_bound_trigger_function(
+        &self,
+        name: &str,
+        object_id: Option<[u8; 16]>,
+    ) -> Result<Arc<SQLUserFunction>, SQLError> {
+        let Some(object_id) = object_id else {
+            return self.resolve_trigger_function(name, RelationLookupMode::Bound);
+        };
+        let binding = uqa_sql::ast::FunctionBinding {
+            object_id: Some(object_id),
+            name: name.to_string(),
+            argument_types: Vec::new(),
+            builtin: false,
+            dispatch: None,
+            invocation: None,
+            resolution_error: None,
+        };
+        let candidates = self
+            .lookup_bound_sql_functions_by_binding(&binding)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|function| {
+                !function.def.is_procedure && routine_signature_types(&function.def).is_empty()
+            })
+            .collect::<Vec<_>>();
+        let function = match candidates.as_slice() {
+            [function] => function.clone(),
+            [] => {
+                return Err(SQLError::Routine {
+                    sqlstate: "42883".into(),
+                    message: format!("function {name}() does not exist"),
+                })
+            }
+            _ => {
+                return Err(SQLError::Internal(format!(
+                    "routine object identity for trigger function `{name}` is not unique"
+                )))
+            }
+        };
+        Self::validate_trigger_function(&function)?;
+        Ok(function)
+    }
+
     fn ensure_trigger_creation_privilege(
         &self,
         relation: &RelationIdentity,
@@ -285,7 +323,7 @@ impl Engine {
         &self,
         definition: &mut CreateTrigger,
         lookup_mode: RelationLookupMode,
-    ) -> Result<RelationIdentity, SQLError> {
+    ) -> Result<(RelationIdentity, bool), SQLError> {
         if definition.constraint && definition.or_replace {
             return Err(SQLError::Routine {
                 sqlstate: "0A000".into(),
@@ -369,11 +407,13 @@ impl Engine {
                 });
             }
         }
+        let mut condition_routine_bindings_changed = false;
         if let Some(mut condition) = definition.when.take() {
-            self.validate_trigger_condition(definition, &columns, &mut condition)?;
+            condition_routine_bindings_changed =
+                self.validate_trigger_condition(definition, &columns, &mut condition)?;
             definition.when = Some(condition);
         }
-        Ok(relation)
+        Ok((relation, condition_routine_bindings_changed))
     }
 
     fn validate_trigger_transition_relations(
@@ -429,35 +469,36 @@ impl Engine {
         definition: &CreateTrigger,
         columns: &[uqa_sql::ast::ColumnDef],
         condition: &mut Expr,
-    ) -> Result<(), SQLError> {
+    ) -> Result<bool, SQLError> {
         validate_trigger_condition_references(definition, columns, condition)?;
         let bound = bind_expr(condition, &mut TriggerConditionTypeResolver { columns })?;
-        let lowered = uqa_planner::ExpressionPlan::lower(bound);
-        match uqa_execution::common_context_expression_type(
-            &lowered.scalar,
-            &uqa_execution::RowSchema::default(),
+        let mut plan = uqa_planner::ExpressionPlan::lower_with(bound, &|name: &str| {
+            self.has_registered_aggregate_function(name)
+        });
+        let ty = crate::sql::bind_catalog_expression_routines_with_outer(
+            self,
+            &mut plan,
             &[],
-            Some(self),
-        )? {
-            Some(ty) if !is_boolean_type(&ty) => {
+            &uqa_execution::RowSchema::default(),
+        )?;
+        if !ty.as_ref().is_some_and(is_boolean_type) {
+            if let Expr::Literal(value @ (Value::Str(_) | Value::FixedChar(_))) = condition {
+                *value = uqa_sql::expr::cast_value(value, "boolean")?;
+            } else if let Some(ty) = ty {
                 return Err(SQLError::TypeMismatch(format!(
                     "argument of WHEN must be type boolean, not type {}",
                     ty.sql_name()
-                )))
+                )));
+            } else {
+                *condition = Expr::Cast {
+                    expr: Box::new(condition.clone()),
+                    ty: "boolean".into(),
+                };
             }
-            None => {
-                if let Expr::Literal(value @ (Value::Str(_) | Value::FixedChar(_))) = condition {
-                    *value = uqa_sql::expr::cast_value(value, "boolean")?;
-                } else {
-                    *condition = Expr::Cast {
-                        expr: Box::new(condition.clone()),
-                        ty: "boolean".into(),
-                    };
-                }
-            }
-            Some(_) => {}
         }
-        crate::sql::reject_stored_regrole_constants(self, condition, None)
+        crate::sql::reject_stored_regrole_constants(self, condition, None)?;
+        let references = crate::sql::collect_expression_routine_references(&plan)?;
+        super::super::bind_stored_expression_routines(condition, &references)
     }
 }
 

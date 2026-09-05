@@ -6,6 +6,48 @@
 
 use super::*;
 
+pub(super) fn assert_table_range_aliases_remain_automatically_updatable() {
+    let engine = Engine::new();
+    exec(
+        &engine,
+        "CREATE TABLE range_alias_view_base(id INTEGER, value TEXT NOT NULL);
+         CREATE VIEW range_alias_view AS
+           SELECT source.key, source.label
+           FROM range_alias_view_base AS source(key, label)
+           WHERE source.key > 0
+           WITH LOCAL CHECK OPTION;
+         INSERT INTO range_alias_view(key, label) VALUES (1, 'before');
+         UPDATE range_alias_view SET label = 'after' WHERE key = 1",
+    );
+    let flags = exec(
+        &engine,
+        "SELECT is_updatable, is_insertable_into
+         FROM information_schema.views
+         WHERE table_name = 'range_alias_view'",
+    );
+    assert_eq!(flags.rows[0]["is_updatable"], Value::Str("YES".into()));
+    assert_eq!(
+        flags.rows[0]["is_insertable_into"],
+        Value::Str("YES".into())
+    );
+    let rejected = engine
+        .sql(
+            "INSERT INTO range_alias_view(key, label) VALUES (-1, 'rejected')",
+            &[],
+        )
+        .expect_err("the range-aliased source predicate must enforce CHECK OPTION");
+    assert_eq!(rejected.sqlstate(), Some("44000"), "{rejected}");
+    let base = exec(
+        &engine,
+        "DELETE FROM range_alias_view WHERE key = 1 RETURNING key, label",
+    );
+    assert_eq!(base.rows[0]["key"], Value::Int(1));
+    assert_eq!(base.rows[0]["label"], Value::Str("after".into()));
+    assert!(exec(&engine, "SELECT id FROM range_alias_view_base")
+        .rows
+        .is_empty());
+}
+
 pub(super) fn assert_check_option_definition_over_non_updatable_source() {
     let engine = Engine::new();
     exec(

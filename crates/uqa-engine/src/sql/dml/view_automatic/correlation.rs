@@ -473,7 +473,9 @@ pub(super) fn insert_conflict_subquery_ids(plan: &InsertPlan) -> BTreeSet<usize>
     };
     let mut ids =
         collect_expression_subquery_ids(assignments.iter().map(|assignment| &assignment.value));
-    ids.extend(collect_expression_subquery_ids(predicate.iter()));
+    ids.extend(collect_expression_subquery_ids(
+        predicate.iter().map(Box::as_ref),
+    ));
     ids
 }
 

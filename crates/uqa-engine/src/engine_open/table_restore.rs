@@ -25,6 +25,7 @@ fn metadata_foreign_keys(
             continue;
         };
         foreign_keys.push(uqa_sql::ast::ForeignKey {
+            referenced_key: reference.referenced_key.clone(),
             name: reference.name.clone(),
             object_id: reference.object_id,
             local_columns: vec![column.name.clone()],
@@ -203,6 +204,7 @@ impl Engine {
         &mut self,
         catalog: &dyn CatalogFacade,
         backend: &dyn PersistentStorageBackend,
+        mode: super::CatalogRestoreMode,
     ) -> StorageBackendResult<()> {
         self.restore_schemas_from_catalog(catalog)?;
         let schemas = catalog.load_tables()?;
@@ -213,7 +215,7 @@ impl Engine {
         }
         self.synchronize_partition_identity_watermarks()?;
         self.restore_graphs_from_catalog(catalog)?;
-        self.restore_engine_registries_from_catalog(catalog)?;
+        self.restore_engine_registries_from_catalog(catalog, mode)?;
         Ok(())
     }
 
@@ -236,6 +238,7 @@ impl Engine {
         Self::migrate_constraint_names_from_metadata(catalog)?;
         Self::migrate_legacy_sequences_from_metadata(catalog)?;
         Self::migrate_sequence_identities(catalog)?;
+        Self::migrate_foreign_table_identities(catalog)?;
         Self::migrate_implicit_sequence_owners(catalog)
     }
 

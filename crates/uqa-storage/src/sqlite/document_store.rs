@@ -13,7 +13,7 @@ use rusqlite::{params, OptionalExtension};
 use uqa_core::{DecimalValue, DocId, TemporalValue, Value};
 
 use crate::backend::StorageBackendResult;
-use crate::document_store::{Document, DocumentStore};
+use crate::document_store::{Document, DocumentMetadata, DocumentStore, StoredDocument};
 use crate::sqlite::connection::{ManagedConnection, Result as SQLiteResult, SQLiteError};
 
 const DOCUMENT_BLOBS_TABLE: &str = "_document_blobs";

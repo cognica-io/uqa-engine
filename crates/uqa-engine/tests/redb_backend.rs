@@ -4,6 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use tempfile::tempdir;
@@ -47,6 +48,19 @@ fn legacy_reverse_posting_key(table: &str, doc_id: u64, field: &str, term: &str)
 fn inverted_index_format_key() -> Vec<u8> {
     let mut key = vec![b'm'];
     push_key_string(&mut key, "inverted_index_format");
+    key
+}
+
+fn document_key(table: &str, doc_id: u64) -> Vec<u8> {
+    let mut key = vec![b'd'];
+    push_key_string(&mut key, table);
+    key.extend_from_slice(&doc_id.to_be_bytes());
+    key
+}
+
+fn document_format_key() -> Vec<u8> {
+    let mut key = vec![b'm'];
+    push_key_string(&mut key, "document_storage_format");
     key
 }
 
@@ -173,6 +187,60 @@ fn engine_open_automatically_migrates_legacy_redb_postings() {
     assert_eq!(store.scan_prefix(b"k").unwrap().len(), 2);
     assert_eq!(store.scan_prefix(b"o").unwrap().len(), 2);
     assert_eq!(store.scan_prefix(b"x").unwrap().len(), 1);
+}
+
+#[test]
+fn engine_open_automatically_migrates_legacy_redb_tuple_metadata() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("legacy-tuple-metadata.redb");
+    let expected_xmin = {
+        let engine = open_engine(&path);
+        engine
+            .sql("CREATE TABLE messages (id INTEGER PRIMARY KEY)", &[])
+            .unwrap();
+        let inserted = engine
+            .sql("INSERT INTO messages VALUES (1) RETURNING xmin", &[])
+            .unwrap();
+        match inserted.rows[0].get("xmin") {
+            Some(Value::Int(xmin)) => *xmin,
+            value => panic!("expected integer xmin, got {value:?}"),
+        }
+    };
+
+    let storage = RedbStorage::open(&path).unwrap();
+    let store = storage.store();
+    let legacy = BTreeMap::from([
+        ("\0uqa.system.xmin".to_string(), Value::Int(expected_xmin)),
+        ("id".to_string(), Value::Int(1)),
+        ("xmin".to_string(), Value::Int(expected_xmin)),
+    ]);
+    let mut encoded = b"\0uqa-document-json-v1\0".to_vec();
+    encoded.extend(serde_json::to_vec(&legacy).unwrap());
+    store
+        .put(&document_key("public.messages", 1), &encoded)
+        .unwrap();
+    store.delete(&document_format_key()).unwrap();
+    drop(store);
+    drop(storage);
+
+    let reopened = open_engine(&path);
+    let row = reopened.sql("SELECT id, xmin FROM messages", &[]).unwrap();
+    assert_eq!(row.rows[0]["id"], Value::Int(1));
+    assert_eq!(row.rows[0]["xmin"], Value::Int(expected_xmin));
+    drop(reopened);
+
+    let storage = RedbStorage::open(&path).unwrap();
+    let stored = storage
+        .store()
+        .get(&document_key("public.messages", 1))
+        .unwrap()
+        .unwrap();
+    let body = stored
+        .strip_prefix(b"\0uqa-document-record-v2\0")
+        .expect("engine open must rewrite the legacy record");
+    let body: serde_json::Value = serde_json::from_slice(body).unwrap();
+    assert_eq!(body["tuple_xmin"], expected_xmin);
+    assert_eq!(body["fields"], serde_json::json!({"id": 1}));
 }
 
 #[test]
@@ -312,12 +380,15 @@ fn redb_persists_btree_postings_across_reopen_and_mutation() {
     assert!(session.backend.persists_btree_indexes());
     assert_eq!(
         session.backend.btree_index_fields("public.items").unwrap(),
-        vec!["id", "price"]
+        vec![
+            uqa_storage::ValueIndexKey::from("id"),
+            uqa_storage::ValueIndexKey::from("price")
+        ]
     );
     assert_eq!(
         session
             .backend
-            .load_btree_index("public.items", "price")
+            .load_btree_index("public.items", &"price".into())
             .unwrap(),
         Some(vec![(2, Value::Int(25)), (3, Value::Int(30))])
     );
@@ -687,7 +758,7 @@ fn assert_indexed_columns_are_physically_removed(path: &std::path::Path) {
             .backend
             .btree_index_fields("public.archived")
             .unwrap(),
-        vec!["id"]
+        vec![uqa_storage::ValueIndexKey::from("id")]
     );
     assert_vector_index_is_missing(
         session.backend.as_ref(),

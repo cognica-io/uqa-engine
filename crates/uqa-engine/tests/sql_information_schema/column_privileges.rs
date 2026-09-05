@@ -138,6 +138,34 @@ fn column_acl_catalog_inquiry_visibility_and_select_enforcement() {
 }
 
 #[test]
+fn table_range_aliases_preserve_physical_column_privileges() {
+    let engine = Engine::new();
+    setup(&engine);
+    for sql in [
+        "SET ROLE column_acl_owner",
+        "GRANT SELECT(a) ON column_acl.items TO column_acl_reader",
+        "RESET ROLE",
+        "SET ROLE column_acl_reader",
+    ] {
+        execute(&engine, sql);
+    }
+    assert_eq!(
+        scalar(
+            &engine,
+            "SELECT visible_a FROM column_acl.items AS source(visible_a, visible_b, visible_c)",
+        ),
+        Value::Int(1)
+    );
+    assert_eq!(
+        sqlstate(
+            &engine,
+            "SELECT visible_b FROM column_acl.items AS source(visible_a, visible_b, visible_c)",
+        ),
+        "42501"
+    );
+}
+
+#[test]
 fn column_privilege_views_follow_postgresql_enabled_role_visibility() {
     let engine = Engine::new();
     setup(&engine);

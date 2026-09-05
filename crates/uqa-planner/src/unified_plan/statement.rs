@@ -53,6 +53,9 @@ impl UnifiedPlan {
             Statement::CreateTable(value) => {
                 Self::Command(Box::new(CommandPlan::CreateTable(Box::new(value))))
             }
+            Statement::CreateTableIfNotExists(value) => {
+                Self::Command(Box::new(CommandPlan::CreateTableIfNotExists(value)))
+            }
             Statement::CreateIndex(value) => {
                 Self::Command(Box::new(CommandPlan::CreateIndex(value)))
             }
@@ -84,12 +87,25 @@ impl UnifiedPlan {
                                 &mut subqueries,
                             ),
                             predicate: r#where.map(|expr| {
-                                lower_scalar_expression(expr, aggregates, &mut subqueries)
+                                Box::new(lower_scalar_expression(
+                                    *expr,
+                                    aggregates,
+                                    &mut subqueries,
+                                ))
                             }),
                         },
                     };
                     ConflictPlan {
+                        predicate: conflict.predicate.map(|expr| {
+                            Box::new(lower_scalar_expression(*expr, aggregates, &mut subqueries))
+                        }),
+                        constraint: conflict.constraint,
                         conflict_columns: conflict.conflict_columns,
+                        expressions: conflict
+                            .expressions
+                            .into_iter()
+                            .map(|expr| lower_scalar_expression(expr, aggregates, &mut subqueries))
+                            .collect(),
                         action,
                     }
                 });
@@ -103,6 +119,7 @@ impl UnifiedPlan {
                 Self::Command(Box::new(CommandPlan::Insert(Box::new(InsertPlan {
                     table: statement.table,
                     target_relation_bound: statement.target_relation_bound,
+                    relations_bound: false,
                     statement_privilege_subject: None,
                     target_privilege_subject: None,
                     target_qualifier: statement.target_qualifier,
@@ -142,6 +159,7 @@ impl UnifiedPlan {
                 Self::Command(Box::new(CommandPlan::Update(Box::new(UpdatePlan {
                     table: statement.table,
                     target_relation_bound: statement.target_relation_bound,
+                    relations_bound: false,
                     statement_privilege_subject: None,
                     target_privilege_subject: None,
                     target_qualifier: statement.target_qualifier,
@@ -178,6 +196,7 @@ impl UnifiedPlan {
                 Self::Command(Box::new(CommandPlan::Delete(Box::new(DeletePlan {
                     table: statement.table,
                     target_relation_bound: statement.target_relation_bound,
+                    relations_bound: false,
                     statement_privilege_subject: None,
                     target_privilege_subject: None,
                     target_qualifier: statement.target_qualifier,
@@ -362,6 +381,9 @@ impl UnifiedPlan {
             Statement::CreateForeignTable(value) => {
                 Self::Command(Box::new(CommandPlan::CreateForeignTable(value)))
             }
+            Statement::CreateForeignTableIfNotExists(value) => {
+                Self::Command(Box::new(CommandPlan::CreateForeignTableIfNotExists(value)))
+            }
             Statement::Merge(statement) => {
                 let mut subqueries = Vec::new();
                 let source = SourcePlan::lower_with(statement.source, aggregates, &mut subqueries);
@@ -407,6 +429,9 @@ impl UnifiedPlan {
             }
             Statement::AlterRoutineOwner(value) => {
                 Self::Command(Box::new(CommandPlan::AlterRoutineOwner(value)))
+            }
+            Statement::RenameRoutine(value) => {
+                Self::Command(Box::new(CommandPlan::RenameRoutine(value)))
             }
             Statement::GrantRoutine(value) => {
                 Self::Command(Box::new(CommandPlan::GrantRoutine(value)))
@@ -472,6 +497,7 @@ impl CommandPlan {
     pub fn name(&self) -> &'static str {
         match self {
             Self::CreateTable(_) => "CreateTable",
+            Self::CreateTableIfNotExists(_) => "CreateTableIfNotExists",
             Self::CreateIndex(_) => "CreateIndex",
             Self::Insert(_) => "Insert",
             Self::Update(_) => "Update",
@@ -509,12 +535,14 @@ impl CommandPlan {
             Self::Deallocate { .. } => "Deallocate",
             Self::CreateForeignServer(_) => "CreateForeignServer",
             Self::CreateForeignTable(_) => "CreateForeignTable",
+            Self::CreateForeignTableIfNotExists(_) => "CreateForeignTableIfNotExists",
             Self::AlterForeignTable(_) => "AlterForeignTable",
             Self::Merge(_) => "Merge",
             Self::CreateFunction(_) => "CreateFunction",
             Self::DropFunction(_) => "DropFunction",
             Self::AlterRoutine(_) => "AlterRoutine",
             Self::AlterRoutineOwner(_) => "AlterRoutineOwner",
+            Self::RenameRoutine(_) => "RenameRoutine",
             Self::GrantRoutine(_) => "GrantRoutine",
             Self::GrantTable(_) => "GrantTable",
             Self::GrantSequence(_) => "GrantSequence",

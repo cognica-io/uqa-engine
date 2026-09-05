@@ -28,13 +28,14 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
         name,
         qualifier,
         alias,
+        column_aliases,
         include_descendants,
     } = source
     else {
         return Ok(None);
     };
     let qualifier = qualifier_for(qualifier, alias.as_deref());
-    if let Some(materialized) = ctes.rows.get(name).cloned() {
+    if let Some(materialized) = ctes.materialized_for_scan(name) {
         if has_filters_for_qualifier(filters, &qualifier) {
             return Ok(None);
         }
@@ -44,7 +45,10 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
             .iter()
             .enumerate()
             .filter_map(|(position, identity)| {
-                let column = identity.column();
+                let source_column = identity.column();
+                let column = column_aliases
+                    .get(position)
+                    .map_or(source_column, String::as_str);
                 if prune
                     .and_then(|prune| prune.get(&qualifier))
                     .is_some_and(|wanted| !wanted.contains(column))
@@ -88,14 +92,32 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
         .iter()
         .map(|column| column.name.clone())
         .collect::<Vec<_>>();
+    if column_aliases.len() > table_columns.len() {
+        return Err(SQLError::Routine {
+            sqlstate: "42P10".into(),
+            message: format!(
+                "table \"{qualifier}\" has {} columns available but {} columns specified",
+                table_columns.len(),
+                column_aliases.len()
+            ),
+        });
+    }
     // An unqualified reference is conservatively requested from every FROM source during pruning. The scan schema must still describe only real table columns: advertising those over-inclusive requests as columns can make later joins bind an unqualified name to a non-existent value.
-    let mut columns = match wanted.as_ref() {
-        Some(wanted) => table_columns
-            .into_iter()
-            .filter(|column| wanted.contains(column))
-            .collect(),
-        None => table_columns,
-    };
+    let selected_columns = table_columns
+        .into_iter()
+        .enumerate()
+        .filter_map(|(position, physical)| {
+            let visible = column_aliases
+                .get(position)
+                .cloned()
+                .unwrap_or_else(|| physical.clone());
+            wanted
+                .as_ref()
+                .is_none_or(|wanted| wanted.contains(&visible))
+                .then_some((physical, visible))
+        })
+        .collect::<Vec<_>>();
+    let (mut columns, mut schema): (Vec<_>, Vec<_>) = selected_columns.into_iter().unzip();
     let include_table_oid = wanted
         .as_ref()
         .is_some_and(|wanted| wanted.contains(TABLE_OID_COLUMN));
@@ -104,8 +126,8 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
         .is_some_and(|wanted| wanted.contains(XMIN_COLUMN));
     if include_xmin {
         columns.push(XMIN_COLUMN.into());
+        schema.push(XMIN_COLUMN.into());
     }
-    let mut schema = columns.clone();
     if include_table_oid {
         schema.push(TABLE_OID_COLUMN.into());
     }

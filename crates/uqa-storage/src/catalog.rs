@@ -307,6 +307,8 @@ pub struct CatalogIndexRow {
     pub table_name: String,
     pub columns_json: String,
     pub parameters_json: String,
+    /// Durable semantic definition; absent on legacy ordinary secondary indexes.
+    pub definition_json: Option<String>,
 }
 
 /// Values persisted into one column-statistics row.
@@ -702,6 +704,12 @@ pub trait CatalogFacade: Send + Sync {
     ) -> StorageBackendResult<Option<i64>>;
 
     fn save_view(&self, view: &ViewRow) -> StorageBackendResult<()>;
+    /// Atomically move one view catalog row and its shared relation claim.
+    fn rename_view(
+        &self,
+        from: &RelationIdentity,
+        to: &RelationIdentity,
+    ) -> StorageBackendResult<bool>;
     fn drop_view(&self, relation: &RelationIdentity) -> StorageBackendResult<bool>;
     fn load_views(&self) -> StorageBackendResult<Vec<ViewRow>>;
 
@@ -786,6 +794,12 @@ pub trait CatalogFacade: Send + Sync {
     fn load_foreign_servers(&self) -> StorageBackendResult<Vec<(String, String, String)>>;
 
     fn save_foreign_table(&self, row: &ForeignTableRow) -> StorageBackendResult<()>;
+    /// Atomically move one foreign-table catalog row and its shared relation claim.
+    fn rename_foreign_table(
+        &self,
+        from: &RelationIdentity,
+        to: &RelationIdentity,
+    ) -> StorageBackendResult<bool>;
     fn update_foreign_table_security(
         &self,
         relation: &RelationIdentity,
@@ -803,7 +817,17 @@ pub trait CatalogFacade: Send + Sync {
         table_name: &str,
         columns_json: &str,
         parameters_json: &str,
-    ) -> StorageBackendResult<()>;
+    ) -> StorageBackendResult<()> {
+        self.save_catalog_index_row(&CatalogIndexRow {
+            relation: relation.clone(),
+            index_type: index_type.to_string(),
+            table_name: table_name.to_string(),
+            columns_json: columns_json.to_string(),
+            parameters_json: parameters_json.to_string(),
+            definition_json: None,
+        })
+    }
+    fn save_catalog_index_row(&self, index: &CatalogIndexRow) -> StorageBackendResult<()>;
     fn drop_catalog_index(&self, relation: &RelationIdentity) -> StorageBackendResult<()>;
     fn drop_catalog_indexes_for_table(&self, table_name: &str) -> StorageBackendResult<()>;
     fn load_catalog_indexes(&self) -> StorageBackendResult<Vec<CatalogIndexRow>>;

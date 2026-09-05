@@ -17,6 +17,7 @@ pub(super) use attributes::{build_pg_attrdef, build_pg_attribute};
 pub(super) use constraints::build_pg_constraint;
 pub(super) use indexes::{
     build_pg_index, build_pg_indexes, catalog_index_relations, index_access_method_oid,
+    CatalogIndexRelation,
 };
 pub(super) use relations::{
     build_pg_database, build_pg_matviews, build_pg_tables, build_pg_views, pg_class_catalog_row,

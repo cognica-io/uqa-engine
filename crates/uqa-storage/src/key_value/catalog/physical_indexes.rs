@@ -46,7 +46,7 @@ pub(super) fn drop_field_indexes(
     table: &str,
     field: &str,
 ) -> StorageBackendResult<()> {
-    batch.delete(&btree_index_key(table, field)?)?;
+    batch.delete(&btree_index_key(table, &field.into())?)?;
     for prefix in field_index_prefixes(table, field)? {
         batch.delete_prefix(&prefix)?;
     }
@@ -63,8 +63,8 @@ pub(super) fn rename_field_indexes(
     batch_rekey_prefix_or_keep_existing(
         store,
         batch,
-        &btree_index_key(table, from)?,
-        &btree_index_key(table, to)?,
+        &btree_index_key(table, &from.into())?,
+        &btree_index_key(table, &to.into())?,
     )?;
     for (old_prefix, new_prefix) in field_index_prefixes(table, from)?
         .into_iter()
@@ -75,9 +75,11 @@ pub(super) fn rename_field_indexes(
     Ok(())
 }
 
-pub(super) fn table_index_prefixes(table: &str) -> StorageBackendResult<[Vec<u8>; 7]> {
+pub(super) fn table_index_prefixes(table: &str) -> StorageBackendResult<[Vec<u8>; 9]> {
     Ok([
         btree_index_key_prefix(table)?,
+        super::super::codec::table_prefixed_key(super::super::TAG_NAMED_BTREE_INDEX, table)?,
+        super::super::codec::table_prefixed_key(super::super::TAG_NAMED_BTREE_ENTRY, table)?,
         btree_entry_key_prefix(table)?,
         ivf_metadata_table_prefix(table)?,
         ivf_centroid_table_prefix(table)?,
@@ -89,7 +91,7 @@ pub(super) fn table_index_prefixes(table: &str) -> StorageBackendResult<[Vec<u8>
 
 fn field_index_prefixes(table: &str, field: &str) -> StorageBackendResult<[Vec<u8>; 6]> {
     Ok([
-        btree_entry_field_prefix(table, field)?,
+        btree_entry_field_prefix(table, &field.into())?,
         ivf_metadata_key(table, field)?,
         ivf_centroid_prefix(table, field)?,
         ivf_assignment_prefix(table, field)?,

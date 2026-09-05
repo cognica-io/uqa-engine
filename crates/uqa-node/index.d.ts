@@ -4,6 +4,7 @@ export type SQLTableFunctionRows = JSValue[][] | Array<Record<string, JSValue>>
 export type SQLTableFunctionResult = { columns: string[]; rows: SQLTableFunctionRows } | [string[], SQLTableFunctionRows]
 export type SQLAggregateState = ({ observe(...args: JSValue[]): unknown } | { step(...args: JSValue[]): unknown }) & ({ finish(): JSValue } | { finalize(): JSValue })
 export interface HttpSQLStream extends AsyncIterable<HttpSQLStreamFrame> { [Symbol.asyncIterator](): AsyncIterator<HttpSQLStreamFrame> }
+export { HttpEngineError } from "./http";
 export declare class Engine {
   /** Create an in-memory engine. */
   constructor()

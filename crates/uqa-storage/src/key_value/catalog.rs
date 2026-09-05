@@ -20,9 +20,9 @@ use crate::catalog::{
 use crate::{StorageBackendError, StorageBackendResult};
 
 use super::codec::{
-    decode_document_value, decode_string, decode_value, doc_length_key, doc_length_key_prefix,
-    document_key_prefix, encode_document_value, encode_value, field_stats_key,
-    field_stats_key_prefix, key_with_tag, posting_cluster_positions_field_prefix,
+    decode_stored_document_value, decode_string, decode_value, doc_length_key,
+    doc_length_key_prefix, document_key_prefix, encode_stored_document_value, encode_value,
+    field_stats_key, field_stats_key_prefix, key_with_tag, posting_cluster_positions_field_prefix,
     posting_cluster_positions_key_prefix, posting_cluster_score_field_prefix,
     posting_cluster_score_key_prefix, posting_document_key, posting_document_key_prefix,
     posting_field_prefix, posting_key_prefix, push_str, push_u64, read_str, read_u64,
@@ -225,6 +225,14 @@ impl CatalogFacade for KeyValueCatalog {
         self.save_view_impl(view)
     }
 
+    fn rename_view(
+        &self,
+        from: &RelationIdentity,
+        to: &RelationIdentity,
+    ) -> StorageBackendResult<bool> {
+        self.rename_view_impl(from, to)
+    }
+
     fn drop_view(&self, relation: &RelationIdentity) -> StorageBackendResult<bool> {
         self.drop_view_impl(relation)
     }
@@ -394,6 +402,14 @@ impl CatalogFacade for KeyValueCatalog {
         self.save_foreign_table_impl(row)
     }
 
+    fn rename_foreign_table(
+        &self,
+        from: &RelationIdentity,
+        to: &RelationIdentity,
+    ) -> StorageBackendResult<bool> {
+        self.rename_foreign_table_impl(from, to)
+    }
+
     fn update_foreign_table_security(
         &self,
         relation: &RelationIdentity,
@@ -412,21 +428,8 @@ impl CatalogFacade for KeyValueCatalog {
         self.load_foreign_tables_impl()
     }
 
-    fn save_catalog_index(
-        &self,
-        relation: &RelationIdentity,
-        index_type: &str,
-        table_name: &str,
-        columns_json: &str,
-        parameters_json: &str,
-    ) -> StorageBackendResult<()> {
-        self.save_catalog_index_impl(
-            relation,
-            index_type,
-            table_name,
-            columns_json,
-            parameters_json,
-        )
+    fn save_catalog_index_row(&self, index: &CatalogIndexRow) -> StorageBackendResult<()> {
+        self.save_catalog_index_impl(index)
     }
 
     fn drop_catalog_index(&self, relation: &RelationIdentity) -> StorageBackendResult<()> {

@@ -10,12 +10,13 @@ use super::{
     append_notification, notification_end_position, notifications_fit_queue,
     projected_tail_position, queue_page, queue_usage, Arc, Condvar, CrossNotificationCommit,
     CrossProcessCoordinator, CrossProcessListenerRow, CrossProcessQueueEntry,
-    CrossProcessQueueState, CrossProcessRegistryTransaction, CrossProcessState, Instant,
-    ListenerLease, Mutex, MutexGuard, NotificationHub, NotificationHubState, NotificationListener,
+    CrossProcessQueueState, CrossProcessRegistryTransaction, Instant, ListenerLease, Mutex,
+    MutexGuard, NotificationHub, NotificationHubState, NotificationListener,
     NotificationSessionCommit, PendingNotification, PreparedCrossSubscription, PreparedDelivery,
-    SQLError, SQLNotification, VecDeque, MAX_NOTIFICATION_QUEUE_PAGES,
-    NOTIFICATION_QUEUE_WARNING_INTERVAL,
+    SQLError, SQLNotification, VecDeque, NOTIFICATION_QUEUE_WARNING_INTERVAL,
 };
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+use super::{CrossProcessState, MAX_NOTIFICATION_QUEUE_PAGES};
 
 impl NotificationHub {
     pub(crate) fn allocate_backend_process_id(&self) -> Result<Option<i32>, SQLError> {
@@ -224,6 +225,7 @@ impl NotificationHub {
         Ok(deliveries)
     }
 
+    #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
     fn try_synchronize_cross_process_notifications(&self) -> Result<(), SQLError> {
         self.try_synchronize_cross_process_session(None)
     }
@@ -255,12 +257,14 @@ impl NotificationHub {
         Ok(())
     }
 
+    #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
     pub(super) fn synchronize_cross_process_notifications(&self) {
         if let Err(error) = self.try_synchronize_cross_process_notifications() {
             self.record_cross_error(error.to_string());
         }
     }
 
+    #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
     pub(super) fn record_cross_error(&self, error: String) {
         *self.cross_error.lock() = Some(error);
         for listener in self.state.lock().listeners.values() {

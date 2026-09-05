@@ -439,6 +439,11 @@ impl KeyValueStore for SQLiteKeyValueStore {
         Ok(())
     }
 
+    fn begin_upgradeable_transaction(&self) -> StorageBackendResult<()> {
+        self.conn.begin_deferred_transaction()?;
+        Ok(())
+    }
+
     fn in_transaction(&self) -> bool {
         self.conn.in_transaction()
     }

@@ -13,6 +13,71 @@ use crate::engine_schema_security::SchemaAclPrivilege;
 use crate::engine_state::TableSecurity;
 
 impl Engine {
+    fn rename_foreign_table_inner(
+        &self,
+        relation: &RelationIdentity,
+        new_name: &str,
+    ) -> Result<(), SQLError> {
+        let target =
+            self.relation_rename_target(relation, new_name, "ALTER FOREIGN TABLE RENAME TO")?;
+        self.rewrite_relation_rename_dependents(relation, &target)
+            .map_err(|error| {
+                SQLError::Internal(format!(
+                    "rewrite dependencies while renaming foreign table `{}`: {error}",
+                    relation.qualified_name()
+                ))
+            })?;
+        if let Some(catalog) = self.storage.catalog.as_ref() {
+            if !catalog
+                .rename_foreign_table(relation, &target)
+                .map_err(|error| {
+                    SQLError::Internal(format!(
+                        "persist foreign table rename `{}` to `{}`: {error}",
+                        relation.qualified_name(),
+                        target.qualified_name()
+                    ))
+                })?
+            {
+                return Err(SQLError::Internal(format!(
+                    "foreign table `{}` disappeared during rename",
+                    relation.qualified_name()
+                )));
+            }
+        }
+        let mut tables = self.durable.foreign_tables.write();
+        let mut security = self.durable.foreign_table_security.write();
+        if tables.contains_key(&target) || security.contains_key(&target) {
+            return Err(SQLError::Internal(format!(
+                "foreign table rename target `{}` appeared after preflight",
+                target.qualified_name()
+            )));
+        }
+        let mut table = tables.remove(relation).ok_or_else(|| {
+            SQLError::Internal(format!(
+                "foreign table `{}` disappeared during rename",
+                relation.qualified_name()
+            ))
+        })?;
+        let table_security = security.remove(relation).ok_or_else(|| {
+            SQLError::Internal(format!(
+                "foreign table `{}` lost its security metadata during rename",
+                relation.qualified_name()
+            ))
+        })?;
+        table.name = target.qualified_name();
+        tables.insert(target.clone(), table);
+        security.insert(target.clone(), table_security);
+        drop(security);
+        drop(tables);
+        let mut memory_tables = self.extensions.foreign_memory_tables.write();
+        if let Some(rows) = memory_tables.remove(relation) {
+            memory_tables.insert(target, rows);
+        }
+        drop(memory_tables);
+        self.note_catalog_registry_changed();
+        Ok(())
+    }
+
     fn bound_foreign_table_security(
         &self,
         name: &str,
@@ -158,22 +223,30 @@ impl Engine {
                 SchemaAclPrivilege::Create,
             )?;
         }
-        crate::engine_table_security::rewrite_acl_owner(&mut security, &new_owner);
-        let columns = self
+        let table = self
             .durable
             .foreign_tables
             .read()
             .get(&relation)
-            .map(|table| {
-                table
-                    .columns
-                    .iter()
-                    .map(|column| column.name.clone())
-                    .collect::<Vec<_>>()
-            })
+            .cloned()
             .ok_or_else(|| {
                 SQLError::Internal(format!("foreign table `{name}` disappeared before update"))
             })?;
+        let sequence_updates =
+            self.table_owned_sequence_owner_updates(table.object_id, &new_owner)?;
+        for (sequence, sequence_security) in &sequence_updates {
+            self.persist_sequence_security(
+                &sequence.qualified_name(),
+                sequence,
+                sequence_security,
+            )?;
+        }
+        crate::engine_table_security::rewrite_acl_owner(&mut security, &new_owner);
+        let columns = table
+            .columns
+            .iter()
+            .map(|column| column.name.clone())
+            .collect::<Vec<_>>();
         crate::engine_table_security::validate_table_security_invariants(
             &security,
             Some(&columns),
@@ -189,6 +262,12 @@ impl Engine {
             .foreign_table_security
             .write()
             .insert(relation, security);
+        if !sequence_updates.is_empty() {
+            let mut registry = self.durable.sequence_security.write();
+            for (sequence, sequence_security) in sequence_updates {
+                registry.insert(sequence, sequence_security);
+            }
+        }
         self.note_catalog_registry_changed();
         Ok(())
     }
@@ -198,7 +277,20 @@ impl Engine {
         statement: &uqa_sql::ast::AlterForeignTableStmt,
     ) -> Result<(), SQLError> {
         self.with_implicit_transaction(|engine| {
-            let canonical = match engine.resolve_visible_relation_kind(&statement.name)? {
+            let resolution = if matches!(
+                statement.action,
+                uqa_sql::ast::AlterForeignTableAction::RenameTo(_)
+            ) {
+                let Some((canonical, kind)) =
+                    engine.resolve_relation_rename_source(&statement.name, statement.if_exists)?
+                else {
+                    return Ok(());
+                };
+                RelationResolution::Found(canonical, kind)
+            } else {
+                engine.resolve_visible_relation_kind(&statement.name)?
+            };
+            let canonical = match resolution {
                 RelationResolution::Found(canonical, "foreign table") => canonical,
                 RelationResolution::Found(_, _) => {
                     return Err(SQLError::Routine {
@@ -240,7 +332,21 @@ impl Engine {
                 &canonical,
                 crate::row_locks::RelationLockMode::AccessExclusive,
             )?;
-            engine.alter_foreign_table_role_owner(&canonical, &statement.owner)
+            match &statement.action {
+                uqa_sql::ast::AlterForeignTableAction::OwnerTo(owner) => {
+                    engine.alter_foreign_table_role_owner(&canonical, owner)
+                }
+                uqa_sql::ast::AlterForeignTableAction::RenameTo(new_name) => {
+                    engine.ensure_foreign_table_owner(&canonical)?;
+                    let relation =
+                        RelationIdentity::from_legacy_name(&canonical).map_err(|error| {
+                            SQLError::Internal(format!(
+                                "resolve foreign table rename target `{canonical}`: {error}"
+                            ))
+                        })?;
+                    engine.rename_foreign_table_inner(&relation, new_name)
+                }
+            }
         })
     }
 }

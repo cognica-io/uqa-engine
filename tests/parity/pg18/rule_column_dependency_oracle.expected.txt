@@ -1,0 +1,16 @@
+renamed-execution|10
+source-projection-restrict|2BP01
+source-predicate-restrict|2BP01
+target-restrict|2BP01
+unreferenced-drop|ok
+positional|5|7|99
+positional-restrict|2BP01
+stable-owner|11
+join-left-rename|1|1
+join-deparse|yes
+join-both-renamed|2|1
+natural-left-rename|2
+projection-star|3|4
+projection-added-drop|ok
+whole-row-drop|ok
+cascade|0

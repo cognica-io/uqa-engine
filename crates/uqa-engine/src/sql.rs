@@ -35,14 +35,16 @@ use uqa_sql::ast::{
 };
 use uqa_sql::expr::{value_to_tensor, value_to_vector};
 use uqa_sql::{compile, ResultRow, SQLError, SQLParam, SQLResult};
-use uqa_storage::document_store::Document;
+use uqa_storage::document_store::{Document, DocumentMetadata, StoredDocument};
 
 use crate::{Engine, HNSWIndexParams, IVFIndexParams, ScoredEntry, VectorIndexSpec};
 
 mod age_cypher;
 mod aggregates;
 mod catalog;
+pub(crate) use catalog::rename_view_column_query;
 pub(crate) use catalog::snapshot_table_relation_oid;
+mod catalog_statement_routines;
 mod copy;
 mod correlation;
 mod cursor;
@@ -74,6 +76,10 @@ mod volatility;
 mod where_eval;
 mod window;
 
+pub(crate) use catalog_statement_routines::{
+    bind_catalog_statement_routines, collect_expression_routine_references,
+    mark_catalog_statement_relations_bound, BoundRoutineReference,
+};
 pub use cursor::{SQLCursor, SQLCursorSummary};
 pub(crate) use driver::{execute, execute_nested};
 use mutability::{
@@ -106,20 +112,22 @@ pub(crate) use catalog::{
     view_relation_oid, RegtypeOutputCatalog,
 };
 pub(in crate::sql) use catalog::{virtual_relation_accepts_row_lock, virtual_relation_schema};
+pub(crate) use ddl::{
+    bind_stored_check_expression_routines, bind_stored_schema_expression_routines,
+    convert_value_to_column_type, convert_value_to_column_type_with_engine,
+    drop_constraint_dependency, drop_index_dependency, validate_check_expression,
+    validate_default_expression, validate_postgres_column_name,
+    validate_postgres_relation_column_type, validate_vector_dimensions,
+};
 use ddl::{
     coerce_to_column_type, column_type_name, core_value_to_json, json_table_arg,
     json_table_value_to_text, json_to_core_value, run_alter_sequence, run_alter_table,
-    run_create_index, run_create_sequence, run_create_table, run_create_table_as, run_drop,
-    value_to_text, CreateTableAsExecution,
-};
-pub(crate) use ddl::{
-    convert_value_to_column_type, convert_value_to_column_type_with_engine,
-    validate_postgres_column_name, validate_postgres_relation_column_type,
-    validate_vector_dimensions,
+    run_create_index, run_create_sequence, run_create_table, run_create_table_as,
+    run_create_table_if_not_exists, run_drop, value_to_text, CreateTableAsExecution,
 };
 use dml::{index_vectors_for_type, run_delete, run_insert, run_merge, run_update};
 use from_rows::{build_join_spill_with_ctes, engine_func_intercept, ColumnPrune, QualifierFilters};
-pub(crate) use generated::refresh_stored_generated_columns;
+pub(crate) use generated::{prepare_generated_columns, refresh_stored_generated_columns};
 pub(in crate::sql) use hierarchy::{
     partition_constraint_accepts_document, partition_insert_target,
     prospective_partition_bound_accepts_document, validate_hash_partition_spec,
@@ -260,27 +268,52 @@ pub(crate) fn validate_stored_view_check_option(
 const SCORE_COLUMN: &str = "_score";
 pub(in crate::sql) const DOC_ID_COLUMN: &str = "_doc_id";
 pub(in crate::sql) const TABLE_OID_COLUMN: &str = "tableoid";
-pub(in crate::sql) const XMIN_COLUMN: &str = "xmin";
-pub(crate) const XMIN_STORAGE_COLUMN: &str = "\0uqa.system.xmin";
-pub(crate) const XMIN_USER_STORAGE_COLUMN: &str = "\0uqa.user.xmin";
+pub(crate) const XMIN_COLUMN: &str = "xmin";
 
-pub(in crate::sql) fn storage_projection_column(column: &str) -> &str {
-    if column == XMIN_COLUMN {
-        XMIN_STORAGE_COLUMN
-    } else {
-        column
-    }
+pub(crate) fn projection_uses_tuple_xmin(
+    column: &str,
+    definitions: &[uqa_sql::ast::ColumnDef],
+) -> bool {
+    column == XMIN_COLUMN
+        && !definitions
+            .iter()
+            .any(|definition| definition.name == XMIN_COLUMN)
 }
 
-pub(in crate::sql) fn storage_projection_column_for_table<'a>(
-    column: &'a str,
+pub(crate) fn projections_use_tuple_xmin(
+    columns: &[String],
     definitions: &[uqa_sql::ast::ColumnDef],
-) -> &'a str {
-    if column == XMIN_COLUMN && !definitions.is_empty() {
-        XMIN_COLUMN
-    } else {
-        storage_projection_column(column)
+) -> bool {
+    columns
+        .iter()
+        .any(|column| projection_uses_tuple_xmin(column, definitions))
+}
+
+pub(crate) fn project_document_column(
+    document: &Document,
+    metadata: DocumentMetadata,
+    column: &str,
+    definitions: &[uqa_sql::ast::ColumnDef],
+) -> Value {
+    if !projection_uses_tuple_xmin(column, definitions) {
+        return document.get(column).cloned().unwrap_or(Value::Null);
     }
+    if definitions.is_empty() {
+        if let Some(value) = document.get(column) {
+            return value.clone();
+        }
+    }
+    metadata
+        .tuple_xmin()
+        .map_or(Value::Null, |xmin| Value::Int(i64::from(xmin)))
+}
+
+pub(crate) fn project_stored_document_column(
+    document: &StoredDocument,
+    column: &str,
+    definitions: &[uqa_sql::ast::ColumnDef],
+) -> Value {
+    project_document_column(document.fields(), document.metadata(), column, definitions)
 }
 
 pub(in crate::sql) const META_QUALIFIER: &str = "_meta";
@@ -331,6 +364,8 @@ pub(crate) fn builtin_function_dispatch_name(name: &str) -> String {
                         | "jsonb_each_text"
                         | "json_object_keys"
                         | "jsonb_object_keys"
+                        | "upper"
+                        | "lower"
                         | "bit_length"
                         | "char_length"
                         | "character_length"
@@ -361,6 +396,9 @@ pub(crate) fn builtin_function_dispatch_name(name: &str) -> String {
                         | "pg_get_serial_sequence"
                         | "pg_get_triggerdef"
                         | "pg_get_ruledef"
+                        | "pg_get_viewdef"
+                        | "pg_get_indexdef"
+                        | "format_type"
                         | "pg_has_role"
                         | "has_table_privilege"
                         | "has_column_privilege"

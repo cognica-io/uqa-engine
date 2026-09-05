@@ -142,6 +142,11 @@ fn materialize_constraint_candidate(
     let relation = crate::RelationIdentity::from_legacy_name(&canonical).map_err(|message| {
         SQLError::Internal(format!("constraint relation identity: {message}"))
     })?;
+    super::super::constraint_indexes::name_constraint_indexes(
+        engine,
+        &canonical,
+        &mut constraints.key_constraints,
+    )?;
     crate::engine_table_storage::materialize_constraint_metadata(&relation, columns, constraints)
         .map_err(|error| ddl_storage_error("ALTER TABLE constraint naming", error))?;
     Ok(())

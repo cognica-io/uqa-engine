@@ -8,6 +8,7 @@ use super::{
     command_exact_document_key, command_exact_lookup_parts, document_store_read_error, Arc,
     BTreeMap, CommandOverlayDocument, DocId, Document, Engine, SQLError, Value,
 };
+use uqa_storage::{DocumentMetadata, StoredDocument};
 
 impl Engine {
     pub(super) fn command_overlay_table_name(&self, table: &str) -> Result<String, SQLError> {
@@ -48,6 +49,14 @@ impl Engine {
         document: Option<Arc<Document>>,
     ) -> Result<(), SQLError> {
         let table = self.command_overlay_table_name(table)?;
+        let document = document
+            .map(|fields| -> Result<_, SQLError> {
+                Ok(crate::CommandStoredDocument {
+                    fields,
+                    metadata: DocumentMetadata::with_tuple_xmin(self.tuple_version_xid()?),
+                })
+            })
+            .transpose()?;
         let mut overlays = self.session.command_mutation_overlays.lock();
         let overlay = overlays.last_mut().ok_or_else(|| {
             SQLError::Internal("stage document without an active command overlay".into())
@@ -69,11 +78,15 @@ impl Engine {
                             previous
                                 .as_ref()
                                 .and_then(Option::as_ref)
-                                .map(|document| command_exact_document_key(document, fields))
+                                .map(|document| {
+                                    command_exact_document_key(document.fields.as_ref(), fields)
+                                })
                                 .transpose()?,
                             document
                                 .as_ref()
-                                .map(|document| command_exact_document_key(document, fields))
+                                .map(|document| {
+                                    command_exact_document_key(document.fields.as_ref(), fields)
+                                })
                                 .transpose()?,
                         ))
                     })
@@ -136,7 +149,10 @@ impl Engine {
                     .and_then(|documents| documents.get(&doc_id))
                     .map(|document| match document {
                         Some(document) => {
-                            CommandOverlayDocument::Present(document.as_ref().clone())
+                            CommandOverlayDocument::Present(StoredDocument::with_metadata(
+                                document.fields.as_ref().clone(),
+                                document.metadata,
+                            ))
                         }
                         None => CommandOverlayDocument::Deleted,
                     })
@@ -163,7 +179,10 @@ impl Engine {
                         };
                         index
                             .doc_ids_by_key
-                            .entry(command_exact_document_key(document, &fields)?)
+                            .entry(command_exact_document_key(
+                                document.fields.as_ref(),
+                                &fields,
+                            )?)
                             .or_default()
                             .insert(*doc_id);
                     }
@@ -187,7 +206,7 @@ impl Engine {
                     .and_then(|documents| documents.get(&doc_id))
             });
             if let Some(Some(document)) = visible {
-                if command_exact_document_key(document, &fields)? == key {
+                if command_exact_document_key(document.fields.as_ref(), &fields)? == key {
                     return Ok(Some(doc_id));
                 }
             }
@@ -198,7 +217,7 @@ impl Engine {
     pub(crate) fn command_overlay_changes(
         &self,
         table: &str,
-    ) -> Result<Option<BTreeMap<DocId, Option<Document>>>, SQLError> {
+    ) -> Result<Option<BTreeMap<DocId, Option<StoredDocument>>>, SQLError> {
         let canonical = self.command_overlay_table_name(table)?;
         let mut changes = self
             .fixed_transaction_row_changes(&canonical)?
@@ -212,7 +231,12 @@ impl Engine {
                 changes.extend(documents.iter().map(|(doc_id, document)| {
                     (
                         *doc_id,
-                        document.as_ref().map(|document| document.as_ref().clone()),
+                        document.as_ref().map(|document| {
+                            StoredDocument::with_metadata(
+                                document.fields.as_ref().clone(),
+                                document.metadata,
+                            )
+                        }),
                     )
                 }));
             }
@@ -223,7 +247,7 @@ impl Engine {
     pub(crate) fn fixed_transaction_row_changes(
         &self,
         canonical_table: &str,
-    ) -> Result<Option<BTreeMap<DocId, Option<Document>>>, SQLError> {
+    ) -> Result<Option<BTreeMap<DocId, Option<StoredDocument>>>, SQLError> {
         let mut changes = self
             .query_transaction_overlay
             .as_ref()
@@ -303,7 +327,7 @@ impl Engine {
         let documents = live
             .document_store
             .read()
-            .get_many(&present)
+            .get_stored_many(&present)
             .map_err(|error| {
                 document_store_read_error("read fixed-snapshot transaction changes", &error)
             })?;

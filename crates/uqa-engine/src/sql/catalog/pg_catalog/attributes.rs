@@ -15,7 +15,7 @@ use crate::Engine;
 
 use super::super::expression_text::default_expr_text;
 use super::super::helpers::information_schema_types::array_dimension_count;
-use super::super::helpers::oids::{relation_oid, split_schema_name, stable_oid};
+use super::super::helpers::oids::{split_schema_name, stable_oid};
 use super::super::helpers::rows::{
     bool_value, catalog_ordinal, catalog_usize, int_value, row, str_value,
 };
@@ -112,9 +112,8 @@ pub(in crate::sql::catalog) fn build_pg_attribute(
             out.push(attribute);
         }
     }
-    for (view_name, stored) in catalog.views_of_kind(crate::StoredViewKind::View) {
-        let (schema, view) = split_schema_name(&view_name)?;
-        let relid = relation_oid("v", &schema, &view);
+    for (_, stored) in catalog.views_of_kind(crate::StoredViewKind::View) {
+        let relid = crate::sql::view_relation_oid(&stored);
         let columns = view_columns_for(engine, catalog, resolution, &stored)?;
         for (idx, col) in columns.iter().enumerate() {
             let mut attribute = pg_attribute_row(
@@ -132,9 +131,8 @@ pub(in crate::sql::catalog) fn build_pg_attribute(
             out.push(attribute);
         }
     }
-    for (view_name, stored) in catalog.views_of_kind(crate::StoredViewKind::Materialized) {
-        let (schema, view) = split_schema_name(&view_name)?;
-        let relid = relation_oid("m", &schema, &view);
+    for (_, stored) in catalog.views_of_kind(crate::StoredViewKind::Materialized) {
+        let relid = crate::sql::view_relation_oid(&stored);
         let columns = view_columns_for(engine, catalog, resolution, &stored)?;
         for (idx, col) in columns.iter().enumerate() {
             let mut attribute = pg_attribute_row(
@@ -153,42 +151,19 @@ pub(in crate::sql::catalog) fn build_pg_attribute(
         }
     }
     for (table_name, foreign_table) in catalog.foreign_tables() {
-        let (schema, table) = split_schema_name(&table_name)?;
-        let relid = relation_oid("f", &schema, &table);
+        let relid = crate::sql::foreign_table_relation_oid(&foreign_table);
         let security = catalog.foreign_table_security(&table_name)?;
         for (idx, column) in foreign_table.columns.into_iter().enumerate() {
-            let col = SQLColumnDef {
-                name: column.name,
-                ty: crate::engine_fdw::fdw_column_type_to_sql(&column.ty),
-                object_id: None,
-                missing_value: None,
-                primary_key: false,
-                not_null: false,
-                not_null_explicit: false,
-                not_null_name: None,
-                not_null_validated: true,
-                not_null_no_inherit: false,
-                auto_increment: None,
-                unique: false,
-                default: None,
-                generated: None,
-                check: None,
-                check_name: None,
-                check_enforced: true,
-                check_validated: true,
-                check_no_inherit: false,
-                references: None,
-            };
             let mut attribute = pg_attribute_row(
                 relid,
                 catalog_ordinal(idx, "pg_attribute foreign-table column")?,
-                &col,
+                &column,
             );
             attribute.insert(
                 "attacl".into(),
                 super::super::relation_catalog::table_acl_catalog_value(
                     &security.role_owner,
-                    security.column_acls.get(&col.name),
+                    security.column_acls.get(&column.name),
                 )?,
             );
             out.push(attribute);
@@ -204,6 +179,7 @@ pub(in crate::sql::catalog) fn build_pg_attribute(
             ));
         }
     }
+    out.extend(index_attributes(catalog, resolution)?);
     out.extend(super::super::ag_catalog::age_pg_attribute_rows(catalog)?);
     Ok(out)
 }
@@ -319,34 +295,117 @@ pub(in crate::sql::catalog) fn build_pg_attrdef(
             .table(resolution, &table_name)?
             .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?
             .columns;
-        for (idx, col) in columns.iter().enumerate() {
-            let legacy_auto_increment = col
-                .auto_increment
-                .as_ref()
-                .is_some_and(uqa_sql::ast::AutoIncrement::is_legacy);
-            if col.default.is_none() && !legacy_auto_increment && col.generated.is_none() {
-                continue;
-            }
-            let default = if legacy_auto_increment {
-                format!("nextval('{}_{}_seq')", table, col.name)
-            } else if let Some(generated) = &col.generated {
-                super::super::expression_text::schema_expr_text(&generated.expression)
-            } else {
-                value_to_text(&default_expr_text(col.default.as_ref()))
-            };
-            out.push(row([
-                (
-                    "oid",
-                    int_value(stable_oid("attrdef", &format!("{table_name}.{}", col.name))),
-                ),
-                ("adrelid", int_value(relid)),
-                (
-                    "adnum",
-                    int_value(catalog_ordinal(idx, "pg_attrdef column")?),
-                ),
-                ("adbin", str_value(default)),
-            ]));
-        }
+        append_pg_attrdef_rows(&mut out, &table_name, &table, relid, columns)?;
+    }
+    for (table_name, table) in catalog.foreign_tables() {
+        let (_, local_name) = split_schema_name(&table_name)?;
+        append_pg_attrdef_rows(
+            &mut out,
+            &table_name,
+            &local_name,
+            crate::sql::foreign_table_relation_oid(&table),
+            &table.columns,
+        )?;
     }
     Ok(out)
+}
+
+fn append_pg_attrdef_rows(
+    out: &mut Vec<ResultRow>,
+    table_name: &str,
+    local_table_name: &str,
+    relid: i64,
+    columns: &[SQLColumnDef],
+) -> Result<(), SQLError> {
+    for (idx, col) in columns.iter().enumerate() {
+        let legacy_auto_increment = col
+            .auto_increment
+            .as_ref()
+            .is_some_and(uqa_sql::ast::AutoIncrement::is_legacy);
+        if col.default.is_none() && !legacy_auto_increment && col.generated.is_none() {
+            continue;
+        }
+        let default = if legacy_auto_increment {
+            format!("nextval('{}_{}_seq')", local_table_name, col.name)
+        } else if let Some(generated) = &col.generated {
+            super::super::expression_text::schema_expr_text(&generated.expression)
+        } else {
+            value_to_text(&default_expr_text(col.default.as_ref()))
+        };
+        out.push(row([
+            (
+                "oid",
+                int_value(stable_oid("attrdef", &format!("{table_name}.{}", col.name))),
+            ),
+            ("adrelid", int_value(relid)),
+            (
+                "adnum",
+                int_value(catalog_ordinal(idx, "pg_attrdef column")?),
+            ),
+            ("adbin", str_value(default)),
+        ]));
+    }
+    Ok(())
+}
+
+fn index_attributes(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+) -> Result<Vec<ResultRow>, SQLError> {
+    let mut rows = Vec::new();
+    for index in super::catalog_index_relations(catalog, resolution)? {
+        let table = catalog
+            .table(resolution, &index.table_name)?
+            .ok_or_else(|| SQLError::UnknownTable(index.table_name.clone()))?;
+        for (position, key) in index.columns.iter().enumerate() {
+            let source = key
+                .column()
+                .and_then(|name| table.columns.iter().find(|column| column.name == name));
+            let name = index
+                .definition
+                .key_names
+                .get(position)
+                .map(String::as_str)
+                .or_else(|| key.column())
+                .unwrap_or("expr");
+            let ty = index
+                .definition
+                .key_types
+                .get(position)
+                .or_else(|| source.map(|column| &column.ty))
+                .cloned()
+                .ok_or_else(|| {
+                    SQLError::Internal("missing expression index attribute type".into())
+                })?;
+            let mut column = sequence_attribute_column(name, ty);
+            column.not_null = false;
+            column.not_null_explicit = false;
+            rows.push(pg_attribute_row(
+                index.oid(),
+                catalog_ordinal(position, "index key attribute")?,
+                &column,
+            ));
+        }
+        for (position, name) in index.definition.included_columns.iter().enumerate() {
+            let source = table
+                .columns
+                .iter()
+                .find(|column| column.name == *name)
+                .ok_or_else(|| SQLError::UnknownColumn(name.clone()))?;
+            let attribute_name = index
+                .definition
+                .key_names
+                .get(index.columns.len() + position)
+                .map_or(name.as_str(), String::as_str);
+            let mut column = sequence_attribute_column(attribute_name, source.ty.clone());
+            column.not_null = false;
+            column.not_null_explicit = false;
+            rows.push(pg_attribute_row(
+                index.oid(),
+                catalog_ordinal(position + index.columns.len(), "index included attribute")?,
+                &column,
+            ));
+        }
+    }
+    Ok(rows)
 }

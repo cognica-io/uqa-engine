@@ -8,7 +8,8 @@
 
 use super::{
     decode_relation_key, decode_value, encode_value, key_with_tag, relation_key, KeyValueCatalog,
-    RelationIdentity, RelationKind, StorageBackendResult, StoredView, ViewRow, TAG_VIEW,
+    RelationIdentity, RelationKind, StorageBackendError, StorageBackendResult, StoredView, ViewRow,
+    TAG_RELATION, TAG_VIEW,
 };
 
 impl KeyValueCatalog {
@@ -35,6 +36,41 @@ impl KeyValueCatalog {
         let mut batch = self.store.batch();
         batch.delete(&key)?;
         self.release_relation(batch.as_mut(), relation, RelationKind::View)?;
+        batch.commit()?;
+        Ok(true)
+    }
+
+    pub(super) fn rename_view_impl(
+        &self,
+        from: &RelationIdentity,
+        to: &RelationIdentity,
+    ) -> StorageBackendResult<bool> {
+        let from_key = relation_key(TAG_VIEW, from)?;
+        if from == to {
+            return Ok(self.store.get(&from_key)?.is_some());
+        }
+        if from.schema != to.schema {
+            return Err(StorageBackendError::Other(
+                "moving a view between schemas is not supported by the catalog".into(),
+            ));
+        }
+        let Some(value) = self.store.get(&from_key)? else {
+            return Ok(false);
+        };
+        let to_key = relation_key(TAG_VIEW, to)?;
+        if self.store.get(&to_key)?.is_some()
+            || self.store.get(&relation_key(TAG_RELATION, to)?)?.is_some()
+        {
+            return Err(StorageBackendError::Other(format!(
+                "relation `{}` already exists",
+                to.qualified_name()
+            )));
+        }
+        let mut batch = self.store.batch();
+        self.claim_relation(batch.as_mut(), to, RelationKind::View)?;
+        batch.put(&to_key, &value)?;
+        batch.delete(&from_key)?;
+        self.release_relation(batch.as_mut(), from, RelationKind::View)?;
         batch.commit()?;
         Ok(true)
     }

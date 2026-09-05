@@ -41,6 +41,27 @@ fn check_constraint_accepts_valid_row() {
 }
 
 #[test]
+fn column_check_with_builtin_can_reference_a_later_column() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE cross_column_check (label TEXT CHECK (later_label <> '' AND random() >= 0), later_label TEXT)",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO cross_column_check VALUES ('stored', 'valid')",
+        &[],
+    )
+    .unwrap();
+    assert_eq!(
+        eng.sql("INSERT INTO cross_column_check VALUES ('stored', '')", &[])
+            .unwrap_err()
+            .sqlstate(),
+        Some("23514")
+    );
+}
+
+#[test]
 fn foreign_key_rejects_orphan_child() {
     let eng = Engine::new();
     eng.sql("CREATE TABLE parent (id INTEGER PRIMARY KEY)", &[])

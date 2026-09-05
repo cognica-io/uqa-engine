@@ -17,7 +17,29 @@ use super::{projection_columns, Engine};
 #[derive(Clone, Default)]
 struct RelationColumns {
     names: BTreeSet<String>,
+    ordered: Vec<String>,
     complete: bool,
+}
+
+impl RelationColumns {
+    fn known(ordered: Vec<String>) -> Self {
+        Self {
+            names: ordered.iter().cloned().collect(),
+            ordered,
+            complete: true,
+        }
+    }
+
+    fn empty_known() -> Self {
+        Self::known(Vec::new())
+    }
+
+    fn apply_positional_aliases(&mut self, aliases: &[String]) {
+        for (column, alias) in self.ordered.iter_mut().zip(aliases) {
+            column.clone_from(alias);
+        }
+        self.names = self.ordered.iter().cloned().collect();
+    }
 }
 
 #[derive(Clone, Default)]
@@ -197,10 +219,7 @@ fn query_has_external_reference(
             let columns = if cte.columns.is_empty() {
                 query_output_columns(&cte.query)
             } else {
-                RelationColumns {
-                    names: cte.columns.iter().cloned().collect(),
-                    complete: true,
-                }
+                RelationColumns::known(cte.columns.clone())
             };
             ctes.insert(cte.name.clone(), columns);
         }
@@ -209,10 +228,7 @@ fn query_has_external_reference(
         let columns = if cte.columns.is_empty() {
             query_output_columns(&cte.query)
         } else {
-            RelationColumns {
-                names: cte.columns.iter().cloned().collect(),
-                complete: true,
-            }
+            RelationColumns::known(cte.columns.clone())
         };
         if cte.recursive {
             ctes.insert(cte.name.clone(), columns.clone());
@@ -230,10 +246,7 @@ fn query_has_external_reference(
                 None => QueryScope {
                     qualifiers: BTreeSet::new(),
                     internal_relations: BTreeSet::new(),
-                    columns: RelationColumns {
-                        names: BTreeSet::new(),
-                        complete: true,
-                    },
+                    columns: RelationColumns::empty_known(),
                 },
             };
             scopes.push(scope);
@@ -306,10 +319,7 @@ fn query_has_external_reference(
             scopes.push(QueryScope {
                 qualifiers: BTreeSet::new(),
                 internal_relations: BTreeSet::new(),
-                columns: RelationColumns {
-                    names: BTreeSet::new(),
-                    complete: true,
-                },
+                columns: RelationColumns::empty_known(),
             });
             let result = (|| {
                 for expression in rows.iter().flatten() {
@@ -344,14 +354,17 @@ fn source_scope(
             name,
             qualifier,
             alias,
+            column_aliases,
             ..
         } => {
             let mut qualifiers = BTreeSet::new();
             qualifiers.insert(alias.as_ref().unwrap_or(qualifier).clone());
+            let mut columns = relation_columns(engine, name, ctes)?;
+            columns.apply_positional_aliases(column_aliases);
             Ok(QueryScope {
                 qualifiers,
                 internal_relations: BTreeSet::new(),
-                columns: relation_columns(engine, name, ctes)?,
+                columns,
             })
         }
         SourcePlan::Join {
@@ -366,17 +379,21 @@ fn source_scope(
             let complete = left.columns.complete && right.columns.complete;
             let mut names = left.columns.names;
             names.extend(right.columns.names);
+            let mut ordered = left.columns.ordered;
+            ordered.extend(right.columns.ordered);
             let mut internal_relations = left.internal_relations;
             internal_relations.extend(right.internal_relations);
             if let Some(alias) = alias {
                 if !column_aliases.is_empty() {
                     names = column_aliases.iter().cloned().collect();
+                    ordered.clone_from(column_aliases);
                 }
                 return Ok(QueryScope {
                     qualifiers: [alias.clone()].into_iter().collect(),
                     internal_relations,
                     columns: RelationColumns {
                         names,
+                        ordered,
                         complete: complete && column_aliases.is_empty(),
                     },
                 });
@@ -386,7 +403,11 @@ fn source_scope(
             Ok(QueryScope {
                 qualifiers,
                 internal_relations,
-                columns: RelationColumns { names, complete },
+                columns: RelationColumns {
+                    names,
+                    ordered,
+                    complete,
+                },
             })
         }
         SourcePlan::Values {
@@ -400,27 +421,21 @@ fn source_scope(
                 return Ok(QueryScope {
                     qualifiers: BTreeSet::new(),
                     internal_relations: [*internal_relation].into_iter().collect(),
-                    columns: RelationColumns {
-                        names: BTreeSet::new(),
-                        complete: true,
-                    },
+                    columns: RelationColumns::empty_known(),
                 });
             }
             let qualifiers = alias.iter().cloned().collect();
-            let names = if column_aliases.is_empty() {
+            let columns = if column_aliases.is_empty() {
                 (0..rows.first().map_or(0, Vec::len))
                     .map(|index| format!("column{}", index + 1))
-                    .collect()
+                    .collect::<Vec<_>>()
             } else {
-                column_aliases.iter().cloned().collect()
+                column_aliases.clone()
             };
             Ok(QueryScope {
                 qualifiers,
                 internal_relations: BTreeSet::new(),
-                columns: RelationColumns {
-                    names,
-                    complete: true,
-                },
+                columns: RelationColumns::known(columns),
             })
         }
         SourcePlan::Function {
@@ -445,7 +460,11 @@ fn source_scope(
             Ok(QueryScope {
                 qualifiers,
                 internal_relations: BTreeSet::new(),
-                columns: RelationColumns { names, complete },
+                columns: RelationColumns {
+                    ordered: names.iter().cloned().collect(),
+                    names,
+                    complete,
+                },
             })
         }
         SourcePlan::FunctionGroup {
@@ -483,11 +502,13 @@ fn source_scope(
             for (name, alias) in names.iter_mut().zip(column_aliases) {
                 name.clone_from(alias);
             }
+            let column_names = names.iter().cloned().collect();
             Ok(QueryScope {
                 qualifiers,
                 internal_relations: BTreeSet::new(),
                 columns: RelationColumns {
-                    names: names.into_iter().collect(),
+                    names: column_names,
+                    ordered: names,
                     complete,
                 },
             })
@@ -503,6 +524,7 @@ fn source_scope(
             } else {
                 RelationColumns {
                     names: column_aliases.iter().cloned().collect(),
+                    ordered: column_aliases.clone(),
                     complete: true,
                 }
             };
@@ -530,35 +552,23 @@ fn relation_columns(
     let catalog = engine.catalog_read_view();
     let resolution = engine.session_execution_view().relation_name_resolution();
     if let Some(columns) = super::virtual_relation_schema(&catalog, &resolution, name)? {
-        return Ok(RelationColumns {
-            names: columns.into_iter().map(|(name, _)| name).collect(),
-            complete: true,
-        });
+        return Ok(RelationColumns::known(
+            columns.into_iter().map(|(name, _)| name).collect(),
+        ));
     }
     if let Ok(columns) = engine.try_table_columns(name) {
-        return Ok(RelationColumns {
-            names: columns.into_iter().collect(),
-            complete: true,
-        });
+        return Ok(RelationColumns::known(columns));
     }
     if let Some(view) = engine.view_plan(name)? {
         return Ok(query_output_columns(&view));
     }
     if let Some(view) = engine.view_definition(name)? {
-        return Ok(RelationColumns {
-            names: view
-                .output_columns
-                .unwrap_or_default()
-                .into_iter()
-                .collect(),
-            complete: true,
-        });
+        return Ok(RelationColumns::known(
+            view.output_columns.unwrap_or_default(),
+        ));
     }
     if let Ok(columns) = engine.foreign_table_columns(name) {
-        return Ok(RelationColumns {
-            names: columns.into_iter().collect(),
-            complete: true,
-        });
+        return Ok(RelationColumns::known(columns));
     }
     Ok(RelationColumns::default())
 }
@@ -596,20 +606,23 @@ fn source_has_external_reference(
 
 fn query_output_columns(plan: &QueryPlan) -> RelationColumns {
     match &plan.root {
-        RelationalPlan::QueryBlock(block) => RelationColumns {
-            names: projection_columns(&block.projections).into_iter().collect(),
-            complete: !block
-                .projections
-                .iter()
-                .any(|projection| matches!(projection.expr, ScalarExpr::Star)),
-        },
+        RelationalPlan::QueryBlock(block) => {
+            let ordered = projection_columns(&block.projections);
+            RelationColumns {
+                names: ordered.iter().cloned().collect(),
+                ordered,
+                complete: !block
+                    .projections
+                    .iter()
+                    .any(|projection| matches!(projection.expr, ScalarExpr::Star)),
+            }
+        }
         RelationalPlan::SetOp { left, .. } => query_output_columns(left),
-        RelationalPlan::Values { rows, .. } => RelationColumns {
-            names: (0..rows.first().map_or(0, Vec::len))
+        RelationalPlan::Values { rows, .. } => RelationColumns::known(
+            (0..rows.first().map_or(0, Vec::len))
                 .map(|index| format!("column{}", index + 1))
                 .collect(),
-            complete: true,
-        },
+        ),
     }
 }
 
@@ -743,5 +756,33 @@ fn frame_bound_has_external_reference(bound: &ScalarFrameBound, scopes: &[QueryS
         ScalarFrameBound::UnboundedPreceding
         | ScalarFrameBound::UnboundedFollowing
         | ScalarFrameBound::CurrentRow => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn table_range_aliases_replace_physical_correlation_names() {
+        let engine = Engine::new();
+        engine
+            .sql(
+                "CREATE TABLE correlation_alias_source(id INTEGER, label TEXT)",
+                &[],
+            )
+            .unwrap();
+        let source = SourcePlan::Table {
+            name: "correlation_alias_source".into(),
+            qualifier: "correlation_alias_source".into(),
+            alias: Some("source".into()),
+            column_aliases: vec!["key".into(), "value".into()],
+            include_descendants: true,
+        };
+        let scope = source_scope(&engine, &source, &BTreeMap::new()).unwrap();
+        assert_eq!(
+            scope.columns.names,
+            BTreeSet::from(["key".to_string(), "value".to_string()])
+        );
     }
 }

@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use super::{DocId, MemoryDocumentStore, SharedDocumentRow, StoredDocument, Value};
+use super::{DocId, MemoryDocumentRow, MemoryDocumentStore, SharedDocumentRow, Value};
 
 const MISSING_SLOT: usize = usize::MAX;
 
@@ -214,7 +214,7 @@ impl ProjectedLayout {
 
     fn project<'a>(
         &self,
-        stored: &'a StoredDocument,
+        stored: &'a MemoryDocumentRow,
         null: &'a Value,
         values: &mut Vec<&'a Value>,
     ) {
@@ -237,7 +237,7 @@ impl ProjectedLayout {
 }
 
 fn project_stored<'a>(
-    stored: Option<&'a StoredDocument>,
+    stored: Option<&'a MemoryDocumentRow>,
     projection: Option<&ProjectedLayout>,
     requested_len: usize,
     null: &'a Value,

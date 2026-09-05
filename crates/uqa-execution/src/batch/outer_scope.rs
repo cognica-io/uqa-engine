@@ -136,7 +136,7 @@ impl RowSchema {
         clippy::too_many_lines,
         reason = "outer-scope merge keeps schema and value precedence aligned"
     )]
-    pub(crate) fn with_outer_schema(input: &Self, outer: &Self) -> Self {
+    pub fn with_outer_schema(input: &Self, outer: &Self) -> Self {
         let outer_base = input.physical_width();
         let current_qualifiers = input
             .index
@@ -262,7 +262,7 @@ impl RowSchema {
         let mut score_sources = input.index.cold.score_sources.clone();
         score_sources.extend(outer.index.cold.score_sources.iter().cloned());
 
-        Self::from_typed_parts_with_aliases_and_exact_precedence(
+        let schema = Self::from_typed_parts_with_aliases_and_exact_precedence(
             input.columns().to_vec(),
             input.identities().to_vec(),
             input.column_types().to_vec(),
@@ -280,6 +280,16 @@ impl RowSchema {
                 extra_ambiguous_qualified: ambiguous_qualified,
                 ..SchemaBuildMetadata::default()
             },
-        )
+        );
+        let virtual_identities = outer
+            .typed_virtual_identities()
+            .filter(|(identity, _)| {
+                identity
+                    .qualifier()
+                    .is_none_or(|qualifier| !current_qualifiers.contains(qualifier))
+            })
+            .map(|(identity, ty)| (identity.clone(), ty.cloned()))
+            .collect::<Vec<_>>();
+        Self::with_typed_virtual_identities(&schema, &virtual_identities)
     }
 }

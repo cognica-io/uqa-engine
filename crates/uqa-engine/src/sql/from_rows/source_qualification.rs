@@ -366,23 +366,6 @@ pub(in crate::sql) fn execute_view_plan_output_with_parent_cache(
     result
 }
 
-pub(in crate::sql) fn qualify_source_operator<'a>(
-    operator: Box<dyn uqa_execution::PhysicalOperator + 'a>,
-    qualifier: &str,
-    prune: Option<&ColumnPrune>,
-    rebind_lock_origins: bool,
-) -> Box<dyn uqa_execution::PhysicalOperator + 'a> {
-    let columns = operator.schema().to_vec();
-    qualify_source_operator_with_columns(
-        operator,
-        &columns,
-        qualifier,
-        prune,
-        &[],
-        rebind_lock_origins,
-    )
-}
-
 pub(in crate::sql) fn qualify_source_operator_with_columns<'a>(
     operator: Box<dyn uqa_execution::PhysicalOperator + 'a>,
     source_columns: &[String],

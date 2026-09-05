@@ -10,6 +10,8 @@ use tempfile::TempDir;
 use uqa_core::Value;
 use uqa_engine::Engine;
 
+#[path = "sql_rules/column_dependencies.rs"]
+mod column_dependencies;
 #[path = "sql_rules/condition_subqueries.rs"]
 mod condition_subqueries;
 #[path = "sql_rules/persistence.rs"]
@@ -18,10 +20,14 @@ mod persistence;
 mod privilege_subjects;
 #[path = "sql_rules/privileges.rs"]
 mod privileges;
+#[path = "sql_rules/relation_dependencies.rs"]
+mod relation_dependencies;
 #[path = "sql_rules/returning.rs"]
 mod returning;
 #[path = "sql_rules/returning_event_rows.rs"]
 mod returning_event_rows;
+#[path = "sql_rules/routine_dependencies.rs"]
+mod routine_dependencies;
 #[path = "sql_rules/row_composites.rs"]
 mod row_composites;
 #[path = "sql_rules/row_expansion.rs"]

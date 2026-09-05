@@ -10,9 +10,9 @@ use super::{ColumnType, Engine, SQLError};
 use uqa_execution::RowSchema;
 use uqa_sql::ast::Expr;
 
-pub(super) fn validate_default_expression(
+pub(crate) fn validate_default_expression(
     engine: &Engine,
-    expression: &Expr,
+    expression: &mut Expr,
     target: &ColumnType,
 ) -> Result<(), SQLError> {
     let plan = uqa_planner::ExpressionPlan::lower(expression.clone());
@@ -41,7 +41,27 @@ pub(super) fn validate_default_expression(
         ));
     }
     uqa_execution::scalar_type_with_resolver(&plan.scalar, &RowSchema::default(), &[], engine)?;
-    crate::sql::reject_stored_regrole_constants(engine, expression, Some(target))
+    crate::sql::reject_stored_regrole_constants(engine, expression, Some(target))?;
+    bind_stored_schema_expression_routines(engine, expression, expression.clone())?;
+    Ok(())
+}
+
+pub(crate) fn bind_stored_schema_expression_routines(
+    engine: &Engine,
+    expression: &mut Expr,
+    typed_expression: Expr,
+) -> Result<bool, SQLError> {
+    let mut plan = uqa_planner::ExpressionPlan::lower_with(typed_expression, &|name: &str| {
+        engine.has_registered_aggregate_function(name)
+    });
+    crate::sql::bind_catalog_expression_routines_with_outer(
+        engine,
+        &mut plan,
+        &[],
+        &RowSchema::default(),
+    )?;
+    let references = crate::sql::collect_expression_routine_references(&plan)?;
+    crate::engine_events::bind_stored_expression_routines(expression, &references)
 }
 
 fn default_error(sqlstate: &str, message: &str) -> SQLError {

@@ -38,6 +38,12 @@ The differential summary line reports `total/match/diff`, and any difference mak
 
 `run_routines_stateful.py` executes the 200 delimited cases in `routines_stateful.sql` against PostgreSQL 18.4 with Apache AGE and UQA, then compares both results with `routines_stateful.expected.json`. It covers polymorphic and variadic resolution, pseudo-type declaration validation, user `pg_proc` identity, ALTER lifecycle, persisted concrete bindings, routine ownership and security, PL/pgSQL array `FOREACH`, static-query, dynamic-query, and bound-cursor `FOR` traversal, assignment-style Boolean conditions, `ASSERT`, lazy messages, assertion handlers and settings, nontransactional sequence effects, expression evaluation, portal prefetch and cleanup, `FOUND`, validation order, session portals, transitive function and procedure `DROP CASCADE` effects, and exact SQLSTATEs.
 
+`routine_rename_oracle.sql` records PostgreSQL 18.4 function, procedure, routine, and schema-expression dependency behavior. The checked-in transcript verifies overload and kind selection, omitted-signature ambiguity, collisions, missing targets, rollback, stable `pg_proc` OIDs and `information_schema.routines.specific_name` suffixes, `CREATE OR REPLACE` identity preservation, bound SQL-standard query and command bodies, routine parameter defaults, ordinary- and foreign-table column defaults, column- and table-level CHECK constraints and stored generated columns, foreign-table sequence rename and DROP dependencies, generated `SERIAL` and identity sequences, schema-local implicit-name collision suffixes, automatic and internal ownership dependency kinds, `pg_get_serial_sequence`, owned-sequence protection and owner-drop behavior, scalar and table-function views, rewrite rules, trigger targets and `WHEN` conditions, dependency rejection and object-granular cascade, old-name recreation isolation, and the intentionally dynamic behavior of SQL string and PL/pgSQL bodies.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/routine_rename_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/routine_rename_oracle.expected.txt -
+```
+
 The same runner's `--suite roles` mode executes the 182 cases in `roles_stateful.sql` and compares them with `roles_stateful.expected.json`. It covers PostgreSQL 18 role-membership defaults and option changes, independent grantors, ADMIN dependency `RESTRICT` and `CASCADE`, cycles, CREATE ROLE membership clauses, legacy ALTER GROUP, transactions and reopen, `pg_auth_members`, CREATEROLE attribute-delegation limits, transitive SET, INHERIT, and ADMIN behavior, all six name/OID `pg_has_role` overloads and privilege modes, scalar and array `regrole` OID storage, role-removal output, stored scalar-constant dependency rejection, CHECK, partition-key, and routine error precedence, and allowed runtime forms, stable-function generated-column rejection, membership-aware routine ownership and ACLs, unauthorized replacement and drop, SECURITY INVOKER role persistence, SECURITY DEFINER restrictions, role-drop dependencies, and exact SQLSTATEs.
 
 The same runner's `--suite constraints` mode executes `constraints_stateful.sql` and compares it with `constraints_stateful.expected.json`. The 162-case transcript covers named CHECK, foreign-key, and `NOT NULL` `NOT VALID` state, validation and enforcement failure atomicity, supported ALTER forms, inferred primary-key references, exact referenced-key and physical-partition event identity, directional and temporal cross-type keys, initially-deferred outer-commit and savepoint behavior, `SET CONSTRAINTS` name resolution and trigger recreation, dependency-aware drops and pending-event precedence, multi-action rollback, catalog flags, and exact SQLSTATEs.
@@ -49,6 +55,8 @@ The `--suite triggers` mode executes the 609 cases in `triggers_stateful.sql` an
 The trigger suite's view `MERGE` slice covers direct and nested automatic-to-trigger targets, INSERT, UPDATE, DELETE, and DO NOTHING actions, action-path selection and errors, statement-trigger order, current, OLD, and NEW row images, NULL suppression, repeated candidates, replication-mode suppression, user-rule rejection, final check options, hidden target rows, failure atomicity, and statement-start snapshots.
 
 The trigger suite's DML row-image slice covers ordinary and partitioned INSERT, UPDATE, DELETE, ON CONFLICT, and MERGE, including BEFORE-trigger mutation and suppression, trigger assignments that do not replace the original OLD image, AFTER-trigger writes that do not retroactively change RETURNING, stored generated values, same-leaf and cross-leaf updates, and source and destination physical `tableoid` identities.
+
+The `--suite view-definitions` mode compares the view-definition transcript in `view_definitions_stateful.sql` with PostgreSQL 18.4. It verifies the five `pg_get_viewdef` signatures and catalog metadata, NULL and non-view results, SQLSTATEs, SELECT clauses and expression formatting, joins, CTEs, subqueries, sets, windows, pretty printing and wrapping, view and materialized-view catalogs, `_RETURN` deparsing, relation renames, and evaluated `string_agg` delimiters. Quoted CTE names are checked with materialization, repeated references, recursion, and nested shadowing. Engine integration tests also execute every reconstructed query and cover schema visibility, fixed public column names, column rename, transactions, savepoints, temporary and foreign sources, prepared statements and cursors, multiple engines, and persistent reopen.
 
 The `--suite rules` mode executes the 194 rewrite-rule cases in `rules_stateful.sql` and compares them with `rules_stateful.expected.json`. It covers `OLD` and `NEW` binding including nullable integer row images, collision-free and correlated LATERAL action sources, PostgreSQL CTE, set-operation member, conditional set-operation action, and `ON CONFLICT` reference-scope errors, qualified and unqualified conditions, alphabetical action ordering, `ALSO`, conditional and unconditional `INSTEAD`, `NOTHING`, set-oriented action and statement-trigger cardinality, INSERT SELECT, row-independent UPDATE and DELETE action qualification cardinality including no-predicate, false-predicate, empty-target, `UPDATE FROM`, and `DELETE USING` cases, positional DML `RETURNING` provider validation, lazy projection evaluation, action row images, aliases, UPDATE-provider `UPDATE FROM` source columns, DELETE-provider `DELETE USING` source columns, view-target action validation, canonical recursion detection, DML restrictions, `session_replication_role` mode selection, `pg_rewrite` and `pg_rules`, enable and rename lifecycle, persistence-safe replacement, token-safe column dependency rewrites, reserved `_RETURN` naming, view `_RETURN` replacement and protection, materialized-view rejection, and exact SQLSTATEs.
 
@@ -88,6 +96,12 @@ docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/pa
 
 ```sh
 docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/schema_create_enforcement_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/schema_create_enforcement_oracle.expected.txt -
+```
+
+`relation_if_not_exists_oracle.sql` records PostgreSQL 18.4 definition-analysis ordering for `CREATE TABLE IF NOT EXISTS` and `CREATE FOREIGN TABLE IF NOT EXISTS`. The checked-in transcript verifies shared-namespace collisions across relation kinds, skipped type, column, constraint, hierarchy, typed-table, tablespace, foreign-server, and generated-sequence work, and the corresponding errors when the target name is free.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/relation_if_not_exists_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/relation_if_not_exists_oracle.expected.txt -
 ```
 
 `routine_schema_usage_oracle.sql` records PostgreSQL 18.4 schema `USAGE` enforcement at routine name-resolution boundaries. The checked-in transcript verifies qualified and effective-search-path function and procedure calls, argument column and type errors before namespace checks in projections and filters, missing-object and schema-before-`EXECUTE` precedence, ALTER, GRANT, REVOKE, and DROP targets, inherited grants, immediate prepared-plan invalidation after revocation, and the distinction between dynamically resolved invoker or definer bodies and exact bindings stored in views, generated expressions, and SQL-standard routine bodies.
@@ -130,6 +144,24 @@ docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/pa
 
 ```sh
 docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/rule_condition_subquery_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/rule_condition_subquery_oracle.expected.txt -
+```
+
+`rule_dependency_oracle.sql` records PostgreSQL 18.4 rewrite-rule object dependencies. The checked-in transcript verifies creation-bound action-target, action-source, and condition-source relations, exact routine overload identities, search-path and later-overload stability, DROP RESTRICT and CASCADE behavior, multi-target failure atomicity, transaction rollback, table and sequence rename, and durable catalog restore.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/rule_dependency_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/rule_dependency_oracle.expected.txt -
+```
+
+`rule_relation_kind_oracle.sql` records PostgreSQL 18.4 rewrite-rule lifecycle across regular views, materialized views, and foreign tables. The checked-in transcript verifies stable relation and row-type OIDs through direct and historical `ALTER TABLE` rename syntax, dependent-view and rule-definition rewrites, old-name recreation isolation, executable regular-view event rules, materialized-view and foreign-table event SQLSTATEs, transaction rollback, collision errors, missing-schema `IF EXISTS` behavior, and DROP RESTRICT and CASCADE behavior.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/rule_relation_kind_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/rule_relation_kind_oracle.expected.txt -
+```
+
+`rule_column_dependency_oracle.sql` records PostgreSQL 18.4 rewrite-rule column dependencies. The checked-in transcript verifies source projections and predicates, action target columns, positional INSERT targets, stable ownership of initially unqualified source columns, creation-bound projection stars, live source whole-row composites, one-sided and two-sided `JOIN USING` renames, one-sided `NATURAL JOIN` rename, catalog deparsing through range-table column aliases, unreferenced-column drops, rename execution, DROP COLUMN RESTRICT and CASCADE behavior, and rule removal.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/rule_column_dependency_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/rule_column_dependency_oracle.expected.txt -
 ```
 
 `rule_row_expansion_oracle.sql` records PostgreSQL 18.4 rewrite-rule action-row expansion. The checked-in transcript verifies multi-row `OLD.*` and `NEW.*` expansion in `VALUES` rows, `SELECT` target lists, and `ROW` constructors; event-side SQLSTATEs; nested local-alias shadowing; CTE and set-operation scope rejection; creation-time stability across added columns; rename and drop dependencies; and cascade cleanup.
@@ -262,6 +294,7 @@ python3 tests/parity/pg18/run_routines_stateful.py --suite constraints
 python3 tests/parity/pg18/run_routines_stateful.py --suite type-temporal
 python3 tests/parity/pg18/run_routines_stateful.py --suite triggers
 python3 tests/parity/pg18/run_routines_stateful.py --suite rules
+python3 tests/parity/pg18/run_routines_stateful.py --suite view-definitions
 python3 tests/parity/pg18/run_routines_stateful.py --suite transactions
 ```
 

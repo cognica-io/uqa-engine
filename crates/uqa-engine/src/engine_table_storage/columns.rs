@@ -30,7 +30,18 @@ impl Engine {
         column: uqa_sql::ast::ColumnDef,
     ) -> StorageBackendResult<()> {
         self.with_implicit_storage_transaction(|engine| {
-            engine.try_register_column_inner(table, column)
+            engine.try_register_column_inner(table, column, None)
+        })
+    }
+
+    pub(crate) fn try_register_column_with_check_columns(
+        &self,
+        table: &str,
+        column: uqa_sql::ast::ColumnDef,
+        check_columns: &[uqa_sql::ast::ColumnDef],
+    ) -> StorageBackendResult<()> {
+        self.with_implicit_storage_transaction(|engine| {
+            engine.try_register_column_inner(table, column, Some(check_columns))
         })
     }
 
@@ -38,6 +49,7 @@ impl Engine {
         &self,
         table: &str,
         mut column: uqa_sql::ast::ColumnDef,
+        check_columns: Option<&[uqa_sql::ast::ColumnDef]>,
     ) -> StorageBackendResult<()> {
         let legacy_auto_increment = column
             .auto_increment
@@ -66,6 +78,16 @@ impl Engine {
             )));
         }
         columns.push(column);
+        if let Some(check_columns) = check_columns {
+            self.bind_table_schema_routine_identities_with_check_columns(
+                &table_name,
+                &mut columns,
+                &mut [],
+                check_columns,
+            )?;
+        } else {
+            self.bind_table_schema_routine_identities(&table_name, &mut columns, &mut [])?;
+        }
         let mut constraints = uqa_sql::ast::TableConstraintSet {
             persistence: t.persistence,
             on_commit: t.on_commit,
@@ -153,6 +175,7 @@ impl Engine {
         let owned_sequences =
             self.sequence_names_owned_by_column(t.object_id(), column_object_id)?;
         self.preflight_drop_column_dependencies(&table_name, column)?;
+        let prepared_rule_drop = self.prepare_rule_column_drop(&table_name, column)?;
         Self::value_indexes_clear(&t);
         {
             let mut cols = t.columns.write();
@@ -212,12 +235,8 @@ impl Engine {
                     .map_err(|err| StorageBackendError::Other(err.to_string()))?;
             }
         }
-        if self.is_persistent() {
-            if let Some(catalog) = self.storage.catalog.as_ref() {
-                catalog.drop_column_data(&table_name, column)?;
-            }
-            self.try_save_table_schema(&table_name, &t)?;
-        }
+        self.persist_dropped_column(&table_name, column, &t)?;
+        self.finish_rule_column_drop(prepared_rule_drop)?;
         for sequence in owned_sequences {
             self.drop_owned_sequence(&sequence, cascade)?;
         }
@@ -226,6 +245,21 @@ impl Engine {
         self.prune_constraint_modes()
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         Ok(true)
+    }
+
+    fn persist_dropped_column(
+        &self,
+        table_name: &str,
+        column: &str,
+        table: &super::TableState,
+    ) -> StorageBackendResult<()> {
+        if !self.is_persistent() {
+            return Ok(());
+        }
+        if let Some(catalog) = self.storage.catalog.as_ref() {
+            catalog.drop_column_data(table_name, column)?;
+        }
+        self.try_save_table_schema(table_name, table)
     }
 
     pub(crate) fn try_drop_vector_indexes_for_column(
@@ -344,7 +378,6 @@ impl Engine {
             }
         }
         self.rewrite_column_rename_dependencies(&table_name, from, to)?;
-        self.rename_event_column_inner(&table_name, from, to)?;
         Self::value_indexes_clear(&t);
         {
             let mut cols = t.columns.write();
@@ -423,6 +456,7 @@ impl Engine {
             }
             self.try_save_table_schema(&table_name, &t)?;
         }
+        self.rename_event_column_inner(&table_name, from, to)?;
         self.mark_column_stats_dirty(&table_name, &t)?;
         self.refresh_value_indexes_for_table(&table_name)?;
         Ok(true)
@@ -494,7 +528,7 @@ impl Engine {
         };
         tables.insert(to_relation.clone(), state.clone());
         drop(tables);
-        self.rename_relation_events_inner(&from_relation, &to_relation)?;
+        self.rewrite_relation_rename_dependents(&from_relation, &to_relation)?;
         self.rename_catalog_index_table_refs(&from, &to);
         {
             let mut analyzers = self.durable.table_field_analyzers.write();

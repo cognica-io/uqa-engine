@@ -13,7 +13,7 @@ use std::sync::Arc;
 use tempfile::TempDir;
 use uqa_core::Value;
 use uqa_sql::SQLError;
-use uqa_storage::document_store::Document;
+use uqa_storage::{DocumentMetadata, StoredDocument};
 
 use crate::Engine;
 
@@ -42,7 +42,7 @@ pub(crate) enum RetryRowOverride {
     Deleted,
     Present {
         doc_id: uqa_core::DocId,
-        document: Document,
+        document: StoredDocument,
     },
 }
 
@@ -160,7 +160,11 @@ fn encode_override(row_override: &RetryRowOverride) -> Result<Value, SQLError> {
             Value::List(vec![
                 Value::Bool(true),
                 Value::Int(doc_id),
-                Value::Map(document.clone()),
+                Value::Map(document.fields().clone()),
+                document
+                    .metadata()
+                    .tuple_xmin()
+                    .map_or(Value::Null, |xmin| Value::Int(i64::from(xmin))),
             ])
         }
     })
@@ -172,10 +176,28 @@ fn decode_override(value: &Value) -> Result<RetryRowOverride, SQLError> {
             Ok(RetryRowOverride::Deleted)
         }
         Value::List(values) => match values.as_slice() {
-            [Value::Bool(true), Value::Int(doc_id), Value::Map(document)] if *doc_id >= 0 => {
+            [Value::Bool(true), Value::Int(doc_id), Value::Map(document), tuple_xmin]
+                if *doc_id >= 0 =>
+            {
+                let metadata = match tuple_xmin {
+                    Value::Null => DocumentMetadata::default(),
+                    Value::Int(xmin) => {
+                        let xmin = u32::try_from(*xmin).map_err(|_| {
+                            SQLError::Internal(
+                                "row-lock retry row has an invalid tuple xmin".into(),
+                            )
+                        })?;
+                        DocumentMetadata::with_tuple_xmin(xmin)
+                    }
+                    _ => {
+                        return Err(SQLError::Internal(
+                            "row-lock retry row has an invalid tuple xmin".into(),
+                        ));
+                    }
+                };
                 Ok(RetryRowOverride::Present {
                     doc_id: *doc_id as uqa_core::DocId,
-                    document: document.clone(),
+                    document: StoredDocument::with_metadata(document.clone(), metadata),
                 })
             }
             _ => Err(SQLError::Internal(

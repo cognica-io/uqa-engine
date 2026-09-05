@@ -100,7 +100,10 @@ pub(super) fn prepare_create_table_hierarchy(
         );
         if is_partition {
             inherited_foreign_keys.extend(constraints.foreign_keys);
-            inherited_keys.extend(constraints.key_constraints);
+            inherited_keys.extend(constraints.key_constraints.into_iter().map(|mut key| {
+                key.name = None;
+                key
+            }));
         }
         canonical_parents.push(parent);
     }

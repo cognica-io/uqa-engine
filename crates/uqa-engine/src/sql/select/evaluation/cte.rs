@@ -66,14 +66,29 @@ impl CteScope {
 
     /// Return one deferred CTE for a scan. `NOT MATERIALIZED` definitions remain available so every syntactic reference is independently folded, while the default single-reference fast path is consumed exactly once.
     pub(in crate::sql) fn deferred_for_scan(&mut self, name: &str) -> Option<CtePlan> {
-        let persistent = self.deferred_ctes.get(name).is_some_and(|plan| {
+        let name = crate::sql::select::cte_reference_name(name)?;
+        let persistent = self.deferred_ctes.get(&name).is_some_and(|plan| {
             plan.materialization == uqa_sql::ast::CteMaterialization::NotMaterialized
         });
         if persistent {
-            self.deferred_ctes.get(name).cloned()
+            self.deferred_ctes.get(&name).cloned()
         } else {
-            self.deferred_ctes.remove(name)
+            self.deferred_ctes.remove(&name)
         }
+    }
+
+    pub(in crate::sql) fn materialized_for_scan(
+        &self,
+        reference: &str,
+    ) -> Option<uqa_execution::SharedSpill> {
+        self.rows
+            .get(&crate::sql::select::cte_reference_name(reference)?)
+            .cloned()
+    }
+
+    pub(in crate::sql) fn deferred_reference(&self, reference: &str) -> Option<&CtePlan> {
+        self.deferred_ctes
+            .get(&crate::sql::select::cte_reference_name(reference)?)
     }
 
     pub(in crate::sql) fn deferred_ctes(&self) -> &BTreeMap<String, CtePlan> {
@@ -150,9 +165,11 @@ impl CteScope {
 
     /// Whether `name` resolves to a CTE in this scope: a name declared by an enclosing query's WITH list, or one whose rows or deferred plan are bound in the scope, which is how a DML statement's own WITH list reaches the query it drives.
     pub(in crate::sql) fn is_visible_cte(&self, name: &str) -> bool {
-        self.visible_cte_names.contains(name)
-            || self.rows.contains_key(name)
-            || self.deferred_ctes.contains_key(name)
+        crate::sql::select::cte_reference_name(name).is_some_and(|name| {
+            self.visible_cte_names.contains(&name)
+                || self.rows.contains_key(&name)
+                || self.deferred_ctes.contains_key(&name)
+        })
     }
 
     pub(in crate::sql) fn returning_statement_snapshot_scope(&self) -> Self {

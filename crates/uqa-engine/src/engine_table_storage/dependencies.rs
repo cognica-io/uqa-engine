@@ -6,12 +6,14 @@
 
 //! DDL target resolution, relation dependencies, and catalog index references.
 
+mod routines;
+mod sequences;
+
 use super::{
     rename_schema_expr_column, rename_schema_expr_qualified_column, rename_schema_expr_relation,
-    rewrite_sequence_function_references, schema_expr_references_column,
-    schema_expr_references_relation, stored_relation_reference_matches, table_not_found, Arc,
-    BTreeMap, CatalogIndexRow, Engine, IVFIndexParams, RelationIdentity, StorageBackendError,
-    StorageBackendResult, TableState,
+    schema_expr_references_column, schema_expr_references_relation,
+    stored_relation_reference_matches, table_not_found, Arc, BTreeMap, CatalogIndexRow, Engine,
+    IVFIndexParams, RelationIdentity, StorageBackendError, StorageBackendResult, TableState,
 };
 use crate::{HNSWIndexParams, VectorIndexSpec};
 
@@ -57,7 +59,7 @@ impl Engine {
 
     pub(super) fn catalog_index_columns(
         row: &CatalogIndexRow,
-    ) -> StorageBackendResult<Vec<String>> {
+    ) -> StorageBackendResult<Vec<uqa_sql::ast::IndexKey>> {
         serde_json::from_str(&row.columns_json).map_err(StorageBackendError::from)
     }
 
@@ -67,7 +69,15 @@ impl Engine {
     ) -> StorageBackendResult<bool> {
         Ok(Self::catalog_index_columns(row)?
             .iter()
-            .any(|candidate| candidate.eq_ignore_ascii_case(column)))
+            .any(|candidate| schema_expr_references_column(&candidate.expression(), column))
+            || crate::engine_catalog_indexes::index_definition(row)?
+                .included_columns
+                .iter()
+                .any(|name| name == column)
+            || crate::engine_catalog_indexes::index_definition(row)?
+                .predicate
+                .as_deref()
+                .is_some_and(|predicate| schema_expr_references_column(predicate, column)))
     }
 
     pub(super) fn catalog_index_with_renamed_column(
@@ -76,17 +86,37 @@ impl Engine {
         to: &str,
     ) -> StorageBackendResult<CatalogIndexRow> {
         let mut columns = Self::catalog_index_columns(&row)?;
-        let mut changed = false;
+        let mut definition = crate::engine_catalog_indexes::index_definition(&row)?;
+        if definition.key_names.is_empty() {
+            definition.key_names = columns
+                .iter()
+                .filter_map(uqa_sql::ast::IndexKey::column)
+                .chain(definition.included_columns.iter().map(String::as_str))
+                .map(str::to_owned)
+                .collect();
+        }
         for column in &mut columns {
-            if column.eq_ignore_ascii_case(from) {
-                *column = to.to_string();
-                changed = true;
+            match column {
+                uqa_sql::ast::IndexKey::Column(name) => {
+                    if name == from {
+                        *name = to.into();
+                    }
+                }
+                uqa_sql::ast::IndexKey::Expression(expression) => {
+                    rename_schema_expr_column(expression, from, to)?;
+                }
             }
         }
-        if changed {
-            row.columns_json =
-                serde_json::to_string(&columns).map_err(StorageBackendError::from)?;
+        row.columns_json = serde_json::to_string(&columns)?;
+        for column in &mut definition.included_columns {
+            if column == from {
+                *column = to.into();
+            }
         }
+        if let Some(predicate) = definition.predicate.as_deref_mut() {
+            rename_schema_expr_column(predicate, from, to)?;
+        }
+        row.definition_json = Some(serde_json::to_string(&definition)?);
         Ok(row)
     }
 
@@ -103,6 +133,15 @@ impl Engine {
             }
         }
         for name in removals {
+            if let Some(catalog) = self.storage.catalog.as_ref() {
+                catalog.drop_catalog_index(&name)?;
+            }
+            if let Some(table) = self.try_table(table)? {
+                table
+                    .value_indexes
+                    .write()
+                    .remove(&uqa_storage::ValueIndexKey::Index(name.qualified_name()));
+            }
             rows.remove(&name);
         }
         Ok(())
@@ -127,13 +166,14 @@ impl Engine {
         for (name, row) in rows.iter() {
             if row.table_name == table && Self::catalog_index_references_column(row, from)? {
                 let renamed = Self::catalog_index_with_renamed_column(row.clone(), from, to)?;
-                updates.push((name.clone(), renamed.columns_json));
+                updates.push((name.clone(), renamed));
             }
         }
-        for (name, columns_json) in updates {
-            if let Some(row) = rows.get_mut(&name) {
-                row.columns_json = columns_json;
+        for (name, renamed) in updates {
+            if let Some(catalog) = self.storage.catalog.as_ref() {
+                catalog.save_catalog_index_row(&renamed)?;
             }
+            rows.insert(name, renamed);
         }
         Ok(())
     }
@@ -215,269 +255,6 @@ impl Engine {
         }
     }
 
-    pub(super) fn bind_sequence_references_in_expr(
-        &self,
-        expression: &mut uqa_sql::ast::Expr,
-    ) -> StorageBackendResult<()> {
-        rewrite_sequence_function_references(expression, &mut |reference| {
-            *reference = self.resolve_sequence_reference_for_binding(reference)?;
-            Ok(())
-        })
-    }
-
-    pub(super) fn resolve_stored_sequence_references_in_expr(
-        &self,
-        expression: &mut uqa_sql::ast::Expr,
-    ) -> StorageBackendResult<()> {
-        rewrite_sequence_function_references(expression, &mut |reference| {
-            *reference = self.resolve_stored_sequence_reference(reference)?;
-            Ok(())
-        })
-    }
-
-    pub(super) fn stored_sequence_targets_in_expr(
-        &self,
-        expression: &uqa_sql::ast::Expr,
-    ) -> StorageBackendResult<std::collections::BTreeSet<String>> {
-        let mut expression = expression.clone();
-        let mut targets = std::collections::BTreeSet::new();
-        rewrite_sequence_function_references(&mut expression, &mut |reference| {
-            let canonical = self.resolve_stored_sequence_reference(reference)?;
-            targets.insert(canonical.clone());
-            *reference = canonical;
-            Ok(())
-        })?;
-        Ok(targets)
-    }
-
-    pub(crate) fn sequence_schema_expression_dependents(
-        &self,
-        sequence: &str,
-    ) -> StorageBackendResult<Vec<(String, String)>> {
-        self.synchronize_table_catalog()?;
-        let mut dependents = Vec::new();
-        for (table_name, table) in self.table_entries() {
-            for column in table.columns.read().iter() {
-                let mut depends = if let Some(default) = &column.default {
-                    self.stored_sequence_targets_in_expr(default)?
-                        .contains(sequence)
-                } else {
-                    false
-                };
-                if !depends {
-                    if let Some(generated) = &column.generated {
-                        depends = self
-                            .stored_sequence_targets_in_expr(&generated.expression)?
-                            .contains(sequence);
-                    }
-                }
-                if depends {
-                    dependents.push((table_name.clone(), column.name.clone()));
-                }
-            }
-        }
-        dependents.sort();
-        Ok(dependents)
-    }
-
-    pub(crate) fn ensure_no_sequence_default_dependencies(
-        &self,
-        sequence: &str,
-    ) -> StorageBackendResult<()> {
-        let dependents = self.sequence_schema_expression_dependents(sequence)?;
-        if dependents.is_empty() {
-            return Ok(());
-        }
-        Err(StorageBackendError::Other(format!(
-            "column schema expression(s) `{}` depend on sequence `{sequence}`",
-            dependents
-                .iter()
-                .map(|(table, column)| format!("{table}.{column}"))
-                .collect::<Vec<_>>()
-                .join("`, `")
-        )))
-    }
-
-    pub(crate) fn rewrite_sequence_schema_dependencies(
-        &self,
-        from: &RelationIdentity,
-        to: &str,
-    ) -> StorageBackendResult<()> {
-        let mut updates = Vec::new();
-        for (table_name, table) in self.table_entries() {
-            let mut columns = table.columns.read().clone();
-            let mut checks = table.table_checks.read().clone();
-            let foreign_keys = table.foreign_keys.read().clone();
-            let key_constraints = table.key_constraints.read().clone();
-            let hierarchy = table.hierarchy.read().clone();
-            let mut changed = false;
-            for column in &mut columns {
-                if let Some(sequence) = column
-                    .auto_increment
-                    .as_mut()
-                    .and_then(|provenance| provenance.sequence.as_mut())
-                {
-                    if stored_relation_reference_matches(sequence, from) {
-                        *sequence = to.to_string();
-                        changed = true;
-                    }
-                }
-                for expression in [&mut column.default, &mut column.check]
-                    .into_iter()
-                    .flatten()
-                {
-                    rewrite_sequence_function_references(expression, &mut |reference| {
-                        if stored_relation_reference_matches(reference, from) {
-                            *reference = to.to_string();
-                            changed = true;
-                        }
-                        Ok(())
-                    })?;
-                }
-                if let Some(generated) = &mut column.generated {
-                    rewrite_sequence_function_references(
-                        &mut generated.expression,
-                        &mut |reference| {
-                            if stored_relation_reference_matches(reference, from) {
-                                *reference = to.to_string();
-                                changed = true;
-                            }
-                            Ok(())
-                        },
-                    )?;
-                }
-            }
-            for check in &mut checks {
-                rewrite_sequence_function_references(&mut check.expr, &mut |reference| {
-                    if stored_relation_reference_matches(reference, from) {
-                        *reference = to.to_string();
-                        changed = true;
-                    }
-                    Ok(())
-                })?;
-            }
-            if changed {
-                self.persist_constraint_candidate_with_hierarchy(
-                    &table_name,
-                    &table,
-                    &columns,
-                    &checks,
-                    &foreign_keys,
-                    &key_constraints,
-                    &hierarchy,
-                )?;
-                updates.push((table, columns, checks));
-            }
-        }
-        for (table, columns, checks) in &updates {
-            (*table.columns.write()).clone_from(columns);
-            (*table.table_checks.write()).clone_from(checks);
-        }
-        if !updates.is_empty() {
-            self.note_table_catalog_changed();
-        }
-        Ok(())
-    }
-
-    /// Retire the legacy name-based owner marker after an explicit `ALTER SEQUENCE ... OWNED BY` action. Generation provenance and the bound sequence reference remain on the original SERIAL or identity column, while the stable dependency stored on the sequence becomes authoritative for lifecycle operations.
-    pub(crate) fn clear_auto_increment_owner_markers(
-        &self,
-        sequence: &str,
-    ) -> StorageBackendResult<()> {
-        let target =
-            RelationIdentity::from_legacy_name(sequence).map_err(StorageBackendError::Other)?;
-        let mut catalog_changed = false;
-        for (table_name, table) in self.table_entries() {
-            let mut columns = table.columns.read().clone();
-            let mut changed = false;
-            for column in &mut columns {
-                let Some(provenance) = column.auto_increment.as_mut() else {
-                    continue;
-                };
-                if provenance.owner.is_some()
-                    && provenance.sequence.as_deref().is_some_and(|reference| {
-                        stored_relation_reference_matches(reference, &target)
-                    })
-                {
-                    provenance.owner = None;
-                    changed = true;
-                }
-            }
-            if !changed {
-                continue;
-            }
-            if self.is_persistent() {
-                self.try_save_table_schema_with_columns(&table_name, &table, &columns)?;
-            }
-            *table.columns.write() = columns;
-            catalog_changed = true;
-        }
-        if catalog_changed {
-            self.note_table_catalog_changed();
-        }
-        Ok(())
-    }
-
-    /// Remove schema-expression dependencies requested by `DROP SEQUENCE CASCADE` and always detach serial ownership metadata whose sequence is being removed.
-    pub(crate) fn detach_sequence_column_dependencies(
-        &self,
-        sequence: &str,
-        cascade: bool,
-    ) -> StorageBackendResult<()> {
-        if !cascade {
-            self.ensure_no_sequence_default_dependencies(sequence)?;
-        }
-        let mut catalog_changed = false;
-        for (table_name, table) in self.table_entries() {
-            let mut columns = table.columns.read().clone();
-            let mut table_changed = false;
-            for column in &mut columns {
-                if cascade {
-                    let default_depends = if let Some(default) = &column.default {
-                        self.stored_sequence_targets_in_expr(default)?
-                            .contains(sequence)
-                    } else {
-                        false
-                    };
-                    if default_depends {
-                        column.default = None;
-                        table_changed = true;
-                    }
-                    let generated_depends = if let Some(generated) = &column.generated {
-                        self.stored_sequence_targets_in_expr(&generated.expression)?
-                            .contains(sequence)
-                    } else {
-                        false
-                    };
-                    if generated_depends {
-                        column.generated = None;
-                        table_changed = true;
-                    }
-                }
-                if column
-                    .auto_increment
-                    .as_ref()
-                    .is_some_and(|provenance| provenance.sequence.as_deref() == Some(sequence))
-                {
-                    column.auto_increment = None;
-                    table_changed = true;
-                }
-            }
-            if !table_changed {
-                continue;
-            }
-            if self.is_persistent() {
-                self.try_save_table_schema_with_columns(&table_name, &table, &columns)?;
-            }
-            *table.columns.write() = columns;
-            catalog_changed = true;
-        }
-        if catalog_changed {
-            self.note_table_catalog_changed();
-        }
-        Ok(())
-    }
-
     pub(super) fn table_schema_references_relation(
         table: &TableState,
         target: &RelationIdentity,
@@ -551,7 +328,6 @@ impl Engine {
         from: &str,
         to: &str,
     ) -> StorageBackendResult<()> {
-        self.ensure_no_dependent_views("ALTER TABLE RENAME", from)?;
         let from_relation = Self::resolved_relation_identity(from)?;
         let mut updates = Vec::new();
         for (table_name, table) in self.table_entries() {
@@ -641,7 +417,7 @@ impl Engine {
         from: &str,
         to: &str,
     ) -> StorageBackendResult<()> {
-        self.ensure_no_dependent_views("ALTER TABLE RENAME COLUMN", table_name)?;
+        self.rewrite_view_column_references(table_name, from, to)?;
         let target = Self::resolved_relation_identity(table_name)?;
         let mut updates = Vec::new();
         for (candidate_name, table) in self.table_entries() {

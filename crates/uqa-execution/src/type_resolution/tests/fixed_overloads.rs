@@ -118,6 +118,7 @@ fn non_fixed_udf_introspection_retains_the_resolver_binding() {
 
     let resolver = StableUdfResolver {
         binding: FunctionBinding {
+            object_id: None,
             name: "application.stable_udf".into(),
             argument_types: vec!["integer".into()],
             builtin: false,
@@ -178,6 +179,7 @@ fn non_fixed_udf_introspection_keeps_typed_text_distinct_from_unknown() {
             assert_eq!(argument_types, [Some(ColumnType::Text)]);
             Ok(Some(ResolvedFunctionOverload {
                 binding: FunctionBinding {
+                    object_id: None,
                     name: "application.typed_text".into(),
                     argument_types: vec!["text".into()],
                     builtin: false,
@@ -269,6 +271,7 @@ fn scalar_introspection_rejects_non_scalar_catalog_bindings() {
     for routine_name in ["catalog_aggregate", "catalog_setof"] {
         let resolver = NonScalarResolver {
             binding: FunctionBinding {
+                object_id: None,
                 name: format!("application.{routine_name}"),
                 argument_types: vec!["integer".into()],
                 builtin: false,

@@ -21,7 +21,7 @@ const BTREE_FORMAT_V1: &[u8] = b"uqa-btree-v1";
 pub(super) fn load(
     store: &dyn KeyValueStore,
     table: &str,
-    field: &str,
+    field: &crate::ValueIndexKey,
 ) -> StorageBackendResult<Option<Vec<(DocId, Value)>>> {
     let Some(format) = store.get(&btree_index_key(table, field)?)? else {
         return Ok(None);
@@ -44,23 +44,36 @@ pub(super) fn load(
     Ok(Some(entries))
 }
 
-pub(super) fn fields(store: &dyn KeyValueStore, table: &str) -> StorageBackendResult<Vec<String>> {
-    let prefix = btree_index_key_prefix(table)?;
+pub(super) fn fields(
+    store: &dyn KeyValueStore,
+    table: &str,
+) -> StorageBackendResult<Vec<crate::ValueIndexKey>> {
     let mut fields = Vec::new();
-    for (key, value) in store.scan_prefix(&prefix)? {
-        if value != BTREE_FORMAT_V1 {
-            return Err(other_error(format!(
-                "unsupported persisted B-tree format for table `{table}`"
-            )));
+    for named in [false, true] {
+        let prefix = if named {
+            super::codec::table_prefixed_key(super::TAG_NAMED_BTREE_INDEX, table)?
+        } else {
+            btree_index_key_prefix(table)?
+        };
+        for (key, value) in store.scan_prefix(&prefix)? {
+            if value != BTREE_FORMAT_V1 {
+                return Err(other_error(format!(
+                    "unsupported persisted B-tree format for table `{table}`"
+                )));
+            }
+            let mut offset = prefix.len();
+            let field = read_str(&key, &mut offset)?;
+            if offset != key.len() {
+                return Err(other_error(
+                    "persisted B-tree definition key has trailing bytes",
+                ));
+            }
+            fields.push(if named {
+                crate::ValueIndexKey::Index(field)
+            } else {
+                crate::ValueIndexKey::Column(field)
+            });
         }
-        let mut offset = prefix.len();
-        let field = read_str(&key, &mut offset)?;
-        if offset != key.len() {
-            return Err(other_error(
-                "persisted B-tree definition key has trailing bytes",
-            ));
-        }
-        fields.push(field);
     }
     Ok(fields)
 }
@@ -68,7 +81,7 @@ pub(super) fn fields(store: &dyn KeyValueStore, table: &str) -> StorageBackendRe
 pub(super) fn replace(
     store: &dyn KeyValueStore,
     table: &str,
-    field: &str,
+    field: &crate::ValueIndexKey,
     values: &[(DocId, Value)],
 ) -> StorageBackendResult<()> {
     let mut batch = store.batch();
@@ -86,7 +99,7 @@ pub(super) fn replace(
 pub(super) fn replace_many(
     store: &dyn KeyValueStore,
     table: &str,
-    indexes: &[(&str, &[(DocId, Value)])],
+    indexes: &[(&crate::ValueIndexKey, &[(DocId, Value)])],
 ) -> StorageBackendResult<()> {
     let mut batch = store.batch();
     for (field, values) in indexes {
@@ -106,7 +119,7 @@ pub(super) fn apply_write(
     store: &dyn KeyValueStore,
     table: &str,
     doc_id: DocId,
-    values: Option<&BTreeMap<String, Value>>,
+    values: Option<&BTreeMap<crate::ValueIndexKey, Value>>,
 ) -> StorageBackendResult<()> {
     let fields = fields(store, table)?;
     let mut batch = store.batch();
@@ -124,7 +137,7 @@ pub(super) fn apply_write(
 pub(super) fn drop_index(
     store: &dyn KeyValueStore,
     table: &str,
-    field: &str,
+    field: &crate::ValueIndexKey,
 ) -> StorageBackendResult<()> {
     let mut batch = store.batch();
     batch.delete(&btree_index_key(table, field)?)?;

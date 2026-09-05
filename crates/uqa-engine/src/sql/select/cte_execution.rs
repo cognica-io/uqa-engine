@@ -8,6 +8,12 @@
 
 use super::*;
 
+/// Decode a source reference into a CTE identifier. Qualified relations never resolve to CTEs.
+pub(in crate::sql) fn cte_reference_name(reference: &str) -> Option<String> {
+    let (schema, name) = crate::RelationIdentity::parse_reference(reference).ok()?;
+    schema.is_none().then_some(name)
+}
+
 pub(in crate::sql) fn materialize_plan_ctes(
     engine: &Engine,
     plans: &[CtePlan],
@@ -285,8 +291,8 @@ fn count_source_cte_references(
 ) {
     match source {
         SourcePlan::Table { name, .. } => {
-            if targets.contains(name) {
-                *counts.entry(name.clone()).or_default() += 1;
+            if let Some(name) = cte_reference_name(name).filter(|name| targets.contains(name)) {
+                *counts.entry(name).or_default() += 1;
             }
         }
         SourcePlan::Join { left, right, .. } => {
@@ -350,8 +356,12 @@ fn collect_target_cte_references_from_source(
     references: &mut BTreeSet<String>,
 ) {
     match source {
-        SourcePlan::Table { name, .. } if targets.contains(name) && !shadowed.contains(name) => {
-            references.insert(name.clone());
+        SourcePlan::Table { name, .. } => {
+            if let Some(name) = cte_reference_name(name)
+                .filter(|name| targets.contains(name) && !shadowed.contains(name))
+            {
+                references.insert(name);
+            }
         }
         SourcePlan::Join { left, right, .. } => {
             collect_target_cte_references_from_source(left, targets, shadowed, references);
@@ -360,8 +370,7 @@ fn collect_target_cte_references_from_source(
         SourcePlan::Subquery { body, .. } => {
             collect_target_cte_references_from_nested_query(body, targets, shadowed, references);
         }
-        SourcePlan::Table { .. }
-        | SourcePlan::Values { .. }
+        SourcePlan::Values { .. }
         | SourcePlan::Function { .. }
         | SourcePlan::FunctionGroup { .. } => {}
     }

@@ -13,10 +13,10 @@ use super::{
     apply_relation_migrations, batch_put_or_keep_existing, batch_rekey_prefix,
     batch_rekey_prefix_or_keep_existing, catalog_index_references_column,
     catalog_index_rename_column, collect_relation_migrations, column_stats_key,
-    column_stats_prefix, decode_document_value, decode_relation_key, decode_string, decode_value,
-    doc_length_key, doc_length_key_prefix, document_key_prefix, encode_document_value,
-    encode_value, field_stats_key, field_stats_key_prefix, key_with_tag,
-    posting_cluster_positions_field_prefix, posting_cluster_positions_key_prefix,
+    column_stats_prefix, decode_relation_key, decode_stored_document_value, decode_string,
+    decode_value, doc_length_key, doc_length_key_prefix, document_key_prefix,
+    encode_stored_document_value, encode_value, field_stats_key, field_stats_key_prefix,
+    key_with_tag, posting_cluster_positions_field_prefix, posting_cluster_positions_key_prefix,
     posting_cluster_score_field_prefix, posting_cluster_score_key_prefix, posting_document_key,
     posting_document_key_prefix, posting_field_prefix, posting_key_prefix, read_str, read_u64,
     relation_key, reverse_posting_key, reverse_posting_key_prefix, single_str_key, string_value,
@@ -328,6 +328,7 @@ impl KeyValueCatalog {
                         table_name: to.to_string(),
                         columns_json: row.columns_json,
                         parameters_json: row.parameters_json,
+                        definition_json: row.definition_json,
                     })?,
                 )?;
             }
@@ -342,9 +343,9 @@ impl KeyValueCatalog {
     ) -> StorageBackendResult<()> {
         let mut batch = self.store.batch();
         for (key, value) in self.store.scan_prefix(&document_key_prefix(table_name)?)? {
-            let mut document = decode_document_value(&value)?;
-            if document.remove(column_name).is_some() {
-                batch.put(&key, &encode_document_value(&document)?)?;
+            let mut document = decode_stored_document_value(&value)?;
+            if document.fields_mut().remove(column_name).is_some() {
+                batch.put(&key, &encode_stored_document_value(&document)?)?;
             }
         }
         batch.delete_prefix(&posting_field_prefix(table_name, column_name)?)?;
@@ -414,10 +415,10 @@ impl KeyValueCatalog {
     ) -> StorageBackendResult<()> {
         let mut batch = self.store.batch();
         for (key, value) in self.store.scan_prefix(&document_key_prefix(table_name)?)? {
-            let mut document = decode_document_value(&value)?;
-            if let Some(value) = document.remove(from) {
-                document.insert(to.to_string(), value);
-                batch.put(&key, &encode_document_value(&document)?)?;
+            let mut document = decode_stored_document_value(&value)?;
+            if let Some(value) = document.fields_mut().remove(from) {
+                document.fields_mut().insert(to.to_string(), value);
+                batch.put(&key, &encode_stored_document_value(&document)?)?;
             }
         }
         batch_rekey_prefix_or_keep_existing(
@@ -479,6 +480,7 @@ impl KeyValueCatalog {
                         table_name: row.table_name,
                         columns_json,
                         parameters_json: row.parameters_json,
+                        definition_json: row.definition_json,
                     })?,
                 )?;
             }

@@ -105,6 +105,11 @@ impl Engine {
                 SQLError::Internal(format!("invalid materialized-view name: {error}"))
             })?;
             let view = StoredView {
+                object_id: crate::new_view_object_id().map_err(|error| {
+                    SQLError::Internal(format!(
+                        "allocate materialized view `{name}` identity: {error}"
+                    ))
+                })?,
                 role_owner: engine.current_user_name(),
                 acl: None,
                 column_acls: std::collections::BTreeMap::new(),

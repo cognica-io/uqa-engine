@@ -9,7 +9,7 @@
 use super::relations::{
     collect_def_elem_options, validate_materialized_view_options, validate_view_options,
 };
-use super::routines::compile_drop_function;
+use super::routines::{compile_drop_function, compile_object_with_args, CompiledRoutineTarget};
 use super::types::{
     compile_foreign_key_action, compile_foreign_key_match, validate_foreign_key_set_columns,
 };
@@ -20,7 +20,8 @@ use super::{
     TableKeyConstraint, TableKeyConstraintKind,
 };
 use crate::ast::{
-    AlterSequence, EventEnableMode, ForeignKey, RelationPersistence, SequenceLifecycle, TableCheck,
+    AlterRoutineKind, AlterSequence, EventEnableMode, ForeignKey, RelationPersistence,
+    RenameRoutineStmt, SequenceLifecycle, TableCheck,
 };
 
 fn extract_strings(nodes: &[pg_query::protobuf::Node]) -> Result<Vec<String>> {
@@ -263,11 +264,13 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
             crate::ast::AlterForeignTableStmt {
                 name: table,
                 if_exists,
-                owner: super::routines::compile_role_spec(
-                    owner,
-                    false,
-                    "ALTER FOREIGN TABLE OWNER TO",
-                )?,
+                action: crate::ast::AlterForeignTableAction::OwnerTo(
+                    super::routines::compile_role_spec(
+                        owner,
+                        false,
+                        "ALTER FOREIGN TABLE OWNER TO",
+                    )?,
+                ),
             },
         ));
     }
@@ -603,6 +606,7 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                             &constraint.fk_del_action,
                         )?;
                         let foreign_key = ForeignKey {
+                            referenced_key: None,
                             name,
                             object_id: None,
                             local_columns,
@@ -824,6 +828,41 @@ fn collect_reset_reloption_names(nodes: &[Node], kind: AlterViewKind) -> Result<
 
 pub(super) fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<Statement> {
     use pg_query::protobuf::ObjectType;
+    let (routine_kind, context) = match stmt.rename_type() {
+        ObjectType::ObjectFunction => (Some(AlterRoutineKind::Function), "ALTER FUNCTION"),
+        ObjectType::ObjectProcedure => (Some(AlterRoutineKind::Procedure), "ALTER PROCEDURE"),
+        ObjectType::ObjectRoutine => (Some(AlterRoutineKind::Routine), "ALTER ROUTINE"),
+        _ => (None, "RENAME"),
+    };
+    if let Some(kind) = routine_kind {
+        let Some(NodeEnum::ObjectWithArgs(object)) = stmt
+            .object
+            .as_deref()
+            .and_then(|object| object.node.as_ref())
+        else {
+            return Err(SQLError::Internal(format!(
+                "{context}: malformed routine target"
+            )));
+        };
+        let CompiledRoutineTarget {
+            name,
+            arg_types,
+            arg_type_references,
+        } = compile_object_with_args(object, context)?;
+        return Ok(Statement::RenameRoutine(RenameRoutineStmt {
+            kind,
+            name,
+            arg_types,
+            arg_type_references,
+            new_name: render_relation_component(&stmt.newname),
+        }));
+    }
+    compile_relation_rename(stmt)
+}
+
+fn compile_relation_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<Statement> {
+    use pg_query::protobuf::ObjectType;
+
     let relation = stmt
         .relation
         .as_ref()
@@ -846,6 +885,29 @@ pub(super) fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<St
                 },
                 ..AlterSequence::default()
             }));
+        }
+        ObjectType::ObjectView | ObjectType::ObjectMatview => {
+            return Ok(Statement::AlterView(AlterViewStmt {
+                name: table,
+                kind: if stmt.rename_type() == ObjectType::ObjectView {
+                    AlterViewKind::View
+                } else {
+                    AlterViewKind::MaterializedView
+                },
+                if_exists: stmt.missing_ok,
+                action: AlterViewAction::RenameTo(render_relation_component(&stmt.newname)),
+            }));
+        }
+        ObjectType::ObjectForeignTable => {
+            return Ok(Statement::AlterForeignTable(
+                crate::ast::AlterForeignTableStmt {
+                    name: table,
+                    if_exists: stmt.missing_ok,
+                    action: crate::ast::AlterForeignTableAction::RenameTo(
+                        render_relation_component(&stmt.newname),
+                    ),
+                },
+            ));
         }
         ObjectType::ObjectTrigger => AlterTableAction::RenameTrigger {
             from: stmt.subname.clone(),

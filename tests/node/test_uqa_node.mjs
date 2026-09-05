@@ -190,6 +190,51 @@ test("HTTP engine does not serialize concurrent requests onto the libuv worker p
   });
 });
 
+test("JavaScript HTTP values agree with the native client across SQL carriers", async () => {
+  const { HttpEngine: NativeHttpEngine } = require("../../crates/uqa-node/index.js");
+  const fixtures = [
+    "9223372036854775807", "-9223372036854775808", "9223372036854775808", "1e30",
+    '{"$uqa_type":"void"}',
+    '{"$uqa_type":"bytes","hex":"00fF"}',
+    '{"$uqa_type":"bytes","hex":"00ff","extra":true}',
+    '{"$uqa_type":"decimal","value":"12345678901234567890.1200"}',
+    '{"$uqa_type":"decimal","value":"NaN"}',
+    '{"$uqa_type":"fixed_char","value":"abc  "}',
+    '{"$uqa_type":"json","value":"{\\"n\\":9223372036854775807}"}',
+    '{"$uqa_type":"jsonb","value":"{\\"$uqa_type\\":\\"bytes\\",\\"hex\\":\\"ff\\"}"}',
+    '{"$uqa_type":"array","lower_bounds":[-2],"values":[9223372036854775807,1]}',
+    '{"$uqa_type":"row","values":[1,{"$uqa_type":"bytes","hex":"ff"}]}',
+    '{"$uqa_type":"record","fields":[["n",1],["n",2]]}',
+    '{"$uqa_type":"date","days":-2147483648}',
+    '{"$uqa_type":"date","days":20000}',
+    '{"$uqa_type":"time","micros":9223372036854775807}',
+    '{"$uqa_type":"time","micros":1.0}',
+    '{"$uqa_type":"time_tz","micros":-1,"offset_minutes":-330}',
+    '{"$uqa_type":"timestamp_tz","micros":9007199254740993}',
+    '{"$uqa_type":"timestamp","micros":-9223372036854775808}',
+    '{"$uqa_type":"timestamp","micros":9223372036854775807}',
+    '{"$uqa_type":"interval","months":-13,"days":2,"micros":9223372036854775807}',
+  ];
+  const server = createServer(async (request, response) => {
+    const query = await readRequestJSON(request);
+    const fixture = fixtures[Number(query.sql)];
+    assert.notEqual(fixture, undefined);
+    response.writeHead(200, { "content-type": "application/json", "x-request-id": "carrier-test" });
+    response.end('{"request_id":"carrier-test","columns":["v"],"affected_rows":0,"rows":[{"v":' + fixture + "}]}");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const url = "http://127.0.0.1:" + server.address().port;
+    const current = new uqa.HttpEngine(url, "token");
+    const native = new NativeHttpEngine(url, "token");
+    for (let index = 0; index < fixtures.length; index += 1) {
+      assert.deepEqual(await current.sql(String(index)), await native.sql(String(index)), fixtures[index]);
+    }
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test("CommonJS and ESM package exports agree", async () => {
   const esm = await import("../../crates/uqa-node/api.js");
   assert.equal(esm.Engine, uqa.Engine);

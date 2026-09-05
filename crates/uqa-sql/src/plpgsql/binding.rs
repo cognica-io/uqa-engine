@@ -394,6 +394,7 @@ pub(super) fn bind_from(from: &FromClause, r: &mut dyn VariableResolver) -> Resu
         },
         FromClause::Function {
             name,
+            binding,
             output_name,
             relations,
             args,
@@ -403,6 +404,7 @@ pub(super) fn bind_from(from: &FromClause, r: &mut dyn VariableResolver) -> Resu
             column_types,
         } => FromClause::Function {
             name: name.clone(),
+            binding: binding.clone(),
             output_name: output_name.clone(),
             relations: relations.clone(),
             args: bind_exprs(args, r)?,
@@ -422,6 +424,7 @@ pub(super) fn bind_from(from: &FromClause, r: &mut dyn VariableResolver) -> Resu
                 .map(|function| {
                     Ok(crate::ast::TableFunction {
                         name: function.name.clone(),
+                        binding: function.binding.clone(),
                         output_name: function.output_name.clone(),
                         relations: function.relations.clone(),
                         args: bind_exprs(&function.args, r)?,
@@ -466,7 +469,14 @@ pub fn bind_statement(stmt: &Statement, r: &mut dyn VariableResolver) -> Result<
             };
             out.on_conflict = match insert.on_conflict.as_ref() {
                 Some(oc) => Some(crate::ast::OnConflict {
+                    predicate: bind_opt_expr(oc.predicate.as_deref(), r)?.map(Box::new),
+                    constraint: oc.constraint.clone(),
                     conflict_columns: oc.conflict_columns.clone(),
+                    expressions: oc
+                        .expressions
+                        .iter()
+                        .map(|expr| bind_expr(expr, r))
+                        .collect::<Result<Vec<_>>>()?,
                     action: match &oc.action {
                         crate::ast::OnConflictAction::Nothing => {
                             crate::ast::OnConflictAction::Nothing
@@ -476,7 +486,7 @@ pub fn bind_statement(stmt: &Statement, r: &mut dyn VariableResolver) -> Result<
                             r#where,
                         } => crate::ast::OnConflictAction::Update {
                             assignments: bind_assignments(assignments, r)?,
-                            r#where: bind_opt_expr(r#where.as_ref(), r)?,
+                            r#where: bind_opt_expr(r#where.as_deref(), r)?.map(Box::new),
                         },
                     },
                 }),

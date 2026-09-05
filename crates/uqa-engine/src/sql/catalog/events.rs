@@ -24,7 +24,7 @@ use crate::engine_user_functions::{
 use crate::{Engine, RelationIdentity};
 
 use super::expression_text::schema_expr_text;
-use super::helpers::oids::{relation_oid, schema_oid, split_schema_name, stable_oid};
+use super::helpers::oids::{schema_oid, split_schema_name, stable_oid};
 use super::helpers::rows::{bool_value, catalog_usize, int_value, row, str_value};
 use super::helpers::views::view_columns_for;
 use super::pg_catalog::table_relation_oid_from;
@@ -54,19 +54,13 @@ fn event_relation_oid_from(
     if catalog.table_name_resolved(resolution, relation)?.is_some() {
         return table_relation_oid_from(catalog, resolution, relation);
     }
-    if let Some((canonical, _)) = catalog.foreign_table_entry_resolved(resolution, relation)? {
-        let relation = RelationIdentity::from_legacy_name(&canonical).map_err(|error| {
-            SQLError::Internal(format!(
-                "decode foreign trigger relation `{canonical}`: {error}"
-            ))
-        })?;
-        return Ok(super::foreign_table_relation_oid(&relation));
+    if let Some((_, table)) = catalog.foreign_table_entry_resolved(resolution, relation)? {
+        return Ok(super::foreign_table_relation_oid(&table));
     }
-    let canonical = catalog
-        .view_name_resolved(resolution, relation)?
+    let view = catalog
+        .view_resolved(resolution, relation)?
         .ok_or_else(|| SQLError::UnknownTable(relation.to_string()))?;
-    let (schema, name) = split_schema_name(&canonical)?;
-    Ok(relation_oid("v", &schema, &name))
+    Ok(super::view_relation_oid(view))
 }
 
 pub(super) fn trigger_catalog_oid(
@@ -307,7 +301,7 @@ fn pg_trigger_row(
         ),
         ("tgparentid", int_value(parent_oid)),
         ("tgname", str_value(definition.name.clone())),
-        ("tgfoid", int_value(user_routine_catalog_oid(&function))),
+        ("tgfoid", int_value(user_routine_catalog_oid(&function)?)),
         ("tgtype", int_value(trigger_type(definition))),
         ("tgenabled", str_value(trigger.enabled.catalog_code())),
         ("tgisinternal", bool_value(false)),
@@ -375,12 +369,7 @@ fn event_relation_columns(
         return Ok(foreign
             .columns
             .iter()
-            .map(|column| {
-                (
-                    column.name.clone(),
-                    crate::engine_fdw::fdw_column_type_to_sql(&column.ty),
-                )
-            })
+            .map(|column| (column.name.clone(), column.ty.clone()))
             .collect());
     }
     Err(SQLError::UnknownTable(relation.to_string()))
@@ -459,7 +448,7 @@ pub(super) fn build_pg_rewrite(
                 ("is_instead", bool_value(definition.instead)),
                 (
                     "ev_qual",
-                    rule_condition_text(definition, false)
+                    rule_condition_text(definition, false)?
                         .map_or_else(|| str_value("<>"), str_value),
                 ),
                 (
@@ -471,12 +460,9 @@ pub(super) fn build_pg_rewrite(
             ]))
         })
         .collect::<Result<Vec<_>, SQLError>>()?;
-    for (name, view) in catalog.views_of_kind(crate::StoredViewKind::View) {
+    for (name, view) in catalog_view_rules(catalog) {
         rows.push(row([
-            (
-                "oid",
-                int_value(stable_oid("rule", &format!("{name}._RETURN"))),
-            ),
+            ("oid", int_value(view_rule_oid(&view))),
             ("rulename", str_value("_RETURN")),
             (
                 "ev_class",
@@ -568,15 +554,32 @@ pub(in crate::sql) fn pg_get_ruledef_value(
             pretty,
         )?));
     }
-    for (name, _) in catalog.views_of_kind(crate::StoredViewKind::View) {
-        if stable_oid("rule", &format!("{name}._RETURN")) == oid {
+    for (name, view) in catalog_view_rules(&catalog) {
+        if view_rule_oid(&view) == oid {
+            let query =
+                super::view_definition::view_definition(&catalog, &resolution, &view, pretty, 0)?;
             return Ok(str_value(format!(
-                "CREATE RULE \"_RETURN\" AS ON SELECT TO {} DO INSTEAD SELECT ...",
+                "CREATE RULE \"_RETURN\" AS\n    ON SELECT TO {} DO INSTEAD {query}",
                 render_rule_relation(&catalog, &resolution, &name, pretty)?
             )));
         }
     }
     Ok(Value::Null)
+}
+
+fn catalog_view_rules(
+    catalog: &CatalogReadView,
+) -> impl Iterator<Item = (String, crate::StoredView)> + '_ {
+    [
+        crate::StoredViewKind::View,
+        crate::StoredViewKind::Materialized,
+    ]
+    .into_iter()
+    .flat_map(|kind| catalog.views_of_kind(kind))
+}
+
+fn view_rule_oid(view: &crate::StoredView) -> i64 {
+    super::helpers::oids::stable_object_oid("view-rule", &view.object_id)
 }
 
 fn definition_arguments(

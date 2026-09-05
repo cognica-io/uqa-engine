@@ -49,17 +49,12 @@ impl EngineTableRowSource {
         if crate::engine_generated::projection_contains_virtual_generated_column(
             &self.column_definitions,
             &self.columns,
-        ) {
-            return self.next_virtual_physical_rows_batch(max_rows);
+        ) || crate::sql::projections_use_tuple_xmin(&self.columns, &self.column_definitions)
+        {
+            return self.next_stored_physical_rows_batch(max_rows);
         }
         let store = self.table.document_store.read();
-        let fields = self
-            .columns
-            .iter()
-            .map(|column| {
-                crate::sql::storage_projection_column_for_table(column, &self.column_definitions)
-            })
-            .collect::<Vec<_>>();
+        let fields = self.columns.iter().map(String::as_str).collect::<Vec<_>>();
         let mut rows = Vec::with_capacity(max_rows);
         loop {
             // A source must not return an empty batch before end-of-stream: TableScan treats it as EOF. Keep advancing storage pages when a pushed predicate rejects an entire page, and fill the requested output batch when selectivity permits it.
@@ -224,7 +219,7 @@ impl EngineTableRowSource {
             let mut document = if let Some(document) = pin.document.as_ref() {
                 (**document).clone()
             } else {
-                let Some(document) = store.get(pin.doc_id).map_err(|error| {
+                let Some(document) = store.get_stored(pin.doc_id).map_err(|error| {
                     SQLError::Internal(format!(
                         "read pinned recheck row from `{}`: {error}",
                         self.table_name
@@ -237,20 +232,18 @@ impl EngineTableRowSource {
             };
             crate::engine_generated::materialize_projected_virtual_generated_columns(
                 &self.column_definitions,
-                &mut document,
+                document.fields_mut(),
                 &self.columns,
             )?;
             let values = self
                 .columns
                 .iter()
                 .map(|column| {
-                    document
-                        .get(crate::sql::storage_projection_column_for_table(
-                            column,
-                            &self.column_definitions,
-                        ))
-                        .cloned()
-                        .unwrap_or(Value::Null)
+                    crate::sql::project_stored_document_column(
+                        &document,
+                        column,
+                        &self.column_definitions,
+                    )
                 })
                 .collect::<Vec<_>>();
             let value_refs = values.iter().collect::<Vec<_>>();
@@ -269,7 +262,7 @@ impl EngineTableRowSource {
         Ok(rows)
     }
 
-    fn next_virtual_physical_rows_batch(
+    fn next_stored_physical_rows_batch(
         &mut self,
         max_rows: usize,
     ) -> uqa_execution::ExecResult<Vec<uqa_execution::PhysicalRow>> {
@@ -287,9 +280,9 @@ impl EngineTableRowSource {
                 break;
             };
             self.after = Some(last);
-            let mut documents = store.get_many(&doc_ids).map_err(|error| {
+            let mut documents = store.get_stored_many(&doc_ids).map_err(|error| {
                 SQLError::Internal(format!(
-                    "read generated rows from `{}`: {error}",
+                    "read rows with metadata from `{}`: {error}",
                     self.table_name
                 ))
             })?;
@@ -302,20 +295,18 @@ impl EngineTableRowSource {
                 })?;
                 crate::engine_generated::materialize_projected_virtual_generated_columns(
                     &self.column_definitions,
-                    &mut document,
+                    document.fields_mut(),
                     &self.columns,
                 )?;
                 let values = self
                     .columns
                     .iter()
                     .map(|column| {
-                        document
-                            .get(crate::sql::storage_projection_column_for_table(
-                                column,
-                                &self.column_definitions,
-                            ))
-                            .cloned()
-                            .unwrap_or(Value::Null)
+                        crate::sql::project_stored_document_column(
+                            &document,
+                            column,
+                            &self.column_definitions,
+                        )
                     })
                     .collect::<Vec<_>>();
                 let value_refs = values.iter().collect::<Vec<_>>();

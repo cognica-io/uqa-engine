@@ -23,8 +23,9 @@ use super::scalar::{
 };
 use super::{
     plpgsql_exec, run_alter_sequence, run_alter_table, run_create_index, run_create_sequence,
-    run_create_table, run_create_table_as, run_delete, run_drop, run_explain, run_insert,
-    run_merge, run_update, run_vacuum, select, CreateTableAsExecution, Engine,
+    run_create_table, run_create_table_as, run_create_table_if_not_exists, run_delete, run_drop,
+    run_explain, run_insert, run_merge, run_update, run_vacuum, select, CreateTableAsExecution,
+    Engine,
 };
 
 fn call_output_schema(
@@ -390,22 +391,14 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         &self,
         statement: &CreateForeignTable,
     ) -> Result<SQLResult, SQLError> {
-        for column in &statement.columns {
-            super::validate_postgres_column_name(&column.name)?;
-            super::validate_postgres_relation_column_type(&column.name, &column.ty)?;
-        }
-        let name = self
-            .engine
-            .try_relation_name_for_sql_create(&statement.name)?;
-        self.engine
-            .register_foreign_table(
-                name,
-                statement.server_name.clone(),
-                statement.columns.clone(),
-                statement.options.clone(),
-                statement.if_not_exists,
-            )
-            .map_err(SQLError::Unsupported)?;
+        self.engine.register_foreign_table_with_checks(
+            statement.name.clone(),
+            statement.server_name.clone(),
+            statement.columns.clone(),
+            statement.checks.clone(),
+            statement.options.clone(),
+            statement.if_not_exists,
+        )?;
         Ok(SQLResult::empty())
     }
 
@@ -491,6 +484,9 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             CommandPlan::CreateTable(statement) => {
                 run_create_table(self.engine, statement.as_ref().clone())
             }
+            CommandPlan::CreateTableIfNotExists(statement) => {
+                run_create_table_if_not_exists(self.engine, statement.clone())
+            }
             CommandPlan::CreateIndex(statement) => run_create_index(self.engine, statement.clone()),
             CommandPlan::Insert(plan) => self.execute_insert(plan),
             CommandPlan::Update(plan) => self.execute_update(plan),
@@ -498,6 +494,10 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             CommandPlan::Drop(statement) => run_drop(self.engine, statement.clone()),
             CommandPlan::AlterRoutineOwner(statement) => {
                 self.engine.alter_sql_routine_owner(statement)?;
+                Ok(SQLResult::empty())
+            }
+            CommandPlan::RenameRoutine(statement) => {
+                self.engine.rename_sql_routine(statement)?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::GrantRoutine(statement) => {
@@ -763,6 +763,10 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             CommandPlan::CreateForeignTable(statement) => {
                 self.execute_create_foreign_table(statement)
             }
+            CommandPlan::CreateForeignTableIfNotExists(statement) => self
+                .engine
+                .register_deferred_foreign_table(statement.clone())
+                .map(|()| SQLResult::empty()),
             CommandPlan::Merge(plan) => self.execute_merge(plan),
             CommandPlan::CreateFunction(definition) => {
                 plpgsql_exec::run_create_function(self.engine, (**definition).clone())

@@ -139,13 +139,21 @@ pub(super) fn rewrite_command_scalars(
                 rewrite_query_scalars(source, rewrite);
             }
             if let Some(conflict) = &mut plan.on_conflict {
+                for expression in &mut conflict.expressions {
+                    rewrite_scalar(expression, rewrite);
+                }
+                if let Some(predicate) = &mut conflict.predicate {
+                    rewrite_scalar(predicate, rewrite);
+                }
                 if let ConflictActionPlan::Update {
                     assignments,
                     predicate,
                 } = &mut conflict.action
                 {
                     rewrite_assignments(assignments, rewrite);
-                    rewrite_optional_scalar(predicate, rewrite);
+                    if let Some(predicate) = predicate {
+                        rewrite_scalar(predicate, rewrite);
+                    }
                 }
             }
             rewrite_projections(&mut plan.returning, rewrite);
@@ -236,6 +244,7 @@ pub(super) fn rewrite_command_scalars(
             }
         }
         CommandPlan::CreateTable(_)
+        | CommandPlan::CreateTableIfNotExists(_)
         | CommandPlan::CreateIndex(_)
         | CommandPlan::Drop(_)
         | CommandPlan::AlterTable(_)
@@ -264,10 +273,12 @@ pub(super) fn rewrite_command_scalars(
         | CommandPlan::Deallocate { .. }
         | CommandPlan::CreateForeignServer(_)
         | CommandPlan::CreateForeignTable(_)
+        | CommandPlan::CreateForeignTableIfNotExists(_)
         | CommandPlan::CreateFunction(_)
         | CommandPlan::DropFunction(_)
         | CommandPlan::AlterRoutine(_)
         | CommandPlan::AlterRoutineOwner(_)
+        | CommandPlan::RenameRoutine(_)
         | CommandPlan::GrantRoutine(_)
         | CommandPlan::GrantTable(_)
         | CommandPlan::GrantSequence(_)

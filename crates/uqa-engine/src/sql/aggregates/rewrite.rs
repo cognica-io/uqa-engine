@@ -205,6 +205,20 @@ pub(in crate::sql) fn aggregate_input_value(
             .transpose()
             .map(|v| v.unwrap_or(Value::Null));
     }
+    if name.eq_ignore_ascii_case("string_agg") {
+        let [value, delimiter] = args else {
+            return Err(SQLError::TypeMismatch(
+                "string_agg requires 2 arguments".into(),
+            ));
+        };
+        let value = eval_scalar(value, ctx)?;
+        let delimiter = eval_scalar(delimiter, ctx)?;
+        return Ok(if matches!(value, Value::Null) {
+            Value::Null
+        } else {
+            Value::List(vec![value, delimiter])
+        });
+    }
     if is_json_object_aggregate(name) {
         return match args {
             [key_expr, value_expr] => {

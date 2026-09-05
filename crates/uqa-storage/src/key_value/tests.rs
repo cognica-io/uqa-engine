@@ -19,12 +19,13 @@ use crate::vector_index::{
 use super::codec::*;
 use super::{
     KeyValueCatalog, KeyValueDocumentStore, KeyValueInvertedIndex, KeyValueStore,
-    KeyValueVectorIndex, MemoryKeyValueStore, DOCUMENT_VALUE_V1_PREFIX, TAG_METADATA,
+    KeyValueVectorIndex, MemoryKeyValueStore, DOCUMENT_VALUE_V2_PREFIX, TAG_METADATA,
 };
 use crate::{PersistentStorageBackend, StorageBackendError};
 
 mod catalog;
 mod indexes;
+mod tuple_metadata;
 
 #[test]
 fn key_segment_length_rejects_values_outside_the_disk_format() {
@@ -120,11 +121,18 @@ fn key_value_backend_persists_btree_definitions_and_incremental_values() {
     let store = store();
     let backend = super::KeyValueStorageBackend::new(Arc::clone(&store));
     backend
-        .replace_btree_index("items", "price", &[(1, Value::Int(10)), (2, Value::Null)])
+        .replace_btree_index(
+            "items",
+            &"price".into(),
+            &[(1, Value::Int(10)), (2, Value::Null)],
+        )
         .unwrap();
-    assert_eq!(backend.btree_index_fields("items").unwrap(), vec!["price"]);
     assert_eq!(
-        backend.load_btree_index("items", "price").unwrap(),
+        backend.btree_index_fields("items").unwrap(),
+        vec![crate::ValueIndexKey::from("price")]
+    );
+    assert_eq!(
+        backend.load_btree_index("items", &"price".into()).unwrap(),
         Some(vec![(1, Value::Int(10)), (2, Value::Null)])
     );
 
@@ -137,17 +145,20 @@ fn key_value_backend_persists_btree_definitions_and_incremental_values() {
         .unwrap();
     backend.apply_btree_index_write("items", 1, None).unwrap();
     assert_eq!(
-        backend.load_btree_index("items", "price").unwrap(),
+        backend.load_btree_index("items", &"price".into()).unwrap(),
         Some(vec![(2, Value::Int(25))])
     );
 
     backend.clear_btree_indexes("items").unwrap();
     assert_eq!(
-        backend.load_btree_index("items", "price").unwrap(),
+        backend.load_btree_index("items", &"price".into()).unwrap(),
         Some(Vec::new())
     );
-    backend.drop_btree_index("items", "price").unwrap();
-    assert_eq!(backend.load_btree_index("items", "price").unwrap(), None);
+    backend.drop_btree_index("items", &"price".into()).unwrap();
+    assert_eq!(
+        backend.load_btree_index("items", &"price".into()).unwrap(),
+        None
+    );
 }
 
 #[test]
@@ -357,7 +368,7 @@ fn key_value_document_codec_preserves_legacy_and_new_array_meanings() {
         .get(&document_key("articles", 8).unwrap())
         .unwrap()
         .unwrap()
-        .starts_with(DOCUMENT_VALUE_V1_PREFIX));
+        .starts_with(DOCUMENT_VALUE_V2_PREFIX));
 }
 
 #[test]
@@ -410,7 +421,7 @@ fn key_value_column_rewrites_upgrade_legacy_documents_without_type_loss() {
             .get(&document_key("articles", doc_id).unwrap())
             .unwrap()
             .unwrap()
-            .starts_with(DOCUMENT_VALUE_V1_PREFIX));
+            .starts_with(DOCUMENT_VALUE_V2_PREFIX));
     }
 }
 

@@ -145,14 +145,14 @@ impl SQLiteBTreeIndexStore {
         Self { conn }
     }
 
-    pub fn fields(&self, table: &str) -> Result<Vec<String>> {
+    pub fn fields(&self, table: &str) -> Result<Vec<crate::ValueIndexKey>> {
         self.conn.with(|conn| {
             let mut stmt = conn.prepare_cached(
                 "SELECT field FROM _btree_indexes
                  WHERE table_name = ?1
                  ORDER BY field",
             )?;
-            let rows = stmt.query_map([table], |row| row.get::<_, String>(0))?;
+            let rows = stmt.query_map([table], |row| row.get::<_, crate::ValueIndexKey>(0))?;
             let mut fields = Vec::new();
             for row in rows {
                 fields.push(row?);
@@ -161,13 +161,16 @@ impl SQLiteBTreeIndexStore {
         })
     }
 
-    pub fn repairs(&self) -> Result<Vec<(String, String)>> {
+    pub fn repairs(&self) -> Result<Vec<(String, crate::ValueIndexKey)>> {
         self.conn.with(|conn| {
             let mut stmt = conn.prepare_cached(
                 "SELECT table_name, field FROM _btree_index_repairs ORDER BY table_name, field",
             )?;
             let rows = stmt.query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, crate::ValueIndexKey>(1)?,
+                ))
             })?;
             let mut repairs = Vec::new();
             for row in rows {
@@ -177,7 +180,7 @@ impl SQLiteBTreeIndexStore {
         })
     }
 
-    pub fn clear_repair(&self, table: &str, field: &str) -> Result<()> {
+    pub fn clear_repair(&self, table: &str, field: &crate::ValueIndexKey) -> Result<()> {
         self.conn.with(|conn| {
             conn.execute(
                 "DELETE FROM _btree_index_repairs
@@ -190,7 +193,11 @@ impl SQLiteBTreeIndexStore {
 
     /// Load a complete persisted index. `None` means this field has not been
     /// built yet and the engine must backfill it from the document store once.
-    pub fn load(&self, table: &str, field: &str) -> Result<Option<Vec<(DocId, Value)>>> {
+    pub fn load(
+        &self,
+        table: &str,
+        field: &crate::ValueIndexKey,
+    ) -> Result<Option<Vec<(DocId, Value)>>> {
         self.conn.with(|conn| {
             let exists = conn
                 .prepare_cached(
@@ -222,7 +229,12 @@ impl SQLiteBTreeIndexStore {
     }
 
     /// Atomically replace the complete persisted posting set and mark it built.
-    pub fn replace(&self, table: &str, field: &str, values: &[(DocId, Value)]) -> Result<()> {
+    pub fn replace(
+        &self,
+        table: &str,
+        field: &crate::ValueIndexKey,
+        values: &[(DocId, Value)],
+    ) -> Result<()> {
         self.replace_many(table, &[(field, values)])
     }
 
@@ -232,7 +244,7 @@ impl SQLiteBTreeIndexStore {
     pub fn repair(
         &self,
         table: &str,
-        field: &str,
+        field: &crate::ValueIndexKey,
         stale_doc_ids: &[DocId],
         missing: &[(DocId, Value)],
     ) -> Result<()> {
@@ -280,7 +292,11 @@ impl SQLiteBTreeIndexStore {
     /// Atomically replace several complete posting sets for one table. Repair
     /// paths commonly rebuild every indexed column together; one savepoint and
     /// one set of prepared statements avoids repeating `SQLite` setup per field.
-    pub fn replace_many(&self, table: &str, indexes: &[(&str, &[(DocId, Value)])]) -> Result<()> {
+    pub fn replace_many(
+        &self,
+        table: &str,
+        indexes: &[(&crate::ValueIndexKey, &[(DocId, Value)])],
+    ) -> Result<()> {
         let encoded = indexes
             .iter()
             .map(|(field, values)| {
@@ -327,7 +343,7 @@ impl SQLiteBTreeIndexStore {
         &self,
         table: &str,
         doc_id: DocId,
-        values: Option<&BTreeMap<String, Value>>,
+        values: Option<&BTreeMap<crate::ValueIndexKey, Value>>,
     ) -> Result<()> {
         let doc_id = encode_doc_id(doc_id)?;
         let encoded = values
@@ -370,7 +386,7 @@ impl SQLiteBTreeIndexStore {
         })
     }
 
-    pub fn drop_index(&self, table: &str, field: &str) -> Result<()> {
+    pub fn drop_index(&self, table: &str, field: &crate::ValueIndexKey) -> Result<()> {
         self.conn.with_mut(|conn| {
             let tx = conn.savepoint()?;
             tx.execute(
@@ -452,15 +468,18 @@ mod tests {
         store
             .replace(
                 "messages",
-                "public_id",
+                &"public_id".into(),
                 &[(1, Value::Str("m1".into())), (2, Value::Null)],
             )
             .unwrap();
         assert_eq!(
-            store.load("messages", "public_id").unwrap(),
+            store.load("messages", &"public_id".into()).unwrap(),
             Some(vec![(1, Value::Str("m1".into())), (2, Value::Null)])
         );
-        assert_eq!(store.fields("messages").unwrap(), vec!["public_id"]);
+        assert_eq!(
+            store.fields("messages").unwrap(),
+            vec![crate::ValueIndexKey::from("public_id")]
+        );
 
         store
             .apply_write(
@@ -474,14 +493,17 @@ mod tests {
             .unwrap();
         store.apply_write("messages", 1, None).unwrap();
         assert_eq!(
-            store.load("messages", "public_id").unwrap(),
+            store.load("messages", &"public_id".into()).unwrap(),
             Some(vec![(2, Value::Str("m2".into()))])
         );
 
         store.clear_table("messages").unwrap();
-        assert_eq!(store.load("messages", "public_id").unwrap(), Some(vec![]));
-        store.drop_index("messages", "public_id").unwrap();
-        assert_eq!(store.load("messages", "public_id").unwrap(), None);
+        assert_eq!(
+            store.load("messages", &"public_id".into()).unwrap(),
+            Some(vec![])
+        );
+        store.drop_index("messages", &"public_id".into()).unwrap();
+        assert_eq!(store.load("messages", &"public_id".into()).unwrap(), None);
     }
 
     #[test]
@@ -490,7 +512,7 @@ mod tests {
         store
             .replace(
                 "messages",
-                "public_id",
+                &"public_id".into(),
                 &[(1, Value::Str("m1".into())), (2, Value::Str("m2".into()))],
             )
             .unwrap();
@@ -521,14 +543,14 @@ mod tests {
         store
             .repair(
                 "messages",
-                "public_id",
+                &"public_id".into(),
                 &[1],
                 &[(3, Value::Str("m3".into()))],
             )
             .unwrap();
 
         assert_eq!(
-            store.load("messages", "public_id").unwrap(),
+            store.load("messages", &"public_id".into()).unwrap(),
             Some(vec![
                 (2, Value::Str("m2".into())),
                 (3, Value::Str("m3".into()))
@@ -553,19 +575,23 @@ mod tests {
     fn out_of_range_document_ids_fail_before_replacing_existing_entries() {
         let store = store();
         store
-            .replace("messages", "public_id", &[(1, Value::Str("m1".into()))])
+            .replace(
+                "messages",
+                &"public_id".into(),
+                &[(1, Value::Str("m1".into()))],
+            )
             .unwrap();
 
         let error = store
             .replace(
                 "messages",
-                "public_id",
+                &"public_id".into(),
                 &[(u64::MAX, Value::Str("overflow".into()))],
             )
             .unwrap_err();
         assert!(error.to_string().contains("does not fit in SQLite INTEGER"));
         assert_eq!(
-            store.load("messages", "public_id").unwrap(),
+            store.load("messages", &"public_id".into()).unwrap(),
             Some(vec![(1, Value::Str("m1".into()))])
         );
 
@@ -586,7 +612,11 @@ mod tests {
     fn negative_persisted_document_id_is_reported_as_corruption() {
         let store = store();
         store
-            .replace("messages", "public_id", &[(1, Value::Str("m1".into()))])
+            .replace(
+                "messages",
+                &"public_id".into(),
+                &[(1, Value::Str("m1".into()))],
+            )
             .unwrap();
         store
             .conn
@@ -611,7 +641,7 @@ mod tests {
             })
             .unwrap();
 
-        let error = store.load("messages", "public_id").unwrap_err();
+        let error = store.load("messages", &"public_id".into()).unwrap_err();
         assert!(error
             .to_string()
             .contains("invalid negative document id -1"));

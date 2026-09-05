@@ -5,8 +5,8 @@
 //
 
 use super::{
-    Arc, Engine, RelationIdentity, SQLError, StorageBackendError, StorageBackendResult, TableState,
-    TrainingExample, TrainingSet,
+    Arc, BTreeMap, Engine, RelationIdentity, SQLError, StorageBackendError, StorageBackendResult,
+    TableState, TrainingExample, TrainingSet,
 };
 use crate::engine_capabilities::RelationResolution;
 
@@ -69,6 +69,77 @@ pub(super) fn value_to_usize(value: &super::Value) -> Result<usize, String> {
 }
 
 impl Engine {
+    pub(crate) fn resolve_relation_rename_source(
+        &self,
+        name: &str,
+        if_exists: bool,
+    ) -> Result<Option<(String, &'static str)>, SQLError> {
+        match self.resolve_visible_relation_kind(name)? {
+            RelationResolution::Found(canonical, kind) => Ok(Some((canonical, kind))),
+            RelationResolution::MissingSchema(_) | RelationResolution::MissingRelation
+                if if_exists =>
+            {
+                let (_, local_name) =
+                    RelationIdentity::parse_reference(name).map_err(SQLError::Internal)?;
+                self.push_sql_notice(
+                    "NOTICE",
+                    &format!("relation \"{local_name}\" does not exist, skipping"),
+                );
+                Ok(None)
+            }
+            RelationResolution::MissingSchema(schema) => Err(SQLError::Routine {
+                sqlstate: "3F000".into(),
+                message: format!("schema \"{schema}\" does not exist"),
+            }),
+            RelationResolution::MissingRelation => Err(SQLError::Routine {
+                sqlstate: "42P01".into(),
+                message: format!("relation \"{name}\" does not exist"),
+            }),
+        }
+    }
+
+    pub(crate) fn relation_rename_target(
+        &self,
+        source: &RelationIdentity,
+        new_name: &str,
+        context: &str,
+    ) -> Result<RelationIdentity, SQLError> {
+        let (schema, local_name) = RelationIdentity::parse_reference(new_name)
+            .map_err(|error| SQLError::Internal(format!("invalid {context} target: {error}")))?;
+        if schema.is_some() {
+            return Err(SQLError::Internal(format!(
+                "{context} produced a qualified target"
+            )));
+        }
+        let target = RelationIdentity::new(&source.schema, local_name);
+        if target == *source
+            || self
+                .relation_kind_at(&target.qualified_name())
+                .map_err(|error| {
+                    SQLError::Internal(format!(
+                        "check {context} target `{}`: {error}",
+                        target.qualified_name()
+                    ))
+                })?
+                .is_some()
+        {
+            return Err(SQLError::Routine {
+                sqlstate: "42P07".into(),
+                message: format!("relation \"{}\" already exists", target.name),
+            });
+        }
+        Ok(target)
+    }
+
+    pub(crate) fn rewrite_relation_rename_dependents(
+        &self,
+        from: &RelationIdentity,
+        to: &RelationIdentity,
+    ) -> StorageBackendResult<()> {
+        self.rewrite_view_relation_references(&BTreeMap::from([(from.clone(), to.clone())]))?;
+        self.rename_relation_events_inner(from, to)
+    }
+
     pub(crate) fn relation_lookup_candidates(
         &self,
         name: &str,
@@ -346,6 +417,16 @@ impl Engine {
     ) -> Result<RelationResolution, SQLError> {
         let mut resolution = self.session_execution_view().relation_name_resolution();
         resolution.set_lookup_mode(crate::engine_capabilities::RelationLookupMode::Bound);
+        self.catalog_read_view()
+            .relation_kind_resolution(&resolution, name)
+    }
+
+    /// Resolve a dynamic name against registries that the caller has already synchronized. Catalog restoration uses this entry point while holding the synchronization boundary, so dependency binding cannot recursively reload the catalog.
+    pub(crate) fn resolve_loaded_visible_relation_kind(
+        &self,
+        name: &str,
+    ) -> Result<RelationResolution, SQLError> {
+        let resolution = self.session_execution_view().relation_name_resolution();
         self.catalog_read_view()
             .relation_kind_resolution(&resolution, name)
     }
@@ -694,7 +775,8 @@ impl Engine {
                 SQLError::Internal(format!("scan deep_learn table `{table}`: {err}"))
             })?;
         let projection = vec![features_field.to_string(), label_field.to_string()];
-        let documents = self.get_documents_with_virtual_projection(table, &doc_ids, &projection)?;
+        let documents =
+            self.get_documents_with_materialized_projection(table, &doc_ids, &projection)?;
         let mut examples = Vec::new();
         for (doc_id, document) in documents {
             let features = document.get(features_field).ok_or_else(|| {

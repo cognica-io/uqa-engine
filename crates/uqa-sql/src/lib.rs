@@ -38,13 +38,15 @@ pub mod fts_query;
 pub mod params;
 pub mod plpgsql;
 pub mod registry;
+pub mod render;
 pub mod result;
 
 pub use ast::{ColumnType, Statement};
 pub use async_sql_engine::AsyncSQLEngine;
 pub use compiler::{
     compile, parse_regobject_name, parse_regprocedure_name, parse_regtype_name, plan_only_for_test,
-    ParsedRegprocedureName, ParsedRegtypeName,
+    resolve_deferred_create_foreign_table, resolve_deferred_create_table, ParsedRegprocedureName,
+    ParsedRegtypeName,
 };
 pub use error::SQLError;
 pub use fts_query::{parse_query_string as parse_fts_query_string, tokenize as fts_tokenize};

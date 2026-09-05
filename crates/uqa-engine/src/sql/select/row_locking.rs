@@ -142,7 +142,7 @@ fn lock_source_plan_relations(
             include_descendants,
             ..
         } => {
-            if visible_ctes.contains(name) {
+            if super::cte_reference_name(name).is_some_and(|name| visible_ctes.contains(&name)) {
                 return Ok(());
             }
             match engine.try_resolve_relation_kind_for_query(name, relations_bound)? {

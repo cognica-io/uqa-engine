@@ -9,6 +9,8 @@
 use super::{CatalogIndexRow, ColumnType, DropKind, DropStmt, Engine, SQLError, SQLResult};
 use crate::engine_capabilities::RelationResolution;
 
+mod index_dependencies;
+
 pub(in crate::sql) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError> {
     if stmt.kind == DropKind::Table {
         for name in &stmt.names {
@@ -33,23 +35,12 @@ pub(in crate::sql) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLRes
         return run_drop_index(engine, stmt);
     }
     if stmt.cascade
-        && matches!(
-            stmt.kind,
-            DropKind::View | DropKind::MaterializedView | DropKind::Schema
-        )
-        && !(stmt.kind == DropKind::Schema
-            && only_graph_namespaces(engine, &stmt.names, stmt.if_exists)?)
+        && stmt.kind == DropKind::Schema
+        && !only_graph_namespaces(engine, &stmt.names, stmt.if_exists)?
     {
-        return Err(SQLError::Unsupported(format!(
-            "DROP {} CASCADE is not supported; no objects were changed",
-            match stmt.kind {
-                DropKind::View => "VIEW",
-                DropKind::MaterializedView => "MATERIALIZED VIEW",
-                DropKind::Schema => "SCHEMA",
-                DropKind::Table | DropKind::ForeignTable | DropKind::Index | DropKind::Sequence =>
-                    unreachable!(),
-            }
-        )));
+        return Err(SQLError::Unsupported(
+            "DROP SCHEMA CASCADE is not supported; no objects were changed".into(),
+        ));
     }
     let mut lock_targets = std::collections::BTreeSet::new();
     match stmt.kind {
@@ -220,11 +211,46 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
             for table in &foreign_tables {
                 engine.ensure_foreign_table_drop_authority(table)?;
             }
+            let target_names = foreign_tables.iter().cloned().collect();
+            let owned_sequences = engine
+                .foreign_table_owned_sequence_names(&foreign_tables)
+                .map_err(|error| {
+                    ddl_storage_error("DROP FOREIGN TABLE sequence ownership", error)
+                })?;
             let mut dependents = std::collections::BTreeSet::new();
             for table in &foreign_tables {
-                dependents.extend(engine.views_depending_on_relation(table).map_err(|error| {
-                    ddl_storage_error("DROP FOREIGN TABLE dependency preflight", error)
-                })?);
+                dependents.extend(
+                    engine
+                        .views_depending_on_relation(table)
+                        .map_err(|error| {
+                            ddl_storage_error("DROP FOREIGN TABLE dependency preflight", error)
+                        })?
+                        .into_iter()
+                        .map(|view| format!("view {view}")),
+                );
+            }
+            dependents.extend(
+                engine
+                    .rules_depending_on_relations(&foreign_tables)
+                    .map_err(|error| {
+                        ddl_storage_error("DROP FOREIGN TABLE dependency preflight", error)
+                    })?
+                    .into_iter()
+                    .map(|(table, rule)| {
+                        format!("rule {rule} on table {}", table.qualified_name())
+                    }),
+            );
+            for sequence in &owned_sequences {
+                dependents.extend(
+                    engine
+                        .sequence_external_dependents_for_owner_drop(sequence, &target_names)
+                        .map_err(|error| {
+                            ddl_storage_error(
+                                "DROP FOREIGN TABLE owned-sequence dependency preflight",
+                                error,
+                            )
+                        })?,
+                );
             }
             if !stmt.cascade && !dependents.is_empty() {
                 return Err(SQLError::Routine {
@@ -238,18 +264,30 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
             }
             if stmt.cascade {
                 engine
+                    .drop_rules_depending_on_relations_inner(&foreign_tables)
+                    .map_err(|error| ddl_storage_error("DROP FOREIGN TABLE CASCADE", error))?;
+                engine
                     .drop_views_depending_on_relations(&foreign_tables)
                     .map_err(|error| ddl_storage_error("DROP FOREIGN TABLE CASCADE", error))?;
             }
             for table in foreign_tables {
-                let removed = engine
-                    .drop_foreign_table_inner(&table)
-                    .map_err(|error| ddl_storage_error("DROP FOREIGN TABLE", error))?;
+                let removed = engine.drop_foreign_table_inner(&table).map_err(|error| {
+                    SQLError::Internal(format!(
+                        "DROP FOREIGN TABLE failed in storage backend: {error}"
+                    ))
+                })?;
                 if !removed {
                     return Err(SQLError::Internal(format!(
                         "foreign table `{table}` disappeared after DROP preflight"
                     )));
                 }
+            }
+            for sequence in owned_sequences {
+                engine
+                    .drop_owned_sequence(&sequence, stmt.cascade)
+                    .map_err(|error| {
+                        ddl_storage_error("DROP FOREIGN TABLE owned sequence", error)
+                    })?;
             }
         }
         DropKind::Index => unreachable!("DROP INDEX has a bound execution path"),
@@ -285,7 +323,7 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
                     }
                 }
             }
-            engine.drop_views(&views)?;
+            engine.drop_views(&views, stmt.cascade)?;
         }
         DropKind::Sequence => {
             let mut sequences = Vec::new();
@@ -395,6 +433,18 @@ fn run_drop_index(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
                         ))
                     })?;
                 engine.require_index_drop_authority(&row)?;
+                if engine
+                    .catalog_read_view()
+                    .has_constraint_index(&row.relation)
+                {
+                    return Err(SQLError::Routine {
+                        sqlstate: "2BP01".into(),
+                        message: format!(
+                            "cannot drop index {} because constraint {} on table {} requires it",
+                            row.relation.name, row.relation.name, row.table_name
+                        ),
+                    });
+                }
                 indexes.push(row);
             }
             RelationResolution::Found(_, _) => {
@@ -435,6 +485,7 @@ fn run_drop_index(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
             }
         }
     }
+    let dependents = index_dependencies::dependents(engine, &indexes, stmt.cascade)?;
     for row in &indexes {
         engine.lock_relation(
             &row.table_name,
@@ -442,6 +493,9 @@ fn run_drop_index(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
         )?;
     }
     engine.with_implicit_transaction(move |engine| {
+        for (table, name) in dependents {
+            super::alter_table::drop_constraint_dependency(engine, &table, &name)?;
+        }
         for row in indexes {
             drop_index_side_effects(engine, &row)?;
             engine
@@ -452,7 +506,17 @@ fn run_drop_index(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
     })
 }
 
-pub(super) fn ddl_storage_error(action: &str, err: impl std::fmt::Display) -> SQLError {
+pub(super) fn ddl_storage_error(action: &str, err: impl std::error::Error + 'static) -> SQLError {
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&err);
+    while let Some(error) = source {
+        if let Some(error) = error.downcast_ref::<SQLError>() {
+            return SQLError::Routine {
+                sqlstate: error.sqlstate().unwrap_or("XX000").into(),
+                message: error.to_string(),
+            };
+        }
+        source = error.source();
+    }
     SQLError::Internal(format!("{action} failed in storage backend: {err}"))
 }
 
@@ -558,5 +622,21 @@ fn drop_vector_index_side_effects(engine: &Engine, row: &CatalogIndexRow) -> Res
             }
         }
     }
+    Ok(())
+}
+
+/// Remove a dependent index after the owning DROP command has checked its authority.
+pub(crate) fn drop_index_dependency(
+    engine: &Engine,
+    relation: &crate::RelationIdentity,
+) -> Result<(), SQLError> {
+    let row = engine
+        .bound_catalog_index(&relation.qualified_name())
+        .map_err(|error| ddl_storage_error("DROP INDEX dependency", error))?
+        .ok_or_else(|| SQLError::Internal("dependent index disappeared".into()))?;
+    drop_index_side_effects(engine, &row)?;
+    engine
+        .try_drop_catalog_index_relation(relation)
+        .map_err(|error| ddl_storage_error("DROP INDEX dependency", error))?;
     Ok(())
 }

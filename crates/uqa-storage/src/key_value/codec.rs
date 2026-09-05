@@ -8,10 +8,20 @@
 
 use super::{
     BTreeMap, Deserialize, DocId, Document, Serialize, StorageBackendError, StorageBackendResult,
-    Value, DOCUMENT_VALUE_V1_PREFIX, TAG_DOCUMENT, TAG_DOC_LENGTH, TAG_FIELD_STATS, TAG_POSTING,
-    TAG_POSTING_CLUSTER_POSITIONS, TAG_POSTING_CLUSTER_SCORE, TAG_POSTING_DOCUMENT,
-    TAG_REVERSE_POSTING, TAG_VECTOR,
+    Value, DOCUMENT_VALUE_V1_PREFIX, DOCUMENT_VALUE_V2_PREFIX, TAG_DOCUMENT, TAG_DOC_LENGTH,
+    TAG_FIELD_STATS, TAG_POSTING, TAG_POSTING_CLUSTER_POSITIONS, TAG_POSTING_CLUSTER_SCORE,
+    TAG_POSTING_DOCUMENT, TAG_REVERSE_POSTING, TAG_VECTOR,
 };
+use crate::document_store::{DocumentMetadata, StoredDocument};
+
+const LEGACY_SYSTEM_XMIN: &str = "\0uqa.system.xmin";
+const LEGACY_USER_XMIN_MARKER: &str = "\0uqa.user.xmin";
+
+#[derive(Serialize, Deserialize)]
+struct StoredDocumentV2 {
+    fields: Document,
+    tuple_xmin: Option<u32>,
+}
 
 pub fn prefix_upper_bound(prefix: &[u8]) -> Option<Vec<u8>> {
     let mut upper = prefix.to_vec();
@@ -37,9 +47,14 @@ pub(super) fn decode_value<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Storag
     serde_json::from_slice(bytes).map_err(StorageBackendError::from)
 }
 
-pub(super) fn encode_document_value(document: &Document) -> StorageBackendResult<Vec<u8>> {
-    let body = encode_value(document)?;
-    let capacity = DOCUMENT_VALUE_V1_PREFIX
+pub(super) fn encode_stored_document_value(
+    document: &StoredDocument,
+) -> StorageBackendResult<Vec<u8>> {
+    let body = encode_value(&StoredDocumentV2 {
+        fields: document.fields().clone(),
+        tuple_xmin: document.metadata().tuple_xmin(),
+    })?;
+    let capacity = DOCUMENT_VALUE_V2_PREFIX
         .len()
         .checked_add(body.len())
         .ok_or_else(|| other_error("KeyValue document encoding size overflow"))?;
@@ -47,16 +62,74 @@ pub(super) fn encode_document_value(document: &Document) -> StorageBackendResult
     encoded
         .try_reserve_exact(capacity)
         .map_err(|error| other_error(format!("cannot allocate KeyValue document: {error}")))?;
-    encoded.extend_from_slice(DOCUMENT_VALUE_V1_PREFIX);
+    encoded.extend_from_slice(DOCUMENT_VALUE_V2_PREFIX);
     encoded.extend_from_slice(&body);
     Ok(encoded)
 }
 
 pub(super) fn decode_document_value(bytes: &[u8]) -> StorageBackendResult<Document> {
+    decode_stored_document_value(bytes).map(StoredDocument::into_fields)
+}
+
+pub(super) fn decode_stored_document_value(bytes: &[u8]) -> StorageBackendResult<StoredDocument> {
+    if let Some(body) = bytes.strip_prefix(DOCUMENT_VALUE_V2_PREFIX) {
+        let stored: StoredDocumentV2 = decode_value(body)?;
+        let metadata = stored
+            .tuple_xmin
+            .map_or_else(DocumentMetadata::default, DocumentMetadata::with_tuple_xmin);
+        return Ok(StoredDocument::with_metadata(stored.fields, metadata));
+    }
     if let Some(body) = bytes.strip_prefix(DOCUMENT_VALUE_V1_PREFIX) {
-        return decode_value(body);
+        return decode_value(body).and_then(|fields| migrate_legacy_stored_document(fields, true));
     }
     decode_legacy_document_value(bytes)
+        .and_then(|fields| migrate_legacy_stored_document(fields, true))
+}
+
+pub(super) fn decode_stored_document_value_for_migration(
+    bytes: &[u8],
+    preserve_public_xmin: bool,
+) -> StorageBackendResult<StoredDocument> {
+    if let Some(body) = bytes.strip_prefix(DOCUMENT_VALUE_V1_PREFIX) {
+        return decode_value(body)
+            .and_then(|fields| migrate_legacy_stored_document(fields, preserve_public_xmin));
+    }
+    decode_legacy_document_value(bytes)
+        .and_then(|fields| migrate_legacy_stored_document(fields, preserve_public_xmin))
+}
+
+pub(super) fn document_value_is_current(bytes: &[u8]) -> bool {
+    bytes.starts_with(DOCUMENT_VALUE_V2_PREFIX)
+}
+
+fn migrate_legacy_stored_document(
+    mut fields: Document,
+    preserve_public_xmin: bool,
+) -> StorageBackendResult<StoredDocument> {
+    let legacy_xmin = fields.remove(LEGACY_SYSTEM_XMIN);
+    let user_xmin = fields
+        .remove(LEGACY_USER_XMIN_MARKER)
+        .is_some_and(|value| value == Value::Bool(true));
+    let tuple_xmin = match legacy_xmin.as_ref() {
+        Some(Value::Int(value)) => Some(u32::try_from(*value).map_err(|_| {
+            other_error(format!(
+                "legacy tuple xmin {value} is outside the u32 range"
+            ))
+        })?),
+        Some(_) => return Err(other_error("legacy tuple xmin is not an integer")),
+        None => None,
+    };
+    if !user_xmin
+        && !preserve_public_xmin
+        && legacy_xmin
+            .as_ref()
+            .is_some_and(|legacy| fields.get("xmin") == Some(legacy))
+    {
+        fields.remove("xmin");
+    }
+    let metadata =
+        tuple_xmin.map_or_else(DocumentMetadata::default, DocumentMetadata::with_tuple_xmin);
+    Ok(StoredDocument::with_metadata(fields, metadata))
 }
 
 /// Decode the unversioned representation written before `Value::Bytes` gained

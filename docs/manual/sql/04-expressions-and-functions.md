@@ -35,7 +35,58 @@ WHERE value LIKE 'a!_b' ESCAPE '!';
 
 For the implemented fixed-signature built-ins documented below, ordinary expressions and generated expressions use one PostgreSQL 18-style candidate-selection contract. Unqualified calls combine visible SQL user functions with `pg_catalog` candidates according to `search_path`; qualified names, exact and implicit matches, preferred types, unknown-category selection, domain base types, named arguments, defaults, and stored bindings use the same resolver. This contract is limited to the listed implemented signatures and does not imply support for PostgreSQL's complete built-in, polymorphic, operator, cast, or `pg_proc` matrix.
 
-The shared fixed-signature registry covers `casefold`, `reverse`, `md5`, `crc32`, `crc32c`, the documented one-argument length family, `gamma`, `lgamma`, `json_strip_nulls`, `jsonb_strip_nulls`, `to_bin`, `to_hex`, `to_oct`, `to_regproc`, `to_regprocedure`, `to_regclass`, `to_regnamespace`, `to_regrole`, `to_regtype`, the unit and range `random` functions, and the documented UUID generation and extraction functions. Polymorphic array transformations retain their specialized type-substitution path.
+The shared fixed-signature registry covers `casefold`, `reverse`, `md5`, `crc32`, `crc32c`, the documented one-argument length family, `gamma`, `lgamma`, `json_strip_nulls`, `jsonb_strip_nulls`, `to_bin`, `to_hex`, `to_oct`, `to_regproc`, `to_regprocedure`, `to_regclass`, `to_regnamespace`, `to_regrole`, `to_regtype`, `format_type`, the unit and range `random` functions, and the documented UUID generation and extraction functions. Polymorphic array transformations retain their specialized type-substitution path.
+
+## View definition functions
+
+```sql
+SELECT pg_get_viewdef(view_oid);
+SELECT pg_get_viewdef(view_oid, pretty);
+SELECT pg_get_viewdef(view_oid, wrap_column);
+SELECT pg_get_viewdef(view_name);
+SELECT pg_get_viewdef(view_name, pretty);
+```
+
+`view_oid` is an `oid` value, including a relation name cast to `regclass`; `view_name` is a `text` value resolved through the current search path and schema `USAGE` privileges. `pretty` is a Boolean value that defaults to false. The integer `wrap_column` overload enables pretty printing and controls target-list wrapping; zero places targets on separate lines and a negative value permits an unlimited line width.
+
+The result is `text` containing the reconstructed SELECT command and its terminating semicolon for a regular or materialized view. Reconstruction reads the stored query without executing it, preserves fixed public output names, and chooses schema qualification against the caller's search path. View and source renames, replacement, transactions, savepoints, temporary relations, and durable reopen are reflected in subsequent calls. `pg_views.definition` and `pg_matviews.definition` expose the same default definition. `information_schema.views.view_definition` exposes it only to an enabled owning role; another role with view privileges sees NULL in that column.
+
+Every overload propagates NULL arguments. An unknown OID or the OID or name of an existing non-view relation returns NULL. A missing textual relation reports `42P01`, a missing explicitly named schema reports `3F000`, and denied schema access reports `42501`; invalid names and unmatched overloads follow PostgreSQL's name and function-resolution errors. OID lookup does not require SELECT on the view. The routines are stable and parallel restricted, with their five PostgreSQL 18 signatures exposed in `pg_proc`.
+
+```sql execute
+CREATE TABLE definition_source (id integer, label text);
+CREATE VIEW definition_example (item_id, label) AS
+SELECT id, label FROM definition_source WHERE id > 0;
+SELECT pg_get_viewdef('definition_example'::regclass) AS definition;
+SELECT pg_get_viewdef('definition_example'::regclass, true) AS pretty_definition;
+```
+
+## Index definition functions
+
+```sql
+SELECT pg_get_indexdef(index_oid);
+SELECT pg_get_indexdef(index_oid, column_number, pretty);
+```
+
+Both overloads return text reconstructed from the stored index metadata. The one-argument form and a zero `column_number` return the complete CREATE INDEX command without a terminating semicolon. Positive column numbers are one-based and return the selected key expression or included column without its ordering options; negative or out-of-range numbers return an empty string. The full definition preserves uniqueness, the access method, key expressions and order, NULL placement, included columns, `NULLS NOT DISTINCT`, and the partial predicate. Pretty output uses visible relation names and fewer parentheses. Unknown index OIDs and NULL arguments return NULL. Both PostgreSQL signatures are stable, strict, and parallel safe and are exposed in `pg_proc`.
+
+## Type display
+
+```sql
+SELECT format_type(type_oid, type_modifier);
+```
+
+`format_type(type_oid oid, type_modifier integer)` returns the represented catalog type's SQL display name as `text` without changing database state. A NULL modifier omits a modifier; an explicit negative modifier also omits it but preserves PostgreSQL's `bpchar` spelling for unconstrained character types. Character lengths, numeric precision and signed scale, temporal precision, interval fields, and array element modifiers use PostgreSQL's encoded typmods.
+
+A NULL type OID returns NULL, OID zero returns `-`, and an unknown OID returns `???`. Invalid encoded interval field combinations raise `XX000`. The function is stable, parallel safe, and non-strict, with its `(oid, integer) -> text` signature exposed in `pg_proc` as OID 1081. The complete PostgreSQL type and function catalogs remain subject to the compatibility matrix.
+
+The following query returns `character varying(8)`, `numeric(10,2)`, and `timestamp(3) with time zone[]`:
+
+```sql execute
+SELECT format_type(1043, 12) AS bounded_text,
+       format_type(1700, 655366) AS decimal_type,
+       format_type(1185, 3) AS timestamp_array;
+```
 
 ## Text functions
 
@@ -273,6 +324,8 @@ Ordered-set examples use `WITHIN GROUP`:
 SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms) AS median
 FROM samples;
 ```
+
+`string_agg(value, delimiter [ORDER BY ...])` evaluates both arguments for each input row. It skips NULL values, inserts each retained row's delimiter before that value except for the first retained row, and treats a NULL delimiter as empty. Text inputs return `text`, binary inputs return `bytea`, and an empty input returns NULL. `DISTINCT` considers both arguments, and ordering and bounded spill execution retain each value with its delimiter.
 
 ## Window functions
 

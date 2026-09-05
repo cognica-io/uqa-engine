@@ -20,6 +20,8 @@ use uqa_storage::sqlite::{Catalog, ManagedConnection};
 mod automatic_updatability;
 #[path = "sql_views/column_aliases.rs"]
 mod column_aliases;
+#[path = "sql_views/definitions.rs"]
+mod definitions;
 
 struct CountCalls {
     calls: Arc<AtomicUsize>,

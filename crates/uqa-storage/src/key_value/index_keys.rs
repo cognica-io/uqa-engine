@@ -22,21 +22,41 @@ pub(super) fn btree_entry_key_prefix(table: &str) -> StorageBackendResult<Vec<u8
     table_prefixed_key(TAG_BTREE_ENTRY, table)
 }
 
-pub(super) fn btree_index_key(table: &str, field: &str) -> StorageBackendResult<Vec<u8>> {
-    let mut key = btree_index_key_prefix(table)?;
-    push_str(&mut key, field)?;
+pub(super) fn btree_index_key(
+    table: &str,
+    field: &crate::ValueIndexKey,
+) -> StorageBackendResult<Vec<u8>> {
+    let mut key = table_prefixed_key(
+        if matches!(field, crate::ValueIndexKey::Column(_)) {
+            TAG_BTREE_INDEX
+        } else {
+            super::TAG_NAMED_BTREE_INDEX
+        },
+        table,
+    )?;
+    push_str(&mut key, field.name())?;
     Ok(key)
 }
 
-pub(super) fn btree_entry_field_prefix(table: &str, field: &str) -> StorageBackendResult<Vec<u8>> {
-    let mut key = btree_entry_key_prefix(table)?;
-    push_str(&mut key, field)?;
+pub(super) fn btree_entry_field_prefix(
+    table: &str,
+    field: &crate::ValueIndexKey,
+) -> StorageBackendResult<Vec<u8>> {
+    let mut key = table_prefixed_key(
+        if matches!(field, crate::ValueIndexKey::Column(_)) {
+            TAG_BTREE_ENTRY
+        } else {
+            super::TAG_NAMED_BTREE_ENTRY
+        },
+        table,
+    )?;
+    push_str(&mut key, field.name())?;
     Ok(key)
 }
 
 pub(super) fn btree_entry_key(
     table: &str,
-    field: &str,
+    field: &crate::ValueIndexKey,
     doc_id: DocId,
 ) -> StorageBackendResult<Vec<u8>> {
     let mut key = btree_entry_field_prefix(table, field)?;

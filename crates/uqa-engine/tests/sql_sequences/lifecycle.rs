@@ -303,6 +303,49 @@ fn drop_sequence_sql_restricts_or_cascades_column_and_view_dependencies() {
 }
 
 #[test]
+fn drop_sequence_tracks_column_and_table_check_dependencies() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE SEQUENCE check_dependency_ids;
+             CREATE TABLE check_dependency_rows(id bigint CONSTRAINT check_dependency_column CHECK (id < nextval('check_dependency_ids')), other bigint, CONSTRAINT check_dependency_table CHECK (other < nextval('check_dependency_ids')))",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        engine
+            .sql("DROP SEQUENCE check_dependency_ids RESTRICT", &[])
+            .unwrap_err()
+            .sqlstate(),
+        Some("2BP01")
+    );
+    engine
+        .sql(
+            "ALTER SEQUENCE check_dependency_ids RENAME TO check_dependency_ids_renamed;
+             CREATE SEQUENCE check_dependency_ids;
+             DROP SEQUENCE check_dependency_ids RESTRICT;
+             DROP SEQUENCE check_dependency_ids_renamed CASCADE",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        engine.take_sql_notices(),
+        vec![("NOTICE".into(), "drop cascades to 2 other objects".into())]
+    );
+    let result = engine
+        .sql(
+            "SELECT count(*) AS count FROM pg_catalog.pg_constraint AS constraint_row JOIN pg_catalog.pg_class AS relation_row ON relation_row.oid = constraint_row.conrelid WHERE relation_row.relname = 'check_dependency_rows' AND constraint_row.contype = 'c'",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.rows[0]["count"], Value::Int(0));
+    assert!(engine
+        .describe_table("check_dependency_rows")
+        .unwrap()
+        .is_some());
+}
+
+#[test]
 fn drop_sequence_sql_cascade_detaches_serial_default_and_ownership() {
     let engine = Engine::new();
     engine

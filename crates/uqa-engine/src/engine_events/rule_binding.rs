@@ -9,12 +9,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_sql::ast::{
-    Expr, FrameBound, FromClause, InsertStmt, OnConflictAction, OrderBy, Projection, RuleEvent,
-    SelectStmt, Statement, UpdateStmt, CTE,
+    Expr, FrameBound, FromClause, OrderBy, Projection, RuleEvent, SelectStmt, Statement,
+    UpdateStmt, CTE,
 };
 use uqa_sql::plpgsql::{bind_statement, ResolvedVariable, VariableResolver};
 use uqa_sql::SQLError;
 
+mod insert;
+use insert::bind_insert;
 mod namespace;
 mod references;
 mod returning;
@@ -22,15 +24,12 @@ mod row_expansion;
 mod scope;
 pub(crate) use references::{
     first_rule_row_reference_in_expr, first_rule_row_reference_in_select,
-    rename_rule_condition_binding_column, rule_action_has_set_operation,
-    rule_condition_plan_references_whole_row, rule_condition_plan_row_columns,
-    rule_expr_references_row, rule_expr_references_whole_row, rule_expr_row_columns,
-    rule_statement_references_row, rule_statement_references_whole_row, rule_statement_row_columns,
+    rule_action_has_set_operation, rule_condition_plan_references_whole_row,
+    rule_condition_plan_row_columns, rule_expr_references_row, rule_expr_references_whole_row,
+    rule_expr_row_columns, rule_statement_references_row, rule_statement_references_whole_row,
+    rule_statement_row_columns,
 };
-pub(crate) use returning::{
-    expand_rule_action_returning_stars, rename_rule_action_returning_target_column,
-    rule_action_returning_references_target_column,
-};
+pub(crate) use returning::expand_rule_action_returning_stars;
 pub(crate) use row_expansion::expand_rule_action_row_stars;
 use scope::{
     apply_positional_aliases, collect_visible_scope, select_output_columns, RuleBindingScope,
@@ -47,13 +46,15 @@ pub(super) fn action_target_qualifier_referenced(
 #[derive(Clone, Default)]
 struct RuleBindingContext<'a> {
     engine: Option<&'a crate::Engine>,
+    relations_bound: bool,
     ctes: BTreeMap<String, Vec<String>>,
 }
 
 impl<'a> RuleBindingContext<'a> {
-    fn with_engine(engine: &'a crate::Engine) -> Self {
+    fn with_engine(engine: &'a crate::Engine, relations_bound: bool) -> Self {
         Self {
             engine: Some(engine),
+            relations_bound,
             ctes: BTreeMap::new(),
         }
     }
@@ -65,7 +66,7 @@ impl<'a> RuleBindingContext<'a> {
         self.engine.map_or_else(
             || Ok(Vec::new()),
             |engine| {
-                crate::sql::query_source_column_names(engine, name)?
+                crate::sql::query_source_column_names(engine, name, self.relations_bound)?
                     .ok_or_else(|| SQLError::UnknownTable(name.to_string()))
             },
         )
@@ -101,7 +102,7 @@ pub(crate) fn bind_rule_action(
     action_columns: &BTreeSet<String>,
     resolver: &mut dyn VariableResolver,
 ) -> Result<Statement, SQLError> {
-    let context = RuleBindingContext::with_engine(engine);
+    let context = RuleBindingContext::with_engine(engine, true);
     let (returning, action_event) = match action {
         Statement::Insert(statement) => (&statement.returning, RuleEvent::Insert),
         Statement::Update(statement) => (&statement.returning, RuleEvent::Update),
@@ -454,7 +455,7 @@ fn bind_rule_select_scoped(
         select,
         resolver,
         &RuleBindingScope::default(),
-        &RuleBindingContext::with_engine(engine),
+        &RuleBindingContext::with_engine(engine, false),
     )
 }
 
@@ -500,68 +501,6 @@ fn bind_rule_statement_body(
         }
         _ => return bind_statement(statement, resolver),
     })
-}
-
-fn bind_insert(
-    insert: &InsertStmt,
-    resolver: &mut dyn VariableResolver,
-    inherited: &RuleBindingScope,
-    context: &RuleBindingContext<'_>,
-) -> Result<InsertStmt, SQLError> {
-    let mut output = insert.clone();
-    output.with = bind_ctes(&insert.with, resolver, inherited, context)?;
-    let context = context.with_ctes(&insert.with)?;
-    output.rows = insert
-        .rows
-        .iter()
-        .map(|row| bind_expanding_exprs(row, resolver, inherited, &context))
-        .collect::<Result<Vec<_>, SQLError>>()?;
-    output.select_source = insert
-        .select_source
-        .as_deref()
-        .map(|select| bind_select_with_scope(select, resolver, inherited, &context).map(Box::new))
-        .transpose()?;
-    output.on_conflict = insert
-        .on_conflict
-        .as_ref()
-        .map(|conflict| -> Result<uqa_sql::ast::OnConflict, SQLError> {
-            let mut conflict_scope = inherited.clone();
-            conflict_scope.insert_qualifier(&insert.target_qualifier);
-            Ok(uqa_sql::ast::OnConflict {
-                conflict_columns: conflict.conflict_columns.clone(),
-                action: match &conflict.action {
-                    OnConflictAction::Nothing => OnConflictAction::Nothing,
-                    OnConflictAction::Update {
-                        assignments,
-                        r#where,
-                    } => OnConflictAction::Update {
-                        assignments: assignments
-                            .iter()
-                            .map(|(column, expr)| {
-                                Ok((
-                                    column.clone(),
-                                    bind_rule_expr_with_scope(
-                                        expr,
-                                        resolver,
-                                        &conflict_scope,
-                                        &context,
-                                    )?,
-                                ))
-                            })
-                            .collect::<Result<Vec<_>, SQLError>>()?,
-                        r#where: bind_optional_expr(
-                            r#where.as_ref(),
-                            resolver,
-                            &conflict_scope,
-                            &context,
-                        )?,
-                    },
-                },
-            })
-        })
-        .transpose()?;
-    output.returning.clear();
-    Ok(output)
 }
 
 fn bind_update(
@@ -717,6 +656,7 @@ fn bind_from(
         },
         FromClause::Function {
             name,
+            binding,
             output_name,
             relations,
             args,
@@ -726,6 +666,7 @@ fn bind_from(
             column_types,
         } => FromClause::Function {
             name: name.clone(),
+            binding: binding.clone(),
             output_name: output_name.clone(),
             relations: relations.clone(),
             args: bind_exprs(args, resolver, inherited, context)?,
@@ -745,6 +686,7 @@ fn bind_from(
                 .map(|function| {
                     Ok(uqa_sql::ast::TableFunction {
                         name: function.name.clone(),
+                        binding: function.binding.clone(),
                         output_name: function.output_name.clone(),
                         relations: function.relations.clone(),
                         args: bind_exprs(&function.args, resolver, inherited, context)?,

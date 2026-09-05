@@ -10,10 +10,22 @@ use super::{
     document_store_read_error, document_store_write_error, Arc, BTreeMap, DocId, Document, Engine,
     FieldName, IndexConflictProbe, SQLError, TableState, Value,
 };
+use uqa_storage::{DocumentMetadata, StoredDocument};
 
 enum CommandOverlayDocument {
-    Present(Document),
+    Present(uqa_storage::StoredDocument),
     Deleted,
+}
+
+fn project_stored_values(
+    document: &StoredDocument,
+    fields: &[&str],
+    columns: &[uqa_sql::ast::ColumnDef],
+) -> Vec<Value> {
+    fields
+        .iter()
+        .map(|field| crate::sql::project_stored_document_column(document, field, columns))
+        .collect()
 }
 
 fn command_exact_lookup_parts(
@@ -56,33 +68,50 @@ impl Engine {
         table: &str,
         state: &TableState,
         doc_id: DocId,
-    ) -> Result<Option<Document>, SQLError> {
+    ) -> Result<Option<StoredDocument>, SQLError> {
         match self.command_overlay_document(table, doc_id)? {
             Some(CommandOverlayDocument::Present(document)) => Ok(Some(document)),
             Some(CommandOverlayDocument::Deleted) => Ok(None),
             None => state
                 .document_store
                 .read()
-                .get(doc_id)
+                .get_stored(doc_id)
                 .map_err(|error| document_store_read_error("read document", &error)),
         }
+    }
+
+    fn materialize_query_document(
+        columns: &[uqa_sql::ast::ColumnDef],
+        document: &mut StoredDocument,
+    ) -> Result<(), SQLError> {
+        crate::engine_generated::materialize_virtual_generated_columns(
+            columns,
+            document.fields_mut(),
+        )?;
+        if crate::sql::projection_uses_tuple_xmin(crate::sql::XMIN_COLUMN, columns)
+            && !document.fields().contains_key(crate::sql::XMIN_COLUMN)
+        {
+            let xmin = document
+                .metadata()
+                .tuple_xmin()
+                .map_or(Value::Null, |xmin| Value::Int(i64::from(xmin)));
+            document
+                .fields_mut()
+                .insert(crate::sql::XMIN_COLUMN.into(), xmin);
+        }
+        Ok(())
     }
 
     pub fn get_document(&self, table: &str, doc_id: DocId) -> Result<Option<Document>, SQLError> {
         let t = self.require_table(table)?;
         let mut document = self.raw_command_visible_document(table, &t, doc_id)?;
         if let Some(document) = document.as_mut() {
-            crate::engine_generated::materialize_virtual_generated_columns(
-                &t.columns.read(),
-                document,
-            )?;
-            document.remove(crate::sql::XMIN_STORAGE_COLUMN);
-            document.remove(crate::sql::XMIN_USER_STORAGE_COLUMN);
+            Self::materialize_query_document(&t.columns.read(), document)?;
         }
-        Ok(document)
+        Ok(document.map(StoredDocument::into_fields))
     }
 
-    /// Read a command-visible document for a tuple rewrite while retaining collision-free system metadata. Public document APIs remove these keys, but DML must carry them into `stamp_tuple_xmin` so a schemaless compatibility mirror is never mistaken for a user-defined `xmin` field.
+    /// Read only user fields for a tuple rewrite. A successful rewrite receives fresh tuple metadata at the storage publication boundary.
     pub(crate) fn get_document_for_mutation(
         &self,
         table: &str,
@@ -93,10 +122,10 @@ impl Engine {
         if let Some(document) = document.as_mut() {
             crate::engine_generated::materialize_virtual_generated_columns(
                 &state.columns.read(),
-                document,
+                document.fields_mut(),
             )?;
         }
-        Ok(document)
+        Ok(document.map(StoredDocument::into_fields))
     }
 
     pub(crate) fn get_query_document(
@@ -107,14 +136,19 @@ impl Engine {
         let table_state = self.require_query_table(table)?;
         let mut document = self.raw_command_visible_document(table, &table_state, doc_id)?;
         if let Some(document) = document.as_mut() {
-            crate::engine_generated::materialize_virtual_generated_columns(
-                &table_state.columns.read(),
-                document,
-            )?;
-            document.remove(crate::sql::XMIN_STORAGE_COLUMN);
-            document.remove(crate::sql::XMIN_USER_STORAGE_COLUMN);
+            Self::materialize_query_document(&table_state.columns.read(), document)?;
         }
-        Ok(document)
+        Ok(document.map(StoredDocument::into_fields))
+    }
+
+    pub(crate) fn get_query_document_metadata(
+        &self,
+        table: &str,
+        doc_id: DocId,
+    ) -> Result<Option<DocumentMetadata>, SQLError> {
+        let table_state = self.require_query_table(table)?;
+        self.raw_command_visible_document(table, &table_state, doc_id)
+            .map(|document| document.map(|document| document.metadata()))
     }
 
     /// Read the latest committed tuple through an independent persistent session while this session keeps its statement snapshot pinned.
@@ -122,9 +156,17 @@ impl Engine {
         &self,
         table: &str,
         doc_id: DocId,
-    ) -> Result<Option<Document>, SQLError> {
+    ) -> Result<Option<StoredDocument>, SQLError> {
         let Some(provider) = self.storage.provider.as_ref() else {
-            return self.get_document(table, doc_id);
+            let state = self.require_table(table)?;
+            let mut document = self.raw_command_visible_document(table, &state, doc_id)?;
+            if let Some(document) = document.as_mut() {
+                crate::engine_generated::materialize_virtual_generated_columns(
+                    &state.columns.read(),
+                    document.fields_mut(),
+                )?;
+            }
+            return Ok(document);
         };
         let canonical = self
             .try_resolve_table_name(table)
@@ -138,16 +180,14 @@ impl Engine {
         let mut document = session
             .backend
             .document_store(&canonical)
-            .get(doc_id)
+            .get_stored(doc_id)
             .map_err(|error| document_store_read_error("read latest committed document", &error))?;
         if let Some(document) = document.as_mut() {
             let table = self.require_table(&canonical)?;
             crate::engine_generated::materialize_virtual_generated_columns(
                 &table.columns.read(),
-                document,
+                document.fields_mut(),
             )?;
-            document.remove(crate::sql::XMIN_STORAGE_COLUMN);
-            document.remove(crate::sql::XMIN_USER_STORAGE_COLUMN);
         }
         Ok(document)
     }
@@ -194,11 +234,8 @@ impl Engine {
         session.knn_search_leaf(table, field, query_vector, top_k)
     }
 
-    /// Fetch complete physical documents while materialising only the virtual
-    /// generated columns named by `projection`. Callers that need full rows
-    /// should use [`Engine::get_document`]; projected execution paths use this
-    /// boundary so unrelated virtual expressions remain deferred.
-    pub(crate) fn get_documents_with_virtual_projection(
+    /// Fetch complete physical documents while materializing only the virtual generated or storage-owned tuple columns named by `projection`; projected execution paths use this boundary so unrelated virtual expressions remain deferred.
+    pub(crate) fn get_documents_with_materialized_projection(
         &self,
         table: &str,
         doc_ids: &[DocId],
@@ -206,9 +243,13 @@ impl Engine {
     ) -> Result<BTreeMap<DocId, Document>, SQLError> {
         let t = self.require_table(table)?;
         let columns = t.columns.read().clone();
-        let mut documents = t.document_store.read().get_many(doc_ids).map_err(|error| {
-            document_store_read_error("read generated document projection", &error)
-        })?;
+        let mut documents = t
+            .document_store
+            .read()
+            .get_stored_many(doc_ids)
+            .map_err(|error| {
+                document_store_read_error("read generated document projection", &error)
+            })?;
         if let Some(changes) = self.command_overlay_changes(table)? {
             for doc_id in doc_ids {
                 let Some(document) = changes.get(doc_id) else {
@@ -223,10 +264,26 @@ impl Engine {
         }
         for document in documents.values_mut() {
             crate::engine_generated::materialize_projected_virtual_generated_columns(
-                &columns, document, projection,
+                &columns,
+                document.fields_mut(),
+                projection,
             )?;
+            if crate::sql::projections_use_tuple_xmin(projection, &columns)
+                && !document.fields().contains_key(crate::sql::XMIN_COLUMN)
+            {
+                let xmin = document
+                    .metadata()
+                    .tuple_xmin()
+                    .map_or(Value::Null, |xmin| Value::Int(i64::from(xmin)));
+                document
+                    .fields_mut()
+                    .insert(crate::sql::XMIN_COLUMN.into(), xmin);
+            }
         }
-        Ok(documents)
+        Ok(documents
+            .into_iter()
+            .map(|(doc_id, document)| (doc_id, document.into_fields()))
+            .collect())
     }
 
     pub(crate) fn get_query_document_fields_multi(
@@ -241,6 +298,7 @@ impl Engine {
             .iter()
             .map(|field| (*field).to_string())
             .collect::<Vec<_>>();
+        let uses_tuple_xmin = crate::sql::projections_use_tuple_xmin(&requested, &columns);
         if crate::engine_generated::projection_contains_virtual_generated_column(
             &columns, &requested,
         ) {
@@ -265,23 +323,51 @@ impl Engine {
                 .filter(|doc_id| !changes.contains_key(doc_id))
                 .copied()
                 .collect::<Vec<_>>();
-            let mut projected = table_state
-                .document_store
-                .read()
-                .get_fields_multi(&persisted_ids, fields)
-                .map_err(|error| document_store_read_error("read query document fields", &error))?;
+            let mut projected = if uses_tuple_xmin {
+                table_state
+                    .document_store
+                    .read()
+                    .get_stored_many(&persisted_ids)
+                    .map_err(|error| {
+                        document_store_read_error("read query documents with metadata", &error)
+                    })?
+                    .into_iter()
+                    .map(|(doc_id, document)| {
+                        (doc_id, project_stored_values(&document, fields, &columns))
+                    })
+                    .collect()
+            } else {
+                table_state
+                    .document_store
+                    .read()
+                    .get_fields_multi(&persisted_ids, fields)
+                    .map_err(|error| {
+                        document_store_read_error("read query document fields", &error)
+                    })?
+            };
             for doc_id in doc_ids {
                 if let Some(Some(document)) = changes.get(doc_id) {
-                    projected.insert(
-                        *doc_id,
-                        fields
-                            .iter()
-                            .map(|field| document.get(*field).cloned().unwrap_or(Value::Null))
-                            .collect(),
-                    );
+                    projected.insert(*doc_id, project_stored_values(document, fields, &columns));
                 }
             }
             return Ok(projected);
+        }
+        if uses_tuple_xmin {
+            return table_state
+                .document_store
+                .read()
+                .get_stored_many(doc_ids)
+                .map_err(|error| {
+                    document_store_read_error("read query documents with metadata", &error)
+                })
+                .map(|documents| {
+                    documents
+                        .into_iter()
+                        .map(|(doc_id, document)| {
+                            (doc_id, project_stored_values(&document, fields, &columns))
+                        })
+                        .collect()
+                });
         }
         let result = table_state
             .document_store
@@ -463,8 +549,15 @@ impl Engine {
         values: &[Value],
     ) -> Result<IndexConflictProbe, SQLError> {
         for (pivot, (column, value)) in conflict_columns.iter().zip(values.iter()).enumerate() {
-            let Some(candidates) =
-                self.value_index_scan(table, column, &uqa_core::Predicate::Equals(value.clone()))?
+            let Some(candidates) = self.value_index_scan(
+                table,
+                column,
+                &if matches!(value, Value::Null) {
+                    uqa_core::Predicate::IsNull
+                } else {
+                    uqa_core::Predicate::Equals(value.clone())
+                },
+            )?
             else {
                 continue;
             };
@@ -736,10 +829,20 @@ impl Engine {
                 text_fields.insert(field, value.clone());
             }
         }
-        t.document_store
-            .write()
-            .put(doc_id, document)
-            .map_err(|err| document_store_write_error(&err))?;
+        {
+            let mut store = t.document_store.write();
+            let metadata = store
+                .get_metadata(doc_id)
+                .map_err(|err| document_store_read_error("read tuple metadata for schema rewrite", &err))?
+                .ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "table `{table_name}` listed document {doc_id} for a schema rewrite but omitted its tuple metadata"
+                    ))
+                })?;
+            store
+                .put_stored(doc_id, StoredDocument::with_metadata(document, metadata))
+                .map_err(|err| document_store_write_error(&err))?;
+        }
         {
             let mut index = t.inverted_index.write();
             index
@@ -781,7 +884,7 @@ impl Engine {
             .get(doc_id)
             .map_err(|err| document_store_write_error(&err))?
             .is_some();
-        let old_indexed = Self::value_indexes_old_values(&t, doc_id)?;
+        let old_indexed = Self::value_indexes_old_values(&t, doc_id);
         let mut store = t.document_store.write();
         store
             .delete(doc_id)
@@ -816,164 +919,4 @@ impl Engine {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn document(id: i64, value: i64) -> Document {
-        BTreeMap::from([
-            ("id".into(), Value::Int(id)),
-            ("value".into(), Value::Int(value)),
-        ])
-    }
-
-    #[test]
-    fn command_overlay_scan_merges_persisted_and_staged_rows_in_document_order() {
-        let engine = Engine::new();
-        engine
-            .sql(
-                "CREATE TABLE command_scan (id INTEGER PRIMARY KEY, value INTEGER); INSERT INTO command_scan VALUES (1, 10), (2, 20), (4, 40)",
-                &[],
-            )
-            .unwrap();
-        engine
-            .mutation_coordinator()
-            .begin_command_mutation_overlay();
-        engine
-            .stage_command_document("command_scan", 2, Some(document(2, 200)))
-            .unwrap();
-        engine
-            .stage_command_document("command_scan", 3, Some(document(3, 300)))
-            .unwrap();
-        engine
-            .stage_command_document("command_scan", 4, None)
-            .unwrap();
-        engine
-            .stage_command_document("command_scan", 5, Some(document(5, 500)))
-            .unwrap();
-
-        let result = engine
-            .sql("SELECT id, value FROM command_scan ORDER BY id", &[])
-            .unwrap();
-
-        assert_eq!(engine.table_doc_count("command_scan").unwrap(), 4);
-        assert_eq!(engine.table_doc_ids("command_scan").unwrap(), [1, 2, 3, 5]);
-        assert_eq!(result.rows.len(), 4);
-        assert_eq!(result.value_at(0, 1), Some(&Value::Int(10)));
-        assert_eq!(result.value_at(1, 1), Some(&Value::Int(200)));
-        assert_eq!(result.value_at(2, 1), Some(&Value::Int(300)));
-        assert_eq!(result.value_at(3, 1), Some(&Value::Int(500)));
-        engine.mutation_coordinator().end_command_mutation_overlay();
-    }
-
-    #[test]
-    fn command_overlay_scan_pages_without_losing_filtered_or_changed_rows() {
-        use std::sync::atomic::Ordering;
-
-        let engine = Engine::new();
-        engine
-            .sql(
-                "CREATE TABLE paged_command_scan (id INTEGER PRIMARY KEY, value INTEGER)",
-                &[],
-            )
-            .unwrap();
-        let table = engine.require_table("paged_command_scan").unwrap();
-        {
-            let mut store = table.document_store.write();
-            for doc_id in 1..=2050 {
-                let value = i64::try_from(doc_id).unwrap();
-                store.put(doc_id, document(value, value)).unwrap();
-            }
-        }
-        table.doc_count_dirty.store(true, Ordering::Release);
-        engine
-            .mutation_coordinator()
-            .begin_command_mutation_overlay();
-        engine
-            .stage_command_document("paged_command_scan", 2, Some(document(2, 9002)))
-            .unwrap();
-        engine
-            .stage_command_document("paged_command_scan", 1025, Some(document(1025, 9025)))
-            .unwrap();
-        engine
-            .stage_command_document("paged_command_scan", 2048, None)
-            .unwrap();
-        engine
-            .stage_command_document("paged_command_scan", 4096, Some(document(4096, 9999)))
-            .unwrap();
-
-        let ids = engine
-            .sql(
-                "SELECT id FROM paged_command_scan WHERE value >= 2047 ORDER BY id",
-                &[],
-            )
-            .unwrap()
-            .rows
-            .into_iter()
-            .map(|row| row["id"].clone())
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            ids,
-            [2, 1025, 2047, 2049, 2050, 4096].map(Value::Int).to_vec()
-        );
-        engine.mutation_coordinator().end_command_mutation_overlay();
-    }
-
-    #[test]
-    fn overlay_projection_materializes_only_requested_virtual_columns() {
-        let engine = Engine::new();
-        engine
-            .sql(
-                "CREATE TABLE overlay_virtual (id INTEGER PRIMARY KEY, source INTEGER, derived INTEGER GENERATED ALWAYS AS (1 / source) VIRTUAL); INSERT INTO overlay_virtual (id, source) VALUES (1, 1), (2, 2)",
-                &[],
-            )
-            .unwrap();
-        engine
-            .mutation_coordinator()
-            .begin_command_mutation_overlay();
-        engine
-            .stage_command_document(
-                "overlay_virtual",
-                1,
-                Some(BTreeMap::from([
-                    ("id".into(), Value::Int(1)),
-                    ("source".into(), Value::Int(0)),
-                ])),
-            )
-            .unwrap();
-        engine
-            .stage_command_document("overlay_virtual", 2, None)
-            .unwrap();
-        engine
-            .stage_command_document(
-                "overlay_virtual",
-                3,
-                Some(BTreeMap::from([
-                    ("id".into(), Value::Int(3)),
-                    ("source".into(), Value::Int(3)),
-                ])),
-            )
-            .unwrap();
-
-        let documents = engine
-            .get_documents_with_virtual_projection(
-                "overlay_virtual",
-                &[1, 2, 3],
-                &["source".into()],
-            )
-            .unwrap();
-        assert_eq!(documents[&1]["source"], Value::Int(0));
-        assert!(!documents.contains_key(&2));
-        assert_eq!(documents[&3]["source"], Value::Int(3));
-        let fields = engine
-            .get_query_document_fields_multi("overlay_virtual", &[1, 2, 3], &["source"])
-            .unwrap();
-        assert_eq!(fields[&1], [Value::Int(0)]);
-        assert!(!fields.contains_key(&2));
-        assert_eq!(fields[&3], [Value::Int(3)]);
-        assert!(engine
-            .get_documents_with_virtual_projection("overlay_virtual", &[1], &["derived".into()],)
-            .is_err());
-        engine.mutation_coordinator().end_command_mutation_overlay();
-    }
-}
+mod tests;

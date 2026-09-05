@@ -11,6 +11,9 @@
 pub mod backend;
 pub mod block_max_index;
 pub mod btree_index;
+mod catalog_index_keys;
+mod value_index_key;
+pub use value_index_key::ValueIndexKey;
 pub mod catalog;
 pub mod clustered_postings;
 pub mod document_store;
@@ -44,7 +47,9 @@ pub use catalog::{
 pub use clustered_postings::{
     MaterializedPostingCursor, PostingCursor, PostingScore, POSTING_CLUSTER_DOCS,
 };
-pub use document_store::{DocumentStore, MemoryDocumentStore, SharedDocumentRow};
+pub use document_store::{
+    DocumentMetadata, DocumentStore, MemoryDocumentStore, SharedDocumentRow, StoredDocument,
+};
 pub use hnsw_index::HNSWIndex;
 pub use index_abc::Index;
 pub use index_manager::{BTreeIndexHandle, IndexManager};

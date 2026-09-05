@@ -177,6 +177,8 @@ pub enum SourcePlan {
         #[serde(default)]
         qualifier: String,
         alias: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        column_aliases: Vec<String>,
         #[serde(default = "default_include_descendants")]
         include_descendants: bool,
     },
@@ -302,6 +304,8 @@ pub struct ViewRuleUpdatePlan {
 pub struct InsertPlan {
     pub table: String,
     pub target_relation_bound: bool,
+    /// Whether non-target relation references are stored catalog identities rather than names that must be resolved in the executing session.
+    pub relations_bound: bool,
     /// Effective role used for non-target privilege checks in an internally rewritten statement.
     pub statement_privilege_subject: Option<String>,
     /// Effective role used only for privilege checks on an internally rewritten target relation.
@@ -324,7 +328,10 @@ pub struct InsertPlan {
 
 #[derive(Debug, Clone)]
 pub struct ConflictPlan {
+    pub predicate: Option<Box<ScalarExpr>>,
+    pub constraint: Option<String>,
     pub conflict_columns: Vec<String>,
+    pub expressions: Vec<ScalarExpr>,
     pub action: ConflictActionPlan,
 }
 
@@ -333,7 +340,7 @@ pub enum ConflictActionPlan {
     Nothing,
     Update {
         assignments: Vec<AssignmentPlan>,
-        predicate: Option<ScalarExpr>,
+        predicate: Option<Box<ScalarExpr>>,
     },
 }
 
@@ -341,6 +348,8 @@ pub enum ConflictActionPlan {
 pub struct UpdatePlan {
     pub table: String,
     pub target_relation_bound: bool,
+    /// Whether non-target relation references are stored catalog identities rather than names that must be resolved in the executing session.
+    pub relations_bound: bool,
     /// Effective role used for non-target privilege checks in an internally rewritten statement.
     pub statement_privilege_subject: Option<String>,
     /// Effective role used only for privilege checks on an internally rewritten target relation.
@@ -364,6 +373,8 @@ pub struct UpdatePlan {
 pub struct DeletePlan {
     pub table: String,
     pub target_relation_bound: bool,
+    /// Whether non-target relation references are stored catalog identities rather than names that must be resolved in the executing session.
+    pub relations_bound: bool,
     /// Effective role used for non-target privilege checks in an internally rewritten statement.
     pub statement_privilege_subject: Option<String>,
     /// Effective role used only for privilege checks on an internally rewritten target relation.
@@ -438,6 +449,7 @@ pub enum MergeWhenPlan {
 #[derive(Debug, Clone)]
 pub enum CommandPlan {
     CreateTable(Box<uqa_sql::ast::CreateTable>),
+    CreateTableIfNotExists(uqa_sql::ast::DeferredCreateTable),
     CreateIndex(uqa_sql::ast::CreateIndex),
     Insert(Box<InsertPlan>),
     Update(Box<UpdatePlan>),
@@ -552,12 +564,14 @@ pub enum CommandPlan {
     },
     CreateForeignServer(uqa_sql::ast::CreateForeignServer),
     CreateForeignTable(uqa_sql::ast::CreateForeignTable),
+    CreateForeignTableIfNotExists(uqa_sql::ast::DeferredCreateForeignTable),
     AlterForeignTable(uqa_sql::ast::AlterForeignTableStmt),
     Merge(Box<MergePlan>),
     CreateFunction(Box<uqa_sql::ast::CreateFunction>),
     DropFunction(uqa_sql::ast::DropFunctionStmt),
     AlterRoutine(uqa_sql::ast::AlterRoutineStmt),
     AlterRoutineOwner(uqa_sql::ast::AlterRoutineOwnerStmt),
+    RenameRoutine(uqa_sql::ast::RenameRoutineStmt),
     GrantRoutine(uqa_sql::ast::GrantRoutineStmt),
     GrantTable(uqa_sql::ast::GrantTableStmt),
     GrantSequence(uqa_sql::ast::GrantSequenceStmt),

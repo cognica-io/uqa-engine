@@ -29,13 +29,14 @@ pub(in crate::compiler) fn compile_role_spec(
     }
 }
 
-struct CompiledRoutineTarget {
-    name: String,
-    arg_types: Option<Vec<String>>,
-    arg_type_references: Vec<Option<crate::ast::RoutineColumnTypeReference>>,
+pub(in crate::compiler) struct CompiledRoutineTarget {
+    pub(in crate::compiler) name: String,
+    pub(in crate::compiler) arg_types: Option<Vec<String>>,
+    pub(in crate::compiler) arg_type_references:
+        Vec<Option<crate::ast::RoutineColumnTypeReference>>,
 }
 
-fn compile_object_with_args(
+pub(in crate::compiler) fn compile_object_with_args(
     object: &pg_query::protobuf::ObjectWithArgs,
     context: &str,
 ) -> Result<CompiledRoutineTarget> {

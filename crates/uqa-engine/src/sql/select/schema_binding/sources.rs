@@ -11,8 +11,26 @@ use uqa_planner::{QueryPlan, SourcePlan, TableFunctionPlan};
 use uqa_sql::ast::{JoinKind, JoinUsing};
 use uqa_sql::{SQLError, SQLParam};
 
-use super::{analysis, CteScope, ScalarExpr, SchemaScope};
+use super::{analysis, projection::rename_schema, CteScope, ScalarExpr, SchemaScope};
 use crate::engine_user_functions::RoutineResolution;
+
+pub(super) fn alias_table_schema(
+    schema: &RowSchema,
+    qualifier: &str,
+    column_aliases: &[String],
+) -> Result<RowSchema, SQLError> {
+    if column_aliases.len() > schema.len() {
+        return Err(SQLError::Routine {
+            sqlstate: "42P10".into(),
+            message: format!(
+                "table \"{qualifier}\" has {} columns available but {} columns specified",
+                schema.len(),
+                column_aliases.len()
+            ),
+        });
+    }
+    Ok(rename_schema(schema, column_aliases, Some(qualifier)))
+}
 
 pub(super) struct JoinSchemaBinding<'a> {
     pub(super) routines: &'a dyn RoutineResolution,

@@ -199,4 +199,50 @@ mod tests {
         );
         assert_eq!(view.qualified_column("outer", "dot.column.dot"), None);
     }
+
+    #[test]
+    fn outer_scope_preserves_binding_only_qualified_identities() {
+        let child = one_row("inner", &["id"], &[1]);
+        let outer_schema = RowSchema::with_typed_virtual_identities(
+            &RowSchema::with_qualified_types(
+                "target",
+                vec!["id".into()],
+                vec![Some(uqa_sql::ast::ColumnType::Integer)],
+            ),
+            &[(
+                ColumnIdentity::qualified("before", "item_label"),
+                Some(uqa_sql::ast::ColumnType::Text),
+            )],
+        );
+        let outer =
+            OwnedPhysicalRow::new(outer_schema, PhysicalRow::from_values(vec![Value::Int(9)]));
+        let overlay = ScopeOverlay::new(child, outer);
+        assert!(overlay
+            .row_schema()
+            .has_qualified_column("before", "item_label"));
+        assert_eq!(
+            overlay.row_schema().qualified_type("before", "item_label"),
+            Some(&uqa_sql::ast::ColumnType::Text)
+        );
+        assert_eq!(overlay.row_schema().columns(), ["id"]);
+        assert_eq!(overlay.row_schema().physical_width(), 2);
+
+        let child = one_row("before", &["id"], &[1]);
+        let shadowed = ScopeOverlay::new(
+            child,
+            OwnedPhysicalRow::new(
+                RowSchema::with_typed_virtual_identities(
+                    &RowSchema::new(Vec::new()),
+                    &[(
+                        ColumnIdentity::qualified("before", "item_label"),
+                        Some(uqa_sql::ast::ColumnType::Text),
+                    )],
+                ),
+                PhysicalRow::from_values(Vec::new()),
+            ),
+        );
+        assert!(!shadowed
+            .row_schema()
+            .has_qualified_column("before", "item_label"));
+    }
 }

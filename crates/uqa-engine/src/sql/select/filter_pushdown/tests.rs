@@ -31,12 +31,14 @@ fn joined_source(kind: JoinKind, on: ScalarExpr) -> SourcePlan {
             name: "left_table".into(),
             qualifier: "left_table".into(),
             alias: Some("l".into()),
+            column_aliases: Vec::new(),
             include_descendants: true,
         }),
         right: Box::new(SourcePlan::Table {
             name: "right_table".into(),
             qualifier: "right_table".into(),
             alias: Some("r".into()),
+            column_aliases: Vec::new(),
             include_descendants: true,
         }),
         kind,
@@ -102,6 +104,55 @@ fn unique_unqualified_owner_enables_safe_filter_pushdown() {
     assert!(
         qualifier_filter_for_part(&engine, &ambiguous, &qualifiers, None, &owners, &[]).is_none()
     );
+}
+
+#[test]
+fn table_range_aliases_are_the_filter_ownership_names() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE filter_alias_source(id INTEGER, label TEXT)",
+            &[],
+        )
+        .unwrap();
+    let ctes = CteScope::new_for_current_routine(&engine);
+    let catalog = ctes.catalog_read_view().unwrap();
+    let resolution = ctes.relation_name_resolution().unwrap();
+    let source = SourcePlan::Table {
+        name: "filter_alias_source".into(),
+        qualifier: "filter_alias_source".into(),
+        alias: Some("source".into()),
+        column_aliases: vec!["key".into(), "value".into()],
+        include_descendants: true,
+    };
+    let owners = source_column_owners(&catalog, &resolution, &source, &ctes).unwrap();
+    assert_eq!(owners.get("key"), Some(&Some("source".into())));
+    assert_eq!(owners.get("value"), Some(&Some("source".into())));
+    assert!(!owners.contains_key("id"));
+    assert!(!owners.contains_key("label"));
+}
+
+#[test]
+fn internal_relation_attributes_never_push_into_catalog_sources() {
+    let engine = Engine::new();
+    let qualifiers = BTreeSet::from(["source".into()]);
+    let predicate = ScalarExpr::Binary {
+        op: BinaryOp::Equal,
+        lhs: Box::new(ScalarExpr::qualified_column("source", "id")),
+        rhs: Box::new(ScalarExpr::InternalColumn(
+            uqa_sql::ast::InternalRelationId::allocate().column(0),
+        )),
+    };
+
+    assert!(qualifier_filter_for_part(
+        &engine,
+        &predicate,
+        &qualifiers,
+        Some("source"),
+        &BTreeMap::new(),
+        &[],
+    )
+    .is_none());
 }
 
 #[test]
@@ -221,6 +272,7 @@ fn outer_join_marks_only_null_extended_qualifiers_as_unsafe_for_pushdown() {
             name: "marker_table".into(),
             qualifier: "marker_table".into(),
             alias: Some("marker".into()),
+            column_aliases: Vec::new(),
             include_descendants: true,
         }),
         kind: JoinKind::Cross,

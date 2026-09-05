@@ -15,12 +15,38 @@ use arrow_ipc::writer::FileWriter;
 use arrow_schema::{DataType, Field, Schema};
 use uqa_core::{ArrayValue, Value};
 use uqa_engine::Engine;
+use uqa_sql::ast::{ColumnDef, ColumnType};
 
 fn row(pairs: &[(&str, Value)]) -> BTreeMap<String, Value> {
     pairs
         .iter()
         .map(|(k, v)| ((*k).to_string(), v.clone()))
         .collect()
+}
+
+fn integer_column(name: &str) -> ColumnDef {
+    ColumnDef {
+        name: name.to_string(),
+        ty: ColumnType::Integer,
+        object_id: None,
+        missing_value: None,
+        primary_key: false,
+        not_null: false,
+        not_null_explicit: false,
+        not_null_name: None,
+        not_null_validated: true,
+        not_null_no_inherit: false,
+        auto_increment: None,
+        unique: false,
+        default: None,
+        generated: None,
+        check: None,
+        check_name: None,
+        check_enforced: true,
+        check_validated: true,
+        check_no_inherit: false,
+        references: None,
+    }
 }
 
 #[test]
@@ -51,6 +77,134 @@ fn create_server_then_create_foreign_table() {
     assert_eq!(table.server_name, "s1");
     assert_eq!(table.options.get("source").unwrap(), "books.parquet");
     assert_eq!(table.columns.len(), 2);
+}
+
+#[test]
+fn create_foreign_table_if_not_exists_checks_the_relation_before_its_definition() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE existing_foreign_definition_target(marker integer);
+             CREATE FOREIGN TABLE IF NOT EXISTS existing_foreign_definition_target(id missing_type PRIMARY KEY CHECK (missing_column > 0)) SERVER missing_server;",
+            &[],
+        )
+        .unwrap();
+    for sql in [
+        "CREATE FOREIGN TABLE IF NOT EXISTS existing_foreign_definition_target(id integer PRIMARY KEY) SERVER missing_server",
+        "CREATE FOREIGN TABLE IF NOT EXISTS existing_foreign_definition_target(id integer UNIQUE) SERVER missing_server",
+        "CREATE FOREIGN TABLE IF NOT EXISTS existing_foreign_definition_target(id integer REFERENCES missing_parent(id)) SERVER missing_server",
+        "CREATE FOREIGN TABLE IF NOT EXISTS existing_foreign_definition_target(id integer, id text) SERVER missing_server",
+        "CREATE FOREIGN TABLE IF NOT EXISTS existing_foreign_definition_target(id missing_type) SERVER missing_server",
+        "CREATE FOREIGN TABLE IF NOT EXISTS existing_foreign_definition_target(id integer CHECK (missing_column > 0)) SERVER missing_server",
+        "CREATE FOREIGN TABLE IF NOT EXISTS existing_foreign_definition_target(id serial) SERVER missing_server",
+    ] {
+        engine.sql(sql, &[]).unwrap();
+    }
+    let notices = engine.take_sql_notices();
+    assert_eq!(notices.len(), 8);
+    assert!(notices.iter().all(|notice| notice
+        == &(
+            "NOTICE".into(),
+            "relation \"existing_foreign_definition_target\" already exists, skipping".into()
+        )));
+
+    engine
+        .sql(
+            "CREATE SEQUENCE existing_foreign_definition_sequence;
+             CREATE FOREIGN TABLE IF NOT EXISTS existing_foreign_definition_sequence(id integer PRIMARY KEY) SERVER missing_server",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        engine.take_sql_notices(),
+        vec![(
+            "NOTICE".into(),
+            "relation \"existing_foreign_definition_sequence\" already exists, skipping".into()
+        )]
+    );
+
+    for (sql, state) in [
+        (
+            "CREATE FOREIGN TABLE IF NOT EXISTS absent_foreign_primary_key(id integer PRIMARY KEY) SERVER missing_server",
+            "0A000",
+        ),
+        (
+            "CREATE FOREIGN TABLE IF NOT EXISTS absent_foreign_duplicate(id integer, id text) SERVER missing_server",
+            "42701",
+        ),
+        (
+            "CREATE FOREIGN TABLE IF NOT EXISTS absent_foreign_check(id integer CHECK (missing_column > 0)) SERVER missing_server",
+            "42703",
+        ),
+        (
+            "CREATE FOREIGN TABLE IF NOT EXISTS absent_foreign_server(id integer) SERVER missing_server",
+            "42704",
+        ),
+        (
+            "CREATE FOREIGN TABLE IF NOT EXISTS absent_foreign_serial_server(id serial) SERVER missing_server",
+            "42704",
+        ),
+    ] {
+        let error = engine
+            .sql(sql, &[])
+            .expect_err("a free foreign-table target must analyze its definition and server");
+        assert_eq!(error.sqlstate(), Some(state), "unexpected error: {error}");
+    }
+    assert!(engine
+        .sequence_state("absent_foreign_serial_server_id_seq")
+        .unwrap()
+        .is_none());
+    assert!(engine
+        .foreign_table("absent_foreign_serial_server")
+        .unwrap()
+        .is_none());
+
+    engine
+        .sql(
+            "CREATE SERVER deferred_foreign_server FOREIGN DATA WRAPPER memory_fdw OPTIONS (kind 'memory');
+             CREATE FOREIGN TABLE IF NOT EXISTS new_foreign_definition_target(id integer) SERVER deferred_foreign_server",
+            &[],
+        )
+        .unwrap();
+    assert!(engine
+        .foreign_table("new_foreign_definition_target")
+        .unwrap()
+        .is_some());
+}
+
+#[test]
+fn direct_foreign_table_registration_only_defers_validation_for_if_not_exists() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE existing_direct_foreign_target(marker integer)",
+            &[],
+        )
+        .unwrap();
+    let duplicate_columns = vec![integer_column("id"), integer_column("id")];
+
+    engine
+        .register_foreign_table(
+            "existing_direct_foreign_target".into(),
+            "missing_server".into(),
+            duplicate_columns.clone(),
+            vec![],
+            true,
+        )
+        .unwrap();
+    let error = engine
+        .register_foreign_table(
+            "existing_direct_foreign_target".into(),
+            "missing_server".into(),
+            duplicate_columns,
+            vec![],
+            false,
+        )
+        .expect_err("ordinary creation must validate its definition before target collision");
+    assert!(
+        error.contains("column \"id\" specified more than once"),
+        "{error}"
+    );
 }
 
 #[test]

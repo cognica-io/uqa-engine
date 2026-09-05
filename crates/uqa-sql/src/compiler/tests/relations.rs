@@ -9,6 +9,24 @@
 use super::*;
 
 #[test]
+fn table_range_alias_preserves_positional_column_names() {
+    let Statement::Select(select) = first("SELECT t.left_id FROM source AS t(left_id, label)")
+    else {
+        panic!("expected SELECT");
+    };
+    let Some(FromClause::Table {
+        alias,
+        column_aliases,
+        ..
+    }) = select.from
+    else {
+        panic!("expected table source");
+    };
+    assert_eq!(alias.as_deref(), Some("t"));
+    assert_eq!(column_aliases, ["left_id", "label"]);
+}
+
+#[test]
 fn rows_from_preserves_members_column_definitions_aliases_and_ordinality() {
     let Statement::Select(select) = first(
         "SELECT * FROM ROWS FROM (f(1) AS (left_id int4, left_label text), g(2)) \

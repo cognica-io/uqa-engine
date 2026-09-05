@@ -21,6 +21,40 @@ fn put_get_round_trip() {
 }
 
 #[test]
+fn tuple_metadata_survives_field_replacements_patches_and_snapshots() {
+    let mut store = MemoryDocumentStore::new();
+    store
+        .put_stored(
+            1,
+            StoredDocument::with_metadata(
+                doc([("title", Value::Str("rust".into()))]),
+                DocumentMetadata::with_tuple_xmin(37),
+            ),
+        )
+        .unwrap();
+    store
+        .put(1, doc([("title", Value::Str("engine".into()))]))
+        .unwrap();
+    store
+        .patch_fields(
+            1,
+            &BTreeMap::from([("title".into(), Value::Str("UQA".into()))]),
+        )
+        .unwrap();
+    let stored = store.get_stored(1).unwrap().unwrap();
+    assert_eq!(stored.metadata().tuple_xmin(), Some(37));
+    assert_eq!(
+        stored.fields().get("title"),
+        Some(&Value::Str("UQA".into()))
+    );
+    let snapshot = store.snapshot().unwrap();
+    assert_eq!(
+        snapshot.get_metadata(1).unwrap().unwrap().tuple_xmin(),
+        Some(37)
+    );
+}
+
+#[test]
 fn get_field_returns_value() {
     let mut s = MemoryDocumentStore::new();
     s.put(1, doc([("year", Value::Int(2026))])).unwrap();
