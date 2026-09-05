@@ -12,34 +12,9 @@ use uqa_sql::SQLError;
 
 use super::{
     default_table_acl_entry, insert_column_privilege_rows, split_schema_name,
-    ColumnPrivilegeCatalogRow, SQLColumnDef,
+    ColumnPrivilegeCatalogRow,
 };
 use crate::engine_capabilities::CatalogReadView;
-
-pub(super) fn foreign_information_schema_column(column: &uqa_fdw::ColumnDef) -> SQLColumnDef {
-    SQLColumnDef {
-        name: column.name.clone(),
-        ty: crate::engine_fdw::fdw_column_type_to_sql(&column.ty),
-        object_id: None,
-        missing_value: None,
-        primary_key: false,
-        not_null: false,
-        not_null_explicit: false,
-        not_null_name: None,
-        not_null_validated: true,
-        not_null_no_inherit: false,
-        auto_increment: None,
-        unique: false,
-        default: None,
-        generated: None,
-        check: None,
-        check_name: None,
-        check_enforced: true,
-        check_validated: true,
-        check_no_inherit: false,
-        references: None,
-    }
-}
 
 pub(super) fn insert_foreign_table_column_privileges(
     catalog: &CatalogReadView,

@@ -489,7 +489,7 @@ impl CatalogReadView {
             .collect()
     }
 
-    pub(crate) fn foreign_tables(&self) -> Vec<(String, uqa_fdw::ForeignTable)> {
+    pub(crate) fn foreign_tables(&self) -> Vec<(String, crate::engine_fdw::StoredForeignTable)> {
         self.snapshot
             .durable
             .foreign_tables
@@ -881,7 +881,7 @@ impl CatalogReadView {
         &self,
         resolution: &RelationNameResolution,
         name: &str,
-    ) -> Result<Option<&uqa_fdw::ForeignTable>, SQLError> {
+    ) -> Result<Option<&crate::engine_fdw::StoredForeignTable>, SQLError> {
         for relation in self.relation_lookup_candidates(resolution, name)? {
             if let Some(table) = self.snapshot.durable.foreign_tables.get(&relation) {
                 return Ok(Some(table));
@@ -897,7 +897,7 @@ impl CatalogReadView {
         &self,
         resolution: &RelationNameResolution,
         name: &str,
-    ) -> Result<Option<(String, uqa_fdw::ForeignTable)>, SQLError> {
+    ) -> Result<Option<(String, crate::engine_fdw::StoredForeignTable)>, SQLError> {
         for relation in self.relation_lookup_candidates(resolution, name)? {
             if let Some(table) = self.snapshot.durable.foreign_tables.get(&relation) {
                 return Ok(Some((relation.qualified_name(), table.clone())));

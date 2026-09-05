@@ -157,38 +157,16 @@ pub(in crate::sql::catalog) fn build_pg_attribute(
         let relid = relation_oid("f", &schema, &table);
         let security = catalog.foreign_table_security(&table_name)?;
         for (idx, column) in foreign_table.columns.into_iter().enumerate() {
-            let col = SQLColumnDef {
-                name: column.name,
-                ty: crate::engine_fdw::fdw_column_type_to_sql(&column.ty),
-                object_id: None,
-                missing_value: None,
-                primary_key: false,
-                not_null: false,
-                not_null_explicit: false,
-                not_null_name: None,
-                not_null_validated: true,
-                not_null_no_inherit: false,
-                auto_increment: None,
-                unique: false,
-                default: None,
-                generated: None,
-                check: None,
-                check_name: None,
-                check_enforced: true,
-                check_validated: true,
-                check_no_inherit: false,
-                references: None,
-            };
             let mut attribute = pg_attribute_row(
                 relid,
                 catalog_ordinal(idx, "pg_attribute foreign-table column")?,
-                &col,
+                &column,
             );
             attribute.insert(
                 "attacl".into(),
                 super::super::relation_catalog::table_acl_catalog_value(
                     &security.role_owner,
-                    security.column_acls.get(&col.name),
+                    security.column_acls.get(&column.name),
                 )?,
             );
             out.push(attribute);
@@ -319,34 +297,55 @@ pub(in crate::sql::catalog) fn build_pg_attrdef(
             .table(resolution, &table_name)?
             .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?
             .columns;
-        for (idx, col) in columns.iter().enumerate() {
-            let legacy_auto_increment = col
-                .auto_increment
-                .as_ref()
-                .is_some_and(uqa_sql::ast::AutoIncrement::is_legacy);
-            if col.default.is_none() && !legacy_auto_increment && col.generated.is_none() {
-                continue;
-            }
-            let default = if legacy_auto_increment {
-                format!("nextval('{}_{}_seq')", table, col.name)
-            } else if let Some(generated) = &col.generated {
-                super::super::expression_text::schema_expr_text(&generated.expression)
-            } else {
-                value_to_text(&default_expr_text(col.default.as_ref()))
-            };
-            out.push(row([
-                (
-                    "oid",
-                    int_value(stable_oid("attrdef", &format!("{table_name}.{}", col.name))),
-                ),
-                ("adrelid", int_value(relid)),
-                (
-                    "adnum",
-                    int_value(catalog_ordinal(idx, "pg_attrdef column")?),
-                ),
-                ("adbin", str_value(default)),
-            ]));
-        }
+        append_pg_attrdef_rows(&mut out, &table_name, &table, relid, columns)?;
+    }
+    for (table_name, table) in catalog.foreign_tables() {
+        let (schema, local_name) = split_schema_name(&table_name)?;
+        append_pg_attrdef_rows(
+            &mut out,
+            &table_name,
+            &local_name,
+            relation_oid("f", &schema, &local_name),
+            &table.columns,
+        )?;
     }
     Ok(out)
+}
+
+fn append_pg_attrdef_rows(
+    out: &mut Vec<ResultRow>,
+    table_name: &str,
+    local_table_name: &str,
+    relid: i64,
+    columns: &[SQLColumnDef],
+) -> Result<(), SQLError> {
+    for (idx, col) in columns.iter().enumerate() {
+        let legacy_auto_increment = col
+            .auto_increment
+            .as_ref()
+            .is_some_and(uqa_sql::ast::AutoIncrement::is_legacy);
+        if col.default.is_none() && !legacy_auto_increment && col.generated.is_none() {
+            continue;
+        }
+        let default = if legacy_auto_increment {
+            format!("nextval('{}_{}_seq')", local_table_name, col.name)
+        } else if let Some(generated) = &col.generated {
+            super::super::expression_text::schema_expr_text(&generated.expression)
+        } else {
+            value_to_text(&default_expr_text(col.default.as_ref()))
+        };
+        out.push(row([
+            (
+                "oid",
+                int_value(stable_oid("attrdef", &format!("{table_name}.{}", col.name))),
+            ),
+            ("adrelid", int_value(relid)),
+            (
+                "adnum",
+                int_value(catalog_ordinal(idx, "pg_attrdef column")?),
+            ),
+            ("adbin", str_value(default)),
+        ]));
+    }
+    Ok(())
 }

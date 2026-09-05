@@ -351,12 +351,7 @@ pub(super) fn build_table_source_operator<'a>(
                 let typed_columns = foreign_table
                     .columns
                     .into_iter()
-                    .map(|column| {
-                        (
-                            column.name,
-                            crate::engine_fdw::fdw_column_type_to_sql(&column.ty),
-                        )
-                    })
+                    .map(|column| (column.name, column.ty))
                     .collect::<Vec<_>>();
                 let columns = typed_columns
                     .iter()

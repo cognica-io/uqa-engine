@@ -8,9 +8,9 @@
 
 use super::dispatch::compile_stmt;
 use super::{
-    compile_column_def, compile_expr, compile_on_commit, compile_select, extract_string,
-    range_var_name, relation_persistence, validate_create_table_envelope, ColumnDef, Expr, Node,
-    NodeEnum, Result, SQLError, Statement,
+    compile_expr, compile_on_commit, compile_select, extract_string, range_var_name,
+    relation_persistence, validate_create_table_envelope, Expr, Node, NodeEnum, Result, SQLError,
+    Statement,
 };
 use crate::ast::{OnCommitAction, RelationPersistence};
 
@@ -232,24 +232,44 @@ pub(super) fn compile_create_foreign_table(
         .as_ref()
         .ok_or_else(|| SQLError::Internal("CREATE FOREIGN TABLE without base".into()))?;
     validate_create_table_envelope(base, "CREATE FOREIGN TABLE")?;
-    let name = base
-        .relation
-        .as_ref()
-        .map(range_var_name)
-        .ok_or_else(|| SQLError::Internal("CREATE FOREIGN TABLE without name".into()))?;
-    let mut columns: Vec<ColumnDef> = Vec::new();
-    for elt in &base.table_elts {
-        let Some(NodeEnum::ColumnDef(col)) = elt.node.as_ref() else {
-            return Err(SQLError::Unsupported(
-                "CREATE FOREIGN TABLE supports column definitions only".into(),
-            ));
+    let table = super::compile_create_table(base)?;
+    if !table.key_constraints.is_empty() {
+        let kind = if table
+            .key_constraints
+            .iter()
+            .any(|constraint| constraint.kind == crate::ast::TableKeyConstraintKind::PrimaryKey)
+        {
+            "primary key"
+        } else {
+            "unique"
         };
-        columns.push(compile_column_def(col)?);
+        return Err(SQLError::Unsupported(format!(
+            "{kind} constraints are not supported on foreign tables"
+        )));
+    }
+    if !table.foreign_keys.is_empty()
+        || table
+            .columns
+            .iter()
+            .any(|column| column.references.is_some())
+    {
+        return Err(SQLError::Unsupported(
+            "foreign key constraints are not supported on foreign tables".into(),
+        ));
+    }
+    if !table.hierarchy.parents.is_empty()
+        || table.hierarchy.partition_spec.is_some()
+        || table.hierarchy.partition_bound.is_some()
+    {
+        return Err(SQLError::Unsupported(
+            "foreign-table inheritance and partitioning are not supported".into(),
+        ));
     }
     Ok(CreateForeignTable {
-        name,
+        name: table.name,
         server_name: stmt.servername.clone(),
-        columns,
+        columns: table.columns,
+        checks: table.checks,
         options: collect_def_elem_options(&stmt.options)?,
         if_not_exists: base.if_not_exists,
     })

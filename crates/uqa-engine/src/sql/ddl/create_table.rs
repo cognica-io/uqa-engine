@@ -6,17 +6,15 @@
 
 //! CREATE TABLE execution.
 
+use super::constraint_validation::{
+    resolve_foreign_key_parent, validate_check_expression, validate_foreign_key_definition,
+};
 use super::defaults::validate_default_expression;
 use super::{
     ddl_storage_error, prepare_create_table_hierarchy, ColumnType, CreateTable, Engine, SQLError,
     SQLResult,
 };
 use crate::sql::generated::prepare_generated_columns;
-use uqa_sql::ast::{AutoIncrementKind, AutoIncrementOwner, Expr, SequenceDataType};
-
-use super::constraint_validation::{
-    resolve_foreign_key_parent, validate_check_expression, validate_foreign_key_definition,
-};
 
 // -------------------------------------------------------------------------
 
@@ -65,7 +63,12 @@ fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResu
     }
     prepare_create_table_hierarchy(engine, &mut c)?;
     bind_create_table_relation_references(engine, &mut c)?;
-    materialize_implicit_sequences(engine, &mut c)?;
+    engine.materialize_implicit_sequences(
+        "CREATE TABLE",
+        &c.name,
+        &mut c.columns,
+        c.persistence,
+    )?;
     let check_columns = c.columns.clone();
     for column in &mut c.columns {
         if let Some(default) = &mut column.default {
@@ -254,60 +257,5 @@ fn bind_create_table_reference(
         return Ok(());
     }
     *reference = engine.resolve_visible_table_reference(reference)?;
-    Ok(())
-}
-
-fn materialize_implicit_sequences(
-    engine: &Engine,
-    table: &mut CreateTable,
-) -> Result<(), SQLError> {
-    let relation = crate::RelationIdentity::from_legacy_name(&table.name)
-        .map_err(|error| SQLError::Internal(format!("resolve CREATE TABLE relation: {error}")))?;
-    for column in &mut table.columns {
-        let Some(auto_increment) = column.auto_increment.as_mut() else {
-            continue;
-        };
-        if auto_increment.kind == AutoIncrementKind::Legacy || auto_increment.sequence.is_some() {
-            continue;
-        }
-        let data_type = match &column.ty {
-            ColumnType::SmallInteger => SequenceDataType::SmallInt,
-            ColumnType::Integer => SequenceDataType::Integer,
-            ColumnType::BigInteger => SequenceDataType::BigInt,
-            _ => {
-                return Err(SQLError::Internal(format!(
-                    "implicit sequence column `{}` has non-integer type",
-                    column.name
-                )))
-            }
-        };
-        let sequence = crate::RelationIdentity::new(
-            relation.schema.clone(),
-            format!("{}_{}_seq", relation.name, column.name),
-        )
-        .qualified_name();
-        engine
-            .create_sequence_with_persistence(&sequence, 1, 1, data_type, false, table.persistence)
-            .map_err(|error| {
-                SQLError::Unsupported(format!(
-                    "CREATE TABLE implicit sequence `{sequence}`: {error}"
-                ))
-            })?;
-        auto_increment.sequence = Some(sequence.clone());
-        auto_increment.owner = Some(AutoIncrementOwner {
-            table: table.name.clone(),
-            column: column.name.clone(),
-        });
-        if auto_increment.kind == AutoIncrementKind::Serial {
-            column.default = Some(Expr::Func {
-                name: "nextval".into(),
-                binding: None,
-                args: vec![Expr::Literal(uqa_core::Value::Str(sequence))],
-                distinct: false,
-                order_by: Vec::new(),
-                filter: None,
-            });
-        }
-    }
     Ok(())
 }

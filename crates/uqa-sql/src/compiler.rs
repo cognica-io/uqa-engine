@@ -12,8 +12,8 @@
 //! in the private `types` module.
 
 use crate::ast::{
-    AlterTableAction, AlterTableStmt, AlterViewAction, AlterViewKind, AlterViewStmt, ColumnDef,
-    DeleteStmt, DropKind, DropStmt, Expr, Statement, TableKeyConstraint, TableKeyConstraintKind,
+    AlterTableAction, AlterTableStmt, AlterViewAction, AlterViewKind, AlterViewStmt, DeleteStmt,
+    DropKind, DropStmt, Expr, Statement, TableKeyConstraint, TableKeyConstraintKind,
     TransactionStmt, UpdateStmt,
 };
 use crate::error::{Result, SQLError};

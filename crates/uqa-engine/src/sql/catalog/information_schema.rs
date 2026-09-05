@@ -10,7 +10,7 @@ mod foreign_tables;
 
 use std::collections::BTreeSet;
 
-use foreign_tables::{foreign_information_schema_column, insert_foreign_table_column_privileges};
+use foreign_tables::insert_foreign_table_column_privileges;
 
 use super::builtin_routines::PG18_BUILTIN_ROUTINE_GROUPS;
 use super::expression_text::{default_expr_text, schema_expr_text};
@@ -382,7 +382,7 @@ pub(super) fn build_info_columns(
                 schema.clone(),
                 table.clone(),
                 idx,
-                &foreign_information_schema_column(column),
+                column,
                 false,
             )?);
         }

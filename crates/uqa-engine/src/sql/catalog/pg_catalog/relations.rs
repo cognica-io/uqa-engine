@@ -64,10 +64,16 @@ pub(in crate::sql::catalog) fn table_relation_oid_from(
     resolution: &RelationNameResolution,
     table: &str,
 ) -> Result<i64, SQLError> {
-    let table_state = catalog
-        .table(resolution, table)?
-        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-    Ok(stable_object_oid("relation", &table_state.object_id))
+    if let Some(table_state) = catalog.table(resolution, table)? {
+        return Ok(stable_object_oid("relation", &table_state.object_id));
+    }
+    if let Some((name, _)) = catalog.foreign_table_entry_resolved(resolution, table)? {
+        let relation = crate::RelationIdentity::from_legacy_name(&name).map_err(|error| {
+            SQLError::Internal(format!("decode foreign table `{name}`: {error}"))
+        })?;
+        return Ok(crate::sql::foreign_table_relation_oid(&relation));
+    }
+    Err(SQLError::UnknownTable(table.to_string()))
 }
 
 pub(in crate::sql::catalog) fn table_rowtype_oid_from(

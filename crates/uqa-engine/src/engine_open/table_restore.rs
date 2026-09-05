@@ -237,6 +237,7 @@ impl Engine {
         Self::migrate_constraint_names_from_metadata(catalog)?;
         Self::migrate_legacy_sequences_from_metadata(catalog)?;
         Self::migrate_sequence_identities(catalog)?;
+        Self::migrate_foreign_table_identities(catalog)?;
         Self::migrate_implicit_sequence_owners(catalog)
     }
 

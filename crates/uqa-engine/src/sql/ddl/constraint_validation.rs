@@ -69,7 +69,7 @@ fn is_boolean_type(ty: &ColumnType) -> bool {
     }
 }
 
-pub(super) fn validate_check_expression(
+pub(crate) fn validate_check_expression(
     engine: &Engine,
     table: &str,
     qualifier: &str,

@@ -563,12 +563,7 @@ impl SchemaScope {
                     let typed_columns = foreign_table
                         .columns
                         .iter()
-                        .map(|column| {
-                            (
-                                column.name.clone(),
-                                crate::engine_fdw::fdw_column_type_to_sql(&column.ty),
-                            )
-                        })
+                        .map(|column| (column.name.clone(), column.ty.clone()))
                         .collect::<Vec<_>>();
                     let columns = typed_columns
                         .iter()

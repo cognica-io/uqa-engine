@@ -374,6 +374,90 @@ pub(in crate::sql::catalog) fn constraint_catalog_rows(
             });
         }
     }
+    for (table_name, foreign_table) in catalog.foreign_tables() {
+        let (schema, table) = split_schema_name(&table_name)?;
+        let columns = foreign_table.columns;
+        let mut pending = Vec::new();
+        for (idx, column) in columns.iter().enumerate() {
+            let ordinal = catalog_ordinal(idx, "foreign-table constraint column")?;
+            if column.not_null {
+                pending.push(PendingConstraintCatalogRow {
+                    schema: schema.clone(),
+                    table: table.clone(),
+                    requested_name: column.not_null_name.clone(),
+                    object_id: None,
+                    kind: ConstraintCatalogKind::NotNull,
+                    columns: vec![ConstraintCatalogColumn {
+                        name: column.name.clone(),
+                        table_ordinal: ordinal,
+                    }],
+                    state: ConstraintCatalogState::new(
+                        ConstraintValidationState::new(true, column.not_null_validated),
+                        ConstraintDeferralState::new(false, false),
+                        ConstraintInheritanceState::new(column.not_null_no_inherit),
+                    ),
+                    period: false,
+                    foreign_key: None,
+                });
+            }
+            if let Some(expression) = &column.check {
+                pending.push(PendingConstraintCatalogRow {
+                    schema: schema.clone(),
+                    table: table.clone(),
+                    requested_name: column.check_name.clone(),
+                    object_id: None,
+                    kind: ConstraintCatalogKind::Check,
+                    columns: check_constraint_columns(expression, &columns, &table_name)?,
+                    state: ConstraintCatalogState::new(
+                        ConstraintValidationState::new(
+                            column.check_enforced,
+                            column.check_validated,
+                        ),
+                        ConstraintDeferralState::new(false, false),
+                        ConstraintInheritanceState::new(column.check_no_inherit),
+                    ),
+                    period: false,
+                    foreign_key: None,
+                });
+            }
+        }
+        for check in foreign_table.checks {
+            pending.push(PendingConstraintCatalogRow {
+                schema: schema.clone(),
+                table: table.clone(),
+                requested_name: check.name,
+                object_id: None,
+                kind: ConstraintCatalogKind::Check,
+                columns: check_constraint_columns(&check.expr, &columns, &table_name)?,
+                state: ConstraintCatalogState::new(
+                    ConstraintValidationState::new(check.enforced, check.validated),
+                    ConstraintDeferralState::new(false, false),
+                    ConstraintInheritanceState::new(check.no_inherit),
+                ),
+                period: false,
+                foreign_key: None,
+            });
+        }
+        for constraint in pending {
+            let name = constraint.requested_name.ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "durable constraint on `{}.{}` has no name",
+                    constraint.schema, constraint.table
+                ))
+            })?;
+            out.push(ConstraintCatalogRow {
+                schema: constraint.schema,
+                table: constraint.table,
+                name,
+                object_id: constraint.object_id,
+                kind: constraint.kind,
+                columns: constraint.columns,
+                state: constraint.state,
+                period: constraint.period,
+                foreign_key: constraint.foreign_key,
+            });
+        }
+    }
     Ok(out)
 }
 

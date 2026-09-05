@@ -266,8 +266,13 @@ impl Engine {
         relations: &std::collections::BTreeSet<RelationIdentity>,
     ) -> StorageBackendResult<()> {
         bind_stored_view_relations(plan, relations)?;
+        let mut refreshed = false;
         bind_query_plan_sequence_references(plan, &mut |reference| {
-            self.resolve_stored_sequence_reference(reference)
+            if !refreshed {
+                self.refresh_sequences_from_catalog()?;
+                refreshed = true;
+            }
+            self.resolve_stored_sequence_reference_from_loaded_registry(reference)
         })
     }
 

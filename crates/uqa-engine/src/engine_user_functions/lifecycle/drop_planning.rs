@@ -13,6 +13,69 @@ use super::{
     SQLUserFunction,
 };
 
+fn append_schema_function_dependents(
+    table_name: &str,
+    columns: &[uqa_sql::ast::ColumnDef],
+    checks: &[uqa_sql::ast::TableCheck],
+    target: &uqa_sql::ast::FunctionBinding,
+    foreign: bool,
+    dependents: &mut RoutineSchemaDependents,
+) -> Result<(), SQLError> {
+    let relation = if foreign {
+        format!("foreign table `{table_name}`")
+    } else {
+        format!("`{table_name}`")
+    };
+    for column in columns {
+        if let Some(generated) = &column.generated {
+            let referenced = generated.function_dependencies.iter().any(|dependency| {
+                crate::engine_session::function_binding_matches(dependency, target)
+            }) || crate::engine_events::expression_references_routine_identity(
+                &generated.expression,
+                target,
+            )?;
+            if referenced {
+                dependents
+                    .columns
+                    .push((table_name.to_string(), column.name.clone(), foreign));
+            }
+        }
+        if let Some(default) = &column.default {
+            if crate::engine_events::expression_references_routine_identity(default, target)? {
+                dependents
+                    .defaults
+                    .push((table_name.to_string(), column.name.clone(), foreign));
+            }
+        }
+        if let Some(check) = &column.check {
+            if crate::engine_events::expression_references_routine_identity(check, target)? {
+                let name = column.check_name.clone().ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "CHECK constraint on {relation}.`{}` has no catalog name",
+                        column.name
+                    ))
+                })?;
+                dependents
+                    .checks
+                    .push((table_name.to_string(), name, foreign));
+            }
+        }
+    }
+    for check in checks {
+        if crate::engine_events::expression_references_routine_identity(&check.expr, target)? {
+            let name = check.name.clone().ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "table CHECK constraint on {relation} has no catalog name"
+                ))
+            })?;
+            dependents
+                .checks
+                .push((table_name.to_string(), name, foreign));
+        }
+    }
+    Ok(())
+}
+
 impl Engine {
     pub(crate) fn drop_sql_functions(&self, stmt: &DropFunctionStmt) -> Result<(), SQLError> {
         self.with_implicit_transaction(|engine| {
@@ -267,6 +330,90 @@ impl Engine {
         Ok(())
     }
 
+    fn drop_routine_check_dependent(
+        &self,
+        table: &str,
+        constraint: &str,
+        foreign: bool,
+    ) -> Result<(), SQLError> {
+        if !foreign {
+            return crate::sql::drop_constraint_dependency(self, table, constraint);
+        }
+        if self
+            .drop_foreign_table_check_dependency(table, constraint)
+            .map_err(|error| {
+                SQLError::Internal(format!(
+                    "drop constraint `{constraint}` on foreign table `{table}` while cascading routine: {error}"
+                ))
+            })?
+            == Some(true)
+        {
+            return Ok(());
+        }
+        Err(SQLError::Internal(format!(
+            "constraint `{constraint}` on foreign table `{table}` disappeared after routine DROP preflight"
+        )))
+    }
+
+    fn drop_routine_default_dependent(
+        &self,
+        table: &str,
+        column: &str,
+        foreign: bool,
+    ) -> Result<(), SQLError> {
+        let dropped = if foreign {
+            self.clear_foreign_table_default_dependency(table, column)
+                .map_err(|error| {
+                    SQLError::Internal(format!(
+                        "drop default `{table}`.`{column}` while cascading routine: {error}"
+                    ))
+                })?
+                == Some(true)
+        } else {
+            self.set_column_default_inner(table, column, None)
+                .map_err(|error| {
+                    SQLError::Internal(format!(
+                        "drop default `{table}`.`{column}` while cascading routine: {error}"
+                    ))
+                })?
+        };
+        if dropped {
+            return Ok(());
+        }
+        Err(SQLError::Internal(format!(
+            "default `{table}`.`{column}` disappeared after routine DROP preflight"
+        )))
+    }
+
+    fn drop_routine_generated_dependent(
+        &self,
+        table: &str,
+        column: &str,
+        foreign: bool,
+    ) -> Result<(), SQLError> {
+        let dropped = if foreign {
+            self.drop_foreign_table_generated_column_dependency(table, column)
+                .map_err(|error| {
+                    SQLError::Internal(format!(
+                        "drop generated column `{table}`.`{column}` while cascading routine: {error}"
+                    ))
+                })?
+                == Some(true)
+        } else {
+            self.try_drop_column_inner(table, column).map_err(|error| {
+                SQLError::Internal(format!(
+                    "drop generated column `{table}`.`{column}` while cascading routine: {error}"
+                ))
+            })?
+        };
+        if dropped {
+            return Ok(());
+        }
+        Err(SQLError::Internal(format!(
+            "generated column `{table}`.`{column}` disappeared after routine DROP preflight"
+        )))
+    }
+
     fn drop_routine_object_dependents(
         &self,
         dependents: &RoutineObjectDependents,
@@ -290,33 +437,14 @@ impl Engine {
         if !dependents.views.is_empty() {
             self.drop_views_inner(&dependents.views, false)?;
         }
-        for (table, constraint) in &dependents.checks {
-            crate::sql::drop_constraint_dependency(self, table, constraint)?;
+        for (table, constraint, foreign) in &dependents.checks {
+            self.drop_routine_check_dependent(table, constraint, *foreign)?;
         }
-        for (table, column) in &dependents.defaults {
-            if !self
-                .set_column_default_inner(table, column, None)
-                .map_err(|error| {
-                    SQLError::Internal(format!(
-                        "drop default `{table}`.`{column}` while cascading routine: {error}"
-                    ))
-                })?
-            {
-                return Err(SQLError::Internal(format!(
-                    "default `{table}`.`{column}` disappeared after routine DROP preflight"
-                )));
-            }
+        for (table, column, foreign) in &dependents.defaults {
+            self.drop_routine_default_dependent(table, column, *foreign)?;
         }
-        for (table, column) in &dependents.columns {
-            if !self.try_drop_column_inner(table, column).map_err(|error| {
-                SQLError::Internal(format!(
-                    "drop generated column `{table}`.`{column}` while cascading routine: {error}"
-                ))
-            })? {
-                return Err(SQLError::Internal(format!(
-                    "generated column `{table}`.`{column}` disappeared after routine DROP preflight"
-                )));
-            }
+        for (table, column, foreign) in &dependents.columns {
+            self.drop_routine_generated_dependent(table, column, *foreign)?;
         }
         Ok(())
     }
@@ -386,68 +514,35 @@ impl Engine {
         &self,
         target: &uqa_sql::ast::FunctionBinding,
     ) -> Result<RoutineSchemaDependents, SQLError> {
-        let mut columns = Vec::new();
-        let mut defaults = Vec::new();
-        let mut checks = Vec::new();
+        let mut dependents = RoutineSchemaDependents::default();
         for (table_name, table) in self.table_entries() {
-            for column in table.columns.read().iter() {
-                if let Some(generated) = &column.generated {
-                    let referenced = generated.function_dependencies.iter().any(|dependency| {
-                        crate::engine_session::function_binding_matches(dependency, target)
-                    })
-                        || crate::engine_events::expression_references_routine_identity(
-                            &generated.expression,
-                            target,
-                        )?;
-                    if referenced {
-                        columns.push((table_name.clone(), column.name.clone()));
-                    }
-                }
-                if let Some(default) = &column.default {
-                    if crate::engine_events::expression_references_routine_identity(
-                        default, target,
-                    )? {
-                        defaults.push((table_name.clone(), column.name.clone()));
-                    }
-                }
-                if let Some(check) = &column.check {
-                    if crate::engine_events::expression_references_routine_identity(check, target)?
-                    {
-                        let name = column.check_name.clone().ok_or_else(|| {
-                            SQLError::Internal(format!(
-                                "CHECK constraint on `{table_name}`.`{}` has no catalog name",
-                                column.name
-                            ))
-                        })?;
-                        checks.push((table_name.clone(), name));
-                    }
-                }
-            }
-            for check in table.table_checks.read().iter() {
-                if crate::engine_events::expression_references_routine_identity(
-                    &check.expr,
-                    target,
-                )? {
-                    let name = check.name.clone().ok_or_else(|| {
-                        SQLError::Internal(format!(
-                            "table CHECK constraint on `{table_name}` has no catalog name"
-                        ))
-                    })?;
-                    checks.push((table_name.clone(), name));
-                }
-            }
+            append_schema_function_dependents(
+                &table_name,
+                &table.columns.read(),
+                &table.table_checks.read(),
+                target,
+                false,
+                &mut dependents,
+            )?;
         }
-        columns.sort();
-        columns.dedup();
-        defaults.sort();
-        defaults.dedup();
-        checks.sort();
-        checks.dedup();
-        Ok(RoutineSchemaDependents {
-            columns,
-            defaults,
-            checks,
-        })
+        for (relation, table) in self.durable.foreign_tables.read().iter() {
+            let table_name = relation.qualified_name();
+            append_schema_function_dependents(
+                &table_name,
+                &table.columns,
+                &table.checks,
+                target,
+                true,
+                &mut dependents,
+            )?;
+        }
+        dependents.columns.sort();
+        dependents.columns.dedup();
+        dependents.defaults.sort();
+        dependents.defaults.dedup();
+        dependents.checks.sort();
+        dependents.checks.dedup();
+        Ok(dependents)
     }
 
     fn ensure_no_function_dependencies(
@@ -470,7 +565,7 @@ impl Engine {
                 dependents
                     .columns
                     .iter()
-                    .map(|(table, column)| format!("{table}.{column}"))
+                    .map(|(table, column, _)| format!("{table}.{column}"))
                     .collect::<Vec<_>>()
                     .join("`, `")
             ));
@@ -481,7 +576,7 @@ impl Engine {
                 dependents
                     .defaults
                     .iter()
-                    .map(|(table, column)| format!("{table}.{column}"))
+                    .map(|(table, column, _)| format!("{table}.{column}"))
                     .collect::<Vec<_>>()
                     .join("`, `")
             ));
@@ -492,7 +587,7 @@ impl Engine {
                 dependents
                     .checks
                     .iter()
-                    .map(|(table, constraint)| format!("{constraint} on {table}"))
+                    .map(|(table, constraint, _)| format!("{constraint} on {table}"))
                     .collect::<Vec<_>>()
                     .join("`, `")
             ));

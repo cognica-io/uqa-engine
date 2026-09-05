@@ -531,3 +531,51 @@ fn serial_and_identity_sequences_receive_their_postgresql_dependency_kinds() {
         .unwrap();
     assert!(!sequence_exists(&engine, "generated_owner_identity_id_seq"));
 }
+
+#[test]
+fn generated_sequence_names_use_postgresql_truncation_and_collision_suffixes() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE SCHEMA generated_name;
+             CREATE SEQUENCE generated_name.foreign_generated_sequence_na_identifier_that_is_also_delib_seq;
+             CREATE TABLE generated_name.foreign_generated_sequence_name_that_is_deliberately_long(identifier_that_is_also_deliberately_long serial)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        engine
+            .sql(
+                "SELECT pg_get_serial_sequence('generated_name.foreign_generated_sequence_name_that_is_deliberately_long', 'identifier_that_is_also_deliberately_long') AS sequence",
+                &[],
+            )
+            .unwrap()
+            .rows[0]["sequence"],
+        Value::Str(
+            "generated_name.foreign_generated_sequence_na_identifier_that_is_also_deli_seq1"
+                .into()
+        )
+    );
+
+    engine.sql("CREATE SCHEMA pending_name", &[]).unwrap();
+    assert_eq!(
+        engine
+            .sql(
+                "CREATE TABLE pending_name.foreign_generated_sequence_name_that_is_deliberately_long(identifier_that_is_also_deliberately_long_a serial, identifier_that_is_also_deliberately_long_b serial)",
+                &[],
+            )
+            .unwrap_err()
+            .sqlstate(),
+        Some("42P07")
+    );
+    assert_eq!(
+        engine
+            .sql(
+                "SELECT count(*) AS relation_count FROM pg_catalog.pg_class AS relation_row JOIN pg_catalog.pg_namespace AS namespace_row ON namespace_row.oid = relation_row.relnamespace WHERE namespace_row.nspname = 'pending_name'",
+                &[],
+            )
+            .unwrap()
+            .rows[0]["relation_count"],
+        Value::Int(0)
+    );
+}

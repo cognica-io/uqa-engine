@@ -375,12 +375,7 @@ fn event_relation_columns(
         return Ok(foreign
             .columns
             .iter()
-            .map(|column| {
-                (
-                    column.name.clone(),
-                    crate::engine_fdw::fdw_column_type_to_sql(&column.ty),
-                )
-            })
+            .map(|column| (column.name.clone(), column.ty.clone()))
             .collect());
     }
     Err(SQLError::UnknownTable(relation.to_string()))

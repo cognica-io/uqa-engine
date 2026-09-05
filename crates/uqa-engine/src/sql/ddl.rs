@@ -28,10 +28,12 @@ mod value_conversion;
 
 pub(crate) use alter_table::drop_constraint_dependency;
 pub(super) use alter_table::run_alter_table;
-pub(crate) use constraint_validation::bind_stored_check_expression_routines;
+pub(crate) use constraint_validation::{
+    bind_stored_check_expression_routines, validate_check_expression,
+};
 pub(super) use create_index::run_create_index;
 pub(super) use create_table::run_create_table;
-pub(crate) use defaults::bind_stored_schema_expression_routines;
+pub(crate) use defaults::{bind_stored_schema_expression_routines, validate_default_expression};
 pub(super) use drop::run_drop;
 use hierarchy::prepare_create_table_hierarchy;
 pub(super) use sequence_ctas::{

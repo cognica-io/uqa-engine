@@ -761,6 +761,8 @@ pub struct CreateForeignTable {
     pub name: String,
     pub server_name: String,
     pub columns: Vec<ColumnDef>,
+    #[serde(default)]
+    pub checks: Vec<TableCheck>,
     pub options: Vec<(String, String)>,
     pub if_not_exists: bool,
 }

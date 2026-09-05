@@ -10,7 +10,7 @@ use super::{ColumnType, Engine, SQLError};
 use uqa_execution::RowSchema;
 use uqa_sql::ast::Expr;
 
-pub(super) fn validate_default_expression(
+pub(crate) fn validate_default_expression(
     engine: &Engine,
     expression: &mut Expr,
     target: &ColumnType,

@@ -4,6 +4,10 @@
 
 DROP SCHEMA IF EXISTS uqa_routine_rename_oracle CASCADE;
 CREATE SCHEMA uqa_routine_rename_oracle;
+DROP SERVER IF EXISTS uqa_routine_rename_server CASCADE;
+DROP FOREIGN DATA WRAPPER IF EXISTS uqa_routine_rename_fdw CASCADE;
+CREATE FOREIGN DATA WRAPPER uqa_routine_rename_fdw NO HANDLER;
+CREATE SERVER uqa_routine_rename_server FOREIGN DATA WRAPPER uqa_routine_rename_fdw;
 
 CREATE OR REPLACE FUNCTION pg_temp.routine_rename_probe(label text, command text)
 RETURNS text
@@ -96,6 +100,7 @@ CREATE FUNCTION uqa_routine_rename_oracle.plpgsql_text_caller(value integer) RET
 CREATE VIEW uqa_routine_rename_oracle.bound_view AS SELECT uqa_routine_rename_oracle.base(6) AS value;
 CREATE TABLE uqa_routine_rename_oracle.generated_source(id integer, derived integer GENERATED ALWAYS AS (uqa_routine_rename_oracle.base(id)) STORED);
 CREATE TABLE uqa_routine_rename_oracle.schema_source(id integer DEFAULT uqa_routine_rename_oracle.base(1), value integer CONSTRAINT schema_column_check CHECK (uqa_routine_rename_oracle.base(value) < 100), other integer, CONSTRAINT schema_table_check CHECK (uqa_routine_rename_oracle.base(other) < 100));
+CREATE FOREIGN TABLE uqa_routine_rename_oracle.foreign_schema_source(id integer NOT NULL DEFAULT uqa_routine_rename_oracle.base(1) CONSTRAINT foreign_schema_column_check CHECK (uqa_routine_rename_oracle.base(id) < 100), other integer, derived integer GENERATED ALWAYS AS (uqa_routine_rename_oracle.base(other)) STORED, CONSTRAINT foreign_schema_table_check CHECK (uqa_routine_rename_oracle.base(other) < 100)) SERVER uqa_routine_rename_server;
 CREATE TABLE uqa_routine_rename_oracle.rule_source(id integer);
 CREATE TABLE uqa_routine_rename_oracle.rule_log(value integer);
 CREATE RULE copy_value AS ON INSERT TO uqa_routine_rename_oracle.rule_source DO ALSO INSERT INTO uqa_routine_rename_oracle.rule_log VALUES (uqa_routine_rename_oracle.base(NEW.id));
@@ -144,6 +149,16 @@ SELECT 'column-check-deparse|' || (position('renamed_base' in pg_get_constraintd
 FROM pg_constraint WHERE conrelid = 'uqa_routine_rename_oracle.schema_source'::regclass AND conname = 'schema_column_check';
 SELECT 'table-check-deparse|' || (position('renamed_base' in pg_get_constraintdef(oid, true)) > 0)
 FROM pg_constraint WHERE conrelid = 'uqa_routine_rename_oracle.schema_source'::regclass AND conname = 'schema_table_check';
+SELECT 'foreign-default-deparse|' || (position('renamed_base' in pg_get_expr(d.adbin, d.adrelid, true)) > 0)
+FROM pg_attrdef d
+JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum
+WHERE d.adrelid = 'uqa_routine_rename_oracle.foreign_schema_source'::regclass AND a.attname = 'id';
+SELECT 'foreign-generated-deparse|' || (position('renamed_base' in pg_get_expr(d.adbin, d.adrelid, true)) > 0)
+FROM pg_attrdef d
+JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum
+WHERE d.adrelid = 'uqa_routine_rename_oracle.foreign_schema_source'::regclass AND a.attname = 'derived';
+SELECT 'foreign-check-deparse|' || bool_and(position('renamed_base' in pg_get_constraintdef(oid, true)) > 0)
+FROM pg_constraint WHERE conrelid = 'uqa_routine_rename_oracle.foreign_schema_source'::regclass AND conname IN ('foreign_schema_column_check', 'foreign_schema_table_check');
 SELECT 'rule-deparse|' || (position('renamed_base' in pg_get_ruledef(oid, true)) > 0)
 FROM pg_rewrite WHERE ev_class = 'uqa_routine_rename_oracle.rule_source'::regclass AND rulename = 'copy_value';
 SELECT 'trigger-deparse|' || (position('renamed_trigger' in pg_get_triggerdef(oid, true)) > 0)
@@ -184,6 +199,37 @@ SELECT 'bound-after-old-drop|' || uqa_routine_rename_oracle.standard_caller(4);
 DROP FUNCTION uqa_routine_rename_oracle.renamed_base(integer) CASCADE;
 SELECT 'routine-cascade|' || (to_regprocedure('uqa_routine_rename_oracle.command_caller(integer)') IS NULL) || '|' || (to_regprocedure('uqa_routine_rename_oracle.default_caller(integer)') IS NULL);
 SELECT 'schema-expression-cascade|' || (column_default IS NULL) || '|' || (NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'uqa_routine_rename_oracle.schema_source'::regclass AND conname IN ('schema_column_check', 'schema_table_check'))) || '|' || (to_regclass('uqa_routine_rename_oracle.schema_source') IS NOT NULL) FROM information_schema.columns WHERE table_schema = 'uqa_routine_rename_oracle' AND table_name = 'schema_source' AND column_name = 'id';
+SELECT 'foreign-schema-expression-cascade|' || (column_default IS NULL) || '|' || is_nullable || '|' || (NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'uqa_routine_rename_oracle.foreign_schema_source'::regclass AND conname IN ('foreign_schema_column_check', 'foreign_schema_table_check'))) || '|' || (to_regclass('uqa_routine_rename_oracle.foreign_schema_source') IS NOT NULL) FROM information_schema.columns WHERE table_schema = 'uqa_routine_rename_oracle' AND table_name = 'foreign_schema_source' AND column_name = 'id';
+SELECT 'foreign-generated-cascade|' || (NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'uqa_routine_rename_oracle.foreign_schema_source'::regclass AND attname = 'derived' AND NOT attisdropped));
 SELECT 'trigger-condition-cascade|' || (NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'uqa_routine_rename_oracle.trigger_source'::regclass AND tgname = 'condition_before')) || '|' || (to_regclass('uqa_routine_rename_oracle.trigger_source') IS NOT NULL) || '|' || (to_regprocedure('uqa_routine_rename_oracle.condition_trigger()') IS NOT NULL);
 
+CREATE SEQUENCE uqa_routine_rename_oracle.foreign_sequence_dependency;
+CREATE FOREIGN TABLE uqa_routine_rename_oracle.foreign_sequence_source(id bigint NOT NULL DEFAULT nextval('uqa_routine_rename_oracle.foreign_sequence_dependency'), value bigint CONSTRAINT foreign_sequence_column_check CHECK (value < nextval('uqa_routine_rename_oracle.foreign_sequence_dependency')), CONSTRAINT foreign_sequence_table_check CHECK (id < nextval('uqa_routine_rename_oracle.foreign_sequence_dependency'))) SERVER uqa_routine_rename_server;
+ALTER SEQUENCE uqa_routine_rename_oracle.foreign_sequence_dependency RENAME TO foreign_sequence_dependency_renamed;
+SELECT 'foreign-sequence-default-deparse|' || (position('foreign_sequence_dependency_renamed' in pg_get_expr(d.adbin, d.adrelid, true)) > 0) FROM pg_attrdef d JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum WHERE d.adrelid = 'uqa_routine_rename_oracle.foreign_sequence_source'::regclass AND a.attname = 'id';
+SELECT 'foreign-sequence-check-deparse|' || bool_and(position('foreign_sequence_dependency_renamed' in pg_get_constraintdef(oid, true)) > 0) FROM pg_constraint WHERE conrelid = 'uqa_routine_rename_oracle.foreign_sequence_source'::regclass AND conname IN ('foreign_sequence_column_check', 'foreign_sequence_table_check');
+CREATE SEQUENCE uqa_routine_rename_oracle.foreign_sequence_dependency;
+DROP SEQUENCE uqa_routine_rename_oracle.foreign_sequence_dependency;
+SELECT pg_temp.routine_rename_probe('foreign-sequence-restrict', 'DROP SEQUENCE uqa_routine_rename_oracle.foreign_sequence_dependency_renamed RESTRICT');
+DROP SEQUENCE uqa_routine_rename_oracle.foreign_sequence_dependency_renamed CASCADE;
+SELECT 'foreign-sequence-cascade|' || (column_default IS NULL) || '|' || is_nullable || '|' || (NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'uqa_routine_rename_oracle.foreign_sequence_source'::regclass AND conname IN ('foreign_sequence_column_check', 'foreign_sequence_table_check'))) || '|' || (to_regclass('uqa_routine_rename_oracle.foreign_sequence_source') IS NOT NULL) FROM information_schema.columns WHERE table_schema = 'uqa_routine_rename_oracle' AND table_name = 'foreign_sequence_source' AND column_name = 'id';
+
+CREATE SEQUENCE uqa_routine_rename_oracle.foreign_generated_sequence_collision_id_seq;
+CREATE TABLE uqa_routine_rename_oracle.foreign_generated_sequence_collision_id_seq1(marker integer);
+SELECT pg_temp.routine_rename_probe('foreign-generated-sequence-collision', 'CREATE FOREIGN TABLE uqa_routine_rename_oracle.foreign_generated_sequence_collision(id serial) SERVER uqa_routine_rename_server');
+SELECT 'foreign-generated-sequence-collision-name|' || pg_get_serial_sequence('uqa_routine_rename_oracle.foreign_generated_sequence_collision', 'id');
+DROP TABLE uqa_routine_rename_oracle.foreign_generated_sequence_collision_id_seq1;
+DROP SEQUENCE uqa_routine_rename_oracle.foreign_generated_sequence_collision_id_seq;
+CREATE FOREIGN TABLE uqa_routine_rename_oracle.foreign_generated_sequence_source(serial_id serial, identity_id bigint GENERATED ALWAYS AS IDENTITY) SERVER uqa_routine_rename_server;
+SELECT 'foreign-owned-sequences|' || (pg_get_serial_sequence('uqa_routine_rename_oracle.foreign_generated_sequence_source', 'serial_id') = 'uqa_routine_rename_oracle.foreign_generated_sequence_source_serial_id_seq') || '|' || (pg_get_serial_sequence('uqa_routine_rename_oracle.foreign_generated_sequence_source', 'identity_id') = 'uqa_routine_rename_oracle.foreign_generated_sequence_source_identity_id_seq');
+SELECT 'foreign-owned-dependency-types|' || bool_and(dependency.deptype = CASE attribute_row.attname WHEN 'serial_id' THEN 'a'::"char" ELSE 'i'::"char" END) FROM pg_depend AS dependency JOIN pg_class AS sequence_row ON sequence_row.oid = dependency.objid JOIN pg_attribute AS attribute_row ON attribute_row.attrelid = dependency.refobjid AND attribute_row.attnum = dependency.refobjsubid WHERE dependency.refobjid = 'uqa_routine_rename_oracle.foreign_generated_sequence_source'::regclass AND sequence_row.relkind = 'S';
+SELECT pg_temp.routine_rename_probe('foreign-identity-sequence-drop', 'DROP SEQUENCE uqa_routine_rename_oracle.foreign_generated_sequence_source_identity_id_seq CASCADE');
+CREATE TABLE uqa_routine_rename_oracle.foreign_owned_sequence_consumer(value bigint DEFAULT nextval('uqa_routine_rename_oracle.foreign_generated_sequence_source_serial_id_seq'));
+SELECT pg_temp.routine_rename_probe('foreign-owner-drop-restrict', 'DROP FOREIGN TABLE uqa_routine_rename_oracle.foreign_generated_sequence_source RESTRICT');
+ALTER TABLE uqa_routine_rename_oracle.foreign_owned_sequence_consumer ALTER COLUMN value DROP DEFAULT;
+DROP FOREIGN TABLE uqa_routine_rename_oracle.foreign_generated_sequence_source;
+SELECT 'foreign-owner-drop|' || (to_regclass('uqa_routine_rename_oracle.foreign_generated_sequence_source_serial_id_seq') IS NULL) || '|' || (to_regclass('uqa_routine_rename_oracle.foreign_generated_sequence_source_identity_id_seq') IS NULL);
+
 DROP SCHEMA uqa_routine_rename_oracle CASCADE;
+DROP SERVER uqa_routine_rename_server;
+DROP FOREIGN DATA WRAPPER uqa_routine_rename_fdw;

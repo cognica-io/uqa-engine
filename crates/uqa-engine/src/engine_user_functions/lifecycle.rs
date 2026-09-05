@@ -46,17 +46,18 @@ struct RoutineDropResolution {
 
 struct RoutineObjectDependents {
     views: Vec<String>,
-    columns: Vec<(String, String)>,
-    defaults: Vec<(String, String)>,
-    checks: Vec<(String, String)>,
+    columns: Vec<(String, String, bool)>,
+    defaults: Vec<(String, String, bool)>,
+    checks: Vec<(String, String, bool)>,
     triggers: Vec<(String, String)>,
     rules: Vec<(String, String)>,
 }
 
+#[derive(Default)]
 struct RoutineSchemaDependents {
-    columns: Vec<(String, String)>,
-    defaults: Vec<(String, String)>,
-    checks: Vec<(String, String)>,
+    columns: Vec<(String, String, bool)>,
+    defaults: Vec<(String, String, bool)>,
+    checks: Vec<(String, String, bool)>,
 }
 
 pub(crate) struct PendingSQLFunctionRestore {
@@ -139,23 +140,28 @@ fn append_routine_cascade_notice(
         .iter()
         .map(|target| format!("{} {}", target.kind(), target.label()))
         .collect::<Vec<_>>();
-    cascaded.extend(
-        dependents
-            .columns
-            .iter()
-            .map(|(table, column)| format!("column {column} of table {table}")),
-    );
-    cascaded.extend(
-        dependents
-            .defaults
-            .iter()
-            .map(|(table, column)| format!("default value for column {column} of table {table}")),
-    );
+    cascaded.extend(dependents.columns.iter().map(|(table, column, foreign)| {
+        format!(
+            "column {column} of {} {table}",
+            routine_schema_relation_kind(*foreign)
+        )
+    }));
+    cascaded.extend(dependents.defaults.iter().map(|(table, column, foreign)| {
+        format!(
+            "default value for column {column} of {} {table}",
+            routine_schema_relation_kind(*foreign)
+        )
+    }));
     cascaded.extend(
         dependents
             .checks
             .iter()
-            .map(|(table, constraint)| format!("constraint {constraint} on table {table}")),
+            .map(|(table, constraint, foreign)| {
+                format!(
+                    "constraint {constraint} on {} {table}",
+                    routine_schema_relation_kind(*foreign)
+                )
+            }),
     );
     cascaded.extend(dependents.views.iter().map(|view| format!("view {view}")));
     cascaded.extend(
@@ -179,6 +185,14 @@ fn append_routine_cascade_notice(
             "NOTICE",
             format!("drop cascades to {} other objects", objects.len()),
         )),
+    }
+}
+
+fn routine_schema_relation_kind(foreign: bool) -> &'static str {
+    if foreign {
+        "foreign table"
+    } else {
+        "table"
     }
 }
 

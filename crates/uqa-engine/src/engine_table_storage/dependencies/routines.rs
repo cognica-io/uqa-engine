@@ -11,6 +11,49 @@ use crate::{Engine, StorageBackendError, StorageBackendResult};
 
 use super::super::walk_schema_expr_mut;
 
+fn rewrite_schema_routine_references(
+    columns: &mut [uqa_sql::ast::ColumnDef],
+    checks: &mut [uqa_sql::ast::TableCheck],
+    target: &uqa_sql::ast::FunctionBinding,
+    new_name: &str,
+) -> StorageBackendResult<bool> {
+    let mut changed = false;
+    for column in columns {
+        for expression in [&mut column.default, &mut column.check]
+            .into_iter()
+            .flatten()
+        {
+            changed |= crate::engine_events::rewrite_expression_routine_identity(
+                expression, target, new_name,
+            )
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+        }
+        if let Some(generated) = column.generated.as_mut() {
+            changed |= crate::engine_events::rewrite_expression_routine_identity(
+                &mut generated.expression,
+                target,
+                new_name,
+            )
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+            for dependency in &mut generated.function_dependencies {
+                if crate::engine_session::function_binding_matches(dependency, target) {
+                    dependency.name = new_name.to_string();
+                    changed = true;
+                }
+            }
+        }
+    }
+    for check in checks {
+        changed |= crate::engine_events::rewrite_expression_routine_identity(
+            &mut check.expr,
+            target,
+            new_name,
+        )
+        .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+    }
+    Ok(changed)
+}
+
 fn schema_expr_may_require_routine_identity_binding(
     expression: &uqa_sql::ast::Expr,
 ) -> StorageBackendResult<bool> {
@@ -207,66 +250,60 @@ impl Engine {
         target: &uqa_sql::ast::FunctionBinding,
         new_name: &str,
     ) -> StorageBackendResult<()> {
-        let mut updates = Vec::new();
+        let mut table_updates = Vec::new();
         for (table_name, table) in self.table_entries() {
             let mut columns = table.columns.read().clone();
             let mut checks = table.table_checks.read().clone();
-            let mut changed = false;
-            for column in &mut columns {
-                for expression in [&mut column.default, &mut column.check]
-                    .into_iter()
-                    .flatten()
-                {
-                    changed |= crate::engine_events::rewrite_expression_routine_identity(
-                        expression, target, new_name,
-                    )
-                    .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-                }
-                if let Some(generated) = column.generated.as_mut() {
-                    changed |= crate::engine_events::rewrite_expression_routine_identity(
-                        &mut generated.expression,
-                        target,
-                        new_name,
-                    )
-                    .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-                    for dependency in &mut generated.function_dependencies {
-                        if crate::engine_session::function_binding_matches(dependency, target) {
-                            dependency.name = new_name.to_string();
-                            changed = true;
-                        }
-                    }
-                }
+            if rewrite_schema_routine_references(&mut columns, &mut checks, target, new_name)? {
+                table_updates.push((table_name, table, columns, checks));
             }
-            for check in &mut checks {
-                changed |= crate::engine_events::rewrite_expression_routine_identity(
-                    &mut check.expr,
-                    target,
-                    new_name,
-                )
-                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+        }
+
+        let mut foreign_updates = Vec::new();
+        for (relation, mut table) in self.durable.foreign_tables.read().clone() {
+            if rewrite_schema_routine_references(
+                &mut table.columns,
+                &mut table.checks,
+                target,
+                new_name,
+            )? {
+                foreign_updates.push((relation, table));
             }
-            if !changed {
-                continue;
-            }
-            if self.is_persistent() {
+        }
+
+        if self.is_persistent() {
+            for (table_name, table, columns, checks) in &table_updates {
                 self.persist_constraint_candidate(
-                    &table_name,
-                    &table,
-                    &columns,
-                    &checks,
+                    table_name,
+                    table,
+                    columns,
+                    checks,
                     &table.foreign_keys.read(),
                     &table.key_constraints.read(),
                 )?;
             }
-            updates.push((table, columns, checks));
+            for (relation, table) in &foreign_updates {
+                self.persist_foreign_table_definition(relation, table)?;
+            }
         }
-        let changed = !updates.is_empty();
-        for (table, columns, checks) in updates {
+
+        let tables_changed = !table_updates.is_empty();
+        for (_, table, columns, checks) in table_updates {
             *table.columns.write() = columns;
             *table.table_checks.write() = checks;
         }
-        if changed {
+        let foreign_tables_changed = !foreign_updates.is_empty();
+        if foreign_tables_changed {
+            let mut tables = self.durable.foreign_tables.write();
+            for (relation, table) in foreign_updates {
+                tables.insert(relation, table);
+            }
+        }
+        if tables_changed {
             self.note_table_catalog_changed();
+        }
+        if foreign_tables_changed {
+            self.note_catalog_registry_changed();
         }
         Ok(())
     }

@@ -158,22 +158,30 @@ impl Engine {
                 SchemaAclPrivilege::Create,
             )?;
         }
-        crate::engine_table_security::rewrite_acl_owner(&mut security, &new_owner);
-        let columns = self
+        let table = self
             .durable
             .foreign_tables
             .read()
             .get(&relation)
-            .map(|table| {
-                table
-                    .columns
-                    .iter()
-                    .map(|column| column.name.clone())
-                    .collect::<Vec<_>>()
-            })
+            .cloned()
             .ok_or_else(|| {
                 SQLError::Internal(format!("foreign table `{name}` disappeared before update"))
             })?;
+        let sequence_updates =
+            self.table_owned_sequence_owner_updates(table.object_id, &new_owner)?;
+        for (sequence, sequence_security) in &sequence_updates {
+            self.persist_sequence_security(
+                &sequence.qualified_name(),
+                sequence,
+                sequence_security,
+            )?;
+        }
+        crate::engine_table_security::rewrite_acl_owner(&mut security, &new_owner);
+        let columns = table
+            .columns
+            .iter()
+            .map(|column| column.name.clone())
+            .collect::<Vec<_>>();
         crate::engine_table_security::validate_table_security_invariants(
             &security,
             Some(&columns),
@@ -189,6 +197,12 @@ impl Engine {
             .foreign_table_security
             .write()
             .insert(relation, security);
+        if !sequence_updates.is_empty() {
+            let mut registry = self.durable.sequence_security.write();
+            for (sequence, sequence_security) in sequence_updates {
+                registry.insert(sequence, sequence_security);
+            }
+        }
         self.note_catalog_registry_changed();
         Ok(())
     }

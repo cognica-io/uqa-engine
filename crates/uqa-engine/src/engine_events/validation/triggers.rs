@@ -41,7 +41,7 @@ impl Engine {
     ) -> Result<Vec<ColumnDef>, SQLError> {
         if kind == "table" {
             return self
-                .try_describe_table(&relation.qualified_name())
+                .try_describe_table_row_type(&relation.qualified_name())
                 .map_err(|error| SQLError::Internal(format!("read trigger columns: {error}")))?
                 .ok_or_else(|| SQLError::UnknownTable(relation.qualified_name()));
         }
@@ -56,12 +56,7 @@ impl Engine {
             return Ok(table
                 .columns
                 .into_iter()
-                .map(|column| {
-                    trigger_column(
-                        column.name,
-                        crate::engine_fdw::fdw_column_type_to_sql(&column.ty),
-                    )
-                })
+                .map(|column| trigger_column(column.name, column.ty))
                 .collect());
         }
         let view = self

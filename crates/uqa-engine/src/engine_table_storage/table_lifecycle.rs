@@ -141,17 +141,7 @@ impl Engine {
         )?;
         for sequence in self.owned_sequences_for_drop(&target_names, &entries)? {
             dependents.extend(
-                self.sequence_schema_expression_dependents(&sequence)?
-                    .into_iter()
-                    .filter(|(table, _)| !target_names.contains(table))
-                    .map(|(table, column)| {
-                        format!("default or generated expression on {table}.{column}")
-                    }),
-            );
-            dependents.extend(
-                self.views_depending_on_sequence(&sequence)?
-                    .into_iter()
-                    .map(|view| format!("view {view}")),
+                self.sequence_external_dependents_for_owner_drop(&sequence, &target_names)?,
             );
         }
         dependents.sort_unstable();

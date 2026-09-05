@@ -13,21 +13,109 @@ use crate::engine_capabilities::RelationResolution;
 use crate::engine_state::SequenceSecurity;
 use uqa_sql::ast::RelationPersistence;
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum SequenceSchemaDependent {
+    Default {
+        table: String,
+        column: String,
+        foreign: bool,
+    },
+    GeneratedColumn {
+        table: String,
+        column: String,
+        foreign: bool,
+    },
+    CheckConstraint {
+        table: String,
+        constraint: String,
+        foreign: bool,
+    },
+}
+
+impl SequenceSchemaDependent {
+    pub(crate) fn table(&self) -> &str {
+        match self {
+            Self::Default { table, .. }
+            | Self::GeneratedColumn { table, .. }
+            | Self::CheckConstraint { table, .. } => table,
+        }
+    }
+
+    pub(crate) fn is_column(&self, table_name: &str, column_name: &str) -> bool {
+        match self {
+            Self::Default { table, column, .. } | Self::GeneratedColumn { table, column, .. } => {
+                table == table_name && column == column_name
+            }
+            Self::CheckConstraint { .. } => false,
+        }
+    }
+
+    pub(crate) fn object_label(&self) -> String {
+        match self {
+            Self::Default {
+                table,
+                column,
+                foreign,
+            } => format!(
+                "default value for column {column} of {} {table}",
+                relation_kind(*foreign)
+            ),
+            Self::GeneratedColumn {
+                table,
+                column,
+                foreign,
+            } => format!("column {column} of {} {table}", relation_kind(*foreign)),
+            Self::CheckConstraint {
+                table,
+                constraint,
+                foreign,
+            } => format!(
+                "constraint {constraint} on {} {table}",
+                relation_kind(*foreign)
+            ),
+        }
+    }
+
+    fn restrict_label(&self) -> String {
+        match self {
+            Self::Default { table, column, .. } | Self::GeneratedColumn { table, column, .. } => {
+                format!("{table}.{column}")
+            }
+            Self::CheckConstraint {
+                table,
+                constraint,
+                foreign,
+            } => format!(
+                "constraint {constraint} on {} {table}",
+                relation_kind(*foreign)
+            ),
+        }
+    }
+}
+
+fn relation_kind(foreign: bool) -> &'static str {
+    if foreign {
+        "foreign table"
+    } else {
+        "table"
+    }
+}
+
 struct SequenceDropDependents {
-    columns: Vec<(String, String)>,
+    schema: Vec<SequenceSchemaDependent>,
     views: Vec<String>,
     rules: Vec<(RelationIdentity, String)>,
 }
 
 impl SequenceDropDependents {
     fn ensure_empty_for_restrict(&self, name: &str) -> Result<(), SQLError> {
-        if self.columns.is_empty() && self.views.is_empty() && self.rules.is_empty() {
+        if self.schema.is_empty() && self.views.is_empty() && self.rules.is_empty() {
             return Ok(());
         }
         let mut dependents = self
-            .columns
+            .schema
             .iter()
-            .map(|(table, column)| format!("{table}.{column}"))
+            .map(SequenceSchemaDependent::restrict_label)
             .collect::<Vec<_>>();
         dependents.extend(self.views.iter().map(|view| format!("view {view}")));
         dependents.extend(
@@ -83,17 +171,7 @@ impl Engine {
         ))
     }
 
-    /// Resolve a reference read from legacy persisted metadata without using
-    /// the current session's `search_path`. An unqualified local name is safe
-    /// only when exactly one catalog sequence has that name.
-    pub(crate) fn resolve_stored_sequence_reference(
-        &self,
-        reference: &str,
-    ) -> StorageBackendResult<String> {
-        self.refresh_sequences_from_catalog()?;
-        self.resolve_stored_sequence_reference_from_loaded_registry(reference)
-    }
-
+    /// Resolve a reference read from persisted metadata against the loaded registry without using the current session's `search_path`. An unqualified local name is safe only when exactly one catalog sequence has that name.
     pub(crate) fn resolve_stored_sequence_reference_from_loaded_registry(
         &self,
         reference: &str,
@@ -189,29 +267,27 @@ impl Engine {
         })
     }
 
-    pub(crate) fn create_sequence_with_persistence(
+    pub(crate) fn create_implicit_sequence_with_persistence(
         &self,
         name: &str,
         start: i64,
         increment: i64,
         data_type: SequenceDataType,
-        if_not_exists: bool,
         persistence: uqa_sql::ast::RelationPersistence,
-    ) -> Result<bool, String> {
-        self.with_implicit_string_transaction(|engine| {
-            engine
-                .create_sequence_inner(
-                    name,
-                    Self::default_sequence_state(start, increment, data_type),
-                    if_not_exists,
-                    persistence,
-                    &uqa_sql::ast::SequenceOwnership::Unchanged,
-                )
-                .map_err(|error| error.to_string())
+    ) -> Result<(), SQLError> {
+        self.with_implicit_transaction(|engine| {
+            engine.create_sequence_inner(
+                name,
+                Self::default_sequence_state(start, increment, data_type),
+                false,
+                persistence,
+                &uqa_sql::ast::SequenceOwnership::Unchanged,
+            )?;
+            Ok(())
         })
     }
 
-    fn default_sequence_state(
+    pub(crate) fn default_sequence_state(
         start: i64,
         increment: i64,
         data_type: SequenceDataType,
@@ -414,7 +490,7 @@ impl Engine {
             {
                 let owner_table = self
                     .sequence_owner_target(state.owner.expect("identity owner was checked"))
-                    .map_or_else(|| "<missing>".into(), |(table, _)| table);
+                    .map_or_else(|| "<missing>".into(), |(table, _, _)| table);
                 return Err(SQLError::Routine {
                     sqlstate: "0A000".into(),
                     message: format!(
@@ -757,7 +833,7 @@ impl Engine {
     }
 
     fn sequence_drop_dependents(&self, name: &str) -> Result<SequenceDropDependents, SQLError> {
-        let columns = self
+        let schema = self
             .sequence_schema_expression_dependents(name)
             .map_err(|error| {
                 SQLError::Internal(format!(
@@ -777,7 +853,7 @@ impl Engine {
                 ))
             })?;
         Ok(SequenceDropDependents {
-            columns,
+            schema,
             views,
             rules,
         })
@@ -807,7 +883,7 @@ impl Engine {
         cascade: bool,
         owner_initiated: bool,
     ) -> Result<(), SQLError> {
-        let mut cascade_columns = Vec::new();
+        let mut cascade_schema = Vec::new();
         let mut direct_views = Vec::new();
         for name in names {
             if !owner_initiated {
@@ -823,15 +899,17 @@ impl Engine {
                     .and_then(|state| state.owner)
                     .filter(|owner| owner.dependency == SequenceOwnerDependency::Internal);
                 if let Some(owner) = owner {
-                    let (table, column) = self.sequence_owner_target(owner).ok_or_else(|| {
-                        SQLError::Internal(format!(
-                            "identity sequence `{name}` has a dangling owner dependency"
-                        ))
-                    })?;
+                    let (table, column, foreign) =
+                        self.sequence_owner_target(owner).ok_or_else(|| {
+                            SQLError::Internal(format!(
+                                "identity sequence `{name}` has a dangling owner dependency"
+                            ))
+                        })?;
+                    let relation_kind = if foreign { "foreign table" } else { "table" };
                     return Err(SQLError::Routine {
                         sqlstate: "2BP01".into(),
                         message: format!(
-                            "cannot drop sequence {name} because column {column} of table {table} requires it"
+                            "cannot drop sequence {name} because column {column} of {relation_kind} {table} requires it"
                         ),
                     });
                 }
@@ -840,11 +918,11 @@ impl Engine {
             if !cascade {
                 dependents.ensure_empty_for_restrict(name)?;
             }
-            cascade_columns.extend(dependents.columns);
+            cascade_schema.extend(dependents.schema);
             direct_views.extend(dependents.views);
         }
-        cascade_columns.sort();
-        cascade_columns.dedup();
+        cascade_schema.sort();
+        cascade_schema.dedup();
         let cascade_views = self.cascade_view_closure(direct_views)?;
         if cascade {
             self.drop_rules_for_sequence_cascade(names, &cascade_views)?;
@@ -869,11 +947,9 @@ impl Engine {
             }
         }
         if cascade {
-            let mut dependents = cascade_columns
+            let mut dependents = cascade_schema
                 .iter()
-                .map(|(table, column)| {
-                    format!("default value for column {column} of table {table}")
-                })
+                .map(SequenceSchemaDependent::object_label)
                 .collect::<Vec<_>>();
             dependents.extend(cascade_views.iter().map(|view| format!("view {view}")));
             match dependents.as_slice() {

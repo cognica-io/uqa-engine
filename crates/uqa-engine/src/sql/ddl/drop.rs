@@ -209,6 +209,12 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
             for table in &foreign_tables {
                 engine.ensure_foreign_table_drop_authority(table)?;
             }
+            let target_names = foreign_tables.iter().cloned().collect();
+            let owned_sequences = engine
+                .foreign_table_owned_sequence_names(&foreign_tables)
+                .map_err(|error| {
+                    ddl_storage_error("DROP FOREIGN TABLE sequence ownership", error)
+                })?;
             let mut dependents = std::collections::BTreeSet::new();
             for table in &foreign_tables {
                 dependents.extend(
@@ -232,6 +238,18 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
                         format!("rule {rule} on table {}", table.qualified_name())
                     }),
             );
+            for sequence in &owned_sequences {
+                dependents.extend(
+                    engine
+                        .sequence_external_dependents_for_owner_drop(sequence, &target_names)
+                        .map_err(|error| {
+                            ddl_storage_error(
+                                "DROP FOREIGN TABLE owned-sequence dependency preflight",
+                                error,
+                            )
+                        })?,
+                );
+            }
             if !stmt.cascade && !dependents.is_empty() {
                 return Err(SQLError::Routine {
                     sqlstate: "2BP01".into(),
@@ -259,6 +277,13 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
                         "foreign table `{table}` disappeared after DROP preflight"
                     )));
                 }
+            }
+            for sequence in owned_sequences {
+                engine
+                    .drop_owned_sequence(&sequence, stmt.cascade)
+                    .map_err(|error| {
+                        ddl_storage_error("DROP FOREIGN TABLE owned sequence", error)
+                    })?;
             }
         }
         DropKind::Index => unreachable!("DROP INDEX has a bound execution path"),

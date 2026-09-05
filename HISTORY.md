@@ -46,6 +46,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Retained each foreign table's complete SQL column and CHECK schema as its sole durable runtime definition instead of reconstructing it from the lossy FDW name/type projection, with stable table and column object identities, versioned initial-open migration, atomic validation and publication, catalog visibility, exact routine and sequence rename and DROP dependencies, owned `SERIAL` and identity sequences, PostgreSQL-style implicit sequence name clipping and collision suffixes, `pg_get_serial_sequence`, owner transfer, rollback and reopen coverage, relation-kind notices, and fail-closed unsupported key declarations.
 - Separated tuple `xmin` from the user document namespace with a required typed storage-record contract, eager SQLite and key-value migration of legacy sentinel fields, schema-aware preservation of user `xmin` collisions, and metadata-safe scans, command overlays, portal snapshots, row-lock rechecks, OLD/NEW `RETURNING`, schema rewrites, and `VACUUM FULL`.
 - Accepted PostgreSQL 18 `INSERT DEFAULT VALUES` as one input row so direct inserts and rewrite-rule actions apply defaults, serial or identity generation, event cardinality, and `RETURNING` instead of rejecting the parser's source-less AST.
 - Made `DROP TABLE ... CASCADE` remove the complete transitive dependent-view closure without requiring ownership of those dependent views, while preserving owner-error precedence for direct view drops.

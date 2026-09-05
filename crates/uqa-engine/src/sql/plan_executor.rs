@@ -390,22 +390,14 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         &self,
         statement: &CreateForeignTable,
     ) -> Result<SQLResult, SQLError> {
-        for column in &statement.columns {
-            super::validate_postgres_column_name(&column.name)?;
-            super::validate_postgres_relation_column_type(&column.name, &column.ty)?;
-        }
-        let name = self
-            .engine
-            .try_relation_name_for_sql_create(&statement.name)?;
-        self.engine
-            .register_foreign_table(
-                name,
-                statement.server_name.clone(),
-                statement.columns.clone(),
-                statement.options.clone(),
-                statement.if_not_exists,
-            )
-            .map_err(SQLError::Unsupported)?;
+        self.engine.register_foreign_table_with_checks(
+            statement.name.clone(),
+            statement.server_name.clone(),
+            statement.columns.clone(),
+            statement.checks.clone(),
+            statement.options.clone(),
+            statement.if_not_exists,
+        )?;
         Ok(SQLResult::empty())
     }
 

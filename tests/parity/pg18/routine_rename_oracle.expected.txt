@@ -24,6 +24,9 @@ generated-deparse|true
 column-default-deparse|true
 column-check-deparse|true
 table-check-deparse|true
+foreign-default-deparse|true
+foreign-generated-deparse|true
+foreign-check-deparse|true
 rule-deparse|true
 trigger-deparse|true
 trigger-condition-deparse|true
@@ -50,4 +53,17 @@ parameter-default-after-recreate|2
 bound-after-old-drop|5
 routine-cascade|true|true
 schema-expression-cascade|true|true|true
+foreign-schema-expression-cascade|true|NO|true|true
+foreign-generated-cascade|true
 trigger-condition-cascade|true|true|true
+foreign-sequence-default-deparse|true
+foreign-sequence-check-deparse|true
+foreign-sequence-restrict|2BP01
+foreign-sequence-cascade|true|NO|true|true
+foreign-generated-sequence-collision|ok
+foreign-generated-sequence-collision-name|uqa_routine_rename_oracle.foreign_generated_sequence_collision_id_seq2
+foreign-owned-sequences|true|true
+foreign-owned-dependency-types|true
+foreign-identity-sequence-drop|2BP01
+foreign-owner-drop-restrict|2BP01
+foreign-owner-drop|true|true
