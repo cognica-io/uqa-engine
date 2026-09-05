@@ -25,6 +25,7 @@ fn metadata_foreign_keys(
             continue;
         };
         foreign_keys.push(uqa_sql::ast::ForeignKey {
+            referenced_key: reference.referenced_key.clone(),
             name: reference.name.clone(),
             object_id: reference.object_id,
             local_columns: vec![column.name.clone()],

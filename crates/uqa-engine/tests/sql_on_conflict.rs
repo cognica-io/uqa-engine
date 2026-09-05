@@ -310,10 +310,7 @@ fn conflict_target_must_match_a_declared_key_and_other_keys_still_apply() {
             &[],
         )
         .unwrap_err();
-    assert!(invalid_target
-        .to_string()
-        .to_ascii_lowercase()
-        .contains("does not match"));
+    assert_eq!(invalid_target.sqlstate(), Some("42P10"));
 
     let other_key = eng
         .sql(
@@ -422,7 +419,7 @@ fn alter_table_add_unique_constraint_enables_conflict_target_and_survives_reopen
                 &[],
             )
             .unwrap_err();
-        assert!(missing.to_string().contains("does not match"));
+        assert_eq!(missing.sqlstate(), Some("42P10"));
 
         eng.sql(
             "ALTER TABLE labels ADD CONSTRAINT labels_tenant_slug_key UNIQUE (tenant, slug)",

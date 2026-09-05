@@ -292,6 +292,10 @@ fn drop_key_constraint_dependencies(
             .map_err(|error| ddl_storage_error("DROP CONSTRAINT dependency", error))?
         {
             if foreign_key.ref_table == canonical
+                && foreign_key
+                    .referenced_key
+                    .as_ref()
+                    .is_none_or(|name| key.name.as_ref() == Some(name))
                 && foreign_key.ref_columns.len() == key.columns.len()
                 && foreign_key
                     .ref_columns

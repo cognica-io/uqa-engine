@@ -115,9 +115,9 @@ pub(in crate::sql) use catalog::{virtual_relation_accepts_row_lock, virtual_rela
 pub(crate) use ddl::{
     bind_stored_check_expression_routines, bind_stored_schema_expression_routines,
     convert_value_to_column_type, convert_value_to_column_type_with_engine,
-    drop_constraint_dependency, validate_check_expression, validate_default_expression,
-    validate_postgres_column_name, validate_postgres_relation_column_type,
-    validate_vector_dimensions,
+    drop_constraint_dependency, drop_index_dependency, validate_check_expression,
+    validate_default_expression, validate_postgres_column_name,
+    validate_postgres_relation_column_type, validate_vector_dimensions,
 };
 use ddl::{
     coerce_to_column_type, column_type_name, core_value_to_json, json_table_arg,
@@ -395,6 +395,7 @@ pub(crate) fn builtin_function_dispatch_name(name: &str) -> String {
                         | "pg_get_triggerdef"
                         | "pg_get_ruledef"
                         | "pg_get_viewdef"
+                        | "pg_get_indexdef"
                         | "pg_has_role"
                         | "has_table_privilege"
                         | "has_column_privilege"

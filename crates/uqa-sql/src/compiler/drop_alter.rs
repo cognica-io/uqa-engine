@@ -606,6 +606,7 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                             &constraint.fk_del_action,
                         )?;
                         let foreign_key = ForeignKey {
+                            referenced_key: None,
                             name,
                             object_id: None,
                             local_columns,

@@ -728,6 +728,7 @@ fn relation_namespace_migration_gives_catalog_indexes_typed_parents() {
                 table_name: "app.docs".into(),
                 columns_json: "[\"id\"]".into(),
                 parameters_json: "{}".into(),
+                definition_json: None,
             })
             .unwrap(),
         )
@@ -740,6 +741,7 @@ fn relation_namespace_migration_gives_catalog_indexes_typed_parents() {
                 table_name: "app.docs".into(),
                 columns_json: "[\"id\"]".into(),
                 parameters_json: "{}".into(),
+                definition_json: None,
             })
             .unwrap(),
         )
@@ -752,6 +754,7 @@ fn relation_namespace_migration_gives_catalog_indexes_typed_parents() {
                 table_name: "pg_temp_91.docs".into(),
                 columns_json: "[\"id\"]".into(),
                 parameters_json: "{}".into(),
+                definition_json: None,
             })
             .unwrap(),
         )
@@ -820,6 +823,7 @@ fn relation_namespace_migration_rejects_catalog_index_collisions_atomically() {
                 table_name: "app.docs".into(),
                 columns_json: "[\"id\"]".into(),
                 parameters_json: "{}".into(),
+                definition_json: None,
             })
             .unwrap(),
         )

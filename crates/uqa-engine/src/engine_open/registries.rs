@@ -189,6 +189,7 @@ impl Engine {
         catalog: &dyn CatalogFacade,
     ) -> StorageBackendResult<()> {
         for row in catalog.load_catalog_indexes()? {
+            crate::engine_catalog_indexes::index_definition(&row)?;
             let table = crate::RelationIdentity::from_legacy_name(&row.table_name)
                 .map_err(StorageBackendError::Other)?;
             if row.relation.schema != table.schema {

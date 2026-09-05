@@ -73,6 +73,9 @@ where
             self.bind_expr(expression, &visible)?;
         }
         if let Some(conflict) = &mut insert.on_conflict {
+            if let Some(predicate) = conflict.predicate.as_deref_mut() {
+                self.bind_expr(predicate, &visible)?;
+            }
             if let uqa_sql::ast::OnConflictAction::Update {
                 assignments,
                 r#where,

@@ -69,7 +69,15 @@ impl Engine {
     ) -> StorageBackendResult<bool> {
         Ok(Self::catalog_index_columns(row)?
             .iter()
-            .any(|candidate| candidate.eq_ignore_ascii_case(column)))
+            .any(|candidate| candidate == column)
+            || crate::engine_catalog_indexes::index_definition(row)?
+                .included_columns
+                .iter()
+                .any(|name| name == column)
+            || crate::engine_catalog_indexes::index_definition(row)?
+                .predicate
+                .as_deref()
+                .is_some_and(|predicate| schema_expr_references_column(predicate, column)))
     }
 
     pub(super) fn catalog_index_with_renamed_column(
@@ -80,7 +88,7 @@ impl Engine {
         let mut columns = Self::catalog_index_columns(&row)?;
         let mut changed = false;
         for column in &mut columns {
-            if column.eq_ignore_ascii_case(from) {
+            if column == from {
                 *column = to.to_string();
                 changed = true;
             }
@@ -89,6 +97,16 @@ impl Engine {
             row.columns_json =
                 serde_json::to_string(&columns).map_err(StorageBackendError::from)?;
         }
+        let mut definition = crate::engine_catalog_indexes::index_definition(&row)?;
+        for column in &mut definition.included_columns {
+            if column == from {
+                *column = to.into();
+            }
+        }
+        if let Some(predicate) = definition.predicate.as_deref_mut() {
+            rename_schema_expr_column(predicate, from, to)?;
+        }
+        row.definition_json = Some(serde_json::to_string(&definition)?);
         Ok(row)
     }
 
@@ -129,13 +147,14 @@ impl Engine {
         for (name, row) in rows.iter() {
             if row.table_name == table && Self::catalog_index_references_column(row, from)? {
                 let renamed = Self::catalog_index_with_renamed_column(row.clone(), from, to)?;
-                updates.push((name.clone(), renamed.columns_json));
+                updates.push((name.clone(), renamed));
             }
         }
-        for (name, columns_json) in updates {
-            if let Some(row) = rows.get_mut(&name) {
-                row.columns_json = columns_json;
+        for (name, renamed) in updates {
+            if let Some(catalog) = self.storage.catalog.as_ref() {
+                catalog.save_catalog_index_row(&renamed)?;
             }
+            rows.insert(name, renamed);
         }
         Ok(())
     }

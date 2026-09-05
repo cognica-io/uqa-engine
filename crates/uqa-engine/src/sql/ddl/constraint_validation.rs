@@ -231,7 +231,7 @@ pub(super) fn resolve_foreign_key_parent(
         .map_err(|error| SQLError::Internal(format!("describe FOREIGN KEY target: {error}")))?
         .ok_or_else(|| SQLError::UnknownTable(canonical.clone()))?;
     let keys = engine
-        .try_key_constraints(&canonical)
+        .referenceable_keys(&canonical)
         .map_err(|error| SQLError::Internal(format!("read FOREIGN KEY target keys: {error}")))?;
     Ok((canonical, columns, keys))
 }

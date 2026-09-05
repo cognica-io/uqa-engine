@@ -24,6 +24,7 @@ pub(in crate::sql::catalog) fn build_pg_constraint(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
+    let indexes = super::catalog_index_relations(catalog, resolution)?;
     let mut rows = constraint_catalog_rows(catalog, resolution)?
         .into_iter()
         .map(|constraint| -> Result<ResultRow, SQLError> {
@@ -74,6 +75,7 @@ pub(in crate::sql::catalog) fn build_pg_constraint(
                 )?,
                 None => 0,
             };
+            let index_oid = constraint_index_oid(&constraint, &indexes);
             Ok(row([
                 (
                     "oid",
@@ -97,7 +99,7 @@ pub(in crate::sql::catalog) fn build_pg_constraint(
                 ("convalidated", bool_value(constraint.state.validated())),
                 ("conrelid", int_value(constrained_relation_oid)),
                 ("contypid", int_value(0)),
-                ("conindid", int_value(0)),
+                ("conindid", int_value(index_oid)),
                 ("conparentid", int_value(0)),
                 ("confrelid", int_value(referenced_relation_oid)),
                 (
@@ -153,4 +155,28 @@ const fn foreign_key_match_code(match_type: uqa_sql::ast::ForeignKeyMatch) -> &'
         uqa_sql::ast::ForeignKeyMatch::Simple => "s",
         uqa_sql::ast::ForeignKeyMatch::Full => "f",
     }
+}
+
+fn constraint_index_oid(
+    constraint: &super::super::helpers::constraints::ConstraintCatalogRow,
+    indexes: &[super::CatalogIndexRelation],
+) -> i64 {
+    use super::super::helpers::constraints::ConstraintCatalogKind;
+    let (schema, name) = if let Some(foreign) = &constraint.foreign_key {
+        let Some(name) = foreign.referenced_key.as_deref() else {
+            return 0;
+        };
+        (foreign.schema.as_str(), name)
+    } else if matches!(
+        constraint.kind,
+        ConstraintCatalogKind::PrimaryKey | ConstraintCatalogKind::Unique { .. }
+    ) {
+        (constraint.schema.as_str(), constraint.name.as_str())
+    } else {
+        return 0;
+    };
+    indexes
+        .iter()
+        .find(|index| index.relation.schema == schema && index.relation.name == name)
+        .map_or(0, super::CatalogIndexRelation::oid)
 }

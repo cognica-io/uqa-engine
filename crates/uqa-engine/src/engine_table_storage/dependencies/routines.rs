@@ -250,6 +250,7 @@ impl Engine {
         target: &uqa_sql::ast::FunctionBinding,
         new_name: &str,
     ) -> StorageBackendResult<()> {
+        self.rewrite_index_routine_identity(target, new_name)?;
         let mut table_updates = Vec::new();
         for (table_name, table) in self.table_entries() {
             let mut columns = table.columns.read().clone();

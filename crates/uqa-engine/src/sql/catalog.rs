@@ -80,6 +80,8 @@ mod ag_catalog;
 mod builtin_routines;
 mod events;
 mod expression_text;
+mod index_definition;
+pub(in crate::sql) use index_definition::pg_get_indexdef_value;
 mod view_definition;
 pub(in crate::sql) use view_definition::pg_get_viewdef_value;
 pub(crate) use view_definition::rename_view_column_query;

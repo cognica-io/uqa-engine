@@ -64,6 +64,7 @@ pub(in crate::sql::catalog) struct ConstraintCatalogColumn {
 
 #[derive(Debug, Clone)]
 pub(in crate::sql::catalog) struct ForeignKeyCatalogData {
+    pub(in crate::sql::catalog) referenced_key: Option<String>,
     pub(in crate::sql::catalog) schema: String,
     pub(in crate::sql::catalog) table: String,
     pub(in crate::sql::catalog) column_ordinals: Vec<i64>,
@@ -248,6 +249,7 @@ pub(in crate::sql::catalog) fn constraint_catalog_rows(
             }
             if let Some(reference) = &col.references {
                 let foreign_key = ForeignKey {
+                    referenced_key: reference.referenced_key.clone(),
                     name: reference.name.clone(),
                     object_id: reference.object_id,
                     local_columns: vec![col.name.clone()],
@@ -546,6 +548,10 @@ fn foreign_key_catalog_row(
         ),
         period: foreign_key.period,
         foreign_key: Some(ForeignKeyCatalogData {
+            referenced_key: foreign_key
+                .referenced_key
+                .clone()
+                .or_else(|| referenced_key.and_then(|key| key.name.clone())),
             schema: referenced_schema,
             table: referenced_table,
             column_ordinals: referenced_column_rows

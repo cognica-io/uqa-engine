@@ -150,6 +150,7 @@ pub(super) fn function_volatility_with_binding(
                 | "pg_get_triggerdef"
                 | "pg_get_ruledef"
                 | "pg_get_viewdef"
+                | "pg_get_indexdef"
                 | "pg_has_role"
                 | "has_database_privilege"
                 | "has_schema_privilege"

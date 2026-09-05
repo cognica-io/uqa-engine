@@ -246,7 +246,10 @@ pub(super) fn build_pg_class(
             &index.relation.schema,
             &index.relation.name,
             index.relkind,
-            catalog_usize(index.columns.len(), "pg_class index column count")?,
+            catalog_usize(
+                index.columns.len() + index.definition.included_columns.len(),
+                "pg_class index column count",
+            )?,
             0.0,
             false,
         );

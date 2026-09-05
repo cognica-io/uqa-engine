@@ -154,6 +154,7 @@ pub(in crate::compiler) fn compile_create_table(
                             &cstr.fk_del_action,
                         )?;
                         foreign_keys.push(ForeignKey {
+                            referenced_key: None,
                             name: cname,
                             object_id: None,
                             local_columns,
@@ -518,6 +519,7 @@ pub(in crate::compiler) fn compile_column_def(
                         ));
                     }
                     references = Some(crate::ast::ForeignKeyRef {
+                        referenced_key: None,
                         name: constraint_name(&cstr.conname),
                         object_id: None,
                         table,
@@ -619,6 +621,7 @@ pub(in crate::compiler) fn compile_create_index(
         .ok_or_else(|| SQLError::Internal("CREATE INDEX without table".into()))?;
     let access_method = stmt.access_method.clone();
     let mut columns = Vec::new();
+    let mut column_order = Vec::new();
     for elt in &stmt.index_params {
         let inner = elt
             .node
@@ -634,6 +637,16 @@ pub(in crate::compiler) fn compile_create_index(
                 "expression indexes are not supported".into(),
             ));
         }
+        let descending = idx.ordering() == pg_query::protobuf::SortByDir::SortbyDesc;
+        let nulls_first = match idx.nulls_ordering() {
+            pg_query::protobuf::SortByNulls::SortbyNullsFirst => true,
+            pg_query::protobuf::SortByNulls::SortbyNullsLast => false,
+            _ => descending,
+        };
+        column_order.push(crate::ast::IndexColumnOrder {
+            descending,
+            nulls_first,
+        });
         columns.push(idx.name.clone());
     }
     let name = if stmt.idxname.is_empty() {
@@ -671,11 +684,31 @@ pub(in crate::compiler) fn compile_create_index(
         };
         options.push((key, value));
     }
+    let included_columns = stmt
+        .index_including_params
+        .iter()
+        .map(|node| match node.node.as_ref() {
+            Some(NodeEnum::IndexElem(index)) if !index.name.is_empty() => Ok(index.name.clone()),
+            _ => Err(SQLError::Unsupported(
+                "expressions are not supported in included columns".into(),
+            )),
+        })
+        .collect::<Result<Vec<_>>>()?;
     Ok(CreateIndex {
+        included_columns,
+        column_order,
+        predicate: stmt
+            .where_clause
+            .as_deref()
+            .map(compile_expr)
+            .transpose()?
+            .map(Box::new),
         name,
         table,
         access_method,
         columns,
+        unique: stmt.unique,
+        nulls_not_distinct: stmt.nulls_not_distinct,
         if_not_exists: stmt.if_not_exists,
         options,
     })

@@ -465,22 +465,8 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::load_foreign_tables(self))
     }
 
-    fn save_catalog_index(
-        &self,
-        relation: &RelationIdentity,
-        index_type: &str,
-        table_name: &str,
-        columns_json: &str,
-        parameters_json: &str,
-    ) -> StorageBackendResult<()> {
-        into_storage_result(Catalog::save_catalog_index(
-            self,
-            relation,
-            index_type,
-            table_name,
-            columns_json,
-            parameters_json,
-        ))
+    fn save_catalog_index_row(&self, index: &CatalogIndexRow) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::save_catalog_index_row(self, index))
     }
 
     fn drop_catalog_index(&self, relation: &RelationIdentity) -> StorageBackendResult<()> {

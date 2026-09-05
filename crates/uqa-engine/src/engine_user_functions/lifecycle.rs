@@ -45,6 +45,7 @@ struct RoutineDropResolution {
 }
 
 struct RoutineObjectDependents {
+    indexes: Vec<crate::RelationIdentity>,
     views: Vec<String>,
     columns: Vec<(String, String, bool)>,
     defaults: Vec<(String, String, bool)>,

@@ -16,6 +16,7 @@ use super::{
 use crate::CatalogIndexRow;
 
 mod alter_table;
+mod constraint_indexes;
 mod constraint_validation;
 mod create_index;
 mod create_table;
@@ -34,6 +35,7 @@ pub(crate) use constraint_validation::{
 pub(super) use create_index::run_create_index;
 pub(super) use create_table::{run_create_table, run_create_table_if_not_exists};
 pub(crate) use defaults::{bind_stored_schema_expression_routines, validate_default_expression};
+pub(crate) use drop::drop_index_dependency;
 pub(super) use drop::run_drop;
 use hierarchy::prepare_create_table_hierarchy;
 pub(super) use sequence_ctas::{

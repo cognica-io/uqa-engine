@@ -67,10 +67,18 @@ fn insert_sql(statement: &InsertStmt) -> String {
     }
     if let Some(conflict) = &statement.on_conflict {
         rendered.push_str(" ON CONFLICT");
+        if let Some(constraint) = &conflict.constraint {
+            rendered.push_str(" ON CONSTRAINT ");
+            rendered.push_str(&ident(constraint));
+        }
         if !conflict.conflict_columns.is_empty() {
             rendered.push_str(" (");
             rendered.push_str(&ident_list(&conflict.conflict_columns));
             rendered.push(')');
+        }
+        if let Some(predicate) = &conflict.predicate {
+            rendered.push_str(" WHERE ");
+            rendered.push_str(&expr_sql(predicate));
         }
         match &conflict.action {
             OnConflictAction::Nothing => rendered.push_str(" DO NOTHING"),

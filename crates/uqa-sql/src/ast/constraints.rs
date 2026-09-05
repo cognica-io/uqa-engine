@@ -86,6 +86,8 @@ pub struct ColumnDef {
 #[allow(clippy::struct_excessive_bools)]
 pub struct ForeignKeyRef {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub referenced_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     /// Durable identity of the catalog constraint object. The engine assigns
     /// this when the constraint is published; parsed SQL leaves it unset.
@@ -226,6 +228,9 @@ pub struct DetachedPartitionConstraint {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct ForeignKey {
+    /// Name of the selected unique index in the referenced relation namespace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub referenced_key: Option<String>,
     pub name: Option<String>,
     /// Durable identity of the catalog constraint object. The engine assigns
     /// this when the constraint is published; parsed SQL leaves it unset.

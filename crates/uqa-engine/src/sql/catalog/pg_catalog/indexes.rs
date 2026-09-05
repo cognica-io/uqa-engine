@@ -10,6 +10,7 @@ use uqa_core::Value;
 use uqa_sql::{ResultRow, SQLError};
 
 use crate::engine_capabilities::{CatalogReadView, RelationNameResolution};
+use crate::engine_catalog_indexes::{index_definition, IndexDefinition};
 use crate::RelationIdentity;
 
 use super::super::helpers::index_definitions::{index_columns, indexdef};
@@ -25,6 +26,8 @@ pub(in crate::sql::catalog) struct CatalogIndexRelation {
     pub(in crate::sql::catalog) table_name: String,
     pub(in crate::sql::catalog) index_type: String,
     pub(in crate::sql::catalog) columns: Vec<String>,
+    pub(in crate::sql::catalog) definition: IndexDefinition,
+    pub(in crate::sql::catalog) primary: bool,
     pub(in crate::sql::catalog) relkind: &'static str,
     pub(in crate::sql::catalog) is_partition: bool,
     pub(in crate::sql::catalog) has_children: bool,
@@ -41,48 +44,80 @@ pub(in crate::sql::catalog) fn catalog_index_relations(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
 ) -> Result<Vec<CatalogIndexRelation>, SQLError> {
-    let registered = catalog.catalog_indexes().cloned().collect::<Vec<_>>();
-    let mut used = registered
-        .iter()
-        .map(|index| index.relation.clone())
-        .collect::<std::collections::BTreeSet<_>>();
-    let mut output = Vec::new();
-    for index in registered {
-        let columns = index_columns(&index.columns_json)?;
-        let hierarchy = &catalog
-            .table(resolution, &index.table_name)?
-            .ok_or_else(|| SQLError::UnknownTable(index.table_name.clone()))?
-            .hierarchy;
-        let relkind = if hierarchy.partition_spec.is_some() {
-            "I"
-        } else {
-            "i"
-        };
-        let has_children = relkind == "I"
-            && !catalog
-                .direct_hierarchy_children(resolution, &index.table_name)?
-                .is_empty();
-        let root = CatalogIndexRelation {
+    let mut roots = Vec::new();
+    for index in catalog.catalog_indexes() {
+        roots.push(CatalogIndexRelation {
             relation: index.relation.clone(),
             table_name: index.table_name.clone(),
             index_type: index.index_type.clone(),
-            columns: columns.clone(),
-            relkind,
+            columns: index_columns(&index.columns_json)?,
+            definition: index_definition(index)
+                .map_err(|error| SQLError::Internal(error.to_string()))?,
+            primary: false,
+            relkind: "i",
             is_partition: false,
-            has_children,
+            has_children: false,
             parent_index_oid: None,
-        };
-        let root_oid = root.oid();
-        output.push(root);
-        if relkind == "I" {
-            append_partition_index_children(
+        });
+    }
+    for table in catalog.table_names() {
+        let snapshot = catalog
+            .table(resolution, &table)?
+            .ok_or_else(|| SQLError::UnknownTable(table.clone()))?;
+        let (schema, _) = split_schema_name(&table)?;
+        for key in &snapshot.keys {
+            let name = key
+                .name
+                .as_ref()
+                .ok_or_else(|| SQLError::Internal("unnamed catalog key".into()))?;
+            roots.push(CatalogIndexRelation {
+                relation: RelationIdentity::new(&schema, name),
+                table_name: table.clone(),
+                index_type: if key.without_overlaps {
+                    "gist"
+                } else {
+                    "btree"
+                }
+                .into(),
+                columns: key.columns.clone(),
+                definition: IndexDefinition {
+                    unique: true,
+                    nulls_not_distinct: key.nulls_not_distinct,
+                    ..IndexDefinition::default()
+                },
+                primary: key.kind == uqa_sql::ast::TableKeyConstraintKind::PrimaryKey,
+                relkind: "i",
+                is_partition: false,
+                has_children: false,
+                parent_index_oid: None,
+            });
+        }
+    }
+    let mut used = roots
+        .iter()
+        .map(|index| index.relation.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut order = roots
+        .iter()
+        .map(|index| {
+            partition_depth(catalog, resolution, &index.table_name)
+                .map(|depth| (depth, index.relation.clone()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    order.sort();
+    let mut pending = roots
+        .into_iter()
+        .map(|index| (index.relation.clone(), index))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let mut output = Vec::new();
+    for (_, relation) in order {
+        if let Some(root) = pending.remove(&relation) {
+            append_index_tree(
                 catalog,
                 resolution,
-                &index.table_name,
-                root_oid,
-                &index.index_type,
-                &columns,
+                root,
                 &mut used,
+                &mut pending,
                 &mut output,
             )?;
         }
@@ -90,56 +125,99 @@ pub(in crate::sql::catalog) fn catalog_index_relations(
     Ok(output)
 }
 
-#[expect(clippy::too_many_arguments, reason = "keeps catalog metadata aligned")]
-fn append_partition_index_children(
+fn append_index_tree(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
-    parent_table: &str,
-    parent_index_oid: i64,
-    index_type: &str,
-    columns: &[String],
+    mut index: CatalogIndexRelation,
     used: &mut std::collections::BTreeSet<RelationIdentity>,
+    pending: &mut std::collections::BTreeMap<RelationIdentity, CatalogIndexRelation>,
     output: &mut Vec<CatalogIndexRelation>,
 ) -> Result<(), SQLError> {
-    for child in catalog.direct_hierarchy_children(resolution, parent_table)? {
+    let snapshot = catalog
+        .table(resolution, &index.table_name)?
+        .ok_or_else(|| SQLError::UnknownTable(index.table_name.clone()))?;
+    index.relkind = if snapshot.hierarchy.partition_spec.is_some() {
+        "I"
+    } else {
+        "i"
+    };
+    let children = if index.relkind == "I" {
+        catalog.direct_hierarchy_children(resolution, &index.table_name)?
+    } else {
+        Vec::new()
+    };
+    index.has_children = !children.is_empty();
+    let parent_oid = index.oid();
+    output.push(index.clone());
+    for child in children {
         let (schema, table) = split_schema_name(&child)?;
-        let hierarchy = &catalog
-            .table(resolution, &child)?
-            .ok_or_else(|| SQLError::UnknownTable(child.clone()))?
-            .hierarchy;
-        let relkind = if hierarchy.partition_spec.is_some() {
-            "I"
+        let reusable = pending
+            .values()
+            .find(|candidate| candidate.table_name == child && equivalent_index(candidate, &index))
+            .map(|candidate| candidate.relation.clone());
+        let mut child_index = if let Some(reusable) = reusable {
+            pending
+                .remove(&reusable)
+                .ok_or_else(|| SQLError::Internal("partition index disappeared".into()))?
         } else {
-            "i"
+            CatalogIndexRelation {
+                relation: allocate_derived_index_name(&schema, &table, &index.columns, used),
+                table_name: child,
+                ..index.clone()
+            }
         };
-        let children = catalog.direct_hierarchy_children(resolution, &child)?;
-        let relation = allocate_derived_index_name(&schema, &table, columns, used);
-        let relation = CatalogIndexRelation {
-            relation,
-            table_name: child.clone(),
-            index_type: index_type.to_string(),
-            columns: columns.to_vec(),
-            relkind,
-            is_partition: true,
-            has_children: !children.is_empty(),
-            parent_index_oid: Some(parent_index_oid),
-        };
-        let relation_oid = relation.oid();
-        output.push(relation);
-        if relkind == "I" {
-            append_partition_index_children(
-                catalog,
-                resolution,
-                &child,
-                relation_oid,
-                index_type,
-                columns,
-                used,
-                output,
-            )?;
-        }
+        child_index.is_partition = true;
+        child_index.parent_index_oid = Some(parent_oid);
+        append_index_tree(catalog, resolution, child_index, used, pending, output)?;
     }
     Ok(())
+}
+
+fn equivalent_index(left: &CatalogIndexRelation, right: &CatalogIndexRelation) -> bool {
+    left.columns == right.columns
+        && left.primary == right.primary
+        && left.index_type == right.index_type
+        && left.definition.unique == right.definition.unique
+        && left.definition.nulls_not_distinct == right.definition.nulls_not_distinct
+        && left.definition.included_columns == right.definition.included_columns
+        && left.definition.predicate == right.definition.predicate
+        && (0..left.columns.len()).all(|position| {
+            left.definition
+                .column_order
+                .get(position)
+                .copied()
+                .unwrap_or_default()
+                == right
+                    .definition
+                    .column_order
+                    .get(position)
+                    .copied()
+                    .unwrap_or_default()
+        })
+}
+
+fn partition_depth(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    table: &str,
+) -> Result<usize, SQLError> {
+    let mut table = table.to_string();
+    let mut ancestors = std::collections::BTreeSet::new();
+    loop {
+        let snapshot = catalog
+            .table(resolution, &table)?
+            .ok_or_else(|| SQLError::UnknownTable(table.clone()))?;
+        if snapshot.hierarchy.partition_bound.is_none() {
+            return Ok(ancestors.len());
+        }
+        let Some(parent) = snapshot.hierarchy.parents.first() else {
+            return Ok(ancestors.len());
+        };
+        if !ancestors.insert(parent.clone()) {
+            return Err(SQLError::Internal("cyclic index partition ancestry".into()));
+        }
+        table.clone_from(parent);
+    }
 }
 
 fn allocate_derived_index_name(
@@ -212,12 +290,20 @@ pub(in crate::sql::catalog) fn build_pg_index(
             .ok_or_else(|| SQLError::UnknownTable(index.table_name.clone()))?
             .columns;
         let mut keys = Vec::with_capacity(index.columns.len());
-        for column in &index.columns {
+        for column in index
+            .columns
+            .iter()
+            .chain(&index.definition.included_columns)
+        {
             if let Some(position) = table_cols.iter().position(|item| item.name == *column) {
                 keys.push(catalog_ordinal(position, "pg_index key column")?);
             }
         }
         let column_count = catalog_usize(index.columns.len(), "pg_index column count")?;
+        let total_count = catalog_usize(
+            index.columns.len() + index.definition.included_columns.len(),
+            "pg_index total column count",
+        )?;
         rows.push(row([
             ("indexrelid", int_value(index.oid())),
             (
@@ -228,11 +314,14 @@ pub(in crate::sql::catalog) fn build_pg_index(
                     &index.table_name,
                 )?),
             ),
-            ("indnatts", int_value(column_count)),
+            ("indnatts", int_value(total_count)),
             ("indnkeyatts", int_value(column_count)),
-            ("indisunique", bool_value(false)),
-            ("indnullsnotdistinct", bool_value(false)),
-            ("indisprimary", bool_value(false)),
+            ("indisunique", bool_value(index.definition.unique)),
+            (
+                "indnullsnotdistinct",
+                bool_value(index.definition.nulls_not_distinct),
+            ),
+            ("indisprimary", bool_value(index.primary)),
             ("indisexclusion", bool_value(false)),
             ("indimmediate", bool_value(true)),
             ("indisclustered", bool_value(false)),
@@ -247,9 +336,39 @@ pub(in crate::sql::catalog) fn build_pg_index(
             ),
             ("indcollation", Value::Null),
             ("indclass", Value::Null),
-            ("indoption", Value::Null),
+            (
+                "indoption",
+                Value::List(
+                    (0..index.columns.len())
+                        .map(|position| {
+                            let order = index
+                                .definition
+                                .column_order
+                                .get(position)
+                                .copied()
+                                .unwrap_or_default();
+                            Value::Int(
+                                i64::from(order.descending) + 2 * i64::from(order.nulls_first),
+                            )
+                        })
+                        .collect(),
+                ),
+            ),
             ("indexprs", Value::Null),
-            ("indpred", Value::Null),
+            (
+                "indpred",
+                index
+                    .definition
+                    .predicate
+                    .as_deref()
+                    .map(|predicate| {
+                        super::super::view_definition::stored_expression_definition(
+                            catalog, resolution, predicate, false,
+                        )
+                    })
+                    .transpose()?
+                    .map_or(Value::Null, Value::Str),
+            ),
         ]));
     }
     Ok(rows)
@@ -264,7 +383,11 @@ pub(in crate::sql::catalog) fn build_pg_indexes(
         let (schema, table) = split_schema_name(&index.table_name)?;
         let qualified_table = format!(
             "{}.{}",
-            uqa_sql::expr::quote_ident(&schema),
+            uqa_sql::expr::quote_ident(if schema.starts_with("pg_temp_") {
+                "pg_temp"
+            } else {
+                &schema
+            }),
             uqa_sql::expr::quote_ident(&table)
         );
         let index_target = if index.relkind == "I" {
@@ -279,12 +402,7 @@ pub(in crate::sql::catalog) fn build_pg_indexes(
             ("tablespace", Value::Null),
             (
                 "indexdef",
-                str_value(indexdef(
-                    &index.relation.name,
-                    &index.index_type,
-                    &index_target,
-                    &index.columns,
-                )),
+                str_value(indexdef(catalog, resolution, &index, &index_target, false)?),
             ),
         ]));
     }

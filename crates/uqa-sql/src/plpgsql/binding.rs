@@ -469,6 +469,8 @@ pub fn bind_statement(stmt: &Statement, r: &mut dyn VariableResolver) -> Result<
             };
             out.on_conflict = match insert.on_conflict.as_ref() {
                 Some(oc) => Some(crate::ast::OnConflict {
+                    predicate: bind_opt_expr(oc.predicate.as_deref(), r)?.map(Box::new),
+                    constraint: oc.constraint.clone(),
                     conflict_columns: oc.conflict_columns.clone(),
                     action: match &oc.action {
                         crate::ast::OnConflictAction::Nothing => {

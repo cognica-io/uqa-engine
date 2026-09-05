@@ -38,11 +38,15 @@ pub(super) fn can_patch_update_without_full_row(
         return Ok(false);
     }
     if engine
-        .try_key_constraints(table)
+        .enforced_keys(table)
         .map_err(|err| dml_storage_error("UPDATE", err))?
         .iter()
         .any(|constraint| {
-            constraint
+            constraint.predicate.as_deref().is_some_and(|predicate| {
+                update_keys.iter().any(|column| {
+                    crate::engine_table_storage::schema_expr_references_column(predicate, column)
+                })
+            }) || constraint
                 .columns
                 .iter()
                 .any(|column| update_keys.contains(column.as_str()))
@@ -82,8 +86,12 @@ pub(super) fn point_lookup_field_is_unique(
     lookup_field: &str,
 ) -> Result<bool, SQLError> {
     Ok(engine
-        .try_key_constraints(table)
+        .enforced_keys(table)
         .map_err(|err| dml_storage_error("UPDATE", err))?
         .iter()
-        .any(|constraint| constraint.columns.len() == 1 && constraint.columns[0] == lookup_field))
+        .any(|constraint| {
+            constraint.predicate.is_none()
+                && constraint.columns.len() == 1
+                && constraint.columns[0] == lookup_field
+        }))
 }

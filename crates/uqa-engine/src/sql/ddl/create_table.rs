@@ -106,6 +106,7 @@ fn create_table_after_preflight(
     mut c: CreateTable,
 ) -> Result<SQLResult, SQLError> {
     prepare_create_table_hierarchy(engine, &mut c)?;
+    super::constraint_indexes::name_constraint_indexes(engine, &c.name, &mut c.key_constraints)?;
     bind_create_table_relation_references(engine, &mut c)?;
     engine.materialize_implicit_sequences(
         "CREATE TABLE",
@@ -227,6 +228,7 @@ fn create_table_after_preflight(
                 "column FOREIGN KEY disappeared during validation".into(),
             ));
         };
+        reference.referenced_key = foreign_key.referenced_key;
         reference.table = foreign_key.ref_table;
         reference.column = Some(referenced_column.clone());
     }

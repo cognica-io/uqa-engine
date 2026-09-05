@@ -9,12 +9,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_sql::ast::{
-    Expr, FrameBound, FromClause, InsertStmt, OnConflictAction, OrderBy, Projection, RuleEvent,
-    SelectStmt, Statement, UpdateStmt, CTE,
+    Expr, FrameBound, FromClause, OrderBy, Projection, RuleEvent, SelectStmt, Statement,
+    UpdateStmt, CTE,
 };
 use uqa_sql::plpgsql::{bind_statement, ResolvedVariable, VariableResolver};
 use uqa_sql::SQLError;
 
+mod insert;
+use insert::bind_insert;
 mod namespace;
 mod references;
 mod returning;
@@ -499,69 +501,6 @@ fn bind_rule_statement_body(
         }
         _ => return bind_statement(statement, resolver),
     })
-}
-
-fn bind_insert(
-    insert: &InsertStmt,
-    resolver: &mut dyn VariableResolver,
-    inherited: &RuleBindingScope,
-    context: &RuleBindingContext<'_>,
-) -> Result<InsertStmt, SQLError> {
-    let mut output = insert.clone();
-    output.with = bind_ctes(&insert.with, resolver, inherited, context)?;
-    let context = context.with_ctes(&insert.with)?;
-    output.rows = insert
-        .rows
-        .iter()
-        .map(|row| bind_expanding_exprs(row, resolver, inherited, &context))
-        .collect::<Result<Vec<_>, SQLError>>()?;
-    output.select_source = insert
-        .select_source
-        .as_deref()
-        .map(|select| bind_select_with_scope(select, resolver, inherited, &context).map(Box::new))
-        .transpose()?;
-    output.on_conflict = insert
-        .on_conflict
-        .as_ref()
-        .map(|conflict| -> Result<uqa_sql::ast::OnConflict, SQLError> {
-            let mut conflict_scope = inherited.clone();
-            conflict_scope.insert_qualifier(&insert.target_qualifier);
-            Ok(uqa_sql::ast::OnConflict {
-                conflict_columns: conflict.conflict_columns.clone(),
-                action: match &conflict.action {
-                    OnConflictAction::Nothing => OnConflictAction::Nothing,
-                    OnConflictAction::Update {
-                        assignments,
-                        r#where,
-                    } => OnConflictAction::Update {
-                        assignments: assignments
-                            .iter()
-                            .map(|(column, expr)| {
-                                Ok((
-                                    column.clone(),
-                                    bind_rule_expr_with_scope(
-                                        expr,
-                                        resolver,
-                                        &conflict_scope,
-                                        &context,
-                                    )?,
-                                ))
-                            })
-                            .collect::<Result<Vec<_>, SQLError>>()?,
-                        r#where: bind_optional_expr(
-                            r#where.as_deref(),
-                            resolver,
-                            &conflict_scope,
-                            &context,
-                        )?
-                        .map(Box::new),
-                    },
-                },
-            })
-        })
-        .transpose()?;
-    output.returning.clear();
-    Ok(output)
 }
 
 fn bind_update(

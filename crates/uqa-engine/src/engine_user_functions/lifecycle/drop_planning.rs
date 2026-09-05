@@ -235,6 +235,7 @@ impl Engine {
         targets: &[RoutineDropTarget],
         cascade: bool,
     ) -> Result<RoutineObjectDependents, SQLError> {
+        let mut dependent_indexes = Vec::new();
         let mut dependent_views = Vec::new();
         let mut dependent_columns = Vec::new();
         let mut dependent_defaults = Vec::new();
@@ -260,6 +261,7 @@ impl Engine {
                     .map(|(table, rule)| (table.qualified_name(), rule))
                     .collect::<Vec<_>>();
                 let dependents = RoutineObjectDependents {
+                    indexes: self.indexes_depending_on_routine(&binding)?,
                     views,
                     columns: schema.columns,
                     defaults: schema.defaults,
@@ -268,6 +270,7 @@ impl Engine {
                     rules,
                 };
                 if cascade {
+                    dependent_indexes.extend(dependents.indexes);
                     dependent_columns.extend(dependents.columns);
                     dependent_defaults.extend(dependents.defaults);
                     dependent_checks.extend(dependents.checks);
@@ -302,7 +305,10 @@ impl Engine {
         dependent_triggers.dedup();
         dependent_rules.sort();
         dependent_rules.dedup();
+        dependent_indexes.sort();
+        dependent_indexes.dedup();
         Ok(RoutineObjectDependents {
+            indexes: dependent_indexes,
             views: dependent_views,
             columns: dependent_columns,
             defaults: dependent_defaults,
@@ -418,6 +424,9 @@ impl Engine {
         &self,
         dependents: &RoutineObjectDependents,
     ) -> Result<(), SQLError> {
+        for index in &dependents.indexes {
+            crate::sql::drop_index_dependency(self, index)?;
+        }
         for (table, name) in &dependents.rules {
             self.drop_rule(&uqa_sql::ast::DropRule {
                 name: name.clone(),
@@ -555,6 +564,7 @@ impl Engine {
             && dependents.views.is_empty()
             && dependents.triggers.is_empty()
             && dependents.rules.is_empty()
+            && dependents.indexes.is_empty()
         {
             return Ok(());
         }
@@ -604,6 +614,17 @@ impl Engine {
                     .map(|(table, trigger)| format!("{trigger} on {table}"))
                     .collect::<Vec<_>>()
                     .join("`, `")
+            ));
+        }
+        if !dependents.indexes.is_empty() {
+            dependency_kinds.push(format!(
+                "indexes {}",
+                dependents
+                    .indexes
+                    .iter()
+                    .map(crate::RelationIdentity::qualified_name)
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ));
         }
         if !dependents.rules.is_empty() {

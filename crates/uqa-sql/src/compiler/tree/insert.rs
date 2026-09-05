@@ -171,6 +171,18 @@ pub(in crate::compiler) fn compile_on_conflict(
     };
 
     Ok(OnConflict {
+        predicate: clause
+            .infer
+            .as_ref()
+            .and_then(|infer| infer.where_clause.as_deref())
+            .map(compile_expr)
+            .transpose()?
+            .map(Box::new),
+        constraint: clause
+            .infer
+            .as_ref()
+            .filter(|infer| !infer.conname.is_empty())
+            .map(|infer| infer.conname.clone()),
         conflict_columns,
         action,
     })

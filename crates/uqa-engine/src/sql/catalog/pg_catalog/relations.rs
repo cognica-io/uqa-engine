@@ -39,7 +39,8 @@ pub(in crate::sql::catalog) fn build_pg_tables(
                 bool_value(
                     catalog
                         .catalog_indexes()
-                        .any(|index| index.table_name == name),
+                        .any(|index| index.table_name == name)
+                        || !table_snapshot.keys.is_empty(),
                 ),
             ),
             (

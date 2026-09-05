@@ -11,6 +11,8 @@ use super::{
     SQLResult, VectorIndexSpec,
 };
 
+mod unique;
+
 pub(in crate::sql) fn run_create_index(
     engine: &Engine,
     mut c: CreateIndex,
@@ -57,6 +59,10 @@ pub(in crate::sql) fn run_create_index(
     }
 
     validate_index_columns(engine, &c)?;
+    if let Some(predicate) = c.predicate.as_deref_mut() {
+        crate::sql::generated::prepare_index_predicate(engine, &c.table, predicate)?;
+    }
+    unique::validate_unique_index(engine, &c, &name)?;
 
     match am.as_str() {
         "gin" => {
@@ -83,12 +89,19 @@ pub(in crate::sql) fn run_create_index(
     // for `gin`) on restore.
     let catalog_index_type = if am.is_empty() { "btree" } else { &am };
     engine
-        .try_register_catalog_index(
+        .register_catalog_index_definition(
             &relation.qualified_name(),
             catalog_index_type,
             &c.table,
             &c.columns,
             &c.options,
+            &crate::engine_catalog_indexes::IndexDefinition {
+                included_columns: c.included_columns.clone(),
+                column_order: c.column_order.clone(),
+                predicate: c.predicate.clone(),
+                unique: c.unique,
+                nulls_not_distinct: c.nulls_not_distinct,
+            },
         )
         .map_err(|e| ddl_storage_error("CREATE INDEX", e))?;
     Ok(SQLResult::empty())
@@ -107,7 +120,7 @@ fn validate_index_columns(engine: &Engine, statement: &CreateIndex) -> Result<()
     if definitions.is_empty() {
         return Ok(());
     }
-    for name in &statement.columns {
+    for name in statement.columns.iter().chain(&statement.included_columns) {
         let Some(column) = definitions.iter().find(|column| &column.name == name) else {
             return Err(SQLError::Unsupported(format!(
                 "CREATE INDEX: column `{}`.`{name}` does not exist",

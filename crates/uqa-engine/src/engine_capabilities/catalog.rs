@@ -6,6 +6,7 @@
 
 //! Immutable statement catalog snapshots and relation-name resolution.
 
+mod indexes;
 mod privileges;
 
 #[cfg(test)]
@@ -176,6 +177,7 @@ impl CatalogReadView {
             || self.snapshot.durable.sequences.contains_key(relation)
             || self.snapshot.durable.foreign_tables.contains_key(relation)
             || self.snapshot.durable.catalog_indexes.contains_key(relation)
+            || self.has_constraint_index(relation)
     }
 
     fn namespace_exists(&self, resolution: &RelationNameResolution, schema: &str) -> bool {
@@ -216,6 +218,7 @@ impl CatalogReadView {
                 .durable
                 .catalog_indexes
                 .contains_key(&relation)
+                || self.has_constraint_index(&relation)
             {
                 Some("index")
             } else {

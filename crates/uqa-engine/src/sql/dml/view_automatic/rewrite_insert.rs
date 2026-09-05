@@ -187,6 +187,20 @@ pub(in crate::sql::dml) fn rewrite_insert_to_base(
         }
         validate_mapped_columns(&columns, duplicate_assignment)?;
         if let Some(conflict) = &mut plan.on_conflict {
+            if let Some(predicate) = &mut conflict.predicate {
+                rewrite_target_expression(
+                    engine,
+                    predicate,
+                    &layer,
+                    ExpressionScope {
+                        target_qualifier: &target_qualifier,
+                        returning_aliases: None,
+                        source: None,
+                        include_excluded: false,
+                    },
+                    &mut plan.subqueries,
+                )?;
+            }
             conflict.conflict_columns = conflict
                 .conflict_columns
                 .iter()

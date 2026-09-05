@@ -61,6 +61,15 @@ SELECT pg_get_viewdef('definition_example'::regclass) AS definition;
 SELECT pg_get_viewdef('definition_example'::regclass, true) AS pretty_definition;
 ```
 
+## Index definition functions
+
+```sql
+SELECT pg_get_indexdef(index_oid);
+SELECT pg_get_indexdef(index_oid, column_number, pretty);
+```
+
+Both overloads return text reconstructed from the stored index metadata. The one-argument form and a zero `column_number` return the complete CREATE INDEX command without a terminating semicolon. Positive column numbers are one-based and return the selected key or included column without its ordering options; negative or out-of-range numbers return an empty string. The full definition preserves uniqueness, the access method, key order, NULL placement, included columns, `NULLS NOT DISTINCT`, and the partial predicate. Pretty output uses visible relation names and fewer parentheses. Unknown index OIDs and NULL arguments return NULL. Both PostgreSQL signatures are stable, strict, and parallel safe and are exposed in `pg_proc`.
+
 ## Text functions
 
 | Group | Functions |

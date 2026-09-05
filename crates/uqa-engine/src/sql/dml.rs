@@ -137,7 +137,7 @@ pub(crate) fn update_lock_strength(
     table: &str,
     columns: &[String],
 ) -> uqa_sql::ast::LockStrength {
-    let Ok(keys) = engine.try_key_constraints(table) else {
+    let Ok(keys) = engine.referenceable_keys(table) else {
         return uqa_sql::ast::LockStrength::ForUpdate;
     };
     let Ok(Some(definitions)) = engine.try_describe_table(table) else {

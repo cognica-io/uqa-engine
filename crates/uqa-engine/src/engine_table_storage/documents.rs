@@ -549,8 +549,15 @@ impl Engine {
         values: &[Value],
     ) -> Result<IndexConflictProbe, SQLError> {
         for (pivot, (column, value)) in conflict_columns.iter().zip(values.iter()).enumerate() {
-            let Some(candidates) =
-                self.value_index_scan(table, column, &uqa_core::Predicate::Equals(value.clone()))?
+            let Some(candidates) = self.value_index_scan(
+                table,
+                column,
+                &if matches!(value, Value::Null) {
+                    uqa_core::Predicate::IsNull
+                } else {
+                    uqa_core::Predicate::Equals(value.clone())
+                },
+            )?
             else {
                 continue;
             };

@@ -74,12 +74,12 @@ pub(in crate::sql::ddl) fn validate_bound_foreign_key_definition_with_local_stat
         match local_keys {
             Some(keys) => keys.to_vec(),
             None => engine
-                .try_key_constraints(&referenced)
+                .referenceable_keys(&referenced)
                 .map_err(|error| ddl_storage_error("FOREIGN KEY referenced key", error))?,
         }
     } else {
         engine
-            .try_key_constraints(&referenced)
+            .referenceable_keys(&referenced)
             .map_err(|error| ddl_storage_error("FOREIGN KEY referenced key", error))?
     };
     if foreign_key.ref_columns.is_empty() {
@@ -165,6 +165,17 @@ pub(in crate::sql::ddl) fn validate_bound_foreign_key_definition_with_local_stat
             crate::engine_table_security::TableAclPrivilege::References,
         )?;
     }
+    foreign_key.referenced_key = referenced_keys
+        .iter()
+        .find(|key| {
+            key.columns.len() == foreign_key.ref_columns.len()
+                && foreign_key
+                    .ref_columns
+                    .iter()
+                    .all(|column| key.columns.contains(column))
+                && (!foreign_key.period || key.without_overlaps)
+        })
+        .and_then(|key| key.name.clone());
     foreign_key.ref_table = referenced;
     Ok(())
 }
@@ -174,6 +185,7 @@ pub(in crate::sql::ddl) fn column_foreign_key(
     reference: &uqa_sql::ast::ForeignKeyRef,
 ) -> uqa_sql::ast::ForeignKey {
     uqa_sql::ast::ForeignKey {
+        referenced_key: reference.referenced_key.clone(),
         name: reference.name.clone(),
         object_id: reference.object_id,
         local_columns: vec![column.name.clone()],

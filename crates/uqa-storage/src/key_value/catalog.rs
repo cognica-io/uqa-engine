@@ -428,21 +428,8 @@ impl CatalogFacade for KeyValueCatalog {
         self.load_foreign_tables_impl()
     }
 
-    fn save_catalog_index(
-        &self,
-        relation: &RelationIdentity,
-        index_type: &str,
-        table_name: &str,
-        columns_json: &str,
-        parameters_json: &str,
-    ) -> StorageBackendResult<()> {
-        self.save_catalog_index_impl(
-            relation,
-            index_type,
-            table_name,
-            columns_json,
-            parameters_json,
-        )
+    fn save_catalog_index_row(&self, index: &CatalogIndexRow) -> StorageBackendResult<()> {
+        self.save_catalog_index_impl(index)
     }
 
     fn drop_catalog_index(&self, relation: &RelationIdentity) -> StorageBackendResult<()> {

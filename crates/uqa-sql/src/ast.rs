@@ -63,13 +63,29 @@ pub struct GeneratedColumn {
     pub function_dependencies: Vec<GeneratedFunctionDependency>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IndexColumnOrder {
+    pub descending: bool,
+    pub nulls_first: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateIndex {
+    #[serde(default)]
+    pub included_columns: Vec<String>,
+    #[serde(default)]
+    pub column_order: Vec<IndexColumnOrder>,
+    #[serde(default)]
+    pub predicate: Option<Box<Expr>>,
     pub name: Option<String>,
     pub table: String,
     /// `gin`, `btree`, `ivf`, `hnsw`, `rtree`, ...
     pub access_method: String,
     pub columns: Vec<String>,
+    #[serde(default)]
+    pub unique: bool,
+    #[serde(default)]
+    pub nulls_not_distinct: bool,
     /// `CREATE INDEX IF NOT EXISTS`.
     pub if_not_exists: bool,
     /// Storage parameters from `WITH (k = v, ...)`. Stored verbatim;
@@ -285,6 +301,10 @@ impl Default for ReturningAliases {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OnConflict {
+    #[serde(default)]
+    pub predicate: Option<Box<Expr>>,
+    #[serde(default)]
+    pub constraint: Option<String>,
     /// Conflict target columns parsed from the `ON CONFLICT (col, ...)`
     /// list. Empty when the clause uses `ON CONFLICT DO NOTHING` with
     /// no target.

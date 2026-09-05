@@ -280,7 +280,23 @@ DROP INDEX orders_state_idx;
 
 An index belongs to its table's schema and has no independent owner: creation requires inherited ownership of the table, and `pg_class.relowner` always follows that table's owner. `CREATE INDEX` first applies schema `USAGE` during table lookup, then checks table ownership, schema `CREATE`, and the index name and definition in PostgreSQL order. `DROP INDEX` permits inherited table-owner authority or ownership of the containing schema, validates every named index before deleting any, and does not let `IF EXISTS` bypass authorization for an existing index. The durable index identity stores its schema and local name as separate components. Distinct schemas may therefore contain indexes with the same local name, while an index cannot share one schema-local relation name with a table, view, materialized view, sequence, or foreign table. Unnamed indexes allocate PostgreSQL-style schema-local names such as `orders_state_idx` and then `orders_state_idx1`. `DROP INDEX` resolves one exact identity through the effective `search_path`, skips inaccessible unqualified schemas, and applies qualified schema `USAGE`, missing-schema, missing-index, wrong-relation-kind, and owner-error precedence before mutation. Index `regclass` values and the corresponding `pg_class`, `pg_index`, and `pg_indexes` rows use the same identity and remain stable across owner transfer, transaction rollback, catalog refresh, and durable reopen. Indexes on temporary tables stay session-local and are never written to the durable catalog.
 
-Expression indexes are not implemented. Index columns must be table columns. `DROP INDEX CASCADE` syntax is accepted, but dependency-sensitive index cascade behavior remains incomplete.
+`CREATE UNIQUE INDEX` checks existing rows before publishing the index and enforces the complete key during INSERT, UPDATE, COPY, and conflict handling. A failed build leaves no index behind, and a failed multirow mutation rolls back the statement. The default treats NULL key fields as distinct; `NULLS NOT DISTINCT` makes NULL compare equal for uniqueness. Multiple matching unique indexes all participate in `ON CONFLICT` arbitration.
+
+A partial index's `WHERE` predicate must be an immutable Boolean expression. Uniqueness applies only when the predicate is true for both rows; false and NULL exclude a row. Updates that change predicate columns recheck membership. `ON CONFLICT (columns) WHERE predicate` selects indexes whose predicates are implied by the target, while a missing matching arbiter raises `42P10`, including for empty input. `ON CONFLICT ON CONSTRAINT name` selects the named constraint. Inference predicates resolve INSERT target aliases and projected or computed view columns in the public target row type; an inference clause may contain additional volatile conditions without executing them during arbitration. Included columns contribute catalog attributes and reconstructed definitions without becoming unique key fields. Column order and NULL placement are preserved in index metadata.
+
+PRIMARY KEY and UNIQUE constraints expose their supporting indexes through `pg_class`, `pg_index`, and `pg_indexes`. `pg_constraint.conindid` identifies the constraint's supporting index or a foreign key's selected referenced index. Directly dropping a constraint-owned index raises `2BP01`; drop its constraint instead. A foreign key can reference a non-partial unique index and retains that index dependency across reopen. `DROP INDEX` rejects a referenced index unless CASCADE removes the dependent foreign keys. Partial-index predicates retain routine identities across function renames; DROP FUNCTION RESTRICT protects dependent indexes and CASCADE removes them. Index predicates and included-column references follow column renames and durable reopen in SQLite and key-value providers.
+
+```sql execute
+CREATE TABLE indexed_accounts (account_id integer, email text, active boolean);
+CREATE UNIQUE INDEX active_email ON indexed_accounts (email) NULLS NOT DISTINCT WHERE active;
+INSERT INTO indexed_accounts VALUES (1, 'one@example.test', true), (2, 'one@example.test', false);
+INSERT INTO indexed_accounts VALUES (3, 'one@example.test', true)
+ON CONFLICT (email) WHERE active DO UPDATE SET account_id = excluded.account_id;
+SELECT account_id, email, active FROM indexed_accounts ORDER BY account_id;
+SELECT pg_get_indexdef('active_email'::regclass) AS definition;
+```
+
+Expression indexes and the remaining PostgreSQL operator-class, collation, concurrent-build, index-administration, and complete partition-index lifecycle differences remain open compatibility bugs. Index key expressions currently must be table columns.
 
 ## Full-text GIN indexes
 

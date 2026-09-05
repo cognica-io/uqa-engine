@@ -256,3 +256,29 @@ fn query_columns(query: &QueryPlan) -> Vec<String> {
             .collect(),
     }
 }
+
+/// Reconstruct a stored catalog expression with the same literal casts, precedence, and routine visibility as a view definition.
+pub(super) fn stored_expression_definition(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    expression: &uqa_sql::ast::Expr,
+    pretty: bool,
+) -> Result<String, SQLError> {
+    let mut dynamic = resolution.clone();
+    dynamic.set_lookup_mode(RelationLookupMode::Dynamic);
+    let mut bound = resolution.clone();
+    bound.set_lookup_mode(RelationLookupMode::Bound);
+    let deparser = Deparser {
+        catalog,
+        dynamic,
+        bound,
+        pretty,
+        wrap: 0,
+    };
+    let expression = uqa_planner::ExpressionPlan::lower(expression.clone());
+    deparser.expression(
+        &expression.scalar,
+        &Scope::default(),
+        &expression.subqueries,
+    )
+}

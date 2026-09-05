@@ -96,6 +96,10 @@ impl UnifiedPlan {
                         },
                     };
                     ConflictPlan {
+                        predicate: conflict.predicate.map(|expr| {
+                            Box::new(lower_scalar_expression(*expr, aggregates, &mut subqueries))
+                        }),
+                        constraint: conflict.constraint,
                         conflict_columns: conflict.conflict_columns,
                         action,
                     }

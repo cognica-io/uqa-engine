@@ -17,12 +17,16 @@ use super::{
 impl KeyValueCatalog {
     pub(super) fn save_catalog_index_impl(
         &self,
-        relation: &RelationIdentity,
-        index_type: &str,
-        table_name: &str,
-        columns_json: &str,
-        parameters_json: &str,
+        index: &CatalogIndexRow,
     ) -> StorageBackendResult<()> {
+        let CatalogIndexRow {
+            relation,
+            index_type,
+            table_name,
+            columns_json,
+            parameters_json,
+            definition_json,
+        } = index;
         let table =
             RelationIdentity::from_legacy_name(table_name).map_err(StorageBackendError::Other)?;
         if relation.schema != table.schema {
@@ -53,6 +57,7 @@ impl KeyValueCatalog {
                 table_name: table.qualified_name(),
                 columns_json: columns_json.to_string(),
                 parameters_json: parameters_json.to_string(),
+                definition_json: definition_json.clone(),
             })?,
         )?;
         batch.commit()
@@ -102,6 +107,7 @@ impl KeyValueCatalog {
                 table_name: stored.table_name,
                 columns_json: stored.columns_json,
                 parameters_json: stored.parameters_json,
+                definition_json: stored.definition_json,
             });
         }
         rows.sort_by(|a, b| a.relation.cmp(&b.relation));

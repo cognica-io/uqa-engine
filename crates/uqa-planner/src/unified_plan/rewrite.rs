@@ -139,6 +139,9 @@ pub(super) fn rewrite_command_scalars(
                 rewrite_query_scalars(source, rewrite);
             }
             if let Some(conflict) = &mut plan.on_conflict {
+                if let Some(predicate) = &mut conflict.predicate {
+                    rewrite_scalar(predicate, rewrite);
+                }
                 if let ConflictActionPlan::Update {
                     assignments,
                     predicate,

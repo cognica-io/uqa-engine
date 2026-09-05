@@ -126,6 +126,11 @@ pub(in crate::sql) fn run_insert_inner(
             !view_returning.returning.is_empty(),
         )?;
     }
+    let prepared_statement = super::conflict::prepare_inference_predicate(engine, stmt, params)?;
+    let stmt = prepared_statement.as_ref();
+    if let Some(conflict) = stmt.on_conflict.as_ref() {
+        super::conflict::validate_conflict_target(engine, &stmt.table, conflict)?;
+    }
     let conflict_update_columns = if let Some(ConflictPlan {
         action: ConflictActionPlan::Update { assignments, .. },
         ..
@@ -209,6 +214,9 @@ pub(in crate::sql) fn run_insert_inner(
         .iter()
         .map(|projection| &projection.expr)
         .collect::<Vec<_>>();
+    if let Some(conflict) = &stmt.on_conflict {
+        privilege_expressions.extend(conflict.predicate.iter().map(Box::as_ref));
+    }
     if let Some(ConflictPlan {
         action:
             ConflictActionPlan::Update {

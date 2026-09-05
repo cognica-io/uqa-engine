@@ -677,11 +677,11 @@ fn pg_catalog_exposes_indexes_types_functions_and_roles() {
         .sql(
             "SELECT schemaname, tablename, indexname, indexdef \
              FROM pg_catalog.pg_indexes \
-             WHERE tablename = 'docs'",
+             WHERE tablename = 'docs' ORDER BY indexname",
             &[],
         )
         .unwrap();
-    assert_eq!(indexes.rows.len(), 1);
+    assert_eq!(indexes.rows.len(), 2);
     assert_eq!(
         indexes.rows[0]["indexname"],
         Value::Str("docs_body_idx".into())
@@ -690,6 +690,11 @@ fn pg_catalog_exposes_indexes_types_functions_and_roles() {
         Value::Str(def) => assert!(def.contains("USING gin")),
         other => panic!("expected indexdef string, got {other:?}"),
     }
+    assert_eq!(indexes.rows[1]["indexname"], Value::Str("docs_pkey".into()));
+    assert_eq!(
+        indexes.rows[1]["indexdef"],
+        Value::Str("CREATE UNIQUE INDEX docs_pkey ON public.docs USING btree (id)".into())
+    );
 
     let pg_index = eng
         .sql(

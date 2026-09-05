@@ -107,6 +107,8 @@ pub(super) struct StoredCatalogIndex {
     pub(super) table_name: String,
     pub(super) columns_json: String,
     pub(super) parameters_json: String,
+    #[serde(default)]
+    pub(super) definition_json: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -307,6 +307,8 @@ pub struct CatalogIndexRow {
     pub table_name: String,
     pub columns_json: String,
     pub parameters_json: String,
+    /// Durable semantic definition; absent on legacy ordinary secondary indexes.
+    pub definition_json: Option<String>,
 }
 
 /// Values persisted into one column-statistics row.
@@ -815,7 +817,17 @@ pub trait CatalogFacade: Send + Sync {
         table_name: &str,
         columns_json: &str,
         parameters_json: &str,
-    ) -> StorageBackendResult<()>;
+    ) -> StorageBackendResult<()> {
+        self.save_catalog_index_row(&CatalogIndexRow {
+            relation: relation.clone(),
+            index_type: index_type.to_string(),
+            table_name: table_name.to_string(),
+            columns_json: columns_json.to_string(),
+            parameters_json: parameters_json.to_string(),
+            definition_json: None,
+        })
+    }
+    fn save_catalog_index_row(&self, index: &CatalogIndexRow) -> StorageBackendResult<()>;
     fn drop_catalog_index(&self, relation: &RelationIdentity) -> StorageBackendResult<()>;
     fn drop_catalog_indexes_for_table(&self, table_name: &str) -> StorageBackendResult<()>;
     fn load_catalog_indexes(&self) -> StorageBackendResult<Vec<CatalogIndexRow>>;

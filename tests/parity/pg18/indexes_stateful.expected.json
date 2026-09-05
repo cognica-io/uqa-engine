@@ -1,0 +1,692 @@
+{
+  "schema_version": 1,
+  "fixture_sha256": "a0aed38cfd95724c9c4be475cd1d2e2e1281f7be2939991da295559af2a42ceb",
+  "oracle": {
+    "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
+    "server_version_num": "180004",
+    "version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "age_version": "1.8.0"
+  },
+  "cases": [
+    {
+      "name": "create_schema",
+      "kind": "ok"
+    },
+    {
+      "name": "create_items",
+      "kind": "ok"
+    },
+    {
+      "name": "create_unique",
+      "kind": "ok"
+    },
+    {
+      "name": "unique_duplicate",
+      "kind": "ok"
+    },
+    {
+      "name": "duplicate_atomic",
+      "kind": "error",
+      "sqlstate": "23505"
+    },
+    {
+      "name": "after_atomic",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "one",
+          "t"
+        ],
+        [
+          "1",
+          null,
+          "f"
+        ],
+        [
+          "1",
+          null,
+          "t"
+        ],
+        [
+          null,
+          "one",
+          "f"
+        ],
+        [
+          null,
+          "one",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "update_duplicate",
+      "kind": "error",
+      "sqlstate": "23505"
+    },
+    {
+      "name": "unique_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "items_ab",
+          "t",
+          "f",
+          "f",
+          "2",
+          "2",
+          "CREATE UNIQUE INDEX items_ab ON fixture.items USING btree (a, b)",
+          "CREATE UNIQUE INDEX items_ab ON items USING btree (a, b)",
+          "a",
+          ""
+        ]
+      ]
+    },
+    {
+      "name": "create_null_items",
+      "kind": "ok"
+    },
+    {
+      "name": "create_null_distinct",
+      "kind": "ok"
+    },
+    {
+      "name": "create_null_equal",
+      "kind": "ok"
+    },
+    {
+      "name": "insert_null",
+      "kind": "ok"
+    },
+    {
+      "name": "duplicate_null",
+      "kind": "error",
+      "sqlstate": "23505"
+    },
+    {
+      "name": "null_arbiter_update",
+      "kind": "ok"
+    },
+    {
+      "name": "null_arbiter_result",
+      "kind": "rows",
+      "rows": [
+        [
+          null,
+          "updated"
+        ]
+      ]
+    },
+    {
+      "name": "create_duplicates",
+      "kind": "ok"
+    },
+    {
+      "name": "failed_build",
+      "kind": "error",
+      "sqlstate": "23505"
+    },
+    {
+      "name": "failed_build_catalog",
+      "kind": "rows",
+      "rows": []
+    },
+    {
+      "name": "nonunique_after_failed_build",
+      "kind": "ok"
+    },
+    {
+      "name": "if_not_exists_before_validation",
+      "kind": "ok"
+    },
+    {
+      "name": "create_partial_items",
+      "kind": "ok"
+    },
+    {
+      "name": "partial_existing_rows",
+      "kind": "ok"
+    },
+    {
+      "name": "create_partial",
+      "kind": "ok"
+    },
+    {
+      "name": "partial_duplicate",
+      "kind": "error",
+      "sqlstate": "23505"
+    },
+    {
+      "name": "partial_outside",
+      "kind": "ok"
+    },
+    {
+      "name": "partial_update_into_index",
+      "kind": "error",
+      "sqlstate": "23505"
+    },
+    {
+      "name": "partial_missing_inference",
+      "kind": "error",
+      "sqlstate": "42P10"
+    },
+    {
+      "name": "partial_empty_missing_inference",
+      "kind": "error",
+      "sqlstate": "42P10"
+    },
+    {
+      "name": "partial_weak_inference",
+      "kind": "error",
+      "sqlstate": "42P10"
+    },
+    {
+      "name": "partial_strong_inference",
+      "kind": "ok"
+    },
+    {
+      "name": "partial_conjunct_inference",
+      "kind": "ok"
+    },
+    {
+      "name": "partial_result",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "-2",
+          "t"
+        ],
+        [
+          "1",
+          "-1",
+          "f"
+        ],
+        [
+          "1",
+          "-1",
+          null
+        ],
+        [
+          "1",
+          "3",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "partial_cardinality",
+      "kind": "error",
+      "sqlstate": "21000"
+    },
+    {
+      "name": "partial_do_nothing",
+      "kind": "ok"
+    },
+    {
+      "name": "partial_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "CREATE UNIQUE INDEX positive_key ON fixture.partial_items USING btree (a) WHERE (b > 0)",
+          "CREATE UNIQUE INDEX positive_key ON partial_items USING btree (a) WHERE b > 0",
+          "(b > 0)"
+        ]
+      ]
+    },
+    {
+      "name": "create_covering",
+      "kind": "ok"
+    },
+    {
+      "name": "covering_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t",
+          "3",
+          "2",
+          "CREATE UNIQUE INDEX covering ON fixture.partial_items USING btree (a DESC NULLS LAST, b NULLS FIRST) INCLUDE (active) NULLS NOT DISTINCT WHERE (b > 0)",
+          "CREATE UNIQUE INDEX covering ON partial_items USING btree (a DESC NULLS LAST, b NULLS FIRST) INCLUDE (active) NULLS NOT DISTINCT WHERE b > 0",
+          "a",
+          "active",
+          ""
+        ]
+      ]
+    },
+    {
+      "name": "create_constraint_items",
+      "kind": "ok"
+    },
+    {
+      "name": "constraint_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "b_key",
+          "t",
+          "f",
+          "CREATE UNIQUE INDEX b_key ON fixture.constraint_items USING btree (b)"
+        ],
+        [
+          "constraint_items_pkey",
+          "t",
+          "t",
+          "CREATE UNIQUE INDEX constraint_items_pkey ON fixture.constraint_items USING btree (a)"
+        ]
+      ]
+    },
+    {
+      "name": "constraint_index_links",
+      "kind": "rows",
+      "rows": [
+        [
+          "b_key",
+          "u",
+          "b_key"
+        ],
+        [
+          "constraint_items_pkey",
+          "p",
+          "constraint_items_pkey"
+        ]
+      ]
+    },
+    {
+      "name": "constraint_insert",
+      "kind": "ok"
+    },
+    {
+      "name": "constraint_arbiter",
+      "kind": "ok"
+    },
+    {
+      "name": "constraint_unrelated_conflict",
+      "kind": "error",
+      "sqlstate": "23505"
+    },
+    {
+      "name": "constraint_missing",
+      "kind": "error",
+      "sqlstate": "42704"
+    },
+    {
+      "name": "constraint_index_drop",
+      "kind": "error",
+      "sqlstate": "2BP01"
+    },
+    {
+      "name": "constraint_index_collision",
+      "kind": "error",
+      "sqlstate": "42P07"
+    },
+    {
+      "name": "constraint_index_if_not_exists",
+      "kind": "ok"
+    },
+    {
+      "name": "fk_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "fk_child",
+      "kind": "ok"
+    },
+    {
+      "name": "foreign_key_index_link",
+      "kind": "rows",
+      "rows": [
+        [
+          "child_a_fkey",
+          "f",
+          "parent_key"
+        ]
+      ]
+    },
+    {
+      "name": "fk_populate",
+      "kind": "ok"
+    },
+    {
+      "name": "fk_missing_parent",
+      "kind": "error",
+      "sqlstate": "23503"
+    },
+    {
+      "name": "fk_index_restrict",
+      "kind": "error",
+      "sqlstate": "2BP01"
+    },
+    {
+      "name": "fk_index_cascade",
+      "kind": "ok"
+    },
+    {
+      "name": "fk_after_drop",
+      "kind": "ok"
+    },
+    {
+      "name": "fk_partial_rejected",
+      "kind": "error",
+      "sqlstate": "42830"
+    },
+    {
+      "name": "predicate_volatile",
+      "kind": "error",
+      "sqlstate": "42P17"
+    },
+    {
+      "name": "predicate_subquery",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "predicate_boolean",
+      "kind": "error",
+      "sqlstate": "42804"
+    },
+    {
+      "name": "predicate_function",
+      "kind": "ok"
+    },
+    {
+      "name": "predicate_function_index",
+      "kind": "ok"
+    },
+    {
+      "name": "predicate_function_restrict",
+      "kind": "error",
+      "sqlstate": "2BP01"
+    },
+    {
+      "name": "predicate_function_rename",
+      "kind": "ok"
+    },
+    {
+      "name": "predicate_function_duplicate",
+      "kind": "error",
+      "sqlstate": "23505"
+    },
+    {
+      "name": "predicate_function_cascade",
+      "kind": "ok"
+    },
+    {
+      "name": "predicate_function_after_drop",
+      "kind": "rows",
+      "rows": []
+    },
+    {
+      "name": "rename_partial_column",
+      "kind": "ok"
+    },
+    {
+      "name": "rename_partial_table",
+      "kind": "ok"
+    },
+    {
+      "name": "renamed_partial_duplicate",
+      "kind": "error",
+      "sqlstate": "23505"
+    },
+    {
+      "name": "renamed_partial_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "CREATE UNIQUE INDEX positive_key ON fixture.renamed_items USING btree (a) WHERE (score > 0)",
+          "CREATE UNIQUE INDEX covering ON fixture.renamed_items USING btree (a DESC NULLS LAST, score NULLS FIRST) INCLUDE (active) NULLS NOT DISTINCT WHERE (score > 0)"
+        ]
+      ]
+    },
+    {
+      "name": "definition_missing_oid",
+      "kind": "rows",
+      "rows": [
+        [
+          null,
+          null
+        ]
+      ]
+    },
+    {
+      "name": "definition_nulls",
+      "kind": "rows",
+      "rows": [
+        [
+          null,
+          null,
+          null,
+          null
+        ]
+      ]
+    },
+    {
+      "name": "definition_wrong_arity",
+      "kind": "error",
+      "sqlstate": "42883"
+    },
+    {
+      "name": "definition_routine_metadata",
+      "kind": "rows",
+      "rows": [
+        [
+          "1643",
+          "pg_get_indexdef",
+          "26",
+          "25",
+          "t",
+          "s",
+          "s",
+          "pg_get_indexdef"
+        ],
+        [
+          "2507",
+          "pg_get_indexdef",
+          "26 23 16",
+          "25",
+          "t",
+          "s",
+          "s",
+          "pg_get_indexdef_ext"
+        ]
+      ]
+    },
+    {
+      "name": "drop_partial_indexes",
+      "kind": "ok"
+    },
+    {
+      "name": "after_drop_duplicate",
+      "kind": "ok"
+    },
+    {
+      "name": "final_state",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "-2",
+          "t"
+        ],
+        [
+          "1",
+          "-1",
+          "f"
+        ],
+        [
+          "1",
+          "-1",
+          null
+        ],
+        [
+          "1",
+          "3",
+          "t"
+        ],
+        [
+          "1",
+          "4",
+          "t"
+        ],
+        [
+          "1",
+          "4",
+          "t"
+        ],
+        [
+          "3",
+          "-1",
+          "t"
+        ],
+        [
+          "3",
+          "1",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "literal_predicate_index",
+      "kind": "ok"
+    },
+    {
+      "name": "literal_predicate_definition",
+      "kind": "rows",
+      "rows": [
+        [
+          "CREATE UNIQUE INDEX lower_key ON fixture.items USING btree (a) WHERE (lower(b) = 'one'::text)",
+          "CREATE UNIQUE INDEX lower_key ON items USING btree (a) WHERE lower(b) = 'one'::text"
+        ]
+      ]
+    },
+    {
+      "name": "constraint_collision_source",
+      "kind": "ok"
+    },
+    {
+      "name": "constraint_collision_allocation",
+      "kind": "ok"
+    },
+    {
+      "name": "constraint_collision_name",
+      "kind": "rows",
+      "rows": [
+        [
+          "CREATE UNIQUE INDEX candidate_pkey1 ON fixture.candidate USING btree (a)"
+        ]
+      ]
+    },
+    {
+      "name": "constraint_collision_explicit",
+      "kind": "error",
+      "sqlstate": "42P07"
+    },
+    {
+      "name": "constraint_collision_alter",
+      "kind": "error",
+      "sqlstate": "42P07"
+    },
+    {
+      "name": "partition_constraint_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "partition_constraint_child",
+      "kind": "ok"
+    },
+    {
+      "name": "partition_constraint_indexes",
+      "kind": "rows",
+      "rows": [
+        [
+          "low_pkey",
+          "t",
+          "t",
+          "CREATE UNIQUE INDEX low_pkey ON fixture.low USING btree (a)"
+        ],
+        [
+          "partitioned_pkey",
+          "f",
+          "t",
+          "CREATE UNIQUE INDEX partitioned_pkey ON ONLY fixture.partitioned USING btree (a)"
+        ]
+      ]
+    },
+    {
+      "name": "inference_scope_table",
+      "kind": "ok"
+    },
+    {
+      "name": "inference_scope_index",
+      "kind": "ok"
+    },
+    {
+      "name": "inference_scope_view",
+      "kind": "ok"
+    },
+    {
+      "name": "inference_view_insert",
+      "kind": "ok"
+    },
+    {
+      "name": "inference_view_alias_update",
+      "kind": "ok"
+    },
+    {
+      "name": "inference_alias_volatile",
+      "kind": "ok"
+    },
+    {
+      "name": "inference_scope_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "1",
+          "2",
+          "updated"
+        ]
+      ]
+    },
+    {
+      "name": "inference_missing_view_column",
+      "kind": "error",
+      "sqlstate": "42703"
+    },
+    {
+      "name": "inference_non_index_constraint",
+      "kind": "error",
+      "sqlstate": "42809"
+    },
+    {
+      "name": "inference_missing_constraint",
+      "kind": "error",
+      "sqlstate": "42704"
+    },
+    {
+      "name": "inference_missing_column",
+      "kind": "error",
+      "sqlstate": "42703"
+    },
+    {
+      "name": "inference_non_boolean",
+      "kind": "error",
+      "sqlstate": "42P10"
+    },
+    {
+      "name": "inference_subquery",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "inference_full_index",
+      "kind": "ok"
+    },
+    {
+      "name": "inference_non_boolean_full_index",
+      "kind": "ok"
+    }
+  ]
+}

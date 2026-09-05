@@ -484,7 +484,7 @@ fn run_alter_table_action(
                 .try_persist_table_schema(&stmt.table)
                 .map_err(|e| ddl_storage_error("ALTER TABLE ADD COLUMN", e))?;
         }
-        AlterTableAction::AddKeyConstraint { constraint } => {
+        AlterTableAction::AddKeyConstraint { mut constraint } => {
             let mut columns = engine
                 .try_describe_table(&stmt.table)
                 .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?
@@ -497,6 +497,11 @@ fn run_alter_table_action(
                 &declared_constraints,
                 constraint.name.as_deref(),
                 &stmt.table,
+            )?;
+            super::constraint_indexes::name_constraint_indexes(
+                engine,
+                &stmt.table,
+                std::slice::from_mut(&mut constraint),
             )?;
             let mut key_constraints = engine
                 .try_key_constraints(&stmt.table)

@@ -9,6 +9,8 @@
 use super::{CatalogIndexRow, ColumnType, DropKind, DropStmt, Engine, SQLError, SQLResult};
 use crate::engine_capabilities::RelationResolution;
 
+mod index_dependencies;
+
 pub(in crate::sql) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError> {
     if stmt.kind == DropKind::Table {
         for name in &stmt.names {
@@ -429,6 +431,18 @@ fn run_drop_index(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
                         ))
                     })?;
                 engine.require_index_drop_authority(&row)?;
+                if engine
+                    .catalog_read_view()
+                    .has_constraint_index(&row.relation)
+                {
+                    return Err(SQLError::Routine {
+                        sqlstate: "2BP01".into(),
+                        message: format!(
+                            "cannot drop index {} because constraint {} on table {} requires it",
+                            row.relation.name, row.relation.name, row.table_name
+                        ),
+                    });
+                }
                 indexes.push(row);
             }
             RelationResolution::Found(_, _) => {
@@ -469,6 +483,7 @@ fn run_drop_index(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
             }
         }
     }
+    let dependents = index_dependencies::dependents(engine, &indexes, stmt.cascade)?;
     for row in &indexes {
         engine.lock_relation(
             &row.table_name,
@@ -476,6 +491,9 @@ fn run_drop_index(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
         )?;
     }
     engine.with_implicit_transaction(move |engine| {
+        for (table, name) in dependents {
+            super::alter_table::drop_constraint_dependency(engine, &table, &name)?;
+        }
         for row in indexes {
             drop_index_side_effects(engine, &row)?;
             engine
@@ -592,5 +610,21 @@ fn drop_vector_index_side_effects(engine: &Engine, row: &CatalogIndexRow) -> Res
             }
         }
     }
+    Ok(())
+}
+
+/// Remove a dependent index after the owning DROP command has checked its authority.
+pub(crate) fn drop_index_dependency(
+    engine: &Engine,
+    relation: &crate::RelationIdentity,
+) -> Result<(), SQLError> {
+    let row = engine
+        .bound_catalog_index(&relation.qualified_name())
+        .map_err(|error| ddl_storage_error("DROP INDEX dependency", error))?
+        .ok_or_else(|| SQLError::Internal("dependent index disappeared".into()))?;
+    drop_index_side_effects(engine, &row)?;
+    engine
+        .try_drop_catalog_index_relation(relation)
+        .map_err(|error| ddl_storage_error("DROP INDEX dependency", error))?;
     Ok(())
 }

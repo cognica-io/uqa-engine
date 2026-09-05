@@ -516,6 +516,7 @@ impl Engine {
         for col in t.columns.read().iter() {
             if let Some(reference) = col.references.clone() {
                 out.push(uqa_sql::ast::ForeignKey {
+                    referenced_key: reference.referenced_key.clone(),
                     name: reference
                         .name
                         .clone()

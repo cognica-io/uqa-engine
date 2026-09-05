@@ -6,7 +6,10 @@
 
 //! Row, key, foreign-key, and referential-action validation.
 
+mod index_keys;
 mod period;
+
+pub(in crate::sql) use index_keys::index_predicate_accepts;
 mod referential_actions;
 mod staging;
 
@@ -560,16 +563,20 @@ pub(in crate::sql) fn lock_document_key_dependencies(
         .map_err(|error| dml_storage_error("key-lock table resolution", error))?
         .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
     let constraints = engine
-        .try_key_constraints(&canonical_table)
+        .enforced_keys(&canonical_table)
         .map_err(|error| dml_storage_error("key-lock constraint lookup", error))?;
     let mut lock_keys = std::collections::BTreeSet::new();
     for constraint in constraints {
-        let Some(values) = key_constraint_values(&constraint, document) else {
+        let Some(values) = constraint.values(engine, table, document)? else {
             continue;
         };
-        if old_document.is_some_and(|old_document| {
-            key_constraint_values(&constraint, old_document).as_ref() == Some(&values)
-        }) {
+        if old_document
+            .map(|old_document| constraint.values(engine, table, old_document))
+            .transpose()?
+            .flatten()
+            .as_ref()
+            == Some(&values)
+        {
             continue;
         }
         let lock_values = if constraint.without_overlaps {
@@ -632,10 +639,10 @@ pub(in crate::sql) fn validate_key_constraints(
     ignored_doc_id: Option<DocId>,
 ) -> Result<(), SQLError> {
     for constraint in engine
-        .try_key_constraints(table)
+        .enforced_keys(table)
         .map_err(|err| dml_storage_error("constraint validation", err))?
     {
-        let Some(values) = key_constraint_values(&constraint, document) else {
+        let Some(values) = constraint.values(engine, table, document)? else {
             continue;
         };
         if constraint.without_overlaps {
@@ -648,7 +655,8 @@ pub(in crate::sql) fn validate_key_constraints(
                 message: format!("conflicting key value violates exclusion constraint \"{name}\""),
             });
         }
-        let Some(conflict_id) = engine.find_conflict(table, &constraint.columns, &values)? else {
+        let Some(conflict_id) = constraint.find_conflict(engine, table, &values, ignored_doc_id)?
+        else {
             continue;
         };
         if ignored_doc_id == Some(conflict_id) {

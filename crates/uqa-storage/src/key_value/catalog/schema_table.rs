@@ -328,6 +328,7 @@ impl KeyValueCatalog {
                         table_name: to.to_string(),
                         columns_json: row.columns_json,
                         parameters_json: row.parameters_json,
+                        definition_json: row.definition_json,
                     })?,
                 )?;
             }
@@ -479,6 +480,7 @@ impl KeyValueCatalog {
                         table_name: row.table_name,
                         columns_json,
                         parameters_json: row.parameters_json,
+                        definition_json: row.definition_json,
                     })?,
                 )?;
             }

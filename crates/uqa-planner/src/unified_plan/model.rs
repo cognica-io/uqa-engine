@@ -328,6 +328,8 @@ pub struct InsertPlan {
 
 #[derive(Debug, Clone)]
 pub struct ConflictPlan {
+    pub predicate: Option<Box<ScalarExpr>>,
+    pub constraint: Option<String>,
     pub conflict_columns: Vec<String>,
     pub action: ConflictActionPlan,
 }
