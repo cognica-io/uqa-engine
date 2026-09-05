@@ -62,6 +62,7 @@ See the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.2.0/doc
 
 ### Fixed
 
+- Made generated Rust crate README links point to the matching GitHub release tag, including release notes, upgrade guidance, licensing, and directory links.
 - Kept native cross-process notification worker state out of Browser WASM builds while retaining the in-process notification queue.
 - Deferred `CREATE TABLE IF NOT EXISTS` and `CREATE FOREIGN TABLE IF NOT EXISTS` definition analysis until after namespace authorization and shared relation-name collision checks, so existing targets now skip invalid or unsupported types, columns, constraints, hierarchy, typed-table sources, options, tablespaces, foreign servers, and implicit sequence creation with PostgreSQL 18.4 notice and error ordering.
 - Retained each foreign table's complete SQL column and CHECK schema as its sole durable runtime definition instead of reconstructing it from the lossy FDW name/type projection, with stable table and column object identities, versioned initial-open migration, atomic validation and publication, catalog visibility, exact routine and sequence rename and DROP dependencies, owned `SERIAL` and identity sequences, PostgreSQL-style implicit sequence name clipping and collision suffixes, `pg_get_serial_sequence`, owner transfer, rollback and reopen coverage, relation-kind notices, and fail-closed unsupported key declarations.
