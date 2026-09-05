@@ -286,7 +286,7 @@ python3 tests/parity/pg18/run_diff.py --validate-manifest
 python3 tests/parity/pg18/run_diff.py
 ```
 
-Stateful routine, constraint, type-and-temporal, trigger, and rewrite-rule oracles plus the pinned psycopg, pgx, and node-postgres matrix are documented in [PG18 differential probes](https://github.com/cognica-io/uqa-engine/blob/main/tests/parity/pg18/README.md). The current milestone and open-gate ledger is the [PostgreSQL 18 compatibility plan](https://github.com/cognica-io/uqa-engine/blob/main/docs/plans/0003-postgresql-18-compatibility.md).
+Stateful routine, constraint, type-and-temporal, trigger, and rewrite-rule oracles plus the pinned psycopg, pgx, and node-postgres matrix are documented in [PG18 differential probes](https://github.com/cognica-io/uqa-engine/blob/v0.2.0/tests/parity/pg18/README.md). The current milestone and open-gate ledger is the [PostgreSQL 18 compatibility plan](https://github.com/cognica-io/uqa-engine/blob/v0.2.0/docs/plans/0003-postgresql-18-compatibility.md).
 
 Release-mode timing uses a machine-readable runner rather than test-profile execution:
 
@@ -317,7 +317,7 @@ Contributor checks, benchmark build gates, and repository conventions are docume
 | [Performance](https://github.com/cognica-io/uqa-engine/blob/v0.2.0/docs/design/performance.md) | Reproducible baselines, regression gates, bottlenecks, and benchmark limitations |
 | [Parity fixtures](https://github.com/cognica-io/uqa-engine/blob/v0.2.0/docs/design/parity.md) | SQL, relevance, and vector-calibration compatibility fixtures |
 | [Citation metadata](https://github.com/cognica-io/uqa-engine/blob/v0.2.0/CITATION.cff) | Software citation and DOI metadata for the underlying research papers |
-| [Licensing policy](https://github.com/cognica-io/uqa-engine/blob/main/LICENSING.md) | AGPL, FOSS, noncommercial, commercial, and contribution paths |
+| [Licensing policy](https://github.com/cognica-io/uqa-engine/blob/v0.2.0/LICENSING.md) | AGPL, FOSS, noncommercial, commercial, and contribution paths |
 | [History](https://github.com/cognica-io/uqa-engine/blob/v0.2.0/HISTORY.md) | Release-by-release changes |
 
 ## Project layout
@@ -330,11 +330,11 @@ See [CONTRIBUTING.md](https://github.com/cognica-io/uqa-engine/blob/v0.2.0/CONTR
 
 ## License
 
-UQA Engine is open-source software licensed under AGPL-3.0-only. See [LICENSE](https://github.com/cognica-io/uqa-engine/blob/main/LICENSE).
+UQA Engine is open-source software licensed under AGPL-3.0-only. See [LICENSE](https://github.com/cognica-io/uqa-engine/blob/v0.2.0/LICENSE).
 
 Two optional additional permissions are available:
 
-- the [FOSS exception](https://github.com/cognica-io/uqa-engine/blob/main/LICENSES/UQA-FOSS-EXCEPTION-1.0.txt) lets a complete qualifying open-source application retain its OSI-approved license while UQA Engine and modifications to UQA Engine remain under the AGPL; and
-- the [noncommercial application exception](https://github.com/cognica-io/uqa-engine/blob/main/LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt) lets a qualifying personal, educational, academic, or charitable application keep its independent code under terms chosen by its author while UQA Engine and modifications to UQA Engine remain under the AGPL.
+- the [FOSS exception](https://github.com/cognica-io/uqa-engine/blob/v0.2.0/LICENSES/UQA-FOSS-EXCEPTION-1.0.txt) lets a complete qualifying open-source application retain its OSI-approved license while UQA Engine and modifications to UQA Engine remain under the AGPL; and
+- the [noncommercial application exception](https://github.com/cognica-io/uqa-engine/blob/v0.2.0/LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt) lets a qualifying personal, educational, academic, or charitable application keep its independent code under terms chosen by its author while UQA Engine and modifications to UQA Engine remain under the AGPL.
 
-Separate [commercial licensing](https://github.com/cognica-io/uqa-engine/blob/main/COMMERCIAL.md) is available for proprietary applications, closed modifications, SaaS, and OEM distribution. The complete decision guide is in the [licensing policy](https://github.com/cognica-io/uqa-engine/blob/main/LICENSING.md).
+Separate [commercial licensing](https://github.com/cognica-io/uqa-engine/blob/v0.2.0/COMMERCIAL.md) is available for proprietary applications, closed modifications, SaaS, and OEM distribution. The complete decision guide is in the [licensing policy](https://github.com/cognica-io/uqa-engine/blob/v0.2.0/LICENSING.md).
