@@ -5,7 +5,7 @@
 For a prebuilt Python binding and the `usql` shell, install the release package:
 
 ```sh
-python -m pip install uqa==0.2.0
+python -m pip install uqa==0.2.1
 usql
 ```
 
@@ -86,7 +86,7 @@ Use the `uqa` facade package for the embedded API. It re-exports `uqa-engine` an
 From a separate Rust application project, add the released dependency:
 
 ```sh
-cargo add uqa@0.2.0
+cargo add uqa@0.2.1
 ```
 
 ```rust
