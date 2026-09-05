@@ -300,6 +300,9 @@ impl<'a> RuleColumnBinder<'a> {
         target_scopes.extend_from_slice(outer);
         if let Some(conflict) = &mut insert.on_conflict {
             self.bind_target_names(&mut conflict.conflict_columns, &target);
+            for expression in &mut conflict.expressions {
+                self.bind_expr(expression, &target_scopes, &context)?;
+            }
             if let Some(predicate) = conflict.predicate.as_deref_mut() {
                 self.bind_expr(predicate, &target_scopes, &context)?;
             }

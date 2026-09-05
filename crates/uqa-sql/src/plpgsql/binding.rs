@@ -472,6 +472,11 @@ pub fn bind_statement(stmt: &Statement, r: &mut dyn VariableResolver) -> Result<
                     predicate: bind_opt_expr(oc.predicate.as_deref(), r)?.map(Box::new),
                     constraint: oc.constraint.clone(),
                     conflict_columns: oc.conflict_columns.clone(),
+                    expressions: oc
+                        .expressions
+                        .iter()
+                        .map(|expr| bind_expr(expr, r))
+                        .collect::<Result<Vec<_>>>()?,
                     action: match &oc.action {
                         crate::ast::OnConflictAction::Nothing => {
                             crate::ast::OnConflictAction::Nothing

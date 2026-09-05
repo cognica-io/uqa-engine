@@ -47,6 +47,13 @@ impl Engine {
                     document_store,
                     inverted_index,
                     vector_indexes,
+                    value_indexes: table
+                        .value_indexes
+                        .read()
+                        .iter()
+                        .filter(|(key, _)| matches!(key, uqa_storage::ValueIndexKey::Index(_)))
+                        .map(|(key, index)| (key.clone(), index.clone()))
+                        .collect(),
                     fts_fields: table.fts_fields.read().clone(),
                     columns: table.columns.read().clone(),
                     next_id: *table.next_id.lock(),
@@ -156,7 +163,10 @@ impl Engine {
                 .hierarchy
                 .write()
                 .clone_from(&table_snapshot.hierarchy);
-            Self::value_indexes_clear(table);
+            table
+                .value_indexes
+                .write()
+                .clone_from(&table_snapshot.value_indexes);
             table.doc_count_cache.store(
                 table_snapshot.doc_count_cache,
                 std::sync::atomic::Ordering::Release,

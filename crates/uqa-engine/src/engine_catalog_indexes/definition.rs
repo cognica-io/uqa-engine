@@ -8,7 +8,7 @@
 
 use crate::engine_capabilities::RelationLookupMode;
 use crate::{CatalogIndexRow, Engine, StorageBackendError, StorageBackendResult};
-use uqa_sql::ast::{Expr, TableKeyConstraint, TableKeyConstraintKind};
+use uqa_sql::ast::{Expr, IndexKey, TableKeyConstraint, TableKeyConstraintKind};
 
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -17,6 +17,10 @@ pub(crate) struct IndexDefinition {
     pub(crate) included_columns: Vec<String>,
     #[serde(default)]
     pub(crate) column_order: Vec<uqa_sql::ast::IndexColumnOrder>,
+    #[serde(default)]
+    pub(crate) key_names: Vec<String>,
+    #[serde(default)]
+    pub(crate) key_types: Vec<uqa_sql::ast::ColumnType>,
     #[serde(default)]
     pub(crate) predicate: Option<Box<Expr>>,
     pub(crate) unique: bool,
@@ -62,13 +66,20 @@ impl Engine {
                         .contains(&table)
             };
             if applies {
+                let index_keys: Vec<IndexKey> = serde_json::from_str(&index.columns_json)?;
                 keys.push(EnforcedKey {
+                    index: Some(index.relation.clone()),
+                    keys: index_keys.clone(),
                     predicate: definition.predicate,
                     constraint_owned: false,
                     constraint: TableKeyConstraint {
                         name: Some(index.relation.name.clone()),
                         kind: TableKeyConstraintKind::Unique,
-                        columns: serde_json::from_str(&index.columns_json)?,
+                        columns: index_keys
+                            .iter()
+                            .filter_map(IndexKey::column)
+                            .map(str::to_owned)
+                            .collect(),
                         nulls_not_distinct: definition.nulls_not_distinct,
                         without_overlaps: false,
                     },
@@ -83,6 +94,8 @@ impl Engine {
 #[derive(Debug, Clone)]
 pub(crate) struct EnforcedKey {
     pub(crate) constraint: TableKeyConstraint,
+    pub(crate) keys: Vec<IndexKey>,
+    pub(crate) index: Option<crate::RelationIdentity>,
     pub(crate) predicate: Option<Box<Expr>>,
     pub(crate) constraint_owned: bool,
 }
@@ -98,6 +111,13 @@ impl std::ops::Deref for EnforcedKey {
 impl From<TableKeyConstraint> for EnforcedKey {
     fn from(constraint: TableKeyConstraint) -> Self {
         Self {
+            keys: constraint
+                .columns
+                .iter()
+                .cloned()
+                .map(IndexKey::Column)
+                .collect(),
+            index: None,
             constraint,
             predicate: None,
             constraint_owned: true,
@@ -113,7 +133,9 @@ impl Engine {
         Ok(self
             .enforced_keys(table)?
             .into_iter()
-            .filter(|key| key.predicate.is_none())
+            .filter(|key| {
+                key.predicate.is_none() && key.keys.iter().all(|key| key.column().is_some())
+            })
             .map(|key| key.constraint)
             .collect())
     }

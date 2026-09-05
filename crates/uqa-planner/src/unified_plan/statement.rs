@@ -101,6 +101,11 @@ impl UnifiedPlan {
                         }),
                         constraint: conflict.constraint,
                         conflict_columns: conflict.conflict_columns,
+                        expressions: conflict
+                            .expressions
+                            .into_iter()
+                            .map(|expr| lower_scalar_expression(expr, aggregates, &mut subqueries))
+                            .collect(),
                         action,
                     }
                 });

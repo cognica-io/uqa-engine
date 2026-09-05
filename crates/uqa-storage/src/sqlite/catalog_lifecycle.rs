@@ -11,10 +11,10 @@ use rusqlite::{params, Connection};
 use crate::sqlite::connection::Result;
 
 pub(super) fn columns_json_references(columns_json: &str, column_name: &str) -> Result<bool> {
-    let columns = serde_json::from_str::<Vec<String>>(columns_json)?;
-    Ok(columns
-        .iter()
-        .any(|column| column.eq_ignore_ascii_case(column_name)))
+    Ok(crate::catalog_index_keys::references_column(
+        columns_json,
+        column_name,
+    )?)
 }
 
 pub(super) fn renamed_columns_json(
@@ -22,19 +22,11 @@ pub(super) fn renamed_columns_json(
     from: &str,
     to: &str,
 ) -> Result<Option<String>> {
-    let mut columns = serde_json::from_str::<Vec<String>>(columns_json)?;
-    let mut changed = false;
-    for column in &mut columns {
-        if column.eq_ignore_ascii_case(from) {
-            *column = to.to_string();
-            changed = true;
-        }
-    }
-    if changed {
-        Ok(Some(serde_json::to_string(&columns)?))
-    } else {
-        Ok(None)
-    }
+    Ok(crate::catalog_index_keys::rename_column(
+        columns_json,
+        from,
+        to,
+    )?)
 }
 
 pub(super) fn drop_fts_aux_tables_for_table(conn: &Connection, table_name: &str) -> Result<()> {

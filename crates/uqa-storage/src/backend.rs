@@ -277,30 +277,34 @@ pub trait PersistentStorageBackend: Send + Sync {
     fn load_btree_index(
         &self,
         _table: &str,
-        _field: &str,
+        _field: &crate::ValueIndexKey,
     ) -> StorageBackendResult<Option<Vec<(DocId, Value)>>> {
         Ok(None)
     }
 
-    fn btree_index_fields(&self, _table: &str) -> StorageBackendResult<Vec<String>> {
+    fn btree_index_fields(&self, _table: &str) -> StorageBackendResult<Vec<crate::ValueIndexKey>> {
         Ok(Vec::new())
     }
 
     /// Fields whose persisted posting support was found inconsistent during a
     /// schema migration. The engine repairs these at its explicit open-time
     /// write boundary and clears each durable retry marker only after success.
-    fn btree_index_repairs(&self) -> StorageBackendResult<Vec<(String, String)>> {
+    fn btree_index_repairs(&self) -> StorageBackendResult<Vec<(String, crate::ValueIndexKey)>> {
         Ok(Vec::new())
     }
 
-    fn clear_btree_index_repair(&self, _table: &str, _field: &str) -> StorageBackendResult<()> {
+    fn clear_btree_index_repair(
+        &self,
+        _table: &str,
+        _field: &crate::ValueIndexKey,
+    ) -> StorageBackendResult<()> {
         Ok(())
     }
 
     fn replace_btree_index(
         &self,
         _table: &str,
-        _field: &str,
+        _field: &crate::ValueIndexKey,
         _values: &[(DocId, Value)],
     ) -> StorageBackendResult<()> {
         Ok(())
@@ -312,7 +316,7 @@ pub trait PersistentStorageBackend: Send + Sync {
     fn repair_btree_index(
         &self,
         table: &str,
-        field: &str,
+        field: &crate::ValueIndexKey,
         complete: &[(DocId, Value)],
         _stale_doc_ids: &[DocId],
         _missing: &[(DocId, Value)],
@@ -325,7 +329,7 @@ pub trait PersistentStorageBackend: Send + Sync {
     fn replace_btree_indexes(
         &self,
         table: &str,
-        indexes: &[(&str, &[(DocId, Value)])],
+        indexes: &[(&crate::ValueIndexKey, &[(DocId, Value)])],
     ) -> StorageBackendResult<()> {
         for (field, values) in indexes {
             self.replace_btree_index(table, field, values)?;
@@ -337,12 +341,16 @@ pub trait PersistentStorageBackend: Send + Sync {
         &self,
         _table: &str,
         _doc_id: DocId,
-        _values: Option<&BTreeMap<String, Value>>,
+        _values: Option<&BTreeMap<crate::ValueIndexKey, Value>>,
     ) -> StorageBackendResult<()> {
         Ok(())
     }
 
-    fn drop_btree_index(&self, _table: &str, _field: &str) -> StorageBackendResult<()> {
+    fn drop_btree_index(
+        &self,
+        _table: &str,
+        _field: &crate::ValueIndexKey,
+    ) -> StorageBackendResult<()> {
         Ok(())
     }
 
@@ -569,20 +577,24 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
     fn load_btree_index(
         &self,
         table: &str,
-        field: &str,
+        field: &crate::ValueIndexKey,
     ) -> StorageBackendResult<Option<Vec<(DocId, Value)>>> {
         Ok(SQLiteBTreeIndexStore::new(self.conn.clone()).load(table, field)?)
     }
 
-    fn btree_index_fields(&self, table: &str) -> StorageBackendResult<Vec<String>> {
+    fn btree_index_fields(&self, table: &str) -> StorageBackendResult<Vec<crate::ValueIndexKey>> {
         Ok(SQLiteBTreeIndexStore::new(self.conn.clone()).fields(table)?)
     }
 
-    fn btree_index_repairs(&self) -> StorageBackendResult<Vec<(String, String)>> {
+    fn btree_index_repairs(&self) -> StorageBackendResult<Vec<(String, crate::ValueIndexKey)>> {
         Ok(SQLiteBTreeIndexStore::new(self.conn.clone()).repairs()?)
     }
 
-    fn clear_btree_index_repair(&self, table: &str, field: &str) -> StorageBackendResult<()> {
+    fn clear_btree_index_repair(
+        &self,
+        table: &str,
+        field: &crate::ValueIndexKey,
+    ) -> StorageBackendResult<()> {
         SQLiteBTreeIndexStore::new(self.conn.clone()).clear_repair(table, field)?;
         Ok(())
     }
@@ -590,7 +602,7 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
     fn replace_btree_index(
         &self,
         table: &str,
-        field: &str,
+        field: &crate::ValueIndexKey,
         values: &[(DocId, Value)],
     ) -> StorageBackendResult<()> {
         SQLiteBTreeIndexStore::new(self.conn.clone()).replace(table, field, values)?;
@@ -600,7 +612,7 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
     fn repair_btree_index(
         &self,
         table: &str,
-        field: &str,
+        field: &crate::ValueIndexKey,
         _complete: &[(DocId, Value)],
         stale_doc_ids: &[DocId],
         missing: &[(DocId, Value)],
@@ -617,7 +629,7 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
     fn replace_btree_indexes(
         &self,
         table: &str,
-        indexes: &[(&str, &[(DocId, Value)])],
+        indexes: &[(&crate::ValueIndexKey, &[(DocId, Value)])],
     ) -> StorageBackendResult<()> {
         SQLiteBTreeIndexStore::new(self.conn.clone()).replace_many(table, indexes)?;
         Ok(())
@@ -627,13 +639,17 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
         &self,
         table: &str,
         doc_id: DocId,
-        values: Option<&BTreeMap<String, Value>>,
+        values: Option<&BTreeMap<crate::ValueIndexKey, Value>>,
     ) -> StorageBackendResult<()> {
         SQLiteBTreeIndexStore::new(self.conn.clone()).apply_write(table, doc_id, values)?;
         Ok(())
     }
 
-    fn drop_btree_index(&self, table: &str, field: &str) -> StorageBackendResult<()> {
+    fn drop_btree_index(
+        &self,
+        table: &str,
+        field: &crate::ValueIndexKey,
+    ) -> StorageBackendResult<()> {
         SQLiteBTreeIndexStore::new(self.conn.clone()).drop_index(table, field)?;
         Ok(())
     }

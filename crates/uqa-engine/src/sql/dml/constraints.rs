@@ -9,7 +9,7 @@
 mod index_keys;
 mod period;
 
-pub(in crate::sql) use index_keys::index_predicate_accepts;
+pub(crate) use index_keys::{index_key_values, index_predicate_accepts};
 mod referential_actions;
 mod staging;
 
@@ -462,24 +462,6 @@ pub(crate) fn validate_deferred_foreign_key_checks(
     Ok(())
 }
 
-pub(in crate::sql) fn key_constraint_values(
-    constraint: &uqa_sql::ast::TableKeyConstraint,
-    document: &Document,
-) -> Option<Vec<Value>> {
-    let values: Vec<Value> = constraint
-        .columns
-        .iter()
-        .map(|column| document.get(column).cloned().unwrap_or(Value::Null))
-        .collect();
-    if constraint.kind == uqa_sql::ast::TableKeyConstraintKind::Unique
-        && !constraint.nulls_not_distinct
-        && values.iter().any(|value| matches!(value, Value::Null))
-    {
-        return None;
-    }
-    Some(values)
-}
-
 fn period_values_overlap(
     left: &Value,
     right: &Value,
@@ -595,9 +577,9 @@ pub(in crate::sql) fn lock_document_key_dependencies(
         }]);
         digest.update([u8::from(constraint.nulls_not_distinct)]);
         digest.update([u8::from(constraint.without_overlaps)]);
-        for column in &constraint.columns {
-            update_key_lock_digest(&mut digest, column.as_bytes())?;
-        }
+        let identity = serde_json::to_vec(&constraint.keys)
+            .map_err(|error| SQLError::Internal(error.to_string()))?;
+        update_key_lock_digest(&mut digest, &identity)?;
         update_key_lock_digest(&mut digest, &key)?;
         let digest: [u8; 32] = digest.finalize().into();
         lock_keys.insert(digest);

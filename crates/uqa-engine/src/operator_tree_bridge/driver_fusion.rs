@@ -222,12 +222,16 @@ impl EngineDriver<'_> {
                 index.index_type
             )));
         }
-        let columns: Vec<String> = serde_json::from_str(&index.columns_json).map_err(|error| {
-            SQLError::Internal(format!(
-                "index {index_name:?} has malformed column metadata: {error}"
-            ))
-        })?;
-        if columns.first().is_none_or(|column| column != field) {
+        let columns: Vec<uqa_sql::ast::IndexKey> = serde_json::from_str(&index.columns_json)
+            .map_err(|error| {
+                SQLError::Internal(format!(
+                    "index {index_name:?} has malformed column metadata: {error}"
+                ))
+            })?;
+        if columns
+            .first()
+            .is_none_or(|column| column.column() != Some(field))
+        {
             return Err(SQLError::TypeMismatch(format!(
                 "index {index_name:?} does not cover leading field {field:?}"
             )));

@@ -11,6 +11,7 @@ use super::{
     SQLResult, VectorIndexSpec,
 };
 
+mod expressions;
 mod unique;
 
 pub(in crate::sql) fn run_create_index(
@@ -58,7 +59,19 @@ pub(in crate::sql) fn run_create_index(
         });
     }
 
-    validate_index_columns(engine, &c)?;
+    let attribute_keys = c
+        .columns
+        .iter()
+        .cloned()
+        .chain(
+            c.included_columns
+                .iter()
+                .cloned()
+                .map(uqa_sql::ast::IndexKey::Column),
+        )
+        .collect::<Vec<_>>();
+    let key_names = expressions::key_names(&attribute_keys);
+    let key_types = expressions::prepare_index_keys(engine, &mut c)?;
     if let Some(predicate) = c.predicate.as_deref_mut() {
         crate::sql::generated::prepare_index_predicate(engine, &c.table, predicate)?;
     }
@@ -72,7 +85,9 @@ pub(in crate::sql) fn run_create_index(
                     .iter()
                     .find(|(k, _)| k.eq_ignore_ascii_case("analyzer"))
                     .map(|(_, v)| v.as_str());
-                if let Err(e) = engine.add_fts_field_with_analyzer(&c.table, col.clone(), analyzer)
+                let column = expressions::require_column_key(col, "gin")?;
+                if let Err(e) =
+                    engine.add_fts_field_with_analyzer(&c.table, column.to_string(), analyzer)
                 {
                     return Err(SQLError::Internal(format!("add_fts_field: {e}")));
                 }
@@ -96,6 +111,8 @@ pub(in crate::sql) fn run_create_index(
             &c.columns,
             &c.options,
             &crate::engine_catalog_indexes::IndexDefinition {
+                key_names,
+                key_types,
                 included_columns: c.included_columns.clone(),
                 column_order: c.column_order.clone(),
                 predicate: c.predicate.clone(),
@@ -105,39 +122,6 @@ pub(in crate::sql) fn run_create_index(
         )
         .map_err(|e| ddl_storage_error("CREATE INDEX", e))?;
     Ok(SQLResult::empty())
-}
-
-fn validate_index_columns(engine: &Engine, statement: &CreateIndex) -> Result<(), SQLError> {
-    let definitions = engine
-        .try_describe_table(&statement.table)
-        .map_err(|error| ddl_storage_error("CREATE INDEX", error))?
-        .ok_or_else(|| {
-            SQLError::Unsupported(format!(
-                "CREATE INDEX: relation `{}` does not exist",
-                statement.table
-            ))
-        })?;
-    if definitions.is_empty() {
-        return Ok(());
-    }
-    for name in statement.columns.iter().chain(&statement.included_columns) {
-        let Some(column) = definitions.iter().find(|column| &column.name == name) else {
-            return Err(SQLError::Unsupported(format!(
-                "CREATE INDEX: column `{}`.`{name}` does not exist",
-                statement.table
-            )));
-        };
-        if column
-            .generated
-            .as_ref()
-            .is_some_and(|generated| generated.kind == uqa_sql::ast::GeneratedColumnKind::Virtual)
-        {
-            return Err(SQLError::TypeMismatch(format!(
-                "indexes on virtual generated column `{name}` are not supported"
-            )));
-        }
-    }
-    Ok(())
 }
 
 fn create_vector_index(
@@ -160,7 +144,8 @@ fn create_vector_index(
             ))
         })?;
     let mut fields = Vec::with_capacity(statement.columns.len());
-    for column in &statement.columns {
+    for key in &statement.columns {
+        let column = expressions::require_column_key(key, access_method)?;
         let dimensions = match engine
             .column_type(&table, column)
             .map_err(|err| ddl_storage_error("CREATE INDEX", err))?
@@ -190,7 +175,7 @@ fn create_vector_index(
     }
     for (column, dimensions) in fields {
         if !engine
-            .rebuild_vector_field_with_spec(&table, column.clone(), dimensions, spec)
+            .rebuild_vector_field_with_spec(&table, column, dimensions, spec)
             .map_err(|err| ddl_storage_error("CREATE INDEX vector field", err))?
         {
             return Err(SQLError::Unsupported(format!(
@@ -204,7 +189,7 @@ fn create_vector_index(
 fn allocate_default_index_name(
     engine: &Engine,
     table: &crate::RelationIdentity,
-    columns: &[String],
+    columns: &[uqa_sql::ast::IndexKey],
 ) -> Result<String, SQLError> {
     fn component(raw: &str) -> String {
         let mut out = String::with_capacity(raw.len());
@@ -225,7 +210,11 @@ fn allocate_default_index_name(
     }
 
     let mut parts = std::iter::once(component(&table.name))
-        .chain(columns.iter().map(|column| component(column)))
+        .chain(
+            expressions::key_names(columns)
+                .iter()
+                .map(|column| component(column)),
+        )
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>();
     if parts.is_empty() {

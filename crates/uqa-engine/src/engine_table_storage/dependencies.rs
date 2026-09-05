@@ -59,7 +59,7 @@ impl Engine {
 
     pub(super) fn catalog_index_columns(
         row: &CatalogIndexRow,
-    ) -> StorageBackendResult<Vec<String>> {
+    ) -> StorageBackendResult<Vec<uqa_sql::ast::IndexKey>> {
         serde_json::from_str(&row.columns_json).map_err(StorageBackendError::from)
     }
 
@@ -69,7 +69,7 @@ impl Engine {
     ) -> StorageBackendResult<bool> {
         Ok(Self::catalog_index_columns(row)?
             .iter()
-            .any(|candidate| candidate == column)
+            .any(|candidate| schema_expr_references_column(&candidate.expression(), column))
             || crate::engine_catalog_indexes::index_definition(row)?
                 .included_columns
                 .iter()
@@ -86,18 +86,28 @@ impl Engine {
         to: &str,
     ) -> StorageBackendResult<CatalogIndexRow> {
         let mut columns = Self::catalog_index_columns(&row)?;
-        let mut changed = false;
+        let mut definition = crate::engine_catalog_indexes::index_definition(&row)?;
+        if definition.key_names.is_empty() {
+            definition.key_names = columns
+                .iter()
+                .filter_map(uqa_sql::ast::IndexKey::column)
+                .chain(definition.included_columns.iter().map(String::as_str))
+                .map(str::to_owned)
+                .collect();
+        }
         for column in &mut columns {
-            if column == from {
-                *column = to.to_string();
-                changed = true;
+            match column {
+                uqa_sql::ast::IndexKey::Column(name) => {
+                    if name == from {
+                        *name = to.into();
+                    }
+                }
+                uqa_sql::ast::IndexKey::Expression(expression) => {
+                    rename_schema_expr_column(expression, from, to)?;
+                }
             }
         }
-        if changed {
-            row.columns_json =
-                serde_json::to_string(&columns).map_err(StorageBackendError::from)?;
-        }
-        let mut definition = crate::engine_catalog_indexes::index_definition(&row)?;
+        row.columns_json = serde_json::to_string(&columns)?;
         for column in &mut definition.included_columns {
             if column == from {
                 *column = to.into();
@@ -123,6 +133,15 @@ impl Engine {
             }
         }
         for name in removals {
+            if let Some(catalog) = self.storage.catalog.as_ref() {
+                catalog.drop_catalog_index(&name)?;
+            }
+            if let Some(table) = self.try_table(table)? {
+                table
+                    .value_indexes
+                    .write()
+                    .remove(&uqa_storage::ValueIndexKey::Index(name.qualified_name()));
+            }
             rows.remove(&name);
         }
         Ok(())

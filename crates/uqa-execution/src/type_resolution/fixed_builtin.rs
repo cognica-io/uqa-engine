@@ -324,6 +324,7 @@ fn builtin_binding_is_non_immutable(binding: &FunctionBinding) -> bool {
                 | "pg_get_ruledef"
                 | "pg_get_viewdef"
                 | "pg_get_indexdef"
+                | "format_type"
                 | "pg_has_role"
                 | "has_table_privilege"
                 | "has_column_privilege"
@@ -610,6 +611,11 @@ fn overloads(name: &str) -> Option<Vec<BuiltinFunctionOverload>> {
                 ColumnType::Text,
             ),
         ],
+        "format_type" => vec![overload(
+            &local,
+            &[ColumnType::Oid, ColumnType::Integer],
+            ColumnType::Text,
+        )],
         "pg_get_indexdef" => vec![
             overload(&local, &[ColumnType::Oid], ColumnType::Text),
             overload(
@@ -862,6 +868,7 @@ fn local_name(name: &str) -> Option<String> {
             | "pg_get_ruledef"
             | "pg_get_viewdef"
             | "pg_get_indexdef"
+            | "format_type"
             | "pg_has_role"
             | "has_table_privilege"
             | "has_column_privilege"

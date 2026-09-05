@@ -634,6 +634,9 @@ impl Statement {
                     changed |= source.upgrade_legacy_serialized_dispatches();
                 }
                 if let Some(conflict) = &mut insert.on_conflict {
+                    for expression in &mut conflict.expressions {
+                        changed |= expression.upgrade_legacy_serialized_dispatches();
+                    }
                     changed |= conflict
                         .predicate
                         .as_deref_mut()

@@ -48,16 +48,22 @@ pub(in crate::sql) fn pg_get_indexdef_value(
         return Ok(Value::Null);
     };
     if column != 0 {
+        let Some(position) = usize::try_from(column - 1).ok() else {
+            return Ok(Value::Str(String::new()));
+        };
+        if let Some(key) = index.columns.get(position) {
+            return super::helpers::index_definitions::index_key_definition(
+                &catalog,
+                &resolution,
+                key,
+                pretty,
+            )
+            .map(Value::Str);
+        }
         return Ok(Value::Str(
-            usize::try_from(column - 1)
-                .ok()
-                .and_then(|position| {
-                    index
-                        .columns
-                        .iter()
-                        .chain(&index.definition.included_columns)
-                        .nth(position)
-                })
+            position
+                .checked_sub(index.columns.len())
+                .and_then(|position| index.definition.included_columns.get(position))
                 .map_or_else(String::new, |name| quote_ident(name)),
         ));
     }

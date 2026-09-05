@@ -106,6 +106,7 @@ pub(super) fn ensure_insert(engine: &Engine, statement: &InsertPlan) -> Result<S
         .map(|projection| &projection.expr)
         .collect::<Vec<_>>();
     if let Some(conflict) = &statement.on_conflict {
+        expressions.extend(conflict.expressions.iter());
         expressions.extend(conflict.predicate.iter().map(Box::as_ref));
     }
     let required_columns = if let Some(ConflictPlan {

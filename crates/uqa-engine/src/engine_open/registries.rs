@@ -234,7 +234,12 @@ impl Engine {
                 .catalog_indexes
                 .write()
                 .insert(row.relation.clone(), row.clone());
-            let columns: Vec<String> = serde_json::from_str(&row.columns_json)?;
+            let keys: Vec<uqa_sql::ast::IndexKey> = serde_json::from_str(&row.columns_json)?;
+            let columns = keys
+                .iter()
+                .filter_map(uqa_sql::ast::IndexKey::column)
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
             let parameters: BTreeMap<String, String> = serde_json::from_str(&row.parameters_json)?;
             if row.index_type.eq_ignore_ascii_case("gin") {
                 let analyzer = parameters

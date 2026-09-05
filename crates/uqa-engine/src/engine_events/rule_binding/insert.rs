@@ -48,6 +48,13 @@ pub(super) fn bind_insert(
                     .transpose()?,
                 constraint: conflict.constraint.clone(),
                 conflict_columns: conflict.conflict_columns.clone(),
+                expressions: conflict
+                    .expressions
+                    .iter()
+                    .map(|expr| {
+                        bind_rule_expr_with_scope(expr, resolver, &conflict_scope, &context)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
                 action: match &conflict.action {
                     OnConflictAction::Nothing => OnConflictAction::Nothing,
                     OnConflictAction::Update {

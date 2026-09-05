@@ -35,7 +35,7 @@ WHERE value LIKE 'a!_b' ESCAPE '!';
 
 For the implemented fixed-signature built-ins documented below, ordinary expressions and generated expressions use one PostgreSQL 18-style candidate-selection contract. Unqualified calls combine visible SQL user functions with `pg_catalog` candidates according to `search_path`; qualified names, exact and implicit matches, preferred types, unknown-category selection, domain base types, named arguments, defaults, and stored bindings use the same resolver. This contract is limited to the listed implemented signatures and does not imply support for PostgreSQL's complete built-in, polymorphic, operator, cast, or `pg_proc` matrix.
 
-The shared fixed-signature registry covers `casefold`, `reverse`, `md5`, `crc32`, `crc32c`, the documented one-argument length family, `gamma`, `lgamma`, `json_strip_nulls`, `jsonb_strip_nulls`, `to_bin`, `to_hex`, `to_oct`, `to_regproc`, `to_regprocedure`, `to_regclass`, `to_regnamespace`, `to_regrole`, `to_regtype`, the unit and range `random` functions, and the documented UUID generation and extraction functions. Polymorphic array transformations retain their specialized type-substitution path.
+The shared fixed-signature registry covers `casefold`, `reverse`, `md5`, `crc32`, `crc32c`, the documented one-argument length family, `gamma`, `lgamma`, `json_strip_nulls`, `jsonb_strip_nulls`, `to_bin`, `to_hex`, `to_oct`, `to_regproc`, `to_regprocedure`, `to_regclass`, `to_regnamespace`, `to_regrole`, `to_regtype`, `format_type`, the unit and range `random` functions, and the documented UUID generation and extraction functions. Polymorphic array transformations retain their specialized type-substitution path.
 
 ## View definition functions
 
@@ -68,7 +68,25 @@ SELECT pg_get_indexdef(index_oid);
 SELECT pg_get_indexdef(index_oid, column_number, pretty);
 ```
 
-Both overloads return text reconstructed from the stored index metadata. The one-argument form and a zero `column_number` return the complete CREATE INDEX command without a terminating semicolon. Positive column numbers are one-based and return the selected key or included column without its ordering options; negative or out-of-range numbers return an empty string. The full definition preserves uniqueness, the access method, key order, NULL placement, included columns, `NULLS NOT DISTINCT`, and the partial predicate. Pretty output uses visible relation names and fewer parentheses. Unknown index OIDs and NULL arguments return NULL. Both PostgreSQL signatures are stable, strict, and parallel safe and are exposed in `pg_proc`.
+Both overloads return text reconstructed from the stored index metadata. The one-argument form and a zero `column_number` return the complete CREATE INDEX command without a terminating semicolon. Positive column numbers are one-based and return the selected key expression or included column without its ordering options; negative or out-of-range numbers return an empty string. The full definition preserves uniqueness, the access method, key expressions and order, NULL placement, included columns, `NULLS NOT DISTINCT`, and the partial predicate. Pretty output uses visible relation names and fewer parentheses. Unknown index OIDs and NULL arguments return NULL. Both PostgreSQL signatures are stable, strict, and parallel safe and are exposed in `pg_proc`.
+
+## Type display
+
+```sql
+SELECT format_type(type_oid, type_modifier);
+```
+
+`format_type(type_oid oid, type_modifier integer)` returns the represented catalog type's SQL display name as `text` without changing database state. A NULL modifier omits a modifier; an explicit negative modifier also omits it but preserves PostgreSQL's `bpchar` spelling for unconstrained character types. Character lengths, numeric precision and signed scale, temporal precision, interval fields, and array element modifiers use PostgreSQL's encoded typmods.
+
+A NULL type OID returns NULL, OID zero returns `-`, and an unknown OID returns `???`. Invalid encoded interval field combinations raise `XX000`. The function is stable, parallel safe, and non-strict, with its `(oid, integer) -> text` signature exposed in `pg_proc` as OID 1081. The complete PostgreSQL type and function catalogs remain subject to the compatibility matrix.
+
+The following query returns `character varying(8)`, `numeric(10,2)`, and `timestamp(3) with time zone[]`:
+
+```sql execute
+SELECT format_type(1043, 12) AS bounded_text,
+       format_type(1700, 655366) AS decimal_type,
+       format_type(1185, 3) AS timestamp_array;
+```
 
 ## Text functions
 

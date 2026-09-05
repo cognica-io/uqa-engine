@@ -11,6 +11,9 @@
 pub mod backend;
 pub mod block_max_index;
 pub mod btree_index;
+mod catalog_index_keys;
+mod value_index_key;
+pub use value_index_key::ValueIndexKey;
 pub mod catalog;
 pub mod clustered_postings;
 pub mod document_store;

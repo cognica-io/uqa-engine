@@ -625,7 +625,7 @@ mod unified_plan_tests {
                 .expect("persistent observer")
                 .btree_index_fields("public.items")
                 .expect("read canonical value-index fields"),
-            vec!["id"]
+            vec![uqa_storage::ValueIndexKey::from("id")]
         );
         assert!(observer.cached_sql_plans(query).is_some());
         assert_eq!(

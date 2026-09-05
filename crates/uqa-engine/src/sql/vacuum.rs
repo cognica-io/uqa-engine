@@ -110,6 +110,9 @@ fn rewrite_full_vacuum_table(engine: &Engine, table_name: &str) -> Result<(), St
             )
             .map_err(|error| vacuum_storage_error("rewrite VACUUM FULL row", error))?;
     }
+    engine
+        .refresh_value_indexes_for_table(table_name)
+        .map_err(|error| vacuum_storage_error("rebuild VACUUM FULL indexes", error))?;
     *table.column_stats.write() = stats.clone();
     table
         .column_stats_loaded

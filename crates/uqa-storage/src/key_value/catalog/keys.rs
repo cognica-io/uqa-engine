@@ -206,10 +206,10 @@ pub(super) fn catalog_index_references_column(
     row: &CatalogIndexRow,
     column_name: &str,
 ) -> StorageBackendResult<bool> {
-    let columns = serde_json::from_str::<Vec<String>>(&row.columns_json)?;
-    Ok(columns
-        .iter()
-        .any(|column| column.eq_ignore_ascii_case(column_name)))
+    Ok(crate::catalog_index_keys::references_column(
+        &row.columns_json,
+        column_name,
+    )?)
 }
 
 pub(super) fn catalog_index_rename_column(
@@ -217,19 +217,11 @@ pub(super) fn catalog_index_rename_column(
     from: &str,
     to: &str,
 ) -> StorageBackendResult<Option<String>> {
-    let mut columns = serde_json::from_str::<Vec<String>>(&row.columns_json)?;
-    let mut changed = false;
-    for column in &mut columns {
-        if column.eq_ignore_ascii_case(from) {
-            *column = to.to_string();
-            changed = true;
-        }
-    }
-    if changed {
-        Ok(Some(serde_json::to_string(&columns)?))
-    } else {
-        Ok(None)
-    }
+    Ok(crate::catalog_index_keys::rename_column(
+        &row.columns_json,
+        from,
+        to,
+    )?)
 }
 
 pub(super) fn load_single_keys(

@@ -303,11 +303,12 @@ pub(super) fn validate_public_insert_contract(
     plan: &InsertPlan,
 ) -> Result<(), SQLError> {
     let columns = public_view_columns(engine, &plan.table)?;
-    if let Some(predicate) = plan
-        .on_conflict
-        .as_ref()
-        .and_then(|conflict| conflict.predicate.as_deref())
-    {
+    for predicate in plan.on_conflict.iter().flat_map(|conflict| {
+        conflict
+            .expressions
+            .iter()
+            .chain(conflict.predicate.iter().map(Box::as_ref))
+    }) {
         validate_public_view_expression(
             predicate,
             &columns,

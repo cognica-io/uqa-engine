@@ -632,11 +632,7 @@ pub(in crate::compiler) fn compile_create_index(
                 "CREATE INDEX expected IndexElem, got {inner:?}"
             )));
         };
-        if idx.name.is_empty() {
-            return Err(SQLError::Unsupported(
-                "expression indexes are not supported".into(),
-            ));
-        }
+        let key = compile_index_key(idx)?;
         let descending = idx.ordering() == pg_query::protobuf::SortByDir::SortbyDesc;
         let nulls_first = match idx.nulls_ordering() {
             pg_query::protobuf::SortByNulls::SortbyNullsFirst => true,
@@ -647,7 +643,7 @@ pub(in crate::compiler) fn compile_create_index(
             descending,
             nulls_first,
         });
-        columns.push(idx.name.clone());
+        columns.push(key);
     }
     let name = if stmt.idxname.is_empty() {
         None
@@ -712,6 +708,18 @@ pub(in crate::compiler) fn compile_create_index(
         if_not_exists: stmt.if_not_exists,
         options,
     })
+}
+
+fn compile_index_key(index: &pg_query::protobuf::IndexElem) -> Result<crate::ast::IndexKey> {
+    if !index.name.is_empty() {
+        return Ok(crate::ast::IndexKey::Column(index.name.clone()));
+    }
+    let expression = index.expr.as_deref().ok_or_else(|| {
+        SQLError::Internal("CREATE INDEX key has neither a column nor an expression".into())
+    })?;
+    Ok(crate::ast::IndexKey::from_expression(compile_expr(
+        expression,
+    )?))
 }
 
 // -------------------------------------------------------------------------

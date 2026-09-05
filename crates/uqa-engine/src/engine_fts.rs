@@ -297,23 +297,24 @@ impl Engine {
         let (old_indexed, indexed_fields) = if known_new {
             (None, Self::value_indexes_built_fields(&t))
         } else {
-            let old = Self::value_indexes_old_values(&t, doc_id)?;
-            let fields = old
-                .as_ref()
-                .map(|old| old.keys().cloned().collect::<Vec<String>>());
+            let old = Self::value_indexes_old_values(&t, doc_id);
+            let fields = old.as_ref().map(|old| {
+                old.keys()
+                    .cloned()
+                    .collect::<Vec<uqa_storage::ValueIndexKey>>()
+            });
             (old, fields)
         };
-        let new_indexed: Option<BTreeMap<String, Value>> = indexed_fields.map(|fields| {
-            fields
-                .into_iter()
-                .map(|k| {
-                    let value = document.get(&k).cloned().unwrap_or(Value::Null);
-                    (k, value)
-                })
-                .collect()
-        });
         let persistent_indexed =
             self.persistent_value_index_document_values(&table_name, &document)?;
+        let new_indexed = indexed_fields
+            .map(|fields| {
+                if let Some(values) = &persistent_indexed {
+                    return Ok(values.clone());
+                }
+                self.value_index_document_values(&table_name, &fields, &document)
+            })
+            .transpose()?;
         let columns = t.columns.read().clone();
         crate::engine_generated::strip_virtual_generated_columns(&columns, &mut document);
         let metadata = match metadata {

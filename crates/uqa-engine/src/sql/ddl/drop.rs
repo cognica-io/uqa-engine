@@ -271,9 +271,11 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
                     .map_err(|error| ddl_storage_error("DROP FOREIGN TABLE CASCADE", error))?;
             }
             for table in foreign_tables {
-                let removed = engine
-                    .drop_foreign_table_inner(&table)
-                    .map_err(|error| ddl_storage_error("DROP FOREIGN TABLE", error))?;
+                let removed = engine.drop_foreign_table_inner(&table).map_err(|error| {
+                    SQLError::Internal(format!(
+                        "DROP FOREIGN TABLE failed in storage backend: {error}"
+                    ))
+                })?;
                 if !removed {
                     return Err(SQLError::Internal(format!(
                         "foreign table `{table}` disappeared after DROP preflight"
@@ -504,7 +506,17 @@ fn run_drop_index(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
     })
 }
 
-pub(super) fn ddl_storage_error(action: &str, err: impl std::fmt::Display) -> SQLError {
+pub(super) fn ddl_storage_error(action: &str, err: impl std::error::Error + 'static) -> SQLError {
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&err);
+    while let Some(error) = source {
+        if let Some(error) = error.downcast_ref::<SQLError>() {
+            return SQLError::Routine {
+                sqlstate: error.sqlstate().unwrap_or("XX000").into(),
+                message: error.to_string(),
+            };
+        }
+        source = error.source();
+    }
     SQLError::Internal(format!("{action} failed in storage backend: {err}"))
 }
 

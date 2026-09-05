@@ -215,6 +215,7 @@ pub(in crate::sql) fn run_insert_inner(
         .map(|projection| &projection.expr)
         .collect::<Vec<_>>();
     if let Some(conflict) = &stmt.on_conflict {
+        privilege_expressions.extend(conflict.expressions.iter());
         privilege_expressions.extend(conflict.predicate.iter().map(Box::as_ref));
     }
     if let Some(ConflictPlan {

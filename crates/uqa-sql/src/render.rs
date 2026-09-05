@@ -71,9 +71,20 @@ fn insert_sql(statement: &InsertStmt) -> String {
             rendered.push_str(" ON CONSTRAINT ");
             rendered.push_str(&ident(constraint));
         }
-        if !conflict.conflict_columns.is_empty() {
+        if !conflict.conflict_columns.is_empty() || !conflict.expressions.is_empty() {
             rendered.push_str(" (");
-            rendered.push_str(&ident_list(&conflict.conflict_columns));
+            let keys = conflict
+                .conflict_columns
+                .iter()
+                .map(|name| ident(name))
+                .chain(
+                    conflict
+                        .expressions
+                        .iter()
+                        .map(|expr| format!("({})", expr_sql(expr))),
+                )
+                .collect::<Vec<_>>();
+            rendered.push_str(&keys.join(", "));
             rendered.push(')');
         }
         if let Some(predicate) = &conflict.predicate {

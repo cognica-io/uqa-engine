@@ -519,3 +519,6 @@ fn insert_select_without_a_target_list_maps_values_by_target_position() {
 
 #[path = "sql_unique_constraint/indexes.rs"]
 mod indexes;
+
+#[path = "sql_unique_constraint/expressions.rs"]
+mod expressions;

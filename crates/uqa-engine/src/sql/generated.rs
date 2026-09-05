@@ -10,7 +10,9 @@ use super::{aggregates, convert_value_to_column_type, ColumnType, Engine, Foreig
 use uqa_sql::ast::{ColumnDef, Expr, GeneratedColumnKind, TableKeyConstraint};
 use uqa_storage::document_store::Document;
 
+mod indexes;
 mod typing;
+pub(in crate::sql) use indexes::{prepare_index_expression, prepare_index_predicate};
 
 pub(crate) fn prepare_generated_columns(
     engine: &Engine,
@@ -406,55 +408,4 @@ pub(in crate::sql) fn generated_column_kind(
         .into_iter()
         .find(|definition| definition.name == column)
         .and_then(|definition| definition.generated.map(|generated| generated.kind)))
-}
-
-/// Bind immutable Boolean expressions owned by partial indexes using the same overload and cast checks as stored generated expressions.
-pub(in crate::sql) fn prepare_index_predicate(
-    engine: &Engine,
-    table: &str,
-    expression: &mut Expr,
-) -> Result<(), SQLError> {
-    let columns = engine
-        .try_describe_table(table)
-        .map_err(|error| SQLError::Internal(format!("index predicate columns: {error}")))?
-        .ok_or_else(|| SQLError::UnknownTable(table.into()))?;
-    let plan = uqa_planner::ExpressionPlan::lower(expression.clone());
-    if !plan.subqueries.is_empty() {
-        return Err(SQLError::Routine {
-            sqlstate: "0A000".into(),
-            message: "cannot use subquery in index predicate".into(),
-        });
-    }
-    if aggregates::contains_aggregate(engine, &plan.scalar) {
-        return Err(SQLError::Routine {
-            sqlstate: "42803".into(),
-            message: "aggregate functions are not allowed in index predicates".into(),
-        });
-    }
-    let mut window = false;
-    plan.scalar
-        .visit(&mut |part| window |= matches!(part, uqa_execution::ScalarExpr::WindowCall { .. }));
-    if window {
-        return Err(SQLError::Routine {
-            sqlstate: "42P20".into(),
-            message: "window functions are not allowed in index predicates".into(),
-        });
-    }
-    let relation = crate::RelationIdentity::from_legacy_name(table)
-        .map_err(|error| SQLError::Internal(error.to_string()))?;
-    bind_generation_column_references(expression, &relation.name);
-    bind_generation_column_references(expression, table);
-    let (ty, _) = typing::infer_generation_expression(engine, &columns, expression)?;
-    match ty {
-        typing::GenerationType::Boolean | typing::GenerationType::Null => Ok(()),
-        typing::GenerationType::UnknownLiteral(value) => {
-            let value =
-                convert_value_to_column_type(uqa_core::Value::Str(value), &ColumnType::Boolean)?;
-            *expression = Expr::Literal(value);
-            Ok(())
-        }
-        _ => Err(SQLError::TypeMismatch(
-            "argument of WHERE must be type boolean".into(),
-        )),
-    }
 }

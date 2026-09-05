@@ -24,42 +24,9 @@ pub(in crate::sql) fn prepare_inference_predicate<'a>(
     if statement
         .on_conflict
         .as_ref()
-        .is_none_or(|conflict| conflict.predicate.is_none())
+        .is_none_or(|conflict| conflict.predicate.is_none() && conflict.expressions.is_empty())
     {
         return Ok(std::borrow::Cow::Borrowed(statement));
-    }
-    let mut statement = statement.clone();
-    let Some(predicate) = statement
-        .on_conflict
-        .as_mut()
-        .and_then(|conflict| conflict.predicate.as_mut())
-    else {
-        return Ok(std::borrow::Cow::Owned(statement));
-    };
-    let mut has_subquery = false;
-    predicate.visit(&mut |part| {
-        has_subquery |= matches!(
-            part,
-            Expr::ScalarSubquery(_) | Expr::Exists { .. } | Expr::InSubquery { .. }
-        );
-    });
-    if has_subquery {
-        return Err(predicate_error(
-            "0A000",
-            "cannot use subquery in index predicate",
-        ));
-    }
-    if crate::sql::aggregates::contains_aggregate(engine, predicate) {
-        return Err(predicate_error(
-            "42803",
-            "aggregate functions are not allowed in index predicates",
-        ));
-    }
-    if crate::sql::window::expr_has_window(predicate) {
-        return Err(predicate_error(
-            "42P20",
-            "window functions are not allowed in index predicates",
-        ));
     }
     let columns = engine
         .try_describe_table(&statement.table)
@@ -73,20 +40,99 @@ pub(in crate::sql) fn prepare_inference_predicate<'a>(
             .map(|column| Some(column.ty.clone()))
             .collect(),
     );
+    let mut statement = statement.clone();
+    if let Some(conflict) = &mut statement.on_conflict {
+        for expression in conflict
+            .expressions
+            .iter_mut()
+            .chain(conflict.predicate.iter_mut().map(Box::as_mut))
+        {
+            prepare_inference_expression(
+                engine,
+                expression,
+                &statement.target_qualifier,
+                &schema,
+                &columns,
+                params,
+            )?;
+        }
+        // A rewritten view expression can resolve to a simple base-table attribute.
+        let expressions = std::mem::take(&mut conflict.expressions);
+        for expression in expressions {
+            if let Expr::Column(column) = expression {
+                conflict.conflict_columns.push(column);
+            } else {
+                conflict.expressions.push(expression);
+            }
+        }
+    }
+    Ok(std::borrow::Cow::Owned(statement))
+}
+
+fn prepare_inference_expression(
+    engine: &Engine,
+    expression: &mut Expr,
+    qualifier: &str,
+    schema: &RowSchema,
+    columns: &[uqa_sql::ast::ColumnDef],
+    params: &[SQLParam],
+) -> Result<(), SQLError> {
+    let mut has_subquery = false;
+    expression.visit(&mut |part| {
+        has_subquery |= matches!(
+            part,
+            Expr::ScalarSubquery(_) | Expr::Exists { .. } | Expr::InSubquery { .. }
+        );
+    });
+    if has_subquery {
+        return Err(predicate_error(
+            "0A000",
+            "cannot use subquery in index inference",
+        ));
+    }
+    if crate::sql::aggregates::contains_aggregate(engine, expression) {
+        return Err(predicate_error(
+            "42803",
+            "aggregate functions are not allowed in index inference",
+        ));
+    }
+    if crate::sql::window::expr_has_window(expression) {
+        return Err(predicate_error(
+            "42P20",
+            "window functions are not allowed in index inference",
+        ));
+    }
     let mut plan = ExpressionPlan {
-        scalar: (**predicate).clone(),
+        scalar: expression.clone(),
         subqueries: Vec::new(),
     };
-    crate::sql::bind_catalog_expression_routines_with_outer(engine, &mut plan, params, &schema)?;
+    crate::sql::bind_catalog_expression_routines_with_outer(engine, &mut plan, params, schema)?;
     uqa_planner::rewrite_scalar_expression(&mut plan.scalar, &mut |expression| {
-        if let Expr::QualifiedColumn { qualifier, column } = expression {
-            if qualifier == &statement.target_qualifier {
+        if let Expr::QualifiedColumn {
+            qualifier: source,
+            column,
+        } = expression
+        {
+            if source == qualifier {
                 *expression = Expr::Column(column.clone());
             }
         }
     });
-    **predicate = plan.scalar;
-    Ok(std::borrow::Cow::Owned(statement))
+    uqa_planner::rewrite_scalar_expression(&mut plan.scalar, &mut |expression| {
+        if let Expr::Cast { expr, ty } = expression {
+            if let Expr::Column(name) = expr.as_ref() {
+                if columns.iter().any(|column| {
+                    column.name == *name
+                        && uqa_sql::ast::ColumnType::from_sql_name(ty).ok().as_ref()
+                            == Some(&column.ty)
+                }) {
+                    *expression = Expr::Column(name.clone());
+                }
+            }
+        }
+    });
+    *expression = plan.scalar;
+    Ok(())
 }
 
 fn predicate_error(sqlstate: &str, message: &str) -> SQLError {
@@ -105,7 +151,7 @@ pub(super) fn conflict_key_indices(
     if let Some(name) = &conflict.constraint {
         return constraint_target_index(engine, table, keys, name);
     }
-    if conflict.conflict_columns.is_empty() {
+    if conflict.conflict_columns.is_empty() && conflict.expressions.is_empty() {
         return Ok((0..keys.len()).collect());
     }
     validate_conflict_columns(engine, table, &conflict.conflict_columns)?;
@@ -123,6 +169,25 @@ pub(super) fn conflict_key_indices(
                 .map(String::as_str)
                 .collect::<BTreeSet<_>>()
                 == target
+                && {
+                    let expressions = key
+                        .keys
+                        .iter()
+                        .filter_map(|key| match key {
+                            uqa_sql::ast::IndexKey::Expression(expr) => {
+                                Some(ExpressionPlan::lower((**expr).clone()).scalar)
+                            }
+                            uqa_sql::ast::IndexKey::Column(_) => None,
+                        })
+                        .collect::<Vec<_>>();
+                    expressions
+                        .iter()
+                        .all(|expr| conflict.expressions.contains(expr))
+                        && conflict
+                            .expressions
+                            .iter()
+                            .all(|expr| expressions.contains(expr))
+                }
                 && key.predicate.as_deref().is_none_or(|required| {
                     conflict.predicate.as_deref().is_some_and(|given| {
                         implies(given, &ExpressionPlan::lower(required.clone()).scalar)

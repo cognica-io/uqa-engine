@@ -380,12 +380,15 @@ fn redb_persists_btree_postings_across_reopen_and_mutation() {
     assert!(session.backend.persists_btree_indexes());
     assert_eq!(
         session.backend.btree_index_fields("public.items").unwrap(),
-        vec!["id", "price"]
+        vec![
+            uqa_storage::ValueIndexKey::from("id"),
+            uqa_storage::ValueIndexKey::from("price")
+        ]
     );
     assert_eq!(
         session
             .backend
-            .load_btree_index("public.items", "price")
+            .load_btree_index("public.items", &"price".into())
             .unwrap(),
         Some(vec![(2, Value::Int(25)), (3, Value::Int(30))])
     );
@@ -755,7 +758,7 @@ fn assert_indexed_columns_are_physically_removed(path: &std::path::Path) {
             .backend
             .btree_index_fields("public.archived")
             .unwrap(),
-        vec!["id"]
+        vec![uqa_storage::ValueIndexKey::from("id")]
     );
     assert_vector_index_is_missing(
         session.backend.as_ref(),

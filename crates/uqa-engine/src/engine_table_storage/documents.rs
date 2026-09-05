@@ -884,7 +884,7 @@ impl Engine {
             .get(doc_id)
             .map_err(|err| document_store_write_error(&err))?
             .is_some();
-        let old_indexed = Self::value_indexes_old_values(&t, doc_id)?;
+        let old_indexed = Self::value_indexes_old_values(&t, doc_id);
         let mut store = t.document_store.write();
         store
             .delete(doc_id)

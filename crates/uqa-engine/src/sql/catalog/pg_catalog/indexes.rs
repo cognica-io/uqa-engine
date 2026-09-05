@@ -25,7 +25,7 @@ pub(in crate::sql::catalog) struct CatalogIndexRelation {
     pub(in crate::sql::catalog) relation: RelationIdentity,
     pub(in crate::sql::catalog) table_name: String,
     pub(in crate::sql::catalog) index_type: String,
-    pub(in crate::sql::catalog) columns: Vec<String>,
+    pub(in crate::sql::catalog) columns: Vec<uqa_sql::ast::IndexKey>,
     pub(in crate::sql::catalog) definition: IndexDefinition,
     pub(in crate::sql::catalog) primary: bool,
     pub(in crate::sql::catalog) relkind: &'static str,
@@ -79,7 +79,12 @@ pub(in crate::sql::catalog) fn catalog_index_relations(
                     "btree"
                 }
                 .into(),
-                columns: key.columns.clone(),
+                columns: key
+                    .columns
+                    .iter()
+                    .cloned()
+                    .map(uqa_sql::ast::IndexKey::Column)
+                    .collect(),
                 definition: IndexDefinition {
                     unique: true,
                     nulls_not_distinct: key.nulls_not_distinct,
@@ -161,7 +166,16 @@ fn append_index_tree(
                 .ok_or_else(|| SQLError::Internal("partition index disappeared".into()))?
         } else {
             CatalogIndexRelation {
-                relation: allocate_derived_index_name(&schema, &table, &index.columns, used),
+                relation: allocate_derived_index_name(
+                    &schema,
+                    &table,
+                    &index
+                        .columns
+                        .iter()
+                        .map(|key| key.column().unwrap_or("expr").to_owned())
+                        .collect::<Vec<_>>(),
+                    used,
+                ),
                 table_name: child,
                 ..index.clone()
             }
@@ -279,6 +293,31 @@ pub(in crate::sql::catalog) fn index_access_method_oid(method: &str) -> i64 {
     }
 }
 
+fn index_key_ordinals(
+    index: &CatalogIndexRelation,
+    table_cols: &[uqa_sql::ast::ColumnDef],
+) -> Result<Vec<i64>, SQLError> {
+    index
+        .columns
+        .iter()
+        .map(uqa_sql::ast::IndexKey::column)
+        .chain(
+            index
+                .definition
+                .included_columns
+                .iter()
+                .map(|name| Some(name.as_str())),
+        )
+        .map(|column| {
+            column
+                .and_then(|name| table_cols.iter().position(|item| item.name == name))
+                .map(|position| catalog_ordinal(position, "pg_index key column"))
+                .transpose()
+                .map(|ordinal| ordinal.unwrap_or(0))
+        })
+        .collect()
+}
+
 pub(in crate::sql::catalog) fn build_pg_index(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
@@ -289,16 +328,20 @@ pub(in crate::sql::catalog) fn build_pg_index(
             .table(resolution, &index.table_name)?
             .ok_or_else(|| SQLError::UnknownTable(index.table_name.clone()))?
             .columns;
-        let mut keys = Vec::with_capacity(index.columns.len());
-        for column in index
+        let keys = index_key_ordinals(&index, table_cols)?;
+        let expressions = index
             .columns
             .iter()
-            .chain(&index.definition.included_columns)
-        {
-            if let Some(position) = table_cols.iter().position(|item| item.name == *column) {
-                keys.push(catalog_ordinal(position, "pg_index key column")?);
-            }
-        }
+            .filter_map(|key| match key {
+                uqa_sql::ast::IndexKey::Expression(expression) => Some(expression.as_ref()),
+                uqa_sql::ast::IndexKey::Column(_) => None,
+            })
+            .map(|expression| {
+                super::super::view_definition::stored_expression_definition(
+                    catalog, resolution, expression, false,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let column_count = catalog_usize(index.columns.len(), "pg_index column count")?;
         let total_count = catalog_usize(
             index.columns.len() + index.definition.included_columns.len(),
@@ -354,7 +397,14 @@ pub(in crate::sql::catalog) fn build_pg_index(
                         .collect(),
                 ),
             ),
-            ("indexprs", Value::Null),
+            (
+                "indexprs",
+                if expressions.is_empty() {
+                    Value::Null
+                } else {
+                    Value::Str(expressions.join(", "))
+                },
+            ),
             (
                 "indpred",
                 index

@@ -46,10 +46,14 @@ pub(super) fn can_patch_update_without_full_row(
                 update_keys.iter().any(|column| {
                     crate::engine_table_storage::schema_expr_references_column(predicate, column)
                 })
-            }) || constraint
-                .columns
-                .iter()
-                .any(|column| update_keys.contains(column.as_str()))
+            }) || constraint.keys.iter().any(|key| {
+                update_keys.iter().any(|column| {
+                    crate::engine_table_storage::schema_expr_references_column(
+                        &key.expression(),
+                        column,
+                    )
+                })
+            })
         })
     {
         return Ok(false);
@@ -91,7 +95,7 @@ pub(super) fn point_lookup_field_is_unique(
         .iter()
         .any(|constraint| {
             constraint.predicate.is_none()
-                && constraint.columns.len() == 1
-                && constraint.columns[0] == lookup_field
+                && constraint.keys.len() == 1
+                && constraint.keys[0].column() == Some(lookup_field)
         }))
 }

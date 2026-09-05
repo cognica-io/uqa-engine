@@ -123,19 +123,19 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
     fn load_btree_index(
         &self,
         table: &str,
-        field: &str,
+        field: &crate::ValueIndexKey,
     ) -> StorageBackendResult<Option<Vec<(DocId, Value)>>> {
         btree_index::load(self.store.as_ref(), table, field)
     }
 
-    fn btree_index_fields(&self, table: &str) -> StorageBackendResult<Vec<String>> {
+    fn btree_index_fields(&self, table: &str) -> StorageBackendResult<Vec<crate::ValueIndexKey>> {
         btree_index::fields(self.store.as_ref(), table)
     }
 
     fn replace_btree_index(
         &self,
         table: &str,
-        field: &str,
+        field: &crate::ValueIndexKey,
         values: &[(DocId, Value)],
     ) -> StorageBackendResult<()> {
         btree_index::replace(self.store.as_ref(), table, field, values)
@@ -144,7 +144,7 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
     fn replace_btree_indexes(
         &self,
         table: &str,
-        indexes: &[(&str, &[(DocId, Value)])],
+        indexes: &[(&crate::ValueIndexKey, &[(DocId, Value)])],
     ) -> StorageBackendResult<()> {
         btree_index::replace_many(self.store.as_ref(), table, indexes)
     }
@@ -153,12 +153,16 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
         &self,
         table: &str,
         doc_id: DocId,
-        values: Option<&BTreeMap<String, Value>>,
+        values: Option<&BTreeMap<crate::ValueIndexKey, Value>>,
     ) -> StorageBackendResult<()> {
         btree_index::apply_write(self.store.as_ref(), table, doc_id, values)
     }
 
-    fn drop_btree_index(&self, table: &str, field: &str) -> StorageBackendResult<()> {
+    fn drop_btree_index(
+        &self,
+        table: &str,
+        field: &crate::ValueIndexKey,
+    ) -> StorageBackendResult<()> {
         btree_index::drop_index(self.store.as_ref(), table, field)
     }
 

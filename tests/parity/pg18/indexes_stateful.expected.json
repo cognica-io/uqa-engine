@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "a0aed38cfd95724c9c4be475cd1d2e2e1281f7be2939991da295559af2a42ceb",
+  "fixture_sha256": "f5cde8e375d73e1ae41339e261554cf4059fd5df4c93535751884e6276af2620",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -687,6 +687,518 @@
     {
       "name": "inference_non_boolean_full_index",
       "kind": "ok"
+    },
+    {
+      "name": "expression_table",
+      "kind": "ok"
+    },
+    {
+      "name": "expression_failed_build",
+      "kind": "error",
+      "sqlstate": "23505"
+    },
+    {
+      "name": "expression_failed_build_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "expression_remove_duplicate",
+      "kind": "ok"
+    },
+    {
+      "name": "expression_unique_index",
+      "kind": "ok"
+    },
+    {
+      "name": "expression_index_definition",
+      "kind": "rows",
+      "rows": [
+        [
+          "CREATE UNIQUE INDEX expression_key ON fixture.expression_items USING btree (lower(email), tenant DESC NULLS LAST) INCLUDE (n) NULLS NOT DISTINCT WHERE enabled",
+          "lower(email)",
+          "tenant",
+          "n"
+        ]
+      ]
+    },
+    {
+      "name": "expression_index_keys",
+      "kind": "rows",
+      "rows": [
+        [
+          "0 2 4",
+          "lower(email)",
+          "enabled"
+        ]
+      ]
+    },
+    {
+      "name": "expression_duplicate",
+      "kind": "error",
+      "sqlstate": "23505"
+    },
+    {
+      "name": "expression_atomic_duplicate",
+      "kind": "error",
+      "sqlstate": "23505"
+    },
+    {
+      "name": "expression_after_duplicate",
+      "kind": "rows",
+      "rows": [
+        [
+          "One",
+          "1",
+          "t",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "expression_null_insert",
+      "kind": "ok"
+    },
+    {
+      "name": "expression_null_duplicate",
+      "kind": "error",
+      "sqlstate": "23505"
+    },
+    {
+      "name": "expression_excluded_rows",
+      "kind": "ok"
+    },
+    {
+      "name": "expression_membership_update",
+      "kind": "error",
+      "sqlstate": "23505"
+    },
+    {
+      "name": "expression_inference",
+      "kind": "ok"
+    },
+    {
+      "name": "expression_wrong_inference",
+      "kind": "error",
+      "sqlstate": "42P10"
+    },
+    {
+      "name": "expression_no_predicate_inference",
+      "kind": "error",
+      "sqlstate": "42P10"
+    },
+    {
+      "name": "expression_view",
+      "kind": "ok"
+    },
+    {
+      "name": "expression_view_inference",
+      "kind": "ok"
+    },
+    {
+      "name": "expression_final_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          null,
+          "1",
+          "t",
+          "4"
+        ],
+        [
+          "one",
+          "1",
+          "f",
+          "6"
+        ],
+        [
+          "one",
+          "1",
+          null,
+          "7"
+        ],
+        [
+          "One",
+          "1",
+          "t",
+          "10"
+        ]
+      ]
+    },
+    {
+      "name": "expression_volatile",
+      "kind": "error",
+      "sqlstate": "42P17"
+    },
+    {
+      "name": "expression_subquery",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "expression_aggregate",
+      "kind": "error",
+      "sqlstate": "42803"
+    },
+    {
+      "name": "expression_set_returning",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "expression_unknown_column",
+      "kind": "error",
+      "sqlstate": "42703"
+    },
+    {
+      "name": "expression_foreign_key",
+      "kind": "error",
+      "sqlstate": "42830"
+    },
+    {
+      "name": "expression_metadata_table",
+      "kind": "ok"
+    },
+    {
+      "name": "expression_metadata_index",
+      "kind": "ok"
+    },
+    {
+      "name": "expression_metadata_definition",
+      "kind": "rows",
+      "rows": [
+        [
+          "CREATE INDEX expression_metadata_index ON fixture.expression_metadata USING btree (((n + 1)), abs(n), (42), a, ((n)::text), COALESCE(n, 0))",
+          "((n + 1))",
+          "(n + 1)",
+          "(42)",
+          "a",
+          "((n)::text)",
+          "COALESCE(n, 0)"
+        ]
+      ]
+    },
+    {
+      "name": "expression_metadata_attributes",
+      "kind": "rows",
+      "rows": [
+        [
+          "expr",
+          "1",
+          "f",
+          "integer"
+        ],
+        [
+          "abs",
+          "2",
+          "f",
+          "integer"
+        ],
+        [
+          "expr1",
+          "3",
+          "f",
+          "integer"
+        ],
+        [
+          "a",
+          "4",
+          "f",
+          "text"
+        ],
+        [
+          "n",
+          "5",
+          "f",
+          "text"
+        ],
+        [
+          "coalesce",
+          "6",
+          "f",
+          "integer"
+        ]
+      ]
+    },
+    {
+      "name": "expression_metadata_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "0 0 0 1 0 0",
+          "(n + 1), abs(n), 42, (n)::text, COALESCE(n, 0)"
+        ]
+      ]
+    },
+    {
+      "name": "expression_varchar_index",
+      "kind": "ok"
+    },
+    {
+      "name": "expression_varchar_insert",
+      "kind": "ok"
+    },
+    {
+      "name": "expression_varchar_inference",
+      "kind": "ok"
+    },
+    {
+      "name": "expression_varchar_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "second",
+          "One",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "expression_metadata_rename",
+      "kind": "ok"
+    },
+    {
+      "name": "expression_metadata_renamed_attributes",
+      "kind": "rows",
+      "rows": [
+        [
+          "expr",
+          "1",
+          "integer"
+        ],
+        [
+          "abs",
+          "2",
+          "integer"
+        ],
+        [
+          "expr1",
+          "3",
+          "integer"
+        ],
+        [
+          "a",
+          "4",
+          "text"
+        ],
+        [
+          "n",
+          "5",
+          "text"
+        ],
+        [
+          "coalesce",
+          "6",
+          "integer"
+        ]
+      ]
+    },
+    {
+      "name": "expression_metadata_drop_column",
+      "kind": "ok"
+    },
+    {
+      "name": "expression_metadata_drop_dependency",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "expression_noop_unique",
+      "kind": "ok"
+    },
+    {
+      "name": "expression_noop_inference",
+      "kind": "ok"
+    },
+    {
+      "name": "format_type_null_and_unknown",
+      "kind": "rows",
+      "rows": [
+        [
+          null,
+          "-",
+          "???",
+          "character",
+          "bpchar",
+          "\"char\"",
+          "text(42)",
+          "integer"
+        ]
+      ]
+    },
+    {
+      "name": "format_type_modifiers",
+      "kind": "rows",
+      "rows": [
+        [
+          "character varying(8)",
+          "character(4)",
+          "numeric(10,2)",
+          "numeric(10,-2)",
+          "timestamp(3) without time zone",
+          "timestamp(2) with time zone",
+          "time(6) without time zone",
+          "time with time zone",
+          "interval day to second(3)"
+        ]
+      ]
+    },
+    {
+      "name": "format_type_arrays",
+      "kind": "rows",
+      "rows": [
+        [
+          "integer[]",
+          "character varying(8)[]",
+          "numeric(10,2)[]",
+          "timestamp(3) with time zone[]",
+          "oidvector",
+          "int2vector"
+        ]
+      ]
+    },
+    {
+      "name": "format_type_invalid_interval",
+      "kind": "error",
+      "sqlstate": "XX000"
+    },
+    {
+      "name": "format_type_routine_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "1081",
+          "26 23",
+          "25",
+          "s",
+          "f",
+          "s",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "expression_include_label_column",
+      "kind": "ok"
+    },
+    {
+      "name": "expression_include_label_index",
+      "kind": "ok"
+    },
+    {
+      "name": "expression_include_label_attributes",
+      "kind": "rows",
+      "rows": [
+        [
+          "lower",
+          "1"
+        ],
+        [
+          "lower1",
+          "2"
+        ]
+      ]
+    },
+    {
+      "name": "expression_label_shapes_index",
+      "kind": "ok"
+    },
+    {
+      "name": "expression_label_shapes_attributes",
+      "kind": "rows",
+      "rows": [
+        [
+          "int8",
+          "1"
+        ],
+        [
+          "v",
+          "2"
+        ],
+        [
+          "abs",
+          "3"
+        ],
+        [
+          "upper",
+          "4"
+        ],
+        [
+          "array",
+          "5"
+        ]
+      ]
+    },
+    {
+      "name": "qualified_generated_functions",
+      "kind": "ok"
+    },
+    {
+      "name": "qualified_generated_values",
+      "kind": "rows",
+      "rows": [
+        [
+          "Mixed",
+          "mixed",
+          "MIXED",
+          "character varying(8)"
+        ]
+      ]
+    },
+    {
+      "name": "expression_runtime_error_table",
+      "kind": "ok"
+    },
+    {
+      "name": "expression_runtime_build_error",
+      "kind": "error",
+      "sqlstate": "22012"
+    },
+    {
+      "name": "expression_runtime_build_atomic",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "expression_runtime_valid_build",
+      "kind": "ok"
+    },
+    {
+      "name": "expression_runtime_insert_error",
+      "kind": "error",
+      "sqlstate": "22012"
+    },
+    {
+      "name": "expression_runtime_insert_atomic",
+      "kind": "rows",
+      "rows": [
+        [
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "expression_runtime_vacuum",
+      "kind": "ok"
+    },
+    {
+      "name": "expression_runtime_update_error",
+      "kind": "error",
+      "sqlstate": "22012"
     }
   ]
 }

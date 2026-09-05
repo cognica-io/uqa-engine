@@ -356,16 +356,16 @@ pub(super) fn engine_index_candidates(
         if index.table_name != resolved_table || !index.index_type.eq_ignore_ascii_case("btree") {
             continue;
         }
-        let columns =
-            serde_json::from_str::<Vec<String>>(&index.columns_json).map_err(|error| {
+        let columns = serde_json::from_str::<Vec<uqa_sql::ast::IndexKey>>(&index.columns_json)
+            .map_err(|error| {
                 SQLError::Internal(format!(
                     "decode catalog index `{}` columns: {error}",
                     index.relation.qualified_name()
                 ))
             })?;
-        if let Some(field) = columns.first() {
+        if let Some(field) = columns.first().and_then(uqa_sql::ast::IndexKey::column) {
             indexes_by_field
-                .entry(field.clone())
+                .entry(field.to_string())
                 .or_insert_with(|| index.relation.qualified_name());
         }
     }

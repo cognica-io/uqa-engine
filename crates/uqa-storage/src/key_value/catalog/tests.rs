@@ -670,12 +670,12 @@ fn relation_namespace_migration_moves_all_physical_index_namespaces() {
         .unwrap();
     let physical_keys = [
         (
-            btree_index_key("docs", "rank").unwrap(),
-            btree_index_key("public.docs", "rank").unwrap(),
+            btree_index_key("docs", &"rank".into()).unwrap(),
+            btree_index_key("public.docs", &"rank".into()).unwrap(),
         ),
         (
-            btree_entry_key("docs", "rank", 1).unwrap(),
-            btree_entry_key("public.docs", "rank", 1).unwrap(),
+            btree_entry_key("docs", &"rank".into(), 1).unwrap(),
+            btree_entry_key("public.docs", &"rank".into(), 1).unwrap(),
         ),
         (
             ivf_metadata_key("docs", "ivf_vector").unwrap(),

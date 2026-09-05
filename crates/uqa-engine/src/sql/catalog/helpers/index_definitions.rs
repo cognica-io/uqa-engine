@@ -9,7 +9,9 @@
 use super::super::pg_catalog::CatalogIndexRelation;
 use uqa_sql::{expr::quote_ident, SQLError};
 
-pub(in crate::sql::catalog) fn index_columns(columns_json: &str) -> Result<Vec<String>, SQLError> {
+pub(in crate::sql::catalog) fn index_columns(
+    columns_json: &str,
+) -> Result<Vec<uqa_sql::ast::IndexKey>, SQLError> {
     serde_json::from_str(columns_json)
         .map_err(|err| SQLError::Internal(format!("decode index column catalog: {err}")))
 }
@@ -36,7 +38,7 @@ pub(in crate::sql::catalog) fn indexdef(
         .iter()
         .enumerate()
         .map(|(position, column)| {
-            let mut column = quote_ident(column);
+            let mut column = index_key_definition(catalog, resolution, column, pretty)?;
             let order = index
                 .definition
                 .column_order
@@ -53,9 +55,9 @@ pub(in crate::sql::catalog) fn indexdef(
                     " NULLS LAST"
                 });
             }
-            column
+            Ok(column)
         })
-        .collect::<Vec<_>>()
+        .collect::<Result<Vec<_>, SQLError>>()?
         .join(", ");
     let mut sql = format!(
         "CREATE {unique}INDEX {} ON {table} USING {method} ({columns})",
@@ -85,4 +87,25 @@ pub(in crate::sql::catalog) fn indexdef(
         sql.push_str(&predicate);
     }
     Ok(sql)
+}
+
+pub(in crate::sql::catalog) fn index_key_definition(
+    catalog: &crate::engine_capabilities::CatalogReadView,
+    resolution: &crate::engine_capabilities::RelationNameResolution,
+    key: &uqa_sql::ast::IndexKey,
+    pretty: bool,
+) -> Result<String, SQLError> {
+    match key {
+        uqa_sql::ast::IndexKey::Column(name) => Ok(quote_ident(name)),
+        uqa_sql::ast::IndexKey::Expression(expression) => {
+            let sql = super::super::view_definition::stored_expression_definition(
+                catalog, resolution, expression, pretty,
+            )?;
+            if matches!(expression.as_ref(), uqa_sql::ast::Expr::Func { .. }) {
+                Ok(sql)
+            } else {
+                Ok(format!("({sql})"))
+            }
+        }
+    }
 }

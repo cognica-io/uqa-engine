@@ -6,6 +6,9 @@
 
 //! Catalog-backed `reg*` input/output and type-name resolution.
 
+mod format_type;
+pub(in crate::sql) use format_type::format_type_value;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 

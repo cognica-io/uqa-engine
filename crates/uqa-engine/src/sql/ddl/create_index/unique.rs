@@ -31,7 +31,7 @@ pub(super) fn validate_unique_index(
         .map_err(|error| ddl_storage_error("CREATE UNIQUE INDEX", error))?;
     if let Some(partition) = &hierarchy.partition_spec {
         for key in &partition.keys {
-            if !matches!(key, uqa_sql::ast::Expr::Column(column) if statement.columns.contains(column))
+            if !matches!(key, uqa_sql::ast::Expr::Column(column) if statement.columns.iter().any(|key| key.column() == Some(column.as_str())))
             {
                 return Err(SQLError::Routine {
                     sqlstate: "0A000".into(),
@@ -64,11 +64,8 @@ pub(super) fn validate_unique_index(
             )? {
                 continue;
             }
-            let values = statement
-                .columns
-                .iter()
-                .map(|column| document.get(column).cloned().unwrap_or(Value::Null))
-                .collect::<Vec<_>>();
+            let values =
+                crate::sql::dml::index_key_values(engine, &table, &statement.columns, &document)?;
             if !statement.nulls_not_distinct
                 && values.iter().any(|value| matches!(value, Value::Null))
             {

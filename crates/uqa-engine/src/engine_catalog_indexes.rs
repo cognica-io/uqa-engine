@@ -36,7 +36,11 @@ impl Engine {
             name,
             index_type,
             table,
-            columns,
+            &columns
+                .iter()
+                .cloned()
+                .map(uqa_sql::ast::IndexKey::Column)
+                .collect::<Vec<_>>(),
             options,
             &IndexDefinition::default(),
         )
@@ -47,7 +51,7 @@ impl Engine {
         name: &str,
         index_type: &str,
         table: &str,
-        columns: &[String],
+        columns: &[uqa_sql::ast::IndexKey],
         options: &[(String, String)],
         definition: &IndexDefinition,
     ) -> StorageBackendResult<()> {
@@ -63,7 +67,7 @@ impl Engine {
         name: &str,
         index_type: &str,
         table: &str,
-        columns: &[String],
+        columns: &[uqa_sql::ast::IndexKey],
         options: &[(String, String)],
         definition: &IndexDefinition,
     ) -> StorageBackendResult<()> {
@@ -148,6 +152,19 @@ impl Engine {
         Ok(())
     }
 
+    fn refresh_catalog_index_table_tree(&self, table: &str) -> StorageBackendResult<()> {
+        let tables = if self.try_table_hierarchy(table)?.partition_spec.is_some() {
+            self.hierarchy_scan_tables(table, true)
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?
+        } else {
+            vec![table.to_string()]
+        };
+        for table in tables {
+            self.refresh_value_indexes_for_table(&table)?;
+        }
+        Ok(())
+    }
+
     fn restore_catalog_index_tables(
         &self,
         current: &CatalogIndexRow,
@@ -161,7 +178,7 @@ impl Engine {
         }
         for table in tables {
             if self.try_resolve_table_name(table)?.is_some() {
-                self.refresh_value_indexes_for_table(table)?;
+                self.refresh_catalog_index_table_tree(table)?;
             }
         }
         Ok(())
@@ -191,7 +208,7 @@ impl Engine {
             }
         }
         for table in tables {
-            self.refresh_value_indexes_for_table(table)?;
+            self.refresh_catalog_index_table_tree(table)?;
         }
         Ok(())
     }
@@ -230,12 +247,13 @@ impl Engine {
         };
         let removed = self.durable.catalog_indexes.write().remove(relation);
         if existing_row.index_type.eq_ignore_ascii_case("btree") {
-            if let Err(err) = self.refresh_value_indexes_for_table(&existing_row.table_name) {
+            if let Err(err) = self.refresh_catalog_index_table_tree(&existing_row.table_name) {
                 self.durable
                     .catalog_indexes
                     .write()
                     .insert(relation.clone(), existing_row.clone());
-                if let Err(cleanup) = self.refresh_value_indexes_for_table(&existing_row.table_name)
+                if let Err(cleanup) =
+                    self.refresh_catalog_index_table_tree(&existing_row.table_name)
                 {
                     return Err(StorageBackendError::Other(format!(
                         "{err}; restoring value indexes after the index drop failure also failed: {cleanup}"
@@ -257,7 +275,7 @@ impl Engine {
                         .insert(relation.clone(), existing_row.clone());
                     if existing_row.index_type.eq_ignore_ascii_case("btree") {
                         if let Err(cleanup) =
-                            self.refresh_value_indexes_for_table(&existing_row.table_name)
+                            self.refresh_catalog_index_table_tree(&existing_row.table_name)
                         {
                             return Err(StorageBackendError::Other(format!(
                                 "{err}; restoring value indexes after the catalog delete failure also failed: {cleanup}"

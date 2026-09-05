@@ -17,6 +17,7 @@ mod events;
 mod expressions;
 mod from;
 mod function_binding;
+mod indexes;
 mod locking;
 mod ranges;
 mod relation_hierarchy;
@@ -32,6 +33,7 @@ pub use events::*;
 pub use expressions::*;
 pub use from::*;
 pub use function_binding::*;
+pub use indexes::*;
 pub use locking::*;
 pub use ranges::*;
 pub use relation_hierarchy::*;
@@ -81,7 +83,7 @@ pub struct CreateIndex {
     pub table: String,
     /// `gin`, `btree`, `ivf`, `hnsw`, `rtree`, ...
     pub access_method: String,
-    pub columns: Vec<String>,
+    pub columns: Vec<IndexKey>,
     #[serde(default)]
     pub unique: bool,
     #[serde(default)]
@@ -309,6 +311,8 @@ pub struct OnConflict {
     /// list. Empty when the clause uses `ON CONFLICT DO NOTHING` with
     /// no target.
     pub conflict_columns: Vec<String>,
+    #[serde(default)]
+    pub expressions: Vec<Expr>,
     pub action: OnConflictAction,
 }
 

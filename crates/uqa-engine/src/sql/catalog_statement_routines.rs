@@ -250,6 +250,7 @@ fn insert_statement_routine_inputs(
 ) -> Result<CommandRoutineInputs, SQLError> {
     let mut expressions = plan.rows.iter().flatten().cloned().collect::<Vec<_>>();
     if let Some(conflict) = &plan.on_conflict {
+        expressions.extend(conflict.expressions.iter().cloned());
         expressions.extend(conflict.predicate.iter().map(Box::as_ref).cloned());
         if let ConflictActionPlan::Update {
             assignments,
