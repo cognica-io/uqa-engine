@@ -446,6 +446,7 @@ pub enum MergeWhenPlan {
 #[derive(Debug, Clone)]
 pub enum CommandPlan {
     CreateTable(Box<uqa_sql::ast::CreateTable>),
+    CreateTableIfNotExists(uqa_sql::ast::DeferredCreateTable),
     CreateIndex(uqa_sql::ast::CreateIndex),
     Insert(Box<InsertPlan>),
     Update(Box<UpdatePlan>),
@@ -560,6 +561,7 @@ pub enum CommandPlan {
     },
     CreateForeignServer(uqa_sql::ast::CreateForeignServer),
     CreateForeignTable(uqa_sql::ast::CreateForeignTable),
+    CreateForeignTableIfNotExists(uqa_sql::ast::DeferredCreateForeignTable),
     AlterForeignTable(uqa_sql::ast::AlterForeignTableStmt),
     Merge(Box<MergePlan>),
     CreateFunction(Box<uqa_sql::ast::CreateFunction>),

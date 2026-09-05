@@ -238,6 +238,7 @@ pub(super) fn rewrite_command_scalars(
             }
         }
         CommandPlan::CreateTable(_)
+        | CommandPlan::CreateTableIfNotExists(_)
         | CommandPlan::CreateIndex(_)
         | CommandPlan::Drop(_)
         | CommandPlan::AlterTable(_)
@@ -266,6 +267,7 @@ pub(super) fn rewrite_command_scalars(
         | CommandPlan::Deallocate { .. }
         | CommandPlan::CreateForeignServer(_)
         | CommandPlan::CreateForeignTable(_)
+        | CommandPlan::CreateForeignTableIfNotExists(_)
         | CommandPlan::CreateFunction(_)
         | CommandPlan::DropFunction(_)
         | CommandPlan::AlterRoutine(_)

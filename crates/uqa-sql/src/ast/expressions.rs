@@ -708,6 +708,7 @@ impl Statement {
                 changed
             }
             Self::CreateTable(_)
+            | Self::CreateTableIfNotExists(_)
             | Self::CreateIndex(_)
             | Self::Drop(_)
             | Self::AlterTable(_)
@@ -736,6 +737,7 @@ impl Statement {
             | Self::Deallocate { .. }
             | Self::CreateForeignServer(_)
             | Self::CreateForeignTable(_)
+            | Self::CreateForeignTableIfNotExists(_)
             | Self::DropFunction(_)
             | Self::AlterRoutine(_)
             | Self::AlterRoutineOwner(_)

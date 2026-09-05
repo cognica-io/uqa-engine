@@ -121,8 +121,8 @@ pub(crate) use ddl::{
 use ddl::{
     coerce_to_column_type, column_type_name, core_value_to_json, json_table_arg,
     json_table_value_to_text, json_to_core_value, run_alter_sequence, run_alter_table,
-    run_create_index, run_create_sequence, run_create_table, run_create_table_as, run_drop,
-    value_to_text, CreateTableAsExecution,
+    run_create_index, run_create_sequence, run_create_table, run_create_table_as,
+    run_create_table_if_not_exists, run_drop, value_to_text, CreateTableAsExecution,
 };
 use dml::{index_vectors_for_type, run_delete, run_insert, run_merge, run_update};
 use from_rows::{build_join_spill_with_ctes, engine_func_intercept, ColumnPrune, QualifierFilters};

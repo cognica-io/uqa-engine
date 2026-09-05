@@ -147,6 +147,14 @@ pub struct CreateTable {
     pub hierarchy: TableHierarchy,
 }
 
+/// A syntactically valid `CREATE TABLE IF NOT EXISTS` whose definition must be analyzed only after execution has established that the target relation does not already exist.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeferredCreateTable {
+    pub name: String,
+    pub persistence: RelationPersistence,
+    pub definition_sql: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TableKeyConstraintKind {
     PrimaryKey,

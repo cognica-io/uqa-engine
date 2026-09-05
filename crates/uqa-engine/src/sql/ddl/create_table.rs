@@ -25,42 +25,86 @@ pub(in crate::sql) fn run_create_table(
     engine.transaction(move |engine| run_create_table_inner(engine, c))
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves DDL dependency and action order"
-)]
-fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResult, SQLError> {
-    for column in &c.columns {
+pub(in crate::sql) fn run_create_table_if_not_exists(
+    engine: &Engine,
+    deferred: uqa_sql::ast::DeferredCreateTable,
+) -> Result<SQLResult, SQLError> {
+    engine.transaction(move |engine| {
+        let Some(name) =
+            preflight_create_table_target(engine, &deferred.name, deferred.persistence, true)?
+        else {
+            return Ok(SQLResult::empty());
+        };
+        let mut table = uqa_sql::resolve_deferred_create_table(&deferred)?;
+        validate_create_table_columns(&table)?;
+        table.name = name;
+        create_table_after_preflight(engine, table)
+    })
+}
+
+fn validate_create_table_columns(table: &CreateTable) -> Result<(), SQLError> {
+    for column in &table.columns {
         super::validate_postgres_column_name(&column.name)?;
         super::validate_postgres_relation_column_type(&column.name, &column.ty)?;
     }
-    if c.persistence != uqa_sql::ast::RelationPersistence::Temporary {
+    Ok(())
+}
+
+fn preflight_create_table_target(
+    engine: &Engine,
+    name: &str,
+    persistence: uqa_sql::ast::RelationPersistence,
+    if_not_exists: bool,
+) -> Result<Option<String>, SQLError> {
+    if persistence != uqa_sql::ast::RelationPersistence::Temporary {
         engine.prepare_explicit_transaction_writer()?;
     }
-    c.name = if c.persistence == uqa_sql::ast::RelationPersistence::Temporary {
-        engine.try_temporary_relation_name_for_create(&c.name)?
+    let name = if persistence == uqa_sql::ast::RelationPersistence::Temporary {
+        engine.try_temporary_relation_name_for_create(name)?
     } else {
-        engine.try_relation_name_for_sql_create(&c.name)?
+        engine.try_relation_name_for_sql_create(name)?
     };
     if matches!(
-        engine.resolve_bound_relation_kind(&c.name)?,
+        engine.resolve_bound_relation_kind(&name)?,
         crate::engine_capabilities::RelationResolution::Found(_, _)
     ) {
-        let local = crate::RelationIdentity::from_legacy_name(&c.name)
+        let local = crate::RelationIdentity::from_legacy_name(&name)
             .map_err(SQLError::Internal)?
             .name;
-        if c.if_not_exists {
+        if if_not_exists {
             engine.push_sql_notice(
                 "NOTICE",
                 &format!("relation \"{local}\" already exists, skipping"),
             );
-            return Ok(SQLResult::empty());
+            return Ok(None);
         }
         return Err(SQLError::Routine {
             sqlstate: "42P07".into(),
             message: format!("relation \"{local}\" already exists"),
         });
     }
+    Ok(Some(name))
+}
+
+fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResult, SQLError> {
+    validate_create_table_columns(&c)?;
+    let Some(name) =
+        preflight_create_table_target(engine, &c.name, c.persistence, c.if_not_exists)?
+    else {
+        return Ok(SQLResult::empty());
+    };
+    c.name = name;
+    create_table_after_preflight(engine, c)
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves DDL dependency and action order"
+)]
+fn create_table_after_preflight(
+    engine: &Engine,
+    mut c: CreateTable,
+) -> Result<SQLResult, SQLError> {
     prepare_create_table_hierarchy(engine, &mut c)?;
     bind_create_table_relation_references(engine, &mut c)?;
     engine.materialize_implicit_sequences(

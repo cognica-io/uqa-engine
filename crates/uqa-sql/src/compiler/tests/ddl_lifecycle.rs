@@ -902,6 +902,49 @@ fn foreign_table_compilation_preserves_schema_expressions_and_rejects_keys() {
 }
 
 #[test]
+fn relation_if_not_exists_defers_definition_analysis_until_execution() {
+    let Statement::CreateTableIfNotExists(table) = first(
+        "CREATE UNLOGGED TABLE IF NOT EXISTS app.items (id missing_type PRIMARY KEY, CHECK (missing_column > 0))",
+    ) else {
+        panic!("expected deferred CREATE TABLE IF NOT EXISTS");
+    };
+    assert_eq!(table.name, "app.items");
+    assert_eq!(table.persistence, crate::ast::RelationPersistence::Unlogged);
+    assert!(table
+        .definition_sql
+        .starts_with("CREATE UNLOGGED TABLE IF NOT EXISTS"));
+    let error = resolve_deferred_create_table(&table)
+        .expect_err("an absent target must analyze the deferred definition");
+    assert!(error.to_string().contains("missing_type"));
+
+    let Statement::CreateTableIfNotExists(table) =
+        first("CREATE TABLE IF NOT EXISTS fresh_items (id integer)")
+    else {
+        panic!("expected deferred CREATE TABLE IF NOT EXISTS");
+    };
+    let resolved = resolve_deferred_create_table(&table).unwrap();
+    assert_eq!(resolved.name, "fresh_items");
+    assert_eq!(resolved.columns.len(), 1);
+
+    let Statement::CreateForeignTableIfNotExists(table) = first(
+        "CREATE FOREIGN TABLE IF NOT EXISTS app.external_items (id integer PRIMARY KEY) SERVER missing_server",
+    ) else {
+        panic!("expected deferred CREATE FOREIGN TABLE IF NOT EXISTS");
+    };
+    assert_eq!(table.name, "app.external_items");
+    assert_eq!(table.server_name, "missing_server");
+    assert!(table
+        .definition_sql
+        .starts_with("CREATE FOREIGN TABLE IF NOT EXISTS"));
+    let error = resolve_deferred_create_foreign_table(&table)
+        .expect_err("an absent target must analyze foreign-table constraints");
+    assert_eq!(error.sqlstate(), Some("0A000"));
+    assert!(error
+        .to_string()
+        .contains("primary key constraints are not supported on foreign tables"));
+}
+
+#[test]
 fn unsupported_create_ddl_never_loses_remaining_envelope_semantics() {
     for (sql, expected) in [
         (

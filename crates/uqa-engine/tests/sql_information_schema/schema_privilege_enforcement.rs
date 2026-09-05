@@ -104,7 +104,8 @@ fn schema_create_is_enforced_across_supported_object_creation_boundaries() {
         "column collision validation precedes the implicit-index privilege check",
     );
     for sql in [
-        "CREATE TABLE IF NOT EXISTS schema_create_space.existing_table(id integer)",
+        "CREATE TABLE IF NOT EXISTS schema_create_space.existing_table(id schema_create_space.missing_type)",
+        "CREATE FOREIGN TABLE IF NOT EXISTS schema_create_space.existing_table(id integer PRIMARY KEY) SERVER missing_server",
         "CREATE VIEW schema_create_space.existing_view AS SELECT 1 AS id",
         "CREATE OR REPLACE VIEW schema_create_space.existing_view AS SELECT 2 AS id",
         "CREATE OR REPLACE FUNCTION schema_create_space.existing_function() RETURNS integer LANGUAGE sql AS 'SELECT 2'",

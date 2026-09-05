@@ -273,10 +273,32 @@ impl Engine {
         })
     }
 
+    pub(crate) fn register_deferred_foreign_table(
+        &self,
+        deferred: uqa_sql::ast::DeferredCreateForeignTable,
+    ) -> Result<(), uqa_sql::SQLError> {
+        self.with_implicit_transaction(move |engine| {
+            let Some((name, relation)) =
+                engine.preflight_foreign_table_creation(&deferred.name, true)?
+            else {
+                return Ok(());
+            };
+            let statement = uqa_sql::resolve_deferred_create_foreign_table(&deferred)?;
+            Self::validate_foreign_table_schema_envelope(&statement.columns)?;
+            engine.register_foreign_table_after_preflight(
+                &name,
+                relation,
+                statement.server_name,
+                statement.columns,
+                statement.checks,
+                statement.options,
+            )
+        })
+    }
+
     fn preflight_foreign_table_creation(
         &self,
         name: &str,
-        server_name: &str,
         if_not_exists: bool,
     ) -> Result<Option<(String, RelationIdentity)>, uqa_sql::SQLError> {
         self.synchronize_catalog_registries().map_err(|error| {
@@ -324,42 +346,70 @@ impl Engine {
                 )));
             }
         }
-        if !self
+        Ok(Some((name, relation)))
+    }
+
+    fn ensure_foreign_server_exists(&self, server_name: &str) -> Result<(), uqa_sql::SQLError> {
+        if self
             .durable
             .foreign_servers
             .read()
             .contains_key(server_name)
         {
-            return Err(uqa_sql::SQLError::Routine {
-                sqlstate: "42704".into(),
-                message: format!("server \"{server_name}\" does not exist"),
-            });
+            return Ok(());
         }
-        Ok(Some((name, relation)))
+        Err(uqa_sql::SQLError::Routine {
+            sqlstate: "42704".into(),
+            message: format!("server \"{server_name}\" does not exist"),
+        })
     }
 
     fn register_foreign_table_inner(
         &self,
         name: &str,
         server_name: String,
-        mut columns: Vec<uqa_sql::ast::ColumnDef>,
-        mut checks: Vec<uqa_sql::ast::TableCheck>,
+        columns: Vec<uqa_sql::ast::ColumnDef>,
+        checks: Vec<uqa_sql::ast::TableCheck>,
         options: Vec<(String, String)>,
         if_not_exists: bool,
     ) -> Result<(), uqa_sql::SQLError> {
-        Self::validate_foreign_table_schema_envelope(&columns)?;
-        let Some((name, relation)) =
-            self.preflight_foreign_table_creation(name, &server_name, if_not_exists)?
+        if !if_not_exists {
+            Self::validate_foreign_table_schema_envelope(&columns)?;
+        }
+        let Some((name, relation)) = self.preflight_foreign_table_creation(name, if_not_exists)?
         else {
             return Ok(());
         };
+        if if_not_exists {
+            Self::validate_foreign_table_schema_envelope(&columns)?;
+        }
+        self.register_foreign_table_after_preflight(
+            &name,
+            relation,
+            server_name,
+            columns,
+            checks,
+            options,
+        )
+    }
+
+    fn register_foreign_table_after_preflight(
+        &self,
+        name: &str,
+        relation: RelationIdentity,
+        server_name: String,
+        mut columns: Vec<uqa_sql::ast::ColumnDef>,
+        mut checks: Vec<uqa_sql::ast::TableCheck>,
+        options: Vec<(String, String)>,
+    ) -> Result<(), uqa_sql::SQLError> {
         self.materialize_implicit_sequences(
             "CREATE FOREIGN TABLE",
-            &name,
+            name,
             &mut columns,
             uqa_sql::ast::RelationPersistence::Permanent,
         )?;
-        self.prepare_foreign_table_schema(&name, &mut columns, &mut checks)?;
+        self.prepare_foreign_table_schema(name, &mut columns, &mut checks)?;
+        self.ensure_foreign_server_exists(&server_name)?;
         let mut opt_map: std::collections::BTreeMap<String, String> =
             std::collections::BTreeMap::new();
         for (k, v) in options {
@@ -372,7 +422,7 @@ impl Engine {
         })?;
         let owner_columns = columns.clone();
         let table = StoredForeignTable {
-            name: name.clone(),
+            name: name.to_string(),
             object_id,
             server_name,
             columns,
@@ -403,7 +453,7 @@ impl Engine {
         table_security.insert(relation, security);
         drop(table_security);
         drop(tables);
-        self.attach_implicit_sequence_owners_for_columns(&name, object_id, &owner_columns)
+        self.attach_implicit_sequence_owners_for_columns(name, object_id, &owner_columns)
             .map_err(|error| {
                 uqa_sql::SQLError::Internal(format!(
                     "attach foreign table `{name}` sequence ownership: {error}"

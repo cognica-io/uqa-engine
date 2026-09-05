@@ -96,6 +96,12 @@ docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/pa
 docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/schema_create_enforcement_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/schema_create_enforcement_oracle.expected.txt -
 ```
 
+`relation_if_not_exists_oracle.sql` records PostgreSQL 18.4 definition-analysis ordering for `CREATE TABLE IF NOT EXISTS` and `CREATE FOREIGN TABLE IF NOT EXISTS`. The checked-in transcript verifies shared-namespace collisions across relation kinds, skipped type, column, constraint, hierarchy, typed-table, tablespace, foreign-server, and generated-sequence work, and the corresponding errors when the target name is free.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/relation_if_not_exists_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/relation_if_not_exists_oracle.expected.txt -
+```
+
 `routine_schema_usage_oracle.sql` records PostgreSQL 18.4 schema `USAGE` enforcement at routine name-resolution boundaries. The checked-in transcript verifies qualified and effective-search-path function and procedure calls, argument column and type errors before namespace checks in projections and filters, missing-object and schema-before-`EXECUTE` precedence, ALTER, GRANT, REVOKE, and DROP targets, inherited grants, immediate prepared-plan invalidation after revocation, and the distinction between dynamically resolved invoker or definer bodies and exact bindings stored in views, generated expressions, and SQL-standard routine bodies.
 
 ```sh

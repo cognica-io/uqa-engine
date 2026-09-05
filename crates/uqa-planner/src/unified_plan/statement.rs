@@ -53,6 +53,9 @@ impl UnifiedPlan {
             Statement::CreateTable(value) => {
                 Self::Command(Box::new(CommandPlan::CreateTable(Box::new(value))))
             }
+            Statement::CreateTableIfNotExists(value) => {
+                Self::Command(Box::new(CommandPlan::CreateTableIfNotExists(value)))
+            }
             Statement::CreateIndex(value) => {
                 Self::Command(Box::new(CommandPlan::CreateIndex(value)))
             }
@@ -369,6 +372,9 @@ impl UnifiedPlan {
             Statement::CreateForeignTable(value) => {
                 Self::Command(Box::new(CommandPlan::CreateForeignTable(value)))
             }
+            Statement::CreateForeignTableIfNotExists(value) => {
+                Self::Command(Box::new(CommandPlan::CreateForeignTableIfNotExists(value)))
+            }
             Statement::Merge(statement) => {
                 let mut subqueries = Vec::new();
                 let source = SourcePlan::lower_with(statement.source, aggregates, &mut subqueries);
@@ -482,6 +488,7 @@ impl CommandPlan {
     pub fn name(&self) -> &'static str {
         match self {
             Self::CreateTable(_) => "CreateTable",
+            Self::CreateTableIfNotExists(_) => "CreateTableIfNotExists",
             Self::CreateIndex(_) => "CreateIndex",
             Self::Insert(_) => "Insert",
             Self::Update(_) => "Update",
@@ -519,6 +526,7 @@ impl CommandPlan {
             Self::Deallocate { .. } => "Deallocate",
             Self::CreateForeignServer(_) => "CreateForeignServer",
             Self::CreateForeignTable(_) => "CreateForeignTable",
+            Self::CreateForeignTableIfNotExists(_) => "CreateForeignTableIfNotExists",
             Self::AlterForeignTable(_) => "AlterForeignTable",
             Self::Merge(_) => "Merge",
             Self::CreateFunction(_) => "CreateFunction",

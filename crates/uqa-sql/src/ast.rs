@@ -480,6 +480,7 @@ pub struct VacuumStmt {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Statement {
     CreateTable(CreateTable),
+    CreateTableIfNotExists(DeferredCreateTable),
     CreateIndex(CreateIndex),
     Insert(InsertStmt),
     /// `SelectStmt` is the largest variant by far (CTEs + set-ops + n-ary
@@ -654,6 +655,8 @@ pub enum Statement {
     CreateForeignServer(CreateForeignServer),
     /// `CREATE FOREIGN TABLE name (...) SERVER server OPTIONS (...)`.
     CreateForeignTable(CreateForeignTable),
+    /// `CREATE FOREIGN TABLE IF NOT EXISTS` retains its raw-parser declaration until execution can check the shared relation namespace.
+    CreateForeignTableIfNotExists(DeferredCreateForeignTable),
     /// `MERGE INTO target USING source ON cond WHEN MATCHED THEN ...
     /// WHEN NOT MATCHED THEN ...`. SQL:2003 conditional UPSERT.
     Merge(MergeStmt),
@@ -765,6 +768,14 @@ pub struct CreateForeignTable {
     pub checks: Vec<TableCheck>,
     pub options: Vec<(String, String)>,
     pub if_not_exists: bool,
+}
+
+/// A syntactically valid `CREATE FOREIGN TABLE IF NOT EXISTS` whose definition must be analyzed only when its target name is free.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeferredCreateForeignTable {
+    pub name: String,
+    pub server_name: String,
+    pub definition_sql: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

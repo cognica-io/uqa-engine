@@ -147,6 +147,7 @@ pub(super) fn optimize_command(
             }
         }
         CommandPlan::CreateTable(_)
+        | CommandPlan::CreateTableIfNotExists(_)
         | CommandPlan::CreateIndex(_)
         | CommandPlan::Drop(_)
         | CommandPlan::AlterTable(_)
@@ -175,6 +176,7 @@ pub(super) fn optimize_command(
         | CommandPlan::Deallocate { .. }
         | CommandPlan::CreateForeignServer(_)
         | CommandPlan::CreateForeignTable(_)
+        | CommandPlan::CreateForeignTableIfNotExists(_)
         | CommandPlan::CreateFunction(_)
         | CommandPlan::DropFunction(_)
         | CommandPlan::AlterRoutine(_)

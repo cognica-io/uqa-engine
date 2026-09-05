@@ -14,6 +14,26 @@ use super::{
 };
 use crate::ast::{OnCommitAction, RelationPersistence};
 
+pub(super) fn defer_create_table(
+    stmt: &pg_query::protobuf::CreateStmt,
+) -> Result<crate::ast::DeferredCreateTable> {
+    let relation = stmt
+        .relation
+        .as_ref()
+        .ok_or_else(|| SQLError::Internal("CREATE TABLE without relation".into()))?;
+    let persistence = relation_persistence(relation, "CREATE TABLE")?;
+    let name = range_var_name(relation);
+    if name.is_empty() {
+        return Err(SQLError::Internal("CREATE TABLE without name".into()));
+    }
+    let definition_sql = NodeEnum::CreateStmt(stmt.clone()).deparse()?;
+    Ok(crate::ast::DeferredCreateTable {
+        name,
+        persistence,
+        definition_sql,
+    })
+}
+
 struct IntoTarget {
     name: String,
     column_names: Vec<String>,
@@ -272,6 +292,37 @@ pub(super) fn compile_create_foreign_table(
         checks: table.checks,
         options: collect_def_elem_options(&stmt.options)?,
         if_not_exists: base.if_not_exists,
+    })
+}
+
+pub(super) fn defer_create_foreign_table(
+    stmt: &pg_query::protobuf::CreateForeignTableStmt,
+) -> Result<crate::ast::DeferredCreateForeignTable> {
+    let base = stmt
+        .base_stmt
+        .as_ref()
+        .ok_or_else(|| SQLError::Internal("CREATE FOREIGN TABLE without base".into()))?;
+    let relation = base
+        .relation
+        .as_ref()
+        .ok_or_else(|| SQLError::Internal("CREATE FOREIGN TABLE without relation".into()))?;
+    let persistence = relation_persistence(relation, "CREATE FOREIGN TABLE")?;
+    if persistence != RelationPersistence::Permanent {
+        return Err(SQLError::Unsupported(
+            "CREATE FOREIGN TABLE: temporary and unlogged relations are not supported".into(),
+        ));
+    }
+    let name = range_var_name(relation);
+    if name.is_empty() {
+        return Err(SQLError::Internal(
+            "CREATE FOREIGN TABLE without name".into(),
+        ));
+    }
+    let definition_sql = NodeEnum::CreateForeignTableStmt(stmt.clone()).deparse()?;
+    Ok(crate::ast::DeferredCreateForeignTable {
+        name,
+        server_name: stmt.servername.clone(),
+        definition_sql,
     })
 }
 

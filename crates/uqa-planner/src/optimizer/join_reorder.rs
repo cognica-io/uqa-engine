@@ -110,6 +110,7 @@ fn reorder_command_joins(
             reorder_expression_subquery_joins(params, statistics)?;
         }
         CommandPlan::CreateTable(_)
+        | CommandPlan::CreateTableIfNotExists(_)
         | CommandPlan::CreateIndex(_)
         | CommandPlan::Drop(_)
         | CommandPlan::RefreshMaterializedView { .. }
@@ -138,6 +139,7 @@ fn reorder_command_joins(
         | CommandPlan::Deallocate { .. }
         | CommandPlan::CreateForeignServer(_)
         | CommandPlan::CreateForeignTable(_)
+        | CommandPlan::CreateForeignTableIfNotExists(_)
         | CommandPlan::CreateFunction(_)
         | CommandPlan::DropFunction(_)
         | CommandPlan::AlterRoutine(_)

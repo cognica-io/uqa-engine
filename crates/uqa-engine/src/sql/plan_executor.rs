@@ -23,8 +23,9 @@ use super::scalar::{
 };
 use super::{
     plpgsql_exec, run_alter_sequence, run_alter_table, run_create_index, run_create_sequence,
-    run_create_table, run_create_table_as, run_delete, run_drop, run_explain, run_insert,
-    run_merge, run_update, run_vacuum, select, CreateTableAsExecution, Engine,
+    run_create_table, run_create_table_as, run_create_table_if_not_exists, run_delete, run_drop,
+    run_explain, run_insert, run_merge, run_update, run_vacuum, select, CreateTableAsExecution,
+    Engine,
 };
 
 fn call_output_schema(
@@ -483,6 +484,9 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             CommandPlan::CreateTable(statement) => {
                 run_create_table(self.engine, statement.as_ref().clone())
             }
+            CommandPlan::CreateTableIfNotExists(statement) => {
+                run_create_table_if_not_exists(self.engine, statement.clone())
+            }
             CommandPlan::CreateIndex(statement) => run_create_index(self.engine, statement.clone()),
             CommandPlan::Insert(plan) => self.execute_insert(plan),
             CommandPlan::Update(plan) => self.execute_update(plan),
@@ -759,6 +763,10 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             CommandPlan::CreateForeignTable(statement) => {
                 self.execute_create_foreign_table(statement)
             }
+            CommandPlan::CreateForeignTableIfNotExists(statement) => self
+                .engine
+                .register_deferred_foreign_table(statement.clone())
+                .map(|()| SQLResult::empty()),
             CommandPlan::Merge(plan) => self.execute_merge(plan),
             CommandPlan::CreateFunction(definition) => {
                 plpgsql_exec::run_create_function(self.engine, (**definition).clone())

@@ -66,6 +66,89 @@ fn engine_with_users() -> Engine {
     engine
 }
 
+#[test]
+fn create_table_if_not_exists_checks_the_relation_before_its_definition() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE existing_definition_target(marker integer);
+             CREATE TABLE IF NOT EXISTS existing_definition_target(id missing_type PRIMARY KEY CHECK (missing_column > 0)) WITH (fillfactor = 70);",
+            &[],
+        )
+        .unwrap();
+    for sql in [
+        "CREATE TABLE IF NOT EXISTS existing_definition_target(id integer, id text)",
+        "CREATE TABLE IF NOT EXISTS existing_definition_target(id integer PRIMARY KEY, other integer PRIMARY KEY)",
+        "CREATE TABLE IF NOT EXISTS existing_definition_target(id integer) INHERITS (missing_parent)",
+        "CREATE TABLE IF NOT EXISTS existing_definition_target OF missing_type",
+        "CREATE TABLE IF NOT EXISTS existing_definition_target(id serial)",
+        "CREATE TABLE IF NOT EXISTS existing_definition_target(id integer) USING missing_access_method",
+        "CREATE TABLE IF NOT EXISTS existing_definition_target(id integer) TABLESPACE missing_tablespace",
+    ] {
+        engine.sql(sql, &[]).unwrap();
+    }
+    let notices = engine.take_sql_notices();
+    assert_eq!(notices.len(), 8);
+    assert!(notices.iter().all(|notice| notice
+        == &(
+            "NOTICE".into(),
+            "relation \"existing_definition_target\" already exists, skipping".into()
+        )));
+    let columns = engine
+        .describe_table("existing_definition_target")
+        .unwrap()
+        .unwrap();
+    assert_eq!(columns.len(), 1);
+    assert_eq!(columns[0].name, "marker");
+    assert!(engine
+        .sequence_state("existing_definition_target_id_seq")
+        .unwrap()
+        .is_none());
+
+    engine
+        .sql(
+            "CREATE SEQUENCE existing_definition_sequence;
+             CREATE TABLE IF NOT EXISTS existing_definition_sequence(id missing_type)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        engine.take_sql_notices(),
+        vec![(
+            "NOTICE".into(),
+            "relation \"existing_definition_sequence\" already exists, skipping".into()
+        )]
+    );
+
+    let error = engine
+        .sql(
+            "CREATE TABLE IF NOT EXISTS absent_definition_target(id missing_type)",
+            &[],
+        )
+        .expect_err("a free target must analyze its definition");
+    assert_eq!(error.sqlstate(), Some("0A000"));
+    assert!(error.to_string().contains("missing_type"));
+    let error = engine
+        .sql(
+            "CREATE TABLE IF NOT EXISTS absent_option_target(id integer) WITH (fillfactor = 70)",
+            &[],
+        )
+        .expect_err("unsupported options must still fail for a free target");
+    assert_eq!(error.sqlstate(), Some("0A000"));
+    assert!(error.to_string().contains("storage options"));
+
+    let create = "CREATE TABLE IF NOT EXISTS cached_definition_target(id integer)";
+    engine.sql(create, &[]).unwrap();
+    engine.sql(create, &[]).unwrap();
+    assert_eq!(
+        engine.take_sql_notices(),
+        vec![(
+            "NOTICE".into(),
+            "relation \"cached_definition_target\" already exists, skipping".into()
+        )]
+    );
+}
+
 fn engine_with_parents() -> Engine {
     let engine = Engine::new();
     exec(

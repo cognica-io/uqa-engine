@@ -21,6 +21,7 @@ use super::relations::{
     compile_create_foreign_server, compile_create_foreign_table, compile_create_schema,
     compile_create_table_as, compile_create_view, compile_deallocate, compile_execute,
     compile_prepare, compile_refresh_materialized_view, compile_top_level_select,
+    defer_create_foreign_table, defer_create_table,
 };
 use super::routines::{
     compile_alter_role, compile_alter_routine, compile_alter_routine_owner, compile_call,
@@ -45,12 +46,96 @@ pub fn compile(sql: &str) -> Result<Vec<Statement>> {
     Ok(out)
 }
 
+pub fn resolve_deferred_create_table(
+    deferred: &crate::ast::DeferredCreateTable,
+) -> Result<crate::ast::CreateTable> {
+    let parsed = pg_query::parse(&deferred.definition_sql)?;
+    let [raw] = parsed.protobuf.stmts.as_slice() else {
+        return Err(SQLError::Internal(
+            "deferred CREATE TABLE did not contain exactly one statement".into(),
+        ));
+    };
+    let node = raw
+        .stmt
+        .as_deref()
+        .and_then(|node| node.node.as_ref())
+        .ok_or_else(|| SQLError::Internal("deferred CREATE TABLE is empty".into()))?;
+    let NodeEnum::CreateStmt(stmt) = node else {
+        return Err(SQLError::Internal(
+            "deferred CREATE TABLE changed statement kind".into(),
+        ));
+    };
+    let table = compile_create_table(stmt)?;
+    if !table.if_not_exists
+        || table.name != deferred.name
+        || table.persistence != deferred.persistence
+    {
+        return Err(SQLError::Internal(
+            "deferred CREATE TABLE changed target identity".into(),
+        ));
+    }
+    Ok(table)
+}
+
+pub fn resolve_deferred_create_foreign_table(
+    deferred: &crate::ast::DeferredCreateForeignTable,
+) -> Result<crate::ast::CreateForeignTable> {
+    let parsed = pg_query::parse(&deferred.definition_sql)?;
+    let [raw] = parsed.protobuf.stmts.as_slice() else {
+        return Err(SQLError::Internal(
+            "deferred CREATE FOREIGN TABLE did not contain exactly one statement".into(),
+        ));
+    };
+    let node = raw
+        .stmt
+        .as_deref()
+        .and_then(|node| node.node.as_ref())
+        .ok_or_else(|| SQLError::Internal("deferred CREATE FOREIGN TABLE is empty".into()))?;
+    let NodeEnum::CreateForeignTableStmt(stmt) = node else {
+        return Err(SQLError::Internal(
+            "deferred CREATE FOREIGN TABLE changed statement kind".into(),
+        ));
+    };
+    let table = compile_create_foreign_table(stmt)?;
+    if !table.if_not_exists
+        || table.name != deferred.name
+        || table.server_name != deferred.server_name
+    {
+        return Err(SQLError::Internal(
+            "deferred CREATE FOREIGN TABLE changed target identity".into(),
+        ));
+    }
+    Ok(table)
+}
+
+fn compile_create_table_statement(statement: &pg_query::protobuf::CreateStmt) -> Result<Statement> {
+    if statement.if_not_exists {
+        defer_create_table(statement).map(Statement::CreateTableIfNotExists)
+    } else {
+        compile_create_table(statement).map(Statement::CreateTable)
+    }
+}
+
+fn compile_create_foreign_table_statement(
+    statement: &pg_query::protobuf::CreateForeignTableStmt,
+) -> Result<Statement> {
+    if statement
+        .base_stmt
+        .as_ref()
+        .is_some_and(|base| base.if_not_exists)
+    {
+        defer_create_foreign_table(statement).map(Statement::CreateForeignTableIfNotExists)
+    } else {
+        compile_create_foreign_table(statement).map(Statement::CreateForeignTable)
+    }
+}
+
 pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
     let Some(inner) = node.node.as_ref() else {
         return Err(SQLError::Unsupported("empty statement".into()));
     };
     match inner {
-        NodeEnum::CreateStmt(stmt) => compile_create_table(stmt).map(Statement::CreateTable),
+        NodeEnum::CreateStmt(stmt) => compile_create_table_statement(stmt),
         NodeEnum::IndexStmt(stmt) => compile_create_index(stmt).map(Statement::CreateIndex),
         NodeEnum::InsertStmt(stmt) => compile_insert(stmt).map(Statement::Insert),
         NodeEnum::SelectStmt(stmt) => {
@@ -110,9 +195,7 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
         NodeEnum::CreateForeignServerStmt(stmt) => {
             compile_create_foreign_server(stmt).map(Statement::CreateForeignServer)
         }
-        NodeEnum::CreateForeignTableStmt(stmt) => {
-            compile_create_foreign_table(stmt).map(Statement::CreateForeignTable)
-        }
+        NodeEnum::CreateForeignTableStmt(stmt) => compile_create_foreign_table_statement(stmt),
         NodeEnum::MergeStmt(stmt) => compile_merge(stmt).map(Statement::Merge),
         NodeEnum::CreateFunctionStmt(stmt) => {
             compile_create_function(stmt).map(|f| Statement::CreateFunction(Box::new(f)))
