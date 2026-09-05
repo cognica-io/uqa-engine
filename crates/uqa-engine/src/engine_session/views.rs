@@ -6,6 +6,7 @@
 
 //! Durable view registration, binding, dependencies, and restoration.
 
+mod columns;
 mod materialized;
 mod options;
 mod ownership;

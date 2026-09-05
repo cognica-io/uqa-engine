@@ -168,6 +168,7 @@ fn compile_plan(
         || *distinct
         || !order_by.is_empty()
         || is_ordered_set_aggregate(name)
+        || name.eq_ignore_ascii_case("string_agg")
         || is_json_object_aggregate(name)
         || is_json_array_aggregate(name)
     {

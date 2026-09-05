@@ -54,10 +54,12 @@ pub(super) fn build_table_source_operator<'a>(
             ..
         } => {
             let qualifier = qualifier_for(qualifier, alias.as_deref());
-            if let Some(materialized) = ctes.rows.get(name).cloned() {
+            if let Some(materialized) = ctes.materialized_for_scan(name) {
                 let scan: Box<dyn PhysicalOperator + 'a> =
                     Box::new(uqa_execution::SharedSpillScan::new(materialized));
-                if let Some(visible) = ctes.recursive_control_width(name) {
+                if let Some(visible) = crate::sql::select::cte_reference_name(name)
+                    .and_then(|name| ctes.recursive_control_width(&name))
+                {
                     let operator: Box<dyn PhysicalOperator + 'a> =
                         Box::new(uqa_execution::ColumnSelection::hiding_trailing_columns(
                             scan, visible, &qualifier,
@@ -132,7 +134,7 @@ pub(super) fn build_table_source_operator<'a>(
                         alias_query_output_to_shared(engine, output, &plan.columns)?
                     } else {
                         materialize_plan_ctes(engine, std::slice::from_ref(&plan), params, ctes)?;
-                        ctes.rows.get(name).cloned().ok_or_else(|| {
+                        ctes.materialized_for_scan(name).ok_or_else(|| {
                             SQLError::Internal(format!(
                                 "deferred CTE `{name}` did not produce a materialized input"
                             ))

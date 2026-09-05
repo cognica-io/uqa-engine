@@ -153,12 +153,10 @@ fn table_lineage(
 ) -> Result<SourceLineage, SQLError> {
     if ctes.is_visible_cte(name) {
         let columns = ctes
-            .rows
-            .get(name)
+            .materialized_for_scan(name)
             .map(|rows| rows.row_schema().columns().to_vec())
             .or_else(|| {
-                ctes.deferred_ctes()
-                    .get(name)
+                ctes.deferred_reference(name)
                     .and_then(|cte| super::query_plan_output_columns(&cte.query))
             })
             .unwrap_or_default();

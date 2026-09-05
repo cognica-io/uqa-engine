@@ -35,7 +35,7 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
         return Ok(None);
     };
     let qualifier = qualifier_for(qualifier, alias.as_deref());
-    if let Some(materialized) = ctes.rows.get(name).cloned() {
+    if let Some(materialized) = ctes.materialized_for_scan(name) {
         if has_filters_for_qualifier(filters, &qualifier) {
             return Ok(None);
         }

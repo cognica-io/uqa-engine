@@ -503,18 +503,21 @@ pub(in crate::sql) fn collect_cte_source_references(
             qualifier,
             alias,
             ..
-        } if cte_names.contains(name.as_str()) => {
-            references
-                .entry(name.clone())
-                .or_default()
-                .push(alias.clone().unwrap_or_else(|| qualifier.clone()));
+        } => {
+            if let Some(name) =
+                super::cte_reference_name(name).filter(|name| cte_names.contains(name.as_str()))
+            {
+                references
+                    .entry(name)
+                    .or_default()
+                    .push(alias.clone().unwrap_or_else(|| qualifier.clone()));
+            }
         }
         SourcePlan::Join { left, right, .. } => {
             collect_cte_source_references(left, cte_names, references);
             collect_cte_source_references(right, cte_names, references);
         }
-        SourcePlan::Table { .. }
-        | SourcePlan::Values { .. }
+        SourcePlan::Values { .. }
         | SourcePlan::Function { .. }
         | SourcePlan::FunctionGroup { .. }
         | SourcePlan::Subquery { .. } => {}

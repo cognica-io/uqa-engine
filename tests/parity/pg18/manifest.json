@@ -373,9 +373,9 @@
     },
     {
       "id": "functions.full-pg18-matrix",
-      "postgresql_reference": "PostgreSQL 18.4 function and operator documentation, pg_proc, pg_operator, pg_cast, and official regression schedules",
-      "uqa_test": "cargo test -p uqa-engine --test integration engine_functions::pg18_semantics::; cargo test -p uqa-engine --test integration engine_catalog::sql_information_schema::; python3 tests/parity/pg18/run_diff.py",
-      "supported_version": "Implemented PostgreSQL 18.4 function, operator, cast, overload, and catalog slices represented by dedicated verified manifest items",
+      "postgresql_reference": "PostgreSQL 18.4 function and operator documentation, pg_proc, pg_operator, pg_cast, and official regression schedules; tests/parity/pg18/view_definitions_stateful.expected.json",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_functions::pg18_semantics::; cargo test -p uqa-engine --test integration engine_catalog::sql_information_schema::; python3 tests/parity/pg18/run_diff.py; cargo test -p uqa-engine --test integration engine_catalog::sql_views::definitions::; python3 tests/parity/pg18/run_routines_stateful.py --suite view-definitions",
+      "supported_version": "Implemented PostgreSQL 18.4 function, operator, cast, overload, and catalog slices represented by dedicated verified manifest items; PostgreSQL 18.4 five pg_get_viewdef overloads, strictness, stable volatility and parallel-restricted pg_proc metadata, stored regular and materialized view SQL reconstruction, compact/pretty/wrapped output, clause and expression cases in the view-definition transcript, schema and non-view errors, fixed output names, relation and column rename, search-path qualification, transaction, savepoint, temporary, foreign-source, owner-visible information-schema definitions, cross-engine and reopen behavior; row-evaluated text and bytea string_agg values and delimiters with ordered, DISTINCT and NULL inputs",
       "status": "partial",
       "open_issue": "The complete PostgreSQL 18 function, operator, cast, extension, and catalog matrix beyond the independently tracked routine-overload matrix has not been inventoried and differentially verified."
     },

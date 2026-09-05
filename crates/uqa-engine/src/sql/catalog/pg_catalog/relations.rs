@@ -176,7 +176,7 @@ pub(in crate::sql::catalog) fn pg_class_catalog_row(
         ("relkind", str_value(relkind)),
         ("relnatts", int_value(natts)),
         ("relchecks", int_value(0)),
-        ("relhasrules", bool_value(relkind == "v")),
+        ("relhasrules", bool_value(matches!(relkind, "v" | "m"))),
         ("relhastriggers", bool_value(false)),
         ("relhassubclass", bool_value(false)),
         ("relrowsecurity", bool_value(false)),
@@ -202,11 +202,14 @@ pub(in crate::sql::catalog) fn pg_class_catalog_row(
 
 pub(in crate::sql::catalog) fn build_pg_views(
     catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows = Vec::new();
     for (name, stored) in catalog.views_of_kind(crate::StoredViewKind::View) {
         let (schema, view) = split_schema_name(&name)?;
-        let definition = format!("{:?}", stored.query);
+        let definition = crate::sql::catalog::view_definition::view_definition(
+            catalog, resolution, &stored, false, 0,
+        )?;
         rows.push(row([
             ("schemaname", str_value(schema)),
             ("viewname", str_value(view)),
@@ -219,6 +222,7 @@ pub(in crate::sql::catalog) fn build_pg_views(
 
 pub(in crate::sql::catalog) fn build_pg_matviews(
     catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows = Vec::new();
     for (name, stored) in catalog.views_of_kind(crate::StoredViewKind::Materialized) {
@@ -226,11 +230,16 @@ pub(in crate::sql::catalog) fn build_pg_matviews(
         rows.push(row([
             ("schemaname", str_value(schema)),
             ("matviewname", str_value(matview)),
-            ("matviewowner", str_value(stored.role_owner)),
+            ("matviewowner", str_value(&stored.role_owner)),
             ("tablespace", Value::Null),
             ("hasindexes", bool_value(false)),
             ("ispopulated", bool_value(stored.populated)),
-            ("definition", str_value(format!("{:?}", stored.query))),
+            (
+                "definition",
+                str_value(crate::sql::catalog::view_definition::view_definition(
+                    catalog, resolution, &stored, false, 0,
+                )?),
+            ),
         ]));
     }
     Ok(rows)

@@ -604,12 +604,19 @@ pub(super) fn build_info_views(
             &name,
             uqa_sql::ast::TriggerEvent::Delete,
         )?;
-        let definition = format!("{:?}", stored.query);
+        let definition =
+            if catalog.role_is_enabled_for(resolution.current_user(), &stored.role_owner) {
+                str_value(super::view_definition::view_definition(
+                    catalog, resolution, &stored, false, 0,
+                )?)
+            } else {
+                Value::Null
+            };
         rows.push(row([
             ("table_catalog", catalog_name()),
             ("table_schema", str_value(schema)),
             ("table_name", str_value(view)),
-            ("view_definition", str_value(definition)),
+            ("view_definition", definition),
             ("check_option", str_value(updatability.check_option)),
             (
                 "is_updatable",

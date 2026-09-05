@@ -460,12 +460,9 @@ pub(super) fn build_pg_rewrite(
             ]))
         })
         .collect::<Result<Vec<_>, SQLError>>()?;
-    for (name, view) in catalog.views_of_kind(crate::StoredViewKind::View) {
+    for (name, view) in catalog_view_rules(catalog) {
         rows.push(row([
-            (
-                "oid",
-                int_value(stable_oid("rule", &format!("{name}._RETURN"))),
-            ),
+            ("oid", int_value(view_rule_oid(&view))),
             ("rulename", str_value("_RETURN")),
             (
                 "ev_class",
@@ -557,15 +554,32 @@ pub(in crate::sql) fn pg_get_ruledef_value(
             pretty,
         )?));
     }
-    for (name, _) in catalog.views_of_kind(crate::StoredViewKind::View) {
-        if stable_oid("rule", &format!("{name}._RETURN")) == oid {
+    for (name, view) in catalog_view_rules(&catalog) {
+        if view_rule_oid(&view) == oid {
+            let query =
+                super::view_definition::view_definition(&catalog, &resolution, &view, pretty, 0)?;
             return Ok(str_value(format!(
-                "CREATE RULE \"_RETURN\" AS ON SELECT TO {} DO INSTEAD SELECT ...",
+                "CREATE RULE \"_RETURN\" AS\n    ON SELECT TO {} DO INSTEAD {query}",
                 render_rule_relation(&catalog, &resolution, &name, pretty)?
             )));
         }
     }
     Ok(Value::Null)
+}
+
+fn catalog_view_rules(
+    catalog: &CatalogReadView,
+) -> impl Iterator<Item = (String, crate::StoredView)> + '_ {
+    [
+        crate::StoredViewKind::View,
+        crate::StoredViewKind::Materialized,
+    ]
+    .into_iter()
+    .flat_map(|kind| catalog.views_of_kind(kind))
+}
+
+fn view_rule_oid(view: &crate::StoredView) -> i64 {
+    super::helpers::oids::stable_object_oid("view-rule", &view.object_id)
 }
 
 fn definition_arguments(

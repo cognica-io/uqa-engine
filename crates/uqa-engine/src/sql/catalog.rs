@@ -58,7 +58,7 @@ pub(super) fn build_info_schema_rows(
         VirtualRelation::PgRewrite => build_pg_rewrite(catalog, resolution)?,
         VirtualRelation::PgRules => build_pg_rules(catalog, resolution)?,
         VirtualRelation::PgTables => build_pg_tables(catalog, resolution)?,
-        VirtualRelation::PgViews => build_pg_views(catalog)?,
+        VirtualRelation::PgViews => build_pg_views(catalog, resolution)?,
         VirtualRelation::PgIndexes => build_pg_indexes(catalog, resolution)?,
         VirtualRelation::PgType => build_pg_type(),
         VirtualRelation::PgRange => build_pg_range(),
@@ -69,7 +69,7 @@ pub(super) fn build_info_schema_rows(
         VirtualRelation::PgUser => build_pg_user(catalog),
         VirtualRelation::PgSettings => build_pg_settings(session)?,
         VirtualRelation::PgDescription => Vec::new(),
-        VirtualRelation::PgMatviews => build_pg_matviews(catalog)?,
+        VirtualRelation::PgMatviews => build_pg_matviews(catalog, resolution)?,
         VirtualRelation::PgSequences => build_pg_sequences(catalog, session)?,
         VirtualRelation::AgGraph => build_ag_graph(catalog)?,
         VirtualRelation::AgLabel => build_ag_label(catalog)?,
@@ -80,6 +80,9 @@ mod ag_catalog;
 mod builtin_routines;
 mod events;
 mod expression_text;
+mod view_definition;
+pub(in crate::sql) use view_definition::pg_get_viewdef_value;
+pub(crate) use view_definition::rename_view_column_query;
 mod helpers;
 mod information_schema;
 mod partitioning;

@@ -474,17 +474,18 @@ impl SchemaScope {
                 ..
             } => {
                 let qualifier = alias.as_deref().unwrap_or(qualifier);
-                if let Some(schema) = self.ctes.get(name) {
+                let cte_name = super::cte_reference_name(name);
+                if let Some(schema) = cte_name.as_ref().and_then(|name| self.ctes.get(name)) {
                     return alias_table_schema(schema, qualifier, column_aliases);
                 }
-                if let Some(plan) = self.deferred_ctes.remove(name) {
+                if let Some(plan) = cte_name.and_then(|name| self.deferred_ctes.remove(&name)) {
                     let result = self
                         .bind_query(routines, &plan.query, params, outer)
                         .and_then(|schema| {
                             let schema = rename_schema(&schema, &plan.columns, Some(qualifier));
                             alias_table_schema(&schema, qualifier, column_aliases)
                         });
-                    self.deferred_ctes.insert(name.clone(), plan);
+                    self.deferred_ctes.insert(plan.name.clone(), plan);
                     return result;
                 }
                 if self

@@ -1,0 +1,693 @@
+{
+  "schema_version": 1,
+  "fixture_sha256": "e42ead06e8d8b103ba800442ff94cf34d35cc06012d32dbfa23b12d5da3723e6",
+  "oracle": {
+    "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
+    "server_version_num": "180004",
+    "version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "age_version": "1.8.0"
+  },
+  "cases": [
+    {
+      "name": "create_schema",
+      "kind": "ok"
+    },
+    {
+      "name": "create_t",
+      "kind": "ok"
+    },
+    {
+      "name": "create_u",
+      "kind": "ok"
+    },
+    {
+      "name": "populate_t",
+      "kind": "ok"
+    },
+    {
+      "name": "populate_u",
+      "kind": "ok"
+    },
+    {
+      "name": "create_simple",
+      "kind": "ok"
+    },
+    {
+      "name": "definition_simple",
+      "kind": "rows",
+      "rows": [
+        [
+          " SELECT a,\n    b AS x,\n    1 AS one,\n    NULL::integer AS n,\n    '-1'::integer AS neg,\n    ((a * 2) + 3) AS calc\n   FROM t;",
+          " SELECT a,\n    b AS x,\n    1 AS one,\n    NULL::integer AS n,\n    '-1'::integer AS neg,\n    a * 2 + 3 AS calc\n   FROM t;",
+          " SELECT a, b AS x, 1 AS one,\n    NULL::integer AS n,\n    '-1'::integer AS neg,\n    a * 2 + 3 AS calc\n   FROM t;"
+        ]
+      ]
+    },
+    {
+      "name": "create_filter",
+      "kind": "ok"
+    },
+    {
+      "name": "definition_filter",
+      "kind": "rows",
+      "rows": [
+        [
+          " SELECT a,\n    b,\n    (a + 1) AS next_a,\n    'hi'::text AS greeting\n   FROM t\n  WHERE ((a > 0) AND (b IS NOT NULL))\n  ORDER BY a DESC;",
+          " SELECT a,\n    b,\n    a + 1 AS next_a,\n    'hi'::text AS greeting\n   FROM t\n  WHERE a > 0 AND b IS NOT NULL\n  ORDER BY a DESC;",
+          " SELECT a, b, a + 1 AS next_a,\n    'hi'::text AS greeting\n   FROM t\n  WHERE a > 0 AND b IS NOT NULL\n  ORDER BY a DESC;"
+        ]
+      ]
+    },
+    {
+      "name": "create_joined",
+      "kind": "ok"
+    },
+    {
+      "name": "definition_joined",
+      "kind": "rows",
+      "rows": [
+        [
+          " SELECT t.a,\n    t.b,\n    u.c\n   FROM (t\n     JOIN u ON ((t.a = u.a)))\n  WHERE (u.c > 0);",
+          " SELECT t.a,\n    t.b,\n    u.c\n   FROM t\n     JOIN u ON t.a = u.a\n  WHERE u.c > 0;",
+          " SELECT t.a, t.b, u.c\n   FROM t\n     JOIN u ON t.a = u.a\n  WHERE u.c > 0;"
+        ]
+      ]
+    },
+    {
+      "name": "create_using_join",
+      "kind": "ok"
+    },
+    {
+      "name": "definition_using_join",
+      "kind": "rows",
+      "rows": [
+        [
+          " SELECT t.a,\n    t.b,\n    u.c\n   FROM (t\n     JOIN u USING (a));",
+          " SELECT t.a,\n    t.b,\n    u.c\n   FROM t\n     JOIN u USING (a);",
+          " SELECT t.a, t.b, u.c\n   FROM t\n     JOIN u USING (a);"
+        ]
+      ]
+    },
+    {
+      "name": "create_full_join",
+      "kind": "ok"
+    },
+    {
+      "name": "definition_full_join",
+      "kind": "rows",
+      "rows": [
+        [
+          " SELECT a,\n    t.b,\n    u.c\n   FROM (t\n     FULL JOIN u USING (a));",
+          " SELECT a,\n    t.b,\n    u.c\n   FROM t\n     FULL JOIN u USING (a);",
+          " SELECT a, t.b, u.c\n   FROM t\n     FULL JOIN u USING (a);"
+        ]
+      ]
+    },
+    {
+      "name": "create_cte",
+      "kind": "ok"
+    },
+    {
+      "name": "definition_cte",
+      "kind": "rows",
+      "rows": [
+        [
+          " WITH x(k) AS (\n         SELECT t.a\n           FROM t\n          WHERE (t.a > 0)\n        )\n SELECT k\n   FROM x;",
+          " WITH x(k) AS (\n         SELECT t.a\n           FROM t\n          WHERE t.a > 0\n        )\n SELECT k\n   FROM x;",
+          " WITH x(k) AS (\n         SELECT t.a\n           FROM t\n          WHERE t.a > 0\n        )\n SELECT k\n   FROM x;"
+        ]
+      ]
+    },
+    {
+      "name": "create_sub",
+      "kind": "ok"
+    },
+    {
+      "name": "definition_sub",
+      "kind": "rows",
+      "rows": [
+        [
+          " SELECT a,\n    ( SELECT max(u.c) AS max\n           FROM u\n          WHERE (u.a = q.a)) AS c\n   FROM ( SELECT t.a\n           FROM t) q\n  WHERE (EXISTS ( SELECT\n           FROM u\n          WHERE (u.a = q.a)));",
+          " SELECT a,\n    ( SELECT max(u.c) AS max\n           FROM u\n          WHERE u.a = q.a) AS c\n   FROM ( SELECT t.a\n           FROM t) q\n  WHERE (EXISTS ( SELECT\n           FROM u\n          WHERE u.a = q.a));",
+          " SELECT a,\n    ( SELECT max(u.c) AS max\n           FROM u\n          WHERE u.a = q.a) AS c\n   FROM ( SELECT t.a\n           FROM t) q\n  WHERE (EXISTS ( SELECT\n           FROM u\n          WHERE u.a = q.a));"
+        ]
+      ]
+    },
+    {
+      "name": "create_values_v",
+      "kind": "ok"
+    },
+    {
+      "name": "definition_values_v",
+      "kind": "rows",
+      "rows": [
+        [
+          " VALUES (1,'x'::text), (2,'y'::text);",
+          " VALUES (1,'x'::text), (2,'y'::text);",
+          " VALUES (1,'x'::text), (2,'y'::text);"
+        ]
+      ]
+    },
+    {
+      "name": "create_union_v",
+      "kind": "ok"
+    },
+    {
+      "name": "definition_union_v",
+      "kind": "rows",
+      "rows": [
+        [
+          " SELECT t.a\n   FROM t\nUNION ALL\n SELECT u.a\n   FROM u\n  ORDER BY 1\n OFFSET 1\n LIMIT 2;",
+          " SELECT t.a\n   FROM t\nUNION ALL\n SELECT u.a\n   FROM u\n  ORDER BY 1\n OFFSET 1\n LIMIT 2;",
+          " SELECT t.a\n   FROM t\nUNION ALL\n SELECT u.a\n   FROM u\n  ORDER BY 1\n OFFSET 1\n LIMIT 2;"
+        ]
+      ]
+    },
+    {
+      "name": "create_group_v",
+      "kind": "ok"
+    },
+    {
+      "name": "definition_group_v",
+      "kind": "rows",
+      "rows": [
+        [
+          " SELECT a,\n    count(*) AS n,\n    sum(a) AS total\n   FROM t\n  GROUP BY a\n HAVING (count(*) > 1)\n  ORDER BY a;",
+          " SELECT a,\n    count(*) AS n,\n    sum(a) AS total\n   FROM t\n  GROUP BY a\n HAVING count(*) > 1\n  ORDER BY a;",
+          " SELECT a, count(*) AS n,\n    sum(a) AS total\n   FROM t\n  GROUP BY a\n HAVING count(*) > 1\n  ORDER BY a;"
+        ]
+      ]
+    },
+    {
+      "name": "create_funcs",
+      "kind": "ok"
+    },
+    {
+      "name": "definition_funcs",
+      "kind": "rows",
+      "rows": [
+        [
+          " SELECT COALESCE(b, 'x'::text) AS text,\n    ((a >= 1) AND (a <= 4)) AS range,\n    (a = ANY (ARRAY[1, 2])) AS \"any\",\n    (a <> ALL (ARRAY[1, 2])) AS no,\n    (a)::text AS casted,\n    ARRAY[a, 2] AS arr,\n        CASE\n            WHEN (a > 0) THEN 'positive'::text\n            ELSE 'other'::text\n        END AS label\n   FROM t;",
+          " SELECT COALESCE(b, 'x'::text) AS text,\n    a >= 1 AND a <= 4 AS range,\n    a = ANY (ARRAY[1, 2]) AS \"any\",\n    a <> ALL (ARRAY[1, 2]) AS no,\n    a::text AS casted,\n    ARRAY[a, 2] AS arr,\n        CASE\n            WHEN a > 0 THEN 'positive'::text\n            ELSE 'other'::text\n        END AS label\n   FROM t;",
+          " SELECT COALESCE(b, 'x'::text) AS text,\n    a >= 1 AND a <= 4 AS range,\n    a = ANY (ARRAY[1, 2]) AS \"any\",\n    a <> ALL (ARRAY[1, 2]) AS no,\n    a::text AS casted,\n    ARRAY[a, 2] AS arr,\n        CASE\n            WHEN a > 0 THEN 'positive'::text\n            ELSE 'other'::text\n        END AS label\n   FROM t;"
+        ]
+      ]
+    },
+    {
+      "name": "create_precedence",
+      "kind": "ok"
+    },
+    {
+      "name": "definition_precedence",
+      "kind": "rows",
+      "rows": [
+        [
+          " SELECT ((a + 1) * 2) AS x,\n    (a - (a - 1)) AS y,\n    (NOT ((a > 0) OR (a < 10))) AS z\n   FROM t;",
+          " SELECT (a + 1) * 2 AS x,\n    a - (a - 1) AS y,\n    NOT (a > 0 OR a < 10) AS z\n   FROM t;",
+          " SELECT (a + 1) * 2 AS x,\n    a - (a - 1) AS y,\n    NOT (a > 0 OR a < 10) AS z\n   FROM t;"
+        ]
+      ]
+    },
+    {
+      "name": "create_aliases",
+      "kind": "ok"
+    },
+    {
+      "name": "definition_aliases",
+      "kind": "rows",
+      "rows": [
+        [
+          " SELECT id AS key,\n    label\n   FROM t x(id, label);",
+          " SELECT id AS key,\n    label\n   FROM t x(id, label);",
+          " SELECT id AS key, label\n   FROM t x(id, label);"
+        ]
+      ]
+    },
+    {
+      "name": "create_distinct_v",
+      "kind": "ok"
+    },
+    {
+      "name": "definition_distinct_v",
+      "kind": "rows",
+      "rows": [
+        [
+          " SELECT DISTINCT ON (a) a,\n    b\n   FROM t\n  ORDER BY a, b DESC NULLS LAST;",
+          " SELECT DISTINCT ON (a) a,\n    b\n   FROM t\n  ORDER BY a, b DESC NULLS LAST;",
+          " SELECT DISTINCT ON (a) a, b\n   FROM t\n  ORDER BY a, b DESC NULLS LAST;"
+        ]
+      ]
+    },
+    {
+      "name": "create_window_v",
+      "kind": "ok"
+    },
+    {
+      "name": "definition_window_v",
+      "kind": "rows",
+      "rows": [
+        [
+          " SELECT a,\n    row_number() OVER (ORDER BY a) AS rn,\n    sum(a) OVER (PARTITION BY b ORDER BY a ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS total\n   FROM t;",
+          " SELECT a,\n    row_number() OVER (ORDER BY a) AS rn,\n    sum(a) OVER (PARTITION BY b ORDER BY a ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS total\n   FROM t;",
+          " SELECT a,\n    row_number() OVER (ORDER BY a) AS rn,\n    sum(a) OVER (PARTITION BY b ORDER BY a ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS total\n   FROM t;"
+        ]
+      ]
+    },
+    {
+      "name": "create_aggregate_v",
+      "kind": "ok"
+    },
+    {
+      "name": "definition_aggregate_v",
+      "kind": "rows",
+      "rows": [
+        [
+          " SELECT count(DISTINCT a) FILTER (WHERE (a > 0)) AS n,\n    string_agg(b, ','::text ORDER BY a DESC) AS labels\n   FROM t;",
+          " SELECT count(DISTINCT a) FILTER (WHERE a > 0) AS n,\n    string_agg(b, ','::text ORDER BY a DESC) AS labels\n   FROM t;",
+          " SELECT count(DISTINCT a) FILTER (WHERE a > 0) AS n,\n    string_agg(b, ','::text ORDER BY a DESC) AS labels\n   FROM t;"
+        ]
+      ]
+    },
+    {
+      "name": "create_function_v",
+      "kind": "ok"
+    },
+    {
+      "name": "definition_function_v",
+      "kind": "rows",
+      "rows": [
+        [
+          " SELECT n\n   FROM generate_series(1, 3) s(n);",
+          " SELECT n\n   FROM generate_series(1, 3) s(n);",
+          " SELECT n\n   FROM generate_series(1, 3) s(n);"
+        ]
+      ]
+    },
+    {
+      "name": "create_empty_v",
+      "kind": "ok"
+    },
+    {
+      "name": "definition_empty_v",
+      "kind": "rows",
+      "rows": [
+        [
+          " SELECT\n   FROM t;",
+          " SELECT\n   FROM t;",
+          " SELECT\n   FROM t;"
+        ]
+      ]
+    },
+    {
+      "name": "create_constants",
+      "kind": "ok"
+    },
+    {
+      "name": "definition_constants",
+      "kind": "rows",
+      "rows": [
+        [
+          " SELECT true AS flag,\n    (1)::bigint AS wide,\n    2.5 AS \"decimal\",\n    '2024-01-01'::date AS day;",
+          " SELECT true AS flag,\n    1::bigint AS wide,\n    2.5 AS \"decimal\",\n    '2024-01-01'::date AS day;",
+          " SELECT true AS flag, 1::bigint AS wide,\n    2.5 AS \"decimal\",\n    '2024-01-01'::date AS day;"
+        ]
+      ]
+    },
+    {
+      "name": "overloads",
+      "kind": "rows",
+      "rows": [
+        [
+          "1640",
+          "25",
+          "25",
+          "t",
+          "s",
+          "r",
+          "pg_get_viewdef_name"
+        ],
+        [
+          "1641",
+          "26",
+          "25",
+          "t",
+          "s",
+          "r",
+          "pg_get_viewdef"
+        ],
+        [
+          "2505",
+          "25 16",
+          "25",
+          "t",
+          "s",
+          "r",
+          "pg_get_viewdef_name_ext"
+        ],
+        [
+          "2506",
+          "26 16",
+          "25",
+          "t",
+          "s",
+          "r",
+          "pg_get_viewdef_ext"
+        ],
+        [
+          "3159",
+          "26 23",
+          "25",
+          "t",
+          "s",
+          "r",
+          "pg_get_viewdef_wrap"
+        ]
+      ]
+    },
+    {
+      "name": "text_overloads",
+      "kind": "rows",
+      "rows": [
+        [
+          "t",
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "nulls",
+      "kind": "rows",
+      "rows": [
+        [
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      ]
+    },
+    {
+      "name": "non_views",
+      "kind": "rows",
+      "rows": [
+        [
+          null,
+          null,
+          null,
+          null
+        ]
+      ]
+    },
+    {
+      "name": "missing_name",
+      "kind": "error",
+      "sqlstate": "42P01"
+    },
+    {
+      "name": "missing_schema",
+      "kind": "error",
+      "sqlstate": "3F000"
+    },
+    {
+      "name": "numeric_name",
+      "kind": "error",
+      "sqlstate": "42P01"
+    },
+    {
+      "name": "invalid_name",
+      "kind": "error",
+      "sqlstate": "42602"
+    },
+    {
+      "name": "too_many_names",
+      "kind": "error",
+      "sqlstate": "42601"
+    },
+    {
+      "name": "invalid_overload",
+      "kind": "error",
+      "sqlstate": "42883"
+    },
+    {
+      "name": "materialized",
+      "kind": "ok"
+    },
+    {
+      "name": "materialized_definition",
+      "kind": "rows",
+      "rows": [
+        [
+          " SELECT a,\n    b\n   FROM t;"
+        ]
+      ]
+    },
+    {
+      "name": "catalogs",
+      "kind": "rows",
+      "rows": [
+        [
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "matview_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "information_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "create_f",
+      "kind": "ok"
+    },
+    {
+      "name": "create_routines_v",
+      "kind": "ok"
+    },
+    {
+      "name": "definition_routines_v",
+      "kind": "rows",
+      "rows": [
+        [
+          " SELECT f(a) AS f,\n    abs(a) AS absolute\n   FROM t;",
+          " SELECT f(a) AS f,\n    abs(a) AS absolute\n   FROM t;",
+          " SELECT f(a) AS f, abs(a) AS absolute\n   FROM t;"
+        ]
+      ]
+    },
+    {
+      "name": "create_natural_v",
+      "kind": "ok"
+    },
+    {
+      "name": "definition_natural_v",
+      "kind": "rows",
+      "rows": [
+        [
+          " SELECT t.a,\n    t.b\n   FROM (t\n     JOIN ( VALUES (1)) u(a) USING (a));",
+          " SELECT t.a,\n    t.b\n   FROM t\n     JOIN ( VALUES (1)) u(a) USING (a);",
+          " SELECT t.a, t.b\n   FROM t\n     JOIN ( VALUES (1)) u(a) USING (a);"
+        ]
+      ]
+    },
+    {
+      "name": "create_patterns_v",
+      "kind": "ok"
+    },
+    {
+      "name": "definition_patterns_v",
+      "kind": "rows",
+      "rows": [
+        [
+          " SELECT (b ~~ 'x%'::text) AS likes,\n    (b !~~ 'y%'::text) AS not_likes,\n    (b ~~* 'x%'::text) AS ilikes,\n    (b || (a)::text) AS joined\n   FROM t;",
+          " SELECT b ~~ 'x%'::text AS likes,\n    b !~~ 'y%'::text AS not_likes,\n    b ~~* 'x%'::text AS ilikes,\n    b || a::text AS joined\n   FROM t;",
+          " SELECT b ~~ 'x%'::text AS likes,\n    b !~~ 'y%'::text AS not_likes,\n    b ~~* 'x%'::text AS ilikes,\n    b || a::text AS joined\n   FROM t;"
+        ]
+      ]
+    },
+    {
+      "name": "create_cast_literals",
+      "kind": "ok"
+    },
+    {
+      "name": "definition_cast_literals",
+      "kind": "rows",
+      "rows": [
+        [
+          " SELECT 1 AS a,\n    (1)::bigint AS b,\n    1 AS c,\n    2.5 AS d,\n    (- (1)::bigint) AS f,\n    '1'::numeric AS n,\n    '-1'::numeric AS negative,\n    1.0 AS scaled,\n    '123456789012345678901'::numeric AS big,\n    '-2.5'::numeric AS neg_fraction,\n    '-1.0'::numeric AS neg_scaled,\n    '100000000000000000000'::numeric AS exponential,\n    '-2147483649'::bigint AS negative_big,\n    '2147483648'::bigint AS positive_big;",
+          " SELECT 1 AS a,\n    1::bigint AS b,\n    1 AS c,\n    2.5 AS d,\n    - 1::bigint AS f,\n    '1'::numeric AS n,\n    '-1'::numeric AS negative,\n    1.0 AS scaled,\n    '123456789012345678901'::numeric AS big,\n    '-2.5'::numeric AS neg_fraction,\n    '-1.0'::numeric AS neg_scaled,\n    '100000000000000000000'::numeric AS exponential,\n    '-2147483649'::bigint AS negative_big,\n    '2147483648'::bigint AS positive_big;",
+          " SELECT 1 AS a, 1::bigint AS b, 1 AS c,\n    2.5 AS d, - 1::bigint AS f,\n    '1'::numeric AS n,\n    '-1'::numeric AS negative,\n    1.0 AS scaled,\n    '123456789012345678901'::numeric AS big,\n    '-2.5'::numeric AS neg_fraction,\n    '-1.0'::numeric AS neg_scaled,\n    '100000000000000000000'::numeric AS exponential,\n    '-2147483649'::bigint AS negative_big,\n    '2147483648'::bigint AS positive_big;"
+        ]
+      ]
+    },
+    {
+      "name": "dynamic_string_delimiters",
+      "kind": "rows",
+      "rows": [
+        [
+          "a:bc/d"
+        ]
+      ]
+    },
+    {
+      "name": "distinct_string_delimiters",
+      "kind": "rows",
+      "rows": [
+        [
+          "a?ab"
+        ]
+      ]
+    },
+    {
+      "name": "string_bytea",
+      "kind": "rows",
+      "rows": [
+        [
+          "61ff62"
+        ]
+      ]
+    },
+    {
+      "name": "view_return_rule_definitions",
+      "kind": "rows",
+      "rows": [
+        [
+          "mv",
+          "t",
+          "CREATE RULE \"_RETURN\" AS\n    ON SELECT TO mv DO INSTEAD  SELECT a,\n    b\n   FROM t;"
+        ],
+        [
+          "simple",
+          "t",
+          "CREATE RULE \"_RETURN\" AS\n    ON SELECT TO simple DO INSTEAD  SELECT a,\n    b AS x,\n    1 AS one,\n    NULL::integer AS n,\n    '-1'::integer AS neg,\n    a * 2 + 3 AS calc\n   FROM t;"
+        ]
+      ]
+    },
+    {
+      "name": "create_quoted_cte",
+      "kind": "ok"
+    },
+    {
+      "name": "definition_quoted_cte",
+      "kind": "rows",
+      "rows": [
+        [
+          " WITH \"Chosen.CTE\"(\"Key.Name\") AS (\n         SELECT t.a\n           FROM t\n        )\n SELECT \"Key.Name\"\n   FROM \"Chosen.CTE\";",
+          " WITH \"Chosen.CTE\"(\"Key.Name\") AS (\n         SELECT t.a\n           FROM t\n        )\n SELECT \"Key.Name\"\n   FROM \"Chosen.CTE\";",
+          " WITH \"Chosen.CTE\"(\"Key.Name\") AS (\n         SELECT t.a\n           FROM t\n        )\n SELECT \"Key.Name\"\n   FROM \"Chosen.CTE\";"
+        ]
+      ]
+    },
+    {
+      "name": "quoted_cte_materialized",
+      "kind": "rows",
+      "rows": [
+        [
+          "12"
+        ]
+      ]
+    },
+    {
+      "name": "quoted_cte_not_materialized",
+      "kind": "rows",
+      "rows": [
+        [
+          "12"
+        ]
+      ]
+    },
+    {
+      "name": "quoted_cte_recursive",
+      "kind": "rows",
+      "rows": [
+        [
+          "6"
+        ]
+      ]
+    },
+    {
+      "name": "quoted_cte_nested_shadowing",
+      "kind": "rows",
+      "rows": [
+        [
+          "7",
+          "99"
+        ]
+      ]
+    },
+    {
+      "name": "create_full_alias",
+      "kind": "ok"
+    },
+    {
+      "name": "definition_full_alias",
+      "kind": "rows",
+      "rows": [
+        [
+          " SELECT j.a,\n    j.b,\n    j.c\n   FROM (t\n     FULL JOIN u USING (a)) j;",
+          " SELECT j.a,\n    j.b,\n    j.c\n   FROM (t\n     FULL JOIN u USING (a)) j;",
+          " SELECT j.a, j.b, j.c\n   FROM (t\n     FULL JOIN u USING (a)) j;"
+        ]
+      ]
+    },
+    {
+      "name": "rename_source_column",
+      "kind": "ok"
+    },
+    {
+      "name": "renamed_aliased_join_definition",
+      "kind": "rows",
+      "rows": [
+        [
+          " SELECT j.a,\n    j.b,\n    j.c\n   FROM (t t(a, b)\n     FULL JOIN u USING (a)) j;",
+          " SELECT j.a,\n    j.b,\n    j.c\n   FROM (t t(a, b)\n     FULL JOIN u USING (a)) j;"
+        ]
+      ]
+    },
+    {
+      "name": "rename_table",
+      "kind": "ok"
+    },
+    {
+      "name": "renamed_definition",
+      "kind": "rows",
+      "rows": [
+        [
+          " SELECT source_a AS a,\n    b AS x,\n    1 AS one,\n    NULL::integer AS n,\n    '-1'::integer AS neg,\n    ((source_a * 2) + 3) AS calc\n   FROM renamed_t;"
+        ]
+      ]
+    },
+    {
+      "name": "rename_view",
+      "kind": "ok"
+    },
+    {
+      "name": "recreate_old_name",
+      "kind": "ok"
+    },
+    {
+      "name": "renamed_view_definition",
+      "kind": "rows",
+      "rows": [
+        [
+          " SELECT source_a AS a,\n    b AS x,\n    1 AS one,\n    NULL::integer AS n,\n    '-1'::integer AS neg,\n    ((source_a * 2) + 3) AS calc\n   FROM renamed_t;",
+          " SELECT '-100'::integer AS a;"
+        ]
+      ]
+    }
+  ]
+}

@@ -38,6 +38,7 @@ mod projected_input;
 mod registered_buffer;
 mod rewrite;
 mod sort_fallback;
+mod string_agg;
 mod value_buffer;
 
 pub(in crate::sql) use accumulator::*;

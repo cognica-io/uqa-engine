@@ -21,6 +21,10 @@ REPO_ROOT = HERE.parent.parent.parent
 FIXTURE = HERE / "routines_stateful.sql"
 EXPECTED = HERE / "routines_stateful.expected.json"
 SUITES = {
+    "view-definitions": (
+        HERE / "view_definitions_stateful.sql",
+        HERE / "view_definitions_stateful.expected.json",
+    ),
     "routines": (FIXTURE, EXPECTED),
     "constraints": (
         HERE / "constraints_stateful.sql",

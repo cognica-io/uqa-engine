@@ -426,7 +426,10 @@ pub(super) fn bind_session_portal_source_plan(
 ) -> Result<(), SQLError> {
     match source {
         SourcePlan::Table { name, .. } => {
-            if visible_ctes.contains(name) {
+            if crate::RelationIdentity::parse_reference(name)
+                .ok()
+                .is_some_and(|(schema, name)| schema.is_none() && visible_ctes.contains(&name))
+            {
                 return Ok(());
             }
             let requested = name.clone();

@@ -360,6 +360,8 @@ ALTER TABLE view_rename_snapshot RENAME TO view_rename_saved;
 SELECT id FROM view_rename_saved;
 ```
 
+View and materialized-view definitions can be reconstructed with [`pg_get_viewdef`](04-expressions-and-functions.md#view-definition-functions). Their catalog definitions contain SQL, and the `_RETURN` rewrite rule exposes the same query through `pg_get_ruledef`; that rule's OID follows the view object's rename and replacement lifecycle.
+
 ## CREATE TABLE AS
 
 ```sql

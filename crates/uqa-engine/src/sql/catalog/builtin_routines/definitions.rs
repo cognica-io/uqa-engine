@@ -1,0 +1,87 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! `PostgreSQL` catalog definition function identities.
+
+use super::BuiltinRoutineCatalogEntry;
+
+pub(super) const ROUTINES: &[BuiltinRoutineCatalogEntry] = &[
+    BuiltinRoutineCatalogEntry {
+        oid: 1640,
+        name: "pg_get_viewdef",
+        kind: "f",
+        strict: true,
+        volatility: "s",
+        parallel: "r",
+        leakproof: false,
+        return_type: 25,
+        argument_types: &[25],
+        argument_names: &[],
+        default_arguments: 0,
+        argument_defaults: None,
+        source: "pg_get_viewdef_name",
+    },
+    BuiltinRoutineCatalogEntry {
+        oid: 1641,
+        name: "pg_get_viewdef",
+        kind: "f",
+        strict: true,
+        volatility: "s",
+        parallel: "r",
+        leakproof: false,
+        return_type: 25,
+        argument_types: &[26],
+        argument_names: &[],
+        default_arguments: 0,
+        argument_defaults: None,
+        source: "pg_get_viewdef",
+    },
+    BuiltinRoutineCatalogEntry {
+        oid: 2505,
+        name: "pg_get_viewdef",
+        kind: "f",
+        strict: true,
+        volatility: "s",
+        parallel: "r",
+        leakproof: false,
+        return_type: 25,
+        argument_types: &[25, 16],
+        argument_names: &[],
+        default_arguments: 0,
+        argument_defaults: None,
+        source: "pg_get_viewdef_name_ext",
+    },
+    BuiltinRoutineCatalogEntry {
+        oid: 2506,
+        name: "pg_get_viewdef",
+        kind: "f",
+        strict: true,
+        volatility: "s",
+        parallel: "r",
+        leakproof: false,
+        return_type: 25,
+        argument_types: &[26, 16],
+        argument_names: &[],
+        default_arguments: 0,
+        argument_defaults: None,
+        source: "pg_get_viewdef_ext",
+    },
+    BuiltinRoutineCatalogEntry {
+        oid: 3159,
+        name: "pg_get_viewdef",
+        kind: "f",
+        strict: true,
+        volatility: "s",
+        parallel: "r",
+        leakproof: false,
+        return_type: 25,
+        argument_types: &[26, 23],
+        argument_names: &[],
+        default_arguments: 0,
+        argument_defaults: None,
+        source: "pg_get_viewdef_wrap",
+    },
+];

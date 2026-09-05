@@ -379,7 +379,7 @@ impl Engine {
         from: &str,
         to: &str,
     ) -> StorageBackendResult<()> {
-        self.ensure_no_dependent_views("ALTER TABLE RENAME COLUMN", table_name)?;
+        self.rewrite_view_column_references(table_name, from, to)?;
         let target = Self::resolved_relation_identity(table_name)?;
         let mut updates = Vec::new();
         for (candidate_name, table) in self.table_entries() {

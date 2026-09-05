@@ -81,45 +81,7 @@ pub(in crate::sql) fn aggregate_value_with_args(
         }
         "min" => acc.min.clone().unwrap_or(Value::Null),
         "max" => acc.max.clone().unwrap_or(Value::Null),
-        "string_agg" => {
-            let ordered_values = acc.values.ordered_values()?;
-            if ordered_values.is_empty() {
-                return Ok(Value::Null);
-            }
-            // Separator: literal second positional arg, or empty.
-            let sep = match args.get(1) {
-                Some(ScalarExpr::Literal(Value::Str(s))) => s.clone(),
-                _ => String::new(),
-            };
-            let parts: Vec<String> = ordered_values
-                .iter()
-                .map(|v| match v {
-                    Value::Null => Ok(None),
-                    Value::Void => Ok(Some(String::new())),
-                    Value::Str(s) => Ok(Some(s.clone())),
-                    Value::FixedChar(s) => Ok(Some(s.trim_end_matches(' ').to_string())),
-                    Value::Int(n) => Ok(Some(n.to_string())),
-                    Value::Float(f) => Ok(Some(f.to_string())),
-                    Value::Decimal(d) => Ok(Some(d.to_sql_string())),
-                    Value::Bool(b) => Ok(Some(b.to_string())),
-                    Value::Temporal(t) => Ok(Some(t.to_sql_string())),
-                    Value::Bytes(_)
-                    | Value::Json(_)
-                    | Value::JsonB(_)
-                    | Value::Array(_)
-                    | Value::List(_)
-                    | Value::Row(_)
-                    | Value::Record(_)
-                    | Value::Map(_) => Err(SQLError::TypeMismatch(format!(
-                        "string_agg requires a text-coercible value, got {v:?}"
-                    ))),
-                })
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .flatten()
-                .collect();
-            Value::Str(parts.join(&sep))
-        }
+        "string_agg" => super::string_agg::finish(&acc.values.ordered_values()?)?,
         "array_agg" => {
             let ordered_values = acc.values.ordered_values()?;
             if ordered_values.is_empty() {

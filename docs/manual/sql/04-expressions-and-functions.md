@@ -37,6 +37,30 @@ For the implemented fixed-signature built-ins documented below, ordinary express
 
 The shared fixed-signature registry covers `casefold`, `reverse`, `md5`, `crc32`, `crc32c`, the documented one-argument length family, `gamma`, `lgamma`, `json_strip_nulls`, `jsonb_strip_nulls`, `to_bin`, `to_hex`, `to_oct`, `to_regproc`, `to_regprocedure`, `to_regclass`, `to_regnamespace`, `to_regrole`, `to_regtype`, the unit and range `random` functions, and the documented UUID generation and extraction functions. Polymorphic array transformations retain their specialized type-substitution path.
 
+## View definition functions
+
+```sql
+SELECT pg_get_viewdef(view_oid);
+SELECT pg_get_viewdef(view_oid, pretty);
+SELECT pg_get_viewdef(view_oid, wrap_column);
+SELECT pg_get_viewdef(view_name);
+SELECT pg_get_viewdef(view_name, pretty);
+```
+
+`view_oid` is an `oid` value, including a relation name cast to `regclass`; `view_name` is a `text` value resolved through the current search path and schema `USAGE` privileges. `pretty` is a Boolean value that defaults to false. The integer `wrap_column` overload enables pretty printing and controls target-list wrapping; zero places targets on separate lines and a negative value permits an unlimited line width.
+
+The result is `text` containing the reconstructed SELECT command and its terminating semicolon for a regular or materialized view. Reconstruction reads the stored query without executing it, preserves fixed public output names, and chooses schema qualification against the caller's search path. View and source renames, replacement, transactions, savepoints, temporary relations, and durable reopen are reflected in subsequent calls. `pg_views.definition` and `pg_matviews.definition` expose the same default definition. `information_schema.views.view_definition` exposes it only to an enabled owning role; another role with view privileges sees NULL in that column.
+
+Every overload propagates NULL arguments. An unknown OID or the OID or name of an existing non-view relation returns NULL. A missing textual relation reports `42P01`, a missing explicitly named schema reports `3F000`, and denied schema access reports `42501`; invalid names and unmatched overloads follow PostgreSQL's name and function-resolution errors. OID lookup does not require SELECT on the view. The routines are stable and parallel restricted, with their five PostgreSQL 18 signatures exposed in `pg_proc`.
+
+```sql execute
+CREATE TABLE definition_source (id integer, label text);
+CREATE VIEW definition_example (item_id, label) AS
+SELECT id, label FROM definition_source WHERE id > 0;
+SELECT pg_get_viewdef('definition_example'::regclass) AS definition;
+SELECT pg_get_viewdef('definition_example'::regclass, true) AS pretty_definition;
+```
+
 ## Text functions
 
 | Group | Functions |
@@ -273,6 +297,8 @@ Ordered-set examples use `WITHIN GROUP`:
 SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms) AS median
 FROM samples;
 ```
+
+`string_agg(value, delimiter [ORDER BY ...])` evaluates both arguments for each input row. It skips NULL values, inserts each retained row's delimiter before that value except for the first retained row, and treats a NULL delimiter as empty. Text inputs return `text`, binary inputs return `bytea`, and an empty input returns NULL. `DISTINCT` considers both arguments, and ordering and bounded spill execution retain each value with its delimiter.
 
 ## Window functions
 
