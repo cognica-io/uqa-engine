@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the Python-installed `usql` entry point so interactive startup and SQL script execution use Python's command-line arguments instead of treating the console launcher or interpreter options as SQL input.
+
 ## [0.2.0] - 2026-09-05
 
 See the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.2.0/docs/manual/reference/10-upgrading.md) for package versions, custom Rust storage API changes, and persistent database migration.
