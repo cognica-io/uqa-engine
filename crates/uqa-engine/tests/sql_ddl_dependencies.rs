@@ -4,6 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use uqa_core::Value;
 use uqa_engine::Engine;
 use uqa_sql::ast::{ColumnDef, ColumnType, Expr};
 
@@ -106,7 +107,7 @@ fn cascade_flags_and_wrong_relation_kinds_fail_before_side_effects() {
 }
 
 #[test]
-fn dependent_views_block_restrict_and_column_ddl_but_cascade_with_the_table() {
+fn dependent_views_follow_table_rename_but_block_restrict_and_column_ddl() {
     let engine = Engine::new();
     engine
         .sql("CREATE TABLE items (id INTEGER, kept INTEGER)", &[])
@@ -123,7 +124,6 @@ fn dependent_views_block_restrict_and_column_ddl_but_cascade_with_the_table() {
 
     for sql in [
         "DROP TABLE items",
-        "ALTER TABLE items RENAME TO renamed_items",
         "ALTER TABLE items RENAME COLUMN id TO item_id",
         "ALTER TABLE items DROP COLUMN id",
     ] {
@@ -138,6 +138,24 @@ fn dependent_views_block_restrict_and_column_ddl_but_cascade_with_the_table() {
     assert!(!engine.has_table("renamed_items").unwrap());
     assert_eq!(engine.table_columns("items").unwrap(), vec!["id", "kept"]);
     assert!(engine.view("item_ids").unwrap().is_some());
+
+    engine.sql("INSERT INTO items VALUES (7, 9)", &[]).unwrap();
+    engine
+        .sql("ALTER TABLE items RENAME TO renamed_items", &[])
+        .unwrap();
+    assert_eq!(
+        engine
+            .sql("SELECT id FROM nested_item_ids", &[])
+            .unwrap()
+            .rows[0]
+            .get("id"),
+        Some(&Value::Int(7))
+    );
+    assert!(!engine.has_table("items").unwrap());
+    assert!(engine.has_table("renamed_items").unwrap());
+    engine
+        .sql("ALTER TABLE renamed_items RENAME TO items", &[])
+        .unwrap();
 
     let error = engine.drop_view("item_ids").unwrap_err();
     assert!(

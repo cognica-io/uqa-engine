@@ -11,6 +11,7 @@ use super::{
     single_str_key, ForeignTableRow, KeyValueCatalog, RelationIdentity, RelationKind,
     StorageBackendError, StorageBackendResult, StoredForeignServer, StoredForeignTable,
     TableAclEntry, STORED_FOREIGN_TABLE_SECURITY_VERSION, TAG_FOREIGN_SERVER, TAG_FOREIGN_TABLE,
+    TAG_RELATION,
 };
 
 impl KeyValueCatalog {
@@ -92,6 +93,41 @@ impl KeyValueCatalog {
         stored.acl = acl.map(<[TableAclEntry]>::to_vec);
         stored.column_acls.clone_from(column_acls);
         self.store.put(&key, &encode_value(&stored)?)?;
+        Ok(true)
+    }
+
+    pub(super) fn rename_foreign_table_impl(
+        &self,
+        from: &RelationIdentity,
+        to: &RelationIdentity,
+    ) -> StorageBackendResult<bool> {
+        let from_key = relation_key(TAG_FOREIGN_TABLE, from)?;
+        if from == to {
+            return Ok(self.store.get(&from_key)?.is_some());
+        }
+        if from.schema != to.schema {
+            return Err(StorageBackendError::Other(
+                "moving a foreign table between schemas is not supported by the catalog".into(),
+            ));
+        }
+        let Some(value) = self.store.get(&from_key)? else {
+            return Ok(false);
+        };
+        let to_key = relation_key(TAG_FOREIGN_TABLE, to)?;
+        if self.store.get(&to_key)?.is_some()
+            || self.store.get(&relation_key(TAG_RELATION, to)?)?.is_some()
+        {
+            return Err(StorageBackendError::Other(format!(
+                "relation `{}` already exists",
+                to.qualified_name()
+            )));
+        }
+        let mut batch = self.store.batch();
+        self.claim_relation(batch.as_mut(), to, RelationKind::ForeignTable)?;
+        batch.put(&to_key, &value)?;
+        batch.delete(&from_key)?;
+        self.release_relation(batch.as_mut(), from, RelationKind::ForeignTable)?;
+        batch.commit()?;
         Ok(true)
     }
 

@@ -225,6 +225,14 @@ impl CatalogFacade for KeyValueCatalog {
         self.save_view_impl(view)
     }
 
+    fn rename_view(
+        &self,
+        from: &RelationIdentity,
+        to: &RelationIdentity,
+    ) -> StorageBackendResult<bool> {
+        self.rename_view_impl(from, to)
+    }
+
     fn drop_view(&self, relation: &RelationIdentity) -> StorageBackendResult<bool> {
         self.drop_view_impl(relation)
     }
@@ -392,6 +400,14 @@ impl CatalogFacade for KeyValueCatalog {
 
     fn save_foreign_table(&self, row: &ForeignTableRow) -> StorageBackendResult<()> {
         self.save_foreign_table_impl(row)
+    }
+
+    fn rename_foreign_table(
+        &self,
+        from: &RelationIdentity,
+        to: &RelationIdentity,
+    ) -> StorageBackendResult<bool> {
+        self.rename_foreign_table_impl(from, to)
     }
 
     fn update_foreign_table_security(

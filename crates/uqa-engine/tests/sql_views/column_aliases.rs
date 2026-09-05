@@ -339,10 +339,27 @@ fn legacy_query_only_view_definitions_still_restore() {
     assert_eq!(updated_rows, 1, "legacy view fixture must update one row");
     drop(connection);
 
+    let identities = {
+        let engine = Engine::open(&path).unwrap();
+        let result = exec(&engine, "SELECT value FROM legacy_view");
+        assert_eq!(result.column_types, [Some(ColumnType::SmallInteger)]);
+        assert_eq!(result.rows[0]["value"], Value::Int(7));
+        let catalog = exec(
+            &engine,
+            "SELECT oid, reltype FROM pg_class WHERE oid = 'legacy_view'::regclass",
+        );
+        (
+            catalog.rows[0]["oid"].clone(),
+            catalog.rows[0]["reltype"].clone(),
+        )
+    };
     let engine = Engine::open(&path).unwrap();
-    let result = exec(&engine, "SELECT value FROM legacy_view");
-    assert_eq!(result.column_types, [Some(ColumnType::SmallInteger)]);
-    assert_eq!(result.rows[0]["value"], Value::Int(7));
+    let catalog = exec(
+        &engine,
+        "SELECT oid, reltype FROM pg_class WHERE oid = 'legacy_view'::regclass",
+    );
+    assert_eq!(catalog.rows[0]["oid"], identities.0);
+    assert_eq!(catalog.rows[0]["reltype"], identities.1);
 }
 
 #[test]

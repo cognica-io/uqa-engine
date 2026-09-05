@@ -264,11 +264,13 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
             crate::ast::AlterForeignTableStmt {
                 name: table,
                 if_exists,
-                owner: super::routines::compile_role_spec(
-                    owner,
-                    false,
-                    "ALTER FOREIGN TABLE OWNER TO",
-                )?,
+                action: crate::ast::AlterForeignTableAction::OwnerTo(
+                    super::routines::compile_role_spec(
+                        owner,
+                        false,
+                        "ALTER FOREIGN TABLE OWNER TO",
+                    )?,
+                ),
             },
         ));
     }
@@ -854,6 +856,12 @@ pub(super) fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<St
             new_name: render_relation_component(&stmt.newname),
         }));
     }
+    compile_relation_rename(stmt)
+}
+
+fn compile_relation_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<Statement> {
+    use pg_query::protobuf::ObjectType;
+
     let relation = stmt
         .relation
         .as_ref()
@@ -876,6 +884,29 @@ pub(super) fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<St
                 },
                 ..AlterSequence::default()
             }));
+        }
+        ObjectType::ObjectView | ObjectType::ObjectMatview => {
+            return Ok(Statement::AlterView(AlterViewStmt {
+                name: table,
+                kind: if stmt.rename_type() == ObjectType::ObjectView {
+                    AlterViewKind::View
+                } else {
+                    AlterViewKind::MaterializedView
+                },
+                if_exists: stmt.missing_ok,
+                action: AlterViewAction::RenameTo(render_relation_component(&stmt.newname)),
+            }));
+        }
+        ObjectType::ObjectForeignTable => {
+            return Ok(Statement::AlterForeignTable(
+                crate::ast::AlterForeignTableStmt {
+                    name: table,
+                    if_exists: stmt.missing_ok,
+                    action: crate::ast::AlterForeignTableAction::RenameTo(
+                        render_relation_component(&stmt.newname),
+                    ),
+                },
+            ));
         }
         ObjectType::ObjectTrigger => AlterTableAction::RenameTrigger {
             from: stmt.subname.clone(),

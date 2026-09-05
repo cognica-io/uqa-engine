@@ -86,6 +86,29 @@ fn validate_rule_action_contract(definition: &CreateRule) -> Result<(), SQLError
 }
 
 impl Engine {
+    fn resolve_rule_event_relation_kind(
+        &self,
+        name: &str,
+        lookup_mode: RelationLookupMode,
+    ) -> Result<(RelationIdentity, &'static str), SQLError> {
+        let resolution = match lookup_mode {
+            RelationLookupMode::Dynamic => self.resolve_visible_relation_kind(name)?,
+            RelationLookupMode::Bound => self.resolve_bound_relation_kind(name)?,
+        };
+        if let RelationResolution::Found(canonical, "foreign table") = &resolution {
+            let relation = RelationIdentity::from_legacy_name(canonical).map_err(|error| {
+                SQLError::Internal(format!(
+                    "decode resolved rule relation `{canonical}`: {error}"
+                ))
+            })?;
+            return Err(SQLError::Routine {
+                sqlstate: "42809".into(),
+                message: format!("\"{}\" is a foreign table", relation.name),
+            });
+        }
+        Self::event_relation_from_resolution(name, resolution)
+    }
+
     fn resolve_visible_rule_action_relation(
         &self,
         name: &str,
@@ -481,7 +504,8 @@ impl Engine {
         ),
         SQLError,
     > {
-        let (relation, _) = self.resolve_event_relation_kind(&definition.table, lookup_mode)?;
+        let (relation, _) =
+            self.resolve_rule_event_relation_kind(&definition.table, lookup_mode)?;
         definition.table = relation.qualified_name();
         if lookup_mode == RelationLookupMode::Dynamic {
             self.ensure_event_relation_owner(&relation, None)?;

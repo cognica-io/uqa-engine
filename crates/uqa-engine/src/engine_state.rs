@@ -177,6 +177,9 @@ impl StorageContext {
 /// One bound view query together with the fixed public column names captured when the view was created. `None` exists only while the catalog-opening migration reads formats written before column metadata was persisted.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct StoredView {
+    /// Stable logical relation identity. Renames and replacement preserve it; a zero value marks a legacy catalog row upgraded during initial open.
+    #[serde(default)]
+    pub(crate) object_id: [u8; 16],
     /// Durable SQL-role owner loaded from the typed view catalog row. The query-definition JSON deliberately excludes ownership so catalog definition and authorization state cannot disagree.
     #[serde(skip)]
     pub(crate) role_owner: String,

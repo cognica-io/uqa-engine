@@ -215,6 +215,14 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::save_view(self, view))
     }
 
+    fn rename_view(
+        &self,
+        from: &RelationIdentity,
+        to: &RelationIdentity,
+    ) -> StorageBackendResult<bool> {
+        into_storage_result(Catalog::rename_view(self, from, to))
+    }
+
     fn drop_view(&self, relation: &RelationIdentity) -> StorageBackendResult<bool> {
         into_storage_result(Catalog::drop_view(self, relation))
     }
@@ -423,6 +431,14 @@ impl CatalogFacade for Catalog {
 
     fn save_foreign_table(&self, row: &ForeignTableRow) -> StorageBackendResult<()> {
         into_storage_result(Catalog::save_foreign_table(self, row))
+    }
+
+    fn rename_foreign_table(
+        &self,
+        from: &RelationIdentity,
+        to: &RelationIdentity,
+    ) -> StorageBackendResult<bool> {
+        into_storage_result(Catalog::rename_foreign_table(self, from, to))
     }
 
     fn update_foreign_table_security(

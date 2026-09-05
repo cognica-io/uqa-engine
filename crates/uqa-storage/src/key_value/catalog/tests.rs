@@ -204,6 +204,76 @@ fn foreign_table_rows_round_trip_security_and_migration_rewrites_it_atomically()
 }
 
 #[test]
+fn view_and_foreign_table_renames_move_rows_and_relation_claims_atomically() {
+    let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
+    let catalog = KeyValueCatalog::new(Arc::clone(&store));
+    catalog.save_schema("public").unwrap();
+    let view = RelationIdentity::new("public", "source_view");
+    let renamed_view = RelationIdentity::new("public", "renamed_view");
+    let foreign = RelationIdentity::new("public", "source_foreign");
+    let renamed_foreign = RelationIdentity::new("public", "renamed_foreign");
+    catalog
+        .save_view(&ViewRow {
+            relation: view.clone(),
+            role_owner: "uqa".into(),
+            acl: None,
+            column_acls: std::collections::BTreeMap::new(),
+            definition_json: "view-definition".into(),
+        })
+        .unwrap();
+    catalog
+        .save_foreign_table(&ForeignTableRow {
+            relation: foreign.clone(),
+            role_owner: "uqa".into(),
+            acl: None,
+            column_acls: std::collections::BTreeMap::new(),
+            server_name: "memory".into(),
+            columns_json: "[]".into(),
+            options_json: "{}".into(),
+        })
+        .unwrap();
+
+    assert!(catalog.rename_view(&view, &renamed_view).unwrap());
+    assert!(catalog
+        .rename_foreign_table(&foreign, &renamed_foreign)
+        .unwrap());
+    assert!(!catalog
+        .rename_view(&RelationIdentity::new("public", "missing"), &view)
+        .unwrap());
+    assert!(catalog
+        .rename_view(&renamed_view, &renamed_foreign)
+        .is_err());
+    assert_eq!(catalog.load_views().unwrap()[0].relation, renamed_view);
+    assert_eq!(
+        catalog.load_foreign_tables().unwrap()[0].relation,
+        renamed_foreign
+    );
+
+    catalog
+        .save_view(&ViewRow {
+            relation: view,
+            role_owner: "uqa".into(),
+            acl: None,
+            column_acls: std::collections::BTreeMap::new(),
+            definition_json: "replacement-view-definition".into(),
+        })
+        .unwrap();
+    catalog
+        .save_foreign_table(&ForeignTableRow {
+            relation: foreign,
+            role_owner: "uqa".into(),
+            acl: None,
+            column_acls: std::collections::BTreeMap::new(),
+            server_name: "memory".into(),
+            columns_json: "[]".into(),
+            options_json: "{}".into(),
+        })
+        .unwrap();
+    assert_eq!(catalog.load_views().unwrap().len(), 2);
+    assert_eq!(catalog.load_foreign_tables().unwrap().len(), 2);
+}
+
+#[test]
 fn owned_foreign_table_acl_defaults_are_assigned_only_by_explicit_catalog_migration() {
     let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
     let catalog = KeyValueCatalog::new(Arc::clone(&store));

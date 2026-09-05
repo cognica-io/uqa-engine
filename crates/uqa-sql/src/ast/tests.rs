@@ -5,11 +5,12 @@
 //
 
 use super::{
-    AlterSequence, ColumnType, CreateFunction, CreateTrigger, FunctionBinding, FunctionBody,
-    FunctionDispatch, FunctionParallel, FunctionParam, FunctionParamMode, FunctionReturns,
-    FunctionVolatility, RangeFunctionOperation, RangeSubtype, RelationPersistence, RoutineAclEntry,
-    RoutineInvocationBinding, RoutineSecurityAttributes, RoutineVariadicMode, SequenceLifecycle,
-    SequenceRestart, Statement, TriggerDeferrability,
+    AlterForeignTableAction, AlterForeignTableStmt, AlterSequence, ColumnType, CreateFunction,
+    CreateTrigger, FunctionBinding, FunctionBody, FunctionDispatch, FunctionParallel,
+    FunctionParam, FunctionParamMode, FunctionReturns, FunctionVolatility, RangeFunctionOperation,
+    RangeSubtype, RelationPersistence, RoutineAclEntry, RoutineInvocationBinding,
+    RoutineSecurityAttributes, RoutineVariadicMode, SequenceLifecycle, SequenceRestart, Statement,
+    TriggerDeferrability,
 };
 
 #[test]
@@ -109,6 +110,39 @@ fn alter_sequence_restart_reads_legacy_and_current_serde_shapes() {
             name: "renamed".into()
         }
     );
+}
+
+#[test]
+fn alter_foreign_table_preserves_owner_serde_and_round_trips_rename() {
+    let legacy: AlterForeignTableStmt =
+        serde_json::from_str(r#"{"name":"items","if_exists":true,"owner":"new_owner"}"#).unwrap();
+    assert_eq!(
+        legacy.action,
+        AlterForeignTableAction::OwnerTo("new_owner".into())
+    );
+    assert_eq!(
+        serde_json::to_value(&legacy).unwrap(),
+        serde_json::json!({
+            "name": "items",
+            "if_exists": true,
+            "owner": "new_owner"
+        })
+    );
+
+    let rename = AlterForeignTableStmt {
+        name: "items".into(),
+        if_exists: false,
+        action: AlterForeignTableAction::RenameTo("renamed_items".into()),
+    };
+    let encoded = serde_json::to_string(&rename).unwrap();
+    assert_eq!(
+        serde_json::from_str::<AlterForeignTableStmt>(&encoded).unwrap(),
+        rename
+    );
+    assert!(serde_json::from_str::<AlterForeignTableStmt>(
+        r#"{"name":"items","if_exists":false,"owner":"role","rename_to":"renamed"}"#,
+    )
+    .is_err());
 }
 
 #[test]

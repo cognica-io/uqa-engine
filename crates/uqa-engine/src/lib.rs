@@ -840,6 +840,10 @@ fn new_table_object_id() -> StorageBackendResult<[u8; 16]> {
     new_nonzero_catalog_identity("table", "object identity")
 }
 
+fn new_view_object_id() -> StorageBackendResult<[u8; 16]> {
+    new_nonzero_catalog_identity("view", "object identity")
+}
+
 fn new_table_storage_generation() -> StorageBackendResult<[u8; 16]> {
     new_nonzero_catalog_identity("table", "storage generation")
 }

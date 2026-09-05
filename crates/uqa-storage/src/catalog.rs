@@ -702,6 +702,12 @@ pub trait CatalogFacade: Send + Sync {
     ) -> StorageBackendResult<Option<i64>>;
 
     fn save_view(&self, view: &ViewRow) -> StorageBackendResult<()>;
+    /// Atomically move one view catalog row and its shared relation claim.
+    fn rename_view(
+        &self,
+        from: &RelationIdentity,
+        to: &RelationIdentity,
+    ) -> StorageBackendResult<bool>;
     fn drop_view(&self, relation: &RelationIdentity) -> StorageBackendResult<bool>;
     fn load_views(&self) -> StorageBackendResult<Vec<ViewRow>>;
 
@@ -786,6 +792,12 @@ pub trait CatalogFacade: Send + Sync {
     fn load_foreign_servers(&self) -> StorageBackendResult<Vec<(String, String, String)>>;
 
     fn save_foreign_table(&self, row: &ForeignTableRow) -> StorageBackendResult<()>;
+    /// Atomically move one foreign-table catalog row and its shared relation claim.
+    fn rename_foreign_table(
+        &self,
+        from: &RelationIdentity,
+        to: &RelationIdentity,
+    ) -> StorageBackendResult<bool>;
     fn update_foreign_table_security(
         &self,
         relation: &RelationIdentity,

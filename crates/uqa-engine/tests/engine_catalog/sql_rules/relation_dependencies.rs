@@ -199,6 +199,425 @@ fn rule_relation_dependencies_follow_table_rename_and_reopen() {
     assert_eq!(error.sqlstate(), Some("2BP01"), "{error}");
 }
 
+fn create_relation_kind_rule_fixture(engine: &Engine) {
+    exec(
+        engine,
+        "CREATE TABLE relation_kind_base(id INTEGER);
+         INSERT INTO relation_kind_base VALUES (11);
+         CREATE VIEW relation_kind_view AS SELECT id FROM relation_kind_base;
+         CREATE MATERIALIZED VIEW relation_kind_materialized AS SELECT id FROM relation_kind_base;
+         CREATE SERVER relation_kind_memory FOREIGN DATA WRAPPER memory_fdw OPTIONS (kind 'memory');
+         CREATE FOREIGN TABLE relation_kind_foreign(id INTEGER) SERVER relation_kind_memory OPTIONS (source 'memory');
+         CREATE VIEW relation_kind_view_wrapper AS SELECT id FROM relation_kind_view;
+         CREATE VIEW relation_kind_materialized_wrapper AS SELECT id FROM relation_kind_materialized;
+         CREATE VIEW relation_kind_foreign_wrapper AS SELECT id FROM relation_kind_foreign;
+         CREATE TABLE relation_kind_view_event_log(id INTEGER);
+         CREATE VIEW relation_kind_event_view AS SELECT id FROM relation_kind_view_event_log;
+         CREATE RULE relation_kind_event_rule AS ON INSERT TO relation_kind_event_view DO INSTEAD
+           INSERT INTO relation_kind_view_event_log VALUES (NEW.id);
+         CREATE TABLE relation_kind_events(id INTEGER);
+         CREATE TABLE relation_kind_log(value INTEGER);
+         CREATE RULE relation_kind_view_rule AS ON INSERT TO relation_kind_events DO ALSO
+           INSERT INTO relation_kind_log SELECT id FROM relation_kind_view;
+         CREATE RULE relation_kind_materialized_rule AS ON INSERT TO relation_kind_events DO ALSO
+           INSERT INTO relation_kind_log SELECT id FROM relation_kind_materialized;
+         CREATE RULE relation_kind_foreign_rule AS ON INSERT TO relation_kind_events DO ALSO
+           INSERT INTO relation_kind_log SELECT id FROM relation_kind_foreign",
+    );
+    engine
+        .load_memory_foreign_table(
+            "relation_kind_foreign",
+            vec![std::collections::BTreeMap::from([(
+                "id".into(),
+                Value::Int(33),
+            )])],
+        )
+        .unwrap();
+    let error = engine
+        .sql(
+            "CREATE RULE invalid_foreign_event AS ON INSERT TO relation_kind_foreign DO NOTHING",
+            &[],
+        )
+        .expect_err("a foreign table cannot be a rule event relation");
+    assert_eq!(error.sqlstate(), Some("42809"), "{error}");
+}
+
+fn assert_renamed_relation_kind_rule_sources(engine: &Engine, identities: &[(Value, Value); 3]) {
+    for (index, name) in [
+        "renamed_relation_kind_view",
+        "renamed_relation_kind_materialized",
+        "renamed_relation_kind_foreign",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let row = exec(
+            engine,
+            &format!("SELECT oid, reltype FROM pg_class WHERE oid = '{name}'::regclass"),
+        )
+        .rows
+        .remove(0);
+        assert_eq!(row.get("oid"), Some(&identities[index].0), "{name}");
+        assert_eq!(row.get("reltype"), Some(&identities[index].1), "{name}");
+    }
+    assert_eq!(
+        exec(
+            engine,
+            "SELECT id FROM relation_kind_view_wrapper
+             UNION ALL SELECT id FROM relation_kind_materialized_wrapper
+             UNION ALL SELECT id FROM relation_kind_foreign_wrapper
+             ORDER BY id",
+        )
+        .rows
+        .iter()
+        .map(|row| row.get("id"))
+        .collect::<Vec<_>>(),
+        [
+            Some(&Value::Int(11)),
+            Some(&Value::Int(11)),
+            Some(&Value::Int(33))
+        ]
+    );
+    exec(engine, "INSERT INTO relation_kind_events VALUES (1)");
+    assert_eq!(
+        exec(engine, "SELECT value FROM relation_kind_log ORDER BY value")
+            .rows
+            .iter()
+            .map(|row| row.get("value"))
+            .collect::<Vec<_>>(),
+        [
+            Some(&Value::Int(11)),
+            Some(&Value::Int(11)),
+            Some(&Value::Int(33))
+        ]
+    );
+    let definitions = strings(
+        engine,
+        "SELECT pg_get_ruledef(oid, true) AS definition FROM pg_rewrite
+         WHERE rulename LIKE 'relation_kind_%_rule' ORDER BY rulename",
+        "definition",
+    );
+    assert!(definitions.iter().all(|definition| {
+        !definition.contains("FROM relation_kind_view")
+            && !definition.contains("FROM relation_kind_materialized")
+            && !definition.contains("FROM relation_kind_foreign")
+    }));
+    assert!(
+        definitions.iter().any(|definition| {
+            definition.contains("relation_kind_event_rule")
+                && definition.contains("ON INSERT TO renamed_relation_kind_event_view")
+        }),
+        "{definitions:?}"
+    );
+}
+
+fn assert_reopened_relation_kind_rule_dependencies(
+    engine: &Engine,
+    identities: &[(Value, Value); 3],
+) {
+    engine
+        .load_memory_foreign_table(
+            "renamed_relation_kind_foreign",
+            vec![std::collections::BTreeMap::from([(
+                "id".into(),
+                Value::Int(33),
+            )])],
+        )
+        .unwrap();
+    for (index, name) in [
+        "renamed_relation_kind_view",
+        "renamed_relation_kind_materialized",
+        "renamed_relation_kind_foreign",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let row = exec(
+            engine,
+            &format!("SELECT oid, reltype FROM pg_class WHERE oid = '{name}'::regclass"),
+        )
+        .rows
+        .remove(0);
+        assert_eq!(row.get("oid"), Some(&identities[index].0), "{name}");
+        assert_eq!(row.get("reltype"), Some(&identities[index].1), "{name}");
+        let drop = match index {
+            0 => format!("DROP VIEW {name}"),
+            1 => format!("DROP MATERIALIZED VIEW {name}"),
+            _ => format!("DROP FOREIGN TABLE {name}"),
+        };
+        let error = engine
+            .sql(&drop, &[])
+            .expect_err("the renamed relation must remain protected by rule dependencies");
+        assert_eq!(error.sqlstate(), Some("2BP01"), "{drop}: {error}");
+    }
+    exec(engine, "INSERT INTO relation_kind_events VALUES (2)");
+    exec(
+        engine,
+        "INSERT INTO renamed_relation_kind_event_view VALUES (55)",
+    );
+    assert_eq!(
+        exec(
+            engine,
+            "SELECT id FROM relation_kind_view_event_log ORDER BY id"
+        )
+        .rows
+        .iter()
+        .map(|row| row.get("id"))
+        .collect::<Vec<_>>(),
+        [Some(&Value::Int(44)), Some(&Value::Int(55))]
+    );
+    assert_eq!(
+        exec(
+            engine,
+            "SELECT value, count(*) AS count FROM relation_kind_log GROUP BY value ORDER BY value",
+        )
+        .rows
+        .iter()
+        .map(|row| (row.get("value"), row.get("count")))
+        .collect::<Vec<_>>(),
+        [
+            (Some(&Value::Int(11)), Some(&Value::Int(4))),
+            (Some(&Value::Int(33)), Some(&Value::Int(2)))
+        ]
+    );
+    exec(
+        engine,
+        "DROP VIEW renamed_relation_kind_view CASCADE;
+         DROP MATERIALIZED VIEW renamed_relation_kind_materialized CASCADE;
+         DROP FOREIGN TABLE renamed_relation_kind_foreign CASCADE;
+         DROP VIEW renamed_relation_kind_event_view",
+    );
+    assert!(exec(
+        engine,
+        "SELECT rulename FROM pg_rewrite WHERE rulename LIKE 'relation_kind_%_rule'",
+    )
+    .rows
+    .is_empty());
+}
+
+#[test]
+fn rule_dependencies_follow_view_materialized_view_and_foreign_table_renames() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("rule-relation-kind-rename.uqa");
+    let identities;
+    {
+        let engine = Engine::open(&path).unwrap();
+        create_relation_kind_rule_fixture(&engine);
+
+        identities = [
+            "relation_kind_view",
+            "relation_kind_materialized",
+            "relation_kind_foreign",
+        ]
+        .map(|name| {
+            let row = exec(
+                &engine,
+                &format!("SELECT oid, reltype FROM pg_class WHERE oid = '{name}'::regclass"),
+            )
+            .rows
+            .remove(0);
+            (
+                row.get("oid").cloned().unwrap(),
+                row.get("reltype").cloned().unwrap(),
+            )
+        });
+
+        exec(
+            &engine,
+            "ALTER VIEW relation_kind_view RENAME TO renamed_relation_kind_view;
+             ALTER MATERIALIZED VIEW relation_kind_materialized RENAME TO renamed_relation_kind_materialized;
+             ALTER FOREIGN TABLE relation_kind_foreign RENAME TO renamed_relation_kind_foreign;
+             ALTER VIEW relation_kind_event_view RENAME TO renamed_relation_kind_event_view;
+             INSERT INTO renamed_relation_kind_event_view VALUES (44);
+             CREATE VIEW relation_kind_view AS SELECT 101 AS id;
+             CREATE MATERIALIZED VIEW relation_kind_materialized AS SELECT 102 AS id;
+             CREATE FOREIGN TABLE relation_kind_foreign(id INTEGER) SERVER relation_kind_memory OPTIONS (source 'memory')",
+        );
+        assert_eq!(
+            exec(&engine, "SELECT id FROM relation_kind_view_event_log").rows[0].get("id"),
+            Some(&Value::Int(44))
+        );
+        assert_renamed_relation_kind_rule_sources(&engine, &identities);
+
+        exec(
+            &engine,
+            "BEGIN;
+             ALTER VIEW renamed_relation_kind_view RENAME TO rolled_back_relation_kind_view;
+             ROLLBACK",
+        );
+        assert!(exec(
+            &engine,
+            "SELECT to_regclass('renamed_relation_kind_view') IS NOT NULL AS present",
+        )
+        .rows[0]
+            .get("present")
+            .is_some_and(|value| value == &Value::Bool(true)));
+    }
+
+    let engine = Engine::open(&path).expect("renamed relation-kind rule dependencies must restore");
+    assert_reopened_relation_kind_rule_dependencies(&engine, &identities);
+}
+
+fn rename_relation_kind_with_rollback(
+    engine: &Engine,
+    kind: &str,
+    name: &str,
+    value: i64,
+) -> (String, uqa_engine::SQLResult) {
+    let renamed = format!("renamed_{name}");
+    let original = exec(
+        engine,
+        &format!("SELECT oid, reltype FROM pg_class WHERE oid = '{name}'::regclass"),
+    );
+    for target in [name, "rename_base"] {
+        let error = engine
+            .sql(&format!("ALTER {kind} {name} RENAME TO {target}"), &[])
+            .expect_err("rename must reject an occupied relation name");
+        assert_eq!(error.sqlstate(), Some("42P07"), "{error}");
+    }
+    exec(
+        engine,
+        &format!(
+            "BEGIN;
+             ALTER TABLE {name} RENAME TO {renamed};
+             SAVEPOINT retained_name;
+             ALTER {kind} {renamed} RENAME TO intermediate_name;
+             ROLLBACK TO retained_name"
+        ),
+    );
+    assert_eq!(
+        exec(engine, &format!("SELECT id FROM {renamed}")).rows[0]["id"],
+        Value::Int(value)
+    );
+    exec(engine, "ROLLBACK");
+    assert_eq!(
+        exec(engine, &format!("SELECT id FROM {name}")).rows[0]["id"],
+        Value::Int(value)
+    );
+    exec(engine, &format!("ALTER TABLE {name} RENAME TO {renamed}"));
+    assert_eq!(
+        exec(
+            engine,
+            &format!("SELECT oid, reltype FROM pg_class WHERE oid = '{renamed}'::regclass"),
+        )
+        .rows,
+        original.rows
+    );
+    (renamed, original)
+}
+
+fn assert_missing_relation_rename_semantics(engine: &Engine) {
+    for kind in ["VIEW", "MATERIALIZED VIEW", "FOREIGN TABLE", "TABLE"] {
+        engine.take_sql_notices();
+        exec(
+            engine,
+            &format!("ALTER {kind} IF EXISTS missing_rename_schema.missing_relation RENAME TO missing_target"),
+        );
+        assert_eq!(
+            engine.take_sql_notices(),
+            [(
+                "NOTICE".into(),
+                "relation \"missing_relation\" does not exist, skipping".into()
+            )],
+            "{kind}"
+        );
+        let error = engine
+            .sql(
+                &format!(
+                    "ALTER {kind} missing_rename_schema.missing_relation RENAME TO missing_target"
+                ),
+                &[],
+            )
+            .expect_err("a missing schema without IF EXISTS must fail");
+        assert_eq!(error.sqlstate(), Some("3F000"), "{kind}: {error}");
+    }
+}
+
+#[test]
+fn relation_kind_renames_preserve_identity_across_table_syntax_and_rollback() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("relation-rename-lifecycle.uqa");
+    let engine = Engine::open(&path).unwrap();
+    exec(
+        &engine,
+        "CREATE TABLE rename_base(id INTEGER);
+         INSERT INTO rename_base VALUES (7);
+         CREATE VIEW rename_view AS SELECT id FROM rename_base;
+         CREATE MATERIALIZED VIEW rename_materialized AS SELECT id FROM rename_base;
+         CREATE SERVER rename_memory FOREIGN DATA WRAPPER memory_fdw OPTIONS (kind 'memory');
+         CREATE FOREIGN TABLE rename_foreign(id SERIAL) SERVER rename_memory OPTIONS (source 'memory')",
+    );
+    engine
+        .load_memory_foreign_table(
+            "rename_foreign",
+            vec![std::collections::BTreeMap::from([(
+                "id".into(),
+                Value::Int(13),
+            )])],
+        )
+        .unwrap();
+    let mut identities = Vec::new();
+    for (kind, name, value) in [
+        ("VIEW", "rename_view", 7),
+        ("MATERIALIZED VIEW", "rename_materialized", 7),
+        ("FOREIGN TABLE", "rename_foreign", 13),
+    ] {
+        identities.push(rename_relation_kind_with_rollback(
+            &engine, kind, name, value,
+        ));
+    }
+    assert_eq!(
+        strings(
+            &engine,
+            "SELECT pg_get_serial_sequence('renamed_rename_foreign', 'id') AS sequence",
+            "sequence",
+        ),
+        ["public.rename_foreign_id_seq"]
+    );
+    exec(
+        &engine,
+        "CREATE OR REPLACE VIEW renamed_rename_view AS SELECT id FROM rename_base WHERE id > 0;
+         CREATE TEMPORARY VIEW rename_temporary AS SELECT id FROM rename_base;
+         ALTER TABLE rename_temporary RENAME TO renamed_temporary",
+    );
+    assert_eq!(
+        exec(&engine, "SELECT id FROM renamed_temporary").rows[0]["id"],
+        Value::Int(7)
+    );
+    assert_missing_relation_rename_semantics(&engine);
+    drop(engine);
+
+    let engine = Engine::open(&path).unwrap();
+    for (name, identity) in identities {
+        assert_eq!(
+            exec(
+                &engine,
+                &format!("SELECT oid, reltype FROM pg_class WHERE oid = '{name}'::regclass"),
+            )
+            .rows,
+            identity.rows
+        );
+        assert_eq!(
+            exec(&engine, &format!("SELECT count(*) AS count FROM pg_attribute WHERE attrelid = '{name}'::regclass AND attnum > 0"))
+                .rows[0]["count"],
+            Value::Int(1)
+        );
+    }
+    exec(&engine, "DROP FOREIGN TABLE renamed_rename_foreign");
+    assert_eq!(
+        exec(
+            &engine,
+            "SELECT to_regclass('rename_foreign_id_seq') AS sequence"
+        )
+        .rows[0]["sequence"],
+        Value::Null
+    );
+    assert_eq!(
+        exec(&engine, "SELECT to_regclass('renamed_temporary') AS view").rows[0]["view"],
+        Value::Null
+    );
+}
+
 #[test]
 fn rule_relation_dependencies_cover_sequences_and_cascading_views() {
     let engine = Engine::new();

@@ -48,6 +48,7 @@ pub enum AlterViewAction {
     Set(Vec<(String, String)>),
     Reset(Vec<String>),
     OwnerTo(String),
+    RenameTo(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -59,10 +60,73 @@ pub struct AlterViewStmt {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AlterForeignTableAction {
+    OwnerTo(String),
+    RenameTo(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AlterForeignTableStmt {
     pub name: String,
     pub if_exists: bool,
-    pub owner: String,
+    pub action: AlterForeignTableAction,
+}
+
+#[derive(Serialize, Deserialize)]
+struct AlterForeignTableStmtSerde {
+    name: String,
+    if_exists: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    owner: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rename_to: Option<String>,
+}
+
+impl Serialize for AlterForeignTableStmt {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let (owner, rename_to) = match &self.action {
+            AlterForeignTableAction::OwnerTo(owner) => (Some(owner.clone()), None),
+            AlterForeignTableAction::RenameTo(name) => (None, Some(name.clone())),
+        };
+        AlterForeignTableStmtSerde {
+            name: self.name.clone(),
+            if_exists: self.if_exists,
+            owner,
+            rename_to,
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for AlterForeignTableStmt {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = AlterForeignTableStmtSerde::deserialize(deserializer)?;
+        let action = match (value.owner, value.rename_to) {
+            (Some(owner), None) => AlterForeignTableAction::OwnerTo(owner),
+            (None, Some(name)) => AlterForeignTableAction::RenameTo(name),
+            (Some(_), Some(_)) => {
+                return Err(serde::de::Error::custom(
+                    "ALTER FOREIGN TABLE cannot contain both owner and rename_to",
+                ));
+            }
+            (None, None) => {
+                return Err(serde::de::Error::custom(
+                    "ALTER FOREIGN TABLE requires owner or rename_to",
+                ));
+            }
+        };
+        Ok(Self {
+            name: value.name,
+            if_exists: value.if_exists,
+            action,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

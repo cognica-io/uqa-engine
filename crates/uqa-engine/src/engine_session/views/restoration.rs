@@ -19,6 +19,21 @@ use super::{
 };
 use crate::engine_session::view_binding::bind_query_plan_sequence_references;
 
+fn validate_restored_view_object_ids(
+    views: &BTreeMap<RelationIdentity, StoredView>,
+) -> StorageBackendResult<()> {
+    let mut object_ids = BTreeSet::new();
+    for (relation, view) in views {
+        if !object_ids.insert(view.object_id) {
+            return Err(StorageBackendError::Other(format!(
+                "view `{}` has a duplicate object identity",
+                relation.qualified_name()
+            )));
+        }
+    }
+    Ok(())
+}
+
 impl Engine {
     fn migrate_persisted_views(
         &self,
@@ -26,8 +41,12 @@ impl Engine {
         views: &mut BTreeMap<RelationIdentity, StoredView>,
         routine_binding_migrations: &BTreeSet<RelationIdentity>,
         missing_output_columns: &[RelationIdentity],
+        missing_object_ids: &[RelationIdentity],
     ) -> StorageBackendResult<()> {
-        if routine_binding_migrations.is_empty() && missing_output_columns.is_empty() {
+        if routine_binding_migrations.is_empty()
+            && missing_output_columns.is_empty()
+            && missing_object_ids.is_empty()
+        {
             return Ok(());
         }
         // Install the complete provisional registry so nested legacy views can derive each other's schemas while exact routine identities are bound and persisted in the current format.
@@ -91,6 +110,7 @@ impl Engine {
             let migrated_views = routine_binding_migrations
                 .iter()
                 .chain(missing_output_columns)
+                .chain(missing_object_ids)
                 .cloned()
                 .collect::<BTreeSet<_>>();
             for relation in migrated_views {
@@ -198,6 +218,30 @@ impl Engine {
         Ok(relations)
     }
 
+    fn validate_restored_view_security(
+        &self,
+        view_name: &str,
+        view: &StoredView,
+    ) -> StorageBackendResult<()> {
+        if !self.durable.roles.read().contains_key(&view.role_owner) {
+            return Err(StorageBackendError::Other(format!(
+                "view `{view_name}` is owned by missing role `{}`",
+                view.role_owner
+            )));
+        }
+        crate::engine_table_security::validate_table_security_invariants(
+            &view.security(),
+            view.output_columns.as_deref(),
+            &self.durable.roles.read(),
+        )
+        .map_err(|error| {
+            StorageBackendError::Other(format!(
+                "view `{view_name}` has invalid privilege metadata: {error}"
+            ))
+        })?;
+        Ok(())
+    }
+
     pub(crate) fn restore_views_from_catalog(
         &self,
         catalog: &dyn CatalogFacade,
@@ -210,6 +254,7 @@ impl Engine {
         let mut views = BTreeMap::new();
         let mut routine_binding_migrations = BTreeSet::new();
         let mut missing_output_columns = Vec::new();
+        let mut missing_object_ids = Vec::new();
         let mut dispatch_upgraded_views = Vec::new();
         for row in rows {
             let view_name = row.relation.qualified_name();
@@ -218,6 +263,7 @@ impl Engine {
                 RestoredView::Legacy(query) => {
                     routine_binding_migrations.insert(row.relation.clone());
                     StoredView {
+                        object_id: [0; 16],
                         role_owner: row.role_owner.clone(),
                         acl: row.acl.clone(),
                         column_acls: row.column_acls.clone(),
@@ -235,25 +281,14 @@ impl Engine {
             view.role_owner = row.role_owner;
             view.acl = row.acl;
             view.column_acls = row.column_acls;
+            if view.object_id == [0; 16] {
+                view.object_id = crate::new_view_object_id()?;
+                missing_object_ids.push(row.relation.clone());
+            }
             if view.kind == StoredViewKind::View && view.output_columns.is_none() {
                 missing_output_columns.push(row.relation.clone());
             }
-            if !self.durable.roles.read().contains_key(&view.role_owner) {
-                return Err(StorageBackendError::Other(format!(
-                    "view `{view_name}` is owned by missing role `{}`",
-                    view.role_owner
-                )));
-            }
-            crate::engine_table_security::validate_table_security_invariants(
-                &view.security(),
-                view.output_columns.as_deref(),
-                &self.durable.roles.read(),
-            )
-            .map_err(|error| {
-                StorageBackendError::Other(format!(
-                    "view `{view_name}` has invalid privilege metadata: {error}"
-                ))
-            })?;
+            self.validate_restored_view_security(&view_name, &view)?;
             if upgrade_legacy_view_dispatches(&mut view.query) {
                 dispatch_upgraded_views.push(row.relation.clone());
             }
@@ -274,9 +309,11 @@ impl Engine {
             views.insert(row.relation, view);
         }
         views.extend(temporary_views);
+        validate_restored_view_object_ids(&views)?;
         if !mode.allows_migration()
             && (!routine_binding_migrations.is_empty()
                 || !missing_output_columns.is_empty()
+                || !missing_object_ids.is_empty()
                 || !dispatch_upgraded_views.is_empty())
         {
             return Err(StorageBackendError::Other(
@@ -288,10 +325,12 @@ impl Engine {
             &mut views,
             &routine_binding_migrations,
             &missing_output_columns,
+            &missing_object_ids,
         )?;
         let migrated_views = routine_binding_migrations
             .iter()
             .chain(&missing_output_columns)
+            .chain(&missing_object_ids)
             .cloned()
             .collect::<BTreeSet<_>>();
         self.validate_and_persist_restored_views(

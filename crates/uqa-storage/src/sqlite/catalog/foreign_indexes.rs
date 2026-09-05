@@ -112,6 +112,54 @@ impl Catalog {
         })
     }
 
+    pub fn rename_foreign_table(
+        &self,
+        from: &RelationIdentity,
+        to: &RelationIdentity,
+    ) -> Result<bool> {
+        if from.schema != to.schema {
+            return Err(SQLiteError::StorageBackend(
+                "moving a foreign table between schemas is not supported by the catalog".into(),
+            ));
+        }
+        self.conn.with_mut(|connection| {
+            let source_exists = connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM _foreign_tables WHERE schema_name = ?1 AND relation_name = ?2)",
+                params![from.schema, from.name],
+                |row| row.get::<_, bool>(0),
+            )?;
+            if from == to || !source_exists {
+                return Ok(source_exists);
+            }
+            let target_exists = connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM _relations WHERE schema_name = ?1 AND relation_name = ?2)",
+                params![to.schema, to.name],
+                |row| row.get::<_, bool>(0),
+            )?;
+            if target_exists {
+                return Err(SQLiteError::StorageBackend(format!(
+                    "relation `{}` already exists",
+                    to.qualified_name()
+                )));
+            }
+            let tx = connection.savepoint()?;
+            Self::claim_relation(&tx, to, RelationKind::ForeignTable)?;
+            let updated = tx.execute(
+                "UPDATE _foreign_tables SET schema_name = ?3, relation_name = ?4 WHERE schema_name = ?1 AND relation_name = ?2",
+                params![from.schema, from.name, to.schema, to.name],
+            )?;
+            if updated != 1 {
+                return Err(SQLiteError::StorageBackend(format!(
+                    "foreign table `{}` disappeared during rename",
+                    from.qualified_name()
+                )));
+            }
+            Self::release_relation(&tx, from, RelationKind::ForeignTable)?;
+            tx.commit()?;
+            Ok(true)
+        })
+    }
+
     pub fn drop_foreign_table(&self, relation: &RelationIdentity) -> Result<()> {
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;

@@ -24,7 +24,7 @@ use crate::engine_user_functions::{
 use crate::{Engine, RelationIdentity};
 
 use super::expression_text::schema_expr_text;
-use super::helpers::oids::{relation_oid, schema_oid, split_schema_name, stable_oid};
+use super::helpers::oids::{schema_oid, split_schema_name, stable_oid};
 use super::helpers::rows::{bool_value, catalog_usize, int_value, row, str_value};
 use super::helpers::views::view_columns_for;
 use super::pg_catalog::table_relation_oid_from;
@@ -54,19 +54,13 @@ fn event_relation_oid_from(
     if catalog.table_name_resolved(resolution, relation)?.is_some() {
         return table_relation_oid_from(catalog, resolution, relation);
     }
-    if let Some((canonical, _)) = catalog.foreign_table_entry_resolved(resolution, relation)? {
-        let relation = RelationIdentity::from_legacy_name(&canonical).map_err(|error| {
-            SQLError::Internal(format!(
-                "decode foreign trigger relation `{canonical}`: {error}"
-            ))
-        })?;
-        return Ok(super::foreign_table_relation_oid(&relation));
+    if let Some((_, table)) = catalog.foreign_table_entry_resolved(resolution, relation)? {
+        return Ok(super::foreign_table_relation_oid(&table));
     }
-    let canonical = catalog
-        .view_name_resolved(resolution, relation)?
+    let view = catalog
+        .view_resolved(resolution, relation)?
         .ok_or_else(|| SQLError::UnknownTable(relation.to_string()))?;
-    let (schema, name) = split_schema_name(&canonical)?;
-    Ok(relation_oid("v", &schema, &name))
+    Ok(super::view_relation_oid(view))
 }
 
 pub(super) fn trigger_catalog_oid(

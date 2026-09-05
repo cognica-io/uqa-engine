@@ -472,12 +472,12 @@ impl Engine {
             }
         }
         for (relation, view) in self.durable.views.read().iter() {
-            if crate::sql::view_relation_oid(relation, view.kind) == oid {
+            if crate::sql::view_relation_oid(view) == oid {
                 return Ok(Some(ResolvedTablePrivilegeTarget::View(relation.clone())));
             }
         }
-        for relation in self.durable.foreign_tables.read().keys() {
-            if crate::sql::foreign_table_relation_oid(relation) == oid {
+        for (relation, table) in self.durable.foreign_tables.read().iter() {
+            if crate::sql::foreign_table_relation_oid(table) == oid {
                 return Ok(Some(ResolvedTablePrivilegeTarget::ForeignTable(
                     relation.clone(),
                 )));

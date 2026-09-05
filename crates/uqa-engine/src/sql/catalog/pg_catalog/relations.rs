@@ -67,11 +67,8 @@ pub(in crate::sql::catalog) fn table_relation_oid_from(
     if let Some(table_state) = catalog.table(resolution, table)? {
         return Ok(stable_object_oid("relation", &table_state.object_id));
     }
-    if let Some((name, _)) = catalog.foreign_table_entry_resolved(resolution, table)? {
-        let relation = crate::RelationIdentity::from_legacy_name(&name).map_err(|error| {
-            SQLError::Internal(format!("decode foreign table `{name}`: {error}"))
-        })?;
-        return Ok(crate::sql::foreign_table_relation_oid(&relation));
+    if let Some((_, table)) = catalog.foreign_table_entry_resolved(resolution, table)? {
+        return Ok(crate::sql::foreign_table_relation_oid(&table));
     }
     Err(SQLError::UnknownTable(table.to_string()))
 }

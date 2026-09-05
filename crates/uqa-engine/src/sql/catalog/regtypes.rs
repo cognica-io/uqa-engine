@@ -110,25 +110,42 @@ fn lookup_regclass_oid(engine: &Engine, name: &str) -> Result<Option<i64>, SQLEr
             })?;
         return Ok(Some(index.oid()));
     }
-    let (schema, relation) = helpers::oids::split_schema_name(&canonical)?;
     if kind == "table" {
         return super::table_relation_oid(engine, &canonical)
             .map(Some)
             .map_err(|error| SQLError::Internal(error.to_string()));
     }
-    let relkind = match kind {
-        "view" => "v",
-        "materialized view" => "m",
-        "foreign table" => "f",
-        other => {
-            return Err(SQLError::Internal(format!(
-                "unknown relation kind `{other}` for `{canonical}`"
-            )));
-        }
-    };
-    Ok(Some(helpers::oids::relation_oid(
-        relkind, &schema, &relation,
-    )))
+    let relation =
+        crate::RelationIdentity::from_legacy_name(&canonical).map_err(SQLError::Internal)?;
+    match kind {
+        "view" | "materialized view" => engine
+            .durable
+            .views
+            .read()
+            .get(&relation)
+            .map(super::view_relation_oid)
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "resolved view `{canonical}` has no catalog definition"
+                ))
+            })
+            .map(Some),
+        "foreign table" => engine
+            .durable
+            .foreign_tables
+            .read()
+            .get(&relation)
+            .map(super::foreign_table_relation_oid)
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "resolved foreign table `{canonical}` has no catalog definition"
+                ))
+            })
+            .map(Some),
+        other => Err(SQLError::Internal(format!(
+            "unknown relation kind `{other}` for `{canonical}`"
+        ))),
+    }
 }
 
 pub(crate) fn resolve_regclass_oid(engine: &Engine, name: &str) -> Result<Option<i64>, SQLError> {

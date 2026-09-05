@@ -256,7 +256,15 @@ impl Engine {
         let replacement_schema = named_view_schema(&query_schema, &output_columns)?;
         let existing_view =
             self.replacement_view(&name, &relation, or_replace, &replacement_schema)?;
+        let object_id = if let Some(existing) = existing_view.as_ref() {
+            existing.object_id
+        } else {
+            crate::new_view_object_id().map_err(|error| {
+                SQLError::Internal(format!("allocate view `{name}` identity: {error}"))
+            })?
+        };
         let view = StoredView {
+            object_id,
             role_owner: existing_view
                 .as_ref()
                 .map_or_else(|| self.current_user_name(), |view| view.role_owner.clone()),

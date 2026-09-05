@@ -90,6 +90,75 @@ fn view_rows_round_trip_role_ownership() {
 }
 
 #[test]
+fn view_and_foreign_table_renames_move_rows_and_relation_claims_atomically() {
+    let catalog = fresh();
+    catalog.save_schema("application").unwrap();
+    let view = RelationIdentity::new("application", "source_view");
+    let renamed_view = RelationIdentity::new("application", "renamed_view");
+    let foreign = RelationIdentity::new("application", "source_foreign");
+    let renamed_foreign = RelationIdentity::new("application", "renamed_foreign");
+    catalog
+        .save_view(&ViewRow {
+            relation: view.clone(),
+            role_owner: "uqa".into(),
+            acl: None,
+            column_acls: std::collections::BTreeMap::new(),
+            definition_json: "view-definition".into(),
+        })
+        .unwrap();
+    catalog
+        .save_foreign_table(&ForeignTableRow {
+            relation: foreign.clone(),
+            role_owner: "uqa".into(),
+            acl: None,
+            column_acls: std::collections::BTreeMap::new(),
+            server_name: "memory".into(),
+            columns_json: "[]".into(),
+            options_json: "{}".into(),
+        })
+        .unwrap();
+
+    assert!(catalog.rename_view(&view, &renamed_view).unwrap());
+    assert!(catalog
+        .rename_foreign_table(&foreign, &renamed_foreign)
+        .unwrap());
+    assert!(!catalog
+        .rename_view(&RelationIdentity::new("application", "missing"), &view)
+        .unwrap());
+    assert!(catalog
+        .rename_view(&renamed_view, &renamed_foreign)
+        .is_err());
+    assert_eq!(catalog.load_views().unwrap()[0].relation, renamed_view);
+    assert_eq!(
+        catalog.load_foreign_tables().unwrap()[0].relation,
+        renamed_foreign
+    );
+
+    catalog
+        .save_view(&ViewRow {
+            relation: view,
+            role_owner: "uqa".into(),
+            acl: None,
+            column_acls: std::collections::BTreeMap::new(),
+            definition_json: "replacement-view-definition".into(),
+        })
+        .unwrap();
+    catalog
+        .save_foreign_table(&ForeignTableRow {
+            relation: foreign,
+            role_owner: "uqa".into(),
+            acl: None,
+            column_acls: std::collections::BTreeMap::new(),
+            server_name: "memory".into(),
+            columns_json: "[]".into(),
+            options_json: "{}".into(),
+        })
+        .unwrap();
+    assert_eq!(catalog.load_views().unwrap().len(), 2);
+    assert_eq!(catalog.load_foreign_tables().unwrap().len(), 2);
+}
+
+#[test]
 fn migration_creates_tables_table() {
     let cat = fresh();
     cat.conn

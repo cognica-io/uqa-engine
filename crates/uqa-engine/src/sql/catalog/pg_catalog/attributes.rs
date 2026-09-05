@@ -15,7 +15,7 @@ use crate::Engine;
 
 use super::super::expression_text::default_expr_text;
 use super::super::helpers::information_schema_types::array_dimension_count;
-use super::super::helpers::oids::{relation_oid, split_schema_name, stable_oid};
+use super::super::helpers::oids::{split_schema_name, stable_oid};
 use super::super::helpers::rows::{
     bool_value, catalog_ordinal, catalog_usize, int_value, row, str_value,
 };
@@ -112,9 +112,8 @@ pub(in crate::sql::catalog) fn build_pg_attribute(
             out.push(attribute);
         }
     }
-    for (view_name, stored) in catalog.views_of_kind(crate::StoredViewKind::View) {
-        let (schema, view) = split_schema_name(&view_name)?;
-        let relid = relation_oid("v", &schema, &view);
+    for (_, stored) in catalog.views_of_kind(crate::StoredViewKind::View) {
+        let relid = crate::sql::view_relation_oid(&stored);
         let columns = view_columns_for(engine, catalog, resolution, &stored)?;
         for (idx, col) in columns.iter().enumerate() {
             let mut attribute = pg_attribute_row(
@@ -132,9 +131,8 @@ pub(in crate::sql::catalog) fn build_pg_attribute(
             out.push(attribute);
         }
     }
-    for (view_name, stored) in catalog.views_of_kind(crate::StoredViewKind::Materialized) {
-        let (schema, view) = split_schema_name(&view_name)?;
-        let relid = relation_oid("m", &schema, &view);
+    for (_, stored) in catalog.views_of_kind(crate::StoredViewKind::Materialized) {
+        let relid = crate::sql::view_relation_oid(&stored);
         let columns = view_columns_for(engine, catalog, resolution, &stored)?;
         for (idx, col) in columns.iter().enumerate() {
             let mut attribute = pg_attribute_row(
@@ -153,8 +151,7 @@ pub(in crate::sql::catalog) fn build_pg_attribute(
         }
     }
     for (table_name, foreign_table) in catalog.foreign_tables() {
-        let (schema, table) = split_schema_name(&table_name)?;
-        let relid = relation_oid("f", &schema, &table);
+        let relid = crate::sql::foreign_table_relation_oid(&foreign_table);
         let security = catalog.foreign_table_security(&table_name)?;
         for (idx, column) in foreign_table.columns.into_iter().enumerate() {
             let mut attribute = pg_attribute_row(
@@ -300,12 +297,12 @@ pub(in crate::sql::catalog) fn build_pg_attrdef(
         append_pg_attrdef_rows(&mut out, &table_name, &table, relid, columns)?;
     }
     for (table_name, table) in catalog.foreign_tables() {
-        let (schema, local_name) = split_schema_name(&table_name)?;
+        let (_, local_name) = split_schema_name(&table_name)?;
         append_pg_attrdef_rows(
             &mut out,
             &table_name,
             &local_name,
-            relation_oid("f", &schema, &local_name),
+            crate::sql::foreign_table_relation_oid(&table),
             &table.columns,
         )?;
     }

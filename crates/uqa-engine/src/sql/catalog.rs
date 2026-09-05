@@ -224,19 +224,20 @@ pub(in crate::sql) fn table_relation_oid(engine: &Engine, table: &str) -> Result
 pub(crate) fn sequence_relation_oid(object_id: [u8; 16]) -> i64 {
     helpers::oids::stable_object_oid("relation", &object_id)
 }
-pub(crate) fn view_relation_oid(
-    relation: &crate::RelationIdentity,
-    kind: crate::StoredViewKind,
-) -> i64 {
-    let relkind = match kind {
-        crate::StoredViewKind::View => "v",
-        crate::StoredViewKind::Materialized => "m",
-    };
-    helpers::oids::relation_oid(relkind, &relation.schema, &relation.name)
+pub(crate) fn view_relation_oid(view: &crate::StoredView) -> i64 {
+    helpers::oids::stable_object_oid("relation", &view.object_id)
 }
 
-pub(crate) fn foreign_table_relation_oid(relation: &crate::RelationIdentity) -> i64 {
-    helpers::oids::relation_oid("f", &relation.schema, &relation.name)
+pub(crate) fn view_rowtype_oid(view: &crate::StoredView) -> i64 {
+    helpers::oids::stable_object_oid("rowtype", &view.object_id)
+}
+
+pub(crate) fn foreign_table_relation_oid(table: &crate::engine_fdw::StoredForeignTable) -> i64 {
+    helpers::oids::stable_object_oid("relation", &table.object_id)
+}
+
+pub(crate) fn foreign_table_rowtype_oid(table: &crate::engine_fdw::StoredForeignTable) -> i64 {
+    helpers::oids::stable_object_oid("rowtype", &table.object_id)
 }
 pub(crate) fn snapshot_table_relation_oid(
     catalog: &CatalogReadView,

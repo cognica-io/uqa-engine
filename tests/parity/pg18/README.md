@@ -150,6 +150,12 @@ docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/pa
 docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/rule_dependency_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/rule_dependency_oracle.expected.txt -
 ```
 
+`rule_relation_kind_oracle.sql` records PostgreSQL 18.4 rewrite-rule lifecycle across regular views, materialized views, and foreign tables. The checked-in transcript verifies stable relation and row-type OIDs through direct and historical `ALTER TABLE` rename syntax, dependent-view and rule-definition rewrites, old-name recreation isolation, executable regular-view event rules, materialized-view and foreign-table event SQLSTATEs, transaction rollback, collision errors, missing-schema `IF EXISTS` behavior, and DROP RESTRICT and CASCADE behavior.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/rule_relation_kind_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/rule_relation_kind_oracle.expected.txt -
+```
+
 `rule_column_dependency_oracle.sql` records PostgreSQL 18.4 rewrite-rule column dependencies. The checked-in transcript verifies source projections and predicates, action target columns, positional INSERT targets, stable ownership of initially unqualified source columns, creation-bound projection stars, live source whole-row composites, one-sided and two-sided `JOIN USING` renames, one-sided `NATURAL JOIN` rename, catalog deparsing through range-table column aliases, unreferenced-column drops, rename execution, DROP COLUMN RESTRICT and CASCADE behavior, and rule removal.
 
 ```sh

@@ -64,7 +64,20 @@ pub(in crate::sql) fn run_alter_table(
                 .into(),
         });
     }
-    match engine.try_resolve_visible_relation_kind(&stmt.table)? {
+    let resolution = if matches!(
+        stmt.actions.as_slice(),
+        [AlterTableAction::RenameTable { .. }]
+    ) {
+        let Some(resolution) =
+            engine.resolve_relation_rename_source(&stmt.table, stmt.if_exists)?
+        else {
+            return Ok(SQLResult::empty());
+        };
+        Some(resolution)
+    } else {
+        engine.try_resolve_visible_relation_kind(&stmt.table)?
+    };
+    match resolution {
         Some((canonical, "table")) => stmt.table = canonical,
         Some((canonical, "sequence")) => {
             return run_alter_sequence_with_table_syntax(engine, canonical, &stmt);
@@ -72,29 +85,8 @@ pub(in crate::sql) fn run_alter_table(
         Some((canonical, "foreign table")) => {
             return run_alter_foreign_table_with_table_syntax(engine, canonical, &stmt);
         }
-        Some((canonical, "view"))
-            if stmt.actions.iter().all(|action| {
-                matches!(
-                    action,
-                    AlterTableAction::RenameRule { .. } | AlterTableAction::RenameTrigger { .. }
-                )
-            }) =>
-        {
-            stmt.table = canonical;
-            return engine.with_implicit_transaction(move |engine| {
-                for action in stmt.actions {
-                    match action {
-                        AlterTableAction::RenameRule { from, to } => {
-                            engine.rename_rule(&stmt.table, &from, &to)?;
-                        }
-                        AlterTableAction::RenameTrigger { from, to } => {
-                            engine.rename_trigger(&stmt.table, &from, &to)?;
-                        }
-                        _ => unreachable!("view ALTER was restricted to event lifecycle actions"),
-                    }
-                }
-                Ok(SQLResult::empty())
-            });
+        Some((canonical, kind @ ("view" | "materialized view"))) => {
+            return run_alter_view_with_table_syntax(engine, canonical, kind, &stmt);
         }
         Some((canonical, kind)) => {
             return Err(SQLError::Routine {
@@ -121,6 +113,54 @@ pub(in crate::sql) fn run_alter_table(
         crate::row_locks::RelationLockMode::AccessExclusive,
     )?;
     engine.with_implicit_transaction(move |engine| run_alter_table_inner(engine, stmt))
+}
+
+fn run_alter_view_with_table_syntax(
+    engine: &Engine,
+    canonical: String,
+    kind: &str,
+    stmt: &AlterTableStmt,
+) -> Result<SQLResult, SQLError> {
+    if let [AlterTableAction::RenameTable { to }] = stmt.actions.as_slice() {
+        engine.alter_view(&uqa_sql::ast::AlterViewStmt {
+            name: canonical,
+            kind: if kind == "view" {
+                uqa_sql::ast::AlterViewKind::View
+            } else {
+                uqa_sql::ast::AlterViewKind::MaterializedView
+            },
+            if_exists: stmt.if_exists,
+            action: uqa_sql::ast::AlterViewAction::RenameTo(to.clone()),
+        })?;
+        return Ok(SQLResult::empty());
+    }
+    if kind == "view"
+        && stmt.actions.iter().all(|action| {
+            matches!(
+                action,
+                AlterTableAction::RenameRule { .. } | AlterTableAction::RenameTrigger { .. }
+            )
+        })
+    {
+        return engine.with_implicit_transaction(|engine| {
+            for action in &stmt.actions {
+                match action {
+                    AlterTableAction::RenameRule { from, to } => {
+                        engine.rename_rule(&canonical, from, to)?;
+                    }
+                    AlterTableAction::RenameTrigger { from, to } => {
+                        engine.rename_trigger(&canonical, from, to)?;
+                    }
+                    _ => unreachable!("view ALTER was restricted to event lifecycle actions"),
+                }
+            }
+            Ok(SQLResult::empty())
+        });
+    }
+    Err(SQLError::Routine {
+        sqlstate: "42809".into(),
+        message: format!("ALTER TABLE: relation `{canonical}` is a {kind}, not a table"),
+    })
 }
 
 fn run_alter_foreign_table_with_table_syntax(
@@ -150,16 +190,26 @@ fn run_alter_foreign_table_with_table_syntax(
             Ok(SQLResult::empty())
         });
     }
-    let [AlterTableAction::ChangeOwner { owner }] = stmt.actions.as_slice() else {
-        return Err(SQLError::Routine {
-            sqlstate: "42809".into(),
-            message: format!("ALTER TABLE: relation `{canonical}` is a foreign table, not a table"),
-        });
+    let action = match stmt.actions.as_slice() {
+        [AlterTableAction::ChangeOwner { owner }] => {
+            uqa_sql::ast::AlterForeignTableAction::OwnerTo(owner.clone())
+        }
+        [AlterTableAction::RenameTable { to }] => {
+            uqa_sql::ast::AlterForeignTableAction::RenameTo(to.clone())
+        }
+        _ => {
+            return Err(SQLError::Routine {
+                sqlstate: "42809".into(),
+                message: format!(
+                    "ALTER TABLE: relation `{canonical}` is a foreign table, not a table"
+                ),
+            });
+        }
     };
     engine.alter_foreign_table(&uqa_sql::ast::AlterForeignTableStmt {
         name: canonical,
         if_exists: stmt.if_exists,
-        owner: owner.clone(),
+        action,
     })?;
     Ok(SQLResult::empty())
 }

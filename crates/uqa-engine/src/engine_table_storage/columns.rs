@@ -528,7 +528,7 @@ impl Engine {
         };
         tables.insert(to_relation.clone(), state.clone());
         drop(tables);
-        self.rename_relation_events_inner(&from_relation, &to_relation)?;
+        self.rewrite_relation_rename_dependents(&from_relation, &to_relation)?;
         self.rename_catalog_index_table_refs(&from, &to);
         {
             let mut analyzers = self.durable.table_field_analyzers.write();

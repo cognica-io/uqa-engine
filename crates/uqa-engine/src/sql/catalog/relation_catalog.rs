@@ -137,6 +137,14 @@ pub(super) fn build_pg_class(
             &definition.options,
         );
         row.insert(
+            "oid".into(),
+            int_value(super::view_relation_oid(&definition)),
+        );
+        row.insert(
+            "reltype".into(),
+            int_value(super::view_rowtype_oid(&definition)),
+        );
+        row.insert(
             "relhastriggers".into(),
             bool_value(catalog.relation_has_triggers(resolution, &name)?),
         );
@@ -165,6 +173,14 @@ pub(super) fn build_pg_class(
             &definition.options,
         );
         row.insert(
+            "oid".into(),
+            int_value(super::view_relation_oid(&definition)),
+        );
+        row.insert(
+            "reltype".into(),
+            int_value(super::view_rowtype_oid(&definition)),
+        );
+        row.insert(
             "relowner".into(),
             int_value(crate::engine_roles::role_oid(&definition.role_owner)),
         );
@@ -187,6 +203,14 @@ pub(super) fn build_pg_class(
             )?,
             0.0,
             false,
+        );
+        row.insert(
+            "oid".into(),
+            int_value(super::foreign_table_relation_oid(&foreign_table)),
+        );
+        row.insert(
+            "reltype".into(),
+            int_value(super::foreign_table_rowtype_oid(&foreign_table)),
         );
         row.insert(
             "relowner".into(),
