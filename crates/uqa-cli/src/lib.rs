@@ -116,7 +116,12 @@ use statements::{
 /// Run `usql` with the current process arguments and standard streams.
 pub fn run_from_env() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let action = match CliAction::parse(&args) {
+    run_from_args(&args)
+}
+
+/// Run `usql` with explicit arguments excluding the executable name, using the standard streams.
+pub fn run_from_args(args: &[String]) -> ExitCode {
+    let action = match CliAction::parse(args) {
         Ok(action) => action,
         Err(err) => {
             eprintln!("{err}");

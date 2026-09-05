@@ -8,12 +8,62 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
+import sysconfig
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 
 import uqa
+
+
+@pytest.mark.parametrize("input_mode", ["stdin", "script"])
+def test_installed_usql_dispatches_python_arguments(tmp_path, input_mode):
+    executable = Path(sysconfig.get_path("scripts")) / (
+        "usql.exe" if os.name == "nt" else "usql"
+    )
+    environment = dict(os.environ, UQA_HISTORY=str(tmp_path / "history"))
+    sql = "SELECT 42 AS python_cli_answer;\n"
+    arguments = []
+    stdin = sql + "\\q\n"
+    if input_mode == "script":
+        script = tmp_path / "query with spaces \ud55c\uae00.sql"
+        script.write_text(sql, encoding="utf-8")
+        arguments.append(str(script))
+        stdin = ""
+    result = subprocess.run(
+        [str(executable), *arguments],
+        input=stdin,
+        capture_output=True,
+        text=True,
+        env=environment,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "python_cli_answer" in result.stdout
+    assert "42" in result.stdout
+    if input_mode == "stdin":
+        assert "UQA interactive SQL shell" in result.stdout
+
+
+def test_python_cli_uses_sys_argv_instead_of_interpreter_arguments(tmp_path):
+    program = (
+        "import sys; from uqa.cli import main; "
+        "sys.argv = ['usql', '--copy-text', '-c', 'SELECT 42']; "
+        "raise SystemExit(main())"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-X", "utf8", "-c", program],
+        capture_output=True,
+        text=True,
+        env=dict(os.environ, UQA_HISTORY=str(tmp_path / "history")),
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "42"
 
 
 class _HTTPHandler(BaseHTTPRequestHandler):
