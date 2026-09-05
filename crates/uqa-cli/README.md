@@ -24,7 +24,13 @@ It is designed for applications that need more than a relational table but do no
 - Embed the engine in Rust or use the Python, Node.js, and browser WASM bindings included in the workspace.
 
 > [!NOTE]
-> UQA Engine is under active development at version 0.1.12. The implementation is broad and heavily tested, but public APIs and storage formats may still evolve before a stable release.
+> UQA Engine is under active development at version 0.2.0. The implementation is broad and heavily tested, but public APIs and storage formats may still evolve before a stable release.
+
+## New in 0.2.0
+
+Version 0.2.0 adds durable B-tree expression and unique indexes, stronger SQL object dependencies and privileges, expanded sequence and PL/pgSQL behavior, and transactional notifications across native processes sharing a database. The Node.js HTTP client now runs without native addons and can be installed with `npm install --omit=optional @cognica-io/uqa@0.2.0`.
+
+Read the [release history](HISTORY.md#020---2026-09-05) for the complete changes and the [upgrade guide](docs/manual/reference/10-upgrading.md) before updating a persistent database or a custom Rust storage provider.
 
 ## Mathematical foundation
 
@@ -37,7 +43,7 @@ The manuscript consolidates and revises the published work on [unified query alg
 Install the prebuilt Python package to get both the Python binding and the `usql` command:
 
 ```sh
-python -m pip install uqa
+python -m pip install uqa==0.2.0
 usql
 ```
 
@@ -85,6 +91,12 @@ cargo run -p uqa-cli --bin usql -- -c "SELECT 1 AS ready"
 ```
 
 ## Embed it in Rust
+
+Add the released package to your application:
+
+```sh
+cargo add uqa@0.2.0
+```
 
 `uqa` is the primary Rust package on crates.io. It is a thin facade over `uqa-engine` that also re-exports the core `Value` type; applications that need the implementation package directly can depend on `uqa-engine`. Public component crates including `uqa-engine`, `uqa-client`, `uqa-api`, and `uqa-cli` are also published independently. The following example creates an in-memory engine, inserts data, and runs SQL through the same interface used by a persistent engine.
 

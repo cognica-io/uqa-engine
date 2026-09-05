@@ -5,7 +5,7 @@
 ## Install
 
 ```sh
-npm install @cognica-io/uqa-wasm
+npm install @cognica-io/uqa-wasm@0.2.0
 ```
 
 ## Use
@@ -20,7 +20,9 @@ console.log(result.rows);
 engine.close();
 ```
 
-See the [UQA Engine manual](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/reference/08-bindings-and-extensions.md) for the complete Browser WASM binding contract.
+See the [UQA Engine manual](https://github.com/cognica-io/uqa-engine/blob/v0.2.0/docs/manual/reference/08-bindings-and-extensions.md) for the complete Browser WASM binding contract.
+
+For existing installations, read the [0.2.0 upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.2.0/docs/manual/reference/10-upgrading.md).
 
 ## License
 

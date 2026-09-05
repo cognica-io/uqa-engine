@@ -6,8 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-05
+
+See the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.2.0/docs/manual/reference/10-upgrading.md) for package versions, custom Rust storage API changes, and persistent database migration.
+
 ### Added
 
+- Added cross-relation operator joins for text, vector, graph, hybrid, and cross-paradigm retrieval, with equivalent executed examples in Rust, Python, Node.js, and Browser WASM.
+- Added PostgreSQL 18 ordinary-table ownership and relation ACLs, database and schema privilege inquiry and enforcement, creation and temporary-object authorization, and schema-qualified index identities.
+- Expanded PL/pgSQL with array `FOREACH`, query and cursor `FOR` loops, assertions, dynamic cursor opening and movement, and result cursors for DML, `CALL`, and `MERGE`; aligned scroll-cursor volatile evaluation, first-fetch command execution, and `UNION ALL` traversal with PostgreSQL 18.
+- Added bounded notification queue accounting, PostgreSQL `void` results for `pg_notify`, and committed notification delivery between native processes opening the same file-backed database, including polling, waiting, listener cursors, and process-liveness cleanup.
+- Added PostgreSQL view definition reconstruction with `pg_get_viewdef`, stable relation and row-type identities across view and foreign-table renames, standalone unique-index enforcement, and index definition reconstruction with `pg_get_indexdef`.
 - Made the Node.js `HttpEngine`, streaming reader, and SQL parameter helpers independent of native addons, with a pure JavaScript HTTP implementation, lazy embedded-engine loading, a dedicated `/http` package entry point, exact int64 and binary conversion, bounded CLI lookup and responses, stream cancellation, and offline package-installation tests on Node.js 16 and newer.
 - Implemented immutable scalar B-tree expression keys with typed binding, composite unique enforcement, partial and expression `ON CONFLICT` inference through aliases and views, atomic build and mutation behavior, routine and column dependencies, creation-time index attribute names and types, `pg_get_indexdef` and `pg_index` expression metadata, and durable SQLite, SQLite key-value, and redb postings with rollback recovery. Added PostgreSQL `format_type(oid, integer)` for represented catalog types and checked-in PostgreSQL 18.4 oracle coverage.
 - Extended PostgreSQL 18 routine dependency ownership to user-routine calls in trigger `WHEN` conditions, including exact overload binding at trigger publication, replacement dependency updates, routine rename and old-name recreation isolation, RESTRICT, trigger-granular CASCADE that retains the relation and trigger execution function, transactional initial-open migration, validation-only reloads, durable reopen, and checked-in PostgreSQL 18.4 oracle evidence.
@@ -46,8 +55,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Implemented durable PostgreSQL 18 role memberships with per-grantor `ADMIN`, `INHERIT`, and `SET` options, dependency-aware grant and revoke, transitive role assumption and privilege inheritance, `pg_auth_members`, CREATEROLE delegation limits, membership-aware routine ownership, non-owner routine ACL delegation with independent grantor paths and dependency-aware revoke, SECURITY INVOKER and DEFINER role context, all six name/OID `pg_has_role` overloads, `regrole` OID storage and stored-constant dependency behavior, and a 182-case stateful PostgreSQL 18.4 oracle.
 - Implemented scalar PostgreSQL 18 `regprocedure` exact-signature input and search-path-aware output for user functions, procedures, and built-ins, including the OID carrier, `pg_type` identities, four scalar I/O `pg_proc` rows, and exact missing-overload errors.
 
+### Changed
+
+- Changed custom Rust `DocumentStore` implementations to persist typed `StoredDocument` records with separate `DocumentMetadata`, and changed `PersistentStorageBackend` B-tree methods to use `ValueIndexKey` so column accelerators and named SQL indexes have distinct physical identities. These storage trait changes require custom implementations to be updated for 0.2.0.
+- Refactored the Rust workspace around explicit engine capabilities and subsystem ownership, with repository checks enforcing dependency boundaries, source-file limits, and consolidated integration-test harnesses.
+
 ### Fixed
 
+- Kept native cross-process notification worker state out of Browser WASM builds while retaining the in-process notification queue.
 - Deferred `CREATE TABLE IF NOT EXISTS` and `CREATE FOREIGN TABLE IF NOT EXISTS` definition analysis until after namespace authorization and shared relation-name collision checks, so existing targets now skip invalid or unsupported types, columns, constraints, hierarchy, typed-table sources, options, tablespaces, foreign servers, and implicit sequence creation with PostgreSQL 18.4 notice and error ordering.
 - Retained each foreign table's complete SQL column and CHECK schema as its sole durable runtime definition instead of reconstructing it from the lossy FDW name/type projection, with stable table and column object identities, versioned initial-open migration, atomic validation and publication, catalog visibility, exact routine and sequence rename and DROP dependencies, owned `SERIAL` and identity sequences, PostgreSQL-style implicit sequence name clipping and collision suffixes, `pg_get_serial_sequence`, owner transfer, rollback and reopen coverage, relation-kind notices, and fail-closed unsupported key declarations.
 - Separated tuple `xmin` from the user document namespace with a required typed storage-record contract, eager SQLite and key-value migration of legacy sentinel fields, schema-aware preservation of user `xmin` collisions, and metadata-safe scans, command overlays, portal snapshots, row-lock rechecks, OLD/NEW `RETURNING`, schema rewrites, and `VACUUM FULL`.

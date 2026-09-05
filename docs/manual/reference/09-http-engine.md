@@ -4,19 +4,19 @@ The `uqa-client` crate provides `HttpEngine`, an asynchronous Rust SQL interface
 
 ## Install a released binding
 
-UQA Engine release artifacts are attached to the [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.1.12). Public Rust crates are published separately to crates.io, the Python package is published to PyPI as `uqa`, and tagged Node.js and Browser WASM releases are published to npm as `@cognica-io/uqa` and `@cognica-io/uqa-wasm`. The GitHub release notes record the independent registry publication status for the exact version. To use the Rust source from GitHub, pin an application to the same release tag:
+UQA Engine release artifacts are attached to the [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.2.0). Public Rust crates are published separately to crates.io, the Python package is published to PyPI as `uqa`, and tagged Node.js and Browser WASM releases are published to npm as `@cognica-io/uqa` and `@cognica-io/uqa-wasm`. The GitHub release notes record the independent registry publication status for the exact version. To use the Rust source from GitHub, pin an application to the same release tag:
 
 ```toml
 [dependencies]
-uqa-client = { git = "https://github.com/cognica-io/uqa-engine", tag = "v0.1.12" }
+uqa-client = { git = "https://github.com/cognica-io/uqa-engine", tag = "v0.2.0" }
 ```
 
-The same version can be taken from the registry as `uqa = "0.1.12"`, `uqa-client = "0.1.12"`, or `uqa-engine = "0.1.12"`.
+The same version can be taken from the registry as `uqa = "0.2.0"`, `uqa-client = "0.2.0"`, or `uqa-engine = "0.2.0"`.
 
 ```sh
-python -m pip install uqa==0.1.12
-npm install @cognica-io/uqa
-npm install @cognica-io/uqa-wasm
+python -m pip install uqa==0.2.0
+npm install @cognica-io/uqa@0.2.0
+npm install @cognica-io/uqa-wasm@0.2.0
 ```
 
 The small `@cognica-io/uqa` root package contains JavaScript and TypeScript declarations and selects one exact-version native package under `@cognica-io` for Linux glibc x64 or arm64, macOS x64 or arm64, or Windows MSVC x64 or arm64. The same root, platform, and WASM tarballs remain attached to the GitHub release for archive verification. An application runtime does not need to spawn or bundle the `uqa` CLI when trusted deployment configuration supplies `UQA_URL` and `UQA_TOKEN`.

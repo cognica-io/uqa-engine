@@ -117,7 +117,7 @@ The workspace lives under `crates/`. New crates follow the existing shape:
 1. `crates/<name>/Cargo.toml` with `version.workspace = true`, `edition.workspace = true`, `license.workspace = true`, `readme = "README.md"`, `exclude.workspace = true`, and `[lints] workspace = true`. Binding crates that belong on PyPI or npm also set `publish = false`. Do not declare `license-file` alongside the SPDX `license` field, and do not inherit `readme` from the workspace because that path resolves against the workspace root.
 2. `crates/<name>/src/lib.rs`.
 3. Add `crates/<name>` to the `members` list in the root `Cargo.toml`.
-4. Add a workspace-internal `[workspace.dependencies]` entry of the form `uqa-foo = { version = "0.1.12", path = "crates/uqa-foo" }` so other crates can depend on it via `workspace = true` without a wildcard pin (cargo deny will reject wildcards).
+4. Add a workspace-internal `[workspace.dependencies]` entry of the form `uqa-foo = { version = "0.2.0", path = "crates/uqa-foo" }` so other crates can depend on it via `workspace = true` without a wildcard pin (cargo deny will reject wildcards).
 5. Run `python3 scripts/sync-crate-legal-files.py` so a publishable crate carries `LICENSE`, `LICENSING.md`, `LICENSE-NOTICE.md`, and both exception texts. Do not give `uqa-pg-query` those AGPL copies; it keeps its MIT and libpg_query licenses.
 6. Document the new crate and its dependency boundary in `docs/design/architecture.md`; keep the repository `README.md` focused on user-facing capabilities and entry points.
 

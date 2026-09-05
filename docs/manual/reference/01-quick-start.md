@@ -2,6 +2,15 @@
 
 ## Requirements
 
+For a prebuilt Python binding and the `usql` shell, install the release package:
+
+```sh
+python -m pip install uqa==0.2.0
+usql
+```
+
+The source-based commands below require:
+
 - Rust 1.90 or newer
 - Cargo and the native build tools required by workspace dependencies
 - A checkout of this repository
@@ -73,6 +82,10 @@ cargo run -p uqa-cli --bin usql -- --db notes.uqa -c "SELECT count(*) FROM notes
 ## Embed the engine in Rust
 
 Use the `uqa` facade package for the embedded API. It re-exports `uqa-engine` and the core `Value` type; depend directly on `uqa-engine` only when the implementation package name is required. The embedded API has the same SQL behavior as the CLI.
+
+```sh
+cargo add uqa@0.2.0
+```
 
 ```rust
 use uqa::{Engine, SQLParam, Value};
