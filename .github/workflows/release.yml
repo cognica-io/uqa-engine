@@ -115,7 +115,7 @@ jobs:
         if: matrix.target != 'aarch64-pc-windows-msvc'
         working-directory: crates/uqa-node
         shell: bash
-        run: node --test ../../tests/node/test_uqa_node.mjs
+        run: node --test ../../tests/node/test_uqa_node.mjs ../../tests/node/test_http_engine.mjs
 
       - name: Run Node.js examples
         if: matrix.target != 'aarch64-pc-windows-msvc'

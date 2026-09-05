@@ -42,7 +42,19 @@ LEGAL_FILES = (
     "LICENSES/UQA-FOSS-EXCEPTION-1.0.txt",
     "LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt",
 )
-ROOT_PACKAGE_FILES = ("README.md", "api.js", "index.js", "index.d.ts", *LEGAL_FILES)
+ROOT_RUNTIME_FILES = (
+    "api.js", "index.js", "index.d.ts",
+    'http.js',
+    'http.d.ts',
+    'http-error.js',
+    'http-json.js',
+    'http-values.js',
+    'http-transport.js',
+    'http-cli.js',
+    'http-stream.js',
+    'sql-param.js',
+)
+ROOT_PACKAGE_FILES = ("README.md", *ROOT_RUNTIME_FILES, *LEGAL_FILES)
 
 
 class ReleaseError(RuntimeError):
@@ -439,7 +451,7 @@ def validate_root_package(
         raise ReleaseError(
             f"root uqa package bundles native addons: {path}: {native_members}"
         )
-    for relative in ("README.md", "api.js", "index.js", "index.d.ts"):
+    for relative in ("README.md", *ROOT_RUNTIME_FILES):
         if relative not in members:
             raise ReleaseError(f"root uqa package omits {relative}: {path}")
     try:

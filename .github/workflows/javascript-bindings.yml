@@ -16,6 +16,20 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
+  http:
+    name: Node.js HTTP without native artifacts
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        node: ["16", "24"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Test HTTP client and offline npm installation
+        run: node --test tests/node/test_http_engine.mjs
+
   node:
     name: Node.js callbacks
     runs-on: ubuntu-24.04
@@ -38,7 +52,7 @@ jobs:
         working-directory: crates/uqa-node
         run: npx napi build --platform --no-js --profile release-stripped
       - name: Test native addon
-        run: node --test tests/node/test_uqa_node.mjs
+        run: node --test tests/node/test_uqa_node.mjs tests/node/test_http_engine.mjs
       - name: Run Node.js examples
         run: |
           set -euo pipefail

@@ -6,7 +6,39 @@
 
 "use strict";
 
-const binding = require("./index.js");
+const { HttpEngine, HttpEngineError, HttpSQLStream } = require("./http.js");
+const { SQLParam, nativeParameter } = require("./sql-param.js");
+
+let binding;
+
+function loadNativeBinding() {
+  if (binding === undefined) {
+    const candidate = require("./index.js");
+    guardEngineMethods(candidate.Engine, candidate);
+    installRegistrationWrappers(candidate.Engine);
+    binding = candidate;
+  }
+  return binding;
+}
+
+// The exported constructor is inert until embedded functionality is used.
+// CommonJS-to-ESM namespace creation can inspect every export without loading an addon.
+const Engine = new Proxy(function Engine(...args) {
+  if (new.target === undefined) throw new TypeError("Engine requires new");
+  const native = loadNativeBinding().Engine;
+  return Reflect.construct(native, args, new.target === Engine ? native : new.target);
+}, {
+  get(target, key, receiver) {
+    if (key === Symbol.hasInstance) {
+      return (value) => binding !== undefined && value instanceof binding.Engine;
+    }
+    if (["prototype", "open", "openAuto", "openEncrypted", "openCompressed",
+      "openCompressedEncrypted", "detectDatabaseFile"].includes(key)) {
+      return Reflect.get(loadNativeBinding().Engine, key);
+    }
+    return Reflect.get(target, key, receiver);
+  },
+});
 
 let sqlCallbackDepth = 0;
 
@@ -25,7 +57,7 @@ function assertEngineCallAllowed() {
   }
 }
 
-function guardEngineMethods(engineClass) {
+function guardEngineMethods(engineClass, native) {
   const prototype = engineClass.prototype;
   for (const name of Object.getOwnPropertyNames(prototype)) {
     if (name === "constructor") {
@@ -40,25 +72,15 @@ function guardEngineMethods(engineClass) {
       ...descriptor,
       value(...args) {
         assertEngineCallAllowed();
+        if (native !== undefined && (name === "sql" || name === "sqlSync") && args[1] != null) {
+          args[1] = args[1].map((value) => nativeParameter(value, native));
+        } else if (native !== undefined && (name === "sqlBatch" || name === "sqlBatchSync") && Array.isArray(args[0])) {
+          args[0] = args[0].map(([query, params]) => [query, params.map((value) => nativeParameter(value, native))]);
+        }
         return Reflect.apply(method, this, args);
       },
     });
   }
-}
-
-function installHTTPStreamIterator(streamClass) {
-  Object.defineProperty(streamClass.prototype, Symbol.asyncIterator, {
-    configurable: true,
-    async *value() {
-      for (;;) {
-        const frame = await this.nextFrame();
-        if (frame === null) {
-          return;
-        }
-        yield frame;
-      }
-    },
-  });
 }
 
 function wrapAggregateFactory(factory) {
@@ -141,23 +163,20 @@ function installRegistrationWrappers(engineClass) {
   };
 }
 
-guardEngineMethods(binding.Engine);
-guardEngineMethods(binding.HttpEngine);
-installHTTPStreamIterator(binding.HttpSQLStream);
-installRegistrationWrappers(binding.Engine);
+guardEngineMethods(HttpEngine);
 
-module.exports = binding;
-module.exports.Engine = binding.Engine;
-module.exports.HttpEngine = binding.HttpEngine;
-module.exports.HttpSQLStream = binding.HttpSQLStream;
-module.exports.SQLParam = binding.SQLParam;
-module.exports.detectDatabaseFile = binding.detectDatabaseFile;
-module.exports.JSFunctionVolatility = binding.JSFunctionVolatility;
-module.exports.migratePythonDB = binding.migratePythonDB;
-module.exports.open = binding.open;
-module.exports.openAuto = binding.openAuto;
-module.exports.openCompressed = binding.openCompressed;
-module.exports.openCompressedEncrypted = binding.openCompressedEncrypted;
-module.exports.openEncrypted = binding.openEncrypted;
-module.exports.tensor = binding.tensor;
-module.exports.vector = binding.vector;
+module.exports.Engine = Engine;
+module.exports.HttpEngine = HttpEngine;
+module.exports.HttpEngineError = HttpEngineError;
+module.exports.HttpSQLStream = HttpSQLStream;
+module.exports.SQLParam = SQLParam;
+module.exports.detectDatabaseFile = (...args) => loadNativeBinding().detectDatabaseFile(...args);
+module.exports.JSFunctionVolatility = Object.freeze({ Volatile: "volatile", Stable: "stable", Immutable: "immutable" });
+module.exports.migratePythonDB = (...args) => loadNativeBinding().migratePythonDB(...args);
+module.exports.open = (...args) => loadNativeBinding().open(...args);
+module.exports.openAuto = (...args) => loadNativeBinding().openAuto(...args);
+module.exports.openCompressed = (...args) => loadNativeBinding().openCompressed(...args);
+module.exports.openCompressedEncrypted = (...args) => loadNativeBinding().openCompressedEncrypted(...args);
+module.exports.openEncrypted = (...args) => loadNativeBinding().openEncrypted(...args);
+module.exports.tensor = SQLParam.tensor;
+module.exports.vector = SQLParam.vector;

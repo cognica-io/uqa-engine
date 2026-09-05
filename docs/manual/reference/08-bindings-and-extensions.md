@@ -20,7 +20,7 @@ UQA Engine exposes the same durable embedded engine through Rust, Python, Node.j
 
 Check the type declaration files in the target package for the exact release surface.
 
-The HTTP class is named `HttpEngine` in every package. Native Rust, Python, and Node.js reuse `uqa-client` and can resolve local or Cloud projects through the installed CLI once during construction; browsers use the same typed protocol through `fetch` but require explicit connection material. See the [HTTP Engine reference](09-http-engine.md) for construction, lifecycle, CORS, request metadata, and streaming contracts.
+The HTTP class is named `HttpEngine` in every package. Rust and Python reuse `uqa-client`; Node.js implements the same typed protocol in JavaScript using its built-in HTTP modules. All three can resolve local or Cloud projects through the installed CLI once during construction. Browsers use `fetch` and require explicit connection material. See the [HTTP Engine reference](09-http-engine.md) for construction, lifecycle, CORS, request metadata, and streaming contracts.
 
 Across every binding, `hybrid_search` or `hybridSearch` uses exact signed single-prior log-odds fusion and has no `alpha` argument. The separately named `robust_hybrid_search` or `robustHybridSearch` accepts `alpha` and selects gated, confidence-scaled positive-evidence pooling. SQL follows the same split: mixed same-relation text and vector conjunctions are exact by default, `fuse_bayesian_evidence` and `fuse_log_odds` are exact explicit functions, and `pool_positive_evidence` is the explicit heuristic.
 
@@ -84,6 +84,8 @@ Heavy engine work releases the Python interpreter lock where the method contract
 The Node-API package requires Node.js 16 or newer. Expensive query and search methods have asynchronous forms; selected operations also expose `Sync` variants.
 
 Install the `@cognica-io/uqa` package from npm. npm selects the matching exact-version native optional package published under `@cognica-io` for the current supported operating system and CPU.
+
+HTTP-only applications can use `npm install --omit=optional @cognica-io/uqa`. Importing `HttpEngine`, its streaming class, and SQL parameter helpers from either `@cognica-io/uqa` or `@cognica-io/uqa/http` works without a native addon. Embedded engine constructors and operations load the addon when first used.
 
 ```sh
 npm install @cognica-io/uqa

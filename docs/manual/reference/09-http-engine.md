@@ -89,7 +89,7 @@ for frame in engine.sql_stream("SELECT id FROM notes ORDER BY id"):
         print(frame["row"])
 ```
 
-The Node.js binding exposes asynchronous project constructors and reuses the native Rust HTTP client:
+The Node.js package implements `HttpEngine` in JavaScript using the built-in `http` and `https` modules on Node.js 16 or newer. The client, SQL parameter helpers, and streaming reader require no Rust toolchain, native addon, or embedded engine. HTTP-only applications can install `@cognica-io/uqa` with `--omit=optional`; both the main package and `@cognica-io/uqa/http` export the same HTTP API for CommonJS and ESM. An explicit URL and token or `fromEnv()` needs no CLI; only `local()` and `cloud()` invoke it for project lookup.
 
 ```javascript
 const { HttpEngine } = require("@cognica-io/uqa");
@@ -106,6 +106,8 @@ for await (const frame of stream) {
   if (frame.type === "row") console.log(frame.row);
 }
 ```
+
+Node.js preserves signed 64-bit integers through `BigInt` when they exceed the safe `number` range and returns byte values as `Buffer`. Parameter validation, atomic batch submission, response-size bounds, request identities, and terminal stream validation follow the native HTTP contract. Breaking out of a stream's asynchronous iterator closes its response. HTTP requests do not follow redirects or use process-configured HTTP proxies.
 
 The browser package exports a fetch-based `HttpEngine` beside the embedded WASM `Engine`:
 
@@ -197,6 +199,6 @@ The client bounds each NDJSON frame at 64 MiB, rejects invalid frame order, requ
 
 ## Errors and diagnostics
 
-`HttpEngineError` separates CLI availability, timeout, size, exit, and JSON failures from URL, credential, parameter, transport, content-type, response-size, request-identity, stream, and server failures. A Rust server failure retains its HTTP status, stable error code, message, and optional request ID for explicit handling, while `Debug` output redacts CLI diagnostics, server messages, transport URLs, endpoints, credentials, statements, parameters, rows, and streamed values. Python and Node.js surface the redacted display message; browser errors expose only the status, stable code, and request ID. CLI stdout and stderr are bounded at 64 KiB each, materialized JSON bodies at 65 MiB, HTTP error bodies at 64 KiB, and individual stream frames at 64 MiB.
+`HttpEngineError` separates CLI availability, timeout, size, exit, and JSON failures from URL, credential, parameter, transport, content-type, response-size, request-identity, stream, and server failures. A Rust server failure retains its HTTP status, stable error code, message, and optional request ID for explicit handling, while `Debug` output redacts CLI diagnostics, server messages, transport URLs, endpoints, credentials, statements, parameters, rows, and streamed values. Python surfaces the redacted display message. Node.js and browser HTTP errors expose a redacted message plus the status, stable code, and request ID. CLI stdout and stderr are bounded at 64 KiB each, materialized JSON bodies at 65 MiB, HTTP error bodies at 64 KiB, and individual stream frames at 64 MiB.
 
 Do not blindly retry SQL mutations. Retry only a bounded transient failure when the operation is known to be safe, and use the preserved request ID when investigating an ambiguous response.
