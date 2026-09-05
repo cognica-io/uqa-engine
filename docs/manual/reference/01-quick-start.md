@@ -83,6 +83,8 @@ cargo run -p uqa-cli --bin usql -- --db notes.uqa -c "SELECT count(*) FROM notes
 
 Use the `uqa` facade package for the embedded API. It re-exports `uqa-engine` and the core `Value` type; depend directly on `uqa-engine` only when the implementation package name is required. The embedded API has the same SQL behavior as the CLI.
 
+From a separate Rust application project, add the released dependency:
+
 ```sh
 cargo add uqa@0.2.0
 ```
