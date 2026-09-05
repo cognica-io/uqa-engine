@@ -53,10 +53,6 @@ mod cross_process {
     pub(super) struct CrossProcessRegistryTransaction;
 
     impl CrossProcessRegistryTransaction {
-        pub(super) fn allocate_backend_process_id(&self) -> Result<i32, SQLError> {
-            Err(unsupported())
-        }
-
         pub(super) fn queue_state(&self) -> Result<CrossProcessQueueState, SQLError> {
             Err(unsupported())
         }
@@ -248,11 +244,15 @@ struct PreparedCrossSubscription {
     listeners: Vec<CrossProcessListenerRow>,
 }
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 struct CrossProcessState {
     database_path: std::path::PathBuf,
     hub: Weak<NotificationHub>,
     coordinator: Mutex<Option<Arc<CrossProcessCoordinator>>>,
 }
+
+#[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]
+struct CrossProcessState;
 
 impl CrossProcessState {
     #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
