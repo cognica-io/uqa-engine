@@ -107,11 +107,13 @@ def write_internal_readme(destination: pathlib.Path, name: str) -> None:
 
 
 def user_readme(version: str) -> str:
+    """Resolve public README links to main for development or the release tag."""
     source = (ROOT / "README.md").read_text(encoding="utf-8")
     prerelease = version.partition("-")[2]
     ref = "main" if prerelease.split(".", 1)[0] == "dev" else f"v{version}"
 
     def repository_link(match: re.Match[str]) -> str:
+        """Resolve relative links against the selected repository ref."""
         target = match.group(1)
         parsed = urlsplit(target)
         if parsed.scheme or target.startswith(("/", "#")):
