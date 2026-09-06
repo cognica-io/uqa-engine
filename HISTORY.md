@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Added a checksum-pinned inventory and official-driver harness for all 354 PostgreSQL 18.4 core and isolation tests, complete ownership accounting, strict result and provenance checks, and the full PostgreSQL reference run in pre-merge CI. UQA execution of this corpus remains part of the compatibility work.
+
 ### Fixed
 
 - Merged equivalent inherited and local CHECK constraints, retained their independent local origin and direct-parent counts, and excluded NO INHERIT checks from descendants. Recursive additions, validation, removal, and renaming now follow PostgreSQL inheritance boundaries, preserve constraint identity, and roll back atomically; adding a column propagates its CHECK independently from existing child-column merges.

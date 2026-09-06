@@ -1,0 +1,2129 @@
+{
+  "schema_version": 1,
+  "tests": {
+    "core/advisory_lock": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/aggregates": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/alter_generic": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/alter_operator": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/alter_table": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/amutils": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/arrays": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/async": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/bit": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/bitmapops": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/boolean": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/box": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/brin": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/brin_bloom": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/brin_multi": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/btree_index": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/case": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/char": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/circle": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/cluster": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/collate.icu.utf8": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/collate.linux.utf8": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/collate": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/collate.utf8": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/collate.windows.win1252": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/combocid": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/comments": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/compression": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/compression_pglz": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/constraints": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/conversion": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/copy": {
+      "owner": "crates/uqa-pg-wire",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/copy2": {
+      "owner": "crates/uqa-pg-wire",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/copydml": {
+      "owner": "crates/uqa-pg-wire",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/copyencoding": {
+      "owner": "crates/uqa-pg-wire",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/copyselect": {
+      "owner": "crates/uqa-pg-wire",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/create_aggregate": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/create_am": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/create_cast": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/create_function_c": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/create_function_sql": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/create_index": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/create_index_spgist": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/create_misc": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/create_operator": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/create_procedure": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/create_role": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/create_schema": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/create_table": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/create_table_like": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/create_type": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/create_view": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/database": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/date": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/dbsize": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/delete": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/dependency": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/domain": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/drop_if_exists": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/drop_operator": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/encoding": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/enum": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/equivclass": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/errors": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/euc_kr": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/event_trigger": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/event_trigger_login": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/explain": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/expressions": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/fast_default": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/float4": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/float8": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/foreign_data": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/foreign_key": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/functional_deps": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/generated_stored": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/generated_virtual": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/geometry": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/gin": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/gist": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/groupingsets": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/guc": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/hash_func": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/hash_index": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/hash_part": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/horology": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/identity": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/incremental_sort": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/index_including": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/index_including_gist": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/indexing": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/indirect_toast": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/inet": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/infinite_recurse": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/inherit": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/init_privs": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/insert": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/insert_conflict": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/int2": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/int4": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/int8": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/interval": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/join": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/join_hash": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/json": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/json_encoding": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/jsonb": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/jsonb_jsonpath": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/jsonpath": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/jsonpath_encoding": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/largeobject": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/limit": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/line": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/lock": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/lseg": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/macaddr": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/macaddr8": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/maintain_every": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/matview": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/md5": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/memoize": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/merge": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/misc": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/misc_functions": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/misc_sanity": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/money": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/multirangetypes": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/mvcc": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/name": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/namespace": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/numa": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/numeric": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/numeric_big": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/numerology": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/object_address": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/oid": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/oidjoins": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/opr_sanity": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/partition_aggregate": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/partition_info": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/partition_join": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/partition_prune": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/password": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/path": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/pg_lsn": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/plancache": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/plpgsql": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/point": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/polygon": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/polymorphism": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/portals": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/portals_p2": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/predicate": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/prepare": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/prepared_xacts": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/privileges": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/psql": {
+      "owner": "crates/uqa-pg-wire",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/psql_crosstab": {
+      "owner": "crates/uqa-pg-wire",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/psql_pipeline": {
+      "owner": "crates/uqa-pg-wire",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/publication": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/random": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/rangefuncs": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/rangetypes": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/regex": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/regproc": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/reindex_catalog": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/reloptions": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/replica_identity": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/returning": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/roleattributes": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/rowsecurity": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/rowtypes": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/rules": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/sanity_check": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/security_label": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/select": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/select_distinct": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/select_distinct_on": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/select_having": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/select_implicit": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/select_into": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/select_parallel": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/select_views": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/sequence": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/spgist": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/sqljson": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/sqljson_jsontable": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/sqljson_queryfuncs": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/stats": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/stats_ext": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/stats_import": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/strings": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/subscription": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/subselect": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/sysviews": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/tablesample": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/tablespace": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/temp": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/test_setup": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/text": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/tid": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/tidrangescan": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/tidscan": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/time": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/timestamp": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/timestamptz": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/timetz": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/transactions": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/triggers": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/truncate": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/tsdicts": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/tsearch": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/tsrf": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/tstypes": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/tuplesort": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/txid": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/type_sanity": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/typed_table": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/unicode": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/union": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/updatable_views": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/update": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/uuid": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/vacuum": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/vacuum_parallel": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/varchar": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/window": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/with": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/without_overlaps": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/write_parallel": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/xid": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/xml": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "core/xmlmap": {
+      "owner": "crates/uqa-engine",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/aborted-keyrevoke": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/alter-table-1": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/alter-table-2": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/alter-table-3": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/alter-table-4": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/async-notify": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/classroom-scheduling": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/cluster-conflict-partition": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/cluster-conflict": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/create-trigger": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/deadlock-hard": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/deadlock-parallel": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/deadlock-simple": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/deadlock-soft-2": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/deadlock-soft": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/delete-abort-savept-2": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/delete-abort-savept": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/detach-partition-concurrently-1": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/detach-partition-concurrently-2": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/detach-partition-concurrently-3": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/detach-partition-concurrently-4": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/drop-index-concurrently-1": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/eval-plan-qual-trigger": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/eval-plan-qual": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/fk-contention": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/fk-deadlock": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/fk-deadlock2": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/fk-partitioned-1": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/fk-partitioned-2": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/fk-snapshot": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/freeze-the-dead": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/horizons": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/index-only-bitmapscan": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/index-only-scan": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/inherit-temp": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/inplace-inval": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/insert-conflict-do-nothing-2": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/insert-conflict-do-nothing": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/insert-conflict-do-update-2": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/insert-conflict-do-update-3": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/insert-conflict-do-update-4": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/insert-conflict-do-update": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/insert-conflict-specconflict": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/intra-grant-inplace-db": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/intra-grant-inplace": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/lock-committed-keyupdate": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/lock-committed-update": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/lock-nowait": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/lock-update-delete": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/lock-update-traversal": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/matview-write-skew": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/merge-delete": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/merge-insert-update": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/merge-join": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/merge-match-recheck": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/merge-update": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/multiple-cic": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/multiple-row-versions": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/multixact-no-deadlock": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/multixact-no-forget": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/nowait-2": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/nowait-3": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/nowait-4": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/nowait-5": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/nowait": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/partial-index": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/partition-concurrent-attach": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/partition-drop-index-locking": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/partition-key-update-1": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/partition-key-update-2": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/partition-key-update-3": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/partition-key-update-4": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/plpgsql-toast": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/predicate-gin": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/predicate-gist": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/predicate-hash": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/predicate-lock-hot-tuple": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/prepared-transactions-cic": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/prepared-transactions": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/project-manager": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/propagate-lock-delete": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/read-only-anomaly-2": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/read-only-anomaly-3": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/read-only-anomaly": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/read-write-unique-2": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/read-write-unique-3": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/read-write-unique-4": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/read-write-unique": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/receipt-report": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/referential-integrity": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/reindex-concurrently-toast": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/reindex-concurrently": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/reindex-schema": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/ri-trigger": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/sequence-ddl": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/serializable-parallel-2": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/serializable-parallel-3": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/serializable-parallel": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/simple-write-skew": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/skip-locked-2": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/skip-locked-3": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/skip-locked-4": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/skip-locked": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/stats": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/subxid-overflow": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/temp-schema-cleanup": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/temporal-range-integrity": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/timeouts": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/total-cash": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/truncate-conflict": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/tuplelock-conflict": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/tuplelock-partition": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/tuplelock-update": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/tuplelock-upgrade-no-deadlock": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/two-ids": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/update-conflict-out": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/update-locked-tuple": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/vacuum-concurrent-drop": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/vacuum-conflict": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/vacuum-no-cleanup-lock": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    },
+    "isolation/vacuum-skip-locked": {
+      "owner": "crates/uqa-engine/src/engine_transactions",
+      "category": "unclassified",
+      "status": "not_audited",
+      "evidence": {}
+    }
+  }
+}

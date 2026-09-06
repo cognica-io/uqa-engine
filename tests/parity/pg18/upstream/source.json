@@ -1,0 +1,10 @@
+{
+  "version": "18.4",
+  "commit": "f5cc81719e6da4cbdb1f797c48b693e91018153a",
+  "url": "https://ftp.postgresql.org/pub/source/v18.4/postgresql-18.4.tar.bz2",
+  "sha256": "81a81ec695fb0c7901407defaa1d2f7973617154cf27ba74e3a7ab8e64436094",
+  "bytes": 22567173,
+  "root": "postgresql-18.4",
+  "license": "PostgreSQL",
+  "license_file": "COPYRIGHT"
+}

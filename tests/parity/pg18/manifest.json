@@ -818,11 +818,11 @@
     },
     {
       "id": "regression.core-and-isolation",
-      "postgresql_reference": "PostgreSQL 18 core regression and isolation schedules",
-      "uqa_test": "No complete harness yet",
+      "postgresql_reference": "PostgreSQL 18.4 REL_18_4 core parallel_schedule and isolation_schedule plus numeric_big, reindex_catalog, prepared-transactions and prepared-transactions-cic; SHA-256-pinned source and complete 791-file inventory in tests/parity/pg18/upstream",
+      "uqa_test": "python3 -m unittest discover -s scripts/tests -p 'test_pg18_upstream_harness.py'; python3 tests/parity/pg18/upstream/harness.py validate; python3 tests/parity/pg18/upstream/harness.py build; python3 tests/parity/pg18/upstream/harness.py run --output target/pg18-upstream/reference",
       "supported_version": "PostgreSQL 18",
-      "status": "not_audited",
-      "open_issue": "The complete core regression and isolation schedules have not been imported and classified."
+      "status": "partial",
+      "open_issue": "The official 354-test corpus and complete ownership ledger are imported, and the PostgreSQL reference is executed with unmodified official drivers. Every UQA case remains not_audited. Implement the real UQA SQL server boundary, execute both complete schedules and all extra tests against UQA, classify every observed failure, and fix all differences."
     },
     {
       "id": "clients.driver-and-operations-matrix",
