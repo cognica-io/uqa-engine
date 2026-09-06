@@ -50,6 +50,12 @@ cargo test -p uqa-engine --test integration engine_catalog::sql_relation_hierarc
 
 ## MERGE and RETURNING oracle
 
+`not_null_origin_oracle.sql` records 29 PostgreSQL 18.4 outcomes for local and inherited NOT NULL constraint origins, nullable column redeclarations, explicit and generated constraint names, recursive SET, constraint and column ADD, multiple inheritance, last-parent removal and rollback, partition creation, attachment and detachment, localizing an inherited NOT VALID constraint before later validation, and excluded NO INHERIT constraints. Six matching engine integration tests verify these behaviors, persistent reopen, and the legacy serialized-column default.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/not_null_origin_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/not_null_origin_oracle.expected.txt -
+```
+
 [`merge_returning_oracle.md`](merge_returning_oracle.md) records the pinned PostgreSQL 18.4 container provenance, full-join candidate results, clause-order and visibility SQLSTATEs, repeated-target cardinality behavior, all mutation row images, `DO NOTHING`, source-column NULLs, `merge_action()`, and source-before-target `RETURNING *` layout used by the focused compiler and engine tests.
 
 ## Stateful routine oracle

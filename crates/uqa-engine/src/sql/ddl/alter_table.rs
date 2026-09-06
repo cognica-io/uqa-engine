@@ -281,6 +281,8 @@ fn run_alter_table_action(
     engine: &Engine,
     stmt: AlterTableStmt,
     action: AlterTableAction,
+    recursing: bool,
+    inherited_not_null_name: Option<String>,
 ) -> Result<(), SQLError> {
     if matches!(&action, AlterTableAction::AddKeyConstraint { .. }) {
         let persistence = engine
@@ -516,7 +518,15 @@ fn run_alter_table_action(
             validated,
             no_inherit,
         } => {
-            add_not_null_constraint(engine, &stmt.table, name, &column, validated, no_inherit)?;
+            add_not_null_constraint(
+                engine,
+                &stmt.table,
+                name,
+                &column,
+                validated,
+                no_inherit,
+                !recursing,
+            )?;
         }
         AlterTableAction::ValidateConstraint { name } => {
             validate_and_mark_constraint(engine, &stmt.table, &name)?;
@@ -745,7 +755,14 @@ fn run_alter_table_action(
                 .map_err(|error| ddl_storage_error("ALTER COLUMN DROP EXPRESSION", error))?;
         }
         AlterTableAction::SetNotNull { name } => {
-            set_not_null_constraint(engine, &stmt.table, &name, stmt.recurse)?;
+            set_not_null_constraint(
+                engine,
+                &stmt.table,
+                &name,
+                stmt.recurse,
+                !recursing,
+                inherited_not_null_name,
+            )?;
         }
         AlterTableAction::DropNotNull { name } => {
             let (columns, _) = table_constraint_state(engine, &stmt.table)?;

@@ -27,7 +27,11 @@ Recursive column, CHECK, and NOT NULL additions require ownership of each descen
 
 `ALTER TABLE ONLY parent ALTER COLUMN column SET NOT NULL` creates a `NO INHERIT` constraint when an ordinary inheritance parent has children. A later recursive `SET NOT NULL` reports `0A000` instead of silently changing that constraint's inheritance status. An ONLY change on a partition parent with existing partitions reports `42P16`; an ordinary leaf or empty partition parent keeps an inheritable constraint. Existing constraint names remain stable when validation is completed, and constraint state remains consistent through rollback and reopen. See the [compatibility guide](../sql/09-compatibility.md) for the verified boundary.
 
-These fixes apply to new ALTER operations and do not infer or rewrite the intent of constraints created by older versions. This patch adds no storage migration and keeps the Rust storage trait requirements from 0.2.0. Applications already using the 0.2 series can keep their database files and custom storage implementations.
+`pg_constraint.conislocal` now distinguishes an inherited NOT NULL constraint from a local NOT NULL declaration, independently from `coninhcount` and from whether the column was redeclared locally. Recursive changes retain existing child constraint names and give newly inherited constraints their parent's name. Removing the last supplying parent or detaching a partition makes its retained constraint local; attaching a partition makes constraints supplied by its parent inherited. Explicit SET on a previously inherited NOT VALID constraint first makes it local; a subsequent SET validates it.
+
+These changes record origin on new declarations and hierarchy mutations. Older serialized columns lack the original declaration history and keep their previous local catalog projection; opening a database does not infer that missing intent. This patch adds no storage migration and keeps the Rust storage trait requirements from 0.2.0. Applications already using the 0.2 series can keep their database files and custom storage implementations.
+
+The public Rust SQL AST adds `ColumnDef.not_null_is_local`. Applications using exhaustive `ColumnDef` struct literals must initialize it to `true` for locally declared columns; inherited NOT NULL definitions use `false`. SQL parsing and engine-managed inheritance initialize the field automatically, and deserialization defaults missing fields to the historical local projection.
 
 ## Python CLI update
 

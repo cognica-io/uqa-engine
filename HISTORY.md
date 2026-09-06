@@ -15,6 +15,12 @@ See the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/doc
 - Fixed recursive `ALTER TABLE` authorization before merging existing child columns and constraints, with PostgreSQL inheritance-edge traversal, unchanged-definition boundaries, and failure-atomic rollback.
 - Preserved PostgreSQL 18 NO INHERIT metadata for `ONLY SET NOT NULL` on ordinary inheritance parents, rejected forbidden recursive and partition-parent changes with matching SQLSTATEs, retained local NOT NULL metadata when merging nullable inherited columns, projected NOT NULL inheritance counts from direct parent constraints, and preserved constraint identity, row validation, rollback, and durable reopen behavior.
 
+- Recorded NOT NULL local origin independently from inheritance counts, preserving local declarations and inherited names through recursive changes, parent removal, partition attachment and detachment, validation, rollback, and reopen; prevented NO INHERIT constraints from being copied to new descendants.
+
+### Changed
+
+- Added `ColumnDef.not_null_is_local` to the public Rust SQL AST. Applications constructing column definitions directly must initialize the field; older serialized definitions retain the previous local-origin projection without a storage migration.
+
 ## [0.2.1] - 2026-09-06
 
 See the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/docs/manual/reference/10-upgrading.md) for package updates and the Python CLI fix.

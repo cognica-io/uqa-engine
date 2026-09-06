@@ -183,6 +183,7 @@ impl Engine {
             .ok_or_else(|| column_not_found(&table_name, column))?;
         col.not_null = not_null;
         col.not_null_explicit = not_null;
+        col.not_null_is_local = true;
         col.not_null_validated = true;
         col.not_null_no_inherit = false;
         if !not_null {
@@ -327,6 +328,8 @@ impl Engine {
         let state = self
             .try_table(&table_name)?
             .ok_or_else(|| table_not_found(&table_name))?;
+        let previous_hierarchy = state.hierarchy.read().clone();
+        self.update_not_null_origins_for_hierarchy(&previous_hierarchy, &hierarchy, &mut columns)?;
         for foreign_key in &mut foreign_keys {
             foreign_key.ref_table = self.canonical_foreign_key_target(&foreign_key.ref_table)?;
         }
@@ -360,6 +363,41 @@ impl Engine {
         *state.key_constraints.write() = constraints.key_constraints;
         *state.hierarchy.write() = constraints.hierarchy;
         self.refresh_value_indexes_for_table(&table_name)?;
+        Ok(())
+    }
+
+    fn update_not_null_origins_for_hierarchy(
+        &self,
+        previous: &uqa_sql::ast::TableHierarchy,
+        next: &uqa_sql::ast::TableHierarchy,
+        columns: &mut [uqa_sql::ast::ColumnDef],
+    ) -> StorageBackendResult<()> {
+        let removed_parent = previous
+            .parents
+            .iter()
+            .any(|parent| !next.parents.contains(parent));
+        let attached_partition = !previous.is_partition() && next.is_partition();
+        if !removed_parent && !attached_partition {
+            return Ok(());
+        }
+        let mut inherited = std::collections::BTreeSet::new();
+        for parent in &next.parents {
+            for column in self
+                .try_describe_table(parent)?
+                .ok_or_else(|| table_not_found(parent))?
+            {
+                if column.not_null && !column.not_null_no_inherit {
+                    inherited.insert(column.name);
+                }
+            }
+        }
+        for column in columns.iter_mut().filter(|column| column.not_null) {
+            if attached_partition && inherited.contains(&column.name) {
+                column.not_null_is_local = false;
+            } else if removed_parent && !inherited.contains(&column.name) {
+                column.not_null_is_local = true;
+            }
+        }
         Ok(())
     }
 

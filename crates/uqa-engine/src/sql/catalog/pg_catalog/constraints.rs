@@ -80,7 +80,8 @@ pub(in crate::sql::catalog) fn build_pg_constraint(
                 None => 0,
             };
             let index_oid = constraint_index_oid(&constraint, &indexes);
-            let inheritance_count = inherited_not_null_count(catalog, resolution, &constraint)?;
+            let (inheritance_count, is_local) =
+                not_null_inheritance_state(catalog, resolution, &constraint)?;
             Ok(row([
                 (
                     "oid",
@@ -125,7 +126,7 @@ pub(in crate::sql::catalog) fn build_pg_constraint(
                         foreign_key_match_code(foreign_key.match_type)
                     })),
                 ),
-                ("conislocal", bool_value(true)),
+                ("conislocal", bool_value(is_local)),
                 ("coninhcount", int_value(inheritance_count)),
                 ("connoinherit", bool_value(constraint.state.no_inherit())),
                 ("conperiod", bool_value(constraint.period)),
@@ -145,13 +146,13 @@ pub(in crate::sql::catalog) fn build_pg_constraint(
     Ok(rows)
 }
 
-fn inherited_not_null_count(
+fn not_null_inheritance_state(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     constraint: &ConstraintCatalogRow,
-) -> Result<i64, SQLError> {
-    if constraint.kind != ConstraintCatalogKind::NotNull || constraint.state.no_inherit() {
-        return Ok(0);
+) -> Result<(i64, bool), SQLError> {
+    if constraint.kind != ConstraintCatalogKind::NotNull {
+        return Ok((0, true));
     }
     let column = constraint
         .columns
@@ -163,8 +164,17 @@ fn inherited_not_null_count(
         uqa_sql::expr::quote_ident(&constraint.table)
     );
     let Some(table) = catalog.table(resolution, &table_name)? else {
-        return Ok(0);
+        return Ok((0, true));
     };
+    let is_local = table
+        .columns
+        .iter()
+        .find(|definition| definition.name == column.name)
+        .ok_or_else(|| SQLError::Internal("NOT NULL constraint column disappeared".into()))?
+        .not_null_is_local;
+    if constraint.state.no_inherit() {
+        return Ok((0, is_local));
+    }
     let mut count = 0;
     for parent in &table.hierarchy.parents {
         let parent_table = catalog
@@ -176,7 +186,10 @@ fn inherited_not_null_count(
             count += 1;
         }
     }
-    catalog_usize(count, "pg_constraint NOT NULL inheritance count")
+    Ok((
+        catalog_usize(count, "pg_constraint NOT NULL inheritance count")?,
+        is_local,
+    ))
 }
 
 const fn foreign_key_action_code(action: uqa_sql::ast::ForeignKeyAction) -> &'static str {

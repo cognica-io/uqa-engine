@@ -27,6 +27,8 @@ mod merge;
 mod movement;
 #[path = "sql_relation_hierarchy/not_null.rs"]
 mod not_null;
+#[path = "sql_relation_hierarchy/not_null_origin.rs"]
+mod not_null_origin;
 #[path = "sql_relation_hierarchy/ownership.rs"]
 mod ownership;
 #[path = "sql_relation_hierarchy/regressions.rs"]

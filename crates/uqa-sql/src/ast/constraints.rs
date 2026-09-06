@@ -43,6 +43,9 @@ pub struct ColumnDef {
     /// constraints.
     #[serde(default)]
     pub not_null_no_inherit: bool,
+    /// Whether this relation declares its NOT NULL constraint locally, independently from inherited parent constraints. Older serialized definitions retain their original local catalog projection.
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub not_null_is_local: bool,
     /// Sequence provenance for `SERIAL` / `BIGSERIAL` and identity columns. The custom decoder accepts the legacy boolean representation written by releases that merged both SQL features into one table counter.
     #[serde(
         default,
@@ -265,6 +268,14 @@ pub struct ForeignKey {
 
 const fn default_true() -> bool {
     true
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip_serializing_if requires a borrowed field"
+)]
+const fn is_true(value: &bool) -> bool {
+    *value
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

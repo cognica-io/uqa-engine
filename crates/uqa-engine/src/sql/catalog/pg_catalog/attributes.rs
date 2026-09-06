@@ -204,6 +204,7 @@ fn sequence_attribute_column(name: &str, ty: ColumnType) -> SQLColumnDef {
         not_null_name: None,
         not_null_validated: true,
         not_null_no_inherit: false,
+        not_null_is_local: true,
         auto_increment: None,
         unique: false,
         default: None,

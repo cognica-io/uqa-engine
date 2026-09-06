@@ -65,6 +65,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `ddl.relation-forms-and-options` | `M3` | `partial` |
 | `ddl.recursive-alter-ownership` | `M3` | `verified` |
 | `ddl.not-null-only-inheritance` | `M3` | `verified` |
+| `ddl.not-null-constraint-origin` | `M3` | `verified` |
 | `ddl.ctas-column-names` | `M1` | `verified` |
 | `ddl.ctas-with-no-data` | `M1` | `verified` |
 | `ddl.select-into` | `M1` | `verified` |
@@ -177,6 +178,8 @@ The following compact ledger is the readable projection of the machine-readable 
 The verified view-trigger `MERGE` slice includes direct and nested automatic-to-trigger targets, action-path consistency, all mutation actions and `DO NOTHING`, statement-trigger ordering, trigger-returned row images and suppression, repeated candidates, replication-mode suppression, user-rule rejection, final check options, hidden target rows, failure atomicity, and statement-start snapshots.
 
 Recursive ALTER ownership is verified under `ddl.recursive-alter-ownership`: ownership is checked before existing child column and constraint merges, recursion stops below an unchanged merged definition, and every changing inheritance edge remains protected. Eight focused tests and a 41-record PostgreSQL 18.4 oracle cover inherited authority, revocation, ordinary and partition children, multiple inheritance, atomic failure, savepoints, and durable reopen.
+
+The `ddl.not-null-constraint-origin` boundary is verified by six focused tests and a 29-record PostgreSQL 18.4 oracle: local NOT NULL declarations are independent of nullable local column redeclarations and inherited parent counts; constraint names survive recursive changes; parent removal and partition lifecycle update durable origin atomically; and explicit localization precedes later validation of inherited NOT VALID constraints. Older serialized definitions preserve their historical local projection because the original declaration history was not stored.
 
 The related `ddl.not-null-only-inheritance` boundary is verified by six focused tests and a 37-record PostgreSQL 18.4 oracle: ONLY changes on ordinary parents preserve NO INHERIT metadata, partition parents reject omitted recursion when children exist, existing local NOT NULL names and flags survive nullable inherited-column merges, and later recursive changes retain exact diagnostics. Canonical constraint publication preserves validation, identity, statement and savepoint rollback, and durable reopen.
 

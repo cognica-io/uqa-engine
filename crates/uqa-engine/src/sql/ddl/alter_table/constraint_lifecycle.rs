@@ -320,6 +320,8 @@ pub(super) fn set_not_null_constraint(
     table: &str,
     column: &str,
     recurse: bool,
+    is_local: bool,
+    inherited_name: Option<String>,
 ) -> Result<(), SQLError> {
     let (mut columns, constraints) = table_constraint_state(engine, table)?;
     let relation = crate::RelationIdentity::from_legacy_name(table)
@@ -350,9 +352,14 @@ pub(super) fn set_not_null_constraint(
             .not_null_name
             .clone()
             .ok_or_else(|| SQLError::Internal("existing NOT NULL constraint has no name".into()))?;
-        if !definition.not_null_explicit {
+        let became_local = is_local && !definition.not_null_is_local;
+        if is_local && (!definition.not_null_explicit || became_local) {
             definition.not_null_explicit = true;
+            definition.not_null_is_local = true;
             publish_constraint_state(engine, table, columns, constraints)?;
+        }
+        if became_local {
+            return Ok(());
         }
         return validate_and_mark_constraint(engine, table, &name);
     }
@@ -363,7 +370,15 @@ pub(super) fn set_not_null_constraint(
             "constraint must be added to child tables too",
         ));
     }
-    add_not_null_constraint(engine, table, None, column, true, no_inherit)
+    add_not_null_constraint(
+        engine,
+        table,
+        inherited_name,
+        column,
+        true,
+        no_inherit,
+        is_local,
+    )
 }
 
 pub(super) fn add_not_null_constraint(
@@ -373,6 +388,7 @@ pub(super) fn add_not_null_constraint(
     column: &str,
     validated: bool,
     no_inherit: bool,
+    is_local: bool,
 ) -> Result<(), SQLError> {
     let (mut columns, mut constraints) = table_constraint_state(engine, table)?;
     ensure_constraint_name_available(&columns, &constraints, name.as_deref(), table)?;
@@ -394,6 +410,7 @@ pub(super) fn add_not_null_constraint(
     definition.not_null_name = name;
     definition.not_null_validated = false;
     definition.not_null_no_inherit = no_inherit;
+    definition.not_null_is_local = is_local;
     materialize_constraint_candidate(engine, table, &mut columns, &mut constraints)?;
     let name = columns
         .iter()
