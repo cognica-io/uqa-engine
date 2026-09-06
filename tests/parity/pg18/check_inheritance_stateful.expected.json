@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "6acbe288450e820576e38cf60555014ca985c766ec6b9c57dc5cc19089977da2",
+  "fixture_sha256": "268e443ae9d88bec242493e013623c05e5b05123b54a41a4fadd2f8f5d32af5d",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -609,6 +609,29 @@
       "kind": "ok"
     },
     {
+      "name": "strengthened_local_validation",
+      "kind": "ok"
+    },
+    {
+      "name": "strengthened_local_keeps_existing_rows",
+      "kind": "rows",
+      "rows": [
+        [
+          "-1"
+        ]
+      ]
+    },
+    {
+      "name": "strengthened_local_enforces_new_rows",
+      "kind": "error",
+      "sqlstate": "23514"
+    },
+    {
+      "name": "strengthened_local_duplicate",
+      "kind": "error",
+      "sqlstate": "42710"
+    },
+    {
       "name": "strengthened_local_flags",
       "kind": "rows",
       "rows": [
@@ -1088,6 +1111,34 @@
     {
       "name": "no_inherit_child_value",
       "kind": "ok"
+    },
+    {
+      "name": "invalid_column_merge_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "invalid_column_merge_child",
+      "kind": "ok"
+    },
+    {
+      "name": "invalid_column_merge_row",
+      "kind": "ok"
+    },
+    {
+      "name": "invalid_column_merge_check",
+      "kind": "error",
+      "sqlstate": "23514"
+    },
+    {
+      "name": "invalid_column_merge_is_atomic",
+      "kind": "rows",
+      "rows": [
+        [
+          "0",
+          "0",
+          "-1"
+        ]
+      ]
     },
     {
       "name": "equivalent_cast_parent",

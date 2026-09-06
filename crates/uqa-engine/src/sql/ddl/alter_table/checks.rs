@@ -148,6 +148,7 @@ pub(super) fn merge_added_check(
         existing.is_local = false;
     }
     if incoming.enforced && !existing.enforced {
+        // PostgreSQL's inherited ADD CHECK merge marks an enforcement upgrade valid without scanning existing rows.
         existing.enforced = true;
         existing.validated = true;
     }

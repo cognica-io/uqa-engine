@@ -154,6 +154,29 @@ fn adding_an_inherited_check_locally_preserves_identity_and_requires_matching_va
         "42P17",
     );
     state(&engine, "invalid_child", "positive", false, 1, false);
+    exec(
+        &engine,
+        "CREATE TABLE weak_parent(a integer,CONSTRAINT positive CHECK(a>0) NOT ENFORCED)",
+    );
+    exec(&engine, "CREATE TABLE weak_child() INHERITS(weak_parent)");
+    exec(&engine, "INSERT INTO weak_child VALUES(-1)");
+    exec(
+        &engine,
+        "ALTER TABLE weak_child ADD CONSTRAINT positive CHECK(a>0)",
+    );
+    state(&engine, "weak_child", "positive", true, 1, true);
+    exec(
+        &engine,
+        "ALTER TABLE weak_child VALIDATE CONSTRAINT positive",
+    );
+    assert_eq!(
+        engine
+            .sql("SELECT a FROM ONLY weak_child", &[])
+            .unwrap()
+            .rows[0]["a"],
+        Value::Int(-1)
+    );
+    error(&engine, "INSERT INTO weak_child VALUES(-2)", "23514");
 }
 
 #[test]
@@ -445,6 +468,26 @@ fn column_merge_keeps_check_propagation_independent_and_leaves_legacy_rows_unval
     exec(&engine, "INSERT INTO check_child VALUES(1,1,-1)");
     exec(&engine, "ALTER TABLE check_parent ADD COLUMN IF NOT EXISTS b integer CONSTRAINT skipped CHECK(b>10)");
     assert_eq!(checks(&engine, "check_parent").len(), 2);
+    exec(&engine, "CREATE TABLE reject_parent(a integer)");
+    exec(
+        &engine,
+        "CREATE TABLE reject_child(b integer) INHERITS(reject_parent)",
+    );
+    exec(&engine, "INSERT INTO reject_child VALUES(1,-1)");
+    error(
+        &engine,
+        "ALTER TABLE reject_parent ADD COLUMN b integer CONSTRAINT positive CHECK(b>0)",
+        "23514",
+    );
+    assert_eq!(engine.sql("SELECT count(*) AS n FROM pg_attribute WHERE attrelid='reject_parent'::regclass AND attname='b'", &[]).unwrap().rows[0]["n"], Value::Int(0));
+    assert!(checks(&engine, "reject_child").is_empty());
+    assert_eq!(
+        engine
+            .sql("SELECT b FROM ONLY reject_child", &[])
+            .unwrap()
+            .rows[0]["b"],
+        Value::Int(-1)
+    );
 }
 
 #[test]

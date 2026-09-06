@@ -3,6 +3,8 @@
 
 -- @case create_schema ok
 CREATE SCHEMA __UQA_STATEFUL_SCHEMA__;
+CREATE SCHEMA __UQA_SCHEMA_PROBE__;
+CREATE TABLE __UQA_SCHEMA_PROBE__.parent(a integer CHECK(a>0));
 -- @end
 
 -- @case create_column_parent ok
@@ -74,7 +76,7 @@ SELECT r.relname,c.conname,c.conislocal,c.coninhcount,c.conenforced,c.convalidat
 -- @end
 
 -- @case renamed_identities rows
-SELECT r.relname,c.oid=i.id AS same_identity FROM identities i JOIN pg_class r ON r.relname=i.relname JOIN pg_constraint c ON c.conrelid=r.oid WHERE c.contype='c' ORDER BY r.relname;
+SELECT r.relname,c.oid=i.id AS same_identity FROM identities i JOIN pg_class r ON r.relname=i.relname AND r.relnamespace=current_schema()::regnamespace JOIN pg_constraint c ON c.conrelid=r.oid WHERE c.contype='c' ORDER BY r.relname;
 -- @end
 
 -- @case localize_inherited ok
@@ -258,6 +260,23 @@ SELECT r.relname,c.conname,c.conislocal,c.coninhcount,c.conenforced,c.convalidat
 -- @end
 
 -- @case strengthen_local_constraint ok
+INSERT INTO weak_child VALUES(-1);
+ALTER TABLE weak_child ADD CONSTRAINT positive CHECK(a>0);
+-- @end
+
+-- @case strengthened_local_validation ok
+ALTER TABLE weak_child VALIDATE CONSTRAINT positive;
+-- @end
+
+-- @case strengthened_local_keeps_existing_rows rows
+SELECT a FROM ONLY weak_child ORDER BY a;
+-- @end
+
+-- @case strengthened_local_enforces_new_rows error
+INSERT INTO weak_child VALUES(-2);
+-- @end
+
+-- @case strengthened_local_duplicate error
 ALTER TABLE weak_child ADD CONSTRAINT positive CHECK(a>0);
 -- @end
 
@@ -461,6 +480,26 @@ SELECT r.relname,c.conname,c.conislocal,c.coninhcount,c.conenforced,c.convalidat
 
 -- @case no_inherit_child_value ok
 INSERT INTO add_child VALUES(1,1,-1);
+-- @end
+
+-- @case invalid_column_merge_parent ok
+CREATE TABLE reject_parent(a integer);
+-- @end
+
+-- @case invalid_column_merge_child ok
+CREATE TABLE reject_child(b integer) INHERITS(reject_parent);
+-- @end
+
+-- @case invalid_column_merge_row ok
+INSERT INTO reject_child VALUES(1,-1);
+-- @end
+
+-- @case invalid_column_merge_check error
+ALTER TABLE reject_parent ADD COLUMN b integer CONSTRAINT positive CHECK(b>0);
+-- @end
+
+-- @case invalid_column_merge_is_atomic rows
+SELECT (SELECT count(*) FROM pg_attribute WHERE attrelid='reject_parent'::regclass AND attname='b') AS parent_column_count,(SELECT count(*) FROM pg_constraint WHERE conrelid='reject_child'::regclass AND contype='c') AS child_check_count,b FROM ONLY reject_child;
 -- @end
 
 -- @case equivalent_cast_parent ok
