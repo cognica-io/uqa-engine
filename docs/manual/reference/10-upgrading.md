@@ -1,14 +1,8 @@
 # Upgrading to UQA Engine 0.2.2
 
-Version 0.2.2 fixes recursive `ALTER TABLE` authorization and PostgreSQL 18 `ONLY SET NOT NULL` inheritance behavior. The [release history](../../../HISTORY.md#022---2026-09-06) records these fixes.
+Version 0.2.2 fixes recursive `ALTER TABLE` authorization and PostgreSQL 18 CHECK and NOT NULL inheritance. It adds persistent CHECK identities, Rust AST origin fields, and the complete PostgreSQL 18.4 reference regression harness. The [release history](../../../HISTORY.md#022---2026-09-06) records the changes.
 
 The 0.2 series includes SQL object and privilege lifecycle changes, durable expression and unique indexes, expanded sequences and PL/pgSQL, native cross-process notifications, and a Node.js HTTP client that runs without native addons. These changes were introduced in [0.2.0](../../../HISTORY.md#020---2026-09-05); the [compatibility guide](../sql/09-compatibility.md) defines the verified PostgreSQL 18 surface and the behavior still being implemented.
-
-## Unreleased CHECK inheritance changes
-
-Development source adds `ColumnDef.check_is_local`, `ColumnDef.check_object_id`, `TableCheck.is_local`, and `TableCheck.object_id`. Rust applications constructing these structs directly initialize local-origin fields to `true` and unassigned CHECK identities to `None`; SQL compilation and engine-owned inheritance fill them automatically. This change does not require additional methods on custom storage traits.
-
-Initial open assigns and persists missing CHECK identities through the existing transactional catalog-migration boundary. CHECK OIDs then remain stable across constraint and relation renames and reopen. Old serialized definitions lack declaration history and retain their historical local-origin projection; new declarations and hierarchy changes record their actual origin. See [CHECK inheritance and lifecycle](../sql/02-ddl.md#inheritance-and-partitioning) for the SQL changes.
 
 ## Package versions
 
@@ -27,6 +21,12 @@ The Rust workspace requires Rust 1.90 or newer. Python requires Python 3.8 or ne
 
 The [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.2.2) contains the Python and npm archives, standalone Node.js addons, and the status of publication to crates.io, PyPI, and npm. Rust applications using Git dependencies should select `tag = "v0.2.2"` consistently for every UQA dependency.
 
+## Rust AST and CHECK catalog updates
+
+Version 0.2.2 adds `ColumnDef.check_is_local`, `ColumnDef.check_object_id`, `TableCheck.is_local`, and `TableCheck.object_id`. Rust applications constructing these structs directly initialize local-origin fields to `true` and unassigned CHECK identities to `None`; SQL compilation and engine-owned inheritance fill them automatically. This change does not require additional methods on custom storage traits.
+
+Initial open assigns and persists missing CHECK identities through the existing transactional catalog-migration boundary. CHECK OIDs then remain stable across constraint and relation renames and reopen. Old serialized definitions lack declaration history and retain their historical local-origin projection; new declarations and hierarchy changes record their actual origin. See [CHECK inheritance and lifecycle](../sql/02-ddl.md#inheritance-and-partitioning) for the SQL changes.
+
 ## SQL constraint and ownership updates
 
 Recursive column, CHECK, and NOT NULL additions require ownership of each descendant whose definition changes, including a child whose existing definition is merged. Table privileges alone do not grant this authority; inherited membership in the child's owning role does. Recursion stops after merging an existing child definition and continues through every inheritance edge that still requires a change. Unauthorized operations restore the parent and all previously visited children.
@@ -35,9 +35,13 @@ Recursive column, CHECK, and NOT NULL additions require ownership of each descen
 
 `pg_constraint.conislocal` now distinguishes an inherited NOT NULL constraint from a local NOT NULL declaration, independently from `coninhcount` and from whether the column was redeclared locally. Recursive changes retain existing child constraint names and give newly inherited constraints their parent's name. Removing the last supplying parent or detaching a partition makes its retained constraint local; attaching a partition makes constraints supplied by its parent inherited. Explicit SET on a previously inherited NOT VALID constraint first makes it local; a subsequent SET validates it.
 
-These changes record origin on new declarations and hierarchy mutations. Older serialized columns lack the original declaration history and keep their previous local catalog projection; opening a database does not infer that missing intent. This patch adds no storage migration and keeps the Rust storage trait requirements from 0.2.0. Applications already using the 0.2 series can keep their database files and custom storage implementations.
+NOT NULL origin is recorded on new declarations and hierarchy mutations. Older serialized columns lack the original declaration history and keep their previous local catalog projection; opening a database does not infer that missing intent. CHECK identities are assigned by the initial-open catalog migration described above. Version 0.2.2 keeps the Rust storage trait requirements from 0.2.0, so applications already using the 0.2 series can keep their database files and custom storage implementations after the normal upgrade checks.
 
 The public Rust SQL AST adds `ColumnDef.not_null_is_local`. Applications using exhaustive `ColumnDef` struct literals must initialize it to `true` for locally declared columns; inherited NOT NULL definitions use `false`. SQL parsing and engine-managed inheritance initialize the field automatically, and deserialization defaults missing fields to the historical local projection.
+
+## Compatibility verification
+
+The release includes all 354 PostgreSQL 18.4 core and isolation tests through the official PostgreSQL drivers, with a pinned source inventory and recorded execution provenance. The PostgreSQL reference run passes this corpus in CI. The UQA run of the complete corpus remains unaudited; release compatibility claims continue to follow the checked differential fixtures and feature manifest. See [verification](../internals/09-verification.md) for commands and evidence boundaries.
 
 ## Python CLI update
 

@@ -6,32 +6,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-09-06
+
+See the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/docs/manual/reference/10-upgrading.md) for package updates, SQL constraint behavior, Rust AST changes, and CHECK catalog migration.
+
 ### Added
 
 - Added a checksum-pinned inventory and official-driver harness for all 354 PostgreSQL 18.4 core and isolation tests, complete ownership accounting, strict result and provenance checks, and the full PostgreSQL reference run in pre-merge CI. UQA execution of this corpus remains part of the compatibility work.
 
 ### Fixed
 
+- Fixed recursive `ALTER TABLE` authorization before merging existing child columns and constraints, with PostgreSQL inheritance-edge traversal, unchanged-definition boundaries, and failure-atomic rollback.
+- Preserved PostgreSQL 18 NO INHERIT metadata for `ONLY SET NOT NULL` on ordinary inheritance parents, rejected forbidden recursive and partition-parent changes with matching SQLSTATEs, retained local NOT NULL metadata when merging nullable inherited columns, projected NOT NULL inheritance counts from direct parent constraints, and preserved constraint identity, row validation, rollback, and durable reopen behavior.
+- Recorded NOT NULL local origin independently from inheritance counts, preserving local declarations and inherited names through recursive changes, parent removal, partition attachment and detachment, validation, rollback, and reopen; prevented NO INHERIT constraints from being copied to new descendants.
 - Merged equivalent inherited and local CHECK constraints, retained their independent local origin and direct-parent counts, and excluded NO INHERIT checks from descendants. Recursive additions, validation, removal, and renaming now follow PostgreSQL inheritance boundaries, preserve constraint identity, and roll back atomically; adding a column propagates its CHECK independently from existing child-column merges.
 
 ### Changed
 
+- Added `ColumnDef.not_null_is_local` to the public Rust SQL AST. Applications constructing column definitions directly must initialize the field; older serialized definitions retain the previous local-origin projection without a NOT NULL metadata migration.
 - Added `ColumnDef.check_is_local`, `ColumnDef.check_object_id`, `TableCheck.is_local`, and `TableCheck.object_id` to the Rust SQL AST. Initial catalog open assigns missing CHECK identities; legacy definitions retain their previous local-origin projection because their declaration history was not stored.
-
-## [0.2.2] - 2026-09-06
-
-See the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/docs/manual/reference/10-upgrading.md) for package updates and SQL ownership and constraint behavior.
-
-### Fixed
-
-- Fixed recursive `ALTER TABLE` authorization before merging existing child columns and constraints, with PostgreSQL inheritance-edge traversal, unchanged-definition boundaries, and failure-atomic rollback.
-- Preserved PostgreSQL 18 NO INHERIT metadata for `ONLY SET NOT NULL` on ordinary inheritance parents, rejected forbidden recursive and partition-parent changes with matching SQLSTATEs, retained local NOT NULL metadata when merging nullable inherited columns, projected NOT NULL inheritance counts from direct parent constraints, and preserved constraint identity, row validation, rollback, and durable reopen behavior.
-
-- Recorded NOT NULL local origin independently from inheritance counts, preserving local declarations and inherited names through recursive changes, parent removal, partition attachment and detachment, validation, rollback, and reopen; prevented NO INHERIT constraints from being copied to new descendants.
-
-### Changed
-
-- Added `ColumnDef.not_null_is_local` to the public Rust SQL AST. Applications constructing column definitions directly must initialize the field; older serialized definitions retain the previous local-origin projection without a storage migration.
+- Generated Rust package README links follow `main` for development versions and the exact version tag for release packages.
 
 ## [0.2.1] - 2026-09-06
 

@@ -108,6 +108,8 @@ def write_internal_readme(destination: pathlib.Path, name: str) -> None:
 
 def user_readme(version: str) -> str:
     source = (ROOT / "README.md").read_text(encoding="utf-8")
+    prerelease = version.partition("-")[2]
+    ref = "main" if prerelease.split(".", 1)[0] == "dev" else f"v{version}"
 
     def repository_link(match: re.Match[str]) -> str:
         target = match.group(1)
@@ -115,7 +117,7 @@ def user_readme(version: str) -> str:
         if parsed.scheme or target.startswith(("/", "#")):
             return match.group(0)
         kind = "tree" if (ROOT / unquote(parsed.path)).is_dir() else "blob"
-        return f"](https://github.com/cognica-io/uqa-engine/{kind}/v{version}/{target})"
+        return f"](https://github.com/cognica-io/uqa-engine/{kind}/{ref}/{target})"
 
     return re.sub(r"\]\(([^)\s]+)\)", repository_link, source)
 

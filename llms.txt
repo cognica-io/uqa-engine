@@ -57,4 +57,4 @@ When generating SQL:
 
 ## Release upgrades
 
-- [Upgrade guide](docs/manual/reference/10-upgrading.md): UQA Engine 0.2.2 packages, SQL ownership and constraint fixes, the Python CLI fix, custom Rust storage API changes, and persistent database migration.
+- [Upgrade guide](docs/manual/reference/10-upgrading.md): UQA Engine 0.2.2 packages, CHECK and NOT NULL inheritance, Rust AST origin fields, CHECK catalog migration, the Python CLI fix, and custom Rust storage requirements.
