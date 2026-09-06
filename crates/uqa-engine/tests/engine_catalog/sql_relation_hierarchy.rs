@@ -13,6 +13,8 @@ use uqa_engine::Engine;
 mod alter_lifecycle;
 #[path = "sql_relation_hierarchy/catalog.rs"]
 mod catalog;
+#[path = "sql_relation_hierarchy/checks.rs"]
+mod checks;
 #[path = "sql_relation_hierarchy/copy_io.rs"]
 mod copy_io;
 #[path = "sql_relation_hierarchy/fk_conflict.rs"]

@@ -4,6 +4,12 @@ Version 0.2.2 fixes recursive `ALTER TABLE` authorization and PostgreSQL 18 `ONL
 
 The 0.2 series includes SQL object and privilege lifecycle changes, durable expression and unique indexes, expanded sequences and PL/pgSQL, native cross-process notifications, and a Node.js HTTP client that runs without native addons. These changes were introduced in [0.2.0](../../../HISTORY.md#020---2026-09-05); the [compatibility guide](../sql/09-compatibility.md) defines the verified PostgreSQL 18 surface and the behavior still being implemented.
 
+## Unreleased CHECK inheritance changes
+
+Development source adds `ColumnDef.check_is_local`, `ColumnDef.check_object_id`, `TableCheck.is_local`, and `TableCheck.object_id`. Rust applications constructing these structs directly initialize local-origin fields to `true` and unassigned CHECK identities to `None`; SQL compilation and engine-owned inheritance fill them automatically. This change does not require additional methods on custom storage traits.
+
+Initial open assigns and persists missing CHECK identities through the existing transactional catalog-migration boundary. CHECK OIDs then remain stable across constraint and relation renames and reopen. Old serialized definitions lack declaration history and retain their historical local-origin projection; new declarations and hierarchy changes record their actual origin. See [CHECK inheritance and lifecycle](../sql/02-ddl.md#inheritance-and-partitioning) for the SQL changes.
+
 ## Package versions
 
 Update the UQA packages used by one application together. Rust's `0.1` dependency requirement does not select `0.2.2`; change the requirement explicitly and regenerate the application's lockfile.

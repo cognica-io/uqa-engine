@@ -14,7 +14,7 @@ use crate::engine_capabilities::{CatalogReadView, RelationNameResolution};
 use super::super::helpers::constraints::{
     constraint_catalog_rows, ConstraintCatalogKind, ConstraintCatalogRow,
 };
-use super::super::helpers::oids::{schema_oid, stable_oid};
+use super::super::helpers::oids::{schema_oid, stable_object_oid, stable_oid};
 use super::super::helpers::rows::{
     bool_value, catalog_array, catalog_usize, int_value, row, str_value,
 };
@@ -81,17 +81,27 @@ pub(in crate::sql::catalog) fn build_pg_constraint(
             };
             let index_oid = constraint_index_oid(&constraint, &indexes);
             let (inheritance_count, is_local) =
-                not_null_inheritance_state(catalog, resolution, &constraint)?;
+                constraint_inheritance_state(catalog, resolution, &constraint)?;
             Ok(row([
                 (
                     "oid",
-                    int_value(stable_oid(
-                        "constraint",
-                        &format!(
-                            "{}.{}.{}",
-                            constraint.schema, constraint.table, constraint.name
-                        ),
-                    )),
+                    int_value(
+                        constraint
+                            .object_id
+                            .filter(|_| constraint.kind == ConstraintCatalogKind::Check)
+                            .map_or_else(
+                                || {
+                                    stable_oid(
+                                        "constraint",
+                                        &format!(
+                                            "{}.{}.{}",
+                                            constraint.schema, constraint.table, constraint.name
+                                        ),
+                                    )
+                                },
+                                |object_id| stable_object_oid("constraint", &object_id),
+                            ),
+                    ),
                 ),
                 ("conname", str_value(constraint.name)),
                 ("connamespace", int_value(schema_oid(&constraint.schema))),
@@ -146,11 +156,14 @@ pub(in crate::sql::catalog) fn build_pg_constraint(
     Ok(rows)
 }
 
-fn not_null_inheritance_state(
+fn constraint_inheritance_state(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     constraint: &ConstraintCatalogRow,
 ) -> Result<(i64, bool), SQLError> {
+    if constraint.kind == ConstraintCatalogKind::Check {
+        return check_inheritance_state(catalog, resolution, constraint);
+    }
     if constraint.kind != ConstraintCatalogKind::NotNull {
         return Ok((0, true));
     }
@@ -188,6 +201,59 @@ fn not_null_inheritance_state(
     }
     Ok((
         catalog_usize(count, "pg_constraint NOT NULL inheritance count")?,
+        is_local,
+    ))
+}
+
+fn check_inheritance_state(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    constraint: &ConstraintCatalogRow,
+) -> Result<(i64, bool), SQLError> {
+    let table_name = format!(
+        "{}.{}",
+        uqa_sql::expr::quote_ident(&constraint.schema),
+        uqa_sql::expr::quote_ident(&constraint.table)
+    );
+    let Some(table) = catalog.table(resolution, &table_name)? else {
+        return Ok((0, true));
+    };
+    let is_local = table
+        .columns
+        .iter()
+        .find(|column| {
+            column.check.is_some() && column.check_name.as_ref() == Some(&constraint.name)
+        })
+        .map(|column| column.check_is_local)
+        .or_else(|| {
+            table
+                .checks
+                .iter()
+                .find(|check| check.name.as_ref() == Some(&constraint.name))
+                .map(|check| check.is_local)
+        })
+        .ok_or_else(|| SQLError::Internal("CHECK constraint disappeared".into()))?;
+    let mut count = 0;
+    if !constraint.state.no_inherit() {
+        for parent in &table.hierarchy.parents {
+            let parent = catalog
+                .table(resolution, parent)?
+                .ok_or_else(|| SQLError::UnknownTable(parent.clone()))?;
+            if parent.columns.iter().any(|column| {
+                column.check.is_some()
+                    && !column.check_no_inherit
+                    && column.check_name.as_ref() == Some(&constraint.name)
+            }) || parent
+                .checks
+                .iter()
+                .any(|check| !check.no_inherit && check.name.as_ref() == Some(&constraint.name))
+            {
+                count += 1;
+            }
+        }
+    }
+    Ok((
+        catalog_usize(count, "pg_constraint CHECK inheritance count")?,
         is_local,
     ))
 }

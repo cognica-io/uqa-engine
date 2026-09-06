@@ -66,6 +66,13 @@ fn trigger_statements_preserve_postgresql_event_and_lifecycle_shape() {
     else {
         panic!("expected ALTER TABLE RENAME CONSTRAINT");
     };
+    assert!(rename_constraint.recurse);
+    let Statement::AlterTable(only) =
+        first("ALTER TABLE ONLY app.items RENAME CONSTRAINT guarded TO guarded_v2")
+    else {
+        panic!("expected ALTER TABLE ONLY")
+    };
+    assert!(!only.recurse);
     assert!(matches!(
         rename_constraint.actions.as_slice(),
         [AlterTableAction::RenameConstraint { from, to }]

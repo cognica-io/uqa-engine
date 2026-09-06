@@ -572,6 +572,8 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                                 enforced: constraint.is_enforced,
                                 validated: constraint.initially_valid,
                                 no_inherit: constraint.is_no_inherit,
+                                object_id: None,
+                                is_local: true,
                                 partition_constraint: None,
                             },
                         }
@@ -931,7 +933,7 @@ fn compile_relation_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<Stat
         table,
         qualifier: relation.relname.clone(),
         if_exists: stmt.missing_ok,
-        recurse: false,
+        recurse: relation.inh,
         actions: vec![action],
     }))
 }

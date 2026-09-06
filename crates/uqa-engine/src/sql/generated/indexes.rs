@@ -6,7 +6,7 @@
 
 //! Immutable index-expression binding in the indexed table's declared row type.
 
-use super::{bind_generation_column_references, typing, ColumnType, Engine, Expr, SQLError};
+use super::{bind_schema_column_references, typing, ColumnType, Engine, Expr, SQLError};
 use uqa_execution::RowSchema;
 use uqa_planner::ExpressionPlan;
 
@@ -80,8 +80,8 @@ fn bind_immutable_index_expression(
         .map_err(|error| SQLError::Internal(error.to_string()))?
         .ok_or_else(|| SQLError::UnknownTable(table.into()))?;
     let relation = crate::RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
-    bind_generation_column_references(expression, &relation.name);
-    bind_generation_column_references(expression, table);
+    bind_schema_column_references(expression, &relation.name);
+    bind_schema_column_references(expression, table);
     plan.scalar = ExpressionPlan::lower(expression.clone()).scalar;
     let schema = RowSchema::with_types(
         columns.iter().map(|column| column.name.clone()).collect(),

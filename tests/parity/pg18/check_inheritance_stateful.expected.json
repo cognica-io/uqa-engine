@@ -1,0 +1,1232 @@
+{
+  "schema_version": 1,
+  "fixture_sha256": "6acbe288450e820576e38cf60555014ca985c766ec6b9c57dc5cc19089977da2",
+  "oracle": {
+    "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
+    "server_version_num": "180004",
+    "version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "age_version": "1.8.0"
+  },
+  "cases": [
+    {
+      "name": "create_schema",
+      "kind": "ok"
+    },
+    {
+      "name": "create_column_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "create_inherited",
+      "kind": "ok"
+    },
+    {
+      "name": "create_local_column",
+      "kind": "ok"
+    },
+    {
+      "name": "create_local_table",
+      "kind": "ok"
+    },
+    {
+      "name": "creation_origins",
+      "kind": "rows",
+      "rows": [
+        [
+          "inherited",
+          "positive",
+          "f",
+          "1",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "local_column",
+          "positive",
+          "t",
+          "1",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "local_table",
+          "positive",
+          "t",
+          "1",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "parent",
+          "positive",
+          "t",
+          "0",
+          "t",
+          "t",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "reject_local_expression_conflict",
+      "kind": "error",
+      "sqlstate": "42710"
+    },
+    {
+      "name": "reject_local_no_inherit",
+      "kind": "error",
+      "sqlstate": "42P17"
+    },
+    {
+      "name": "reject_local_not_enforced",
+      "kind": "error",
+      "sqlstate": "42P17"
+    },
+    {
+      "name": "enforce_inherited",
+      "kind": "error",
+      "sqlstate": "23514"
+    },
+    {
+      "name": "save_identity_table",
+      "kind": "ok"
+    },
+    {
+      "name": "save_identity",
+      "kind": "ok"
+    },
+    {
+      "name": "direct_inherited_drop",
+      "kind": "error",
+      "sqlstate": "42P16"
+    },
+    {
+      "name": "direct_local_inherited_drop",
+      "kind": "error",
+      "sqlstate": "42P16"
+    },
+    {
+      "name": "direct_inherited_rename",
+      "kind": "error",
+      "sqlstate": "42P16"
+    },
+    {
+      "name": "only_parent_rename",
+      "kind": "error",
+      "sqlstate": "42P16"
+    },
+    {
+      "name": "parent_recursive_rename",
+      "kind": "ok"
+    },
+    {
+      "name": "renamed_origins",
+      "kind": "rows",
+      "rows": [
+        [
+          "inherited",
+          "renamed",
+          "f",
+          "1",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "local_column",
+          "renamed",
+          "t",
+          "1",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "local_table",
+          "renamed",
+          "t",
+          "1",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "parent",
+          "renamed",
+          "t",
+          "0",
+          "t",
+          "t",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "renamed_identities",
+      "kind": "rows",
+      "rows": [
+        [
+          "inherited",
+          "t"
+        ],
+        [
+          "local_column",
+          "t"
+        ],
+        [
+          "local_table",
+          "t"
+        ],
+        [
+          "parent",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "localize_inherited",
+      "kind": "ok"
+    },
+    {
+      "name": "localized_origin",
+      "kind": "rows",
+      "rows": [
+        [
+          "inherited",
+          "renamed",
+          "t",
+          "1",
+          "t",
+          "t",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "duplicate_local_add",
+      "kind": "error",
+      "sqlstate": "42710"
+    },
+    {
+      "name": "drop_parent_preserving_locals",
+      "kind": "ok"
+    },
+    {
+      "name": "locals_after_parent_drop",
+      "kind": "rows",
+      "rows": [
+        [
+          "inherited",
+          "renamed",
+          "t",
+          "0",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "local_column",
+          "renamed",
+          "t",
+          "0",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "local_table",
+          "renamed",
+          "t",
+          "0",
+          "t",
+          "t",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "left_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "right_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "multiple_parents",
+      "kind": "ok"
+    },
+    {
+      "name": "multiple_parent_count",
+      "kind": "rows",
+      "rows": [
+        [
+          "shared_child",
+          "shared",
+          "f",
+          "2",
+          "t",
+          "t",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "rename_one_of_two_parents",
+      "kind": "error",
+      "sqlstate": "42P16"
+    },
+    {
+      "name": "failed_rename_is_atomic",
+      "kind": "rows",
+      "rows": [
+        [
+          "left_parent",
+          "shared",
+          "t",
+          "0",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "right_parent",
+          "shared",
+          "t",
+          "0",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "shared_child",
+          "shared",
+          "f",
+          "2",
+          "t",
+          "t",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "drop_first_parent_constraint",
+      "kind": "ok"
+    },
+    {
+      "name": "one_parent_remains",
+      "kind": "rows",
+      "rows": [
+        [
+          "shared_child",
+          "shared",
+          "f",
+          "1",
+          "t",
+          "t",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "drop_last_parent_constraint",
+      "kind": "ok"
+    },
+    {
+      "name": "inherited_constraint_removed",
+      "kind": "rows",
+      "rows": []
+    },
+    {
+      "name": "only_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "only_child",
+      "kind": "ok"
+    },
+    {
+      "name": "only_drop",
+      "kind": "ok"
+    },
+    {
+      "name": "only_drop_localizes_child",
+      "kind": "rows",
+      "rows": [
+        [
+          "only_child",
+          "positive",
+          "t",
+          "0",
+          "t",
+          "t",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "invalid_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "invalid_child",
+      "kind": "ok"
+    },
+    {
+      "name": "invalid_row",
+      "kind": "ok"
+    },
+    {
+      "name": "unvalidated_child",
+      "kind": "ok"
+    },
+    {
+      "name": "validated_recursive_merge_conflict",
+      "kind": "error",
+      "sqlstate": "42P17"
+    },
+    {
+      "name": "validation_conflict_rollback",
+      "kind": "rows",
+      "rows": [
+        [
+          "invalid_child",
+          "positive",
+          "t",
+          "0",
+          "t",
+          "f",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "unvalidated_recursive_merge",
+      "kind": "ok"
+    },
+    {
+      "name": "new_child_from_unvalidated",
+      "kind": "ok"
+    },
+    {
+      "name": "new_empty_child_is_valid",
+      "kind": "rows",
+      "rows": [
+        [
+          "born_valid",
+          "positive",
+          "f",
+          "1",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "invalid_child",
+          "positive",
+          "t",
+          "1",
+          "t",
+          "f",
+          "f"
+        ],
+        [
+          "invalid_parent",
+          "positive",
+          "t",
+          "0",
+          "t",
+          "f",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "failed_recursive_validation",
+      "kind": "error",
+      "sqlstate": "23514"
+    },
+    {
+      "name": "failed_validation_rollback",
+      "kind": "rows",
+      "rows": [
+        [
+          "invalid_child",
+          "positive",
+          "t",
+          "1",
+          "t",
+          "f",
+          "f"
+        ],
+        [
+          "invalid_parent",
+          "positive",
+          "t",
+          "0",
+          "t",
+          "f",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "repair_invalid_row",
+      "kind": "ok"
+    },
+    {
+      "name": "only_validation_requires_children",
+      "kind": "error",
+      "sqlstate": "42P16"
+    },
+    {
+      "name": "recursive_validation",
+      "kind": "ok"
+    },
+    {
+      "name": "recursive_validated_flags",
+      "kind": "rows",
+      "rows": [
+        [
+          "born_valid",
+          "positive",
+          "f",
+          "1",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "invalid_child",
+          "positive",
+          "t",
+          "1",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "invalid_parent",
+          "positive",
+          "t",
+          "0",
+          "t",
+          "t",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "nv_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "nv_child",
+      "kind": "ok"
+    },
+    {
+      "name": "nv_legacy_row",
+      "kind": "ok"
+    },
+    {
+      "name": "nv_add_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "nv_local_validated_conflict",
+      "kind": "error",
+      "sqlstate": "42P17"
+    },
+    {
+      "name": "nv_localize",
+      "kind": "ok"
+    },
+    {
+      "name": "nv_localized_flags",
+      "kind": "rows",
+      "rows": [
+        [
+          "nv_child",
+          "positive",
+          "t",
+          "1",
+          "t",
+          "f",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "not_enforced_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "not_enforced_child",
+      "kind": "ok"
+    },
+    {
+      "name": "enforced_local_create",
+      "kind": "ok"
+    },
+    {
+      "name": "directional_enforcement",
+      "kind": "rows",
+      "rows": [
+        [
+          "strong_child",
+          "positive",
+          "t",
+          "1",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "weak_child",
+          "positive",
+          "f",
+          "1",
+          "f",
+          "f",
+          "f"
+        ],
+        [
+          "weak_parent",
+          "positive",
+          "t",
+          "0",
+          "f",
+          "f",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "strengthen_local_constraint",
+      "kind": "ok"
+    },
+    {
+      "name": "strengthened_local_flags",
+      "kind": "rows",
+      "rows": [
+        [
+          "weak_child",
+          "positive",
+          "t",
+          "1",
+          "t",
+          "t",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "plain_child",
+      "kind": "ok"
+    },
+    {
+      "name": "ordinary_attach",
+      "kind": "ok"
+    },
+    {
+      "name": "ordinary_attach_keeps_local",
+      "kind": "rows",
+      "rows": [
+        [
+          "attached",
+          "positive",
+          "t",
+          "1",
+          "t",
+          "t",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "ordinary_remove_edge",
+      "kind": "ok"
+    },
+    {
+      "name": "removed_edge_origin",
+      "kind": "rows",
+      "rows": [
+        [
+          "attached",
+          "positive",
+          "t",
+          "0",
+          "t",
+          "t",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "ordinary_readd_edge",
+      "kind": "ok"
+    },
+    {
+      "name": "readded_edge_origin",
+      "kind": "rows",
+      "rows": [
+        [
+          "attached",
+          "positive",
+          "t",
+          "1",
+          "t",
+          "t",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "partition_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "born_partition",
+      "kind": "ok"
+    },
+    {
+      "name": "standalone_partition",
+      "kind": "ok"
+    },
+    {
+      "name": "attach_partition",
+      "kind": "ok"
+    },
+    {
+      "name": "partition_origins",
+      "kind": "rows",
+      "rows": [
+        [
+          "attached_partition",
+          "positive",
+          "f",
+          "1",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "born_partition",
+          "positive",
+          "f",
+          "1",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "partition_parent",
+          "positive",
+          "t",
+          "0",
+          "t",
+          "t",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "partition_duplicate_local",
+      "kind": "error",
+      "sqlstate": "42710"
+    },
+    {
+      "name": "detach_partition",
+      "kind": "ok"
+    },
+    {
+      "name": "detached_partition_origin",
+      "kind": "rows",
+      "rows": [
+        [
+          "attached_partition",
+          "positive",
+          "t",
+          "0",
+          "t",
+          "t",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "partition_rename",
+      "kind": "ok"
+    },
+    {
+      "name": "partition_renamed_origin",
+      "kind": "rows",
+      "rows": [
+        [
+          "born_partition",
+          "renamed",
+          "f",
+          "1",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "partition_parent",
+          "renamed",
+          "t",
+          "0",
+          "t",
+          "t",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "partition_drop",
+      "kind": "ok"
+    },
+    {
+      "name": "partition_dropped",
+      "kind": "rows",
+      "rows": []
+    },
+    {
+      "name": "column_no_inherit_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "no_inherit_child",
+      "kind": "ok"
+    },
+    {
+      "name": "no_inherit_insert",
+      "kind": "ok"
+    },
+    {
+      "name": "no_inherit_absent",
+      "kind": "rows",
+      "rows": [
+        [
+          "local_only",
+          "positive",
+          "t",
+          "0",
+          "t",
+          "t",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "diamond_root",
+      "kind": "ok"
+    },
+    {
+      "name": "diamond_left",
+      "kind": "ok"
+    },
+    {
+      "name": "diamond_right",
+      "kind": "ok"
+    },
+    {
+      "name": "diamond_leaf",
+      "kind": "ok"
+    },
+    {
+      "name": "diamond_rename",
+      "kind": "ok"
+    },
+    {
+      "name": "diamond_rename_origins",
+      "kind": "rows",
+      "rows": [
+        [
+          "branch_left",
+          "renamed",
+          "f",
+          "1",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "branch_right",
+          "renamed",
+          "f",
+          "1",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "leaf",
+          "renamed",
+          "f",
+          "2",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "root",
+          "renamed",
+          "t",
+          "0",
+          "t",
+          "t",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "diamond_drop",
+      "kind": "ok"
+    },
+    {
+      "name": "diamond_dropped",
+      "kind": "rows",
+      "rows": []
+    },
+    {
+      "name": "owner_parent_role",
+      "kind": "ok"
+    },
+    {
+      "name": "owner_child_role",
+      "kind": "ok"
+    },
+    {
+      "name": "owner_schema_usage",
+      "kind": "ok"
+    },
+    {
+      "name": "owned_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "owned_child",
+      "kind": "ok"
+    },
+    {
+      "name": "change_parent_owner",
+      "kind": "ok"
+    },
+    {
+      "name": "change_child_owner",
+      "kind": "ok"
+    },
+    {
+      "name": "rename_other_owner_child",
+      "kind": "error",
+      "sqlstate": "42501"
+    },
+    {
+      "name": "drop_other_owner_child",
+      "kind": "error",
+      "sqlstate": "42501"
+    },
+    {
+      "name": "owner_failures_are_atomic",
+      "kind": "rows",
+      "rows": [
+        [
+          "owned_child",
+          "positive",
+          "f",
+          "1",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "owned_parent",
+          "positive",
+          "t",
+          "0",
+          "t",
+          "t",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "column_add_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "column_add_child",
+      "kind": "ok"
+    },
+    {
+      "name": "column_add_grandchild",
+      "kind": "ok"
+    },
+    {
+      "name": "recursive_column_check",
+      "kind": "ok"
+    },
+    {
+      "name": "column_checks_have_independent_origins",
+      "kind": "rows",
+      "rows": [
+        [
+          "add_child",
+          "child_positive",
+          "t",
+          "0",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "add_child",
+          "parent_positive",
+          "f",
+          "1",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "add_grandchild",
+          "child_positive",
+          "f",
+          "1",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "add_grandchild",
+          "parent_positive",
+          "f",
+          "1",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "add_parent",
+          "parent_positive",
+          "t",
+          "0",
+          "t",
+          "t",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "add_no_inherit_column_check",
+      "kind": "ok"
+    },
+    {
+      "name": "added_no_inherit_check_boundary",
+      "kind": "rows",
+      "rows": [
+        [
+          "add_child",
+          "child_positive",
+          "t",
+          "0",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "add_child",
+          "parent_positive",
+          "f",
+          "1",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "add_grandchild",
+          "child_positive",
+          "f",
+          "1",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "add_grandchild",
+          "parent_positive",
+          "f",
+          "1",
+          "t",
+          "t",
+          "f"
+        ],
+        [
+          "add_parent",
+          "local_positive",
+          "t",
+          "0",
+          "t",
+          "t",
+          "t"
+        ],
+        [
+          "add_parent",
+          "parent_positive",
+          "t",
+          "0",
+          "t",
+          "t",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "no_inherit_child_value",
+      "kind": "ok"
+    },
+    {
+      "name": "equivalent_cast_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "equivalent_cast_child",
+      "kind": "ok"
+    },
+    {
+      "name": "equivalent_literal_child",
+      "kind": "ok"
+    },
+    {
+      "name": "repeated_local_name",
+      "kind": "error",
+      "sqlstate": "42710"
+    },
+    {
+      "name": "partition_local_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "partition_local_definition",
+      "kind": "ok"
+    },
+    {
+      "name": "explicit_partition_origin",
+      "kind": "rows",
+      "rows": [
+        [
+          "explicit_partition",
+          "positive",
+          "f",
+          "1",
+          "t",
+          "t",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "only_partition_constraint_drop",
+      "kind": "ok"
+    },
+    {
+      "name": "only_partition_drop_origin",
+      "kind": "rows",
+      "rows": [
+        [
+          "explicit_partition",
+          "positive",
+          "t",
+          "0",
+          "t",
+          "t",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "attach_invalid_child",
+      "kind": "ok"
+    },
+    {
+      "name": "attach_invalid_check",
+      "kind": "ok"
+    },
+    {
+      "name": "attach_validation_conflict",
+      "kind": "error",
+      "sqlstate": "42P17"
+    },
+    {
+      "name": "mixed_enforcement_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "mixed_enforcement_child",
+      "kind": "ok"
+    },
+    {
+      "name": "mixed_enforcement_merge",
+      "kind": "rows",
+      "rows": [
+        [
+          "mixed_enforcement",
+          "positive",
+          "f",
+          "2",
+          "t",
+          "t",
+          "f"
+        ]
+      ]
+    },
+    {
+      "name": "separate_constraint_identities",
+      "kind": "rows",
+      "rows": [
+        [
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "qualified_add_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "qualified_add_child",
+      "kind": "ok"
+    },
+    {
+      "name": "qualified_recursive_check",
+      "kind": "error",
+      "sqlstate": "42P01"
+    },
+    {
+      "name": "qualified_child_enforcement",
+      "kind": "ok"
+    },
+    {
+      "name": "qualified_child_origin",
+      "kind": "rows",
+      "rows": []
+    },
+    {
+      "name": "owned_parent_inheritance_ancestor",
+      "kind": "ok"
+    },
+    {
+      "name": "inherited_owned_parent",
+      "kind": "ok"
+    },
+    {
+      "name": "rename_child_owner_precedes_root_inheritance",
+      "kind": "error",
+      "sqlstate": "42501"
+    }
+  ]
+}

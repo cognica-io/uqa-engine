@@ -17,6 +17,7 @@ pub(super) fn drop_constraint(
     name: &str,
     if_exists: bool,
     cascade: bool,
+    recurse: bool,
 ) -> Result<(), SQLError> {
     let table = engine
         .try_resolve_table_name(table)
@@ -39,6 +40,9 @@ pub(super) fn drop_constraint(
                 relation.name
             ),
         ));
+    }
+    if super::checks::drop_check(engine, &table, name, recurse, cascade)? {
+        return Ok(());
     }
     drop_constraint_group(engine, &table, name, if_exists, cascade, true)
 }
@@ -170,7 +174,7 @@ fn foreign_key_object_id(
     }
 }
 
-fn drop_constraint_one(
+pub(super) fn drop_constraint_one(
     engine: &Engine,
     table: &str,
     name: &str,
@@ -225,6 +229,8 @@ fn drop_constraint_one(
             columns[index].check_enforced = true;
             columns[index].check_validated = true;
             columns[index].check_no_inherit = false;
+            columns[index].check_is_local = true;
+            columns[index].check_object_id = None;
         }
         ConstraintLocation::ColumnForeignKey(index) => columns[index].references = None,
         ConstraintLocation::TableCheck(index) => {

@@ -187,6 +187,8 @@ impl Engine {
                 {
                     definition.check = None;
                     definition.check_name = None;
+                    definition.check_object_id = None;
+                    definition.check_is_local = true;
                     definition.check_enforced = true;
                     definition.check_validated = true;
                     definition.check_no_inherit = false;

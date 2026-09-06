@@ -354,6 +354,8 @@ impl Engine {
                 if column.check.is_some() && column.check_name.as_deref() == Some(constraint_name) {
                     column.check = None;
                     column.check_name = None;
+                    column.check_object_id = None;
+                    column.check_is_local = true;
                     column.check_enforced = true;
                     column.check_validated = true;
                     column.check_no_inherit = false;
@@ -427,6 +429,8 @@ impl Engine {
             {
                 column.check = None;
                 column.check_name = None;
+                column.check_object_id = None;
+                column.check_is_local = true;
                 column.check_enforced = true;
                 column.check_validated = true;
                 column.check_no_inherit = false;

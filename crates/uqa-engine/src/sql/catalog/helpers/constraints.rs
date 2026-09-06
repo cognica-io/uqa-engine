@@ -235,7 +235,7 @@ pub(in crate::sql::catalog) fn constraint_catalog_rows(
                     schema: schema.clone(),
                     table: table.clone(),
                     requested_name: col.check_name.clone(),
-                    object_id: None,
+                    object_id: col.check_object_id,
                     kind: ConstraintCatalogKind::Check,
                     columns: check_constraint_columns(expr, &columns, &table_name)?,
                     state: ConstraintCatalogState::new(
@@ -331,7 +331,7 @@ pub(in crate::sql::catalog) fn constraint_catalog_rows(
                 schema: schema.clone(),
                 table: table.clone(),
                 requested_name: constraint.name.clone(),
-                object_id: None,
+                object_id: constraint.object_id,
                 kind: ConstraintCatalogKind::Check,
                 columns: check_constraint_columns(&constraint.expr, &columns, &table_name)?,
                 state: ConstraintCatalogState::new(
@@ -407,7 +407,7 @@ pub(in crate::sql::catalog) fn constraint_catalog_rows(
                     schema: schema.clone(),
                     table: table.clone(),
                     requested_name: column.check_name.clone(),
-                    object_id: None,
+                    object_id: column.check_object_id,
                     kind: ConstraintCatalogKind::Check,
                     columns: check_constraint_columns(expression, &columns, &table_name)?,
                     state: ConstraintCatalogState::new(
@@ -428,7 +428,7 @@ pub(in crate::sql::catalog) fn constraint_catalog_rows(
                 schema: schema.clone(),
                 table: table.clone(),
                 requested_name: check.name,
-                object_id: None,
+                object_id: check.object_id,
                 kind: ConstraintCatalogKind::Check,
                 columns: check_constraint_columns(&check.expr, &columns, &table_name)?,
                 state: ConstraintCatalogState::new(

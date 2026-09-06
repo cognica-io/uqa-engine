@@ -317,7 +317,7 @@ impl Engine {
         &self,
         table: &str,
         mut columns: Vec<uqa_sql::ast::ColumnDef>,
-        checks: Vec<uqa_sql::ast::TableCheck>,
+        mut checks: Vec<uqa_sql::ast::TableCheck>,
         mut foreign_keys: Vec<uqa_sql::ast::ForeignKey>,
         key_constraints: Vec<uqa_sql::ast::TableKeyConstraint>,
         hierarchy: uqa_sql::ast::TableHierarchy,
@@ -330,6 +330,12 @@ impl Engine {
             .ok_or_else(|| table_not_found(&table_name))?;
         let previous_hierarchy = state.hierarchy.read().clone();
         self.update_not_null_origins_for_hierarchy(&previous_hierarchy, &hierarchy, &mut columns)?;
+        self.update_check_origins_for_hierarchy(
+            &previous_hierarchy,
+            &hierarchy,
+            &mut columns,
+            &mut checks,
+        )?;
         for foreign_key in &mut foreign_keys {
             foreign_key.ref_table = self.canonical_foreign_key_target(&foreign_key.ref_table)?;
         }
@@ -399,6 +405,64 @@ impl Engine {
             }
         }
         Ok(())
+    }
+
+    fn update_check_origins_for_hierarchy(
+        &self,
+        previous: &uqa_sql::ast::TableHierarchy,
+        next: &uqa_sql::ast::TableHierarchy,
+        columns: &mut [uqa_sql::ast::ColumnDef],
+        checks: &mut [uqa_sql::ast::TableCheck],
+    ) -> StorageBackendResult<()> {
+        let removed_parent = previous
+            .parents
+            .iter()
+            .any(|parent| !next.parents.contains(parent));
+        let attached_partition = !previous.is_partition() && next.is_partition();
+        if !removed_parent && !attached_partition {
+            return Ok(());
+        }
+        let mut inherited = std::collections::BTreeSet::new();
+        for parent in &next.parents {
+            for check in self.try_check_constraint_definitions(parent)? {
+                if !check.no_inherit {
+                    inherited.extend(check.name);
+                }
+            }
+        }
+        let update = |name: Option<&String>, local: &mut bool| {
+            let supplied = name.is_some_and(|name| inherited.contains(name));
+            if attached_partition && supplied {
+                *local = false;
+            } else if removed_parent && !supplied {
+                *local = true;
+            }
+        };
+        for column in columns.iter_mut().filter(|column| column.check.is_some()) {
+            update(column.check_name.as_ref(), &mut column.check_is_local);
+        }
+        for check in checks {
+            update(check.name.as_ref(), &mut check.is_local);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn try_check_constraint_parent_count(
+        &self,
+        table: &str,
+        name: &str,
+    ) -> StorageBackendResult<usize> {
+        let mut count = 0;
+        for parent in self.try_table_hierarchy(table)?.parents {
+            if self
+                .try_check_constraint_definitions(&parent)?
+                .iter()
+                .any(|check| !check.no_inherit && check.name.as_deref() == Some(name))
+            {
+                count += 1;
+            }
+        }
+        Ok(count)
     }
 
     /// Append one validated PRIMARY KEY or UNIQUE tuple without replacing the
@@ -503,6 +567,8 @@ impl Engine {
                     enforced: col.check_enforced,
                     validated: col.check_validated,
                     no_inherit: col.check_no_inherit,
+                    object_id: col.check_object_id,
+                    is_local: col.check_is_local,
                     partition_constraint: None,
                 });
             }

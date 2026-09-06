@@ -238,6 +238,9 @@ pub(super) fn add_check_constraint(
     mut constraint: uqa_sql::ast::TableCheck,
 ) -> Result<(), SQLError> {
     let should_validate = constraint.validated;
+    if super::checks::merge_added_check(engine, table, constraint.clone())? {
+        return Ok(());
+    }
     constraint.validated = false;
     let (mut columns, mut constraints) = table_constraint_state(engine, table)?;
     super::super::constraint_validation::validate_check_expression(
@@ -521,7 +524,11 @@ pub(super) fn validate_and_mark_constraint(
     publish_constraint_state(engine, table, columns, constraints)
 }
 
-fn validate_not_null_rows(engine: &Engine, table: &str, column: &str) -> Result<(), SQLError> {
+pub(super) fn validate_not_null_rows(
+    engine: &Engine,
+    table: &str,
+    column: &str,
+) -> Result<(), SQLError> {
     let relation = crate::RelationIdentity::from_legacy_name(table)
         .map_err(|error| SQLError::Internal(format!("resolve NOT NULL relation: {error}")))?;
     for doc_id in engine.live_table_doc_ids(table)? {
