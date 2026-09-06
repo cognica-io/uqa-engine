@@ -11,6 +11,7 @@ import argparse
 import importlib.util
 import io
 from pathlib import Path
+import re
 import tarfile
 import tempfile
 import unittest
@@ -87,6 +88,16 @@ class UpstreamInventoryTest(unittest.TestCase):
         self.assertIsNone(batches[1]["schedule"])
         self.assertEqual(batches[0]["tests"][:-1], [name for group in self.inventory["suites"]["core"]["groups"] for name in group])
         self.assertEqual(batches[2]["extras"], ["prepared-transactions", "prepared-transactions-cic"])
+
+    def test_ci_allows_driver_timeouts_to_finish_and_preserves_artifact_time(self) -> None:
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+        job = workflow.split("  upstream-regression-oracle:\n", 1)[1].split("  gate:\n", 1)[0]
+        job_minutes = int(re.search(r"^    timeout-minutes: (\d+)$", job, re.M).group(1))
+        build_minutes, run_minutes, upload_minutes = map(int, re.findall(r"^        timeout-minutes: (\d+)$", job, re.M))
+        driver_seconds = int(re.search(r"harness\.py run[^\n]*--timeout (\d+)", job).group(1))
+        driver_budget = driver_seconds * len(HARNESS.batches(self.inventory, "all"))
+        self.assertLess(driver_budget, run_minutes * 60)
+        self.assertLess(build_minutes + run_minutes + upload_minutes, job_minutes)
 
 
 class UpstreamScheduleTest(unittest.TestCase):

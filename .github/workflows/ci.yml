@@ -184,10 +184,13 @@ jobs:
       - name: Test upstream corpus accounting and failure detection
         run: python3 -m unittest discover -s scripts/tests -p 'test_pg18_upstream_harness.py'
       - name: Build pinned PostgreSQL regression environment
+        timeout-minutes: 10
         run: python3 tests/parity/pg18/upstream/harness.py build
       - name: Run every official core and isolation test
-        run: python3 tests/parity/pg18/upstream/harness.py run --output target/pg18-upstream/reference
+        timeout-minutes: 17
+        run: python3 tests/parity/pg18/upstream/harness.py run --output target/pg18-upstream/reference --timeout 300
       - uses: actions/upload-artifact@v4
+        timeout-minutes: 2
         if: always()
         with:
           name: pg18-upstream-reference-${{ github.sha }}
