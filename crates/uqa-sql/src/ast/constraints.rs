@@ -79,6 +79,12 @@ pub struct ColumnDef {
     pub check_validated: bool,
     #[serde(default)]
     pub check_no_inherit: bool,
+    /// Whether this relation declares its column CHECK locally, independently from inherited copies. Missing legacy origin retains the historical local projection.
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub check_is_local: bool,
+    /// Durable identity of the column CHECK, preserved across constraint and relation renames.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check_object_id: Option<[u8; 16]>,
     /// Column-level `REFERENCES parent[(col)]` foreign key. An omitted column is resolved to the referenced primary key before publication.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub references: Option<ForeignKeyRef>,
@@ -207,8 +213,18 @@ pub struct TableConstraintSet {
 /// `CHECK (expr)` constraint with an optional name (`CONSTRAINT <name>
 /// CHECK (...)`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "CHECK catalog flags are independent PostgreSQL properties"
+)]
 pub struct TableCheck {
     pub name: Option<String>,
+    /// Durable identity of this CHECK, assigned when its definition is published.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub object_id: Option<[u8; 16]>,
+    /// Whether this relation declares this CHECK locally, independently from inherited copies. Missing legacy origin retains the historical local projection.
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub is_local: bool,
     pub expr: Expr,
     #[serde(default = "default_true")]
     pub enforced: bool,

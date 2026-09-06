@@ -115,6 +115,10 @@ pub(crate) fn validate_check_expression(
         Some(_) => Ok(()),
     }?;
     bind_stored_check_expression_routines(engine, table, qualifier, columns, expression)?;
+    crate::sql::generated::bind_schema_column_references(expression, qualifier);
+    crate::sql::generated::bind_schema_column_references(expression, table);
+    let relation = crate::RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
+    crate::sql::generated::bind_schema_column_references(expression, &relation.name);
     Ok(())
 }
 

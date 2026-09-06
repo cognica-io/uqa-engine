@@ -431,6 +431,10 @@ fn validate_row_type(
 }
 
 fn validate_inherited_checks(engine: &Engine, parent: &str, child: &str) -> Result<(), SQLError> {
+    let child_columns = engine
+        .try_describe_table(child)
+        .map_err(|error| ddl_storage_error("read child CHECK columns", error))?
+        .ok_or_else(|| SQLError::UnknownTable(child.to_string()))?;
     let parent_checks = engine
         .try_check_constraint_definitions(parent)
         .map_err(|error| ddl_storage_error("read parent CHECK constraints", error))?;
@@ -455,22 +459,11 @@ fn validate_inherited_checks(engine: &Engine, parent: &str, child: &str) -> Resu
                 format!("child table is missing constraint \"{name}\""),
             ));
         };
-        if child_check.no_inherit {
-            return Err(routine(
-                "42P17",
-                format!(
-                    "constraint \"{name}\" conflicts with non-inherited constraint on child table \"{}\"",
-                    local_relation_name(child)
-                ),
-            ));
-        }
-        if child_check.enforced != parent_check.enforced
-            || serde_json::to_value(&child_check.expr)
-                .map_err(|error| SQLError::Internal(format!("serialize child CHECK: {error}")))?
-                != serde_json::to_value(&parent_check.expr).map_err(|error| {
-                    SQLError::Internal(format!("serialize parent CHECK: {error}"))
-                })?
-        {
+        if !super::check_inheritance::same_check_expression(
+            &child_check.expr,
+            &parent_check.expr,
+            &child_columns,
+        )? {
             return Err(routine(
                 "42804",
                 format!(
@@ -478,6 +471,18 @@ fn validate_inherited_checks(engine: &Engine, parent: &str, child: &str) -> Resu
                     local_relation_name(child)
                 ),
             ));
+        }
+        let conflict = if child_check.no_inherit {
+            Some("non-inherited")
+        } else if parent_check.validated && child_check.enforced && !child_check.validated {
+            Some("NOT VALID")
+        } else if parent_check.enforced && !child_check.enforced {
+            Some("NOT ENFORCED")
+        } else {
+            None
+        };
+        if let Some(conflict) = conflict {
+            return Err(routine("42P17", format!("constraint \"{name}\" conflicts with {conflict} constraint on child table \"{}\"", local_relation_name(child))));
         }
     }
     Ok(())
@@ -703,6 +708,8 @@ fn detached_bound_check(
         enforced: true,
         validated: true,
         no_inherit: false,
+        object_id: None,
+        is_local: true,
         partition_constraint: Some(DetachedPartitionConstraint {
             spec: spec.clone(),
             bound: bound.clone(),

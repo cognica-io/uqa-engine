@@ -30,6 +30,8 @@ fn integer_column(name: &str, default: Option<Expr>) -> ColumnDef {
         check_enforced: true,
         check_validated: true,
         check_no_inherit: false,
+        check_is_local: true,
+        check_object_id: None,
         references: None,
     }
 }

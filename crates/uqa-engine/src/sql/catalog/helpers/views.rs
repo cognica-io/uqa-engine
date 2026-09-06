@@ -54,6 +54,8 @@ pub(in crate::sql::catalog) fn view_columns_for(
             check_enforced: true,
             check_validated: true,
             check_no_inherit: false,
+            check_is_local: true,
+            check_object_id: None,
             references: None,
         })
         .collect())

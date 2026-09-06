@@ -63,7 +63,7 @@ pub(crate) fn prepare_generated_columns(
             .generated
             .as_mut()
             .ok_or_else(|| SQLError::Internal("generated column disappeared".into()))?;
-        bind_generation_column_references(&mut prepared.expression, qualifier);
+        bind_schema_column_references(&mut prepared.expression, qualifier);
         let (expression_type, function_dependencies) =
             typing::infer_generation_expression(engine, &snapshot, &mut prepared.expression)?;
         crate::sql::reject_stored_regrole_constants(
@@ -256,7 +256,7 @@ fn validate_generation_expression(
     }
 }
 
-fn bind_generation_column_references(expression: &mut Expr, qualifier: &str) {
+pub(crate) fn bind_schema_column_references(expression: &mut Expr, qualifier: &str) {
     if let Expr::QualifiedColumn {
         qualifier: expression_qualifier,
         column,
@@ -275,39 +275,39 @@ fn bind_generation_column_references(expression: &mut Expr, qualifier: &str) {
             ..
         } => {
             for argument in args {
-                bind_generation_column_references(argument, qualifier);
+                bind_schema_column_references(argument, qualifier);
             }
             for order in order_by {
-                bind_generation_column_references(&mut order.expr, qualifier);
+                bind_schema_column_references(&mut order.expr, qualifier);
             }
             if let Some(filter) = filter {
-                bind_generation_column_references(filter, qualifier);
+                bind_schema_column_references(filter, qualifier);
             }
         }
         Expr::Array(items) | Expr::Row(items) | Expr::And(items) | Expr::Or(items) => {
             for item in items {
-                bind_generation_column_references(item, qualifier);
+                bind_schema_column_references(item, qualifier);
             }
         }
         Expr::Binary { lhs, rhs, .. } => {
-            bind_generation_column_references(lhs, qualifier);
-            bind_generation_column_references(rhs, qualifier);
+            bind_schema_column_references(lhs, qualifier);
+            bind_schema_column_references(rhs, qualifier);
         }
         Expr::Not(inner)
         | Expr::UnaryMinus(inner)
         | Expr::IsNull { expr: inner, .. }
         | Expr::Cast { expr: inner, .. } => {
-            bind_generation_column_references(inner, qualifier);
+            bind_schema_column_references(inner, qualifier);
         }
         Expr::Between { expr, low, high } => {
-            bind_generation_column_references(expr, qualifier);
-            bind_generation_column_references(low, qualifier);
-            bind_generation_column_references(high, qualifier);
+            bind_schema_column_references(expr, qualifier);
+            bind_schema_column_references(low, qualifier);
+            bind_schema_column_references(high, qualifier);
         }
         Expr::InList { expr, list, .. } => {
-            bind_generation_column_references(expr, qualifier);
+            bind_schema_column_references(expr, qualifier);
             for item in list {
-                bind_generation_column_references(item, qualifier);
+                bind_schema_column_references(item, qualifier);
             }
         }
         Expr::Case {
@@ -316,14 +316,14 @@ fn bind_generation_column_references(expression: &mut Expr, qualifier: &str) {
             else_branch,
         } => {
             if let Some(base) = base {
-                bind_generation_column_references(base, qualifier);
+                bind_schema_column_references(base, qualifier);
             }
             for (condition, result) in when {
-                bind_generation_column_references(condition, qualifier);
-                bind_generation_column_references(result, qualifier);
+                bind_schema_column_references(condition, qualifier);
+                bind_schema_column_references(result, qualifier);
             }
             if let Some(else_branch) = else_branch {
-                bind_generation_column_references(else_branch, qualifier);
+                bind_schema_column_references(else_branch, qualifier);
             }
         }
         Expr::Star

@@ -19,6 +19,7 @@ use super::constraint_validation::{
 use super::defaults::validate_default_expression;
 use super::hierarchy_alter::run_alter_hierarchy_action;
 
+mod checks;
 mod constraint_drop;
 mod constraint_lifecycle;
 mod foreign_key;
@@ -257,7 +258,32 @@ fn run_alter_table_inner(engine: &Engine, stmt: AlterTableStmt) -> Result<SQLRes
     } = stmt;
     engine.ensure_table_owner(&table)?;
     for mut action in actions {
+        if let AlterTableAction::AddColumn {
+            column,
+            if_not_exists: true,
+        } = &action
+        {
+            if engine
+                .try_table_has_column(&table, &column.name)
+                .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN", error))?
+            {
+                engine.push_sql_notice(
+                    "NOTICE",
+                    &format!(
+                        "column \"{}\" of relation \"{qualifier}\" already exists, skipping",
+                        column.name
+                    ),
+                );
+                continue;
+            }
+        }
         materialize_recursive_action_names(engine, &table, recurse, &mut action)?;
+        // Column merging can stop at an existing child column. Its CHECK still has an independent inheritance lifecycle and must reach every supplying edge.
+        let column_check = if let AlterTableAction::AddColumn { column, .. } = &mut action {
+            checks::take_column_check(column)
+        } else {
+            None
+        };
         run_recursive_alter_action(
             engine,
             AlterTableStmt {
@@ -269,6 +295,21 @@ fn run_alter_table_inner(engine: &Engine, stmt: AlterTableStmt) -> Result<SQLRes
             },
             action,
         )?;
+        if let Some(constraint) = column_check {
+            let mut action = AlterTableAction::AddCheckConstraint { constraint };
+            materialize_recursive_action_names(engine, &table, recurse, &mut action)?;
+            run_recursive_alter_action(
+                engine,
+                AlterTableStmt {
+                    table: table.clone(),
+                    qualifier: qualifier.clone(),
+                    if_exists,
+                    recurse,
+                    actions: Vec::new(),
+                },
+                action,
+            )?;
+        }
     }
     Ok(SQLResult::empty())
 }
@@ -529,7 +570,9 @@ fn run_alter_table_action(
             )?;
         }
         AlterTableAction::ValidateConstraint { name } => {
-            validate_and_mark_constraint(engine, &stmt.table, &name)?;
+            if !checks::validate_check(engine, &stmt.table, &name, stmt.recurse)? {
+                validate_and_mark_constraint(engine, &stmt.table, &name)?;
+            }
         }
         AlterTableAction::AlterConstraint {
             name,
@@ -551,7 +594,7 @@ fn run_alter_table_action(
             if_exists,
             cascade,
         } => {
-            drop_constraint(engine, &stmt.table, &name, if_exists, cascade)?;
+            drop_constraint(engine, &stmt.table, &name, if_exists, cascade, stmt.recurse)?;
         }
         AlterTableAction::DropColumn {
             name,
@@ -614,7 +657,9 @@ fn run_alter_table_action(
             engine.rename_trigger(&stmt.table, &from, &to)?;
         }
         AlterTableAction::RenameConstraint { from, to } => {
-            engine.rename_trigger_constraint(&stmt.table, &from, &to)?;
+            if !checks::rename_check(engine, &stmt.table, &from, &to, stmt.recurse)? {
+                engine.rename_trigger_constraint(&stmt.table, &from, &to)?;
+            }
         }
         AlterTableAction::RenameRule { from, to } => {
             engine.rename_rule(&stmt.table, &from, &to)?;
@@ -771,7 +816,14 @@ fn run_alter_table_action(
                 .find(|column| column.name == name)
                 .ok_or_else(|| SQLError::UnknownColumn(format!("{}.{name}", stmt.table)))?;
             if let Some(constraint_name) = column.not_null_name.as_deref() {
-                drop_constraint(engine, &stmt.table, constraint_name, false, false)?;
+                drop_constraint(
+                    engine,
+                    &stmt.table,
+                    constraint_name,
+                    false,
+                    false,
+                    stmt.recurse,
+                )?;
             }
         }
         AlterTableAction::AlterColumnType { name, ty, using } => {

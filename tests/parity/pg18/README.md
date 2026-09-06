@@ -30,6 +30,14 @@ Manifest schema version 2 records the pinned parser chain, oracle provenance, mi
 
 The differential summary line reports `total/match/diff`, and any difference makes the runner exit nonzero. Error rows match only when their SQLSTATE codes match; message text is not compared. The runner discovers every probe directly from `probes.sql`. Update it freely: one probe per line, `--` comments skipped; probes must be side-effect-free single statements. Set `UQA_PG_CONTAINER`, `UQA_PG_DATABASE`, or `UQA_USQL` to override the defaults while keeping both systems under test in equivalent contexts.
 
+## CHECK inheritance oracle
+
+`check_inheritance_stateful.sql` and its checked-in PostgreSQL 18.4 expected transcript verify named column and table CHECK merges, local and inherited origins, direct-parent counts, directional enforcement and validation, recursive additions and column merges, ordinary and partition hierarchy changes, DROP and RENAME boundaries, owner failures, atomic rollback, and stable constraint identities. The stateful runner reopens the engine database for each case; focused engine tests also verify savepoints and in-session rollback.
+
+```sh
+env UQA_USQL=target/debug/usql python3 tests/parity/pg18/run_routines_stateful.py --suite check-inheritance
+```
+
 ## Recursive ALTER ownership oracle
 
 `recursive_alter_ownership_oracle.sql` records PostgreSQL 18.4 ownership checks for recursive column, CHECK, and NOT NULL changes. Its 41 transcript records cover existing child definitions, ownership before conflicting definitions, table grants versus inherited ownership, role revocation, partition ownership, changed and unchanged grandchild paths, multiple inheritance, unchanged root definitions, statement rollback, and savepoint failure recovery. The matching engine integration tests additionally verify unchanged catalog state, retained rows, inherited-column counts, and durable role and schema state across reopen.

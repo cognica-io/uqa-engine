@@ -66,7 +66,11 @@ pub(in crate::compiler) fn compile_create_table(
                             "unexpected column constraint node {inner:?}"
                         )));
                     };
-                    register_constraint_name(&mut named_constraints, &cstr.conname)?;
+                    register_constraint_name(
+                        &mut named_constraints,
+                        &cstr.conname,
+                        &relation.relname,
+                    )?;
                     let kind = match cstr.contype() {
                         pg_query::protobuf::ConstrType::ConstrPrimary => {
                             if primary_key_seen {
@@ -95,7 +99,7 @@ pub(in crate::compiler) fn compile_create_table(
                 columns.push(compile_column_def(col)?);
             }
             NodeEnum::Constraint(cstr) => {
-                register_constraint_name(&mut named_constraints, &cstr.conname)?;
+                register_constraint_name(&mut named_constraints, &cstr.conname, &relation.relname)?;
                 match cstr.contype() {
                     pg_query::protobuf::ConstrType::ConstrCheck => {
                         let raw = cstr
@@ -114,6 +118,8 @@ pub(in crate::compiler) fn compile_create_table(
                             enforced: cstr.is_enforced,
                             validated: cstr.initially_valid && cstr.is_enforced,
                             no_inherit: cstr.is_no_inherit,
+                            object_id: None,
+                            is_local: true,
                             partition_constraint: None,
                         });
                     }
@@ -374,11 +380,13 @@ pub(in crate::compiler) fn constraint_name(name: &str) -> Option<String> {
 pub(in crate::compiler) fn register_constraint_name(
     names: &mut std::collections::BTreeSet<String>,
     name: &str,
+    relation: &str,
 ) -> Result<()> {
     if !name.is_empty() && !names.insert(name.to_string()) {
-        return Err(SQLError::TypeMismatch(format!(
-            "constraint `{name}` is declared more than once"
-        )));
+        return Err(SQLError::Routine {
+            sqlstate: "42710".into(),
+            message: format!("constraint \"{name}\" for relation \"{relation}\" already exists"),
+        });
     }
     Ok(())
 }
@@ -604,6 +612,8 @@ pub(in crate::compiler) fn compile_column_def(
         check_enforced,
         check_validated,
         check_no_inherit,
+        check_is_local: true,
+        check_object_id: None,
         references,
     })
 }

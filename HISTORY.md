@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- Merged equivalent inherited and local CHECK constraints, retained their independent local origin and direct-parent counts, and excluded NO INHERIT checks from descendants. Recursive additions, validation, removal, and renaming now follow PostgreSQL inheritance boundaries, preserve constraint identity, and roll back atomically; adding a column propagates its CHECK independently from existing child-column merges.
+
+### Changed
+
+- Added `ColumnDef.check_is_local`, `ColumnDef.check_object_id`, `TableCheck.is_local`, and `TableCheck.object_id` to the Rust SQL AST. Initial catalog open assigns missing CHECK identities; legacy definitions retain their previous local-origin projection because their declaration history was not stored.
+
 ## [0.2.2] - 2026-09-06
 
 See the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/docs/manual/reference/10-upgrading.md) for package updates and SQL ownership and constraint behavior.

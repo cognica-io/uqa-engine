@@ -66,6 +66,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `ddl.recursive-alter-ownership` | `M3` | `verified` |
 | `ddl.not-null-only-inheritance` | `M3` | `verified` |
 | `ddl.not-null-constraint-origin` | `M3` | `verified` |
+| `ddl.check-constraint-inheritance` | `M3` | `verified` |
 | `ddl.ctas-column-names` | `M1` | `verified` |
 | `ddl.ctas-with-no-data` | `M1` | `verified` |
 | `ddl.select-into` | `M1` | `verified` |
@@ -178,6 +179,8 @@ The following compact ledger is the readable projection of the machine-readable 
 The verified view-trigger `MERGE` slice includes direct and nested automatic-to-trigger targets, action-path consistency, all mutation actions and `DO NOTHING`, statement-trigger ordering, trigger-returned row images and suppression, repeated candidates, replication-mode suppression, user-rule rejection, final check options, hidden target rows, failure atomicity, and statement-start snapshots.
 
 Recursive ALTER ownership is verified under `ddl.recursive-alter-ownership`: ownership is checked before existing child column and constraint merges, recursion stops below an unchanged merged definition, and every changing inheritance edge remains protected. Eight focused tests and a 41-record PostgreSQL 18.4 oracle cover inherited authority, revocation, ordinary and partition children, multiple inheritance, atomic failure, savepoints, and durable reopen.
+
+The `ddl.check-constraint-inheritance` boundary is verified by twelve focused tests and 148 stateful PostgreSQL 18.4 + AGE comparisons. Named column and table CHECKs merge equivalent bound definitions, retain independent local origin and direct-parent counts, obey directional enforcement and validation rules, propagate independently from merged ADD COLUMN definitions, and preserve identity through recursive rename, drop, validation, ordinary inheritance and partition edge changes. Descendant owner failures precede root inheritance errors during rename; direct inherited mutations and omitted validation recursion retain their PostgreSQL SQLSTATEs. Statement and savepoint rollback and database reopen preserve the resulting state. Missing legacy CHECK identities are assigned during initial catalog open, while absent declaration history retains its historical local projection.
 
 The `ddl.not-null-constraint-origin` boundary is verified by six focused tests and a 29-record PostgreSQL 18.4 oracle: local NOT NULL declarations are independent of nullable local column redeclarations and inherited parent counts; constraint names survive recursive changes; parent removal and partition lifecycle update durable origin atomically; and explicit localization precedes later validation of inherited NOT VALID constraints. Older serialized definitions preserve their historical local projection because the original declaration history was not stored.
 

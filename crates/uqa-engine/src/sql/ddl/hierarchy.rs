@@ -85,6 +85,14 @@ pub(super) fn prepare_create_table_hierarchy(
                 column.not_null_validated = true;
             }
             column.not_null_is_local = !column.not_null;
+            // CHECKs inherit as named constraints independently of the merged column's origin.
+            column.check = None;
+            column.check_name = None;
+            column.check_object_id = None;
+            column.check_is_local = true;
+            column.check_enforced = true;
+            column.check_validated = true;
+            column.check_no_inherit = false;
         }
         if !is_partition {
             // PostgreSQL inherits the NOT NULL property of an identity column, but not its identity generation attribute or owned sequence. SERIAL is different: its nextval default is ordinary inherited metadata and therefore keeps pointing at the parent's sequence.
@@ -102,12 +110,18 @@ pub(super) fn prepare_create_table_hierarchy(
         let constraints = engine
             .try_declared_table_constraints(&parent)
             .map_err(|error| SQLError::Internal(format!("read inherited constraints: {error}")))?;
-        inherited_checks.extend(
-            constraints
-                .checks
-                .into_iter()
-                .filter(|constraint| !constraint.no_inherit),
-        );
+        for mut check in engine
+            .try_check_constraint_definitions(&parent)
+            .map_err(|error| SQLError::Internal(format!("read inherited CHECKs: {error}")))?
+            .into_iter()
+            .filter(|check| !check.no_inherit)
+        {
+            super::check_inheritance::bind_parent_check_columns(&parent, &mut check.expr)?;
+            check.is_local = false;
+            check.object_id = None;
+            check.validated = check.enforced;
+            inherited_checks.push(check);
+        }
         if is_partition {
             inherited_foreign_keys.extend(constraints.foreign_keys);
             inherited_keys.extend(constraints.key_constraints.into_iter().map(|mut key| {
@@ -243,6 +257,10 @@ pub(super) fn merge_same_column(
         inherited.check = declared.check;
         inherited.check_name = declared.check_name;
         inherited.check_enforced = declared.check_enforced;
+        inherited.check_validated = declared.check_validated;
+        inherited.check_no_inherit = declared.check_no_inherit;
+        inherited.check_is_local = declared.check_is_local;
+        inherited.check_object_id = declared.check_object_id;
     }
     if declared.references.is_some() {
         inherited.references = declared.references;

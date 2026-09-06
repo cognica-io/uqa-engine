@@ -135,7 +135,8 @@
       "ddl.temporal-constraints",
       "routines.alter-volatility-null-input-lifecycle",
       "routines.function-procedure-drop-cascade",
-      "routines.function-procedure-drop-cascade-extended"
+      "routines.function-procedure-drop-cascade-extended",
+      "ddl.check-constraint-inheritance"
     ],
     "M4": [
       "dml.returning-row-images-extended",
@@ -356,6 +357,14 @@
       "postgresql_reference": "PostgreSQL 18.4 pg_constraint.conislocal and NOT NULL creation, merge, inheritance and partition lifecycle",
       "uqa_test": "cargo test -p uqa-engine --test integration engine_catalog::sql_relation_hierarchy::not_null_origin::; tests/parity/pg18/not_null_origin_oracle.sql and not_null_origin_oracle.expected.txt (29 PostgreSQL 18.4 records)",
       "supported_version": "PostgreSQL 18.4 NOT NULL local origin independently from parent counts and local column declarations; local and inherited constraint names; recursive SET, constraint ADD and column ADD; explicit localization before later validation; multiple inheritance, last-parent removal, partition attachment and detachment, NO INHERIT exclusion, atomic rollback and durable reopen; legacy serialized columns retain their historical local projection",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "ddl.check-constraint-inheritance",
+      "postgresql_reference": "PostgreSQL 18.4 CHECK inheritance and ALTER constraint lifecycle; tests/parity/pg18/check_inheritance_stateful.expected.json records 148 PostgreSQL 18.4 + AGE cases",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_catalog::sql_relation_hierarchy::checks; env UQA_USQL=target/debug/usql python3 tests/parity/pg18/run_routines_stateful.py --suite check-inheritance",
+      "supported_version": "PostgreSQL 18.4 named CHECK inheritance origin, definition merging, recursive addition, validation, drop and rename, ordinary and partition edge lifecycle, SQLSTATEs, atomicity and stable identity",
       "status": "verified",
       "open_issue": null
     },

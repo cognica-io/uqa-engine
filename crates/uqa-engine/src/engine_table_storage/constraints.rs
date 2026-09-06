@@ -77,6 +77,7 @@ pub(crate) fn materialize_constraint_metadata(
                 format!("{}_{}_check", relation.name, column.name),
                 &mut used,
             )?;
+            changed |= assign_catalog_object_id(&mut column.check_object_id, "CHECK constraint")?;
         }
         if let Some(reference) = &mut column.references {
             changed |= assign_constraint_name(
@@ -109,6 +110,7 @@ pub(crate) fn materialize_constraint_metadata(
             format!("{}_check", relation.name)
         };
         changed |= assign_constraint_name(&mut constraint.name, base, &mut used)?;
+        changed |= assign_catalog_object_id(&mut constraint.object_id, "CHECK constraint")?;
     }
     changed |= synchronize_partition_inherited_foreign_key_ids(constraints);
     for constraint in &mut constraints.foreign_keys {

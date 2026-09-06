@@ -6,10 +6,7 @@
 
 //! `PostgreSQL` inheritance recursion for `ALTER TABLE` actions.
 
-use super::{
-    run_alter_table_action, validate_all_table_rows, AlterTableAction, AlterTableStmt, Engine,
-    SQLError,
-};
+use super::{run_alter_table_action, AlterTableAction, AlterTableStmt, Engine, SQLError};
 use crate::sql::ddl::ddl_storage_error;
 use std::collections::BTreeSet;
 
@@ -39,6 +36,18 @@ fn run_alter_action_branch(
     if recursing {
         if let AlterTableAction::AddColumn { column, .. } = &mut action {
             column.not_null_is_local = !column.not_null;
+            column.check_is_local = column.check.is_none();
+            column.check_object_id = None;
+            if column.check_no_inherit {
+                column.check = None;
+                column.check_name = None;
+                column.check_is_local = true;
+                column.check_no_inherit = false;
+            }
+        }
+        if let AlterTableAction::AddCheckConstraint { constraint } = &mut action {
+            constraint.is_local = false;
+            constraint.object_id = None;
         }
     }
     if recursing && merge_existing_recursive_action(engine, &table, &action)? {
@@ -111,6 +120,11 @@ fn recursive_alter_children(
         AlterTableAction::AddColumn { column, .. } => engine
             .try_table_has_column(table, &column.name)
             .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN", error))?,
+        AlterTableAction::AddCheckConstraint { constraint } => engine
+            .try_check_constraint_definitions(table)
+            .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?
+            .iter()
+            .any(|check| check.name.is_some() && check.name == constraint.name),
         AlterTableAction::AddNotNullConstraint { column, .. }
         | AlterTableAction::SetNotNull { name: column } => engine
             .try_describe_table(table)
@@ -245,6 +259,7 @@ pub(super) fn merge_existing_recursive_action(
                 return Ok(false);
             };
             let local = columns[index].clone();
+            let needs_not_null_validation = column.not_null && !local.not_null;
             let existing_not_null = local.not_null.then(|| {
                 (
                     local.not_null_name.clone(),
@@ -273,26 +288,13 @@ pub(super) fn merge_existing_recursive_action(
                     constraints.hierarchy,
                 )
                 .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN", error))?;
-            validate_all_table_rows(engine)?;
+            if needs_not_null_validation {
+                super::constraint_lifecycle::validate_not_null_rows(engine, table, &column.name)?;
+            }
             Ok(true)
         }
         AlterTableAction::AddCheckConstraint { constraint } => {
-            let checks = engine
-                .try_check_constraint_definitions(table)
-                .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
-            let Some(existing) = checks
-                .iter()
-                .find(|existing| existing.name == constraint.name)
-            else {
-                return Ok(false);
-            };
-            let same_expression = serde_json::to_value(&existing.expr)
-                .map_err(|error| SQLError::Internal(format!("serialize CHECK: {error}")))?
-                == serde_json::to_value(&constraint.expr)
-                    .map_err(|error| SQLError::Internal(format!("serialize CHECK: {error}")))?;
-            Ok(same_expression
-                && existing.enforced == constraint.enforced
-                && existing.no_inherit == constraint.no_inherit)
+            super::checks::merge_added_check(engine, table, constraint.clone())
         }
         AlterTableAction::AddNotNullConstraint { column, .. }
         | AlterTableAction::SetNotNull { name: column } => {

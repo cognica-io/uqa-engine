@@ -134,6 +134,7 @@ fn create_table_after_preflight(
         )?;
         crate::sql::reject_stored_regrole_constants(engine, &check.expr, None)?;
     }
+    super::check_inheritance::merge_create_checks(&mut c)?;
     for foreign_key in &mut c.foreign_keys {
         if !foreign_key.period {
             continue;
