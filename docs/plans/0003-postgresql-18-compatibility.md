@@ -123,7 +123,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `ddl.rewrite-rules` | `M4` | `partial` |
 | `graph.age-default-label-drop` | `M4` | `verified` |
 | `graph.age-cypher-complete-matrix` | `M4` | `partial` |
-| `regression.core-and-isolation` | `M4` | `not_audited` |
+| `regression.core-and-isolation` | `M4` | `partial` |
 | `clients.driver-and-operations-matrix` | `M5` | `partial` |
 | `compatibility.complete-zero-exemption-audit` | `M6` | `not_audited` |
 
@@ -294,6 +294,8 @@ The extended protocol slice now resolves Bind and FunctionCall format vectors th
 ### 7. Complete SQL, catalog, and transaction compatibility
 
 Drive remaining work from the PostgreSQL 18 official regression schedules rather than an ad hoc feature list. Import queries and expected behavior in license-compatible differential harnesses, categorize failures by parser, binder, type system, planner, executor, catalog, transaction, protocol, or administration, and maintain a burn-down manifest with owners and evidence.
+
+The official PostgreSQL 18.4 regression corpus is now pinned by release-archive SHA-256 and source commit, with an exact inventory of 791 original files and ownership accounting for all 354 core and isolation tests. The runner preserves the original parallel schedules, psql commands, concurrent session specifications, expected-output variants, and support data; it runs the four extra tests as well, with a fresh cluster for catalog reindexing and prepared transactions enabled for their isolation specs. The full PostgreSQL reference is a required pre-merge job and retains the original driver logs, results, diffs, server logs, and provenance. Its success verifies the harness environment only. The complete UQA SQL server, actual UQA execution of the corpus, failure classification, and fixes remain required; all upstream UQA cases retain `not_audited` status, and `regression.core-and-isolation` remains partial.
 
 Close the existing embedded-runtime gaps: PostgreSQL integer widths and overflow, numeric precision and formatting, collations, domains, enums, user composites and user-defined ranges, unlogged crash recovery, advanced materialized-view behavior, inheritance and partitioning, complete row-lock and isolation regression coverage, the remaining advanced trigger and rewrite-rule matrices, sequences, COPY, complete system catalogs, roles and ACLs, MVCC snapshots and deadlock behavior, prepared statements and portals, large objects, extensions, replication-facing protocol, WAL, and administration surfaces.
 

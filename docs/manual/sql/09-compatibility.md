@@ -14,6 +14,8 @@ UQA Engine targets PostgreSQL 18-compatible syntax and behavior while remaining 
 
 The fixture coverage is evidence for those queries and types, not a claim of complete PostgreSQL 18 compatibility.
 
+The [official regression inventory](../internals/09-verification.md#compatibility-evidence) covers all 354 PostgreSQL 18.4 core and isolation tests, including the four tests outside the default schedules. Its full PostgreSQL reference runs in pre-merge CI. UQA execution of that corpus still requires the real SQL server boundary and complete failure triage; the imported tests remain unaudited for UQA until their own results are recorded.
+
 <!-- pg18-milestone-snapshot:start -->
 
 Current milestone snapshot: complete — `M1` (Discovered semantic fixes), `M2` (Protocol 3.2); in progress — `M0` (PG18 baseline), `M3` (PG18 DDL and types), `M4` (Core regression parity), `M5` (Client parity); not started — `M6` (Complete compatibility). Each milestone status is derived from its owned evidence items and remains bounded by its exit gate.

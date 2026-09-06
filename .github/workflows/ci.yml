@@ -169,10 +169,37 @@ jobs:
           command: check
           arguments: --workspace
 
+  upstream-regression-oracle:
+    name: PostgreSQL upstream regression oracle
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.9"
+      - name: Test upstream corpus accounting and failure detection
+        run: python3 -m unittest discover -s scripts/tests -p 'test_pg18_upstream_harness.py'
+      - name: Build pinned PostgreSQL regression environment
+        timeout-minutes: 10
+        run: python3 tests/parity/pg18/upstream/harness.py build
+      - name: Run every official core and isolation test
+        timeout-minutes: 17
+        run: python3 tests/parity/pg18/upstream/harness.py run --output target/pg18-upstream/reference --timeout 300
+      - uses: actions/upload-artifact@v4
+        timeout-minutes: 2
+        if: always()
+        with:
+          name: pg18-upstream-reference-${{ github.sha }}
+          path: target/pg18-upstream/reference/
+
   gate:
     name: pre-merge CI
     if: ${{ always() }}
-    needs: [test-linux, test-fdw-linux, test-macos, clippy, msrv, doc, deny]
+    needs: [test-linux, test-fdw-linux, test-macos, clippy, msrv, doc, deny, upstream-regression-oracle]
     runs-on: ubuntu-24.04
     env:
       RESULTS: ${{ join(needs.*.result, ' ') }}

@@ -127,6 +127,13 @@ An optimization may reduce work only after its result is compared with the exact
 
 ## Compatibility evidence
 
+The [official PostgreSQL regression harness](../../../tests/parity/pg18/upstream/README.md) imports the checksum-pinned PostgreSQL 18.4 core and isolation corpus without editing its SQL, psql commands, concurrent session specifications, or expected-output variants. Its inventory covers 231 default core tests, 119 default isolation tests, and four additional upstream tests. The full reference run executes all 354 through PostgreSQL's own drivers in disposable local clusters, preserves their output and diffs, and records missing tests and infrastructure failures explicitly. The complete reference is part of pre-merge CI; a passing reference validates the corpus and environment, while UQA results require execution through a real UQA SQL server and separate evidence for every test.
+
+```sh
+python3 tests/parity/pg18/upstream/harness.py build
+python3 tests/parity/pg18/upstream/harness.py run --output target/pg18-upstream/reference
+```
+
 The TPC-H-derived fixture runs all 22 queries and compares exact columns, row order, NULLs, text bytes, and type-aware canonical numeric values with checked-in PostgreSQL 18.4 output:
 
 ```sh

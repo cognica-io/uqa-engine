@@ -53,5 +53,7 @@ jobs:
         run: python3 scripts/check-release-licenses.py
       - name: Check PostgreSQL 18 compatibility manifest
         run: python3 tests/parity/pg18/run_diff.py --validate-manifest
+      - name: Check complete upstream regression inventory
+        run: python3 tests/parity/pg18/upstream/harness.py validate
       - name: Check rustfmt
         run: bash scripts/check-rustfmt.sh

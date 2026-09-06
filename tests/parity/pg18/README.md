@@ -1,5 +1,7 @@
 # PG18 differential probes
 
+The [official upstream regression harness](upstream/README.md) separately imports all 354 PostgreSQL 18.4 core and isolation tests, preserves their original scripts and expected files, validates the PostgreSQL reference with the official drivers, and accounts for every UQA test in a complete burn-down ledger.
+
 `run_diff.py` validates `manifest.json`, executes every probe in `probes.sql` against a real PostgreSQL 18 instance and against the `usql` release binary, then reports divergences in four categories:
 
 - `engine-error`: PostgreSQL answers, the engine rejects (missing feature).
