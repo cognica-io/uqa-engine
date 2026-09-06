@@ -178,7 +178,7 @@ The verified view-trigger `MERGE` slice includes direct and nested automatic-to-
 
 Recursive ALTER ownership is verified under `ddl.recursive-alter-ownership`: ownership is checked before existing child column and constraint merges, recursion stops below an unchanged merged definition, and every changing inheritance edge remains protected. Eight focused tests and a 41-record PostgreSQL 18.4 oracle cover inherited authority, revocation, ordinary and partition children, multiple inheritance, atomic failure, savepoints, and durable reopen.
 
-The related `ddl.not-null-only-inheritance` boundary is verified by five focused tests and a 29-record PostgreSQL 18.4 oracle: ONLY changes on ordinary parents preserve NO INHERIT metadata, partition parents reject omitted recursion when children exist, existing local NOT NULL names and flags survive nullable inherited-column merges, and later recursive changes retain exact diagnostics. Canonical constraint publication preserves validation, identity, statement and savepoint rollback, and durable reopen.
+The related `ddl.not-null-only-inheritance` boundary is verified by six focused tests and a 37-record PostgreSQL 18.4 oracle: ONLY changes on ordinary parents preserve NO INHERIT metadata, partition parents reject omitted recursion when children exist, existing local NOT NULL names and flags survive nullable inherited-column merges, and later recursive changes retain exact diagnostics. Canonical constraint publication preserves validation, identity, statement and savepoint rollback, and durable reopen.
 
 ## Workstreams
 

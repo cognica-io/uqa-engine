@@ -345,8 +345,8 @@
     {
       "id": "ddl.not-null-only-inheritance",
       "postgresql_reference": "PostgreSQL 18.4 ALTER TABLE ONLY SET NOT NULL and ATExecSetNotNull in src/backend/commands/tablecmds.c",
-      "uqa_test": "cargo test -p uqa-engine --test integration engine_catalog::sql_relation_hierarchy::not_null::; tests/parity/pg18/not_null_only_inheritance_oracle.sql and not_null_only_inheritance_oracle.expected.txt (29 PostgreSQL 18.4 records)",
-      "supported_version": "PostgreSQL 18.4 ONLY SET NOT NULL inheritance-parent NO INHERIT metadata, leaf and partition-parent boundaries, explicit and merged local NO INHERIT constraints, SET and ADD recursion diagnostics with ownership precedence, constraint identity and validation, column errors, statement and savepoint rollback, and durable reopen",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_catalog::sql_relation_hierarchy::not_null::; tests/parity/pg18/not_null_only_inheritance_oracle.sql and not_null_only_inheritance_oracle.expected.txt (37 PostgreSQL 18.4 records)",
+      "supported_version": "PostgreSQL 18.4 ONLY SET NOT NULL inheritance-parent NO INHERIT metadata, leaf and partition-parent boundaries, explicit and merged local NO INHERIT constraints, SET and ADD recursion diagnostics with ownership precedence, constraint identity and validation, column errors, statement and savepoint rollback, and durable reopen; existing NOT VALID descendants retain validation state while NOT NULL inheritance counts follow direct parents across multiple inheritance, NO INHERIT, edge removal and reopen",
       "status": "verified",
       "open_issue": null
     },

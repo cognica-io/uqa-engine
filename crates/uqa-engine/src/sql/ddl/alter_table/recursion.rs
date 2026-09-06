@@ -279,6 +279,7 @@ pub(super) fn merge_existing_recursive_action(
                 "55000"
             };
             super::constraint_lifecycle::ensure_not_null_inheritable(table, &definition, sqlstate)?;
+            // An inherited merge preserves the existing child's validation state.
             Ok(true)
         }
         _ => Ok(false),

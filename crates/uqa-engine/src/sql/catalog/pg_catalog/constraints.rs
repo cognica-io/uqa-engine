@@ -11,9 +11,13 @@ use uqa_sql::{ResultRow, SQLError};
 
 use crate::engine_capabilities::{CatalogReadView, RelationNameResolution};
 
-use super::super::helpers::constraints::constraint_catalog_rows;
+use super::super::helpers::constraints::{
+    constraint_catalog_rows, ConstraintCatalogKind, ConstraintCatalogRow,
+};
 use super::super::helpers::oids::{schema_oid, stable_oid};
-use super::super::helpers::rows::{bool_value, catalog_array, int_value, row, str_value};
+use super::super::helpers::rows::{
+    bool_value, catalog_array, catalog_usize, int_value, row, str_value,
+};
 use super::table_relation_oid_from;
 
 #[expect(
@@ -76,6 +80,7 @@ pub(in crate::sql::catalog) fn build_pg_constraint(
                 None => 0,
             };
             let index_oid = constraint_index_oid(&constraint, &indexes);
+            let inheritance_count = inherited_not_null_count(catalog, resolution, &constraint)?;
             Ok(row([
                 (
                     "oid",
@@ -121,7 +126,7 @@ pub(in crate::sql::catalog) fn build_pg_constraint(
                     })),
                 ),
                 ("conislocal", bool_value(true)),
-                ("coninhcount", int_value(0)),
+                ("coninhcount", int_value(inheritance_count)),
                 ("connoinherit", bool_value(constraint.state.no_inherit())),
                 ("conperiod", bool_value(constraint.period)),
                 ("conkey", constrained_key),
@@ -138,6 +143,40 @@ pub(in crate::sql::catalog) fn build_pg_constraint(
         catalog, resolution,
     )?);
     Ok(rows)
+}
+
+fn inherited_not_null_count(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    constraint: &ConstraintCatalogRow,
+) -> Result<i64, SQLError> {
+    if constraint.kind != ConstraintCatalogKind::NotNull || constraint.state.no_inherit() {
+        return Ok(0);
+    }
+    let column = constraint
+        .columns
+        .first()
+        .ok_or_else(|| SQLError::Internal("NOT NULL constraint has no column".into()))?;
+    let table_name = format!(
+        "{}.{}",
+        uqa_sql::expr::quote_ident(&constraint.schema),
+        uqa_sql::expr::quote_ident(&constraint.table)
+    );
+    let Some(table) = catalog.table(resolution, &table_name)? else {
+        return Ok(0);
+    };
+    let mut count = 0;
+    for parent in &table.hierarchy.parents {
+        let parent_table = catalog
+            .table(resolution, parent)?
+            .ok_or_else(|| SQLError::UnknownTable(parent.clone()))?;
+        if parent_table.columns.iter().any(|definition| {
+            definition.name == column.name && definition.not_null && !definition.not_null_no_inherit
+        }) {
+            count += 1;
+        }
+    }
+    catalog_usize(count, "pg_constraint NOT NULL inheritance count")
 }
 
 const fn foreign_key_action_code(action: uqa_sql::ast::ForeignKeyAction) -> &'static str {

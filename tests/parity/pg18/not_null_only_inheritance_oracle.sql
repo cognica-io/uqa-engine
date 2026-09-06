@@ -74,4 +74,27 @@ SELECT pg_temp.not_null_probe('system-column', 'ALTER TABLE nn_errors ALTER COLU
 INSERT INTO nn_errors VALUES(NULL);
 SELECT pg_temp.not_null_probe('parent-null-validation', 'ALTER TABLE nn_errors ALTER COLUMN a SET NOT NULL');
 SELECT 'validation-failure-count', count(*) FROM pg_constraint WHERE conrelid = 'nn_errors'::regclass;
+
+CREATE TABLE nn_unvalidated_parent(a integer);
+CREATE TABLE nn_unvalidated_child() INHERITS(nn_unvalidated_parent);
+INSERT INTO nn_unvalidated_child VALUES(NULL);
+ALTER TABLE nn_unvalidated_child ADD CONSTRAINT unvalidated_child_nn NOT NULL a NOT VALID;
+SELECT pg_temp.not_null_probe('recursive-unvalidated-child', 'ALTER TABLE nn_unvalidated_parent ALTER COLUMN a SET NOT NULL');
+SELECT 'unvalidated-child', x.conname, x.convalidated, x.coninhcount, a.attnotnull FROM pg_constraint x JOIN pg_attribute a ON a.attrelid=x.conrelid AND a.attname='a' WHERE x.conrelid='nn_unvalidated_child'::regclass;
+SELECT 'retained-child-null', count(*) FROM nn_unvalidated_child WHERE a IS NULL;
+ALTER TABLE nn_unvalidated_child NO INHERIT nn_unvalidated_parent;
+SELECT 'detached-child-count', coninhcount FROM pg_constraint WHERE conrelid='nn_unvalidated_child'::regclass;
+CREATE TABLE nn_left(a integer NOT NULL);
+CREATE TABLE nn_right(a integer NOT NULL);
+CREATE TABLE nn_shared(a integer NOT NULL) INHERITS(nn_left, nn_right);
+SELECT 'two-parent-count', coninhcount FROM pg_constraint WHERE conrelid='nn_shared'::regclass;
+ALTER TABLE nn_shared NO INHERIT nn_right;
+SELECT 'one-parent-count', coninhcount FROM pg_constraint WHERE conrelid='nn_shared'::regclass;
+ALTER TABLE nn_shared NO INHERIT nn_left;
+SELECT 'zero-parent-count', coninhcount FROM pg_constraint WHERE conrelid='nn_shared'::regclass;
+CREATE TABLE nn_only_parent(a integer);
+CREATE TABLE nn_only_child() INHERITS(nn_only_parent);
+ALTER TABLE ONLY nn_only_parent ALTER COLUMN a SET NOT NULL;
+ALTER TABLE nn_only_child ALTER COLUMN a SET NOT NULL;
+SELECT 'no-inherit-parent-count', coninhcount FROM pg_constraint WHERE conrelid='nn_only_child'::regclass;
 ROLLBACK;

@@ -191,6 +191,105 @@ fn explicit_no_inherit_and_unvalidated_not_null_keep_their_names() {
 }
 
 #[test]
+fn inherited_merge_preserves_an_existing_unvalidated_not_null_constraint() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("unvalidated-inheritance.db");
+    let engine = Engine::open(&path).unwrap();
+    exec(&engine, "CREATE TABLE nn_unvalidated_parent(a integer)");
+    exec(
+        &engine,
+        "CREATE TABLE nn_unvalidated_child() INHERITS(nn_unvalidated_parent)",
+    );
+    exec(&engine, "INSERT INTO nn_unvalidated_child VALUES(NULL)");
+    exec(
+        &engine,
+        "ALTER TABLE nn_unvalidated_child ADD CONSTRAINT unvalidated_child_nn NOT NULL a NOT VALID",
+    );
+    let before = constraint(&engine, "nn_unvalidated_child");
+    exec(
+        &engine,
+        "ALTER TABLE nn_unvalidated_parent ALTER COLUMN a SET NOT NULL",
+    );
+    drop(engine);
+    let engine = Engine::open(&path).unwrap();
+    assert_eq!(constraint(&engine, "nn_unvalidated_child"), before);
+    let result = engine.sql("SELECT x.convalidated, x.coninhcount, a.attnotnull FROM pg_constraint x JOIN pg_attribute a ON a.attrelid=x.conrelid AND a.attname='a' WHERE x.conrelid='nn_unvalidated_child'::regclass", &[]).unwrap();
+    assert_eq!(result.rows[0]["convalidated"], Value::Bool(false));
+    assert_eq!(result.rows[0]["coninhcount"], Value::Int(1));
+    assert_eq!(result.rows[0]["attnotnull"], Value::Bool(true));
+    assert_eq!(
+        engine
+            .sql(
+                "SELECT count(*) AS n FROM nn_unvalidated_child WHERE a IS NULL",
+                &[]
+            )
+            .unwrap()
+            .rows[0]["n"],
+        Value::Int(1)
+    );
+    exec(
+        &engine,
+        "ALTER TABLE nn_unvalidated_child NO INHERIT nn_unvalidated_parent",
+    );
+    assert_eq!(engine.sql("SELECT coninhcount FROM pg_constraint WHERE conrelid='nn_unvalidated_child'::regclass", &[]).unwrap().rows[0]["coninhcount"], Value::Int(0));
+    exec(&engine, "CREATE TABLE nn_left(a integer NOT NULL)");
+    exec(&engine, "CREATE TABLE nn_right(a integer NOT NULL)");
+    exec(
+        &engine,
+        "CREATE TABLE nn_shared(a integer NOT NULL) INHERITS(nn_left, nn_right)",
+    );
+    for (count, parent) in [(2, "nn_right"), (1, "nn_left")] {
+        assert_eq!(
+            engine
+                .sql(
+                    "SELECT coninhcount FROM pg_constraint WHERE conrelid='nn_shared'::regclass",
+                    &[]
+                )
+                .unwrap()
+                .rows[0]["coninhcount"],
+            Value::Int(count)
+        );
+        exec(
+            &engine,
+            &format!("ALTER TABLE nn_shared NO INHERIT {parent}"),
+        );
+    }
+    assert_eq!(
+        engine
+            .sql(
+                "SELECT coninhcount FROM pg_constraint WHERE conrelid='nn_shared'::regclass",
+                &[]
+            )
+            .unwrap()
+            .rows[0]["coninhcount"],
+        Value::Int(0)
+    );
+    exec(&engine, "CREATE TABLE nn_only_parent(a integer)");
+    exec(
+        &engine,
+        "CREATE TABLE nn_only_child() INHERITS(nn_only_parent)",
+    );
+    exec(
+        &engine,
+        "ALTER TABLE ONLY nn_only_parent ALTER COLUMN a SET NOT NULL",
+    );
+    exec(
+        &engine,
+        "ALTER TABLE nn_only_child ALTER COLUMN a SET NOT NULL",
+    );
+    assert_eq!(
+        engine
+            .sql(
+                "SELECT coninhcount FROM pg_constraint WHERE conrelid='nn_only_child'::regclass",
+                &[]
+            )
+            .unwrap()
+            .rows[0]["coninhcount"],
+        Value::Int(0)
+    );
+}
+
+#[test]
 fn set_not_null_reports_column_and_existing_row_errors_atomically() {
     let engine = Engine::new();
     exec(&engine, "CREATE TABLE nn_errors(a integer)");

@@ -13,7 +13,7 @@ See the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/doc
 ### Fixed
 
 - Fixed recursive `ALTER TABLE` authorization before merging existing child columns and constraints, with PostgreSQL inheritance-edge traversal, unchanged-definition boundaries, and failure-atomic rollback.
-- Preserved PostgreSQL 18 NO INHERIT metadata for `ONLY SET NOT NULL` on ordinary inheritance parents, rejected forbidden recursive and partition-parent changes with matching SQLSTATEs, retained local NOT NULL metadata when merging nullable inherited columns, and preserved constraint identity, row validation, rollback, and durable reopen behavior.
+- Preserved PostgreSQL 18 NO INHERIT metadata for `ONLY SET NOT NULL` on ordinary inheritance parents, rejected forbidden recursive and partition-parent changes with matching SQLSTATEs, retained local NOT NULL metadata when merging nullable inherited columns, projected NOT NULL inheritance counts from direct parent constraints, and preserved constraint identity, row validation, rollback, and durable reopen behavior.
 
 ## [0.2.1] - 2026-09-06
 

@@ -27,3 +27,11 @@ missing-column|42703|column "absent" of relation "nn_errors" does not exist
 system-column|0A000|cannot alter system column "xmin"
 parent-null-validation|23502|column "a" of relation "nn_errors" contains null values
 validation-failure-count|0
+recursive-unvalidated-child|ok
+unvalidated-child|unvalidated_child_nn|f|1|t
+retained-child-null|1
+detached-child-count|0
+two-parent-count|2
+one-parent-count|1
+zero-parent-count|0
+no-inherit-parent-count|0

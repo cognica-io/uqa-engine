@@ -32,7 +32,7 @@ Version 0.2.2 fixes recursive `ALTER TABLE` ownership checks and PostgreSQL 18 `
 
 The 0.2 series adds durable B-tree expression and unique indexes, stronger SQL object dependencies and privileges, expanded sequence and PL/pgSQL behavior, and transactional notifications across native processes sharing a database. The Node.js HTTP client now runs without native addons and can be installed with `npm install --omit=optional @cognica-io/uqa@0.2.2`.
 
-Read the [release history](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/HISTORY.md#021---2026-09-06) for the complete changes and the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/docs/manual/reference/10-upgrading.md) before updating a persistent database or a custom Rust storage provider.
+Read the [release history](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/HISTORY.md#022---2026-09-06) for the complete changes and the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/docs/manual/reference/10-upgrading.md) before updating a persistent database or a custom Rust storage provider.
 
 ## Mathematical foundation
 
