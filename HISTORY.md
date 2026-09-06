@@ -25,7 +25,7 @@ See the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/doc
 
 - Added `ColumnDef.not_null_is_local` to the public Rust SQL AST. Applications constructing column definitions directly must initialize the field; older serialized definitions retain the previous local-origin projection without a NOT NULL metadata migration.
 - Added `ColumnDef.check_is_local`, `ColumnDef.check_object_id`, `TableCheck.is_local`, and `TableCheck.object_id` to the Rust SQL AST. Initial catalog open assigns missing CHECK identities; legacy definitions retain their previous local-origin projection because their declaration history was not stored.
-- Generated Rust package README links follow `main` for development versions and the exact version tag for release packages.
+- The generated README files for `uqa`, `uqa-engine`, `uqa-client`, `uqa-api`, and `uqa-cli` link to `main` for development versions and the exact version tag for releases.
 
 ## [0.2.1] - 2026-09-06
 
