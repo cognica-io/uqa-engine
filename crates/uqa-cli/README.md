@@ -23,9 +23,6 @@ It is designed for applications that need more than a relational table but do no
 - Use the same SQL result and parameter shapes against a local or Cloud UQA node through authenticated Rust, Python, Node.js, and browser HTTP engines.
 - Embed the engine in Rust or use the Python, Node.js, and browser WASM bindings included in the workspace.
 
-> [!NOTE]
-> UQA Engine is under active development at version 0.2.2. The implementation is broad and heavily tested, but public APIs and storage formats may still evolve before a stable release.
-
 ## New in 0.2.2
 
 Version 0.2.2 fixes recursive `ALTER TABLE` ownership checks and PostgreSQL 18 CHECK and NOT NULL inheritance, including atomic rollback, independent local and inherited constraint origins, stable constraint identities, and durable reopen behavior. The release adds a pinned harness for the complete PostgreSQL 18.4 regression corpus and includes the Python `usql` startup and script fix from 0.2.1.
