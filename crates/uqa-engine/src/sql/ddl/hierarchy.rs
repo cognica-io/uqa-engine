@@ -76,6 +76,16 @@ pub(super) fn prepare_create_table_hierarchy(
             .try_describe_table(&parent)
             .map_err(|error| SQLError::Internal(format!("read inherited row type: {error}")))?
             .ok_or_else(|| SQLError::UnknownTable(parent.clone()))?;
+        for column in &mut columns {
+            if column.not_null_no_inherit {
+                column.not_null = false;
+                column.not_null_explicit = false;
+                column.not_null_name = None;
+                column.not_null_no_inherit = false;
+                column.not_null_validated = true;
+            }
+            column.not_null_is_local = !column.not_null;
+        }
         if !is_partition {
             // PostgreSQL inherits the NOT NULL property of an identity column, but not its identity generation attribute or owned sequence. SERIAL is different: its nextval default is ordinary inherited metadata and therefore keeps pointing at the parent's sequence.
             for column in &mut columns {
@@ -208,7 +218,15 @@ pub(super) fn merge_same_column(
             ),
         });
     }
+    let not_null_is_local = (inherited.not_null && inherited.not_null_is_local)
+        || (declared.not_null && declared.not_null_is_local);
+    if declared.not_null && (!inherited.not_null || declared.not_null_is_local) {
+        inherited.not_null_name.clone_from(&declared.not_null_name);
+        inherited.not_null_validated = declared.not_null_validated;
+        inherited.not_null_no_inherit = declared.not_null_no_inherit;
+    }
     inherited.not_null |= declared.not_null;
+    inherited.not_null_is_local = !inherited.not_null || not_null_is_local;
     inherited.not_null_explicit |= declared.not_null_explicit;
     inherited.primary_key |= declared.primary_key;
     inherited.unique |= declared.unique;

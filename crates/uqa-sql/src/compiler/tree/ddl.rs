@@ -594,6 +594,7 @@ pub(in crate::compiler) fn compile_column_def(
         not_null_name,
         not_null_validated,
         not_null_no_inherit,
+        not_null_is_local: true,
         auto_increment,
         unique,
         default,

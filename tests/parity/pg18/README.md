@@ -28,9 +28,33 @@ python3 tests/parity/pg18/run_diff.py
 
 Manifest schema version 2 records the pinned parser chain, oracle provenance, milestone titles and exit gates, exact single ownership of every evidence item, positive evidence, and every currently tracked incomplete gate. The validator derives milestone states from owned item statuses, synchronizes the plan ledger and manual snapshot, rejects malformed ownership, stale wrapper revisions, duplicate or orphaned items, verified items with open issues, and any complete-compatibility claim made before M6 and every item are complete.
 
-The differential summary line reports `total/match/diff`, and any difference makes the runner exit nonzero. Error rows match only when their SQLSTATE codes match; message text is not compared. At this revision `probes.sql` contains 797 probes. Update it freely: one probe per line, `--` comments skipped; probes must be side-effect-free single statements. Set `UQA_PG_CONTAINER`, `UQA_PG_DATABASE`, or `UQA_USQL` to override the defaults while keeping both systems under test in equivalent contexts.
+The differential summary line reports `total/match/diff`, and any difference makes the runner exit nonzero. Error rows match only when their SQLSTATE codes match; message text is not compared. The runner discovers every probe directly from `probes.sql`. Update it freely: one probe per line, `--` comments skipped; probes must be side-effect-free single statements. Set `UQA_PG_CONTAINER`, `UQA_PG_DATABASE`, or `UQA_USQL` to override the defaults while keeping both systems under test in equivalent contexts.
+
+## Recursive ALTER ownership oracle
+
+`recursive_alter_ownership_oracle.sql` records PostgreSQL 18.4 ownership checks for recursive column, CHECK, and NOT NULL changes. Its 41 transcript records cover existing child definitions, ownership before conflicting definitions, table grants versus inherited ownership, role revocation, partition ownership, changed and unchanged grandchild paths, multiple inheritance, unchanged root definitions, statement rollback, and savepoint failure recovery. The matching engine integration tests additionally verify unchanged catalog state, retained rows, inherited-column counts, and durable role and schema state across reopen.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/recursive_alter_ownership_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/recursive_alter_ownership_oracle.expected.txt -
+cargo test -p uqa-engine --test integration engine_catalog::sql_relation_hierarchy::ownership::
+```
+
+## ONLY NOT NULL inheritance oracle
+
+`not_null_only_inheritance_oracle.sql` records 37 PostgreSQL 18.4 outcomes for ONLY changes on inheritance parents, ordinary leaves, partition parents with and without children, explicit and merged NO INHERIT constraints, preserved names and validation state, unchanged NOT VALID descendants during inherited merges, column diagnostics, and rollback. Six matching engine integration tests also verify constraint OID stability, owner-error precedence, and durable reopen. The PostgreSQL scripts provide the reference transcripts; the Rust tests execute the corresponding engine behaviors.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/not_null_only_inheritance_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/not_null_only_inheritance_oracle.expected.txt -
+cargo test -p uqa-engine --test integration engine_catalog::sql_relation_hierarchy::not_null::
+```
 
 ## MERGE and RETURNING oracle
+
+`not_null_origin_oracle.sql` records 29 PostgreSQL 18.4 outcomes for local and inherited NOT NULL constraint origins, nullable column redeclarations, explicit and generated constraint names, recursive SET, constraint and column ADD, multiple inheritance, last-parent removal and rollback, partition creation, attachment and detachment, localizing an inherited NOT VALID constraint before later validation, and excluded NO INHERIT constraints. Six matching engine integration tests verify these behaviors, persistent reopen, and the legacy serialized-column default.
+
+```sh
+docker exec -i uqa-pg18-age psql -U postgres -d postgres -X -qAt -f - < tests/parity/pg18/not_null_origin_oracle.sql 2>/dev/null | diff -u tests/parity/pg18/not_null_origin_oracle.expected.txt -
+```
 
 [`merge_returning_oracle.md`](merge_returning_oracle.md) records the pinned PostgreSQL 18.4 container provenance, full-join candidate results, clause-order and visibility SQLSTATEs, repeated-target cardinality behavior, all mutation row images, `DO NOTHING`, source-column NULLs, `merge_action()`, and source-before-target `RETURNING *` layout used by the focused compiler and engine tests.
 

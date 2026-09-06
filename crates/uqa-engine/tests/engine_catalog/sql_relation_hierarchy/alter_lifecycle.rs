@@ -270,6 +270,17 @@ fn alter_table_recurses_columns_checks_and_not_null_but_honors_only() {
     );
     exec(&engine, "INSERT INTO alter_child (a) VALUES (NULL)");
     exec(&engine, "DELETE FROM alter_child WHERE a IS NULL");
+    assert_eq!(
+        engine
+            .sql("ALTER TABLE alter_parent ALTER COLUMN a SET NOT NULL", &[])
+            .unwrap_err()
+            .sqlstate(),
+        Some("0A000")
+    );
+    exec(
+        &engine,
+        "ALTER TABLE ONLY alter_parent ALTER COLUMN a DROP NOT NULL",
+    );
     exec(
         &engine,
         "ALTER TABLE alter_parent ALTER COLUMN a SET NOT NULL",

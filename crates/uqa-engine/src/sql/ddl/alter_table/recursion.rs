@@ -6,10 +6,89 @@
 
 //! `PostgreSQL` inheritance recursion for `ALTER TABLE` actions.
 
-use super::{validate_all_table_rows, AlterTableAction, Engine, SQLError};
+use super::{
+    run_alter_table_action, validate_all_table_rows, AlterTableAction, AlterTableStmt, Engine,
+    SQLError,
+};
 use crate::sql::ddl::ddl_storage_error;
+use std::collections::BTreeSet;
 
-pub(super) fn recursive_alter_targets(
+pub(super) fn run_recursive_alter_action(
+    engine: &Engine,
+    stmt: AlterTableStmt,
+    action: AlterTableAction,
+) -> Result<(), SQLError> {
+    run_alter_action_branch(engine, stmt, action, false, None, &mut BTreeSet::new())
+}
+
+fn run_alter_action_branch(
+    engine: &Engine,
+    stmt: AlterTableStmt,
+    mut action: AlterTableAction,
+    recursing: bool,
+    inherited_not_null_name: Option<String>,
+    visiting: &mut BTreeSet<String>,
+) -> Result<(), SQLError> {
+    let table = stmt.table.clone();
+    if !visiting.insert(table.clone()) {
+        return Err(SQLError::Internal(format!(
+            "table inheritance cycle reaches `{table}`"
+        )));
+    }
+    engine.ensure_table_owner(&table)?;
+    if recursing {
+        if let AlterTableAction::AddColumn { column, .. } = &mut action {
+            column.not_null_is_local = !column.not_null;
+        }
+    }
+    if recursing && merge_existing_recursive_action(engine, &table, &action)? {
+        visiting.remove(&table);
+        return Ok(());
+    }
+    let children = recursive_alter_children(engine, &table, stmt.recurse, &action)?;
+    let if_exists = stmt.if_exists;
+    run_alter_table_action(
+        engine,
+        stmt,
+        action.clone(),
+        recursing,
+        inherited_not_null_name,
+    )?;
+    let child_not_null_name = if let AlterTableAction::SetNotNull { name } = &action {
+        engine
+            .try_describe_table(&table)
+            .map_err(|error| ddl_storage_error("ALTER TABLE SET NOT NULL", error))?
+            .and_then(|columns| columns.into_iter().find(|column| column.name == *name))
+            .and_then(|column| column.not_null_name)
+    } else {
+        None
+    };
+    for child in children {
+        let qualifier = crate::RelationIdentity::from_legacy_name(&child)
+            .map_err(|error| {
+                SQLError::Internal(format!("resolve recursive ALTER target: {error}"))
+            })?
+            .name;
+        run_alter_action_branch(
+            engine,
+            AlterTableStmt {
+                table: child,
+                qualifier,
+                if_exists,
+                recurse: true,
+                actions: Vec::new(),
+            },
+            action.clone(),
+            true,
+            child_not_null_name.clone(),
+            visiting,
+        )?;
+    }
+    visiting.remove(&table);
+    Ok(())
+}
+
+fn recursive_alter_children(
     engine: &Engine,
     table: &str,
     recurse: bool,
@@ -26,10 +105,29 @@ pub(super) fn recursive_alter_targets(
         )
         || matches!(action, AlterTableAction::SetNotNull { .. });
     if !recursive {
-        return Ok(vec![table.to_string()]);
+        return Ok(Vec::new());
+    }
+    let unchanged = match action {
+        AlterTableAction::AddColumn { column, .. } => engine
+            .try_table_has_column(table, &column.name)
+            .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN", error))?,
+        AlterTableAction::AddNotNullConstraint { column, .. }
+        | AlterTableAction::SetNotNull { name: column } => engine
+            .try_describe_table(table)
+            .map_err(|error| ddl_storage_error("ALTER TABLE SET NOT NULL", error))?
+            .and_then(|columns| {
+                columns
+                    .into_iter()
+                    .find(|definition| definition.name == *column)
+            })
+            .is_some_and(|definition| definition.not_null && definition.not_null_validated),
+        _ => false,
+    };
+    if unchanged {
+        return Ok(Vec::new());
     }
     if recurse {
-        return engine.hierarchy_scan_tables(table, true);
+        return engine.direct_hierarchy_children(table);
     }
     let requires_children = matches!(
         action,
@@ -48,7 +146,7 @@ pub(super) fn recursive_alter_targets(
             message: format!("{object} must be added to child tables too"),
         });
     }
-    Ok(vec![table.to_string()])
+    Ok(Vec::new())
 }
 
 pub(super) fn materialize_recursive_action_names(
@@ -147,8 +245,20 @@ pub(super) fn merge_existing_recursive_action(
                 return Ok(false);
             };
             let local = columns[index].clone();
+            let existing_not_null = local.not_null.then(|| {
+                (
+                    local.not_null_name.clone(),
+                    local.not_null_validated,
+                    local.not_null_no_inherit,
+                )
+            });
             let mut merged = column.clone();
             super::super::hierarchy::merge_same_column(&mut merged, local)?;
+            if let Some((name, validated, no_inherit)) = existing_not_null {
+                merged.not_null_name = name;
+                merged.not_null_validated = validated;
+                merged.not_null_no_inherit = no_inherit;
+            }
             columns[index] = merged;
             let constraints = engine
                 .try_declared_table_constraints(table)
@@ -185,15 +295,27 @@ pub(super) fn merge_existing_recursive_action(
                 && existing.no_inherit == constraint.no_inherit)
         }
         AlterTableAction::AddNotNullConstraint { column, .. }
-        | AlterTableAction::SetNotNull { name: column } => Ok(engine
-            .try_describe_table(table)
-            .map_err(|error| ddl_storage_error("ALTER TABLE SET NOT NULL", error))?
-            .and_then(|columns| {
-                columns
-                    .into_iter()
-                    .find(|definition| definition.name == *column)
-            })
-            .is_some_and(|definition| definition.not_null)),
+        | AlterTableAction::SetNotNull { name: column } => {
+            let definition = engine
+                .try_describe_table(table)
+                .map_err(|error| ddl_storage_error("ALTER TABLE SET NOT NULL", error))?
+                .and_then(|columns| {
+                    columns
+                        .into_iter()
+                        .find(|definition| definition.name == *column)
+                });
+            let Some(definition) = definition.filter(|definition| definition.not_null) else {
+                return Ok(false);
+            };
+            let sqlstate = if matches!(action, AlterTableAction::SetNotNull { .. }) {
+                "0A000"
+            } else {
+                "55000"
+            };
+            super::constraint_lifecycle::ensure_not_null_inheritable(table, &definition, sqlstate)?;
+            // An inherited merge preserves the existing child's validation state.
+            Ok(true)
+        }
         _ => Ok(false),
     }
 }

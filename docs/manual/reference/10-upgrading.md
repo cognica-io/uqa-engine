@@ -1,47 +1,59 @@
-# Upgrading to UQA Engine 0.2.1
+# Upgrading to UQA Engine 0.2.2
 
-Version 0.2.1 fixes interactive startup and SQL script execution in the Python-installed `usql` command. The [release history](../../../HISTORY.md#021---2026-09-06) records the fix.
+Version 0.2.2 fixes recursive `ALTER TABLE` authorization and PostgreSQL 18 `ONLY SET NOT NULL` inheritance behavior. The [release history](../../../HISTORY.md#022---2026-09-06) records these fixes.
 
 The 0.2 series includes SQL object and privilege lifecycle changes, durable expression and unique indexes, expanded sequences and PL/pgSQL, native cross-process notifications, and a Node.js HTTP client that runs without native addons. These changes were introduced in [0.2.0](../../../HISTORY.md#020---2026-09-05); the [compatibility guide](../sql/09-compatibility.md) defines the verified PostgreSQL 18 surface and the behavior still being implemented.
 
 ## Package versions
 
-Update the UQA packages used by one application together. Rust's `0.1` dependency requirement does not select `0.2.1`; change the requirement explicitly and regenerate the application's lockfile.
+Update the UQA packages used by one application together. Rust's `0.1` dependency requirement does not select `0.2.2`; change the requirement explicitly and regenerate the application's lockfile.
 
 | Environment | Versioned installation |
 | --- | --- |
-| Embedded Rust | `cargo add uqa@0.2.1` |
-| Rust HTTP client | `cargo add uqa-client@0.2.1` |
-| Python and `usql` | `python -m pip install --upgrade uqa==0.2.1` |
-| Embedded Node.js | `npm install @cognica-io/uqa@0.2.1` |
-| Node.js HTTP only | `npm install --omit=optional @cognica-io/uqa@0.2.1` |
-| Browser WASM | `npm install @cognica-io/uqa-wasm@0.2.1` |
+| Embedded Rust | `cargo add uqa@0.2.2` |
+| Rust HTTP client | `cargo add uqa-client@0.2.2` |
+| Python and `usql` | `python -m pip install --upgrade uqa==0.2.2` |
+| Embedded Node.js | `npm install @cognica-io/uqa@0.2.2` |
+| Node.js HTTP only | `npm install --omit=optional @cognica-io/uqa@0.2.2` |
+| Browser WASM | `npm install @cognica-io/uqa-wasm@0.2.2` |
 
 The Rust workspace requires Rust 1.90 or newer. Python requires Python 3.8 or newer, and the Node.js package requires Node.js 16 or newer. The Node.js root package selects an exact-version native optional package for embedded execution; deploy the root and native packages from the same release. Deploy the Browser WASM JavaScript module and `uqa.wasm` from the same package together, including when updating a browser cache.
 
-The [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.2.1) contains the Python and npm archives, standalone Node.js addons, and the status of publication to crates.io, PyPI, and npm. Rust applications using Git dependencies should select `tag = "v0.2.1"` consistently for every UQA dependency.
+The [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.2.2) contains the Python and npm archives, standalone Node.js addons, and the status of publication to crates.io, PyPI, and npm. Rust applications using Git dependencies should select `tag = "v0.2.2"` consistently for every UQA dependency.
+
+## SQL constraint and ownership updates
+
+Recursive column, CHECK, and NOT NULL additions require ownership of each descendant whose definition changes, including a child whose existing definition is merged. Table privileges alone do not grant this authority; inherited membership in the child's owning role does. Recursion stops after merging an existing child definition and continues through every inheritance edge that still requires a change. Unauthorized operations restore the parent and all previously visited children.
+
+`ALTER TABLE ONLY parent ALTER COLUMN column SET NOT NULL` creates a `NO INHERIT` constraint when an ordinary inheritance parent has children. A later recursive `SET NOT NULL` reports `0A000` instead of silently changing that constraint's inheritance status. An ONLY change on a partition parent with existing partitions reports `42P16`; an ordinary leaf or empty partition parent keeps an inheritable constraint. Existing constraint names remain stable when validation is completed, and constraint state remains consistent through rollback and reopen. See the [compatibility guide](../sql/09-compatibility.md) for the verified boundary.
+
+`pg_constraint.conislocal` now distinguishes an inherited NOT NULL constraint from a local NOT NULL declaration, independently from `coninhcount` and from whether the column was redeclared locally. Recursive changes retain existing child constraint names and give newly inherited constraints their parent's name. Removing the last supplying parent or detaching a partition makes its retained constraint local; attaching a partition makes constraints supplied by its parent inherited. Explicit SET on a previously inherited NOT VALID constraint first makes it local; a subsequent SET validates it.
+
+These changes record origin on new declarations and hierarchy mutations. Older serialized columns lack the original declaration history and keep their previous local catalog projection; opening a database does not infer that missing intent. This patch adds no storage migration and keeps the Rust storage trait requirements from 0.2.0. Applications already using the 0.2 series can keep their database files and custom storage implementations.
+
+The public Rust SQL AST adds `ColumnDef.not_null_is_local`. Applications using exhaustive `ColumnDef` struct literals must initialize it to `true` for locally declared columns; inherited NOT NULL definitions use `false`. SQL parsing and engine-managed inheritance initialize the field automatically, and deserialization defaults missing fields to the historical local projection.
 
 ## Python CLI update
 
-Upgrade Python installations of 0.2.0 to 0.2.1 to restore `usql` interactive startup and `usql script.sql` execution. The entry point now uses Python's command-line arguments, so the console launcher and interpreter options are not parsed as SQL input. Python engine APIs and `usql -c` keep their existing behavior.
+Version 0.2.2 includes the 0.2.1 correction to `usql` interactive startup and `usql script.sql` execution. Upgrade Python installations of 0.2.0 to restore these modes. The entry point uses Python's command-line arguments, so the console launcher and interpreter options are not parsed as SQL input. Python engine APIs and `usql -c` keep their existing behavior.
 
-This patch does not add storage migrations or change the existing Rust storage trait requirements. Applications already using 0.2.0 can keep their database files and custom storage implementations. The following storage guidance applies when upgrading from the 0.1 series.
+The following storage guidance applies when upgrading from the 0.1 series.
 
 ## Custom Rust storage implementations
 
 The storage traits changed in the 0.2 minor release. Applications implementing `uqa_storage::DocumentStore` must implement `put_stored` and `get_stored` using `StoredDocument`. A record keeps its public field map separate from `DocumentMetadata`, including tuple `xmin`. Preserve metadata through scans, rewrites, snapshots, and persistence; storing it as a user field can collide with application data. The default `put` implementation replaces public fields while preserving existing metadata, while a new tuple version uses `put_stored` with explicit metadata.
 
-The B-tree methods on `uqa_storage::PersistentStorageBackend` now use `ValueIndexKey::Column` and `ValueIndexKey::Index`. Preserve both namespaces even when the enclosed names are equal. Named expression indexes store composite `Value::Row` keys; SQL expression binding and evaluation belong to the engine. Update custom backend signatures and physical key encoding before compiling against 0.2.1. See [Storage internals](../internals/03-storage.md) and the trait definitions in [`document_store.rs`](../../../crates/uqa-storage/src/document_store.rs) and [`backend.rs`](../../../crates/uqa-storage/src/backend.rs).
+The B-tree methods on `uqa_storage::PersistentStorageBackend` now use `ValueIndexKey::Column` and `ValueIndexKey::Index`. Preserve both namespaces even when the enclosed names are equal. Named expression indexes store composite `Value::Row` keys; SQL expression binding and evaluation belong to the engine. Update custom backend signatures and physical key encoding before compiling against 0.2.2. See [Storage internals](../internals/03-storage.md) and the trait definitions in [`document_store.rs`](../../../crates/uqa-storage/src/document_store.rs) and [`backend.rs`](../../../crates/uqa-storage/src/backend.rs).
 
 ## Persistent database migration
 
 Opening an older supported database performs the required provider and catalog migrations. The 0.2 minor release adds typed tuple metadata, richer object and column identities, ownership and ACL records, bound routine and rule dependencies, and expression-index metadata. Initial open owns migration writes; later catalog refresh validates the persisted representation. The shipped SQLite and key-value providers handle their storage migrations through the normal engine open path.
 
 1. Stop writers, close every engine using the database, and create a recoverable backup through the [storage backup procedure](04-storage-and-security.md#backups-and-copies).
-2. Open a copy with the exact 0.2.1 application and its selected provider, encryption key, and compression configuration.
+2. Open a copy with the exact 0.2.2 application and its selected provider, encryption key, and compression configuration.
 3. Execute representative reads, writes, role and privilege checks, stored routines and views, and retrieval queries. Verify indexes, transaction rollback, and close-and-reopen behavior with the application's data.
 4. Update every process sharing the database before reopening the original file. Register process-local runtime callbacks again when the application starts.
-5. If the application must return to an older binary, restore the pre-upgrade backup. Do not rely on an older binary reading a file migrated by 0.2.1.
+5. If the application must return to an older binary, restore the pre-upgrade backup. Do not rely on an older binary reading a file migrated by 0.2.2.
 
 Keep migration failures visible and resolve them before admitting writes. Retain encryption keys and any external rollback anchor according to the [storage and security contract](04-storage-and-security.md).
 

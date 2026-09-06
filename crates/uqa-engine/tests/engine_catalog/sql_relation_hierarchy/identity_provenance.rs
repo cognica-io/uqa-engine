@@ -216,6 +216,7 @@ fn legacy_boolean_auto_increment_metadata_remains_readable() {
         not_null_name: None,
         not_null_validated: true,
         not_null_no_inherit: false,
+        not_null_is_local: true,
         auto_increment: Some(AutoIncrement {
             kind: AutoIncrementKind::Serial,
             sequence: Some("public.parent_id_seq".into()),

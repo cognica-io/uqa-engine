@@ -1,0 +1,37 @@
+only-parent|nn_parent_a_not_null|t|t
+rollback-count|0
+repeat-only|ok
+recursive-no-inherit|0A000|cannot change NO INHERIT status of NOT NULL constraint "nn_parent_a_not_null" on relation "nn_parent"
+preserved-parent|nn_parent_a_not_null|t|t
+unconstrained-child|0
+child-null-validation|23502|column "a" of relation "nn_child" contains null values
+failed-recursion-count|0
+recursive-after-drop|ok
+inheritable-parent|f|t
+child-enforces|23502|null value in column "a" of relation "nn_child" violates not-null constraint
+leaf|f
+leaf-recursive|ok
+partition-only|42P16|constraint must be added to child tables too
+partition-failure-count|0
+partition-existing-only|ok
+empty-partitioned|f
+child-no-inherit-set|0A000|cannot change NO INHERIT status of NOT NULL constraint "child_nn" on relation "nn_merge_child"
+child-no-inherit-add|55000|cannot change NO INHERIT status of NOT NULL constraint "child_nn" on relation "nn_merge_child"
+merge-parent-count|0
+merge-child|child_nn|t|t
+explicit-no-inherit|0A000|cannot change NO INHERIT status of NOT NULL constraint "chosen_nn" on relation "nn_explicit"
+explicit-only|ok
+unvalidated-before|retained_nn|f
+validated-after|retained_nn|t
+missing-column|42703|column "absent" of relation "nn_errors" does not exist
+system-column|0A000|cannot alter system column "xmin"
+parent-null-validation|23502|column "a" of relation "nn_errors" contains null values
+validation-failure-count|0
+recursive-unvalidated-child|ok
+unvalidated-child|unvalidated_child_nn|f|1|t
+retained-child-null|1
+detached-child-count|0
+two-parent-count|2
+one-parent-count|1
+zero-parent-count|0
+no-inherit-parent-count|0
