@@ -1,0 +1,41 @@
+new-column|42501|must be owner of table child
+merged-column|42501|must be owner of table child
+owner-before-merged-type|42501|must be owner of table child
+merged-check|42501|must be owner of table child
+owner-before-check-conflict|42501|must be owner of table child
+merged-named-not-null|42501|must be owner of table child
+merged-set-not-null|42501|must be owner of table child
+only-column|42P16|column must be added to child tables too
+all-grants-are-not-ownership|42501|must be owner of table child
+set-without-inherit|42501|must be owner of table child
+parent-after-denials|id
+child-extra-after-denials|true|0
+rows-after-denials|1
+unaffected-grandchild-column|ok
+unaffected-grandchild-check|ok
+unaffected-grandchild-not-null|ok
+unchanged-grandchild-extra|false|1
+affected-grandchild-column|42501|must be owner of table propagation_grandchild
+affected-grandchild-not-null|42501|must be owner of table propagation_grandchild
+parent-after-grandchild-denial|id
+diamond-column|42501|must be owner of table diamond_leaf
+diamond-not-null|42501|must be owner of table diamond_leaf
+partition-check|42501|must be owner of table partition_child
+partition-named-not-null|42501|must be owner of table partition_child
+partition-set-not-null|42501|must be owner of table partition_child
+savepoint-error 42501
+failed-transaction 25P02
+parent-after-savepoint|id
+inherited-column|ok
+inherited-check|ok
+inherited-not-null|ok
+inherited-partition-check|ok
+inherited-partition-not-null|ok
+inherited-diamond-column|ok
+diamond-leaf-extra|2
+child-extra-after-inherit|true|1
+revoked-child-owner|42501|must be owner of table child
+parent-after-revoke|id,extra
+unchanged-root-column|ok
+unchanged-only-root-column|ok
+unchanged-root-not-null|ok

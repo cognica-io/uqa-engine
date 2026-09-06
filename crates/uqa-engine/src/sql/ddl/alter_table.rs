@@ -28,8 +28,8 @@ pub(crate) use constraint_drop::drop_constraint_dependency;
 use constraint_drop::{drop_column_cascade, drop_column_restrict, drop_constraint};
 use constraint_lifecycle::{
     add_check_constraint, add_foreign_key_constraint, add_not_null_constraint, alter_constraint,
-    ensure_constraint_name_available, validate_altered_constraint_column_types,
-    validate_and_mark_constraint,
+    ensure_constraint_name_available, set_not_null_constraint,
+    validate_altered_constraint_column_types, validate_and_mark_constraint,
 };
 use constraint_lifecycle::{
     constraint_error, find_constraint, publish_constraint_state, table_constraint_state,
@@ -39,9 +39,7 @@ pub(super) use foreign_key::{
     column_foreign_key, validate_bound_foreign_key_definition_with_local_state,
     validate_foreign_key_definition_with_local_state,
 };
-use recursion::{
-    materialize_recursive_action_names, merge_existing_recursive_action, recursive_alter_targets,
-};
+use recursion::{materialize_recursive_action_names, run_recursive_alter_action};
 
 pub(in crate::sql) fn run_alter_table(
     engine: &Engine,
@@ -260,32 +258,17 @@ fn run_alter_table_inner(engine: &Engine, stmt: AlterTableStmt) -> Result<SQLRes
     engine.ensure_table_owner(&table)?;
     for mut action in actions {
         materialize_recursive_action_names(engine, &table, recurse, &mut action)?;
-        let targets = recursive_alter_targets(engine, &table, recurse, &action)?;
-        for target in targets {
-            if target != table && merge_existing_recursive_action(engine, &target, &action)? {
-                continue;
-            }
-            let target_qualifier = if target == table {
-                qualifier.clone()
-            } else {
-                crate::RelationIdentity::from_legacy_name(&target)
-                    .map_err(|error| {
-                        SQLError::Internal(format!("resolve recursive ALTER target: {error}"))
-                    })?
-                    .name
-            };
-            run_alter_table_action(
-                engine,
-                AlterTableStmt {
-                    table: target,
-                    qualifier: target_qualifier,
-                    if_exists,
-                    recurse: false,
-                    actions: Vec::new(),
-                },
-                action.clone(),
-            )?;
-        }
+        run_recursive_alter_action(
+            engine,
+            AlterTableStmt {
+                table: table.clone(),
+                qualifier: qualifier.clone(),
+                if_exists,
+                recurse,
+                actions: Vec::new(),
+            },
+            action,
+        )?;
     }
     Ok(SQLResult::empty())
 }
@@ -299,7 +282,6 @@ fn run_alter_table_action(
     stmt: AlterTableStmt,
     action: AlterTableAction,
 ) -> Result<(), SQLError> {
-    engine.ensure_table_owner(&stmt.table)?;
     if matches!(&action, AlterTableAction::AddKeyConstraint { .. }) {
         let persistence = engine
             .table_persistence(&stmt.table)
@@ -763,14 +745,7 @@ fn run_alter_table_action(
                 .map_err(|error| ddl_storage_error("ALTER COLUMN DROP EXPRESSION", error))?;
         }
         AlterTableAction::SetNotNull { name } => {
-            ensure_column_exists(engine, &stmt.table, &name)?;
-            ensure_existing_values_not_null(engine, &stmt.table, &name)?;
-            engine
-                .set_column_not_null(&stmt.table, &name, true)
-                .map_err(|err| ddl_storage_error("ALTER COLUMN SET NOT NULL", err))?;
-            engine
-                .try_persist_table_schema(&stmt.table)
-                .map_err(|e| ddl_storage_error("ALTER TABLE ALTER COLUMN", e))?;
+            set_not_null_constraint(engine, &stmt.table, &name, stmt.recurse)?;
         }
         AlterTableAction::DropNotNull { name } => {
             let (columns, _) = table_constraint_state(engine, &stmt.table)?;
@@ -889,7 +864,6 @@ fn run_alter_table_action(
 
 mod validation;
 use validation::{
-    backfill_added_column, ensure_column_exists, ensure_existing_values_not_null,
-    reject_default_change_on_generated_column, validate_added_key_constraint,
-    validate_all_table_rows, validate_and_rewrite_generated_rows,
+    backfill_added_column, ensure_column_exists, reject_default_change_on_generated_column,
+    validate_added_key_constraint, validate_all_table_rows, validate_and_rewrite_generated_rows,
 };

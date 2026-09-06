@@ -155,28 +155,6 @@ pub(super) fn ensure_column_exists(
     }
 }
 
-pub(super) fn ensure_existing_values_not_null(
-    engine: &Engine,
-    table: &str,
-    column: &str,
-) -> Result<(), SQLError> {
-    let mut null_rows = 0usize;
-    for doc_id in engine.live_table_doc_ids(table)? {
-        let Some(doc) = engine.get_document(table, doc_id)? else {
-            continue;
-        };
-        if matches!(doc.get(column), None | Some(Value::Null)) {
-            null_rows += 1;
-        }
-    }
-    if null_rows > 0 {
-        return Err(SQLError::TypeMismatch(format!(
-            "ALTER TABLE ALTER COLUMN: column `{column}` contains NULL values"
-        )));
-    }
-    Ok(())
-}
-
 #[expect(
     clippy::too_many_lines,
     reason = "preserves DDL dependency and action order"

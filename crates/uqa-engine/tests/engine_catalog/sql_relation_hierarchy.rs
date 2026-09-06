@@ -25,6 +25,10 @@ mod identity_provenance;
 mod merge;
 #[path = "sql_relation_hierarchy/movement.rs"]
 mod movement;
+#[path = "sql_relation_hierarchy/not_null.rs"]
+mod not_null;
+#[path = "sql_relation_hierarchy/ownership.rs"]
+mod ownership;
 #[path = "sql_relation_hierarchy/regressions.rs"]
 mod regressions;
 #[path = "sql_relation_hierarchy/retrieval.rs"]

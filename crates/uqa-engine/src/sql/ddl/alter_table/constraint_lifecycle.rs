@@ -295,6 +295,77 @@ pub(super) fn add_foreign_key_constraint(
     Ok(())
 }
 
+pub(super) fn ensure_not_null_inheritable(
+    table: &str,
+    column: &uqa_sql::ast::ColumnDef,
+    sqlstate: &str,
+) -> Result<(), SQLError> {
+    if column.not_null_no_inherit {
+        let relation = crate::RelationIdentity::from_legacy_name(table)
+            .map_err(|error| SQLError::Internal(format!("resolve NOT NULL relation: {error}")))?;
+        let name = column.not_null_name.as_deref().unwrap_or("<unnamed>");
+        return Err(constraint_error(
+            sqlstate,
+            format!(
+            "cannot change NO INHERIT status of NOT NULL constraint \"{name}\" on relation \"{}\"",
+            relation.name,
+        ),
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn set_not_null_constraint(
+    engine: &Engine,
+    table: &str,
+    column: &str,
+    recurse: bool,
+) -> Result<(), SQLError> {
+    let (mut columns, constraints) = table_constraint_state(engine, table)?;
+    let relation = crate::RelationIdentity::from_legacy_name(table)
+        .map_err(|error| SQLError::Internal(format!("resolve NOT NULL relation: {error}")))?;
+    if super::super::POSTGRES_SYSTEM_COLUMNS.contains(&column) {
+        return Err(constraint_error(
+            "0A000",
+            format!("cannot alter system column \"{column}\""),
+        ));
+    }
+    let definition = columns
+        .iter_mut()
+        .find(|definition| definition.name == column)
+        .ok_or_else(|| {
+            constraint_error(
+                "42703",
+                format!(
+                    "column \"{column}\" of relation \"{}\" does not exist",
+                    relation.name,
+                ),
+            )
+        })?;
+    if definition.not_null {
+        if recurse {
+            ensure_not_null_inheritable(table, definition, "0A000")?;
+        }
+        let name = definition
+            .not_null_name
+            .clone()
+            .ok_or_else(|| SQLError::Internal("existing NOT NULL constraint has no name".into()))?;
+        if !definition.not_null_explicit {
+            definition.not_null_explicit = true;
+            publish_constraint_state(engine, table, columns, constraints)?;
+        }
+        return validate_and_mark_constraint(engine, table, &name);
+    }
+    let no_inherit = !recurse && !engine.direct_hierarchy_children(table)?.is_empty();
+    if no_inherit && constraints.hierarchy.partition_spec.is_some() {
+        return Err(constraint_error(
+            "42P16",
+            "constraint must be added to child tables too",
+        ));
+    }
+    add_not_null_constraint(engine, table, None, column, true, no_inherit)
+}
+
 pub(super) fn add_not_null_constraint(
     engine: &Engine,
     table: &str,
@@ -434,6 +505,8 @@ pub(super) fn validate_and_mark_constraint(
 }
 
 fn validate_not_null_rows(engine: &Engine, table: &str, column: &str) -> Result<(), SQLError> {
+    let relation = crate::RelationIdentity::from_legacy_name(table)
+        .map_err(|error| SQLError::Internal(format!("resolve NOT NULL relation: {error}")))?;
     for doc_id in engine.live_table_doc_ids(table)? {
         let Some(document) = engine.get_document(table, doc_id)? else {
             continue;
@@ -441,7 +514,10 @@ fn validate_not_null_rows(engine: &Engine, table: &str, column: &str) -> Result<
         if matches!(document.get(column), None | Some(Value::Null)) {
             return Err(constraint_error(
                 "23502",
-                format!("column \"{column}\" of relation \"{table}\" contains null values"),
+                format!(
+                    "column \"{column}\" of relation \"{}\" contains null values",
+                    relation.name
+                ),
             ));
         }
     }

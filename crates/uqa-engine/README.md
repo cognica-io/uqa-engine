@@ -7,12 +7,12 @@ It is designed for applications that need more than a relational table but do no
 > [!IMPORTANT]
 > **Open source with broad application exceptions**
 >
-> UQA Engine uses AGPL-3.0-only as its base license, with FOSS and noncommercial application exceptions. Qualifying open-source applications, including commercial ones, and qualifying personal, educational, academic, or charitable applications may keep their independent code under their own licenses or chosen terms. In practice, separate commercial terms are mainly needed for proprietary commercial products or services that must keep their application or UQA Engine changes closed. UQA Engine and modifications to UQA Engine remain under the AGPL when using the public paths. See the [licensing policy](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/LICENSING.md) for the exact conditions.
+> UQA Engine uses AGPL-3.0-only as its base license, with FOSS and noncommercial application exceptions. Qualifying open-source applications, including commercial ones, and qualifying personal, educational, academic, or charitable applications may keep their independent code under their own licenses or chosen terms. In practice, separate commercial terms are mainly needed for proprietary commercial products or services that must keep their application or UQA Engine changes closed. UQA Engine and modifications to UQA Engine remain under the AGPL when using the public paths. See the [licensing policy](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/LICENSING.md) for the exact conditions.
 
 > [!TIP]
 > **Using an LLM or coding agent?**
 >
-> Start with [`llms.txt`](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/llms.txt). It maps the authoritative manual, implementation, examples, and verification workflow without requiring the agent to load the entire repository.
+> Start with [`llms.txt`](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/llms.txt). It maps the authoritative manual, implementation, examples, and verification workflow without requiring the agent to load the entire repository.
 
 ## What you can build
 
@@ -24,28 +24,28 @@ It is designed for applications that need more than a relational table but do no
 - Embed the engine in Rust or use the Python, Node.js, and browser WASM bindings included in the workspace.
 
 > [!NOTE]
-> UQA Engine is under active development at version 0.2.1. The implementation is broad and heavily tested, but public APIs and storage formats may still evolve before a stable release.
+> UQA Engine is under active development at version 0.2.2. The implementation is broad and heavily tested, but public APIs and storage formats may still evolve before a stable release.
 
-## New in 0.2.1
+## New in 0.2.2
 
-Version 0.2.1 fixes Python-installed `usql` startup and SQL script execution. Upgrade the Python package to use both modes normally.
+Version 0.2.2 fixes recursive `ALTER TABLE` ownership checks and PostgreSQL 18 `ONLY SET NOT NULL` inheritance behavior, including atomic rollback and durable constraint metadata. It also includes the Python `usql` startup and script fix from 0.2.1.
 
-The 0.2 series adds durable B-tree expression and unique indexes, stronger SQL object dependencies and privileges, expanded sequence and PL/pgSQL behavior, and transactional notifications across native processes sharing a database. The Node.js HTTP client now runs without native addons and can be installed with `npm install --omit=optional @cognica-io/uqa@0.2.1`.
+The 0.2 series adds durable B-tree expression and unique indexes, stronger SQL object dependencies and privileges, expanded sequence and PL/pgSQL behavior, and transactional notifications across native processes sharing a database. The Node.js HTTP client now runs without native addons and can be installed with `npm install --omit=optional @cognica-io/uqa@0.2.2`.
 
-Read the [release history](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/HISTORY.md#021---2026-09-06) for the complete changes and the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/docs/manual/reference/10-upgrading.md) before updating a persistent database or a custom Rust storage provider.
+Read the [release history](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/HISTORY.md#021---2026-09-06) for the complete changes and the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/docs/manual/reference/10-upgrading.md) before updating a persistent database or a custom Rust storage provider.
 
 ## Mathematical foundation
 
-[A Typed Carrier Algebra for Unified Query Execution](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/docs/papers/A%20Typed%20Carrier%20Algebra%20for%20Unified%20Query%20Execution.pdf) states the implementation-grounded theory behind UQA Engine. It distinguishes document support, weighted relations, decorated postings, ranked views, SQL bags, join tuples, graph context, and aggregate state while showing how they compose through one typed planning and execution framework.
+[A Typed Carrier Algebra for Unified Query Execution](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/docs/papers/A%20Typed%20Carrier%20Algebra%20for%20Unified%20Query%20Execution.pdf) states the implementation-grounded theory behind UQA Engine. It distinguishes document support, weighted relations, decorated postings, ranked views, SQL bags, join tuples, graph context, and aggregate state while showing how they compose through one typed planning and execution framework.
 
-The manuscript consolidates and revises the published work on [unified query algebra](https://doi.org/10.31219/osf.io/f56j2_v2), its [graph-data extension](https://doi.org/10.31219/osf.io/cgfae_v1), and the [Bayesian framework for hybrid search](https://doi.org/10.5281/zenodo.20768747). For academic use, cite the software and the papers relevant to the features used; machine-readable metadata is provided in [CITATION.cff](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/CITATION.cff).
+The manuscript consolidates and revises the published work on [unified query algebra](https://doi.org/10.31219/osf.io/f56j2_v2), its [graph-data extension](https://doi.org/10.31219/osf.io/cgfae_v1), and the [Bayesian framework for hybrid search](https://doi.org/10.5281/zenodo.20768747). For academic use, cite the software and the papers relevant to the features used; machine-readable metadata is provided in [CITATION.cff](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/CITATION.cff).
 
 ## Try it in a terminal
 
 Install the prebuilt Python package to get both the Python binding and the `usql` command:
 
 ```sh
-python -m pip install uqa==0.2.1
+python -m pip install uqa==0.2.2
 usql
 ```
 
@@ -97,7 +97,7 @@ cargo run -p uqa-cli --bin usql -- -c "SELECT 1 AS ready"
 Add the released package to your application:
 
 ```sh
-cargo add uqa@0.2.1
+cargo add uqa@0.2.2
 ```
 
 `uqa` is the primary Rust package on crates.io. It is a thin facade over `uqa-engine` that also re-exports the core `Value` type; applications that need the implementation package directly can depend on `uqa-engine`. Public component crates including `uqa-engine`, `uqa-client`, `uqa-api`, and `uqa-cli` are also published independently. The following example creates an in-memory engine, inserts data, and runs SQL through the same interface used by a persistent engine.
@@ -174,7 +174,7 @@ assert_eq!(result.rows.len(), 1);
 # }
 ```
 
-Python and Node.js provide matching `local` and `cloud` project constructors; browsers retain explicit URL/token and environment construction because they cannot execute the CLI or access its credential store. Every client calls `/v1/sql`, `/v1/sql/batch`, and `/v1/sql/stream` directly after construction. See the [HTTP Engine reference](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/docs/manual/reference/09-http-engine.md) for connection, binding examples, result, streaming, CORS, and security contracts.
+Python and Node.js provide matching `local` and `cloud` project constructors; browsers retain explicit URL/token and environment construction because they cannot execute the CLI or access its credential store. Every client calls `/v1/sql`, `/v1/sql/batch`, and `/v1/sql/stream` directly after construction. See the [HTTP Engine reference](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/docs/manual/reference/09-http-engine.md) for connection, binding examples, result, streaming, CORS, and security contracts.
 
 ## Choose a query path
 
@@ -207,24 +207,24 @@ let engine = Engine::from_persistent_provider(provider)?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-The redb path supports the catalog, documents, full-text search, graphs, durable B-tree indexes, exact brute-force vectors, physical IVF and HNSW indexes, transactions, and savepoints. It uses the same SQL DDL and query API as SQLite; the main capability difference is that redb does not provide encryption at rest. See the [Key/Value storage design](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/docs/design/kv-storage-backends.md) for storage and transaction details.
+The redb path supports the catalog, documents, full-text search, graphs, durable B-tree indexes, exact brute-force vectors, physical IVF and HNSW indexes, transactions, and savepoints. It uses the same SQL DDL and query API as SQLite; the main capability difference is that redb does not provide encryption at rest. See the [Key/Value storage design](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/docs/design/kv-storage-backends.md) for storage and transaction details.
 
 Persistent full-text indexes use clustered postings rather than one physical row or key per `(term, doc_id)`: one `(table, field, term, doc_id / 65,536)` value stores delta-encoded document IDs, term frequencies, and document lengths, while positions live in a separate value. Ranking opens score-only cursors, reuses one decode buffer for at most 128 postings per block, and leaves positional payloads unread unless a positional consumer asks for them. SQLite schema v22 and the shared Key/Value backend automatically migrate the previous per-document posting format on open; each SQLite or redb rewrite is atomic, idempotent, and rolls back without changing the old data when validation fails.
 
 Security-sensitive deployments should use the SQLCipher path exposed by `Engine::open_encrypted`. Compressed encrypted containers are also available when compression is required, but they have a narrower, explicitly documented threat model and require an external trusted anchor for whole-file rollback detection.
 
-Read the [compressed VFS security contract](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/docs/design/compressed-vfs-security.md) before selecting that format.
+Read the [compressed VFS security contract](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/docs/design/compressed-vfs-security.md) before selecting that format.
 
 ## Language bindings
 
 | Environment | Workspace package | Notes |
 | --- | --- | --- |
-| Rust facade | [`uqa`](https://github.com/cognica-io/uqa-engine/tree/v0.2.1/crates/uqa) | Primary dependency re-exporting `uqa-engine` and `uqa_core::Value` |
-| Rust engine | [`uqa-engine`](https://github.com/cognica-io/uqa-engine/tree/v0.2.1/crates/uqa-engine) | Direct embedded implementation API and runnable examples |
-| Rust HTTP | [`uqa-client`](https://github.com/cognica-io/uqa-engine/tree/v0.2.1/crates/uqa-client) | Authenticated local and Cloud data-plane SQL, atomic batches, and NDJSON streaming |
-| Python | [`uqa-python`](https://github.com/cognica-io/uqa-engine/tree/v0.2.1/crates/uqa-python) | pyo3/maturin bindings, the installed `usql` command, and synchronous local and Cloud HTTP SQL |
-| Node.js | [`uqa-node`](https://github.com/cognica-io/uqa-engine/tree/v0.2.1/crates/uqa-node) | Node-API bindings with asynchronous embedded and local or Cloud HTTP SQL methods |
-| Browser | [`uqa-wasm`](https://github.com/cognica-io/uqa-engine/tree/v0.2.1/crates/uqa-wasm) | Emscripten embedded engine with IndexedDB persistence plus fetch-based local and Cloud HTTP SQL |
+| Rust facade | [`uqa`](https://github.com/cognica-io/uqa-engine/tree/v0.2.2/crates/uqa) | Primary dependency re-exporting `uqa-engine` and `uqa_core::Value` |
+| Rust engine | [`uqa-engine`](https://github.com/cognica-io/uqa-engine/tree/v0.2.2/crates/uqa-engine) | Direct embedded implementation API and runnable examples |
+| Rust HTTP | [`uqa-client`](https://github.com/cognica-io/uqa-engine/tree/v0.2.2/crates/uqa-client) | Authenticated local and Cloud data-plane SQL, atomic batches, and NDJSON streaming |
+| Python | [`uqa-python`](https://github.com/cognica-io/uqa-engine/tree/v0.2.2/crates/uqa-python) | pyo3/maturin bindings, the installed `usql` command, and synchronous local and Cloud HTTP SQL |
+| Node.js | [`uqa-node`](https://github.com/cognica-io/uqa-engine/tree/v0.2.2/crates/uqa-node) | Node-API bindings with asynchronous embedded and local or Cloud HTTP SQL methods |
+| Browser | [`uqa-wasm`](https://github.com/cognica-io/uqa-engine/tree/v0.2.2/crates/uqa-wasm) | Emscripten embedded engine with IndexedDB persistence plus fetch-based local and Cloud HTTP SQL |
 
 Released Node.js applications install `@cognica-io/uqa` from npm; npm selects an exact-version native optional package under `@cognica-io` for the current supported platform. Browser applications install the independent `@cognica-io/uqa-wasm` package.
 
@@ -263,7 +263,7 @@ python3 -m pip install -r benchmarks/beir/requirements.txt
 bash scripts/run-beir-benchmark.sh
 ```
 
-The combined report includes exact, IVF, and HNSW SQL query latency and throughput, SQL load and index-construction throughput, recall@10, top-1 accuracy, MRR@10, exact top-k set rate, and cosine-score error. Pass `smoke` or `large` to select the 10,000-row or 1,000,000-row profile; the deterministic workload, measured boundary, metric definitions, quality floors, output files, and limitations are documented in the [vector-search benchmark](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/benchmarks/vector-search/README.md).
+The combined report includes exact, IVF, and HNSW SQL query latency and throughput, SQL load and index-construction throughput, recall@10, top-1 accuracy, MRR@10, exact top-k set rate, and cosine-score error. Pass `smoke` or `large` to select the 10,000-row or 1,000,000-row profile; the deterministic workload, measured boundary, metric definitions, quality floors, output files, and limitations are documented in the [vector-search benchmark](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/benchmarks/vector-search/README.md).
 
 Integration tests are consolidated into a small set of domain harnesses so a workspace test does not pay one linker and process-startup cost per source file. Individual modules remain directly selectable during development:
 
@@ -288,7 +288,7 @@ python3 tests/parity/pg18/run_diff.py --validate-manifest
 python3 tests/parity/pg18/run_diff.py
 ```
 
-Stateful routine, constraint, type-and-temporal, trigger, and rewrite-rule oracles plus the pinned psycopg, pgx, and node-postgres matrix are documented in [PG18 differential probes](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/tests/parity/pg18/README.md). The current milestone and open-gate ledger is the [PostgreSQL 18 compatibility plan](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/docs/plans/0003-postgresql-18-compatibility.md).
+Stateful routine, constraint, type-and-temporal, trigger, and rewrite-rule oracles plus the pinned psycopg, pgx, and node-postgres matrix are documented in [PG18 differential probes](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/tests/parity/pg18/README.md). The current milestone and open-gate ledger is the [PostgreSQL 18 compatibility plan](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/docs/plans/0003-postgresql-18-compatibility.md).
 
 Release-mode timing uses a machine-readable runner rather than test-profile execution:
 
@@ -297,46 +297,46 @@ cargo build --release -p uqa-engine --example tpch_runner --locked
 target/release/examples/tpch_runner --iterations 201
 ```
 
-In the 2026-08-09 local arm64 development snapshot, UQA matched all 22 results and had a lower median latency than PostgreSQL 17 on 14 of 22 queries. This is a small developer-machine compatibility workload, not a compliant or audited TPC-H result. The complete fixture provenance, per-query measurements, and reproduction rules are in the [TPC-H compatibility benchmark](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/benchmarks/tpch/README.md); the broader benchmark methodology is in the [performance design document](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/docs/design/performance.md).
+In the 2026-08-09 local arm64 development snapshot, UQA matched all 22 results and had a lower median latency than PostgreSQL 17 on 14 of 22 queries. This is a small developer-machine compatibility workload, not a compliant or audited TPC-H result. The complete fixture provenance, per-query measurements, and reproduction rules are in the [TPC-H compatibility benchmark](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/benchmarks/tpch/README.md); the broader benchmark methodology is in the [performance design document](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/docs/design/performance.md).
 
-The 2026-08-11 clustered-posting pass measured release-profile persisted Block-Max WAND at 1.0142 ms and WAND at 0.9337 ms on the direct 5,000-document reopened-SQLite probe, down 73.7% and 76.5% from the preceding 3.8584 ms and 3.9801 ms baselines. The 2026-08-12 pinned SciFact run separately measured the current exact `hybrid_log_odds` contract at 0.7226 NDCG@10, 0.6820 MAP@10, 0.8322 Recall@10, and 3.29 ms per query; it passed every absolute and comparative gate. Commands, measured boundaries, validity rules, complete tables, and limitations are recorded in the [performance design document](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/docs/design/performance.md#clustered-posting-pass-2026-08-11).
+The 2026-08-11 clustered-posting pass measured release-profile persisted Block-Max WAND at 1.0142 ms and WAND at 0.9337 ms on the direct 5,000-document reopened-SQLite probe, down 73.7% and 76.5% from the preceding 3.8584 ms and 3.9801 ms baselines. The 2026-08-12 pinned SciFact run separately measured the current exact `hybrid_log_odds` contract at 0.7226 NDCG@10, 0.6820 MAP@10, 0.8322 Recall@10, and 3.29 ms per query; it passed every absolute and comparative gate. Commands, measured boundaries, validity rules, complete tables, and limitations are recorded in the [performance design document](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/docs/design/performance.md#clustered-posting-pass-2026-08-11).
 
-Contributor checks, benchmark build gates, and repository conventions are documented in [CONTRIBUTING.md](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/CONTRIBUTING.md).
+Contributor checks, benchmark build gates, and repository conventions are documented in [CONTRIBUTING.md](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/CONTRIBUTING.md).
 
 ## Documentation
 
 | Document | Use it for |
 | --- | --- |
-| [Reference manual and tutorials](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/docs/manual/README.md) | Learning the engine, supported SQL, public APIs, and internal architecture |
-| [Runnable examples](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/examples/README.md) | Comparing the same search, vector, graph, storage, and extension scenarios across Rust, Python, Node.js, and Browser WASM |
-| [Design documentation index](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/docs/design/README.md) | Finding the right technical contract or architecture document |
-| [System architecture](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/docs/design/architecture.md) | Crate boundaries, query planning, carriers, execution, storage, and extension points |
-| [Vector indexes](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/docs/design/vector-indexes.md) | Brute-force, IVF, and HNSW behavior, parameters, persistence, and correctness contracts |
-| [Vector-search benchmark](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/benchmarks/vector-search/README.md) | Reproducing vector latency, throughput, construction cost, recall, and accuracy reports |
-| [Engine state ownership](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/docs/design/engine-state-ownership.md) | Session isolation, locks, epochs, and publication rules |
-| [Key/Value storage](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/docs/design/kv-storage-backends.md) | Swappable provider contract, redb behavior, transactions, and current capability limits |
-| [Compressed VFS security](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/docs/design/compressed-vfs-security.md) | Encryption format, authenticated metadata, rollback limits, and deployment guidance |
-| [Performance](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/docs/design/performance.md) | Reproducible baselines, regression gates, bottlenecks, and benchmark limitations |
-| [Parity fixtures](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/docs/design/parity.md) | SQL, relevance, and vector-calibration compatibility fixtures |
-| [Citation metadata](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/CITATION.cff) | Software citation and DOI metadata for the underlying research papers |
-| [Licensing policy](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/LICENSING.md) | AGPL, FOSS, noncommercial, commercial, and contribution paths |
-| [History](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/HISTORY.md) | Release-by-release changes |
+| [Reference manual and tutorials](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/docs/manual/README.md) | Learning the engine, supported SQL, public APIs, and internal architecture |
+| [Runnable examples](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/examples/README.md) | Comparing the same search, vector, graph, storage, and extension scenarios across Rust, Python, Node.js, and Browser WASM |
+| [Design documentation index](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/docs/design/README.md) | Finding the right technical contract or architecture document |
+| [System architecture](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/docs/design/architecture.md) | Crate boundaries, query planning, carriers, execution, storage, and extension points |
+| [Vector indexes](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/docs/design/vector-indexes.md) | Brute-force, IVF, and HNSW behavior, parameters, persistence, and correctness contracts |
+| [Vector-search benchmark](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/benchmarks/vector-search/README.md) | Reproducing vector latency, throughput, construction cost, recall, and accuracy reports |
+| [Engine state ownership](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/docs/design/engine-state-ownership.md) | Session isolation, locks, epochs, and publication rules |
+| [Key/Value storage](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/docs/design/kv-storage-backends.md) | Swappable provider contract, redb behavior, transactions, and current capability limits |
+| [Compressed VFS security](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/docs/design/compressed-vfs-security.md) | Encryption format, authenticated metadata, rollback limits, and deployment guidance |
+| [Performance](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/docs/design/performance.md) | Reproducible baselines, regression gates, bottlenecks, and benchmark limitations |
+| [Parity fixtures](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/docs/design/parity.md) | SQL, relevance, and vector-calibration compatibility fixtures |
+| [Citation metadata](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/CITATION.cff) | Software citation and DOI metadata for the underlying research papers |
+| [Licensing policy](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/LICENSING.md) | AGPL, FOSS, noncommercial, commercial, and contribution paths |
+| [History](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/HISTORY.md) | Release-by-release changes |
 
 ## Project layout
 
-The repository is a Rust workspace with small crates for the algebra, storage, scoring, graph, SQL, planning, execution, engine, CLI, APIs, and language bindings. The full dependency map and ownership rules live in the [system architecture](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/docs/design/architecture.md), keeping this README focused on using the project.
+The repository is a Rust workspace with small crates for the algebra, storage, scoring, graph, SQL, planning, execution, engine, CLI, APIs, and language bindings. The full dependency map and ownership rules live in the [system architecture](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/docs/design/architecture.md), keeping this README focused on using the project.
 
 ## Contributing
 
-See [CONTRIBUTING.md](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/CONTRIBUTING.md) for local gates, test conventions, crate boundaries, pull request guidelines, and the current contributor-licensing requirement.
+See [CONTRIBUTING.md](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/CONTRIBUTING.md) for local gates, test conventions, crate boundaries, pull request guidelines, and the current contributor-licensing requirement.
 
 ## License
 
-UQA Engine is open-source software licensed under AGPL-3.0-only. See [LICENSE](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/LICENSE).
+UQA Engine is open-source software licensed under AGPL-3.0-only. See [LICENSE](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/LICENSE).
 
 Two optional additional permissions are available:
 
-- the [FOSS exception](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/LICENSES/UQA-FOSS-EXCEPTION-1.0.txt) lets a complete qualifying open-source application retain its OSI-approved license while UQA Engine and modifications to UQA Engine remain under the AGPL; and
-- the [noncommercial application exception](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt) lets a qualifying personal, educational, academic, or charitable application keep its independent code under terms chosen by its author while UQA Engine and modifications to UQA Engine remain under the AGPL.
+- the [FOSS exception](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/LICENSES/UQA-FOSS-EXCEPTION-1.0.txt) lets a complete qualifying open-source application retain its OSI-approved license while UQA Engine and modifications to UQA Engine remain under the AGPL; and
+- the [noncommercial application exception](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt) lets a qualifying personal, educational, academic, or charitable application keep its independent code under terms chosen by its author while UQA Engine and modifications to UQA Engine remain under the AGPL.
 
-Separate [commercial licensing](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/COMMERCIAL.md) is available for proprietary applications, closed modifications, SaaS, and OEM distribution. The complete decision guide is in the [licensing policy](https://github.com/cognica-io/uqa-engine/blob/v0.2.1/LICENSING.md).
+Separate [commercial licensing](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/COMMERCIAL.md) is available for proprietary applications, closed modifications, SaaS, and OEM distribution. The complete decision guide is in the [licensing policy](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/LICENSING.md).

@@ -57,8 +57,8 @@ New users should read the [quick start](reference/01-quick-start.md), then work 
 
 ## Version and compatibility scope
 
-This manual targets UQA Engine 0.2.1 and Rust 1.90 or newer. UQA Engine implements a large PostgreSQL 18-compatible surface across its verified behavior, but it is an embedded engine rather than a PostgreSQL server clone. The [compatibility guide](sql/09-compatibility.md) states the verification boundary and behavior that remains incomplete.
+This manual targets UQA Engine 0.2.2 and Rust 1.90 or newer. UQA Engine implements a large PostgreSQL 18-compatible surface across its verified behavior, but it is an embedded engine rather than a PostgreSQL server clone. The [compatibility guide](sql/09-compatibility.md) states the verification boundary and behavior that remains incomplete.
 
-For an existing installation, follow the [0.2.1 upgrade guide](reference/10-upgrading.md), including its custom storage API and persistent database migration notes.
+For an existing installation, follow the [0.2.2 upgrade guide](reference/10-upgrading.md), including its custom storage API and persistent database migration notes.
 
 The implementation and tests are authoritative when behavior changes. Source paths are included throughout the internal documentation to make each claim traceable.

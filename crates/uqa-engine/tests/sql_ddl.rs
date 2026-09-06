@@ -529,10 +529,11 @@ fn alter_table_set_not_null_with_existing_nulls_raises() {
     let engine = Engine::new();
     exec(&engine, "CREATE TABLE t (id INTEGER, val TEXT)");
     exec(&engine, "INSERT INTO t (id) VALUES (1)");
-    assert_err_contains(
+    assert_err_with_sqlstate(
         &engine,
         "ALTER TABLE t ALTER COLUMN val SET NOT NULL",
-        "contains NULL",
+        "23502",
+        "column \"val\" of relation \"t\" contains null values",
     );
 }
 

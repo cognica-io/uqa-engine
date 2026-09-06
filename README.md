@@ -24,13 +24,13 @@ It is designed for applications that need more than a relational table but do no
 - Embed the engine in Rust or use the Python, Node.js, and browser WASM bindings included in the workspace.
 
 > [!NOTE]
-> UQA Engine is under active development at version 0.2.1. The implementation is broad and heavily tested, but public APIs and storage formats may still evolve before a stable release.
+> UQA Engine is under active development at version 0.2.2. The implementation is broad and heavily tested, but public APIs and storage formats may still evolve before a stable release.
 
-## New in 0.2.1
+## New in 0.2.2
 
-Version 0.2.1 fixes Python-installed `usql` startup and SQL script execution. Upgrade the Python package to use both modes normally.
+Version 0.2.2 fixes recursive `ALTER TABLE` ownership checks and PostgreSQL 18 `ONLY SET NOT NULL` inheritance behavior, including atomic rollback and durable constraint metadata. It also includes the Python `usql` startup and script fix from 0.2.1.
 
-The 0.2 series adds durable B-tree expression and unique indexes, stronger SQL object dependencies and privileges, expanded sequence and PL/pgSQL behavior, and transactional notifications across native processes sharing a database. The Node.js HTTP client now runs without native addons and can be installed with `npm install --omit=optional @cognica-io/uqa@0.2.1`.
+The 0.2 series adds durable B-tree expression and unique indexes, stronger SQL object dependencies and privileges, expanded sequence and PL/pgSQL behavior, and transactional notifications across native processes sharing a database. The Node.js HTTP client now runs without native addons and can be installed with `npm install --omit=optional @cognica-io/uqa@0.2.2`.
 
 Read the [release history](HISTORY.md#021---2026-09-06) for the complete changes and the [upgrade guide](docs/manual/reference/10-upgrading.md) before updating a persistent database or a custom Rust storage provider.
 
@@ -45,7 +45,7 @@ The manuscript consolidates and revises the published work on [unified query alg
 Install the prebuilt Python package to get both the Python binding and the `usql` command:
 
 ```sh
-python -m pip install uqa==0.2.1
+python -m pip install uqa==0.2.2
 usql
 ```
 
@@ -97,7 +97,7 @@ cargo run -p uqa-cli --bin usql -- -c "SELECT 1 AS ready"
 Add the released package to your application:
 
 ```sh
-cargo add uqa@0.2.1
+cargo add uqa@0.2.2
 ```
 
 `uqa` is the primary Rust package on crates.io. It is a thin facade over `uqa-engine` that also re-exports the core `Value` type; applications that need the implementation package directly can depend on `uqa-engine`. Public component crates including `uqa-engine`, `uqa-client`, `uqa-api`, and `uqa-cli` are also published independently. The following example creates an in-memory engine, inserts data, and runs SQL through the same interface used by a persistent engine.

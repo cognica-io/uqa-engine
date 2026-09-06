@@ -208,6 +208,11 @@ pub(super) fn merge_same_column(
             ),
         });
     }
+    if !inherited.not_null && declared.not_null {
+        inherited.not_null_name.clone_from(&declared.not_null_name);
+        inherited.not_null_validated = declared.not_null_validated;
+        inherited.not_null_no_inherit = declared.not_null_no_inherit;
+    }
     inherited.not_null |= declared.not_null;
     inherited.not_null_explicit |= declared.not_null_explicit;
     inherited.primary_key |= declared.primary_key;
