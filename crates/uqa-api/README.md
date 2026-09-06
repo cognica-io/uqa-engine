@@ -28,7 +28,7 @@ It is designed for applications that need more than a relational table but do no
 
 ## New in 0.2.2
 
-Version 0.2.2 fixes recursive `ALTER TABLE` ownership checks and PostgreSQL 18 `ONLY SET NOT NULL` inheritance behavior, including atomic rollback, durable local and inherited constraint origins, and stable constraint names. It also includes the Python `usql` startup and script fix from 0.2.1.
+Version 0.2.2 fixes recursive `ALTER TABLE` ownership checks and PostgreSQL 18 CHECK and NOT NULL inheritance, including atomic rollback, independent local and inherited constraint origins, stable constraint identities, and durable reopen behavior. The release adds a pinned harness for the complete PostgreSQL 18.4 regression corpus and includes the Python `usql` startup and script fix from 0.2.1.
 
 The 0.2 series adds durable B-tree expression and unique indexes, stronger SQL object dependencies and privileges, expanded sequence and PL/pgSQL behavior, and transactional notifications across native processes sharing a database. The Node.js HTTP client now runs without native addons and can be installed with `npm install --omit=optional @cognica-io/uqa@0.2.2`.
 

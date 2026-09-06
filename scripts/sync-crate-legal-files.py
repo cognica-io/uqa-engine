@@ -107,15 +107,19 @@ def write_internal_readme(destination: pathlib.Path, name: str) -> None:
 
 
 def user_readme(version: str) -> str:
+    """Resolve public README links to main for development or the release tag."""
     source = (ROOT / "README.md").read_text(encoding="utf-8")
+    prerelease = version.partition("-")[2]
+    ref = "main" if prerelease.split(".", 1)[0] == "dev" else f"v{version}"
 
     def repository_link(match: re.Match[str]) -> str:
+        """Resolve relative links against the selected repository ref."""
         target = match.group(1)
         parsed = urlsplit(target)
         if parsed.scheme or target.startswith(("/", "#")):
             return match.group(0)
         kind = "tree" if (ROOT / unquote(parsed.path)).is_dir() else "blob"
-        return f"](https://github.com/cognica-io/uqa-engine/{kind}/v{version}/{target})"
+        return f"](https://github.com/cognica-io/uqa-engine/{kind}/{ref}/{target})"
 
     return re.sub(r"\]\(([^)\s]+)\)", repository_link, source)
 
