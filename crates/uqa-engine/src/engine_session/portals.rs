@@ -116,9 +116,8 @@ impl Engine {
             transaction_overlay.as_ref(),
         )?;
         let catalog_snapshot = std::sync::Arc::new(self.durable.snapshot());
-        let view_snapshots = std::sync::Arc::new(catalog_snapshot.views.clone());
-        let sql_function_snapshots =
-            std::sync::Arc::new(catalog_snapshot.sql_user_functions.clone());
+        let view_snapshots = std::sync::Arc::clone(&catalog_snapshot.views);
+        let sql_function_snapshots = std::sync::Arc::clone(&catalog_snapshot.sql_user_functions);
         let restart = holdable.then(|| SessionPortalRestart {
             query: query.clone(),
             params: params.clone(),
@@ -219,9 +218,8 @@ impl Engine {
             transaction_overlay.as_ref(),
         )?;
         let catalog_snapshot = std::sync::Arc::new(self.durable.snapshot());
-        let view_snapshots = std::sync::Arc::new(catalog_snapshot.views.clone());
-        let sql_function_snapshots =
-            std::sync::Arc::new(catalog_snapshot.sql_user_functions.clone());
+        let view_snapshots = std::sync::Arc::clone(&catalog_snapshot.views);
+        let sql_function_snapshots = std::sync::Arc::clone(&catalog_snapshot.sql_user_functions);
         Ok(self.session_portal_worker_engine(
             table_snapshots,
             view_snapshots,
@@ -630,16 +628,18 @@ impl Engine {
         Ok(std::sync::Arc::new(TableState {
             lifecycle_id: std::sync::atomic::AtomicU64::new(metadata.lifecycle_id()),
             object_id: metadata.object_id(),
-            security: parking_lot::RwLock::new(metadata.security()),
+            security: crate::engine_state::CatalogCell::new(metadata.security()),
             storage_generation: parking_lot::RwLock::new(metadata.storage_generation()),
             document_store: parking_lot::RwLock::new(Box::new(document_store)),
             inverted_index: parking_lot::RwLock::new(Box::new(inverted_index)),
             vector_indexes: parking_lot::RwLock::new(vector_indexes),
-            fts_fields: parking_lot::RwLock::new(fts_fields),
-            columns: parking_lot::RwLock::new(metadata_columns),
+            fts_fields: crate::engine_state::CatalogCell::new(fts_fields),
+            columns: crate::engine_state::CatalogCell::new(metadata_columns),
             next_id: parking_lot::Mutex::new(*metadata.next_id.lock()),
-            analyzer: parking_lot::RwLock::new(analyzer),
-            column_stats: parking_lot::RwLock::new(metadata.column_stats.read().clone()),
+            analyzer: crate::engine_state::CatalogCell::new(analyzer),
+            column_stats: crate::engine_state::CatalogCell::from_snapshot(
+                metadata.column_stats.snapshot(),
+            ),
             column_stats_loaded: std::sync::atomic::AtomicBool::new(
                 metadata
                     .column_stats_loaded
@@ -650,10 +650,18 @@ impl Engine {
                     .column_stats_dirty
                     .load(std::sync::atomic::Ordering::Acquire),
             ),
-            table_checks: parking_lot::RwLock::new(metadata.table_checks.read().clone()),
-            foreign_keys: parking_lot::RwLock::new(metadata.foreign_keys.read().clone()),
-            key_constraints: parking_lot::RwLock::new(metadata.key_constraints.read().clone()),
-            hierarchy: parking_lot::RwLock::new(metadata.hierarchy.read().clone()),
+            table_checks: crate::engine_state::CatalogCell::from_snapshot(
+                metadata.table_checks.snapshot(),
+            ),
+            foreign_keys: crate::engine_state::CatalogCell::from_snapshot(
+                metadata.foreign_keys.snapshot(),
+            ),
+            key_constraints: crate::engine_state::CatalogCell::from_snapshot(
+                metadata.key_constraints.snapshot(),
+            ),
+            hierarchy: crate::engine_state::CatalogCell::from_snapshot(
+                metadata.hierarchy.snapshot(),
+            ),
             value_indexes: parking_lot::RwLock::new(std::collections::BTreeMap::new()),
             doc_count_cache: std::sync::atomic::AtomicU64::new(
                 u64::try_from(adapted_documents.len()).unwrap_or(u64::MAX),

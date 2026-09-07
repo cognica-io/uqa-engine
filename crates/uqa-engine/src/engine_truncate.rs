@@ -93,6 +93,7 @@ impl Engine {
             .read()
             .doc_ids()
             .map_err(|error| SQLError::Internal(format!("read document ids: {error}")))?;
+        let removed_count = (ids.len() as u64).max(1);
         for doc_id in ids {
             t.document_store
                 .write()
@@ -124,7 +125,7 @@ impl Engine {
             }
         }
         self.value_indexes_truncate(table_name, &t)?;
-        self.mark_column_stats_dirty(table_name, &t)
+        self.mark_column_stats_dirty_by_count(table_name, &t, removed_count)
             .map_err(|err| SQLError::Internal(format!("invalidate column stats: {err}")))?;
         Ok(())
     }

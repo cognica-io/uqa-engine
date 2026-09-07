@@ -33,14 +33,16 @@ impl CatalogTableSnapshot {
     pub(crate) fn fixture(columns: Vec<uqa_sql::ast::ColumnDef>) -> Self {
         Self {
             object_id: [1; 16],
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: BTreeMap::new(),
-            columns,
-            checks: Vec::new(),
-            foreign_keys: Vec::new(),
-            keys: Vec::new(),
-            hierarchy: uqa_sql::ast::TableHierarchy::default(),
+            security: Arc::new(crate::engine_state::TableSecurity {
+                role_owner: "uqa".into(),
+                acl: None,
+                column_acls: BTreeMap::new(),
+            }),
+            columns: Arc::new(columns),
+            checks: Arc::new(Vec::new()),
+            foreign_keys: Arc::new(Vec::new()),
+            keys: Arc::new(Vec::new()),
+            hierarchy: Arc::new(uqa_sql::ast::TableHierarchy::default()),
             persistence: uqa_sql::ast::RelationPersistence::Permanent,
         }
     }

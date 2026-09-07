@@ -28,7 +28,7 @@ impl uqa_planner::SourceStatistics for EngineSourceStatistics<'_> {
             Ok(None) => None,
             Ok(Some(_)) => match (
                 hierarchy_row_count(self.engine, table),
-                self.engine.try_column_stats(table),
+                self.engine.try_query_column_stats(table),
             ) {
                 (Ok(row_count), Ok(columns)) => {
                     Some(uqa_planner::RelationStats { row_count, columns })

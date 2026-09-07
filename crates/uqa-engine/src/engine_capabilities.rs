@@ -50,14 +50,12 @@ pub(crate) struct CatalogReadSnapshot {
 #[derive(Clone)]
 pub(crate) struct CatalogTableSnapshot {
     pub(crate) object_id: [u8; 16],
-    pub(crate) role_owner: String,
-    pub(crate) acl: Option<Vec<uqa_storage::TableAclEntry>>,
-    pub(crate) column_acls: BTreeMap<String, Vec<uqa_storage::TableAclEntry>>,
-    pub(crate) columns: Vec<uqa_sql::ast::ColumnDef>,
-    pub(crate) checks: Vec<uqa_sql::ast::TableCheck>,
-    pub(crate) foreign_keys: Vec<uqa_sql::ast::ForeignKey>,
-    pub(crate) keys: Vec<uqa_sql::ast::TableKeyConstraint>,
-    pub(crate) hierarchy: uqa_sql::ast::TableHierarchy,
+    pub(crate) security: Arc<super::engine_state::TableSecurity>,
+    pub(crate) columns: Arc<Vec<uqa_sql::ast::ColumnDef>>,
+    pub(crate) checks: Arc<Vec<uqa_sql::ast::TableCheck>>,
+    pub(crate) foreign_keys: Arc<Vec<uqa_sql::ast::ForeignKey>>,
+    pub(crate) keys: Arc<Vec<uqa_sql::ast::TableKeyConstraint>>,
+    pub(crate) hierarchy: Arc<uqa_sql::ast::TableHierarchy>,
     pub(crate) persistence: uqa_sql::ast::RelationPersistence,
 }
 
@@ -418,17 +416,14 @@ impl Engine {
         let tables = table_sources
             .into_iter()
             .map(|(relation, table)| {
-                let security = table.security();
                 let snapshot = CatalogTableSnapshot {
                     object_id: table.object_id(),
-                    role_owner: security.role_owner,
-                    acl: security.acl,
-                    column_acls: security.column_acls,
-                    columns: table.columns.read().clone(),
-                    checks: table.table_checks.read().clone(),
-                    foreign_keys: table.foreign_keys.read().clone(),
-                    keys: table.key_constraints.read().clone(),
-                    hierarchy: table.hierarchy.read().clone(),
+                    security: table.security.snapshot(),
+                    columns: table.columns.snapshot(),
+                    checks: table.table_checks.snapshot(),
+                    foreign_keys: table.foreign_keys.snapshot(),
+                    keys: table.key_constraints.snapshot(),
+                    hierarchy: table.hierarchy.snapshot(),
                     persistence: table.persistence,
                 };
                 (relation, snapshot)

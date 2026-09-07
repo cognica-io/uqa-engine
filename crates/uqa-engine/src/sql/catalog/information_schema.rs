@@ -512,31 +512,31 @@ pub(super) fn build_info_column_privileges(
             .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?;
         let (schema, table) = split_schema_name(&table_name)?;
         let default_table_acl;
-        let table_acl = if let Some(acl) = table_snapshot.acl.as_deref() {
+        let table_acl = if let Some(acl) = table_snapshot.security.acl.as_deref() {
             acl
         } else {
-            default_table_acl = [default_table_acl_entry(&table_snapshot.role_owner)];
+            default_table_acl = [default_table_acl_entry(&table_snapshot.security.role_owner)];
             &default_table_acl
         };
-        for column in &table_snapshot.columns {
+        for column in table_snapshot.columns.iter() {
             for entry in table_acl {
                 insert_column_privilege_rows(
                     &mut privileges,
                     &schema,
                     &table,
                     &column.name,
-                    &table_snapshot.role_owner,
+                    &table_snapshot.security.role_owner,
                     entry,
                 );
             }
-            if let Some(column_acl) = table_snapshot.column_acls.get(&column.name) {
+            if let Some(column_acl) = table_snapshot.security.column_acls.get(&column.name) {
                 for entry in column_acl {
                     insert_column_privilege_rows(
                         &mut privileges,
                         &schema,
                         &table,
                         &column.name,
-                        &table_snapshot.role_owner,
+                        &table_snapshot.security.role_owner,
                         entry,
                     );
                 }

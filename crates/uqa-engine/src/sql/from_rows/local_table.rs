@@ -44,7 +44,7 @@ type SharedLockOrigin = (Arc<str>, Arc<str>);
 pub(in crate::sql) struct EngineTableRowSource {
     table_name: String,
     table: std::sync::Arc<crate::TableState>,
-    column_definitions: Vec<uqa_sql::ast::ColumnDef>,
+    column_definitions: Arc<Vec<uqa_sql::ast::ColumnDef>>,
     columns: Vec<String>,
     schema: Vec<String>,
     physical_schema: uqa_execution::RowSchema,

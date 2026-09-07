@@ -19,8 +19,85 @@ use uqa_storage::{
     ColumnStatsInput, SQLiteStorageBackend,
 };
 
+#[path = "sql_analyze_persistence/automatic.rs"]
+mod automatic;
+
 fn exec(engine: &Engine, sql: &str) {
     engine.sql(sql, &[]).unwrap();
+}
+
+#[test]
+fn metadata_projection_and_explain_do_not_analyze_unrequested_blobs() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("metadata-projection.sqlite3");
+    let engine = Engine::open(&path).unwrap();
+    exec(
+        &engine,
+        "CREATE TABLE assets (id INTEGER PRIMARY KEY, kind TEXT, size_bytes BIGINT, bytes BYTEA)",
+    );
+    engine
+        .sql(
+            "INSERT INTO assets VALUES (1, 'image', 8388608, $1)",
+            &[uqa_engine::SQLParam::scalar(Value::Bytes(vec![
+                7;
+                8 * 1024
+                    * 1024
+            ]))],
+        )
+        .unwrap();
+    // A missing payload is an I/O tripwire: metadata remains readable, but
+    // any accidental full-document read must fail instead of hiding its cost.
+    rusqlite::Connection::open(&path).unwrap().execute(
+        "DELETE FROM _document_blobs WHERE table_name = 'public.assets' AND field_name = 'bytes'", []
+    ).unwrap();
+    let query = "SELECT kind, size_bytes FROM assets WHERE kind IN ('image', 'video')";
+    let rows = engine.sql(query, &[]).unwrap();
+    assert_eq!(rows.rows[0]["size_bytes"], Value::Int(8 * 1024 * 1024));
+    exec(&engine, &format!("EXPLAIN {query}"));
+    exec(
+        &engine,
+        "CREATE TABLE tags (id INTEGER PRIMARY KEY); INSERT INTO tags VALUES (1)",
+    );
+    let joined = engine
+        .sql(
+            "SELECT a.kind FROM assets a JOIN tags t ON a.id = t.id WHERE a.kind = 'image'",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(joined.rows[0]["kind"], Value::Str("image".into()));
+    assert!(engine.sql("SELECT bytes FROM assets", &[]).is_err());
+}
+
+#[test]
+fn lazy_statistics_are_durable_and_not_recomputed_on_reopen() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("lazy-statistics.sqlite3");
+    let original = {
+        let engine = Engine::open(&path).unwrap();
+        exec(
+            &engine,
+            "CREATE TABLE t (id INTEGER PRIMARY KEY, val INTEGER, cat TEXT)",
+        );
+        exec(
+            &engine,
+            "INSERT INTO t VALUES (1, 10, 'A'), (2, 20, 'A'), (3, 30, 'B')",
+        );
+        engine.column_stats("t").unwrap()
+    };
+    let catalog = Catalog::open(ManagedConnection::open(&path).unwrap()).unwrap();
+    let persisted = catalog.load_column_stats("public.t").unwrap();
+    assert_eq!(
+        persisted.len(),
+        3,
+        "lazy refresh must persist all statistics"
+    );
+    rusqlite::Connection::open(&path).unwrap().execute_batch(
+        "CREATE TRIGGER reject_statistics_rebuild BEFORE INSERT ON _column_stats BEGIN SELECT RAISE(ABORT, 'unexpected statistics recomputation'); END;"
+    ).unwrap();
+    let reopened = Engine::open(&path).unwrap();
+    let restored = reopened.column_stats("t").unwrap();
+    assert_eq!(restored["cat"].mcv_values, original["cat"].mcv_values);
+    assert_eq!(restored["val"].histogram, original["val"].histogram);
 }
 
 fn insert_skewed_rows(engine: &Engine) {

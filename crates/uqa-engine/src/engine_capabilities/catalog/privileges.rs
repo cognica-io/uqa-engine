@@ -24,11 +24,7 @@ impl CatalogReadView {
 
     pub(crate) fn table_is_visible_to(&self, table: &CatalogTableSnapshot, role: &str) -> bool {
         crate::engine_table_security::role_can_view_table(
-            &crate::engine_state::TableSecurity {
-                role_owner: table.role_owner.clone(),
-                acl: table.acl.clone(),
-                column_acls: table.column_acls.clone(),
-            },
+            &table.security,
             role,
             &self.snapshot.durable.roles,
             &self.snapshot.durable.role_memberships,
@@ -42,11 +38,7 @@ impl CatalogReadView {
         privilege: crate::engine_table_security::TableAclPrivilege,
     ) -> bool {
         crate::engine_table_security::role_has_table_privilege(
-            &crate::engine_state::TableSecurity {
-                role_owner: table.role_owner.clone(),
-                acl: table.acl.clone(),
-                column_acls: table.column_acls.clone(),
-            },
+            &table.security,
             role,
             privilege,
             &self.snapshot.durable.roles,
@@ -62,11 +54,7 @@ impl CatalogReadView {
         privilege: crate::engine_table_security::TableAclPrivilege,
     ) -> bool {
         crate::engine_table_security::role_has_column_privilege(
-            &crate::engine_state::TableSecurity {
-                role_owner: table.role_owner.clone(),
-                acl: table.acl.clone(),
-                column_acls: table.column_acls.clone(),
-            },
+            &table.security,
             column,
             role,
             privilege,

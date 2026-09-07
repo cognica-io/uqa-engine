@@ -198,21 +198,47 @@ impl Engine {
     ///
     /// The new session gets its own catalog/backend pair, transaction stack,
     /// runtime variables, prepared statements, statement cache, and
-    /// cancellation token. Durable registry caches remain session-private and
-    /// synchronize through shared epochs; runtime-only Rust extensions are
-    /// shared. The provider must return catalog and data handles bound to one
-    /// session transaction so every durable mutation commits atomically.
+    /// cancellation token. Committed catalog definitions share immutable
+    /// allocations; mutations detach the session's copy and synchronize through
+    /// shared epochs. Runtime-only Rust extensions are shared. The provider
+    /// must return catalog and data handles bound to one session transaction
+    /// so every durable mutation commits atomically.
     pub fn new_session(&self) -> StorageBackendResult<Self> {
+        let _statement = self.runtime.statement_gate.lock();
         let provider = self.storage.provider.as_ref().ok_or_else(|| {
             StorageBackendError::Other(
                 "independent sessions require a PersistentStorageProvider".into(),
             )
         })?;
+        // Fixed-snapshot construction can call this while holding the
+        // transaction stack. In that case restore committed storage instead
+        // of recursively locking the stack or sharing private definitions.
+        let share_catalog = self
+            .session
+            .transactions
+            .try_lock()
+            .is_some_and(|stack| stack.is_empty())
+            && !self.session.state.read().temporary_namespace_allocated;
+        if share_catalog {
+            self.synchronize_table_catalog()?;
+            self.synchronize_table_data()?;
+            self.synchronize_catalog_registries()?;
+        }
         let observed_epochs = self.epochs.published_epochs();
         let storage_session = provider.open_session()?;
         let storage_version_before_restore = storage_session.backend.change_version()?;
-        let mut session =
-            Self::from_initialized_persistent_session(storage_session, Some(Arc::clone(provider)))?;
+        let shared = if share_catalog {
+            self.session_from_shared_catalog(&storage_session, provider)?
+        } else {
+            None
+        };
+        let mut session = match shared {
+            Some(session) => session,
+            None => Self::from_initialized_persistent_session(
+                storage_session,
+                Some(Arc::clone(provider)),
+            )?,
+        };
         session.row_locks = Arc::clone(&self.row_locks);
         session.install_notification_hub(Arc::clone(&self.notification_hub))?;
         session.session_id = self.row_locks.allocate_session();
@@ -236,14 +262,13 @@ impl Engine {
         // A commit that raced the load advanced a shared publication beyond
         // the generation or storage version captured before the session
         // restored. Only that case needs a second catalog or data refresh.
-        // Durable registries remain session-local. Sharing these maps
-        // would expose a writer's uncommitted graph/schema/view/FDW changes
-        // to sibling sessions before storage COMMIT. Runtime-only registries
-        // may remain shared.
+        // Catalog cells keep independent mutable owners over shared immutable
+        // values, so a writer cannot expose uncommitted definitions to siblings.
         session.extensions = super::RuntimeExtensions::shared_from(&self.extensions);
         session.synchronize_table_catalog()?;
         session.synchronize_table_data()?;
         session.synchronize_catalog_registries()?;
+        session.start_automatic_statistics();
         Ok(session)
     }
 
@@ -262,6 +287,7 @@ impl Engine {
         engine.session_id = row_locks.allocate_session();
         engine.row_locks = row_locks;
         engine.install_notification_hub(notification_hub)?;
+        engine.start_automatic_statistics();
         Ok(engine)
     }
 
@@ -284,6 +310,7 @@ impl Engine {
         engine.session_id = row_locks.allocate_session();
         engine.row_locks = row_locks;
         engine.install_notification_hub(notification_hub)?;
+        engine.start_automatic_statistics();
         Ok(engine)
     }
 
@@ -312,25 +339,22 @@ impl Engine {
         Self::build_persistent_session(storage_session, provider, true)
     }
 
-    fn from_initialized_persistent_session(
+    pub(crate) fn from_initialized_persistent_session(
         storage_session: PersistentStorageSession,
         provider: Option<Arc<dyn PersistentStorageProvider>>,
     ) -> StorageBackendResult<Self> {
         Self::build_persistent_session(storage_session, provider, false)
     }
 
-    fn build_persistent_session(
+    pub(super) fn empty_persistent_session(
         storage_session: PersistentStorageSession,
         provider: Option<Arc<dyn PersistentStorageProvider>>,
-        initialize_catalog: bool,
-    ) -> StorageBackendResult<Self> {
+    ) -> Self {
         let PersistentStorageSession { catalog, backend } = storage_session;
-        let restore_catalog = Arc::clone(&catalog);
-        let restore_backend = Arc::clone(&backend);
         let row_locks = Arc::new(crate::row_locks::RowLockManager::new());
         let notification_hub = Arc::new(crate::NotificationHub::default());
         let session_id = row_locks.allocate_session();
-        let mut engine = Self {
+        Self {
             storage: super::StorageContext::persistent(catalog, backend, provider),
             durable: Arc::new(super::DurableCatalogState::new()),
             session: Arc::new(super::SessionContext::new(super::initial_random_state())),
@@ -347,7 +371,17 @@ impl Engine {
             query_catalog_snapshot: None,
             query_transaction_overlay: None,
             query_transaction_origin: None,
-        };
+        }
+    }
+
+    fn build_persistent_session(
+        storage_session: PersistentStorageSession,
+        provider: Option<Arc<dyn PersistentStorageProvider>>,
+        initialize_catalog: bool,
+    ) -> StorageBackendResult<Self> {
+        let restore_catalog = Arc::clone(&storage_session.catalog);
+        let restore_backend = Arc::clone(&storage_session.backend);
+        let mut engine = Self::empty_persistent_session(storage_session, provider);
         if initialize_catalog {
             restore_backend.migrate_document_storage()?;
             restore_backend.migrate_inverted_index_storage()?;

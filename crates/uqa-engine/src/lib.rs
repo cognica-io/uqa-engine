@@ -111,6 +111,8 @@ mod engine_sequences;
 mod engine_session;
 mod engine_sql_registry;
 mod engine_state;
+mod engine_statistics;
+pub use engine_statistics::AutomaticStatisticsStatus;
 mod engine_statement_cache;
 mod engine_table_security;
 mod engine_table_storage;
@@ -472,6 +474,7 @@ struct TransactionFrame {
     next_lock_mark: u32,
     snapshot_change_baseline: row_locks::RowChangeBaseline,
     row_changes: Vec<TransactionRowChange>,
+    statistics_changes: engine_statistics::StatisticsChanges,
     deferred_foreign_key_checks: Vec<DeferredForeignKeyCheck>,
     deferred_constraint_trigger_events: Vec<sql::DeferredConstraintTriggerEvent>,
     pending_listen_actions: Vec<PendingListenAction>,
@@ -536,6 +539,7 @@ struct TransactionSavepoint {
     dirty: TransactionDirtyState,
     lock_mark: u32,
     row_changes: Vec<TransactionRowChange>,
+    statistics_changes: engine_statistics::StatisticsChanges,
     deferred_foreign_key_checks: Vec<DeferredForeignKeyCheck>,
     deferred_constraint_trigger_events: Vec<sql::DeferredConstraintTriggerEvent>,
     pending_listen_actions: Vec<PendingListenAction>,
@@ -742,40 +746,40 @@ pub(crate) struct TableState {
     /// Durable logical relation identity used by `PostgreSQL` catalogs. Renames, schema changes, `TRUNCATE`, and reopen preserve it.
     object_id: [u8; 16],
     /// Durable SQL role ownership and ACL. Mutations publish this value atomically and preserve the relation's logical and physical identities.
-    security: RwLock<engine_state::TableSecurity>,
+    security: engine_state::CatalogCell<engine_state::TableSecurity>,
     /// Durable physical-storage generation shared by every session. Schema-only changes preserve it; CREATE and TRUNCATE replace it so a fixed transaction snapshot never aliases a different physical relation lifetime.
     storage_generation: RwLock<[u8; 16]>,
     pub(crate) document_store: RwLock<Box<dyn DocumentStore>>,
     inverted_index: RwLock<Box<dyn InvertedIndex>>,
     vector_indexes: RwLock<BTreeMap<FieldName, Box<dyn VectorIndex>>>,
-    fts_fields: RwLock<Vec<FieldName>>,
+    fts_fields: engine_state::CatalogCell<Vec<FieldName>>,
     /// Column schema captured at CREATE TABLE / ALTER TABLE time.
     /// Drives auto-id allocation and ALTER COLUMN bookkeeping.
-    columns: RwLock<Vec<uqa_sql::ast::ColumnDef>>,
+    columns: engine_state::CatalogCell<Vec<uqa_sql::ast::ColumnDef>>,
     /// Monotonic id watermark for SERIAL/BIGSERIAL columns. The first
     /// allocated value is `1`; the watermark grows past
     /// `max(existing_doc_id, allocated)` so reopened catalogs do not
     /// collide with existing rows.
     next_id: parking_lot::Mutex<u128>,
-    analyzer: RwLock<Analyzer>,
+    analyzer: engine_state::CatalogCell<Analyzer>,
     /// Per-column statistics refreshed by `ANALYZE table_name` or lazily
     /// by `column_stats` after writes mark the table dirty. Keyed by column
     /// name.
-    column_stats: RwLock<BTreeMap<String, uqa_planner::ColumnStats>>,
+    column_stats: engine_state::CatalogCell<BTreeMap<String, uqa_planner::ColumnStats>>,
     column_stats_loaded: AtomicBool,
     column_stats_dirty: AtomicBool,
     /// Table-level `CHECK` constraints, evaluated against every row
     /// at INSERT / UPDATE time.
-    table_checks: RwLock<Vec<uqa_sql::ast::TableCheck>>,
+    table_checks: engine_state::CatalogCell<Vec<uqa_sql::ast::TableCheck>>,
     /// Table-level `FOREIGN KEY` constraints. Each entry binds local
     /// columns to a `(ref_table, ref_columns)` lookup target.
-    foreign_keys: RwLock<Vec<uqa_sql::ast::ForeignKey>>,
+    foreign_keys: engine_state::CatalogCell<Vec<uqa_sql::ast::ForeignKey>>,
     /// Typed PRIMARY KEY / UNIQUE tuples, including composite keys and
     /// their SQL NULL-equality policy.
-    key_constraints: RwLock<Vec<uqa_sql::ast::TableKeyConstraint>>,
+    key_constraints: engine_state::CatalogCell<Vec<uqa_sql::ast::TableKeyConstraint>>,
     /// Direct parents, an optional partition key, and an optional child bound.
     /// The complete object is persisted with the table's constraint envelope.
-    hierarchy: RwLock<uqa_sql::ast::TableHierarchy>,
+    hierarchy: engine_state::CatalogCell<uqa_sql::ast::TableHierarchy>,
     /// Lazily built per-column value indexes for PRIMARY KEY / UNIQUE
     /// / `CREATE INDEX` btree columns. Maintained incrementally by the
     /// document write paths; cleared on bulk reloads.
@@ -916,6 +920,7 @@ impl Drop for Engine {
             }
             self.row_locks.release_session(self.session_id);
             self.notification_hub.unregister(self.session_id);
+            self.release_automatic_statistics_client();
         }
     }
 }

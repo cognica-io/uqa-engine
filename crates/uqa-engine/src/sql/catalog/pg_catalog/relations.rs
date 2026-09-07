@@ -32,7 +32,10 @@ pub(in crate::sql::catalog) fn build_pg_tables(
         out.push(row([
             ("schemaname", str_value(schema.clone())),
             ("tablename", str_value(table)),
-            ("tableowner", str_value(table_snapshot.role_owner.clone())),
+            (
+                "tableowner",
+                str_value(table_snapshot.security.role_owner.clone()),
+            ),
             ("tablespace", Value::Null),
             (
                 "hasindexes",

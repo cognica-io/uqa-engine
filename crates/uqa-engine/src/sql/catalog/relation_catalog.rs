@@ -86,11 +86,16 @@ pub(super) fn build_pg_class(
         );
         row.insert(
             "relowner".into(),
-            int_value(crate::engine_roles::role_oid(&table_snapshot.role_owner)),
+            int_value(crate::engine_roles::role_oid(
+                &table_snapshot.security.role_owner,
+            )),
         );
         row.insert(
             "relacl".into(),
-            table_acl_catalog_value(&table_snapshot.role_owner, table_snapshot.acl.as_ref())?,
+            table_acl_catalog_value(
+                &table_snapshot.security.role_owner,
+                table_snapshot.security.acl.as_ref(),
+            )?,
         );
         row.insert(
             "relispartition".into(),
@@ -262,7 +267,7 @@ pub(super) fn build_pg_class(
             .ok_or_else(|| SQLError::UnknownTable(index.table_name.clone()))?;
         index_row.insert(
             "relowner".into(),
-            int_value(crate::engine_roles::role_oid(&table.role_owner)),
+            int_value(crate::engine_roles::role_oid(&table.security.role_owner)),
         );
         index_row.insert("relispartition".into(), bool_value(index.is_partition));
         index_row.insert("relhassubclass".into(), bool_value(index.has_children));

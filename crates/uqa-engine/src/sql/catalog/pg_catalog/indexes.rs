@@ -65,7 +65,7 @@ pub(in crate::sql::catalog) fn catalog_index_relations(
             .table(resolution, &table)?
             .ok_or_else(|| SQLError::UnknownTable(table.clone()))?;
         let (schema, _) = split_schema_name(&table)?;
-        for key in &snapshot.keys {
+        for key in snapshot.keys.iter() {
             let name = key
                 .name
                 .as_ref()

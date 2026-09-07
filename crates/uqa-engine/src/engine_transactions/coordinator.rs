@@ -154,6 +154,7 @@ impl Engine {
         // Logical catalog and runtime registries are database state shared by
         // sibling sessions. Closing one session must not erase them from the
         // sessions that remain alive.
+        self.release_automatic_statistics_client();
         Ok(())
     }
 
@@ -314,6 +315,7 @@ impl Engine {
             next_lock_mark,
             snapshot_change_baseline,
             row_changes: Vec::new(),
+            statistics_changes: crate::engine_statistics::StatisticsChanges::new(),
             deferred_foreign_key_checks,
             deferred_constraint_trigger_events,
             pending_listen_actions: Vec::new(),

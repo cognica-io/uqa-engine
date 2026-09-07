@@ -63,6 +63,7 @@ impl Engine {
             dirty: self.transaction_dirty_state(),
             lock_mark: keep_mark,
             row_changes,
+            statistics_changes: frame.statistics_changes.clone(),
             deferred_foreign_key_checks,
             deferred_constraint_trigger_events,
             pending_listen_actions,
@@ -179,18 +180,7 @@ impl Engine {
             &mut cleanup_errors,
         );
         let keep_mark = savepoint.lock_mark;
-        frame.row_changes.clone_from(&savepoint.row_changes);
-        frame
-            .deferred_foreign_key_checks
-            .clone_from(&savepoint.deferred_foreign_key_checks);
-        frame
-            .deferred_constraint_trigger_events
-            .clone_from(&savepoint.deferred_constraint_trigger_events);
-        frame
-            .constraint_modes
-            .clone_from(&savepoint.constraint_modes);
-        frame.intent = savepoint.intent;
-        frame.characteristics = savepoint.characteristics;
+        frame.restore_mutation_savepoint(position);
         frame.restore_pending_notification_savepoint(position);
         frame.savepoints.truncate(position + 1);
         frame.xid_levels.truncate(position + 2);
@@ -211,5 +201,22 @@ impl Engine {
                 cleanup_errors.join("; ")
             )))
         }
+    }
+}
+
+impl TransactionFrame {
+    fn restore_mutation_savepoint(&mut self, position: usize) {
+        let savepoint = &self.savepoints[position];
+        self.row_changes.clone_from(&savepoint.row_changes);
+        self.statistics_changes
+            .clone_from(&savepoint.statistics_changes);
+        self.deferred_foreign_key_checks
+            .clone_from(&savepoint.deferred_foreign_key_checks);
+        self.deferred_constraint_trigger_events
+            .clone_from(&savepoint.deferred_constraint_trigger_events);
+        self.constraint_modes
+            .clone_from(&savepoint.constraint_modes);
+        self.intent = savepoint.intent;
+        self.characteristics = savepoint.characteristics;
     }
 }

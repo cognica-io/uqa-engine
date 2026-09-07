@@ -19,6 +19,7 @@ mod data_sync;
 mod graphs;
 mod lifecycle;
 mod registries;
+mod session_seed;
 mod statistics;
 mod table_restore;
 

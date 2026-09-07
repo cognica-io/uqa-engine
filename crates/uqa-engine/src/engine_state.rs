@@ -13,6 +13,9 @@ use std::sync::Arc;
 
 use parking_lot::{Mutex, ReentrantMutex, RwLock};
 
+mod catalog_cell;
+pub(crate) use catalog_cell::CatalogCell;
+
 use super::{
     BayesianBM25Params, CommandMutationOverlay, DeepModel, RegisteredSQLFunction, RelationIdentity,
     SQLAggregateFunction, SQLScalarFunction, SQLStatementCache, SQLTableFunction, SequenceState,
@@ -240,162 +243,171 @@ impl StoredView {
 }
 
 pub(super) struct DurableCatalogState {
-    pub(super) graphs: RwLock<BTreeMap<String, uqa_graph::MemoryGraphStore>>,
-    pub(super) models: RwLock<BTreeMap<String, DeepModel>>,
-    pub(super) scoring_params: RwLock<BTreeMap<String, String>>,
-    pub(super) views: RwLock<BTreeMap<RelationIdentity, StoredView>>,
-    pub(super) catalog_indexes: RwLock<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
-    pub(super) database_security: RwLock<DatabaseSecurity>,
-    pub(super) schemas: RwLock<BTreeMap<String, SchemaSecurity>>,
-    pub(super) path_indexes: RwLock<BTreeMap<String, uqa_graph::PathIndex>>,
-    pub(super) sequences: RwLock<BTreeMap<RelationIdentity, SequenceState>>,
-    pub(super) sequence_object_ids: RwLock<BTreeMap<RelationIdentity, [u8; 16]>>,
+    pub(super) graphs: CatalogCell<BTreeMap<String, uqa_graph::MemoryGraphStore>>,
+    pub(super) models: CatalogCell<BTreeMap<String, DeepModel>>,
+    pub(super) scoring_params: CatalogCell<BTreeMap<String, String>>,
+    pub(super) views: CatalogCell<BTreeMap<RelationIdentity, StoredView>>,
+    pub(super) catalog_indexes:
+        CatalogCell<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
+    pub(super) database_security: CatalogCell<DatabaseSecurity>,
+    pub(super) schemas: CatalogCell<BTreeMap<String, SchemaSecurity>>,
+    pub(super) path_indexes: CatalogCell<BTreeMap<String, uqa_graph::PathIndex>>,
+    pub(super) sequences: CatalogCell<BTreeMap<RelationIdentity, SequenceState>>,
+    pub(super) sequence_object_ids: CatalogCell<BTreeMap<RelationIdentity, [u8; 16]>>,
     pub(super) sequence_persistence:
-        RwLock<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
-    pub(super) sequence_security: RwLock<BTreeMap<RelationIdentity, SequenceSecurity>>,
-    pub(super) named_analyzers: RwLock<BTreeMap<String, String>>,
-    pub(super) table_field_analyzers: RwLock<TableFieldAnalyzerRegistry>,
-    pub(super) foreign_servers: RwLock<BTreeMap<String, uqa_fdw::ForeignServer>>,
+        CatalogCell<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
+    pub(super) sequence_security: CatalogCell<BTreeMap<RelationIdentity, SequenceSecurity>>,
+    pub(super) named_analyzers: CatalogCell<BTreeMap<String, String>>,
+    pub(super) table_field_analyzers: CatalogCell<TableFieldAnalyzerRegistry>,
+    pub(super) foreign_servers: CatalogCell<BTreeMap<String, uqa_fdw::ForeignServer>>,
     pub(super) foreign_tables:
-        RwLock<BTreeMap<RelationIdentity, super::engine_fdw::StoredForeignTable>>,
-    pub(super) foreign_table_security: RwLock<BTreeMap<RelationIdentity, TableSecurity>>,
+        CatalogCell<BTreeMap<RelationIdentity, super::engine_fdw::StoredForeignTable>>,
+    pub(super) foreign_table_security: CatalogCell<BTreeMap<RelationIdentity, TableSecurity>>,
     pub(super) sql_user_functions:
-        RwLock<BTreeMap<String, Vec<Arc<super::engine_user_functions::SQLUserFunction>>>>,
-    pub(super) roles: RwLock<BTreeMap<String, super::engine_roles::RoleDefinition>>,
-    pub(super) role_memberships: RwLock<
+        CatalogCell<BTreeMap<String, Vec<Arc<super::engine_user_functions::SQLUserFunction>>>>,
+    pub(super) roles: CatalogCell<BTreeMap<String, super::engine_roles::RoleDefinition>>,
+    pub(super) role_memberships: CatalogCell<
         BTreeMap<super::engine_roles::RoleMembershipKey, super::engine_roles::RoleMembership>,
     >,
-    pub(super) triggers: RwLock<
+    pub(super) triggers: CatalogCell<
         BTreeMap<
             uqa_storage::RelationIdentity,
             BTreeMap<String, super::engine_events::StoredTrigger>,
         >,
     >,
-    pub(super) rules: RwLock<
+    pub(super) rules: CatalogCell<
         BTreeMap<uqa_storage::RelationIdentity, BTreeMap<String, super::engine_events::StoredRule>>,
     >,
 }
 
 #[derive(Clone)]
 pub(super) struct DurableCatalogSnapshot {
-    pub(super) graphs: BTreeMap<String, uqa_graph::MemoryGraphStore>,
-    pub(super) models: BTreeMap<String, DeepModel>,
-    pub(super) scoring_params: BTreeMap<String, String>,
-    pub(super) views: BTreeMap<RelationIdentity, StoredView>,
-    pub(super) catalog_indexes: BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>,
-    pub(super) database_security: DatabaseSecurity,
-    pub(super) schemas: BTreeMap<String, SchemaSecurity>,
-    pub(super) path_indexes: BTreeMap<String, uqa_graph::PathIndex>,
-    pub(super) sequences: BTreeMap<RelationIdentity, SequenceState>,
-    pub(super) sequence_object_ids: BTreeMap<RelationIdentity, [u8; 16]>,
-    pub(super) sequence_persistence: BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>,
-    pub(super) sequence_security: BTreeMap<RelationIdentity, SequenceSecurity>,
-    pub(super) named_analyzers: BTreeMap<String, String>,
-    pub(super) table_field_analyzers: TableFieldAnalyzerRegistry,
-    pub(super) foreign_servers: BTreeMap<String, uqa_fdw::ForeignServer>,
-    pub(super) foreign_tables: BTreeMap<RelationIdentity, super::engine_fdw::StoredForeignTable>,
-    pub(super) foreign_table_security: BTreeMap<RelationIdentity, TableSecurity>,
+    pub(super) graphs: Arc<BTreeMap<String, uqa_graph::MemoryGraphStore>>,
+    pub(super) models: Arc<BTreeMap<String, DeepModel>>,
+    pub(super) scoring_params: Arc<BTreeMap<String, String>>,
+    pub(super) views: Arc<BTreeMap<RelationIdentity, StoredView>>,
+    pub(super) catalog_indexes: Arc<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
+    pub(super) database_security: Arc<DatabaseSecurity>,
+    pub(super) schemas: Arc<BTreeMap<String, SchemaSecurity>>,
+    pub(super) path_indexes: Arc<BTreeMap<String, uqa_graph::PathIndex>>,
+    pub(super) sequences: Arc<BTreeMap<RelationIdentity, SequenceState>>,
+    pub(super) sequence_object_ids: Arc<BTreeMap<RelationIdentity, [u8; 16]>>,
+    pub(super) sequence_persistence:
+        Arc<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
+    pub(super) sequence_security: Arc<BTreeMap<RelationIdentity, SequenceSecurity>>,
+    pub(super) named_analyzers: Arc<BTreeMap<String, String>>,
+    pub(super) table_field_analyzers: Arc<TableFieldAnalyzerRegistry>,
+    pub(super) foreign_servers: Arc<BTreeMap<String, uqa_fdw::ForeignServer>>,
+    pub(super) foreign_tables:
+        Arc<BTreeMap<RelationIdentity, super::engine_fdw::StoredForeignTable>>,
+    pub(super) foreign_table_security: Arc<BTreeMap<RelationIdentity, TableSecurity>>,
     pub(super) sql_user_functions:
-        BTreeMap<String, Vec<Arc<super::engine_user_functions::SQLUserFunction>>>,
-    pub(super) roles: BTreeMap<String, super::engine_roles::RoleDefinition>,
+        Arc<BTreeMap<String, Vec<Arc<super::engine_user_functions::SQLUserFunction>>>>,
+    pub(super) roles: Arc<BTreeMap<String, super::engine_roles::RoleDefinition>>,
     pub(super) role_memberships:
-        BTreeMap<super::engine_roles::RoleMembershipKey, super::engine_roles::RoleMembership>,
-    pub(super) triggers: BTreeMap<
-        uqa_storage::RelationIdentity,
-        BTreeMap<String, super::engine_events::StoredTrigger>,
+        Arc<BTreeMap<super::engine_roles::RoleMembershipKey, super::engine_roles::RoleMembership>>,
+    pub(super) triggers: Arc<
+        BTreeMap<
+            uqa_storage::RelationIdentity,
+            BTreeMap<String, super::engine_events::StoredTrigger>,
+        >,
     >,
-    pub(super) rules:
+    pub(super) rules: Arc<
         BTreeMap<uqa_storage::RelationIdentity, BTreeMap<String, super::engine_events::StoredRule>>,
+    >,
 }
 
 impl DurableCatalogState {
     pub(super) fn new() -> Self {
         Self {
-            graphs: RwLock::new(BTreeMap::new()),
-            models: RwLock::new(BTreeMap::new()),
-            scoring_params: RwLock::new(BTreeMap::new()),
-            views: RwLock::new(BTreeMap::new()),
-            catalog_indexes: RwLock::new(BTreeMap::new()),
-            database_security: RwLock::new(DatabaseSecurity::bootstrap()),
-            schemas: RwLock::new(BTreeMap::from([(
+            graphs: CatalogCell::new(BTreeMap::new()),
+            models: CatalogCell::new(BTreeMap::new()),
+            scoring_params: CatalogCell::new(BTreeMap::new()),
+            views: CatalogCell::new(BTreeMap::new()),
+            catalog_indexes: CatalogCell::new(BTreeMap::new()),
+            database_security: CatalogCell::new(DatabaseSecurity::bootstrap()),
+            schemas: CatalogCell::new(BTreeMap::from([(
                 "public".to_string(),
                 SchemaSecurity::legacy("public"),
             )])),
-            path_indexes: RwLock::new(BTreeMap::new()),
-            sequences: RwLock::new(BTreeMap::new()),
-            sequence_object_ids: RwLock::new(BTreeMap::new()),
-            sequence_persistence: RwLock::new(BTreeMap::new()),
-            sequence_security: RwLock::new(BTreeMap::new()),
-            named_analyzers: RwLock::new(BTreeMap::new()),
-            table_field_analyzers: RwLock::new(BTreeMap::new()),
-            foreign_servers: RwLock::new(BTreeMap::new()),
-            foreign_tables: RwLock::new(BTreeMap::new()),
-            foreign_table_security: RwLock::new(BTreeMap::new()),
-            sql_user_functions: RwLock::new(BTreeMap::new()),
-            roles: RwLock::new(BTreeMap::from([(
+            path_indexes: CatalogCell::new(BTreeMap::new()),
+            sequences: CatalogCell::new(BTreeMap::new()),
+            sequence_object_ids: CatalogCell::new(BTreeMap::new()),
+            sequence_persistence: CatalogCell::new(BTreeMap::new()),
+            sequence_security: CatalogCell::new(BTreeMap::new()),
+            named_analyzers: CatalogCell::new(BTreeMap::new()),
+            table_field_analyzers: CatalogCell::new(BTreeMap::new()),
+            foreign_servers: CatalogCell::new(BTreeMap::new()),
+            foreign_tables: CatalogCell::new(BTreeMap::new()),
+            foreign_table_security: CatalogCell::new(BTreeMap::new()),
+            sql_user_functions: CatalogCell::new(BTreeMap::new()),
+            roles: CatalogCell::new(BTreeMap::from([(
                 "uqa".to_string(),
                 super::engine_roles::RoleDefinition::bootstrap(),
             )])),
-            role_memberships: RwLock::new(BTreeMap::new()),
-            triggers: RwLock::new(BTreeMap::new()),
-            rules: RwLock::new(BTreeMap::new()),
+            role_memberships: CatalogCell::new(BTreeMap::new()),
+            triggers: CatalogCell::new(BTreeMap::new()),
+            rules: CatalogCell::new(BTreeMap::new()),
         }
     }
 
     /// Capture durable registries in the transaction coordinator's canonical lock order.
     pub(super) fn snapshot(&self) -> DurableCatalogSnapshot {
         DurableCatalogSnapshot {
-            graphs: self.graphs.read().clone(),
-            models: self.models.read().clone(),
-            scoring_params: self.scoring_params.read().clone(),
-            views: self.views.read().clone(),
-            catalog_indexes: self.catalog_indexes.read().clone(),
-            database_security: self.database_security.read().clone(),
-            schemas: self.schemas.read().clone(),
-            path_indexes: self.path_indexes.read().clone(),
-            sequences: self.sequences.read().clone(),
-            sequence_object_ids: self.sequence_object_ids.read().clone(),
-            sequence_persistence: self.sequence_persistence.read().clone(),
-            sequence_security: self.sequence_security.read().clone(),
-            named_analyzers: self.named_analyzers.read().clone(),
-            table_field_analyzers: self.table_field_analyzers.read().clone(),
-            foreign_servers: self.foreign_servers.read().clone(),
-            foreign_tables: self.foreign_tables.read().clone(),
-            foreign_table_security: self.foreign_table_security.read().clone(),
-            sql_user_functions: self.sql_user_functions.read().clone(),
-            roles: self.roles.read().clone(),
-            role_memberships: self.role_memberships.read().clone(),
-            triggers: self.triggers.read().clone(),
-            rules: self.rules.read().clone(),
+            graphs: self.graphs.snapshot(),
+            models: self.models.snapshot(),
+            scoring_params: self.scoring_params.snapshot(),
+            views: self.views.snapshot(),
+            catalog_indexes: self.catalog_indexes.snapshot(),
+            database_security: self.database_security.snapshot(),
+            schemas: self.schemas.snapshot(),
+            path_indexes: self.path_indexes.snapshot(),
+            sequences: self.sequences.snapshot(),
+            sequence_object_ids: self.sequence_object_ids.snapshot(),
+            sequence_persistence: self.sequence_persistence.snapshot(),
+            sequence_security: self.sequence_security.snapshot(),
+            named_analyzers: self.named_analyzers.snapshot(),
+            table_field_analyzers: self.table_field_analyzers.snapshot(),
+            foreign_servers: self.foreign_servers.snapshot(),
+            foreign_tables: self.foreign_tables.snapshot(),
+            foreign_table_security: self.foreign_table_security.snapshot(),
+            sql_user_functions: self.sql_user_functions.snapshot(),
+            roles: self.roles.snapshot(),
+            role_memberships: self.role_memberships.snapshot(),
+            triggers: self.triggers.snapshot(),
+            rules: self.rules.snapshot(),
         }
     }
 
-    /// Restore in the transaction coordinator's canonical lock order.
+    /// Restore shared immutable values in the transaction coordinator's lock order.
     pub(super) fn restore(&self, snapshot: &DurableCatalogSnapshot) {
-        *self.graphs.write() = snapshot.graphs.clone();
-        *self.models.write() = snapshot.models.clone();
-        *self.scoring_params.write() = snapshot.scoring_params.clone();
-        *self.views.write() = snapshot.views.clone();
-        *self.catalog_indexes.write() = snapshot.catalog_indexes.clone();
-        self.database_security
-            .write()
-            .clone_from(&snapshot.database_security);
-        self.schemas.write().clone_from(&snapshot.schemas);
-        *self.path_indexes.write() = snapshot.path_indexes.clone();
-        *self.sequences.write() = snapshot.sequences.clone();
-        *self.sequence_object_ids.write() = snapshot.sequence_object_ids.clone();
-        *self.sequence_persistence.write() = snapshot.sequence_persistence.clone();
-        *self.sequence_security.write() = snapshot.sequence_security.clone();
-        *self.named_analyzers.write() = snapshot.named_analyzers.clone();
-        *self.table_field_analyzers.write() = snapshot.table_field_analyzers.clone();
-        *self.foreign_servers.write() = snapshot.foreign_servers.clone();
-        *self.foreign_tables.write() = snapshot.foreign_tables.clone();
-        *self.foreign_table_security.write() = snapshot.foreign_table_security.clone();
-        *self.sql_user_functions.write() = snapshot.sql_user_functions.clone();
-        *self.roles.write() = snapshot.roles.clone();
-        *self.role_memberships.write() = snapshot.role_memberships.clone();
-        *self.triggers.write() = snapshot.triggers.clone();
-        *self.rules.write() = snapshot.rules.clone();
+        self.graphs.restore(&snapshot.graphs);
+        self.models.restore(&snapshot.models);
+        self.scoring_params.restore(&snapshot.scoring_params);
+        self.views.restore(&snapshot.views);
+        self.catalog_indexes.restore(&snapshot.catalog_indexes);
+        self.database_security.restore(&snapshot.database_security);
+        self.schemas.restore(&snapshot.schemas);
+        self.path_indexes.restore(&snapshot.path_indexes);
+        self.sequences.restore(&snapshot.sequences);
+        self.sequence_object_ids
+            .restore(&snapshot.sequence_object_ids);
+        self.sequence_persistence
+            .restore(&snapshot.sequence_persistence);
+        self.sequence_security.restore(&snapshot.sequence_security);
+        self.named_analyzers.restore(&snapshot.named_analyzers);
+        self.table_field_analyzers
+            .restore(&snapshot.table_field_analyzers);
+        self.foreign_servers.restore(&snapshot.foreign_servers);
+        self.foreign_tables.restore(&snapshot.foreign_tables);
+        self.foreign_table_security
+            .restore(&snapshot.foreign_table_security);
+        self.sql_user_functions
+            .restore(&snapshot.sql_user_functions);
+        self.roles.restore(&snapshot.roles);
+        self.role_memberships.restore(&snapshot.role_memberships);
+        self.triggers.restore(&snapshot.triggers);
+        self.rules.restore(&snapshot.rules);
     }
 }
 
@@ -421,6 +433,8 @@ pub(super) struct SessionContext {
     pub(super) portals: Mutex<BTreeMap<String, super::SessionPortalState>>,
     pub(super) next_portal_id: Mutex<usize>,
     pub(super) next_portal_transaction_origin: Mutex<u64>,
+    pub(crate) statistics_worker: AtomicBool,
+    pub(crate) statistics_client: AtomicBool,
 }
 
 impl SessionContext {
@@ -452,6 +466,8 @@ impl SessionContext {
             portals: Mutex::new(BTreeMap::new()),
             next_portal_id: Mutex::new(1),
             next_portal_transaction_origin: Mutex::new(1),
+            statistics_worker: AtomicBool::new(false),
+            statistics_client: AtomicBool::new(false),
         }
     }
 

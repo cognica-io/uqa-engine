@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- Replaced synchronous full-table statistics collection during persistent query planning with automatic database-level background maintenance. Committed-change thresholds and dirty-age scheduling use durable counters, preserve existing estimates during refresh, survive restart, and respect rollback. Bounded projected samples avoid unrelated BLOB payloads; explicit full refresh persists through the ANALYZE transaction path and histogram construction avoids redundant payload copies.
+- Shared immutable catalog registries and table definitions across statement snapshots and new sessions from a stable committed parent, while retaining independent physical storage handles, copy-on-write mutations, transaction isolation, and temporary-object visibility.
+- Pinned external catalog refresh to one read snapshot so concurrent commits cannot mix catalog generations or deadlock recursive rule/trigger validation during reopen.
+
 ## [0.2.2] - 2026-09-06
 
 See the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.2.2/docs/manual/reference/10-upgrading.md) for package updates, SQL constraint behavior, Rust AST changes, and CHECK catalog migration.

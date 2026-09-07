@@ -34,6 +34,7 @@ impl Engine {
             .ok_or_else(|| SQLError::Internal("COMMIT without an open transaction".into()))?;
         let read_only = frame.intent == TransactionIntent::ReadOnly;
         let has_row_changes = !frame.row_changes.is_empty();
+        let statistics_changes = frame.statistics_changes.clone();
         self.validate_read_only_commit(stack, read_only, storage_savepoint.is_none())?;
         let change_publication = if storage_savepoint.is_none() && has_row_changes {
             Some(
@@ -46,6 +47,13 @@ impl Engine {
         let notification_commit =
             self.prepare_notification_commit(stack, storage_savepoint.is_none())?;
         let savepoints_deferred = Self::backend_savepoints_deferred(stack);
+        if storage_savepoint.is_none() {
+            if let Err(error) = self.persist_statistics_changes(&statistics_changes) {
+                drop(notification_commit);
+                drop(change_publication);
+                return Err(self.rollback_failed_statistics_preparation(stack, &error));
+            }
+        }
         if let Some(backend) = self.storage.backend.as_ref() {
             let commit_result = if let Some(savepoint) = storage_savepoint {
                 if savepoints_deferred {
@@ -80,6 +88,9 @@ impl Engine {
             drop(change_publication);
             self.row_locks.release_session(self.session_id);
             self.publish_committed_transaction_epochs();
+            if !committed.statistics_changes.is_empty() {
+                self.wake_automatic_statistics();
+            }
             let notification_result = notification_commit.map_or(Ok(()), |notification_commit| {
                 self.commit_notification_state(notification_commit, &committed)
             });
@@ -94,6 +105,10 @@ impl Engine {
             parent.next_lock_mark = parent.next_lock_mark.max(committed.next_lock_mark);
             parent.constraint_modes = committed.constraint_modes;
             parent.row_changes.extend(committed.row_changes);
+            Self::merge_statistics_changes(
+                &mut parent.statistics_changes,
+                committed.statistics_changes,
+            );
             parent.deferred_foreign_key_checks = committed.deferred_foreign_key_checks;
             parent.deferred_constraint_trigger_events =
                 committed.deferred_constraint_trigger_events;
@@ -102,6 +117,22 @@ impl Engine {
             parent.first_snapshot_set |= committed.first_snapshot_set;
         }
         Ok(())
+    }
+
+    fn rollback_failed_statistics_preparation(
+        &self,
+        stack: &mut Vec<TransactionFrame>,
+        error: &StorageBackendError,
+    ) -> SQLError {
+        let failure = Self::storage_tx_error("statistics maintenance state", error);
+        // This error precedes COMMIT; the live/poisoned backend still needs
+        // rollback before its transaction frame and caches can be restored.
+        match self.rollback_transaction_frame(stack) {
+            Ok(()) => failure,
+            Err(rollback) => SQLError::Internal(format!(
+                "{failure}; statistics preparation rollback also failed: {rollback}"
+            )),
+        }
     }
 
     fn validate_read_only_commit(

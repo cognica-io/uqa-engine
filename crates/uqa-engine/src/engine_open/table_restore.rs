@@ -380,7 +380,13 @@ impl Engine {
             serde_json::from_str(&schema.constraints_json)?
         };
         let column_stats = Self::load_column_stats_from_catalog(catalog, &table_name)?;
-        let column_stats_dirty = column_stats.is_empty() && !columns.is_empty();
+        let column_stats_dirty = (column_stats.is_empty() && !columns.is_empty())
+            || crate::engine_statistics::MaintenanceState::load_for(
+                catalog,
+                &table_name,
+                schema.object_id,
+            )?
+            .invalidates_existing_statistics();
         let max_id = docs.max_doc_id()?;
         let persisted_next_id = if columns.iter().any(|column| {
             column
@@ -396,7 +402,7 @@ impl Engine {
         Ok(Arc::new(TableState {
             lifecycle_id: std::sync::atomic::AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: schema.object_id,
-            security: RwLock::new(crate::engine_state::TableSecurity {
+            security: crate::engine_state::CatalogCell::new(crate::engine_state::TableSecurity {
                 role_owner: schema.role_owner,
                 acl: schema.acl,
                 column_acls: schema.column_acls,
@@ -405,17 +411,17 @@ impl Engine {
             document_store: RwLock::new(docs),
             inverted_index: RwLock::new(inv),
             vector_indexes: RwLock::new(vectors),
-            fts_fields: RwLock::new(schema.fts_fields),
-            columns: RwLock::new(columns),
+            fts_fields: crate::engine_state::CatalogCell::new(schema.fts_fields),
+            columns: crate::engine_state::CatalogCell::new(columns),
             next_id: parking_lot::Mutex::new(next_id),
-            analyzer: RwLock::new(analyzer),
-            column_stats: RwLock::new(column_stats),
+            analyzer: crate::engine_state::CatalogCell::new(analyzer),
+            column_stats: crate::engine_state::CatalogCell::new(column_stats),
             column_stats_loaded: AtomicBool::new(true),
             column_stats_dirty: AtomicBool::new(column_stats_dirty),
-            table_checks: RwLock::new(constraints.checks),
-            foreign_keys: RwLock::new(constraints.foreign_keys),
-            key_constraints: RwLock::new(constraints.key_constraints),
-            hierarchy: RwLock::new(constraints.hierarchy),
+            table_checks: crate::engine_state::CatalogCell::new(constraints.checks),
+            foreign_keys: crate::engine_state::CatalogCell::new(constraints.foreign_keys),
+            key_constraints: crate::engine_state::CatalogCell::new(constraints.key_constraints),
+            hierarchy: crate::engine_state::CatalogCell::new(constraints.hierarchy),
             value_indexes: RwLock::new(BTreeMap::new()),
             doc_count_cache: std::sync::atomic::AtomicU64::new(0),
             doc_count_dirty: AtomicBool::new(true),

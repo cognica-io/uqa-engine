@@ -13,6 +13,8 @@ use uqa_storage::{ColumnStatsInput, SQLiteStorageBackend};
 
 use super::Engine;
 
+mod external_refresh;
+
 fn sqlite_data_version(engine: &Engine) -> u64 {
     engine
         .storage
@@ -22,6 +24,101 @@ fn sqlite_data_version(engine: &Engine) -> u64 {
         .change_version()
         .expect("read storage change version")
         .expect("file-backed database has a data version")
+}
+
+#[test]
+fn independent_sessions_share_committed_catalog_allocations() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("shared-catalog.db");
+    let engine = Engine::open(&path).unwrap();
+    engine.sql("CREATE TABLE items (id INTEGER PRIMARY KEY, label TEXT); INSERT INTO items VALUES (1, 'ready')", &[]).unwrap();
+    engine.create_graph("shared_graph").unwrap();
+    let session = engine.new_session().unwrap();
+    let first = engine.try_table("items").unwrap().unwrap();
+    let second = session.try_table("items").unwrap().unwrap();
+    assert!(
+        !Arc::ptr_eq(&first, &second),
+        "physical handles must stay session-bound"
+    );
+    assert!(Arc::ptr_eq(
+        &first.columns.snapshot(),
+        &second.columns.snapshot()
+    ));
+    assert!(Arc::ptr_eq(
+        &first.key_constraints.snapshot(),
+        &second.key_constraints.snapshot()
+    ));
+    assert!(Arc::ptr_eq(
+        &engine.durable.schemas.snapshot(),
+        &session.durable.schemas.snapshot()
+    ));
+    assert!(Arc::ptr_eq(
+        &engine.durable.graphs.snapshot(),
+        &session.durable.graphs.snapshot()
+    ));
+    assert_eq!(
+        session
+            .sql("SELECT label FROM items WHERE id = 1", &[])
+            .unwrap()
+            .rows[0]["label"],
+        Value::Str("ready".into())
+    );
+    assert!(
+        Arc::ptr_eq(
+            &first.columns.snapshot(),
+            &session
+                .try_table("items")
+                .unwrap()
+                .unwrap()
+                .columns
+                .snapshot()
+        ),
+        "first query must reuse its shared schema"
+    );
+
+    engine
+        .sql(
+            "BEGIN; ALTER TABLE items ADD COLUMN extra INTEGER; CREATE SCHEMA private_change",
+            &[],
+        )
+        .unwrap();
+    assert!(!session.catalog_read_view().has_schema("private_change"));
+    assert_eq!(second.columns.read().len(), 2);
+    engine.sql("ROLLBACK", &[]).unwrap();
+    assert!(session.sql("SELECT extra FROM items", &[]).is_err());
+    engine
+        .sql("ALTER TABLE items ADD COLUMN committed INTEGER", &[])
+        .unwrap();
+    assert!(session.sql("SELECT committed FROM items", &[]).is_ok());
+}
+
+#[test]
+fn session_created_during_parent_transaction_never_inherits_private_catalog() {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = Engine::open(&directory.path().join("transaction-session.db")).unwrap();
+    engine.sql("CREATE TABLE stable (id INTEGER)", &[]).unwrap();
+    engine
+        .sql("BEGIN; CREATE TABLE private_table (id INTEGER)", &[])
+        .unwrap();
+    let session = engine.new_session().unwrap();
+    session.sql("SELECT * FROM stable", &[]).unwrap();
+    assert!(session.sql("SELECT * FROM private_table", &[]).is_err());
+    engine.sql("ROLLBACK", &[]).unwrap();
+}
+
+#[test]
+fn new_session_does_not_inherit_temporary_catalog_objects() {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = Engine::open(&directory.path().join("temporary-session.db")).unwrap();
+    engine
+        .sql(
+            "CREATE TABLE stable (id INTEGER); CREATE TEMP TABLE private_temp (id INTEGER)",
+            &[],
+        )
+        .unwrap();
+    let session = engine.new_session().unwrap();
+    assert!(session.sql("SELECT * FROM stable", &[]).is_ok());
+    assert!(session.sql("SELECT * FROM private_temp", &[]).is_err());
 }
 
 #[test]

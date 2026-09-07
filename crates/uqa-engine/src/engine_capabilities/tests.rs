@@ -8,6 +8,42 @@ use super::*;
 use crate::StoredViewKind;
 
 #[test]
+fn catalog_views_share_schema_and_graph_allocations_until_mutation() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE items (id INTEGER PRIMARY KEY, label TEXT)",
+            &[],
+        )
+        .unwrap();
+    engine.create_graph("shared_graph").unwrap();
+    let first = engine.catalog_read_view();
+    let second = engine.catalog_read_view();
+    let relation = crate::RelationIdentity::new("public", "items");
+    assert!(Arc::ptr_eq(
+        &first.snapshot.tables[&relation].columns,
+        &second.snapshot.tables[&relation].columns
+    ));
+    assert!(Arc::ptr_eq(
+        &first.snapshot.durable.graphs,
+        &second.snapshot.durable.graphs
+    ));
+    assert!(Arc::ptr_eq(
+        &first.snapshot.durable.schemas,
+        &second.snapshot.durable.schemas
+    ));
+    engine
+        .sql("ALTER TABLE items ADD COLUMN extra INTEGER", &[])
+        .unwrap();
+    engine.create_graph("later_graph").unwrap();
+    let current = engine.catalog_read_view();
+    assert_eq!(first.snapshot.tables[&relation].columns.len(), 2);
+    assert_eq!(current.snapshot.tables[&relation].columns.len(), 3);
+    assert_eq!(first.graph_names(), vec!["shared_graph"]);
+    assert_eq!(current.graph_names(), vec!["later_graph", "shared_graph"]);
+}
+
+#[test]
 fn capability_views_expose_only_their_owned_state() {
     let engine = Engine::new();
     let catalog = engine.catalog_read_view();

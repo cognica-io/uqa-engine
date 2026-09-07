@@ -277,8 +277,8 @@ pub(in crate::sql::catalog) fn constraint_catalog_rows(
             }
         }
 
-        let mut key_constraints = table_snapshot.keys.clone();
-        for column in &columns {
+        let mut key_constraints = table_snapshot.keys.as_ref().clone();
+        for column in columns.iter() {
             let kind = if column.primary_key {
                 Some(TableKeyConstraintKind::PrimaryKey)
             } else if column.unique {
@@ -326,7 +326,7 @@ pub(in crate::sql::catalog) fn constraint_catalog_rows(
             });
         }
 
-        for constraint in &table_snapshot.checks {
+        for constraint in table_snapshot.checks.iter() {
             pending.push(PendingConstraintCatalogRow {
                 schema: schema.clone(),
                 table: table.clone(),
@@ -344,7 +344,7 @@ pub(in crate::sql::catalog) fn constraint_catalog_rows(
             });
         }
 
-        for foreign_key in &table_snapshot.foreign_keys {
+        for foreign_key in table_snapshot.foreign_keys.iter() {
             pending.push(foreign_key_catalog_row(
                 catalog,
                 resolution,
@@ -491,8 +491,8 @@ fn foreign_key_catalog_row(
         referenced_columns,
         &referenced_name,
     )?;
-    let mut referenced_keys = referenced.keys.clone();
-    for column in referenced_columns {
+    let mut referenced_keys = referenced.keys.as_ref().clone();
+    for column in referenced_columns.iter() {
         let kind = if column.primary_key {
             Some(TableKeyConstraintKind::PrimaryKey)
         } else if column.unique {

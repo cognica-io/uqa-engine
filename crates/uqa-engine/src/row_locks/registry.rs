@@ -42,6 +42,7 @@ impl RowLockManager {
             wake: Condvar::new(),
             cross,
             column_stats: RwLock::new(std::collections::BTreeMap::new()),
+            automatic_statistics: crate::engine_statistics::AutomaticStatistics::default(),
         }
     }
 

@@ -138,30 +138,26 @@ impl Engine {
             return Ok(());
         }
 
-        // Mark this version while rebuilding so catalog restore helpers that
-        // resolve a table cannot recursively enter the same non-reentrant
-        // refresh lock. Restore the old marker on failure; a commit racing the
-        // rebuild will advance the monitor again and be handled next time.
+        // Pin one committed snapshot for the entire restore. Merely marking
+        // the observed generation is insufficient: another writer can commit
+        // during restore, and a table lookup from a rule/trigger validator
+        // would recursively acquire this non-reentrant refresh lock. The
+        // pinned transaction both defers recursive synchronization and keeps
+        // table definitions and their dependent registries consistent.
         let previous_version = self
             .epochs
             .seen_storage_change_version
-            .swap(version, std::sync::atomic::Ordering::AcqRel);
-        let refresh_result = (|| {
-            self.clear_persistent_table_bindings_for_catalog_reload();
-            let table_catalog_epoch = self
-                .epochs
-                .table_catalog
-                .published
-                .load(std::sync::atomic::Ordering::Acquire);
-            self.reload_table_catalog(table_catalog_epoch)?;
-            self.refresh_table_data_cache(true)?;
-            let catalog_registry_epoch = self
-                .epochs
-                .catalog_registry
-                .published
-                .load(std::sync::atomic::Ordering::Acquire);
-            self.reload_catalog_registries(catalog_registry_epoch)
-        })();
+            .load(std::sync::atomic::Ordering::Acquire);
+        backend.begin_read_transaction()?;
+        let refresh_result = self.refresh_pinned_transaction_snapshot();
+        let cleanup = backend.rollback_transaction();
+        let refresh_result = match (refresh_result, cleanup) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+            (Err(error), Err(cleanup)) => Err(StorageBackendError::Other(format!(
+                "external catalog refresh failed: {error}; snapshot cleanup failed: {cleanup}"
+            ))),
+        };
         if refresh_result.is_err() {
             self.epochs
                 .seen_storage_change_version
@@ -222,13 +218,18 @@ impl Engine {
             table
                 .doc_count_dirty
                 .store(true, std::sync::atomic::Ordering::Release);
-            if temporary {
-                table
-                    .column_stats_dirty
-                    .store(true, std::sync::atomic::Ordering::Release);
-            } else if let Some(catalog) = self.storage.catalog.as_ref() {
+            // In-memory and temporary tables have no external writers. Their
+            // mutation hooks already invalidate statistics; an epoch refresh
+            // must not invalidate freshly collected ANALYZE results again.
+            if let Some(catalog) = self.storage.catalog.as_ref().filter(|_| !temporary) {
                 let stats = Self::load_column_stats_from_catalog(catalog.as_ref(), &name)?;
-                let stats_dirty = stats.is_empty() && !table.columns.read().is_empty();
+                let stats_dirty = (stats.is_empty() && !table.columns.read().is_empty())
+                    || crate::engine_statistics::MaintenanceState::load_for(
+                        catalog.as_ref(),
+                        &name,
+                        table.object_id(),
+                    )?
+                    .invalidates_existing_statistics();
                 *table.column_stats.write() = stats;
                 table
                     .column_stats_loaded
@@ -236,10 +237,6 @@ impl Engine {
                 table
                     .column_stats_dirty
                     .store(stats_dirty, std::sync::atomic::Ordering::Release);
-            } else {
-                table
-                    .column_stats_dirty
-                    .store(true, std::sync::atomic::Ordering::Release);
             }
         }
         self.synchronize_partition_identity_watermarks()?;

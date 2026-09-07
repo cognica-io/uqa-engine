@@ -28,6 +28,7 @@ struct StatementAbortSnapshot {
     dirty: TransactionDirtyState,
     keep_mark: Option<u32>,
     row_changes: Vec<TransactionRowChange>,
+    statistics_changes: crate::engine_statistics::StatisticsChanges,
     deferred_foreign_key_checks: Vec<crate::DeferredForeignKeyCheck>,
     deferred_constraint_trigger_events: Vec<crate::sql::DeferredConstraintTriggerEvent>,
     pending_listen_actions: Vec<crate::PendingListenAction>,
@@ -48,6 +49,7 @@ fn statement_abort_snapshot(frame: &TransactionFrame) -> StatementAbortSnapshot 
             dirty: savepoint.dirty,
             keep_mark: Some(savepoint.lock_mark),
             row_changes: savepoint.row_changes.clone(),
+            statistics_changes: savepoint.statistics_changes.clone(),
             deferred_foreign_key_checks: savepoint.deferred_foreign_key_checks.clone(),
             deferred_constraint_trigger_events: savepoint
                 .deferred_constraint_trigger_events
@@ -72,6 +74,7 @@ fn statement_abort_snapshot(frame: &TransactionFrame) -> StatementAbortSnapshot 
             .as_ref()
             .map(|_| frame.begin_lock_mark.saturating_sub(1)),
         row_changes: Vec::new(),
+        statistics_changes: crate::engine_statistics::StatisticsChanges::new(),
         deferred_foreign_key_checks: Vec::new(),
         deferred_constraint_trigger_events: Vec::new(),
         pending_listen_actions: Vec::new(),
@@ -178,6 +181,7 @@ impl Engine {
                 TransactionStatus::Failed
             };
             frame.row_changes = rollback_state.row_changes;
+            frame.statistics_changes = rollback_state.statistics_changes;
             frame.deferred_foreign_key_checks = rollback_state.deferred_foreign_key_checks;
             frame.deferred_constraint_trigger_events =
                 rollback_state.deferred_constraint_trigger_events;

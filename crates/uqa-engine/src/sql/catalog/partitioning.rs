@@ -218,8 +218,8 @@ pub(super) fn partition_bound_node(
                 .table(resolution, parent)?
                 .ok_or_else(|| SQLError::UnknownTable(parent.clone()))?
                 .hierarchy
-                .clone()
                 .partition_spec
+                .as_ref()
                 .map(|spec| spec.strategy)
                 .ok_or_else(|| {
                     SQLError::Internal(format!("partition parent `{parent}` has no partition key"))

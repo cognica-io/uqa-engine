@@ -89,8 +89,8 @@ pub(in crate::sql::catalog) fn build_pg_attribute(
             attribute.insert(
                 "attacl".into(),
                 super::super::relation_catalog::table_acl_catalog_value(
-                    &table.role_owner,
-                    table.column_acls.get(&col.name),
+                    &table.security.role_owner,
+                    table.security.column_acls.get(&col.name),
                 )?,
             );
             attribute.insert(

@@ -37,26 +37,30 @@ pub(super) fn collect_analyze_values(
         values.insert(column.clone(), Vec::new());
         nulls.insert(column.clone(), 0);
     }
-    for doc_id in doc_ids {
-        let Some(document) = snapshot.get(*doc_id)? else {
-            for column in columns {
-                increment_analyze_null(&mut nulls, column)?;
-            }
-            continue;
-        };
-        for column in columns {
-            match document.get(column) {
-                None | Some(Value::Null) => increment_analyze_null(&mut nulls, column)?,
-                Some(value) => values
+    let fields = columns.iter().map(String::as_str).collect::<Vec<_>>();
+    let mut failure = None;
+    snapshot.for_each_fields_multi(doc_ids, &fields, &mut |_, row| {
+        for (column, value) in columns.iter().zip(row) {
+            let result = match value {
+                Value::Null => increment_analyze_null(&mut nulls, column),
+                value => values
                     .get_mut(column)
                     .ok_or_else(|| {
                         StorageBackendError::Other(format!(
                             "ANALYZE lost the value buffer for column `{column}`"
                         ))
-                    })?
-                    .push(value.clone()),
+                    })
+                    .map(|values| values.push(value)),
+            };
+            if let Err(error) = result {
+                failure = Some(error);
+                return false;
             }
         }
+        true
+    })?;
+    if let Some(error) = failure {
+        return Err(error);
     }
     Ok((values, nulls))
 }
@@ -77,7 +81,7 @@ pub(super) fn build_histogram(values: &[&Value]) -> Vec<Value> {
     if values.is_empty() {
         return Vec::new();
     }
-    let mut sorted: Vec<Value> = values.iter().map(|value| (*value).clone()).collect();
+    let mut sorted = values.to_vec();
     sorted.sort();
     let count = sorted.len();
     let bucket_count = HISTOGRAM_BUCKETS.min(count);
@@ -86,12 +90,12 @@ pub(super) fn build_histogram(values: &[&Value]) -> Vec<Value> {
     }
     let mut boundaries = vec![sorted[0].clone()];
     for bucket in 1..bucket_count {
-        let value = &sorted[(bucket * count) / bucket_count];
+        let value = sorted[(bucket * count) / bucket_count];
         if Some(value) != boundaries.last() {
             boundaries.push(value.clone());
         }
     }
-    if boundaries.last() != Some(&sorted[count - 1]) {
+    if boundaries.last() != Some(sorted[count - 1]) {
         boundaries.push(sorted[count - 1].clone());
     }
     boundaries

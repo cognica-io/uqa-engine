@@ -6,6 +6,8 @@
 
 //! Column-statistics collection, persistence, and lazy refresh.
 
+mod automatic;
+
 use super::{
     build_histogram, build_mcv, collect_analyze_values, distinct_count, Arc, BTreeMap,
     CatalogFacade, ColumnStatsInput, DocId, Engine, Ordering, RelationIdentity,
@@ -140,6 +142,15 @@ impl Engine {
         canonical_table_name: &str,
         table: &Arc<TableState>,
     ) -> StorageBackendResult<()> {
+        self.mark_column_stats_dirty_by_count(canonical_table_name, table, 1)
+    }
+
+    pub(crate) fn mark_column_stats_dirty_by_count(
+        &self,
+        canonical_table_name: &str,
+        table: &Arc<TableState>,
+        count: u64,
+    ) -> StorageBackendResult<()> {
         let ancestors = self
             .hierarchy_ancestor_tables(canonical_table_name)
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
@@ -154,13 +165,9 @@ impl Engine {
                     ))
                 })?
             };
-            if state.persistence != uqa_sql::ast::RelationPersistence::Temporary
-                && !state.column_stats_dirty.load(Ordering::Acquire)
-            {
-                if let Some(catalog) = self.storage.catalog.as_ref() {
-                    catalog.delete_column_stats(&name)?;
-                }
-            }
+            // Estimates remain useful while a replacement is pending. Track
+            // changes transactionally instead of deleting durable statistics.
+            self.record_statistics_change(&name, &state, count)?;
             state.doc_count_dirty.store(true, Ordering::Release);
             state.column_stats_dirty.store(true, Ordering::Release);
         }
@@ -245,6 +252,7 @@ impl Engine {
         *t.column_stats.write() = stats_out.clone();
         t.column_stats_loaded.store(true, Ordering::Release);
         t.column_stats_dirty.store(false, Ordering::Release);
+        self.clear_pending_statistics_changes(canonical_table_name);
         if persist {
             if t.persistence != uqa_sql::ast::RelationPersistence::Temporary {
                 self.row_locks
@@ -302,7 +310,7 @@ impl Engine {
                 .ok_or_else(|| {
                     StorageBackendError::Other("ANALYZE hierarchy row count overflow".into())
                 })?;
-            let (member_values, member_nulls) =
+            let (mut member_values, member_nulls) =
                 collect_analyze_values(snapshot.as_ref(), &doc_ids, columns)?;
             for column in columns {
                 col_values
@@ -312,7 +320,7 @@ impl Engine {
                             "ANALYZE lost the value buffer for column `{column}`"
                         ))
                     })?
-                    .extend(member_values.get(column).cloned().unwrap_or_default());
+                    .extend(member_values.remove(column).unwrap_or_default());
                 let null_count = member_nulls.get(column).copied().ok_or_else(|| {
                     StorageBackendError::Other(format!(
                         "ANALYZE lost the null counter for column `{column}`"
@@ -418,7 +426,12 @@ impl Engine {
                 mcv_frequencies_json: &stats.mcv_frequencies_json,
             })
             .collect::<Vec<_>>();
-        catalog.replace_column_stats(table_name, &rows)
+        catalog.replace_column_stats(table_name, &rows)?;
+        crate::engine_statistics::MaintenanceState::analyzed(
+            catalog,
+            table_name,
+            stats.values().next().map_or(0, |stats| stats.row_count),
+        )
     }
 
     pub(super) fn u64_to_i64(kind: &str, value: u64) -> StorageBackendResult<i64> {
@@ -430,8 +443,11 @@ impl Engine {
     }
 
     /// Snapshot of the cardinality estimator's per-column statistics
-    /// for `table`. Dirty stats are recomputed lazily so callers do not
-    /// need to issue `ANALYZE` after every data change.
+    /// for `table`. Clean statistics are reused, including sampled scalar
+    /// statistics from automatic maintenance. Dirty stats are recomputed
+    /// through the same durable transaction boundary as `ANALYZE`. Use
+    /// `run_analyze` to force full collection regardless of cached statistics.
+    /// Persistent query planning only consumes already-collected statistics.
     pub fn column_stats(
         &self,
         table: &str,
@@ -462,7 +478,18 @@ impl Engine {
             return Ok(stats);
         }
         if t.column_stats_dirty.load(Ordering::Acquire) {
-            self.analyze_table(&canonical_name, &t, false, None, true)?;
+            if self.storage.catalog.is_none() {
+                // Memory-only lazy collection has no durable publication and
+                // must not invalidate the statement currently being planned.
+                self.analyze_table(&canonical_name, &t, false, None, true)?;
+                return Ok(t.column_stats.read().clone());
+            }
+            self.run_analyze(Some(&canonical_name))?;
+            // Starting maintenance can refresh session-local table bindings.
+            let refreshed = self.try_table(&canonical_name)?.ok_or_else(|| {
+                StorageBackendError::Other(format!("table `{canonical_name}` does not exist"))
+            })?;
+            return Ok(refreshed.column_stats.read().clone());
         }
         let stats = t.column_stats.read().clone();
         Ok(stats)
@@ -472,12 +499,18 @@ impl Engine {
         &self,
         table: &str,
     ) -> StorageBackendResult<BTreeMap<String, uqa_planner::ColumnStats>> {
-        if self.query_table_snapshots.is_none() {
+        // Memory-only engines have no durable independent sessions or blob
+        // I/O. Retain their automatic lazy refresh at this boundary.
+        if self.storage.provider.is_none() && self.query_table_snapshots.is_none() {
             return self.try_column_stats(table);
         }
         let table = self
             .try_query_table(table)?
             .ok_or_else(|| StorageBackendError::Other(format!("table `{table}` does not exist")))?;
+        // Cardinality estimates must never turn a projection or EXPLAIN into
+        // a synchronous full-table ANALYZE (including unrelated BLOB fields).
+        // Keep using the last collected estimate while the database worker
+        // refreshes it. A genuinely new table uses ordinary planner estimates.
         let stats = table.column_stats.read().clone();
         Ok(stats)
     }
