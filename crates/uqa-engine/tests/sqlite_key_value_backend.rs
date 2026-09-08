@@ -612,6 +612,7 @@ fn failed_key_value_graph_replacement_preserves_snapshot_and_path_index() {
         index
             .lookup(&["knows".to_string()])
             .unwrap()
+            .unwrap()
             .iter()
             .copied()
             .collect::<Vec<_>>(),

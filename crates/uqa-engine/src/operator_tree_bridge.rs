@@ -84,7 +84,7 @@ use deep_layers::{
 };
 use graph_runtime::{
     graph_pattern_from_ir, parse_rpq, restrict_result_to_source, temporal_filter_from_ir,
-    GraphNeighborSnapshot,
+    GraphNeighborAccess,
 };
 use lowering_boolean::{column_name, lower_comparison, lower_document_boolean, lower_function};
 use lowering_constants::{

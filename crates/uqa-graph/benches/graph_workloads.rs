@@ -372,12 +372,19 @@ fn bench_graph_path_index(c: &mut Criterion) {
     .expect("path index build");
     c.bench_function("graph_path_index_lookup", |bencher| {
         let seq = vec!["knows".to_string()];
-        bencher.iter(|| black_box(idx.lookup(black_box(&seq)).map(BTreeSet::len)));
+        bencher.iter(|| {
+            black_box(
+                idx.lookup(black_box(&seq))
+                    .expect("path-index query")
+                    .map(|pairs| pairs.len()),
+            )
+        });
     });
 
     let indexed_sequence = vec!["knows".to_string(), "knows".to_string()];
     let indexed_count = idx
         .lookup(&indexed_sequence)
+        .expect("path-index query")
         .expect("indexed sequence")
         .len();
     assert_eq!(
@@ -390,6 +397,7 @@ fn bench_graph_path_index(c: &mut Criterion) {
         bencher.iter(|| {
             black_box(
                 idx.lookup(black_box(&indexed_sequence))
+                    .expect("path-index query")
                     .expect("indexed sequence")
                     .len(),
             )
@@ -404,7 +412,10 @@ fn bench_graph_path_index(c: &mut Criterion) {
         });
     });
     comparison_group.finish();
+}
 
+fn bench_graph_subgraph_index(c: &mut Criterion) {
+    let store = build_graph(1_000);
     let pattern = person_knows_pattern();
     c.bench_function("graph_subgraph_index_build", |bencher| {
         bencher.iter(|| {
@@ -944,6 +955,7 @@ criterion_group!(
     bench_graph_store_and_traversal,
     bench_pattern_rpq_cypher,
     bench_graph_path_index,
+    bench_graph_subgraph_index,
     bench_graph_delta,
     bench_graph_temporal_message_embedding,
     bench_centrality,

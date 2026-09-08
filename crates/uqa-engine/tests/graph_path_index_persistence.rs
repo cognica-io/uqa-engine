@@ -5,8 +5,8 @@
 //
 
 //! Persistence/atomicity regressions for graph mutation and dependent path
-//! indexes. A graph snapshot replacement deletes its path-index catalog rows
-//! in the same transaction; failed replacement must roll both changes back.
+//! indexes. A graph mutation invalidates its path-index catalog rows in the
+//! same storage transaction; failed mutation must roll both changes back.
 
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -52,7 +52,7 @@ fn clear_membership_insert_failure(connection: &ManagedConnection) {
 }
 
 #[test]
-fn failed_graph_replacement_preserves_graph_and_path_index_after_reopen() {
+fn failed_graph_mutation_preserves_graph_and_path_index_after_reopen() {
     let (directory, connection, engine) = persistent_engine();
     engine.create_graph("g").unwrap();
     engine.add_graph_vertex(Vertex::new(1, "P"), "g").unwrap();
@@ -93,6 +93,7 @@ fn failed_graph_replacement_preserves_graph_and_path_index_after_reopen() {
         .expect("the rolled-back path index must survive reopen");
     let pairs = index
         .lookup(&["knows".to_string()])
+        .expect("path-index query")
         .expect("persisted path sequence must be restored");
     assert_eq!(pairs.iter().copied().collect::<Vec<_>>(), vec![(1, 2)]);
 }

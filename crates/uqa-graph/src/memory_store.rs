@@ -29,7 +29,7 @@ pub use graphid::{
     VERTEX_DEFAULT_LABEL_ID,
 };
 
-use graphid::usize_to_f64_exact;
+pub(crate) use graphid::usize_to_f64_exact;
 #[cfg(test)]
 use graphid::{MAX_GRAPHID_LABEL_ID, MAX_GRAPHID_SEQUENCE};
 use partition::Partition;

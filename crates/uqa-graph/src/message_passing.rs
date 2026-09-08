@@ -92,7 +92,7 @@ impl<'a> MessagePassing<'a> {
     ) -> GraphStoreResult<BTreeMap<VertexId, f64>> {
         let mut features = BTreeMap::new();
         for vid in vertices {
-            let vertex = store.get_vertex(*vid).ok_or_else(|| {
+            let vertex = store.get_vertex(*vid)?.ok_or_else(|| {
                 GraphStoreError::CorruptGraph(format!(
                     "message-passing graph {:?} references missing vertex {vid}",
                     self.graph
@@ -134,7 +134,7 @@ impl<'a> MessagePassing<'a> {
                     ))
                 })?;
             for eid in out_edges {
-                let edge = store.get_edge(eid).ok_or_else(|| {
+                let edge = store.get_edge(eid)?.ok_or_else(|| {
                     GraphStoreError::CorruptGraph(format!("missing message-passing edge {eid}"))
                 })?;
                 let value = features.get(&edge.target_id).ok_or_else(|| {
@@ -146,7 +146,7 @@ impl<'a> MessagePassing<'a> {
                 neighbor_values.push(*value);
             }
             for eid in in_edges {
-                let edge = store.get_edge(eid).ok_or_else(|| {
+                let edge = store.get_edge(eid)?.ok_or_else(|| {
                     GraphStoreError::CorruptGraph(format!("missing message-passing edge {eid}"))
                 })?;
                 let value = features.get(&edge.source_id).ok_or_else(|| {

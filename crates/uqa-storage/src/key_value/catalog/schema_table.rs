@@ -94,6 +94,12 @@ fn rename_document_scoped_fts_fields(
 
 impl KeyValueCatalog {
     pub(super) fn set_metadata_impl(&self, key: &str, value: &str) -> StorageBackendResult<()> {
+        if let Some(graph) = key.strip_prefix("graph_label_registry::") {
+            let mut batch = self.store.batch();
+            self.invalidate_graph_path_data(batch.as_mut(), graph)?;
+            batch.put(&single_str_key(TAG_METADATA, key)?, &string_value(value))?;
+            return batch.commit();
+        }
         self.store
             .put(&single_str_key(TAG_METADATA, key)?, &string_value(value))
     }

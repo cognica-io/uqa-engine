@@ -155,7 +155,7 @@ impl<'a> TemporalTraverse<'a> {
             let mut next_frontier: BTreeSet<VertexId> = BTreeSet::new();
             for v in &frontier {
                 for eid in store.out_edge_ids(*v, self.graph)? {
-                    let edge = store.get_edge(eid).ok_or_else(|| {
+                    let edge = store.get_edge(eid)?.ok_or_else(|| {
                         GraphStoreError::CorruptGraph(format!(
                             "temporal traversal references missing edge {eid}"
                         ))
@@ -326,7 +326,7 @@ impl<'a> TemporalPatternMatch<'a> {
         for vp in &self.pattern.vertex_patterns {
             let mut candidates = Vec::new();
             for vid in &vids {
-                let vertex = store.get_vertex(*vid).ok_or_else(|| {
+                let vertex = store.get_vertex(*vid)?.ok_or_else(|| {
                     GraphStoreError::CorruptGraph(format!(
                         "graph {:?} references missing vertex {vid}",
                         self.graph
@@ -335,7 +335,7 @@ impl<'a> TemporalPatternMatch<'a> {
                 if vp
                     .constraints
                     .iter()
-                    .all(|constraint| constraint.matches(vertex))
+                    .all(|constraint| constraint.matches(&vertex))
                 {
                     candidates.push(*vid);
                 }
@@ -429,7 +429,7 @@ impl<'a> TemporalPatternMatch<'a> {
             };
             let mut found = false;
             for eid in store.out_edge_ids(src_id, self.graph)? {
-                let edge = store.get_edge(eid).ok_or_else(|| {
+                let edge = store.get_edge(eid)?.ok_or_else(|| {
                     GraphStoreError::CorruptGraph(format!(
                         "temporal matcher references missing edge {eid}"
                     ))
@@ -442,7 +442,7 @@ impl<'a> TemporalPatternMatch<'a> {
                         continue;
                     }
                 }
-                if !ep.constraints.iter().all(|c| c.matches(edge)) {
+                if !ep.constraints.iter().all(|c| c.matches(&edge)) {
                     continue;
                 }
                 if !self.temporal_filter.is_valid(&edge.properties)? {
@@ -472,7 +472,7 @@ impl<'a> TemporalPatternMatch<'a> {
                 continue;
             };
             for eid in store.out_edge_ids(src_id, self.graph)? {
-                let edge = store.get_edge(eid).ok_or_else(|| {
+                let edge = store.get_edge(eid)?.ok_or_else(|| {
                     GraphStoreError::CorruptGraph(format!(
                         "temporal match result references missing edge {eid}"
                     ))

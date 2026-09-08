@@ -48,11 +48,11 @@ impl<'a> VertexMatch<'a> {
         let mut entries: Vec<PostingEntry> = Vec::new();
         let mut graph_payloads: BTreeMap<DocId, GraphPayload> = BTreeMap::new();
         for vid in candidates {
-            let vtx = store.get_vertex(vid).ok_or_else(|| {
+            let vtx = store.get_vertex(vid)?.ok_or_else(|| {
                 GraphStoreError::CorruptGraph(format!("missing matched vertex {vid}"))
             })?;
             if let Some(pred) = &self.predicate {
-                if !pred.matches(vtx) {
+                if !pred.matches(&vtx) {
                     continue;
                 }
             }

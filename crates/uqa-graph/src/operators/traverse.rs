@@ -62,7 +62,7 @@ impl<'a> Traverse<'a> {
             let mut next_frontier: BTreeSet<VertexId> = BTreeSet::new();
             for v in &frontier {
                 for eid in store.out_edge_ids(*v, self.graph)? {
-                    let edge = store.get_edge(eid).ok_or_else(|| {
+                    let edge = store.get_edge(eid)?.ok_or_else(|| {
                         GraphStoreError::CorruptGraph(format!("missing traversal edge {eid}"))
                     })?;
                     if let Some(want) = self.label {
@@ -77,12 +77,12 @@ impl<'a> Traverse<'a> {
                         continue;
                     }
                     if let Some(pred) = &self.vertex_predicate {
-                        let vtx = store.get_vertex(neighbor).ok_or_else(|| {
+                        let vtx = store.get_vertex(neighbor)?.ok_or_else(|| {
                             GraphStoreError::CorruptGraph(format!(
                                 "traversal edge {eid} references missing vertex {neighbor}"
                             ))
                         })?;
-                        if !pred.matches(vtx) {
+                        if !pred.matches(&vtx) {
                             continue;
                         }
                     }

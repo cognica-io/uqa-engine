@@ -145,7 +145,7 @@ impl<'a> WeightedPathQuery<'a> {
                 continue;
             };
             for edge_id in store.out_edge_ids(walk.vertex, self.graph)? {
-                let edge = store.get_edge(edge_id).ok_or_else(|| {
+                let edge = store.get_edge(edge_id)?.ok_or_else(|| {
                     GraphStoreError::CorruptGraph(format!("missing weighted-path edge {edge_id}"))
                 })?;
                 let Some(next_state) = transitions.get(&edge.label) else {

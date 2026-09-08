@@ -53,9 +53,25 @@ fn independent_sessions_share_committed_catalog_allocations() {
         &engine.durable.schemas.snapshot(),
         &session.durable.schemas.snapshot()
     ));
-    assert!(Arc::ptr_eq(
-        &engine.durable.graphs.snapshot(),
-        &session.durable.graphs.snapshot()
+    let engine_graphs = engine.durable.graphs.snapshot();
+    let session_graphs = session.durable.graphs.snapshot();
+    assert_eq!(
+        engine_graphs.keys().collect::<Vec<_>>(),
+        session_graphs.keys().collect::<Vec<_>>()
+    );
+    let engine_graph = &engine_graphs["shared_graph"];
+    let session_graph = &session_graphs["shared_graph"];
+    assert!(
+        !Arc::ptr_eq(engine_graph, session_graph),
+        "physical graph handles must stay session-bound"
+    );
+    assert!(matches!(
+        engine_graph.as_ref(),
+        uqa_graph::GraphStoreHandle::Persistent(_)
+    ));
+    assert!(matches!(
+        session_graph.as_ref(),
+        uqa_graph::GraphStoreHandle::Persistent(_)
     ));
     assert_eq!(
         session

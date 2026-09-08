@@ -18,6 +18,98 @@ fn into_storage_result<T>(result: Result<T>) -> StorageBackendResult<T> {
 }
 
 impl CatalogFacade for Catalog {
+    fn clear_path_index_data(&self, index: &str) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::clear_path_index_data(self, index))
+    }
+
+    fn save_path_index_pairs(
+        &self,
+        index: &str,
+        sequence: &str,
+        pairs: &[(u64, u64)],
+    ) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::save_path_index_pairs(self, index, sequence, pairs))
+    }
+
+    fn finish_path_index_data(
+        &self,
+        index: &str,
+        graph: &str,
+        definition: &str,
+    ) -> StorageBackendResult<()> {
+        into_storage_result(Catalog::finish_path_index_data(
+            self, index, graph, definition,
+        ))
+    }
+
+    fn path_index_data_is_current(
+        &self,
+        index: &str,
+        definition: &str,
+    ) -> StorageBackendResult<bool> {
+        into_storage_result(Catalog::path_index_data_is_current(self, index, definition))
+    }
+
+    fn path_index_pairs(
+        &self,
+        index: &str,
+        sequence: &str,
+        after: Option<(u64, u64)>,
+        limit: usize,
+    ) -> StorageBackendResult<Vec<(u64, u64)>> {
+        into_storage_result(Catalog::path_index_pairs(
+            self, index, sequence, after, limit,
+        ))
+    }
+
+    fn graph_vertex(&self, id: u64) -> StorageBackendResult<Option<crate::GraphVertexRow>> {
+        into_storage_result(Catalog::graph_vertex(self, id))
+    }
+
+    fn graph_edge(&self, id: u64) -> StorageBackendResult<Option<EdgeRow>> {
+        into_storage_result(Catalog::graph_edge(self, id))
+    }
+
+    fn graph_entity_ids(
+        &self,
+        filter: crate::GraphEntityFilter<'_>,
+        after: Option<u64>,
+        limit: usize,
+    ) -> StorageBackendResult<Vec<u64>> {
+        into_storage_result(Catalog::graph_entity_ids(self, filter, after, limit))
+    }
+
+    fn graph_entity_count(
+        &self,
+        filter: crate::GraphEntityFilter<'_>,
+    ) -> StorageBackendResult<u64> {
+        into_storage_result(Catalog::graph_entity_count(self, filter))
+    }
+
+    fn graph_entity_max_id(
+        &self,
+        kind: crate::GraphEntityKind,
+    ) -> StorageBackendResult<Option<u64>> {
+        into_storage_result(Catalog::graph_entity_max_id(self, kind))
+    }
+
+    fn graph_entity_memberships(
+        &self,
+        kind: crate::GraphEntityKind,
+        id: u64,
+    ) -> StorageBackendResult<Vec<String>> {
+        into_storage_result(Catalog::graph_entity_memberships(self, kind, id))
+    }
+
+    fn graph_has_membership(
+        &self,
+        kind: crate::GraphEntityKind,
+        id: u64,
+        graph: &str,
+    ) -> StorageBackendResult<bool> {
+        into_storage_result(Catalog::graph_has_membership(self, kind, id, graph))
+    }
+
     fn cache_revisions(&self) -> StorageBackendResult<Option<crate::CatalogCacheRevisions>> {
         into_storage_result(Catalog::cache_revisions(self)).map(Some)
     }
@@ -245,6 +337,9 @@ impl CatalogFacade for Catalog {
 
     fn load_named_graphs(&self) -> StorageBackendResult<Vec<String>> {
         into_storage_result(Catalog::load_named_graphs(self))
+    }
+    fn named_graph_exists(&self, name: &str) -> StorageBackendResult<bool> {
+        into_storage_result(Catalog::named_graph_exists(self, name))
     }
 
     fn load_named_graph_snapshot(&self, name: &str) -> StorageBackendResult<Option<GraphSnapshot>> {

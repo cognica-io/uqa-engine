@@ -8,12 +8,75 @@ use super::{
     bind_session_portal_function_relations, Engine, QueryPlan, RelationalPlan, SQLError,
     SessionPortalTableDependencies, SourcePlan,
 };
+use uqa_sql::registry::FunctionKind;
+
+fn collect_graph_function_dependency(
+    name: &str,
+    binding: Option<&uqa_sql::ast::FunctionBinding>,
+    args: &[uqa_execution::ScalarExpr],
+    dependencies: &mut SessionPortalTableDependencies,
+) {
+    if binding.is_some_and(|binding| !binding.builtin) {
+        return;
+    }
+    let name = crate::sql::builtin_function_dispatch_name(name);
+    let argument = match uqa_sql::registry::lookup(&name) {
+        Some(
+            FunctionKind::GraphPagerank
+            | FunctionKind::GraphHits
+            | FunctionKind::GraphBetweenness
+            | FunctionKind::GraphTraverse
+            | FunctionKind::GraphNeighbors
+            | FunctionKind::TraverseMatch
+            | FunctionKind::TemporalTraverse
+            | FunctionKind::GraphEdges,
+        ) => Some(0),
+        Some(FunctionKind::RPQ) => Some(2),
+        Some(FunctionKind::DeepPredict | FunctionKind::DeepLearn) => {
+            // Model programs can select graph inputs dynamically.
+            dependencies.graphs = None;
+            dependencies.graph_catalog = true;
+            return;
+        }
+        Some(
+            FunctionKind::GraphCreate
+            | FunctionKind::GraphDrop
+            | FunctionKind::GraphExists
+            | FunctionKind::GraphLabelCreate
+            | FunctionKind::GraphLabelDrop
+            | FunctionKind::GraphAlter,
+        ) => {
+            dependencies.graph_catalog = true;
+            return;
+        }
+        _ if name == "cypher" => Some(0),
+        _ if name == "graph_join" => {
+            dependencies.graphs = None;
+            dependencies.graph_catalog = true;
+            return;
+        }
+        _ => None,
+    };
+    let Some(argument) = argument else {
+        return;
+    };
+    dependencies.graph_catalog = true;
+    if let Some(uqa_execution::ScalarExpr::Literal(uqa_core::Value::Str(graph))) =
+        args.get(argument)
+    {
+        dependencies.insert_graph(graph.clone());
+    } else {
+        // Do not evaluate expressions or volatile functions at DECLARE.
+        // A parameter, expression, or default graph can select any graph.
+        dependencies.graphs = None;
+    }
+}
 
 pub(super) fn session_portal_table_dependencies(
     engine: &Engine,
     query: &QueryPlan,
 ) -> Result<SessionPortalTableDependencies, SQLError> {
-    let mut dependencies = SessionPortalTableDependencies::Exact(std::collections::BTreeSet::new());
+    let mut dependencies = SessionPortalTableDependencies::empty();
     collect_session_portal_query_dependencies(
         engine,
         query,
@@ -31,7 +94,7 @@ pub(super) fn collect_session_portal_query_dependencies(
     visiting_views: &mut std::collections::BTreeSet<String>,
     visiting_routines: &mut std::collections::BTreeSet<String>,
 ) -> Result<(), SQLError> {
-    if matches!(dependencies, SessionPortalTableDependencies::All) {
+    if dependencies.is_all() {
         return Ok(());
     }
     for cte in &query.ctes {
@@ -54,7 +117,14 @@ pub(super) fn collect_session_portal_query_dependencies(
     let mut plan = uqa_planner::UnifiedPlan::Query(Box::new(query.clone()));
     let mut routines = Vec::new();
     plan.rewrite_scalar_expressions(&mut |expression| {
-        if let uqa_execution::ScalarExpr::Func { name, binding, .. } = expression {
+        if let uqa_execution::ScalarExpr::Func {
+            name,
+            binding,
+            args,
+            ..
+        } = expression
+        {
+            collect_graph_function_dependency(name, binding.as_ref(), args, dependencies);
             routines.push((name.clone(), binding.clone()));
         }
     });
@@ -67,7 +137,7 @@ pub(super) fn collect_session_portal_query_dependencies(
             visiting_views,
             visiting_routines,
         )?;
-        if matches!(dependencies, SessionPortalTableDependencies::All) {
+        if dependencies.is_all() {
             break;
         }
     }
@@ -147,6 +217,56 @@ pub(super) fn collect_session_portal_relational_dependencies(
     Ok(())
 }
 
+fn collect_session_portal_relation_dependencies(
+    engine: &Engine,
+    name: &str,
+    include_descendants: bool,
+    dependencies: &mut SessionPortalTableDependencies,
+    visiting_views: &mut std::collections::BTreeSet<String>,
+    visiting_routines: &mut std::collections::BTreeSet<String>,
+) -> Result<(), SQLError> {
+    if let Some(table) = engine.try_resolve_table_name(name).map_err(|error| {
+        SQLError::Internal(format!(
+            "resolve cursor dependency relation `{name}`: {error}"
+        ))
+    })? {
+        for table in engine.hierarchy_scan_tables(&table, include_descendants)? {
+            dependencies.insert(Engine::resolved_relation_identity(&table).map_err(|error| {
+                SQLError::Internal(format!(
+                    "resolve cursor dependency identity `{table}`: {error}"
+                ))
+            })?);
+        }
+        return Ok(());
+    }
+    if super::super::canonical_virtual_relation_reference(name).is_some() {
+        dependencies.tables = None;
+        dependencies.graph_catalog = true;
+        return Ok(());
+    }
+    if let Some(relation) = crate::sql::resolve_age_label_relation_name(engine, name)? {
+        let relation = Engine::resolved_relation_identity(&relation)
+            .map_err(|error| SQLError::Internal(error.to_string()))?;
+        dependencies.insert_graph(relation.schema);
+        return Ok(());
+    }
+    let key = name.to_ascii_lowercase();
+    if !visiting_views.insert(key.clone()) {
+        return Ok(());
+    }
+    if let Some(view) = engine.view_plan(name)? {
+        collect_session_portal_query_dependencies(
+            engine,
+            &view,
+            dependencies,
+            visiting_views,
+            visiting_routines,
+        )?;
+    }
+    visiting_views.remove(&key);
+    Ok(())
+}
+
 pub(super) fn collect_session_portal_source_dependencies(
     engine: &Engine,
     source: &SourcePlan,
@@ -159,43 +279,14 @@ pub(super) fn collect_session_portal_source_dependencies(
             name,
             include_descendants,
             ..
-        } => {
-            if let Some(table) = engine.try_resolve_table_name(name).map_err(|error| {
-                SQLError::Internal(format!(
-                    "resolve cursor dependency relation `{name}`: {error}"
-                ))
-            })? {
-                for table in engine.hierarchy_scan_tables(&table, *include_descendants)? {
-                    dependencies.insert(Engine::resolved_relation_identity(&table).map_err(
-                        |error| {
-                            SQLError::Internal(format!(
-                                "resolve cursor dependency identity `{table}`: {error}"
-                            ))
-                        },
-                    )?);
-                }
-                return Ok(());
-            }
-            if super::super::canonical_virtual_relation_reference(name).is_some() {
-                *dependencies = SessionPortalTableDependencies::All;
-                return Ok(());
-            }
-            let key = name.to_ascii_lowercase();
-            if !visiting_views.insert(key.clone()) {
-                return Ok(());
-            }
-            if let Some(view) = engine.view_plan(name)? {
-                collect_session_portal_query_dependencies(
-                    engine,
-                    &view,
-                    dependencies,
-                    visiting_views,
-                    visiting_routines,
-                )?;
-            }
-            visiting_views.remove(&key);
-            Ok(())
-        }
+        } => collect_session_portal_relation_dependencies(
+            engine,
+            name,
+            *include_descendants,
+            dependencies,
+            visiting_views,
+            visiting_routines,
+        ),
         SourcePlan::Join { left, right, .. } => {
             collect_session_portal_source_dependencies(
                 engine,
@@ -223,18 +314,28 @@ pub(super) fn collect_session_portal_source_dependencies(
             name,
             binding,
             relations,
+            args,
             ..
-        } => collect_session_portal_function_dependencies(
-            engine,
-            name,
-            binding.as_ref(),
-            relations.as_ref(),
-            dependencies,
-            visiting_views,
-            visiting_routines,
-        ),
+        } => {
+            collect_graph_function_dependency(name, binding.as_ref(), args, dependencies);
+            collect_session_portal_function_dependencies(
+                engine,
+                name,
+                binding.as_ref(),
+                relations.as_ref(),
+                dependencies,
+                visiting_views,
+                visiting_routines,
+            )
+        }
         SourcePlan::FunctionGroup { functions, .. } => {
             for function in functions {
+                collect_graph_function_dependency(
+                    &function.name,
+                    function.binding.as_ref(),
+                    &function.args,
+                    dependencies,
+                );
                 collect_session_portal_function_dependencies(
                     engine,
                     &function.name,
@@ -343,20 +444,20 @@ pub(super) fn collect_session_portal_routine_dependencies(
                             )?;
                         }
                         uqa_planner::UnifiedPlan::Command(_) => {
-                            *dependencies = SessionPortalTableDependencies::All;
+                            *dependencies = SessionPortalTableDependencies::all();
                         }
                     }
-                    if matches!(dependencies, SessionPortalTableDependencies::All) {
+                    if dependencies.is_all() {
                         break;
                     }
                 }
             }
             crate::engine_user_functions::CompiledFunctionBody::PLpgSQL(_) => {
-                *dependencies = SessionPortalTableDependencies::All;
+                *dependencies = SessionPortalTableDependencies::all();
             }
         }
         visiting_routines.remove(&key);
-        if matches!(dependencies, SessionPortalTableDependencies::All) {
+        if dependencies.is_all() {
             break;
         }
     }

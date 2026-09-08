@@ -83,7 +83,7 @@ impl Engine {
         if registries_changed {
             self.reload_catalog_registries(registry_epoch)?;
         } else if let Some(graphs) = current.graphs.as_ref() {
-            let changed = self.refresh_graph_snapshots(
+            let changed = self.refresh_graph_handles(
                 catalog.as_ref(),
                 previous
                     .as_ref()

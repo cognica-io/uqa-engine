@@ -214,6 +214,9 @@ impl Engine {
             self.storage.tables.write().insert(relation, table);
         }
         self.synchronize_partition_identity_watermarks()?;
+        if mode.allows_migration() {
+            self.migrate_graph_access_metadata(catalog)?;
+        }
         self.restore_graphs_from_catalog(catalog)?;
         self.restore_engine_registries_from_catalog(catalog, mode)?;
         Ok(())

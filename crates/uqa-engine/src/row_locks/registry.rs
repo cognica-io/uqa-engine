@@ -43,7 +43,6 @@ impl RowLockManager {
             cross,
             column_stats: RwLock::new(std::collections::BTreeMap::new()),
             statistics_snapshots: crate::engine_statistics::StatisticsSnapshots::default(),
-            graph_snapshots: crate::engine_open::GraphSnapshots::default(),
             automatic_statistics: crate::engine_statistics::AutomaticStatistics::default(),
         }
     }

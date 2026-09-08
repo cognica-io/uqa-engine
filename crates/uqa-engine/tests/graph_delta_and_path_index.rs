@@ -67,6 +67,7 @@ fn build_path_index_then_get_then_drop() {
         .expect("index should be registered");
     let pairs = idx
         .lookup(&["manages".to_string(), "manages".to_string()])
+        .expect("path-index query")
         .expect("indexed sequence missing");
     assert!(pairs.contains(&(1, 3)));
 

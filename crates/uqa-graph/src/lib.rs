@@ -20,6 +20,7 @@ mod cross_paradigm;
 pub mod cypher;
 mod delta;
 mod embedding;
+mod handle;
 mod incremental_match;
 mod index;
 mod memory_store;
@@ -27,6 +28,7 @@ mod message_passing;
 mod operator_impls;
 mod operators;
 mod pattern;
+mod persistent_store;
 mod posting_list;
 mod rpq;
 mod sqlite_store;
@@ -44,6 +46,7 @@ pub use cross_paradigm::{
 };
 pub use delta::{DeltaOp, GraphDelta};
 pub use embedding::{GraphEmbedding, MAX_GRAPH_EMBEDDING_DIMENSIONS, MAX_GRAPH_EMBEDDING_LAYERS};
+pub use handle::GraphStoreHandle;
 pub use incremental_match::{implicated_vertices, IncrementalPatternMatcher};
 pub use index::{LabelIndex, PathIndex, VertexPropertyIndex};
 pub use memory_store::{
@@ -58,6 +61,7 @@ pub use operators::{
     DEFAULT_GRAPH_SCORE,
 };
 pub use pattern::{EdgePattern, EdgePredicate, GraphPattern, VertexPattern, VertexPredicate};
+pub use persistent_store::PersistentGraphStore;
 pub use posting_list::{
     GraphPayload, GraphPostingList, GraphPostingListError, GraphPostingListResult,
     SubgraphMergePolicy,

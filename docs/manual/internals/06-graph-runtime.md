@@ -19,6 +19,10 @@ flowchart TD
 
 A graph name identifies a workspace with vertices, edges, labels, properties, temporal deltas, and path indexes. Memory and persistent stores implement graph operations, while engine catalog ownership restores named graph identities and metadata.
 
+Persistent engines keep only session-bound `PersistentGraphStore` handles. Vertex, edge, membership, and adjacency records remain in the physical backend: neither opening, session creation, catalog refresh, nor handle cloning constructs a complete resident graph. `MemoryGraphStore` is primary storage for `Engine::new()`, not a cache for persistent engines. Standalone `SQLiteGraphStore` follows the same direct-access contract.
+
+Point reads return owned entities; scans use bounded ID pages, and label and adjacency predicates start at selective physical indexes. Corrupt payloads fail when accessed rather than forcing every unrelated entity to be decoded at startup. Individual analytical queries can still require result-sized or algorithm-specific working sets, such as PageRank scores or traversal frontiers; those are not persistent graph replicas.
+
 Vertex and edge identities are non-negative internal identifiers. Application properties such as `member_id` are separate values and should be used explicitly when joining graph objects to relational tables.
 
 ## Cypher pipeline
@@ -69,11 +73,15 @@ PageRank, HITS, and betweenness produce scored graph support. Traversal, neighbo
 
 The `cypher` table function returns a relation and therefore joins through ordinary SQL execution. Graph support predicates instead align graph vertex identity with the current table document identity. The distinction is important: a table-function join uses explicit projected properties, while a support predicate assumes an identity domain.
 
-## Transaction and cache behavior
+## Durable reads and transactions
 
-Graph mutation participates in the engine statement boundary. Candidate graph and catalog state is durable before it becomes published in caches. Rollback restores graph registries and provider state. Epoch publication informs sibling sessions that their private graph cache needs refresh.
+Graph mutation participates in the engine statement boundary. Storage transactions and savepoints own atomicity, including rollback on errors or panics; mutation candidates clone handles, not graph payloads. Catalog generations refresh graph names and label metadata. Shared entity changes update physical indexes for all owning graphs.
 
-Path indexes and graph deltas are durable objects and must follow the same create, validate, publish, invalidate, and reopen sequence as relational or vector indexes.
+REPEATABLE READ and SERIALIZABLE retain a fixed physical reader and overlay only the identities changed by the current transaction. Unchanged entities are fetched from the fixed reader; changed entities are fetched from the writer. Savepoints retain changed-ID checkpoints, and conflicting concurrent changes report a serialization failure instead of overwriting an unseen version. Promoting an unrelated relational write cannot replace the fixed graph read view.
+
+Cursors retain their declaration-time graph view independently of later writes and transaction completion. Native pinned readers are reused when possible. Rollback-journal backends cannot retain a reader while acquiring a writer; these fixed snapshots are streamed into encrypted temporary storage. A cursor containing earlier uncommitted graph writes uses the same bounded, storage-backed mechanism for its graph dependencies, not a resident graph copy. Ordinary opens and new sessions never take that detachment path.
+
+Persistent path indexes store reachability pairs in physical indexed pages. Construction is checkpointed, so a failed rebuild restores the prior definition and data. Graph writes invalidate materializations atomically; query-time reads of a legacy or invalidated materialization evaluate only the requested path sequence and do not rebuild or retain an index. Temporary cursor and transaction views cannot use live materializations that belong to a different graph snapshot. `VersionedGraphStore` retains explicit operation-level undo history and restores overwritten global entities and exact memberships; it does not snapshot a complete graph for rollback.
 
 ## Source entry points
 

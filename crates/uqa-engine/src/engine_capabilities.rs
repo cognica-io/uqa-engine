@@ -391,10 +391,11 @@ impl Engine {
     }
 
     pub(crate) fn catalog_read_view(&self) -> CatalogReadView {
-        let durable = self
-            .query_catalog_snapshot
-            .clone()
-            .unwrap_or_else(|| Arc::new(self.durable.snapshot()));
+        let durable = self.query_catalog_snapshot.clone().unwrap_or_else(|| {
+            let mut snapshot = self.durable.snapshot();
+            snapshot.graphs = self.visible_graph_handles();
+            Arc::new(snapshot)
+        });
         let table_sources = self.query_table_snapshots.as_ref().map_or_else(
             || self.storage.tables.read().clone(),
             |tables| (**tables).clone(),

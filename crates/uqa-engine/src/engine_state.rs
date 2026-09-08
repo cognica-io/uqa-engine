@@ -243,7 +243,7 @@ impl StoredView {
 }
 
 pub(super) struct DurableCatalogState {
-    pub(super) graphs: CatalogCell<BTreeMap<String, Arc<uqa_graph::MemoryGraphStore>>>,
+    pub(super) graphs: CatalogCell<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
     pub(super) models: CatalogCell<BTreeMap<String, DeepModel>>,
     pub(super) scoring_params: CatalogCell<BTreeMap<String, String>>,
     pub(super) views: CatalogCell<BTreeMap<RelationIdentity, StoredView>>,
@@ -282,7 +282,7 @@ pub(super) struct DurableCatalogState {
 
 #[derive(Clone)]
 pub(super) struct DurableCatalogSnapshot {
-    pub(super) graphs: Arc<BTreeMap<String, Arc<uqa_graph::MemoryGraphStore>>>,
+    pub(super) graphs: Arc<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
     pub(super) models: Arc<BTreeMap<String, DeepModel>>,
     pub(super) scoring_params: Arc<BTreeMap<String, String>>,
     pub(super) views: Arc<BTreeMap<RelationIdentity, StoredView>>,
@@ -440,6 +440,7 @@ pub(super) struct SessionContext {
 impl SessionContext {
     pub(super) fn new(random_state: super::SessionRandomState) -> Self {
         let state = super::SessionStateSnapshot {
+            graph_overlay: None,
             search_path: vec!["public".to_string()],
             temporary_namespace_allocated: false,
             session_vars: BTreeMap::new(),

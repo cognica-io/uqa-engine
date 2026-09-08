@@ -8,12 +8,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Removed the complete resident graph and reachability-index replicas from persistent engines. Startup, new sessions, catalog refresh, and graph handle cloning now retain only metadata and session-bound storage handles; point, label, and adjacency reads use indexed durable records. Graph mutations use storage checkpoints, fixed transactions combine physical snapshots with changed identities, and cursors preserve their declaration-time graph view without hydrating a complete graph in RAM. SQLite catalog version 46 adds durable path-index data and invalidation; legacy key-value graph access indexes migrate atomically at initial open.
 - Bounded sampled statistics by value size as well as row count. Oversized text and binary values no longer become full-payload histogram or MCV copies; non-null counts remain represented in distinctness estimates, row and NULL counts are preserved, and legacy oversized statistics are bounded during reopen and automatically replaced without requiring another write.
 - Reused unchanged SQLite table definitions, physical handles, and decoded statistics across data-only and automatic-statistics commits. Transactional, per-table cache revisions preserve snapshot and rollback visibility, refresh only changed dependencies, and share decoded committed statistics across independent sessions without a database-wide load lock. SQLite catalog version 44 installs durable invalidation tracking atomically.
 - Preserved staged document-ID reservations when deferred transaction snapshots refresh for key-lock rechecks or writer promotion after a concurrent statistics or catalog commit, preventing INSERT/COPY from reusing IDs and overwriting earlier rows in the same statement or transaction.
 - Replaced synchronous full-table statistics collection during persistent query planning with automatic database-level background maintenance. Committed-change thresholds and dirty-age scheduling use durable counters, preserve existing estimates during refresh, survive restart, and respect rollback. Bounded projected samples avoid unrelated BLOB payloads; explicit full refresh persists through the ANALYZE transaction path and histogram construction avoids redundant payload copies.
 - Shared immutable catalog registries and table definitions across statement snapshots and new sessions from a stable committed parent, while retaining independent physical storage handles, copy-on-write mutations, transaction isolation, and temporary-object visibility.
 - Pinned external catalog refresh to one read snapshot so concurrent commits cannot mix catalog generations or deadlock recursive rule/trigger validation during reopen.
+
+### Changed
+
+- Rust graph callbacks now receive `GraphStoreHandle`, and `GraphStore` reads return owned, fallible results. Custom graph stores implement paged identity access, edge memberships, and atomic mutation checkpoints; custom catalogs implement direct graph access and durable path-index data. See the [development upgrade notes](docs/manual/reference/10-upgrading.md#unreleased-development-changes) before updating an embedded application or storage provider.
 
 ## [0.2.2] - 2026-09-06
 

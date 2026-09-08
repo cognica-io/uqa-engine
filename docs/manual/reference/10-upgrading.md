@@ -4,6 +4,14 @@ Version 0.2.2 fixes recursive `ALTER TABLE` authorization and PostgreSQL 18 CHEC
 
 The 0.2 series includes SQL object and privilege lifecycle changes, durable expression and unique indexes, expanded sequences and PL/pgSQL, native cross-process notifications, and a Node.js HTTP client that runs without native addons. These changes were introduced in [0.2.0](../../../HISTORY.md#020---2026-09-05); the [compatibility guide](../sql/09-compatibility.md) defines the verified PostgreSQL 18 surface and the behavior still being implemented.
 
+## Unreleased development changes
+
+The development branch after 0.2.2 replaces resident persistent-graph replicas with direct storage reads. `Engine::graph_with` and `Engine::graph_with_mut` callbacks receive `uqa_graph::GraphStoreHandle`, not `MemoryGraphStore`. Import `GraphStore` for its methods, propagate storage errors, and use the owned `Result<Option<Vertex>>` and `Result<Option<Edge>>` point-read results without `.cloned()`. Mutation callbacks return `GraphStoreResult<T>` so an error rolls back the complete storage checkpoint. `PathIndex::lookup` likewise returns an owned, fallible result. Primary in-memory graph storage remains available through `MemoryGraphStore`.
+
+Custom `CatalogFacade` implementations must provide selective graph point reads, bounded identity pages, counts, memberships, and durable path-index data methods. Do not implement these by loading complete graph partitions into a resident map. Persistent sessions must bind graph handles to their own physical transaction. See [graph access](07-graphs.md) and [storage contracts](04-storage-and-security.md) for the current signatures and lifecycle requirements.
+
+Development SQLite catalogs use version 46 for durable path-index data and invalidation. Initial open also performs the bounded, atomic legacy graph access/label metadata migration where needed. Validate an isolated copy before upgrading all processes; do not reopen a migrated database with an older binary. These changes are unreleased and are not part of the published 0.2.2 artifacts described below.
+
 ## Package versions
 
 Update the UQA packages used by one application together. Rust's `0.1` dependency requirement does not select `0.2.2`; change the requirement explicitly and regenerate the application's lockfile.

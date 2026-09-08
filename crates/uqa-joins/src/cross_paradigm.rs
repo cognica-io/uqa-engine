@@ -361,7 +361,7 @@ impl<'a, G: GraphStore> CrossParadigmJoin<'a, G> {
         }
         let mut out = Vec::new();
         for left in self.left {
-            let vertex = self.store.get_vertex(left.doc_id).ok_or_else(|| {
+            let vertex = self.store.get_vertex(left.doc_id)?.ok_or_else(|| {
                 CrossParadigmError::GraphStore(GraphStoreError::CorruptGraph(format!(
                     "cross-paradigm join input references missing graph vertex {}",
                     left.doc_id

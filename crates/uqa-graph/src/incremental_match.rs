@@ -150,7 +150,7 @@ pub fn implicated_vertices<G: GraphStore>(
                 source_id,
                 target_id,
                 ..
-            }) = store.get_edge(*eid).cloned()
+            }) = store.get_edge(*eid)?
             {
                 out.insert(source_id);
                 out.insert(target_id);

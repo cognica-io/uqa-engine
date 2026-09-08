@@ -84,7 +84,9 @@ fn graph_mutation_and_drop_roll_back_on_catalog_failure() {
     let (_dir, connection, engine) = persistent_engine();
     engine.create_graph("g").unwrap();
 
-    fail_event(&connection, "_named_graphs", "INSERT");
+    // Direct graph writes do not replace the graph registry. Fail after the
+    // vertex row is written so rollback must also remove that partial write.
+    fail_event(&connection, "_graph_membership", "INSERT");
     assert!(engine
         .add_graph_vertex(Vertex::new(1, "Person"), "g")
         .is_err());

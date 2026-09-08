@@ -27,22 +27,49 @@ use fetch::{
 use uqa_planner::{QueryPlan, RelationalPlan, SourcePlan};
 use uqa_sql::ast::{CursorDirection, FetchCursorStmt};
 
-enum SessionPortalTableDependencies {
-    All,
-    Exact(std::collections::BTreeSet<RelationIdentity>),
+struct SessionPortalTableDependencies {
+    tables: Option<std::collections::BTreeSet<RelationIdentity>>,
+    graphs: Option<std::collections::BTreeSet<String>>,
+    graph_catalog: bool,
 }
 
 impl SessionPortalTableDependencies {
-    fn includes(&self, relation: &RelationIdentity) -> bool {
-        match self {
-            Self::All => true,
-            Self::Exact(relations) => relations.contains(relation),
+    fn empty() -> Self {
+        Self {
+            tables: Some(std::collections::BTreeSet::new()),
+            graphs: Some(std::collections::BTreeSet::new()),
+            graph_catalog: false,
         }
     }
 
+    fn all() -> Self {
+        Self {
+            tables: None,
+            graphs: None,
+            graph_catalog: true,
+        }
+    }
+
+    fn is_all(&self) -> bool {
+        self.tables.is_none() && self.graphs.is_none()
+    }
+
+    fn includes(&self, relation: &RelationIdentity) -> bool {
+        self.tables
+            .as_ref()
+            .is_none_or(|tables| tables.contains(relation))
+    }
+
     fn insert(&mut self, relation: RelationIdentity) {
-        if let Self::Exact(relations) = self {
+        if let Some(relations) = &mut self.tables {
             relations.insert(relation);
+        }
+    }
+
+    fn insert_graph(&mut self, graph: String) {
+        self.graph_catalog = true;
+        if let Some(graphs) = &mut self.graphs {
+            graphs.insert(graph);
         }
     }
 }
@@ -115,7 +142,12 @@ impl Engine {
             table_sources,
             transaction_overlay.as_ref(),
         )?;
-        let catalog_snapshot = std::sync::Arc::new(self.durable.snapshot());
+        let mut catalog_snapshot = self.durable.snapshot();
+        catalog_snapshot.graphs = self.freeze_graph_read_handles(
+            table_dependencies.graphs.as_ref(),
+            table_dependencies.graph_catalog,
+        )?;
+        let catalog_snapshot = std::sync::Arc::new(catalog_snapshot);
         let view_snapshots = std::sync::Arc::clone(&catalog_snapshot.views);
         let sql_function_snapshots = std::sync::Arc::clone(&catalog_snapshot.sql_user_functions);
         let restart = holdable.then(|| SessionPortalRestart {
@@ -199,7 +231,7 @@ impl Engine {
 
     /// Capture the relation and catalog state visible at the start of a SQL statement. A `BEFORE STATEMENT` trigger executes inside the statement's transaction and may therefore change the live engine before the statement evaluates its source query. `PostgreSQL` keeps those changes outside the statement snapshot, so the remaining query work must read through an immutable query engine while trigger and row effects continue to use the live engine.
     pub(crate) fn capture_statement_snapshot_engine(&self) -> Result<Engine, SQLError> {
-        let dependencies = SessionPortalTableDependencies::All;
+        let dependencies = SessionPortalTableDependencies::all();
         let snapshot_gate = self
             .row_locks
             .begin_change_snapshot(&self.runtime.cancellation)?;
@@ -217,7 +249,9 @@ impl Engine {
             table_sources,
             transaction_overlay.as_ref(),
         )?;
-        let catalog_snapshot = std::sync::Arc::new(self.durable.snapshot());
+        let mut catalog_snapshot = self.durable.snapshot();
+        catalog_snapshot.graphs = self.freeze_graph_read_handles(None, true)?;
+        let catalog_snapshot = std::sync::Arc::new(catalog_snapshot);
         let view_snapshots = std::sync::Arc::clone(&catalog_snapshot.views);
         let sql_function_snapshots = std::sync::Arc::clone(&catalog_snapshot.sql_user_functions);
         Ok(self.session_portal_worker_engine(

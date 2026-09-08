@@ -119,15 +119,20 @@ impl KeyValueCatalog {
         graph_name: &str,
         label_sequences_json: &str,
     ) -> StorageBackendResult<()> {
-        self.store.put(
+        let mut batch = self.store.batch();
+        Self::invalidate_path_index_data_into(batch.as_mut(), graph_name)?;
+        batch.put(
             &single_str_key(TAG_PATH_INDEX, graph_name)?,
             &string_value(label_sequences_json),
-        )
+        )?;
+        batch.commit()
     }
 
     pub(super) fn drop_path_index_impl(&self, graph_name: &str) -> StorageBackendResult<()> {
-        self.store
-            .delete(&single_str_key(TAG_PATH_INDEX, graph_name)?)
+        let mut batch = self.store.batch();
+        self.clear_path_index_data_into(batch.as_mut(), graph_name)?;
+        batch.delete(&single_str_key(TAG_PATH_INDEX, graph_name)?)?;
+        batch.commit()
     }
 
     pub(super) fn load_path_indexes_impl(&self) -> StorageBackendResult<Vec<(String, String)>> {

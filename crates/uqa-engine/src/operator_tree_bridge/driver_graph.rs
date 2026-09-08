@@ -51,7 +51,7 @@ impl EngineDriver<'_> {
             DeepGraphDirection::Both => uqa_graph::Direction::Both,
         };
         let neighbors = self.with_graph(graph, |store| {
-            <uqa_graph::MemoryGraphStore as uqa_graph::GraphStore>::neighbors(
+            <uqa_graph::GraphStoreHandle as uqa_graph::GraphStore>::neighbors(
                 store, vertex, label, direction, graph,
             )
             .map_err(|error| graph_execution_error("GraphNeighbors", error))
@@ -79,14 +79,15 @@ impl EngineDriver<'_> {
         label: Option<&str>,
     ) -> DriverResult<PostingList> {
         let edges = self.with_graph(graph, |store| {
-            <uqa_graph::MemoryGraphStore as uqa_graph::GraphStore>::edges_in_graph(store, graph)
-                .map_err(|error| graph_execution_error("GraphEdges", error))
+            use uqa_graph::GraphStore as _;
+            match label {
+                Some(label) => store.edges_by_label(label, graph),
+                None => store.edges_in_graph(graph),
+            }
+            .map_err(|error| graph_execution_error("GraphEdges", error))
         })?;
         let mut entries = Vec::new();
         for edge in edges {
-            if label.is_some_and(|label| edge.label != label) {
-                continue;
-            }
             let score = match edge.properties.get("weight") {
                 Some(Value::Float(value)) => *value,
                 Some(Value::Int(value)) => *value as f64,
@@ -359,11 +360,29 @@ impl EngineDriver<'_> {
     pub(super) fn with_graph<R>(
         &self,
         graph: &str,
-        execute: impl FnOnce(&uqa_graph::MemoryGraphStore) -> DriverResult<R>,
+        execute: impl FnOnce(&uqa_graph::GraphStoreHandle) -> DriverResult<R>,
     ) -> DriverResult<R> {
-        self.engine
-            .graph_with(graph, execute)
-            .map_err(|err| SQLError::Internal(format!("read graph catalog: {err}")))?
-            .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {graph:?}")))?
+        match self.execution {
+            super::DriverExecution::Public => self
+                .engine
+                .graph_with(graph, execute)
+                .map_err(|error| SQLError::Internal(format!("read graph catalog: {error}")))?
+                .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {graph:?}")))?,
+            super::DriverExecution::InExecution => execute(self.graph_handle(graph)?.as_ref()),
+        }
+    }
+
+    pub(super) fn graph_handle(
+        &self,
+        graph: &str,
+    ) -> DriverResult<std::sync::Arc<uqa_graph::GraphStoreHandle>> {
+        let store = match self.execution {
+            super::DriverExecution::Public => self
+                .engine
+                .graph_handle_with(graph, std::sync::Arc::clone)
+                .map_err(|error| SQLError::Internal(format!("read graph catalog: {error}")))?,
+            super::DriverExecution::InExecution => self.engine.graph_handle_in_execution(graph),
+        };
+        store.ok_or_else(|| SQLError::Unsupported(format!("unknown graph {graph:?}")))
     }
 }

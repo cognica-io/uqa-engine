@@ -90,6 +90,12 @@ pub(super) fn build_rows(
                 uqa_graph::cypher::CypherError::MissingLabelRelation(relation) => {
                     SQLError::UnknownTable(relation)
                 }
+                uqa_graph::cypher::CypherError::SerializationFailure(message) => {
+                    SQLError::Routine {
+                        sqlstate: "40001".into(),
+                        message,
+                    }
+                }
                 other => SQLError::Unsupported(format!("cypher: {other}")),
             })?;
     if !cypher_columns.is_empty() && cypher_columns.len() != column_aliases.len() {

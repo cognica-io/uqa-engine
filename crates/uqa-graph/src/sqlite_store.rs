@@ -4,69 +4,45 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `SQLite`-backed graph store with write-through persistence.
+//! Standalone `SQLite` graph storage using indexed records directly.
 //!
-//! A [`MemoryGraphStore`] serves
-//! the in-memory query path. Each fallible mutation is first applied to a
-//! candidate snapshot, persisted atomically in one `SQLite` savepoint, and
-//! published to memory only after the savepoint commits. Reopened catalogs
-//! therefore replay the same vertex, edge, membership, and label state.
-//!
-//! Tables (per optional `table_name` qualifier):
-//!
-//! ```sql
-//! CREATE TABLE _graph_vertices_{tbl} (
-//!     vertex_id        INTEGER PRIMARY KEY,
-//!     label            TEXT NOT NULL DEFAULT '',
-//!     properties_json  TEXT NOT NULL
-//! );
-//! CREATE TABLE _graph_edges_{tbl} (
-//!     edge_id          INTEGER PRIMARY KEY,
-//!     source_id        INTEGER NOT NULL,
-//!     target_id        INTEGER NOT NULL,
-//!     label            TEXT NOT NULL,
-//!     properties_json  TEXT NOT NULL
-//! );
-//! CREATE TABLE _graph_membership_{tbl} (
-//!     graph        TEXT NOT NULL,
-//!     entity_kind  TEXT NOT NULL CHECK (entity_kind IN ('v', 'e')),
-//!     entity_id    INTEGER NOT NULL,
-//!     PRIMARY KEY (graph, entity_kind, entity_id)
-//! );
-//! CREATE TABLE _graph_catalog_{tbl} (
-//!     name TEXT PRIMARY KEY
-//! );
-//! ```
+//! The handle does not load a graph on open or retain entity/adjacency maps.
+//! Existing per-table schemas and legacy property encodings remain readable.
+//! Mutations use physical transactions/savepoints; multi-read queries pin one
+//! storage snapshot. Owned query results belong to the caller, not the store.
+
+mod access;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
-use rusqlite::params;
-use uqa_core::{Edge, EdgeId, Value, Vertex, VertexId};
-use uqa_storage::{ManagedConnection, SQLiteError};
+use uqa_core::{Edge, Value, Vertex};
+use uqa_storage::{ManagedConnection, PersistentStorageBackend, SQLiteError, SQLiteStorageBackend};
 
-use crate::memory_store::MemoryGraphStore;
-use crate::store::{GraphStore, GraphStoreError, GraphStoreResult};
-use crate::types::Direction;
+use crate::persistent_store::storage::{begin_graph_write, GraphStorage};
+use crate::{Direction, GraphStore, GraphStoreError, GraphStoreResult, PersistentGraphStore};
 
 const LEGACY_PROPERTIES_FORMAT: i64 = 1;
 const TAGGED_PROPERTIES_FORMAT: i64 = 2;
 
+/// Direct durable access to a standalone graph table family.
 pub struct SQLiteGraphStore {
-    inner: MemoryGraphStore,
-    conn: ManagedConnection,
-    vtx_table: String,
-    edge_table: String,
-    member_table: String,
-    catalog_table: String,
+    inner: PersistentGraphStore,
+    backend: Arc<dyn PersistentStorageBackend>,
+    operation_gate: parking_lot::ReentrantMutex<()>,
 }
 
 fn graph_store_error(error: &GraphStoreError) -> SQLiteError {
     SQLiteError::StorageBackend(error.to_string())
 }
 
+fn sqlite_graph_error(error: &SQLiteError) -> GraphStoreError {
+    GraphStoreError::Storage(error.to_string())
+}
+
 impl SQLiteGraphStore {
-    /// Open (or create) the per-table graph tables on `conn` and
-    /// rehydrate the in-memory store from any existing rows.
+    /// Open a table family and migrate small access metadata once. Existing
+    /// records are streamed only for a legacy label-watermark migration.
     pub fn open(conn: ManagedConnection, table_name: Option<&str>) -> Result<Self, SQLiteError> {
         let suffix = table_name.unwrap_or("");
         if !suffix
@@ -77,582 +53,481 @@ impl SQLiteGraphStore {
                 "invalid graph table suffix {suffix:?}"
             )));
         }
-        let (vtx, edg, mem, cat) = if suffix.is_empty() {
-            (
-                "_graph_vertices".to_string(),
-                "_graph_edges".to_string(),
-                "_graph_membership".to_string(),
-                "_graph_catalog".to_string(),
-            )
+        let suffix = if suffix.is_empty() {
+            String::new()
         } else {
-            (
-                format!("_graph_vertices_{suffix}"),
-                format!("_graph_edges_{suffix}"),
-                format!("_graph_membership_{suffix}"),
-                format!("_graph_catalog_{suffix}"),
-            )
+            format!("_{suffix}")
         };
-
-        let mut store = Self {
-            inner: MemoryGraphStore::new(),
+        let backend: Arc<dyn PersistentStorageBackend> =
+            Arc::new(SQLiteStorageBackend::new(conn.clone()));
+        let storage = Arc::new(access::SQLiteGraphStorage {
             conn,
-            vtx_table: vtx,
-            edge_table: edg,
-            member_table: mem,
-            catalog_table: cat,
-        };
-        store.ensure_tables()?;
-        store.load_from_sqlite()?;
-        Ok(store)
-    }
-
-    fn ensure_tables(&self) -> Result<(), SQLiteError> {
-        let v = &self.vtx_table;
-        let e = &self.edge_table;
-        let m = &self.member_table;
-        let c = &self.catalog_table;
-        self.conn.with(|conn| {
-            conn.execute_batch(&format!(
-                r#"
-                CREATE TABLE IF NOT EXISTS "{v}" (
-                    vertex_id INTEGER PRIMARY KEY,
-                    label TEXT NOT NULL DEFAULT '',
-                    properties_json TEXT NOT NULL,
-                    properties_format INTEGER NOT NULL DEFAULT 2
-                        CHECK (properties_format IN (1, 2))
-                );
-                CREATE TABLE IF NOT EXISTS "{e}" (
-                    edge_id INTEGER PRIMARY KEY,
-                    source_id INTEGER NOT NULL,
-                    target_id INTEGER NOT NULL,
-                    label TEXT NOT NULL,
-                    properties_json TEXT NOT NULL,
-                    properties_format INTEGER NOT NULL DEFAULT 2
-                        CHECK (properties_format IN (1, 2))
-                );
-                CREATE TABLE IF NOT EXISTS "{m}" (
-                    graph TEXT NOT NULL,
-                    entity_kind TEXT NOT NULL CHECK (entity_kind IN ('v', 'e')),
-                    entity_id INTEGER NOT NULL,
-                    PRIMARY KEY (graph, entity_kind, entity_id)
-                );
-                CREATE TABLE IF NOT EXISTS "{c}" (
-                    name TEXT PRIMARY KEY,
-                    registry_json TEXT NOT NULL DEFAULT '{{}}'
-                );
-                CREATE INDEX IF NOT EXISTS "{e}_source_idx" ON "{e}" (source_id);
-                CREATE INDEX IF NOT EXISTS "{e}_target_idx" ON "{e}" (target_id);
-                CREATE INDEX IF NOT EXISTS "{m}_entity_idx" ON "{m}" (entity_kind, entity_id);
-                "#
-            ))?;
-            let mut columns = conn.prepare(&format!("PRAGMA table_info(\"{c}\")"))?;
-            let has_registry = columns
-                .query_map([], |row| row.get::<_, String>(1))?
-                .collect::<Result<Vec<_>, _>>()?
-                .iter()
-                .any(|column| column == "registry_json");
-            if !has_registry {
-                conn.execute(
-                    &format!(
-                        "ALTER TABLE \"{c}\" ADD COLUMN registry_json TEXT NOT NULL DEFAULT '{{}}'"
-                    ),
-                    [],
-                )?;
-            }
-            for table in [&v, &e] {
-                let mut columns = conn.prepare(&format!("PRAGMA table_info(\"{table}\")"))?;
-                let has_properties_format = columns
-                    .query_map([], |row| row.get::<_, String>(1))?
-                    .collect::<Result<Vec<_>, _>>()?
-                    .iter()
-                    .any(|column| column == "properties_format");
-                if !has_properties_format {
-                    // Rows written before the tagged Value encoding used a
-                    // raw JSON byte array. Mark those existing records as
-                    // legacy; every engine write below explicitly stores v2.
-                    conn.execute(
-                        &format!(
-                            "ALTER TABLE \"{table}\" ADD COLUMN properties_format \
-                             INTEGER NOT NULL DEFAULT {LEGACY_PROPERTIES_FORMAT} \
-                             CHECK (properties_format IN (1, 2))"
-                        ),
-                        [],
-                    )?;
+            backend: Arc::clone(&backend),
+            vtx_table: format!("_graph_vertices{suffix}"),
+            edge_table: format!("_graph_edges{suffix}"),
+            member_table: format!("_graph_membership{suffix}"),
+            catalog_table: format!("_graph_catalog{suffix}"),
+            metadata_table: format!("_graph_metadata{suffix}"),
+        });
+        let mut inner = PersistentGraphStore::from_storage(storage.clone());
+        let mut checkpoint =
+            begin_graph_write(Arc::clone(&backend)).map_err(|error| graph_store_error(&error))?;
+        let opened = (|| {
+            storage.ensure_tables()?;
+            match storage.metadata("direct_access_version")?.as_deref() {
+                Some("1") => {}
+                None => {
+                    for graph in storage
+                        .graph_names()
+                        .map_err(|error| graph_store_error(&error))?
+                    {
+                        inner
+                            .rebuild_label_registry_from_ids(&graph)
+                            .map_err(|error| graph_store_error(&error))?;
+                    }
+                    storage.save_metadata("direct_access_version", "1")?;
                 }
-            }
-            Ok(())
-        })
-    }
-
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one read transaction reconstructs a mutually consistent graph snapshot"
-    )]
-    fn load_from_sqlite(&mut self) -> Result<(), SQLiteError> {
-        let v = self.vtx_table.clone();
-        let e = self.edge_table.clone();
-        let m = self.member_table.clone();
-        let c = self.catalog_table.clone();
-        self.conn.with(|conn| {
-            // Catalog: every named graph
-            let mut stmt = conn.prepare(&format!("SELECT name, registry_json FROM \"{c}\""))?;
-            let graphs: Vec<(String, String)> = stmt
-                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-                .collect::<Result<_, _>>()?;
-            for (name, registry_json) in &graphs {
-                self.inner.create_graph(name);
-                let registry = serde_json::from_str(registry_json).map_err(SQLiteError::from)?;
-                self.inner.import_label_registry(name, &registry);
-            }
-
-            // Vertices
-            let mut stmt = conn.prepare(&format!(
-                "SELECT vertex_id, label, properties_json, properties_format FROM \"{v}\""
-            ))?;
-            for row in stmt.query_map([], |r| {
-                Ok((
-                    r.get::<_, i64>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
-                    r.get::<_, i64>(3)?,
-                ))
-            })? {
-                let (vid, label, props_json, properties_format) = row?;
-                let properties = decode_properties(&props_json, properties_format)?;
-                let vertex = Vertex {
-                    vertex_id: decode_graph_id("vertex", vid)?,
-                    label,
-                    properties,
-                };
-                // Insert into the inner store. Membership is restored
-                // separately so the vertex initially lives in graph 0
-                // and we re-membership it below.
-                self.inner
-                    .insert_raw_vertex(vertex)
-                    .map_err(|error| SQLiteError::StorageBackend(error.to_string()))?;
-            }
-
-            // Edges
-            let mut stmt = conn.prepare(&format!(
-                "SELECT edge_id, source_id, target_id, label, properties_json, \
-                 properties_format FROM \"{e}\""
-            ))?;
-            for row in stmt.query_map([], |r| {
-                Ok((
-                    r.get::<_, i64>(0)?,
-                    r.get::<_, i64>(1)?,
-                    r.get::<_, i64>(2)?,
-                    r.get::<_, String>(3)?,
-                    r.get::<_, String>(4)?,
-                    r.get::<_, i64>(5)?,
-                ))
-            })? {
-                let (eid, src, tgt, label, props_json, properties_format) = row?;
-                let properties = decode_properties(&props_json, properties_format)?;
-                let edge = Edge {
-                    edge_id: decode_graph_id("edge", eid)?,
-                    source_id: decode_graph_id("edge source", src)?,
-                    target_id: decode_graph_id("edge target", tgt)?,
-                    label,
-                    properties,
-                };
-                self.inner
-                    .insert_raw_edge(edge)
-                    .map_err(|error| SQLiteError::StorageBackend(error.to_string()))?;
-            }
-
-            // Membership
-            let mut stmt = conn.prepare(&format!(
-                "SELECT graph, entity_kind, entity_id FROM \"{m}\""
-            ))?;
-            let memberships = stmt
-                .query_map([], |r| {
-                    Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, i64>(2)?,
-                    ))
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            let mut decoded_memberships = Vec::with_capacity(memberships.len());
-            for (graph, kind, id) in memberships {
-                if !self.inner.has_graph(&graph) {
+                Some(other) => {
                     return Err(SQLiteError::StorageBackend(format!(
-                        "membership references unknown graph {graph:?}"
-                    )));
+                        "unsupported standalone graph access version {other}"
+                    )))
                 }
-                let id = decode_graph_id("membership", id)?;
-                match kind.as_str() {
-                    "v" if self.inner.get_vertex(id).is_some() => {}
-                    "v" => {
-                        return Err(SQLiteError::StorageBackend(format!(
-                            "graph {graph:?} references missing vertex {id}"
-                        )));
-                    }
-                    "e" if self.inner.get_edge(id).is_some() => {}
-                    "e" => {
-                        return Err(SQLiteError::StorageBackend(format!(
-                            "graph {graph:?} references missing edge {id}"
-                        )));
-                    }
-                    _ => {
-                        return Err(SQLiteError::StorageBackend(format!(
-                            "invalid graph membership kind {kind:?}"
-                        )));
-                    }
-                }
-                decoded_memberships.push((graph, kind, id));
-            }
-            // SQLite does not promise row order without ORDER BY. Restore
-            // every vertex membership first so edge attachment can enforce
-            // that both endpoints belong to the same graph partition.
-            for (graph, kind, id) in &decoded_memberships {
-                if kind == "v" {
-                    self.inner
-                        .attach_vertex(*id, graph)
-                        .map_err(|error| SQLiteError::StorageBackend(error.to_string()))?;
-                }
-            }
-            for (graph, kind, id) in &decoded_memberships {
-                if kind == "e" {
-                    self.inner
-                        .attach_edge(*id, graph)
-                        .map_err(|error| SQLiteError::StorageBackend(error.to_string()))?;
-                }
-            }
-            for (name, _) in &graphs {
-                self.inner.rebuild_label_registry_from_ids(name);
             }
             Ok(())
+        })();
+        if let Err(error) = opened {
+            checkpoint
+                .rollback()
+                .map_err(|error| graph_store_error(&error))?;
+            return Err(error);
+        }
+        checkpoint
+            .commit()
+            .map_err(|error| graph_store_error(&error))?;
+        Ok(Self {
+            inner,
+            backend,
+            operation_gate: parking_lot::ReentrantMutex::new(()),
         })
     }
 
-    /// Persist a complete, internally consistent graph snapshot in one
-    /// savepoint. The in-memory candidate is published only after this
-    /// transaction commits, so a storage failure cannot create a state that
-    /// appears successful until the next reopen.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one savepoint writes every graph registry before memory publication"
-    )]
-    fn persist_snapshot(&self, snapshot: &MemoryGraphStore) -> Result<(), SQLiteError> {
-        let graph_rows: Vec<(String, String)> = snapshot
-            .graph_names()
-            .into_iter()
-            .map(|name| {
-                let registry = serde_json::to_string(&snapshot.label_registry(&name))?;
-                Ok((name, registry))
-            })
-            .collect::<Result<_, SQLiteError>>()?;
-        let vertex_rows: Vec<(i64, String, String)> = snapshot
-            .vertices()
-            .into_values()
-            .map(|vertex| {
-                Ok((
-                    encode_graph_id("vertex", vertex.vertex_id)?,
-                    vertex.label,
-                    serde_json::to_string(&vertex.properties)?,
-                ))
-            })
-            .collect::<Result<_, SQLiteError>>()?;
-        let edge_rows: Vec<(i64, i64, i64, String, String)> = snapshot
-            .edges()
-            .into_values()
-            .map(|edge| {
-                Ok((
-                    encode_graph_id("edge", edge.edge_id)?,
-                    encode_graph_id("edge source", edge.source_id)?,
-                    encode_graph_id("edge target", edge.target_id)?,
-                    edge.label,
-                    serde_json::to_string(&edge.properties)?,
-                ))
-            })
-            .collect::<Result<_, SQLiteError>>()?;
-        let mut memberships = Vec::new();
-        for (graph, _) in &graph_rows {
-            for vertex_id in snapshot
-                .vertex_ids_in_graph(graph)
-                .map_err(|error| graph_store_error(&error))?
-            {
-                memberships.push((
-                    graph.clone(),
-                    "v",
-                    encode_graph_id("vertex membership", vertex_id)?,
-                ));
-            }
-            for edge_id in snapshot
-                .out_edge_ids_for_graph(graph)
-                .map_err(|error| SQLiteError::StorageBackend(error.to_string()))?
-            {
-                memberships.push((
-                    graph.clone(),
-                    "e",
-                    encode_graph_id("edge membership", edge_id)?,
-                ));
+    /// Execute several graph reads against one pinned physical snapshot.
+    /// Callers must serialize transaction ownership on this storage session.
+    pub fn read_snapshot<T>(
+        &self,
+        read: impl FnOnce(&PersistentGraphStore) -> GraphStoreResult<T>,
+    ) -> GraphStoreResult<T> {
+        struct ReadCheckpoint(Option<Arc<dyn PersistentStorageBackend>>);
+        impl Drop for ReadCheckpoint {
+            fn drop(&mut self) {
+                if let Some(backend) = &self.0 {
+                    let _ = backend.rollback_transaction();
+                }
             }
         }
-
-        let vertex_table = self.vtx_table.clone();
-        let edge_table = self.edge_table.clone();
-        let member_table = self.member_table.clone();
-        let catalog_table = self.catalog_table.clone();
-        self.conn.with_mut(|connection| {
-            let savepoint = connection.savepoint()?;
-            savepoint.execute(&format!("DELETE FROM \"{member_table}\""), [])?;
-            savepoint.execute(&format!("DELETE FROM \"{catalog_table}\""), [])?;
-            savepoint.execute(&format!("DELETE FROM \"{edge_table}\""), [])?;
-            savepoint.execute(&format!("DELETE FROM \"{vertex_table}\""), [])?;
-            for (name, registry_json) in &graph_rows {
-                savepoint.execute(
-                    &format!(
-                        "INSERT INTO \"{catalog_table}\" (name, registry_json) VALUES (?1, ?2)"
-                    ),
-                    params![name, registry_json],
-                )?;
-            }
-            for (vertex_id, label, properties_json) in &vertex_rows {
-                savepoint.execute(
-                    &format!(
-                        "INSERT INTO \"{vertex_table}\" \
-                         (vertex_id, label, properties_json, properties_format) \
-                         VALUES (?1, ?2, ?3, ?4)"
-                    ),
-                    params![
-                        vertex_id,
-                        label,
-                        properties_json,
-                        TAGGED_PROPERTIES_FORMAT
-                    ],
-                )?;
-            }
-            for (edge_id, source_id, target_id, label, properties_json) in &edge_rows {
-                savepoint.execute(
-                    &format!(
-                        "INSERT INTO \"{edge_table}\" \
-                         (edge_id, source_id, target_id, label, properties_json, properties_format) \
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
-                    ),
-                    params![
-                        edge_id,
-                        source_id,
-                        target_id,
-                        label,
-                        properties_json,
-                        TAGGED_PROPERTIES_FORMAT
-                    ],
-                )?;
-            }
-            for (graph, kind, entity_id) in &memberships {
-                savepoint.execute(
-                    &format!(
-                        "INSERT INTO \"{member_table}\" \
-                         (graph, entity_kind, entity_id) VALUES (?1, ?2, ?3)"
-                    ),
-                    params![graph, kind, entity_id],
-                )?;
-            }
-            savepoint.commit()?;
-            Ok(())
-        })
-    }
-
-    fn apply_mutation(
-        &mut self,
-        mutation: impl FnOnce(&mut MemoryGraphStore) -> GraphStoreResult<()>,
-    ) -> Result<(), SQLiteError> {
-        let mut candidate = self.inner.clone();
-        mutation(&mut candidate).map_err(|error| graph_store_error(&error))?;
-        self.persist_snapshot(&candidate)?;
-        self.inner = candidate;
-        Ok(())
-    }
-
-    fn require_graph(&self, graph: &str) -> Result<(), SQLiteError> {
-        if self.inner.has_graph(graph) {
-            Ok(())
-        } else {
-            Err(SQLiteError::StorageBackend(format!(
-                "unknown graph {graph:?}"
-            )))
+        let _operation = self.operation_gate.lock();
+        if self.backend.in_transaction() {
+            return read(&self.inner);
         }
+        self.backend.begin_read_transaction()?;
+        let mut checkpoint = ReadCheckpoint(Some(Arc::clone(&self.backend)));
+        let result = read(&self.inner);
+        self.backend.rollback_transaction()?;
+        checkpoint.0 = None;
+        result
     }
 
-    pub fn as_memory_store(&self) -> &MemoryGraphStore {
+    /// Borrow the durable handle within an existing storage transaction.
+    pub fn as_graph_store(&self) -> &PersistentGraphStore {
         &self.inner
     }
 
     pub fn create_graph(&mut self, name: &str) -> Result<(), SQLiteError> {
-        self.apply_mutation(|store| {
-            store.create_graph(name);
-            Ok(())
-        })
+        self.inner
+            .create_graph(name)
+            .map_err(|error| graph_store_error(&error))
     }
 
     pub fn drop_graph(&mut self, name: &str) -> Result<(), SQLiteError> {
-        self.apply_mutation(|store| {
-            store.drop_graph(name);
-            Ok(())
-        })
+        self.inner
+            .drop_graph(name)
+            .map_err(|error| graph_store_error(&error))
     }
 
-    pub fn union_graphs(
-        &mut self,
-        left: &str,
-        right: &str,
-        target: &str,
-    ) -> Result<(), SQLiteError> {
-        self.require_graph(left)?;
-        self.require_graph(right)?;
-        self.apply_mutation(|store| store.union_graphs(left, right, target))
+    pub fn graph_names(&self) -> Result<Vec<String>, SQLiteError> {
+        self.read_snapshot(GraphStore::graph_names)
+            .map_err(|error| graph_store_error(&error))
+    }
+
+    pub fn has_graph(&self, name: &str) -> Result<bool, SQLiteError> {
+        self.read_snapshot(|store| store.has_graph(name))
+            .map_err(|error| graph_store_error(&error))
+    }
+
+    pub fn union_graphs(&mut self, g1: &str, g2: &str, target: &str) -> Result<(), SQLiteError> {
+        self.inner
+            .union_graphs(g1, g2, target)
+            .map_err(|error| graph_store_error(&error))
     }
 
     pub fn intersect_graphs(
         &mut self,
-        left: &str,
-        right: &str,
+        g1: &str,
+        g2: &str,
         target: &str,
     ) -> Result<(), SQLiteError> {
-        self.require_graph(left)?;
-        self.require_graph(right)?;
-        self.apply_mutation(|store| store.intersect_graphs(left, right, target))
+        self.inner
+            .intersect_graphs(g1, g2, target)
+            .map_err(|error| graph_store_error(&error))
     }
 
     pub fn difference_graphs(
         &mut self,
-        left: &str,
-        right: &str,
+        g1: &str,
+        g2: &str,
         target: &str,
     ) -> Result<(), SQLiteError> {
-        self.require_graph(left)?;
-        self.require_graph(right)?;
-        self.apply_mutation(|store| store.difference_graphs(left, right, target))
+        self.inner
+            .difference_graphs(g1, g2, target)
+            .map_err(|error| graph_store_error(&error))
     }
 
     pub fn copy_graph(&mut self, source: &str, target: &str) -> Result<(), SQLiteError> {
-        self.require_graph(source)?;
-        self.apply_mutation(|store| store.copy_graph(source, target))
+        self.inner
+            .copy_graph(source, target)
+            .map_err(|error| graph_store_error(&error))
     }
 
     pub fn add_vertex(&mut self, vertex: Vertex, graph: &str) -> Result<(), SQLiteError> {
-        self.apply_mutation(|store| store.add_vertex(vertex, graph))
+        self.inner
+            .add_vertex(vertex, graph)
+            .map_err(|error| graph_store_error(&error))
     }
 
     pub fn add_edge(&mut self, edge: Edge, graph: &str) -> Result<(), SQLiteError> {
-        self.apply_mutation(|store| store.add_edge(edge, graph))
+        self.inner
+            .add_edge(edge, graph)
+            .map_err(|error| graph_store_error(&error))
     }
 
-    pub fn remove_vertex(&mut self, vertex_id: VertexId, graph: &str) -> Result<(), SQLiteError> {
-        self.apply_mutation(|store| store.remove_vertex(vertex_id, graph))
+    pub fn remove_vertex(&mut self, vertex_id: u64, graph: &str) -> Result<(), SQLiteError> {
+        self.inner
+            .remove_vertex(vertex_id, graph)
+            .map_err(|error| graph_store_error(&error))
     }
 
-    pub fn remove_edge(&mut self, edge_id: EdgeId, graph: &str) -> Result<(), SQLiteError> {
-        self.apply_mutation(|store| store.remove_edge(edge_id, graph))
-    }
-
-    pub fn allocate_vertex_id(
-        &mut self,
-        label: &str,
-        graph: &str,
-    ) -> Result<VertexId, SQLiteError> {
-        self.require_graph(graph)?;
-        let mut candidate = self.inner.clone();
-        let id = candidate
-            .allocate_vertex_id(label, graph)
-            .map_err(|error| SQLiteError::StorageBackend(error.to_string()))?;
-        self.persist_snapshot(&candidate)?;
-        self.inner = candidate;
-        Ok(id)
-    }
-
-    pub fn allocate_edge_id(&mut self, label: &str, graph: &str) -> Result<EdgeId, SQLiteError> {
-        self.require_graph(graph)?;
-        let mut candidate = self.inner.clone();
-        let id = candidate
-            .allocate_edge_id(label, graph)
-            .map_err(|error| SQLiteError::StorageBackend(error.to_string()))?;
-        self.persist_snapshot(&candidate)?;
-        self.inner = candidate;
-        Ok(id)
-    }
-
-    pub fn clear(&mut self) -> Result<(), SQLiteError> {
-        self.apply_mutation(|store| {
-            store.clear();
-            Ok(())
-        })
-    }
-
-    pub fn graph_names(&self) -> Vec<String> {
-        self.inner.graph_names()
-    }
-
-    pub fn has_graph(&self, name: &str) -> bool {
-        self.inner.has_graph(name)
+    pub fn remove_edge(&mut self, edge_id: u64, graph: &str) -> Result<(), SQLiteError> {
+        self.inner
+            .remove_edge(edge_id, graph)
+            .map_err(|error| graph_store_error(&error))
     }
 
     pub fn neighbors(
         &self,
-        vertex_id: VertexId,
+        vertex_id: u64,
         label: Option<&str>,
         direction: Direction,
         graph: &str,
-    ) -> Result<Vec<VertexId>, SQLiteError> {
-        self.require_graph(graph)?;
-        self.inner
-            .neighbors(vertex_id, label, direction, graph)
+    ) -> Result<Vec<u64>, SQLiteError> {
+        self.read_snapshot(|store| store.neighbors(vertex_id, label, direction, graph))
             .map_err(|error| graph_store_error(&error))
     }
 
     pub fn vertices_by_label(&self, label: &str, graph: &str) -> Result<Vec<Vertex>, SQLiteError> {
-        self.require_graph(graph)?;
-        self.inner
-            .vertices_by_label(label, graph)
+        self.read_snapshot(|store| store.vertices_by_label(label, graph))
             .map_err(|error| graph_store_error(&error))
     }
 
-    pub fn vertex_ids_by_label(
-        &self,
-        label: &str,
-        graph: &str,
-    ) -> Result<Vec<VertexId>, SQLiteError> {
-        self.require_graph(graph)?;
-        self.inner
-            .vertex_ids_by_label(label, graph)
+    pub fn vertex_ids_by_label(&self, label: &str, graph: &str) -> Result<Vec<u64>, SQLiteError> {
+        self.read_snapshot(|store| store.vertex_ids_by_label(label, graph))
             .map_err(|error| graph_store_error(&error))
     }
 
     pub fn vertices_in_graph(&self, graph: &str) -> Result<Vec<Vertex>, SQLiteError> {
-        self.require_graph(graph)?;
-        self.inner
-            .vertices_in_graph(graph)
+        self.read_snapshot(|store| store.vertices_in_graph(graph))
             .map_err(|error| graph_store_error(&error))
     }
 
     pub fn edges_in_graph(&self, graph: &str) -> Result<Vec<Edge>, SQLiteError> {
-        self.require_graph(graph)?;
-        self.inner
-            .edges_in_graph(graph)
+        self.read_snapshot(|store| store.edges_in_graph(graph))
             .map_err(|error| graph_store_error(&error))
     }
 
-    pub fn vertex_graphs(&self, vertex_id: VertexId) -> BTreeSet<String> {
-        self.inner.vertex_graphs(vertex_id)
+    pub fn vertex_graphs(&self, vertex_id: u64) -> Result<BTreeSet<String>, SQLiteError> {
+        self.read_snapshot(|store| store.vertex_graphs(vertex_id))
+            .map_err(|error| graph_store_error(&error))
     }
 
-    pub fn get_vertex(&self, vertex_id: VertexId) -> Option<&Vertex> {
-        self.inner.get_vertex(vertex_id)
+    pub fn out_edge_ids(&self, vertex_id: u64, graph: &str) -> Result<BTreeSet<u64>, SQLiteError> {
+        self.read_snapshot(|store| store.out_edge_ids(vertex_id, graph))
+            .map_err(|error| graph_store_error(&error))
     }
 
-    pub fn get_edge(&self, edge_id: EdgeId) -> Option<&Edge> {
-        self.inner.get_edge(edge_id)
+    pub fn in_edge_ids(&self, vertex_id: u64, graph: &str) -> Result<BTreeSet<u64>, SQLiteError> {
+        self.read_snapshot(|store| store.in_edge_ids(vertex_id, graph))
+            .map_err(|error| graph_store_error(&error))
     }
 
-    pub fn vertices(&self) -> BTreeMap<VertexId, Vertex> {
-        self.inner.vertices()
+    pub fn edge_ids_by_label(
+        &self,
+        label: &str,
+        graph: &str,
+    ) -> Result<BTreeSet<u64>, SQLiteError> {
+        self.read_snapshot(|store| store.edge_ids_by_label(label, graph))
+            .map_err(|error| graph_store_error(&error))
     }
 
-    pub fn edges(&self) -> BTreeMap<EdgeId, Edge> {
-        self.inner.edges()
+    pub fn vertex_ids_in_graph(&self, graph: &str) -> Result<BTreeSet<u64>, SQLiteError> {
+        self.read_snapshot(|store| store.vertex_ids_in_graph(graph))
+            .map_err(|error| graph_store_error(&error))
+    }
+
+    pub fn require_vertex_in_graph(&self, vertex_id: u64, graph: &str) -> Result<(), SQLiteError> {
+        self.read_snapshot(|store| store.require_vertex_in_graph(vertex_id, graph))
+            .map_err(|error| graph_store_error(&error))
+    }
+
+    pub fn degree_distribution(&self, graph: &str) -> Result<BTreeMap<u64, u64>, SQLiteError> {
+        self.read_snapshot(|store| store.degree_distribution(graph))
+            .map_err(|error| graph_store_error(&error))
+    }
+
+    pub fn label_degree(&self, label: &str, graph: &str) -> Result<f64, SQLiteError> {
+        self.read_snapshot(|store| store.label_degree(label, graph))
+            .map_err(|error| graph_store_error(&error))
+    }
+
+    pub fn vertex_label_counts(&self, graph: &str) -> Result<BTreeMap<String, u64>, SQLiteError> {
+        self.read_snapshot(|store| store.vertex_label_counts(graph))
+            .map_err(|error| graph_store_error(&error))
+    }
+
+    pub fn get_vertex(&self, vertex_id: u64) -> Result<Option<Vertex>, SQLiteError> {
+        self.read_snapshot(|store| store.get_vertex(vertex_id))
+            .map_err(|error| graph_store_error(&error))
+    }
+
+    pub fn get_edge(&self, edge_id: u64) -> Result<Option<Edge>, SQLiteError> {
+        self.read_snapshot(|store| store.get_edge(edge_id))
+            .map_err(|error| graph_store_error(&error))
+    }
+
+    pub fn next_vertex_id(&mut self) -> Result<u64, SQLiteError> {
+        self.inner
+            .next_vertex_id()
+            .map_err(|error| graph_store_error(&error))
+    }
+
+    pub fn next_edge_id(&mut self) -> Result<u64, SQLiteError> {
+        self.inner
+            .next_edge_id()
+            .map_err(|error| graph_store_error(&error))
+    }
+
+    pub fn allocate_vertex_id(&mut self, label: &str, graph: &str) -> Result<u64, SQLiteError> {
+        self.inner
+            .allocate_vertex_id(label, graph)
+            .map_err(|error| graph_store_error(&error))
+    }
+
+    pub fn allocate_edge_id(&mut self, label: &str, graph: &str) -> Result<u64, SQLiteError> {
+        self.inner
+            .allocate_edge_id(label, graph)
+            .map_err(|error| graph_store_error(&error))
+    }
+
+    pub fn clear(&mut self) -> Result<(), SQLiteError> {
+        self.inner
+            .clear()
+            .map_err(|error| graph_store_error(&error))
+    }
+
+    pub fn vertices(&self) -> Result<BTreeMap<u64, Vertex>, SQLiteError> {
+        self.read_snapshot(GraphStore::vertices)
+            .map_err(|error| graph_store_error(&error))
+    }
+
+    pub fn edges(&self) -> Result<BTreeMap<u64, Edge>, SQLiteError> {
+        self.read_snapshot(GraphStore::edges)
+            .map_err(|error| graph_store_error(&error))
+    }
+}
+
+impl GraphStore for SQLiteGraphStore {
+    fn vertex_id_page(
+        &self,
+        graph: &str,
+        after: Option<u64>,
+        limit: usize,
+    ) -> GraphStoreResult<Vec<u64>> {
+        self.read_snapshot(|store| store.vertex_id_page(graph, after, limit))
+    }
+    fn edge_id_page(
+        &self,
+        graph: &str,
+        after: Option<u64>,
+        limit: usize,
+    ) -> GraphStoreResult<Vec<u64>> {
+        self.read_snapshot(|store| store.edge_id_page(graph, after, limit))
+    }
+    fn transaction<T>(
+        &mut self,
+        operation: impl FnOnce(&mut Self) -> GraphStoreResult<T>,
+    ) -> GraphStoreResult<T> {
+        let mut checkpoint = self.inner.clone();
+        checkpoint.transaction(|_| operation(self))
+    }
+
+    fn create_graph(&mut self, name: &str) -> GraphStoreResult<()> {
+        self.inner.create_graph(name)
+    }
+
+    fn drop_graph(&mut self, name: &str) -> GraphStoreResult<()> {
+        self.inner.drop_graph(name)
+    }
+
+    fn graph_names(&self) -> GraphStoreResult<Vec<String>> {
+        self.read_snapshot(GraphStore::graph_names)
+    }
+
+    fn has_graph(&self, name: &str) -> GraphStoreResult<bool> {
+        self.read_snapshot(|store| store.has_graph(name))
+    }
+
+    fn union_graphs(&mut self, g1: &str, g2: &str, target: &str) -> GraphStoreResult<()> {
+        self.inner.union_graphs(g1, g2, target)
+    }
+
+    fn intersect_graphs(&mut self, g1: &str, g2: &str, target: &str) -> GraphStoreResult<()> {
+        self.inner.intersect_graphs(g1, g2, target)
+    }
+
+    fn difference_graphs(&mut self, g1: &str, g2: &str, target: &str) -> GraphStoreResult<()> {
+        self.inner.difference_graphs(g1, g2, target)
+    }
+
+    fn copy_graph(&mut self, source: &str, target: &str) -> GraphStoreResult<()> {
+        self.inner.copy_graph(source, target)
+    }
+
+    fn add_vertex(&mut self, vertex: Vertex, graph: &str) -> GraphStoreResult<()> {
+        self.inner.add_vertex(vertex, graph)
+    }
+
+    fn add_edge(&mut self, edge: Edge, graph: &str) -> GraphStoreResult<()> {
+        self.inner.add_edge(edge, graph)
+    }
+
+    fn remove_vertex(&mut self, vertex_id: u64, graph: &str) -> GraphStoreResult<()> {
+        self.inner.remove_vertex(vertex_id, graph)
+    }
+
+    fn remove_edge(&mut self, edge_id: u64, graph: &str) -> GraphStoreResult<()> {
+        self.inner.remove_edge(edge_id, graph)
+    }
+
+    fn neighbors(
+        &self,
+        vertex_id: u64,
+        label: Option<&str>,
+        direction: Direction,
+        graph: &str,
+    ) -> GraphStoreResult<Vec<u64>> {
+        self.read_snapshot(|store| store.neighbors(vertex_id, label, direction, graph))
+    }
+
+    fn vertices_by_label(&self, label: &str, graph: &str) -> GraphStoreResult<Vec<Vertex>> {
+        self.read_snapshot(|store| store.vertices_by_label(label, graph))
+    }
+
+    fn vertex_ids_by_label(&self, label: &str, graph: &str) -> GraphStoreResult<Vec<u64>> {
+        self.read_snapshot(|store| store.vertex_ids_by_label(label, graph))
+    }
+
+    fn vertices_in_graph(&self, graph: &str) -> GraphStoreResult<Vec<Vertex>> {
+        self.read_snapshot(|store| store.vertices_in_graph(graph))
+    }
+
+    fn edges_in_graph(&self, graph: &str) -> GraphStoreResult<Vec<Edge>> {
+        self.read_snapshot(|store| store.edges_in_graph(graph))
+    }
+
+    fn vertex_graphs(&self, vertex_id: u64) -> GraphStoreResult<BTreeSet<String>> {
+        self.read_snapshot(|store| store.vertex_graphs(vertex_id))
+    }
+    fn edge_graphs(&self, edge_id: u64) -> GraphStoreResult<BTreeSet<String>> {
+        self.read_snapshot(|store| store.edge_graphs(edge_id))
+    }
+    fn edges_by_label(&self, label: &str, graph: &str) -> GraphStoreResult<Vec<Edge>> {
+        self.read_snapshot(|store| store.edges_by_label(label, graph))
+    }
+
+    fn out_edge_ids(&self, vertex_id: u64, graph: &str) -> GraphStoreResult<BTreeSet<u64>> {
+        self.read_snapshot(|store| store.out_edge_ids(vertex_id, graph))
+    }
+
+    fn in_edge_ids(&self, vertex_id: u64, graph: &str) -> GraphStoreResult<BTreeSet<u64>> {
+        self.read_snapshot(|store| store.in_edge_ids(vertex_id, graph))
+    }
+
+    fn edge_ids_by_label(&self, label: &str, graph: &str) -> GraphStoreResult<BTreeSet<u64>> {
+        self.read_snapshot(|store| store.edge_ids_by_label(label, graph))
+    }
+
+    fn vertex_ids_in_graph(&self, graph: &str) -> GraphStoreResult<BTreeSet<u64>> {
+        self.read_snapshot(|store| store.vertex_ids_in_graph(graph))
+    }
+
+    fn require_vertex_in_graph(&self, vertex_id: u64, graph: &str) -> GraphStoreResult<()> {
+        self.read_snapshot(|store| store.require_vertex_in_graph(vertex_id, graph))
+    }
+
+    fn degree_distribution(&self, graph: &str) -> GraphStoreResult<BTreeMap<u64, u64>> {
+        self.read_snapshot(|store| store.degree_distribution(graph))
+    }
+
+    fn label_degree(&self, label: &str, graph: &str) -> GraphStoreResult<f64> {
+        self.read_snapshot(|store| store.label_degree(label, graph))
+    }
+
+    fn vertex_label_counts(&self, graph: &str) -> GraphStoreResult<BTreeMap<String, u64>> {
+        self.read_snapshot(|store| store.vertex_label_counts(graph))
+    }
+
+    fn get_vertex(&self, vertex_id: u64) -> GraphStoreResult<Option<Vertex>> {
+        self.read_snapshot(|store| store.get_vertex(vertex_id))
+    }
+
+    fn get_edge(&self, edge_id: u64) -> GraphStoreResult<Option<Edge>> {
+        self.read_snapshot(|store| store.get_edge(edge_id))
+    }
+
+    fn next_vertex_id(&mut self) -> GraphStoreResult<u64> {
+        self.inner.next_vertex_id()
+    }
+
+    fn next_edge_id(&mut self) -> GraphStoreResult<u64> {
+        self.inner.next_edge_id()
+    }
+
+    fn allocate_vertex_id(&mut self, label: &str, graph: &str) -> GraphStoreResult<u64> {
+        self.inner.allocate_vertex_id(label, graph)
+    }
+
+    fn allocate_edge_id(&mut self, label: &str, graph: &str) -> GraphStoreResult<u64> {
+        self.inner.allocate_edge_id(label, graph)
+    }
+
+    fn clear(&mut self) -> GraphStoreResult<()> {
+        self.inner.clear()
+    }
+
+    fn vertices(&self) -> GraphStoreResult<BTreeMap<u64, Vertex>> {
+        self.read_snapshot(GraphStore::vertices)
+    }
+
+    fn edges(&self) -> GraphStoreResult<BTreeMap<u64, Edge>> {
+        self.read_snapshot(GraphStore::edges)
     }
 }
 
@@ -745,7 +620,7 @@ mod tests {
         store.add_vertex(Vertex::new(2, "person"), "g").unwrap();
         store.add_edge(Edge::new(1, 1, 2, "knows"), "g").unwrap();
         let other = SQLiteGraphStore::open(conn, None).unwrap();
-        assert!(other.has_graph("g"));
+        assert!(other.has_graph("g").unwrap());
         let vs = other.vertices_in_graph("g").unwrap();
         assert_eq!(vs.len(), 2);
         let es = other.edges_in_graph("g").unwrap();
@@ -801,7 +676,7 @@ mod tests {
         .unwrap();
 
         let reopened = SQLiteGraphStore::open(conn, None).unwrap();
-        let vertex = reopened.get_vertex(1).unwrap();
+        let vertex = reopened.get_vertex(1).unwrap().unwrap();
         assert_eq!(vertex.properties["bytes"], Value::Bytes(vec![1, 2]));
         assert_eq!(
             vertex.properties["nested"],
@@ -812,7 +687,7 @@ mod tests {
             Value::List(vec![Value::Int(256)])
         );
         assert_eq!(
-            reopened.get_edge(10).unwrap().properties["bytes"],
+            reopened.get_edge(10).unwrap().unwrap().properties["bytes"],
             Value::Bytes(vec![5, 6])
         );
     }
@@ -834,7 +709,7 @@ mod tests {
         drop(store);
 
         let reopened = SQLiteGraphStore::open(conn, None).unwrap();
-        let restored = reopened.get_vertex(1).unwrap();
+        let restored = reopened.get_vertex(1).unwrap().unwrap();
         assert_eq!(
             restored.properties["list"],
             Value::List(vec![Value::Int(1), Value::Int(2)])
@@ -843,7 +718,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_persistence_does_not_publish_memory_or_partial_disk_state() {
+    fn failed_persistence_does_not_publish_partial_disk_state() {
         let conn = ManagedConnection::open_in_memory().unwrap();
         let mut store = SQLiteGraphStore::open(conn.clone(), None).unwrap();
         store.create_graph("g").unwrap();
@@ -864,8 +739,8 @@ mod tests {
         .unwrap();
 
         assert!(store.add_vertex(Vertex::new(2, "person"), "g").is_err());
-        assert!(store.get_vertex(1).is_some());
-        assert!(store.get_vertex(2).is_none());
+        assert!(store.get_vertex(1).unwrap().is_some());
+        assert!(store.get_vertex(2).unwrap().is_none());
 
         conn.with(|connection| {
             connection.execute_batch("DROP TRIGGER fail_graph_membership")?;
@@ -874,11 +749,11 @@ mod tests {
         .unwrap();
         let reopened = SQLiteGraphStore::open(conn, None).unwrap();
         assert_eq!(reopened.vertices_in_graph("g").unwrap().len(), 1);
-        assert!(reopened.get_vertex(2).is_none());
+        assert!(reopened.get_vertex(2).unwrap().is_none());
     }
 
     #[test]
-    fn corrupt_property_json_is_an_open_error() {
+    fn unrelated_corrupt_payload_is_not_loaded_until_queried() {
         let conn = ManagedConnection::open_in_memory().unwrap();
         let mut store = SQLiteGraphStore::open(conn.clone(), None).unwrap();
         store.create_graph("g").unwrap();
@@ -892,7 +767,10 @@ mod tests {
         })
         .unwrap();
 
-        assert!(SQLiteGraphStore::open(conn, None).is_err());
+        store.add_vertex(Vertex::new(2, "person"), "g").unwrap();
+        let reopened = SQLiteGraphStore::open(conn, None).unwrap();
+        assert!(reopened.get_vertex(2).unwrap().is_some());
+        assert!(reopened.get_vertex(1).is_err());
     }
 
     #[test]

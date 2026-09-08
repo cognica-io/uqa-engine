@@ -30,7 +30,7 @@ fn engine_with_simple_graph() -> Engine {
     engine.create_graph("g").unwrap();
     engine
         .graph_with_mut("g", |store| {
-            store.create_graph("g");
+            store.create_graph("g")?;
             for v in 1..=4 {
                 store.add_vertex(Vertex::new(v, "n"), "g")?;
             }
@@ -182,7 +182,7 @@ fn graph_pagerank_scores_central_vertex_higher_in_star() {
     engine.create_graph("star").unwrap();
     engine
         .graph_with_mut("star", |store| {
-            store.create_graph("star");
+            store.create_graph("star")?;
             for v in 1..=4 {
                 store.add_vertex(Vertex::new(v, "n"), "star")?;
             }

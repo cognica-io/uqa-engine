@@ -7,6 +7,36 @@
 use super::*;
 
 #[test]
+fn physical_path_pages_and_validity_do_not_invalidate_catalog_definitions() {
+    let catalog = fresh();
+    catalog.save_named_graph("items").unwrap();
+    catalog.save_vertex(1, "Item", "{}").unwrap();
+    catalog.save_graph_membership("vertex", 1, "items").unwrap();
+    catalog
+        .save_path_index("items::links", "[[\"link\"]]")
+        .unwrap();
+    let before = catalog.cache_revisions().unwrap().registries;
+    catalog
+        .save_path_index_pairs("items::links", "[\"link\"]", &[(1, 2), (2, 3)])
+        .unwrap();
+    catalog
+        .finish_path_index_data("items::links", "items", "[[\"link\"]]")
+        .unwrap();
+    assert_eq!(catalog.cache_revisions().unwrap().registries, before);
+    catalog
+        .save_vertex(1, "Item", "{\"changed\":true}")
+        .unwrap();
+    assert!(!catalog
+        .path_index_data_is_current("items::links", "[[\"link\"]]")
+        .unwrap());
+    assert_eq!(catalog.cache_revisions().unwrap().registries, before);
+    catalog.clear_path_index_data("items::links").unwrap();
+    assert_eq!(catalog.cache_revisions().unwrap().registries, before);
+    catalog.drop_path_index("items::links").unwrap();
+    assert!(catalog.cache_revisions().unwrap().registries > before);
+}
+
+#[test]
 fn graph_revision_migration_upgrades_existing_graphs_and_legacy_triggers() {
     let connection = ManagedConnection::open_in_memory().unwrap();
     let catalog = Catalog::open(connection.clone()).unwrap();

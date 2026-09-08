@@ -306,7 +306,7 @@ impl<'a> VertexEmbedding<'a> {
         let mut ids: Vec<VertexId> = store.vertex_ids_in_graph(self.graph)?.into_iter().collect();
         ids.sort_unstable();
         for vid in ids {
-            let Some(vertex) = store.get_vertex(vid) else {
+            let Some(vertex) = store.get_vertex(vid)? else {
                 return Err(GraphStoreError::CorruptGraph(format!(
                     "graph {:?} references missing vertex {vid}",
                     self.graph
@@ -381,7 +381,7 @@ impl<'a> SemanticGraphSearch<'a> {
         let mut entries: Vec<PostingEntry> = Vec::new();
         let mut graph_payloads: BTreeMap<VertexId, GraphPayload> = BTreeMap::new();
         for entry in gpl.inner().entries() {
-            let Some(vertex) = store.get_vertex(entry.doc_id) else {
+            let Some(vertex) = store.get_vertex(entry.doc_id)? else {
                 return Err(GraphStoreError::CorruptGraph(format!(
                     "traversal returned missing vertex {}",
                     entry.doc_id
@@ -466,7 +466,7 @@ impl<'a> VectorEnhancedMatch<'a> {
                     self.score_variable
                 ))
             })?;
-            let Some(vertex) = store.get_vertex(vid) else {
+            let Some(vertex) = store.get_vertex(vid)? else {
                 return Err(GraphStoreError::CorruptGraph(format!(
                     "match variable {:?} references missing vertex {vid}",
                     self.score_variable

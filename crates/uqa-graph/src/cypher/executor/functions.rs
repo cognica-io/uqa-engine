@@ -129,8 +129,8 @@ impl<G: GraphStore> CypherExecutor<'_, G> {
                         ));
                     };
                     let id = nonnegative_i64_to_u64(id, "edge endpoint id")?;
-                    match self.store.get_vertex(id) {
-                        Some(vertex) => Ok(agtype::vertex_to_value(vertex)?),
+                    match self.store.get_vertex(id)? {
+                        Some(vertex) => Ok(agtype::vertex_to_value(&vertex)?),
                         None => Ok(Value::Null),
                     }
                 }

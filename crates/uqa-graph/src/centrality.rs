@@ -102,7 +102,7 @@ impl<'a> PageRank<'a> {
             out_degree.insert(*v, store.out_edge_ids(*v, self.graph)?.len());
             let mut ins: Vec<VertexId> = Vec::new();
             for eid in store.in_edge_ids(*v, self.graph)? {
-                let edge = store.get_edge(eid).ok_or_else(|| {
+                let edge = store.get_edge(eid)?.ok_or_else(|| {
                     GraphStoreError::CorruptGraph(format!("missing PageRank edge {eid}"))
                 })?;
                 ins.push(edge.source_id);
@@ -188,7 +188,7 @@ impl<'a> HITS<'a> {
         for v in &vertices {
             let mut ins = Vec::new();
             for eid in store.in_edge_ids(*v, self.graph)? {
-                let edge = store.get_edge(eid).ok_or_else(|| {
+                let edge = store.get_edge(eid)?.ok_or_else(|| {
                     GraphStoreError::CorruptGraph(format!("missing HITS edge {eid}"))
                 })?;
                 ins.push(edge.source_id);
@@ -196,7 +196,7 @@ impl<'a> HITS<'a> {
             in_neighbors.insert(*v, ins);
             let mut outs = Vec::new();
             for eid in store.out_edge_ids(*v, self.graph)? {
-                let edge = store.get_edge(eid).ok_or_else(|| {
+                let edge = store.get_edge(eid)?.ok_or_else(|| {
                     GraphStoreError::CorruptGraph(format!("missing HITS edge {eid}"))
                 })?;
                 outs.push(edge.target_id);
@@ -293,7 +293,7 @@ impl<'a> BetweennessCentrality<'a> {
         let mut out_neighbors: Vec<Vec<usize>> = vec![Vec::new(); n];
         for (idx, vertex_id) in vertices.iter().enumerate() {
             for eid in store.out_edge_ids(*vertex_id, self.graph)? {
-                let edge = store.get_edge(eid).ok_or_else(|| {
+                let edge = store.get_edge(eid)?.ok_or_else(|| {
                     GraphStoreError::CorruptGraph(format!("missing betweenness edge {eid}"))
                 })?;
                 if let Some(target_idx) = vertex_index.get(&edge.target_id) {

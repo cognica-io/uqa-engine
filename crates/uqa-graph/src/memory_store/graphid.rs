@@ -30,7 +30,7 @@ pub const MAX_GRAPHID_LABEL_ID: u32 = 32_767;
 pub(super) const MAX_GRAPHID_SEQUENCE: u64 = (1_u64 << GRAPHID_LABEL_SHIFT) - 1;
 const MAX_EXACT_F64_INTEGER: u64 = 9_007_199_254_740_992;
 
-pub(super) fn usize_to_f64_exact(value: usize, context: &str) -> GraphStoreResult<f64> {
+pub(crate) fn usize_to_f64_exact(value: usize, context: &str) -> GraphStoreResult<f64> {
     if u64::try_from(value).is_ok_and(|value| value <= MAX_EXACT_F64_INTEGER) {
         Ok(value as f64)
     } else {
@@ -170,7 +170,7 @@ impl GraphLabelRegistry {
     /// user label on first use. Empty labels map onto the reserved
     /// default label of the kind. Using a label registered for the
     /// other kind fails exactly like AGE's `CREATE` transform.
-    pub(super) fn label_id(&mut self, label: &str, kind: LabelKind) -> GraphStoreResult<u32> {
+    pub(crate) fn label_id(&mut self, label: &str, kind: LabelKind) -> GraphStoreResult<u32> {
         if label.is_empty() {
             self.require_default_label(kind)?;
             return Ok(kind.default_label_id());
@@ -352,7 +352,7 @@ impl GraphLabelRegistry {
         out
     }
 
-    pub(super) fn next_sequence(&mut self, label_id: u32) -> GraphStoreResult<u64> {
+    pub(crate) fn next_sequence(&mut self, label_id: u32) -> GraphStoreResult<u64> {
         let current = self.sequences.get(&label_id).copied().unwrap_or(0);
         let next = current.checked_add(1).ok_or_else(|| {
             GraphStoreError::IdExhausted(format!(
@@ -370,7 +370,7 @@ impl GraphLabelRegistry {
 
     /// Fold an existing entity id back into the registry so restored
     /// graphs never re-issue an id that is already in use.
-    pub(super) fn observe(&mut self, label: &str, id: u64, kind: LabelKind) {
+    pub(crate) fn observe(&mut self, label: &str, id: u64, kind: LabelKind) {
         let label_id = graphid_label_id(id);
         if label_id == 0 {
             // Pre-AGE id (plain counter) - nothing to learn.

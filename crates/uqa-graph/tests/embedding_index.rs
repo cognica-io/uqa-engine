@@ -100,10 +100,13 @@ fn path_index_reaches_pairs_per_label_sequence() {
     )
     .unwrap();
     assert!(idx.has_path(&["knows".into()]));
-    let one_hop = idx.lookup(&["knows".into()]).unwrap();
+    let one_hop = idx.lookup(&["knows".into()]).unwrap().unwrap();
     assert!(one_hop.contains(&(1, 2)));
     assert!(one_hop.contains(&(2, 3)));
-    let two_hop = idx.lookup(&["knows".into(), "knows".into()]).unwrap();
+    let two_hop = idx
+        .lookup(&["knows".into(), "knows".into()])
+        .unwrap()
+        .unwrap();
     assert!(two_hop.contains(&(1, 3)));
 }
 

@@ -12,7 +12,7 @@ use super::{
     lower_deep_dropout, lower_deep_pool, operator_execution_error, scored_term_count,
     scored_to_posting_list, sql, static_operator, BTreeSet, BayesianEvidenceFusionOperator, DocId,
     DriverExecution, DriverResult, EngineDriver, ExternalPriorMode, GatingSpec,
-    GraphNeighborSnapshot, MultiStageCutoff, MultiStageEntry, OperatorTree, Payload,
+    GraphNeighborAccess, MultiStageCutoff, MultiStageEntry, OperatorTree, Payload,
     PositiveEvidencePoolExecution, PostingEntry, PostingList, RobustPositiveEvidencePoolOperator,
     SQLError, ScalarExpr, ScoredEntry, StaticPostingList, StorageBackendError, TextScoringMode,
     Value,
@@ -722,13 +722,9 @@ impl EngineDriver<'_> {
             .map_err(|error| SQLError::TypeMismatch(error.to_string()))?;
         let mut context = self.bridge_context()?;
         if let Some(graph) = graph_names.into_iter().next() {
-            let snapshot = self.with_graph(&graph, |store| {
-                Ok(
-                    std::sync::Arc::new(GraphNeighborSnapshot::from_store(store, &graph)?)
-                        as std::sync::Arc<dyn uqa_operators::GraphNeighborLookup>,
-                )
-            })?;
-            context.graph = Some(snapshot);
+            let access =
+                std::sync::Arc::new(GraphNeighborAccess::new(self.graph_handle(&graph)?, &graph));
+            context.graph = Some(access);
         }
         operator
             .execute(&context)

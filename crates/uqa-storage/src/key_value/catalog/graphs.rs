@@ -6,23 +6,25 @@
 
 //! Named graph entities, memberships, snapshots, and cleanup.
 
+use super::graph_access::reverse_membership_key;
 use super::{
-    decode_value, edge_key, encode_value, graph_membership_graph_prefix, graph_membership_key,
-    graph_membership_prefix, key_with_tag, load_single_keys, read_str, read_u64, single_str_key,
-    string_value, vertex_key, BTreeSet, CatalogFacade, EdgeRow, GraphSnapshot, KeyValueCatalog,
-    StorageBackendResult, StoredEdge, StoredVertex, TAG_EDGE, TAG_METADATA, TAG_NAMED_GRAPH,
-    TAG_PATH_INDEX, TAG_VERTEX,
+    decode_value, edge_key, encode_value, graph_membership_key, graph_membership_prefix,
+    key_with_tag, load_single_keys, read_str, read_u64, single_str_key, string_value, vertex_key,
+    BTreeSet, CatalogFacade, EdgeRow, GraphSnapshot, KeyValueCatalog, StorageBackendResult,
+    StoredEdge, StoredVertex, TAG_EDGE, TAG_METADATA, TAG_NAMED_GRAPH, TAG_PATH_INDEX, TAG_VERTEX,
 };
 
 impl KeyValueCatalog {
     pub(super) fn save_named_graph_impl(&self, name: &str) -> StorageBackendResult<()> {
+        self.ensure_graph_lookup_indexes()?;
         self.store.put(&single_str_key(TAG_NAMED_GRAPH, name)?, &[])
     }
 
     pub(super) fn drop_named_graph_impl(&self, name: &str) -> StorageBackendResult<()> {
+        self.ensure_graph_lookup_indexes()?;
         let mut batch = self.store.batch();
         batch.delete(&single_str_key(TAG_NAMED_GRAPH, name)?)?;
-        batch.delete_prefix(&graph_membership_graph_prefix(name)?)?;
+        self.delete_graph_memberships_into(batch.as_mut(), name)?;
         batch.commit()
     }
 
@@ -36,19 +38,25 @@ impl KeyValueCatalog {
         label: &str,
         properties_json: &str,
     ) -> StorageBackendResult<()> {
+        self.ensure_graph_lookup_indexes()?;
         let key = vertex_key(vertex_id);
-        self.store.put(
-            &key,
-            &encode_value(&StoredVertex {
-                label: label.to_string(),
-                properties_json: properties_json.to_string(),
-            })?,
-        )
+        let row = StoredVertex {
+            label: label.to_string(),
+            properties_json: properties_json.to_string(),
+        };
+        let mut batch = self.store.batch();
+        self.replace_vertex_lookup(batch.as_mut(), vertex_id, Some(&row))?;
+        batch.put(&key, &encode_value(&row)?)?;
+        batch.commit()
     }
 
     pub(super) fn delete_vertex_impl(&self, vertex_id: u64) -> StorageBackendResult<()> {
+        self.ensure_graph_lookup_indexes()?;
         let key = vertex_key(vertex_id);
-        self.store.delete(&key)
+        let mut batch = self.store.batch();
+        self.replace_vertex_lookup(batch.as_mut(), vertex_id, None)?;
+        batch.delete(&key)?;
+        batch.commit()
     }
 
     pub(super) fn load_vertices_impl(&self) -> StorageBackendResult<Vec<(u64, String, String)>> {
@@ -70,21 +78,27 @@ impl KeyValueCatalog {
         label: &str,
         properties_json: &str,
     ) -> StorageBackendResult<()> {
+        self.ensure_graph_lookup_indexes()?;
         let key = edge_key(edge_id);
-        self.store.put(
-            &key,
-            &encode_value(&StoredEdge {
-                source_id,
-                target_id,
-                label: label.to_string(),
-                properties_json: properties_json.to_string(),
-            })?,
-        )
+        let row = StoredEdge {
+            source_id,
+            target_id,
+            label: label.to_string(),
+            properties_json: properties_json.to_string(),
+        };
+        let mut batch = self.store.batch();
+        self.replace_edge_lookup(batch.as_mut(), edge_id, Some(&row))?;
+        batch.put(&key, &encode_value(&row)?)?;
+        batch.commit()
     }
 
     pub(super) fn delete_edge_impl(&self, edge_id: u64) -> StorageBackendResult<()> {
+        self.ensure_graph_lookup_indexes()?;
         let key = edge_key(edge_id);
-        self.store.delete(&key)
+        let mut batch = self.store.batch();
+        self.replace_edge_lookup(batch.as_mut(), edge_id, None)?;
+        batch.delete(&key)?;
+        batch.commit()
     }
 
     pub(super) fn load_edges_impl(&self) -> StorageBackendResult<Vec<EdgeRow>> {
@@ -110,10 +124,18 @@ impl KeyValueCatalog {
         entity_id: u64,
         graph_name: &str,
     ) -> StorageBackendResult<()> {
-        self.store.put(
+        self.ensure_graph_lookup_indexes()?;
+        let mut batch = self.store.batch();
+        batch.put(
             &graph_membership_key(entity_type, entity_id, graph_name)?,
             &[],
-        )
+        )?;
+        batch.put(
+            &reverse_membership_key(entity_type, entity_id, graph_name)?,
+            &[],
+        )?;
+        self.invalidate_graph_path_data(batch.as_mut(), graph_name)?;
+        batch.commit()
     }
 
     pub(super) fn delete_graph_membership_impl(
@@ -122,17 +144,22 @@ impl KeyValueCatalog {
         entity_id: u64,
         graph_name: &str,
     ) -> StorageBackendResult<()> {
-        self.store
-            .delete(&graph_membership_key(entity_type, entity_id, graph_name)?)
+        self.ensure_graph_lookup_indexes()?;
+        let mut batch = self.store.batch();
+        batch.delete(&graph_membership_key(entity_type, entity_id, graph_name)?)?;
+        batch.delete(&reverse_membership_key(entity_type, entity_id, graph_name)?)?;
+        self.invalidate_graph_path_data(batch.as_mut(), graph_name)?;
+        batch.commit()
     }
 
     pub(super) fn delete_graph_membership_for_graph_impl(
         &self,
         graph_name: &str,
     ) -> StorageBackendResult<()> {
-        self.store
-            .delete_prefix(&graph_membership_graph_prefix(graph_name)?)?;
-        Ok(())
+        self.ensure_graph_lookup_indexes()?;
+        let mut batch = self.store.batch();
+        self.delete_graph_memberships_into(batch.as_mut(), graph_name)?;
+        batch.commit()
     }
 
     pub(super) fn load_graph_memberships_impl(
@@ -150,6 +177,7 @@ impl KeyValueCatalog {
     }
 
     pub(super) fn purge_orphan_graph_entities_impl(&self) -> StorageBackendResult<()> {
+        self.ensure_graph_lookup_indexes()?;
         let memberships = self.load_graph_memberships()?;
         let vertex_ids = memberships
             .iter()
@@ -162,11 +190,13 @@ impl KeyValueCatalog {
         let mut batch = self.store.batch();
         for (id, _, _) in self.load_vertices()? {
             if !vertex_ids.contains(&id) {
+                self.replace_vertex_lookup(batch.as_mut(), id, None)?;
                 batch.delete(&vertex_key(id))?;
             }
         }
         for edge in self.load_edges()? {
             if !edge_ids.contains(&edge.edge_id) {
+                self.replace_edge_lookup(batch.as_mut(), edge.edge_id, None)?;
                 batch.delete(&edge_key(edge.edge_id))?;
             }
         }
@@ -178,6 +208,7 @@ impl KeyValueCatalog {
         graph_name: &str,
         snapshot: &GraphSnapshot,
     ) -> StorageBackendResult<()> {
+        self.ensure_graph_lookup_indexes()?;
         let memberships = self.load_graph_memberships()?;
         let mut surviving_vertices = memberships
             .iter()
@@ -191,15 +222,24 @@ impl KeyValueCatalog {
         surviving_edges.extend(snapshot.edges.iter().map(|row| row.edge_id));
         let mut batch = self.store.batch();
         batch.put(&single_str_key(TAG_NAMED_GRAPH, graph_name)?, &[])?;
-        batch.delete_prefix(&graph_membership_graph_prefix(graph_name)?)?;
+        self.delete_graph_memberships_into(batch.as_mut(), graph_name)?;
         for (key, _) in self.store.scan_prefix(&key_with_tag(TAG_PATH_INDEX))? {
             let mut offset = 1;
             let key_name = read_str(&key, &mut offset)?;
             if key_name.starts_with(&format!("{graph_name}::")) {
+                self.clear_path_index_data_into(batch.as_mut(), &key_name)?;
                 batch.delete(&key)?;
             }
         }
         for vertex in &snapshot.vertices {
+            self.replace_vertex_lookup(
+                batch.as_mut(),
+                vertex.vertex_id,
+                Some(&StoredVertex {
+                    label: vertex.label.clone(),
+                    properties_json: vertex.properties_json.clone(),
+                }),
+            )?;
             batch.put(
                 &vertex_key(vertex.vertex_id),
                 &encode_value(&StoredVertex {
@@ -211,8 +251,22 @@ impl KeyValueCatalog {
                 &graph_membership_key("vertex", vertex.vertex_id, graph_name)?,
                 &[],
             )?;
+            batch.put(
+                &reverse_membership_key("vertex", vertex.vertex_id, graph_name)?,
+                &[],
+            )?;
         }
         for edge in &snapshot.edges {
+            self.replace_edge_lookup(
+                batch.as_mut(),
+                edge.edge_id,
+                Some(&StoredEdge {
+                    source_id: edge.source_id,
+                    target_id: edge.target_id,
+                    label: edge.label.clone(),
+                    properties_json: edge.properties_json.clone(),
+                }),
+            )?;
             batch.put(
                 &edge_key(edge.edge_id),
                 &encode_value(&StoredEdge {
@@ -226,6 +280,10 @@ impl KeyValueCatalog {
                 &graph_membership_key("edge", edge.edge_id, graph_name)?,
                 &[],
             )?;
+            batch.put(
+                &reverse_membership_key("edge", edge.edge_id, graph_name)?,
+                &[],
+            )?;
         }
         batch.put(
             &single_str_key(TAG_METADATA, &format!("graph_label_registry::{graph_name}"))?,
@@ -233,11 +291,13 @@ impl KeyValueCatalog {
         )?;
         for (id, _, _) in self.load_vertices()? {
             if !surviving_vertices.contains(&id) {
+                self.replace_vertex_lookup(batch.as_mut(), id, None)?;
                 batch.delete(&vertex_key(id))?;
             }
         }
         for edge in self.load_edges()? {
             if !surviving_edges.contains(&edge.edge_id) {
+                self.replace_edge_lookup(batch.as_mut(), edge.edge_id, None)?;
                 batch.delete(&edge_key(edge.edge_id))?;
             }
         }
@@ -245,6 +305,7 @@ impl KeyValueCatalog {
     }
 
     pub(super) fn drop_named_graph_data_impl(&self, graph_name: &str) -> StorageBackendResult<()> {
+        self.ensure_graph_lookup_indexes()?;
         let memberships = self.load_graph_memberships()?;
         let surviving_vertices = memberships
             .iter()
@@ -256,7 +317,7 @@ impl KeyValueCatalog {
             .collect::<BTreeSet<_>>();
         let mut batch = self.store.batch();
         batch.delete(&single_str_key(TAG_NAMED_GRAPH, graph_name)?)?;
-        batch.delete_prefix(&graph_membership_graph_prefix(graph_name)?)?;
+        self.delete_graph_memberships_into(batch.as_mut(), graph_name)?;
         batch.delete(&single_str_key(
             TAG_METADATA,
             &format!("graph_label_registry::{graph_name}"),
@@ -265,16 +326,19 @@ impl KeyValueCatalog {
             let mut offset = 1;
             let key_name = read_str(&key, &mut offset)?;
             if key_name.starts_with(&format!("{graph_name}::")) {
+                self.clear_path_index_data_into(batch.as_mut(), &key_name)?;
                 batch.delete(&key)?;
             }
         }
         for (id, _, _) in self.load_vertices()? {
             if !surviving_vertices.contains(&id) {
+                self.replace_vertex_lookup(batch.as_mut(), id, None)?;
                 batch.delete(&vertex_key(id))?;
             }
         }
         for edge in self.load_edges()? {
             if !surviving_edges.contains(&edge.edge_id) {
+                self.replace_edge_lookup(batch.as_mut(), edge.edge_id, None)?;
                 batch.delete(&edge_key(edge.edge_id))?;
             }
         }

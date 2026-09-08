@@ -7,8 +7,9 @@
 //! SQL graph-function benchmarks for centrality, bounded RPQs, and named graphs.
 
 use std::fmt::Write as _;
+use std::time::Duration;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use uqa_core::{Edge, Value, Vertex};
 use uqa_engine::Engine;
 use uqa_graph::GraphStore;
@@ -34,7 +35,7 @@ fn build_engine() -> Engine {
     engine.create_graph(GRAPH).unwrap();
     engine
         .graph_with_mut(GRAPH, |store| {
-            store.create_graph(GRAPH);
+            store.create_graph(GRAPH)?;
             for id in 1..=500 {
                 store.add_vertex(Vertex::new(id, "Person"), GRAPH)?;
             }
@@ -148,10 +149,73 @@ fn bench_named_graph_sql(c: &mut Criterion) {
     group.finish();
 }
 
+fn build_persistent_engine(size: u64) -> (tempfile::TempDir, Engine) {
+    let directory = tempfile::tempdir().expect("temporary graph fixture");
+    let engine = Engine::open(&directory.path().join("graph.db")).expect("open graph fixture");
+    engine.create_graph(GRAPH).expect("create graph");
+    engine
+        .graph_with_mut(GRAPH, |store| {
+            for id in 1..=size {
+                let mut vertex = Vertex::new(id, "Item");
+                vertex.properties.insert(
+                    "body".into(),
+                    Value::Str("synthetic graph property".repeat(16)),
+                );
+                store.add_vertex(vertex, GRAPH)?;
+            }
+            // Keep the queried neighborhood fixed as unrelated graph data grows.
+            store.add_edge(Edge::new(1, 1, 2, "next"), GRAPH)?;
+            for id in 3..size {
+                store.add_edge(Edge::new(id, id, id + 1, "unrelated"), GRAPH)?;
+            }
+            Ok(())
+        })
+        .expect("persist graph fixture")
+        .expect("graph exists");
+    (directory, engine)
+}
+
+fn bench_persistent_graph_scaling(c: &mut Criterion) {
+    let mut group = c.benchmark_group("persistent_graph_scaling");
+    group.sample_size(10);
+    group.warm_up_time(Duration::from_secs(1));
+    group.measurement_time(Duration::from_secs(1));
+    for size in [1_024_u64, 65_536] {
+        let (directory, engine) = build_persistent_engine(size);
+        group.bench_function(BenchmarkId::new("open", size), |bencher| {
+            bencher.iter(|| {
+                black_box(
+                    Engine::open(&directory.path().join("graph.db")).expect("reopen graph fixture"),
+                );
+            });
+        });
+        group.bench_function(BenchmarkId::new("new_session", size), |bencher| {
+            bencher.iter(|| {
+                black_box(engine.new_session().expect("graph session"));
+            });
+        });
+        group.bench_function(BenchmarkId::new("one_hop", size), |bencher| {
+            bencher.iter(|| {
+                let neighbors = engine
+                    .graph_with(GRAPH, |store| {
+                        store.neighbors(1, Some("next"), uqa_graph::Direction::Out, GRAPH)
+                    })
+                    .expect("graph snapshot")
+                    .expect("graph exists")
+                    .expect("one-hop query");
+                assert_eq!(neighbors, vec![2]);
+                black_box(neighbors)
+            });
+        });
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_centrality_sql,
     bench_rpq_sql,
-    bench_named_graph_sql
+    bench_named_graph_sql,
+    bench_persistent_graph_scaling
 );
 criterion_main!(benches);

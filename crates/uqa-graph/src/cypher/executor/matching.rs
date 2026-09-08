@@ -137,7 +137,7 @@ impl<G: GraphStore> CypherExecutor<'_, G> {
                 }
             }
             for vid in &candidate_ids {
-                let Some(vertex) = self.store.get_vertex(*vid).cloned() else {
+                let Some(vertex) = self.store.get_vertex(*vid)? else {
                     continue;
                 };
                 if !self.node_matches(np, &vertex, &state.row)? {
@@ -260,14 +260,14 @@ impl<G: GraphStore> CypherExecutor<'_, G> {
                             } else {
                                 edge.source_id
                             };
-                            let Some(neighbor_vertex) = self.store.get_vertex(neighbor) else {
+                            let Some(neighbor_vertex) = self.store.get_vertex(neighbor)? else {
                                 continue;
                             };
                             let mut new_edges = edges_so_far.clone();
                             new_edges.push(edge.clone());
                             let mut new_trail = trail_so_far.clone();
                             new_trail.push(agtype::edge_to_value(&edge)?);
-                            new_trail.push(agtype::vertex_to_value(neighbor_vertex)?);
+                            new_trail.push(agtype::vertex_to_value(&neighbor_vertex)?);
                             if hop >= min_hops {
                                 all_paths.push((neighbor, new_edges.clone(), new_trail.clone()));
                             }
@@ -280,7 +280,7 @@ impl<G: GraphStore> CypherExecutor<'_, G> {
                     }
                 }
                 for (end_id, edges, mut trail_ext) in all_paths {
-                    let Some(end_vertex) = self.store.get_vertex(end_id).cloned() else {
+                    let Some(end_vertex) = self.store.get_vertex(end_id)? else {
                         continue;
                     };
                     // The trail extension already ends with the reached
@@ -308,7 +308,7 @@ impl<G: GraphStore> CypherExecutor<'_, G> {
                     } else {
                         edge.source_id
                     };
-                    let Some(end_vertex) = self.store.get_vertex(neighbor_id).cloned() else {
+                    let Some(end_vertex) = self.store.get_vertex(neighbor_id)? else {
                         continue;
                     };
                     let trail_ext = vec![
@@ -388,7 +388,7 @@ impl<G: GraphStore> CypherExecutor<'_, G> {
         }
         ids.into_iter()
             .map(|eid| {
-                self.store.get_edge(eid).cloned().ok_or_else(|| {
+                self.store.get_edge(eid)?.ok_or_else(|| {
                     CypherError::Storage(format!("graph adjacency references missing edge {eid}"))
                 })
             })

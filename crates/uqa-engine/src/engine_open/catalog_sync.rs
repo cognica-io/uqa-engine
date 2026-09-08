@@ -243,6 +243,7 @@ impl Engine {
             .map(|(relation, security)| (relation.clone(), security.clone()))
             .collect::<BTreeMap<_, _>>();
         self.durable.restore(&latest.durable.snapshot());
+        self.rebind_graph_stores()?;
         self.durable.views.write().extend(temporary_views);
         self.durable.sequences.write().extend(temporary_sequences);
         self.durable

@@ -38,11 +38,12 @@ pub use block_max_index::{BlockMaxIndex, BlockMaxScorer, DEFAULT_BLOCK_SIZE};
 pub use btree_index::BTreeIndex;
 pub use catalog::{
     sequence_value_reservation, CatalogCacheRevisions, CatalogFacade, CatalogIndexRow,
-    ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignTableRow, GraphSnapshot, GraphVertexRow,
-    RelationIdentity, RelationKind, SchemaAclEntry, SchemaPrivileges, SchemaRow, SequenceAclEntry,
-    SequenceOptions, SequenceOwner, SequenceOwnerDependency, SequencePrivileges,
-    SequenceReservationResult, SequenceRow, SequenceValuePosition, SequenceValueReservation,
-    TableAclEntry, TablePrivileges, TableSchema, VectorFieldSchema, ViewRow,
+    ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignTableRow, GraphEntityFilter, GraphEntityKind,
+    GraphSnapshot, GraphVertexRow, RelationIdentity, RelationKind, SchemaAclEntry,
+    SchemaPrivileges, SchemaRow, SequenceAclEntry, SequenceOptions, SequenceOwner,
+    SequenceOwnerDependency, SequencePrivileges, SequenceReservationResult, SequenceRow,
+    SequenceValuePosition, SequenceValueReservation, TableAclEntry, TablePrivileges, TableSchema,
+    VectorFieldSchema, ViewRow, MAX_GRAPH_ID_PAGE,
 };
 pub use clustered_postings::{
     MaterializedPostingCursor, PostingCursor, PostingScore, POSTING_CLUSTER_DOCS,

@@ -143,7 +143,41 @@ fn execute_operator_tree_gated(
         return engine
             .transaction(|engine| execute_operator_tree_inner(engine, table, table, params, tree));
     }
-    execute_operator_tree_inner(engine, table, table, params, tree)
+    engine
+        .with_graph_read_snapshot(|engine| {
+            Ok(execute_operator_tree_inner(
+                engine, table, table, params, tree,
+            ))
+        })
+        .map_err(|error| operator_execution_error("pin operator snapshot", error))?
+}
+
+/// A direct physical driver call owns one snapshot for the whole tree,
+/// including graph-aware propagation and parallel child operators.
+pub(super) fn execute_public_physical_node(
+    driver: &EngineDriver<'_>,
+    tree: &OperatorTree,
+) -> DriverResult<OperatorOutput> {
+    use super::OperatorTreeDriver as _;
+    let engine = driver.engine;
+    let _statement = engine.runtime.statement_gate.lock();
+    let execute = |engine: &Engine| {
+        let scoped = EngineDriver::new_for_relation_in_execution(
+            engine,
+            driver.table,
+            driver.signal_table,
+            driver.params,
+        )
+        .with_parallel(driver.parallel.clone());
+        scoped.execute_node(tree)
+    };
+    if engine.transaction_depth() == 0 && tree_may_persist_calibration(tree) {
+        engine.transaction(execute)
+    } else {
+        engine
+            .with_graph_read_snapshot(|engine| Ok(execute(engine)))
+            .map_err(|error| operator_execution_error("pin physical operator snapshot", error))?
+    }
 }
 
 /// Execute below a SQL/direct statement boundary that already owns the

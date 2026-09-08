@@ -54,7 +54,7 @@ impl<'a> VertexAggregation<'a> {
         }
         let mut numeric: Vec<f64> = Vec::new();
         for vid in &vertex_ids {
-            let vtx = store.get_vertex(*vid).ok_or_else(|| {
+            let vtx = store.get_vertex(*vid)?.ok_or_else(|| {
                 GraphStoreError::CorruptGraph(format!("missing aggregate vertex {vid}"))
             })?;
             if let Some(value) = vtx.properties.get(&self.property_name) {

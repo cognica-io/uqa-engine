@@ -27,6 +27,10 @@ pub enum GraphStoreError {
     InvalidQuery(String),
     #[error("corrupt graph state: {0}")]
     CorruptGraph(String),
+    #[error("graph storage error: {0}")]
+    Storage(String),
+    #[error("graph serialization failure: {0}")]
+    SerializationFailure(String),
     #[error(transparent)]
     InvalidPostingList(#[from] GraphPostingListError),
 }
@@ -39,20 +43,30 @@ pub type GraphStoreResult<T> = Result<T, GraphStoreError>;
 /// vertex / edge id space (a vertex can belong to multiple graphs).
 /// Mutations are scoped to a target graph by name.
 pub trait GraphStore {
+    /// Apply a group of mutations atomically. Persistent stores use a storage
+    /// transaction or savepoint, never a cloned graph as a rollback image.
+    /// Both errors and unwinding must restore the pre-operation state.
+    fn transaction<T>(
+        &mut self,
+        operation: impl FnOnce(&mut Self) -> GraphStoreResult<T>,
+    ) -> GraphStoreResult<T>
+    where
+        Self: Sized;
+
     // --- Lifecycle ---
 
     /// Create a new named graph. No-op if it already exists.
-    fn create_graph(&mut self, name: &str);
+    fn create_graph(&mut self, name: &str) -> GraphStoreResult<()>;
 
     /// Drop a named graph and all of its membership entries. Vertex /
     /// edge records that aren't referenced by any other graph become
     /// unreachable and are released.
-    fn drop_graph(&mut self, name: &str);
+    fn drop_graph(&mut self, name: &str) -> GraphStoreResult<()>;
 
     /// Return all graph names sorted ascending.
-    fn graph_names(&self) -> Vec<String>;
+    fn graph_names(&self) -> GraphStoreResult<Vec<String>>;
 
-    fn has_graph(&self, name: &str) -> bool;
+    fn has_graph(&self, name: &str) -> GraphStoreResult<bool>;
 
     // --- Algebra ---
 
@@ -105,7 +119,20 @@ pub trait GraphStore {
 
     fn edges_in_graph(&self, graph: &str) -> GraphStoreResult<Vec<Edge>>;
 
-    fn vertex_graphs(&self, vertex_id: VertexId) -> BTreeSet<String>;
+    /// Read only edges carrying a label. Durable stores push this predicate
+    /// into their physical label index before fetching any payloads.
+    fn edges_by_label(&self, label: &str, graph: &str) -> GraphStoreResult<Vec<Edge>> {
+        self.edge_ids_by_label(label, graph)?
+            .into_iter()
+            .map(|id| {
+                self.get_edge(id)?
+                    .ok_or_else(|| GraphStoreError::CorruptGraph(format!("missing edge {id}")))
+            })
+            .collect()
+    }
+
+    fn vertex_graphs(&self, vertex_id: VertexId) -> GraphStoreResult<BTreeSet<String>>;
+    fn edge_graphs(&self, edge_id: EdgeId) -> GraphStoreResult<BTreeSet<String>>;
 
     // --- Adjacency accessors ---
 
@@ -117,6 +144,50 @@ pub trait GraphStore {
 
     fn vertex_ids_in_graph(&self, graph: &str) -> GraphStoreResult<BTreeSet<VertexId>>;
 
+    /// Bounded ascending vertex identities, exclusively after the cursor.
+    /// Durable stores override this with an indexed storage cursor.
+    fn vertex_id_page(
+        &self,
+        graph: &str,
+        after: Option<u64>,
+        limit: usize,
+    ) -> GraphStoreResult<Vec<u64>> {
+        if !(1..=uqa_storage::MAX_GRAPH_ID_PAGE).contains(&limit) {
+            return Err(GraphStoreError::InvalidQuery(
+                "invalid graph page size".into(),
+            ));
+        }
+        Ok(self
+            .vertex_ids_in_graph(graph)?
+            .into_iter()
+            .filter(|id| after.is_none_or(|after| *id > after))
+            .take(limit)
+            .collect())
+    }
+
+    /// Bounded ascending edge identities without materializing edge payloads.
+    fn edge_id_page(
+        &self,
+        graph: &str,
+        after: Option<u64>,
+        limit: usize,
+    ) -> GraphStoreResult<Vec<u64>> {
+        if !(1..=uqa_storage::MAX_GRAPH_ID_PAGE).contains(&limit) {
+            return Err(GraphStoreError::InvalidQuery(
+                "invalid graph page size".into(),
+            ));
+        }
+        let mut ids = BTreeSet::new();
+        for vertex in self.vertex_ids_in_graph(graph)? {
+            ids.extend(self.out_edge_ids(vertex, graph)?);
+        }
+        Ok(ids
+            .into_iter()
+            .filter(|id| after.is_none_or(|after| *id > after))
+            .take(limit)
+            .collect())
+    }
+
     /// Require an explicit query vertex to be a live member of `graph`.
     /// Implementations may override this with a cheaper membership lookup.
     /// Missing query input is distinct from a valid vertex with no edges and
@@ -127,7 +198,7 @@ pub trait GraphStore {
                 "vertex {vertex_id} is not a member of graph {graph:?}"
             )));
         }
-        if self.get_vertex(vertex_id).is_none() {
+        if self.get_vertex(vertex_id)?.is_none() {
             return Err(GraphStoreError::CorruptGraph(format!(
                 "graph {graph:?} references missing vertex {vertex_id}"
             )));
@@ -145,9 +216,11 @@ pub trait GraphStore {
 
     // --- Global accessors ---
 
-    fn get_vertex(&self, vertex_id: VertexId) -> Option<&Vertex>;
+    /// Fetch one owned record. A storage implementation must not retain all
+    /// entities merely to return a borrow, and I/O failures are not absence.
+    fn get_vertex(&self, vertex_id: VertexId) -> GraphStoreResult<Option<Vertex>>;
 
-    fn get_edge(&self, edge_id: EdgeId) -> Option<&Edge>;
+    fn get_edge(&self, edge_id: EdgeId) -> GraphStoreResult<Option<Edge>>;
 
     /// Returns and advances the next available vertex id.
     fn next_vertex_id(&mut self) -> GraphStoreResult<VertexId>;
@@ -169,15 +242,21 @@ pub trait GraphStore {
         self.next_edge_id()
     }
 
-    fn clear(&mut self);
+    fn clear(&mut self) -> GraphStoreResult<()>;
 
     // --- Bulk accessors ---
 
     /// Snapshot every vertex in the store, keyed by id. Mirrors the
     /// `vertices` property on the current abstract `GraphStore`.
-    fn vertices(&self) -> BTreeMap<VertexId, Vertex>;
+    fn vertices(&self) -> GraphStoreResult<BTreeMap<VertexId, Vertex>>;
 
     /// Snapshot every edge in the store, keyed by id. Mirrors the
     /// `edges` property on the current abstract `GraphStore`.
-    fn edges(&self) -> BTreeMap<EdgeId, Edge>;
+    fn edges(&self) -> GraphStoreResult<BTreeMap<EdgeId, Edge>>;
+}
+
+impl From<uqa_storage::StorageBackendError> for GraphStoreError {
+    fn from(error: uqa_storage::StorageBackendError) -> Self {
+        Self::Storage(error.to_string())
+    }
 }

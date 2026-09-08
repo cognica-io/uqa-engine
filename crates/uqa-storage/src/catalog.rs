@@ -16,170 +16,19 @@ use serde::{Deserialize, Serialize};
 use crate::backend::{StorageBackendError, StorageBackendResult};
 
 mod cache_revisions;
+mod graph_access;
 mod graph_snapshot;
+mod relation;
 mod schema;
 
 pub use cache_revisions::CatalogCacheRevisions;
+pub(crate) use graph_access::validate_graph_page;
+pub use graph_access::{GraphEntityFilter, GraphEntityKind, MAX_GRAPH_ID_PAGE};
+pub use relation::RelationIdentity;
 mod table;
 
 pub use schema::{SchemaAclEntry, SchemaPrivileges, SchemaRow};
 pub use table::{TableAclEntry, TablePrivileges};
-
-/// Durable identity of a SQL relation.
-///
-/// The schema and local name are stored separately so `foo` and
-/// `public.foo` can never become two physical catalog identities for the
-/// same SQL object.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct RelationIdentity {
-    pub schema: String,
-    pub name: String,
-}
-
-impl RelationIdentity {
-    pub fn new(schema: impl Into<String>, name: impl Into<String>) -> Self {
-        Self {
-            schema: schema.into(),
-            name: name.into(),
-        }
-    }
-
-    pub fn qualified_name(&self) -> String {
-        format!(
-            "{}.{}",
-            render_relation_component(&self.schema),
-            render_relation_component(&self.name)
-        )
-    }
-
-    /// Physical owner keys that can refer to this relation. New writes use
-    /// only the canonical qualified name. Catalog cleanup also accepts the
-    /// former unqualified key for `public` relations so data written before
-    /// relation identities became schema-aware cannot survive its owner.
-    pub(crate) fn canonical_and_legacy_public_names(&self) -> Vec<String> {
-        let canonical = self.qualified_name();
-        if self.schema != "public" {
-            return vec![canonical];
-        }
-        let mut names = vec![canonical];
-        let rendered_alias = render_relation_component(&self.name);
-        if !names.contains(&rendered_alias) {
-            names.push(rendered_alias);
-        }
-        // The direct Rust API historically accepted a decoded local name as
-        // well as SQL-rendered text. Include that spelling only when parsing
-        // it maps back to this exact relation; for example, raw `a.b` must not
-        // be removed while dropping the distinct public relation `"a.b"`.
-        if RelationIdentity::from_legacy_name(&self.name).is_ok_and(|raw| raw == *self)
-            && !names.contains(&self.name)
-        {
-            names.push(self.name.clone());
-        }
-        names
-    }
-
-    /// Decode a SQL relation reference or a former flat catalog key.
-    /// Unqualified objects belong to `public`. Quoted components preserve
-    /// embedded dots and escaped quotes, so `public.\"a.b\"` is distinct from
-    /// `\"public.a\".b` all the way down to physical storage keys.
-    pub fn from_legacy_name(value: &str) -> Result<Self, String> {
-        let (schema, name) = Self::parse_reference(value)?;
-        Ok(Self::new(
-            schema.unwrap_or_else(|| "public".to_string()),
-            name,
-        ))
-    }
-
-    /// Recover an index identity from the former flat index catalog. The stored value is a decoded local identifier rather than a relation reference, so dots and quotes remain part of the local name and the owning table supplies the schema.
-    pub(crate) fn from_legacy_index_name(value: &str, table: &Self) -> Self {
-        Self::new(&table.schema, value)
-    }
-
-    /// Parse a possibly-unqualified SQL relation reference without choosing a
-    /// search-path schema. Components use `PostgreSQL` double-quote escaping.
-    pub fn parse_reference(value: &str) -> Result<(Option<String>, String), String> {
-        let components = parse_relation_components(value)?;
-        match components.as_slice() {
-            [name] => Ok((None, name.clone())),
-            [schema, name] => Ok((Some(schema.clone()), name.clone())),
-            _ => Err(format!("invalid persisted relation name `{value}`")),
-        }
-    }
-}
-
-fn render_relation_component(component: &str) -> String {
-    let can_render_bare = component
-        .bytes()
-        .enumerate()
-        .all(|(index, byte)| match byte {
-            b'a'..=b'z' | b'_' => true,
-            b'0'..=b'9' | b'$' => index != 0,
-            _ => false,
-        });
-    if can_render_bare && !component.is_empty() {
-        component.to_string()
-    } else {
-        format!("\"{}\"", component.replace('"', "\"\""))
-    }
-}
-
-fn parse_relation_components(value: &str) -> Result<Vec<String>, String> {
-    if value.is_empty() {
-        return Err("persisted relation name is empty".to_string());
-    }
-    let mut components = Vec::with_capacity(2);
-    let mut chars = value.char_indices().peekable();
-    while chars.peek().is_some() {
-        let mut component = String::new();
-        if chars.peek().is_some_and(|(_, ch)| *ch == '"') {
-            chars.next();
-            let mut terminated = false;
-            while let Some((_, ch)) = chars.next() {
-                if ch != '"' {
-                    component.push(ch);
-                    continue;
-                }
-                if chars.peek().is_some_and(|(_, next)| *next == '"') {
-                    chars.next();
-                    component.push('"');
-                } else {
-                    terminated = true;
-                    break;
-                }
-            }
-            if !terminated {
-                return Err(format!("unterminated quoted relation name `{value}`"));
-            }
-            if chars.peek().is_some_and(|(_, ch)| *ch != '.') {
-                return Err(format!("invalid persisted relation name `{value}`"));
-            }
-        } else {
-            while let Some((_, ch)) = chars.peek() {
-                if *ch == '.' {
-                    break;
-                }
-                if *ch == '"' {
-                    return Err(format!("invalid persisted relation name `{value}`"));
-                }
-                component.push(*ch);
-                chars.next();
-            }
-        }
-        if component.is_empty() {
-            return Err(format!("invalid persisted relation name `{value}`"));
-        }
-        components.push(component);
-        if components.len() > 2 {
-            return Err(format!("invalid persisted relation name `{value}`"));
-        }
-        match chars.next() {
-            Some((_, '.')) if chars.peek().is_some() => {}
-            Some(_) => return Err(format!("invalid persisted relation name `{value}`")),
-            None => break,
-        }
-    }
-    Ok(components)
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -726,9 +575,37 @@ pub trait CatalogFacade: Send + Sync {
     fn save_named_graph(&self, name: &str) -> StorageBackendResult<()>;
     fn drop_named_graph(&self, name: &str) -> StorageBackendResult<()>;
     fn load_named_graphs(&self) -> StorageBackendResult<Vec<String>>;
-    /// Load only the entities and label metadata owned by one named graph.
-    /// The caller pins the storage transaction. The default implementation
-    /// preserves compatibility with providers exposing only bulk graph reads.
+    fn named_graph_exists(&self, name: &str) -> StorageBackendResult<bool>;
+
+    /// Read one entity without loading any other graph payload.
+    fn graph_vertex(&self, id: u64) -> StorageBackendResult<Option<GraphVertexRow>>;
+    fn graph_edge(&self, id: u64) -> StorageBackendResult<Option<EdgeRow>>;
+
+    /// Read a bounded, strictly ascending identity page from the pinned
+    /// storage snapshot. Filters must be applied before the page limit.
+    fn graph_entity_ids(
+        &self,
+        filter: GraphEntityFilter<'_>,
+        after: Option<u64>,
+        limit: usize,
+    ) -> StorageBackendResult<Vec<u64>>;
+
+    fn graph_entity_count(&self, filter: GraphEntityFilter<'_>) -> StorageBackendResult<u64>;
+    fn graph_entity_max_id(&self, kind: GraphEntityKind) -> StorageBackendResult<Option<u64>>;
+    fn graph_entity_memberships(
+        &self,
+        kind: GraphEntityKind,
+        id: u64,
+    ) -> StorageBackendResult<Vec<String>>;
+    fn graph_has_membership(
+        &self,
+        kind: GraphEntityKind,
+        id: u64,
+        graph: &str,
+    ) -> StorageBackendResult<bool>;
+    /// Explicit bulk snapshot/export of one named graph. The caller pins
+    /// the storage transaction. Engine startup, sessions, and query handles
+    /// use direct access methods instead of retaining this owned copy.
     fn load_named_graph_snapshot(&self, name: &str) -> StorageBackendResult<Option<GraphSnapshot>> {
         graph_snapshot::load(self, name)
     }
@@ -855,6 +732,35 @@ pub trait CatalogFacade: Send + Sync {
     ) -> StorageBackendResult<()>;
     fn drop_path_index(&self, graph_name: &str) -> StorageBackendResult<()>;
     fn load_path_indexes(&self) -> StorageBackendResult<Vec<(String, String)>>;
+
+    /// Durable reachability records, paged lexicographically by (source, target).
+    /// Building calls clear, bounded saves, then finish inside one transaction.
+    /// Graph mutations invalidate the materialization atomically; definitions remain.
+    fn clear_path_index_data(&self, index: &str) -> StorageBackendResult<()>;
+    fn save_path_index_pairs(
+        &self,
+        index: &str,
+        sequence: &str,
+        pairs: &[(u64, u64)],
+    ) -> StorageBackendResult<()>;
+    fn finish_path_index_data(
+        &self,
+        index: &str,
+        graph: &str,
+        definition: &str,
+    ) -> StorageBackendResult<()>;
+    fn path_index_data_is_current(
+        &self,
+        index: &str,
+        definition: &str,
+    ) -> StorageBackendResult<bool>;
+    fn path_index_pairs(
+        &self,
+        index: &str,
+        sequence: &str,
+        after: Option<(u64, u64)>,
+        limit: usize,
+    ) -> StorageBackendResult<Vec<(u64, u64)>>;
 
     fn save_column_stats(&self, stats: ColumnStatsInput<'_>) -> StorageBackendResult<()>;
     /// Atomically replace the complete statistics snapshot for one table.

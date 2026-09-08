@@ -115,7 +115,7 @@ impl<'a> RegularPathQuery<'a> {
                 continue;
             };
             for eid in store.out_edge_ids(vertex, self.graph)? {
-                let edge = store.get_edge(eid).ok_or_else(|| {
+                let edge = store.get_edge(eid)?.ok_or_else(|| {
                     GraphStoreError::CorruptGraph(format!("missing RPQ edge {eid}"))
                 })?;
                 let Some(next_state) = transitions.get(&edge.label) else {

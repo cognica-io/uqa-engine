@@ -11,15 +11,13 @@ use super::{
     PersistentStorageProvider, PersistentStorageSession, QueryRuntime, RuntimeExtensions, RwLock,
     SQLiteCompressedContainerAnchor, SQLiteCompressionOptions, SQLiteError, SQLiteStorageProvider,
     SessionContext, StorageBackendError, StorageBackendResult, StorageContext, TableSchema,
-    TableState, Value, VectorIndex, GRAPH_LABELS_METADATA_PREFIX, SQL_FUNCTION_DEPTH_LIMIT,
+    TableState, Value, VectorIndex, SQL_FUNCTION_DEPTH_LIMIT,
 };
 
 mod cache_refresh;
 mod catalog_sync;
 mod data_sync;
-mod graph_cache;
 mod graphs;
-pub(crate) use graph_cache::GraphSnapshots;
 mod lifecycle;
 mod registries;
 mod session_seed;

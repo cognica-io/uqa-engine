@@ -4,91 +4,56 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Immutable graph snapshots and IR-to-runtime graph conversion.
+//! On-demand graph adjacency and IR-to-runtime graph conversion.
 
 use super::{
-    graph_execution_error, BTreeMap, BTreeSet, DocId, DriverResult, Payload, PostingEntry,
-    PostingList, SQLError, StorageBackendError,
+    BTreeMap, DocId, DriverResult, Payload, PostingEntry, PostingList, SQLError,
+    StorageBackendError,
 };
 
-#[derive(Default)]
-pub(super) struct GraphNeighborSnapshot {
-    vertices: BTreeSet<u64>,
-    out: BTreeMap<u64, Vec<(String, u64)>>,
-    incoming: BTreeMap<u64, Vec<(String, u64)>>,
+pub(super) struct GraphNeighborAccess {
+    store: std::sync::Arc<uqa_graph::GraphStoreHandle>,
+    graph: String,
 }
 
-impl GraphNeighborSnapshot {
-    pub(super) fn from_store(
-        store: &uqa_graph::MemoryGraphStore,
-        graph: &str,
-    ) -> DriverResult<Self> {
-        use uqa_graph::GraphStore;
-
-        let vertices = store
-            .vertex_ids_in_graph(graph)
-            .map_err(|error| graph_execution_error("DeepFusion graph snapshot", error))?;
-        let mut snapshot = Self {
-            vertices,
-            ..Self::default()
-        };
-        for edge in store
-            .edges_in_graph(graph)
-            .map_err(|error| graph_execution_error("DeepFusion graph snapshot", error))?
-        {
-            snapshot
-                .out
-                .entry(edge.source_id)
-                .or_default()
-                .push((edge.label.clone(), edge.target_id));
-            snapshot
-                .incoming
-                .entry(edge.target_id)
-                .or_default()
-                .push((edge.label, edge.source_id));
+impl GraphNeighborAccess {
+    pub(super) fn new(store: std::sync::Arc<uqa_graph::GraphStoreHandle>, graph: &str) -> Self {
+        Self {
+            store,
+            graph: graph.to_owned(),
         }
-        Ok(snapshot)
     }
 }
 
-impl uqa_operators::GraphNeighborLookup for GraphNeighborSnapshot {
+impl uqa_operators::GraphNeighborLookup for GraphNeighborAccess {
     fn neighbors(
         &self,
         vertex: u64,
         label: &str,
         direction: uqa_operators::DeepGraphDirection,
     ) -> uqa_storage::StorageBackendResult<Vec<u64>> {
-        if !self.vertices.contains(&vertex) {
-            return Err(StorageBackendError::Other(format!(
-                "graph-aware DeepFusion input vertex {vertex} is not a member of the selected graph"
-            )));
-        }
-        let mut result = Vec::new();
-        let mut append = |edges: Option<&Vec<(String, u64)>>| {
-            if let Some(edges) = edges {
-                result.extend(
-                    edges
-                        .iter()
-                        .filter(|(edge_label, _)| label.is_empty() || edge_label == label)
-                        .map(|(_, neighbor)| *neighbor),
-                );
-            }
+        use uqa_graph::GraphStore as _;
+        let direction = match direction {
+            uqa_operators::DeepGraphDirection::Out => uqa_graph::Direction::Out,
+            uqa_operators::DeepGraphDirection::In => uqa_graph::Direction::In,
+            uqa_operators::DeepGraphDirection::Both => uqa_graph::Direction::Both,
         };
-        if matches!(
-            direction,
-            uqa_operators::DeepGraphDirection::Out | uqa_operators::DeepGraphDirection::Both
-        ) {
-            append(self.out.get(&vertex));
-        }
-        if matches!(
-            direction,
-            uqa_operators::DeepGraphDirection::In | uqa_operators::DeepGraphDirection::Both
-        ) {
-            append(self.incoming.get(&vertex));
-        }
-        result.sort_unstable();
-        result.dedup();
-        Ok(result)
+        let mut neighbors = self
+            .store
+            .neighbors(
+                vertex,
+                (!label.is_empty()).then_some(label),
+                direction,
+                &self.graph,
+            )
+            .map_err(|error| {
+                StorageBackendError::Other(format!(
+                    "graph-aware DeepFusion input vertex {vertex}: {error}"
+                ))
+            })?;
+        neighbors.sort_unstable();
+        neighbors.dedup();
+        Ok(neighbors)
     }
 }
 

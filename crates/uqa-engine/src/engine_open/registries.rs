@@ -334,8 +334,8 @@ impl Engine {
                     "path index `{key}` references missing graph `{graph}`"
                 ))
             })?;
-            let idx = uqa_graph::PathIndex::build(store.as_ref(), graph, &label_sequences)
-                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+            let _ = store;
+            let idx = self.bind_path_index_definition(&key, graph, &label_sequences)?;
             drop(graphs);
             self.durable.path_indexes.write().insert(key, idx);
         }
@@ -368,8 +368,8 @@ impl Engine {
                     "path index `{key}` references missing graph `{graph}`"
                 ))
             })?;
-            let index = uqa_graph::PathIndex::build(store.as_ref(), graph, &sequences)
-                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+            let _ = store;
+            let index = self.bind_path_index_definition(&key, graph, &sequences)?;
             self.durable.path_indexes.write().insert(key, index);
         }
         Ok(())

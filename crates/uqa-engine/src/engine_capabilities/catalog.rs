@@ -612,12 +612,20 @@ impl CatalogReadView {
         self.snapshot.durable.graphs.keys().cloned().collect()
     }
 
-    pub(crate) fn graph_next_label_id(&self, graph: &str) -> Option<u32> {
+    pub(crate) fn graph_next_label_id(&self, graph: &str) -> Result<Option<u32>, SQLError> {
         self.snapshot
             .durable
             .graphs
             .get(graph)
-            .map(|store| store.label_registry(graph).next_label_id)
+            .map(|store| {
+                store
+                    .label_registry(graph)
+                    .map(|registry| registry.next_label_id)
+            })
+            .transpose()
+            .map_err(|error| {
+                SQLError::Internal(format!("read graph `{graph}` label sequence: {error}"))
+            })
     }
 
     pub(crate) fn graph_label_count(

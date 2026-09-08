@@ -109,9 +109,22 @@ flowchart LR
 
 ## Typed Cypher API
 
-`Engine::run_cypher(graph, query, params)` executes Cypher directly and returns an `SQLResult`. Bind parameter values through the provided map rather than building untrusted Cypher text.
+`Engine::run_cypher(graph, query, params)` executes Cypher directly and returns a pair of column names and result rows: `(Vec<String>, Vec<ResultRow>)`. Bind parameter values through the provided map rather than building untrusted Cypher text.
 
 Python exposes `run_cypher`, Node.js exposes `runCypher` and `runCypherSync`, and browser WASM exposes the corresponding asynchronous request path.
+
+`Engine::graph_with` scopes direct reads to one physical storage snapshot and passes a `GraphStoreHandle`. `Engine::new()` uses primary memory storage; persistent engines use `PersistentGraphStore` handles without loading a graph replica. `GraphStore::get_vertex` and `get_edge` return owned `Result<Option<Vertex>>` and `Result<Option<Edge>>`; callers must handle storage errors as well as missing entities. Label, adjacency, membership, count, and lifecycle methods are fallible too. Bounded `vertex_id_page` and `edge_id_page` methods accept an exclusive ID cursor and a page size from 1 through 4,096.
+
+```rust
+use uqa_graph::GraphStore;
+
+let vertex = engine
+    .graph_with("social", |store| store.get_vertex(42))?
+    .transpose()?
+    .flatten();
+```
+
+`graph_with_mut` callbacks return `GraphStoreResult<T>` and run inside a storage checkpoint. Errors and panics roll back the callback's writes. A standalone `SQLiteGraphStore` also reads indexed durable records directly; use its `read_snapshot` callback for a multi-read operation. Callers sharing a physical storage session must serialize transaction ownership.
 
 ## Regular path queries
 
@@ -135,7 +148,7 @@ Graph mutations participate in engine transaction state. Use an explicit SQL tra
 
 ## Path indexes
 
-The engine API can create, list, and drop path indexes for repeated graph path workloads. A path index is durable with the graph catalog. Validate its query shape and refresh behavior against the workload before relying on it for a latency target.
+The engine API can create, list, and drop path indexes for repeated graph path workloads. Persistent path definitions and reachability pairs live in storage; opening an engine or session binds handles without rebuilding or loading all pairs. `PathIndex::lookup` returns an owned, fallible `Result<Option<BTreeSet<(u64, u64)>>>`. Invalidated or legacy materializations evaluate only the requested sequence in the current read view, without rebuilding an in-memory index or writing during a read. Engine graph mutations invalidate dependent path-index registrations; storage-level mutations invalidate physical materializations atomically, including every graph sharing a changed entity.
 
 ## Related material
 

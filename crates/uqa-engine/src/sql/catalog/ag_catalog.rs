@@ -388,7 +388,7 @@ pub(super) fn age_pg_sequences_rows(catalog: &CatalogReadView) -> Result<Vec<Res
     let mut out = Vec::new();
     for entry in graph_catalog_entries(catalog)? {
         let next_label_id = catalog
-            .graph_next_label_id(&entry.name)
+            .graph_next_label_id(&entry.name)?
             .unwrap_or(uqa_graph::FIRST_USER_LABEL_ID);
         let last_label_id = i64::from(next_label_id).saturating_sub(1);
         out.push(age_pg_sequence_row(

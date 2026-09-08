@@ -17,7 +17,7 @@
 //!
 //! Supported clauses: `MATCH` (node, 1-hop rel, variable-length rel,
 //! path variables), `OPTIONAL MATCH`, `WHERE`, `RETURN` (with
-//! `DISTINCT`, `ORDER BY`, `SKIP`, `LIMIT`), and `WITH`. Mutation
+//! `DISTINCT`, `ORDER BY`, `SKIP`, `LIMIT`), `WITH`, and `UNWIND`. Mutation
 //! clauses live in [`crate::cypher::writer::CypherWriter`].
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -29,7 +29,7 @@ use crate::cypher::ast::{
     BinaryOp, CaseExpr, CypherClause, CypherExpr, CypherQuery, FunctionCall, InList, IsNotNull,
     IsNull, ListComprehension, ListIndex, ListLiteral, ListSlice, Literal, MapLiteral, MatchClause,
     NodePattern, OrderByItem, Parameter, PathElement, PathPattern, PropertyAccess, RelDirection,
-    RelPattern, ReturnItem, UnaryOp, Variable,
+    RelPattern, ReturnItem, UnaryOp, UnwindClause, Variable,
 };
 use crate::store::GraphStore;
 use crate::types::Direction;
@@ -106,6 +106,8 @@ pub enum CypherError {
     MissingLabelRelation(String),
     #[error("storage error: {0}")]
     Storage(String),
+    #[error("serialization failure: {0}")]
+    SerializationFailure(String),
 }
 
 impl From<crate::cypher::parser::ParseError> for CypherError {
@@ -122,7 +124,12 @@ impl From<agtype::AgtypeConversionError> for CypherError {
 
 impl From<crate::store::GraphStoreError> for CypherError {
     fn from(err: crate::store::GraphStoreError) -> Self {
-        CypherError::Storage(err.to_string())
+        match err {
+            crate::store::GraphStoreError::SerializationFailure(message) => {
+                Self::SerializationFailure(message)
+            }
+            other => Self::Storage(other.to_string()),
+        }
     }
 }
 
@@ -272,11 +279,13 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
                     columns = cols;
                     rows = ret_rows;
                 }
+                CypherClause::Unwind(clause) => {
+                    bindings = self.exec_unwind(clause, bindings)?;
+                }
                 CypherClause::Create(_)
                 | CypherClause::Merge(_)
                 | CypherClause::Set(_)
-                | CypherClause::Delete(_)
-                | CypherClause::Unwind(_) => {
+                | CypherClause::Delete(_) => {
                     return Err(CypherError::Unsupported(format!("{clause:?}")));
                 }
             }
@@ -292,6 +301,27 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
             }
         }
         out
+    }
+
+    pub(crate) fn exec_unwind(
+        &self,
+        clause: &UnwindClause,
+        bindings: Vec<BindingRow>,
+    ) -> Result<Vec<BindingRow>, CypherError> {
+        let mut next = Vec::new();
+        for row in bindings {
+            let items = match self.eval(&clause.expr, &row)? {
+                Value::List(items) => items,
+                Value::Null => continue,
+                other => vec![other],
+            };
+            for item in items {
+                let mut new_row = row.clone();
+                new_row.insert(clause.variable.clone(), Binding::Value(item));
+                next.push(new_row);
+            }
+        }
+        Ok(next)
     }
 
     // ------------------------------------------------------------------

@@ -12,44 +12,80 @@ use super::{
 };
 
 impl GraphStore for MemoryGraphStore {
-    fn create_graph(&mut self, name: &str) {
-        self.graphs.entry(name.to_string()).or_default();
+    fn vertex_id_page(
+        &self,
+        graph: &str,
+        after: Option<u64>,
+        limit: usize,
+    ) -> GraphStoreResult<Vec<u64>> {
+        if !(1..=uqa_storage::MAX_GRAPH_ID_PAGE).contains(&limit) {
+            return Err(GraphStoreError::InvalidQuery(
+                "invalid graph page size".into(),
+            ));
+        }
+        Ok(self
+            .require_partition(graph)?
+            .vertex_ids
+            .iter()
+            .copied()
+            .filter(|id| after.is_none_or(|after| *id > after))
+            .take(limit)
+            .collect())
     }
-
-    fn drop_graph(&mut self, name: &str) {
-        // AGE drops every per-graph label table with the graph, so a
-        // re-created graph starts a fresh label / sequence space.
-        self.label_registries.remove(name);
-        let Some(partition) = self.graphs.remove(name) else {
-            return;
-        };
-        for vid in &partition.vertex_ids {
-            if let Some(set) = self.vertex_membership.get_mut(vid) {
-                set.remove(name);
+    fn edge_id_page(
+        &self,
+        graph: &str,
+        after: Option<u64>,
+        limit: usize,
+    ) -> GraphStoreResult<Vec<u64>> {
+        if !(1..=uqa_storage::MAX_GRAPH_ID_PAGE).contains(&limit) {
+            return Err(GraphStoreError::InvalidQuery(
+                "invalid graph page size".into(),
+            ));
+        }
+        Ok(self
+            .require_partition(graph)?
+            .edge_ids
+            .iter()
+            .copied()
+            .filter(|id| after.is_none_or(|after| *id > after))
+            .take(limit)
+            .collect())
+    }
+    fn transaction<T>(
+        &mut self,
+        operation: impl FnOnce(&mut Self) -> GraphStoreResult<T>,
+    ) -> GraphStoreResult<T> {
+        let backup = self.clone();
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| operation(self))) {
+            Ok(Ok(value)) => Ok(value),
+            Ok(Err(error)) => {
+                *self = backup;
+                Err(error)
+            }
+            Err(panic) => {
+                *self = backup;
+                std::panic::resume_unwind(panic)
             }
         }
-        for eid in &partition.edge_ids {
-            if let Some(set) = self.edge_membership.get_mut(eid) {
-                set.remove(name);
-            }
-        }
-        // Drop any vertex / edge that no longer has any membership.
-        let orphan_vertices: Vec<VertexId> = partition.vertex_ids.iter().copied().collect();
-        for vid in orphan_vertices {
-            self.release_vertex_if_orphan(vid);
-        }
-        let orphan_edges: Vec<EdgeId> = partition.edge_ids.iter().copied().collect();
-        for eid in orphan_edges {
-            self.release_edge_if_orphan(eid);
-        }
     }
 
-    fn graph_names(&self) -> Vec<String> {
-        self.graphs.keys().cloned().collect()
+    fn create_graph(&mut self, name: &str) -> GraphStoreResult<()> {
+        MemoryGraphStore::create_graph(self, name);
+        Ok(())
     }
 
-    fn has_graph(&self, name: &str) -> bool {
-        self.graphs.contains_key(name)
+    fn drop_graph(&mut self, name: &str) -> GraphStoreResult<()> {
+        MemoryGraphStore::drop_graph(self, name);
+        Ok(())
+    }
+
+    fn graph_names(&self) -> GraphStoreResult<Vec<String>> {
+        Ok(MemoryGraphStore::graph_names(self))
+    }
+
+    fn has_graph(&self, name: &str) -> GraphStoreResult<bool> {
+        Ok(MemoryGraphStore::has_graph(self, name))
     }
 
     fn union_graphs(&mut self, g1: &str, g2: &str, target: &str) -> GraphStoreResult<()> {
@@ -116,28 +152,50 @@ impl GraphStore for MemoryGraphStore {
         } else {
             self.next_vertex_id
         };
-        self.vertices.insert(vid, vertex.clone());
-        self.require_partition_mut(graph)?.add_vertex(&vertex);
-        self.vertex_membership
-            .entry(vid)
-            .or_default()
-            .insert(graph.to_string());
+        let mut owners = self
+            .vertex_membership
+            .get(&vid)
+            .cloned()
+            .unwrap_or_default();
+        owners.insert(graph.to_owned());
+        for owner in &owners {
+            self.require_partition(owner)?;
+        }
+        let previous = self.vertices.insert(vid, vertex.clone());
+        for owner in &owners {
+            let partition = self.graphs.get_mut(owner).expect("validated vertex owner");
+            if let Some(previous) = &previous {
+                if let Some(ids) = partition.vertex_label_index.get_mut(&previous.label) {
+                    ids.remove(&vid);
+                }
+            }
+            partition.add_vertex(&vertex);
+        }
+        self.vertex_membership.insert(vid, owners);
         self.next_vertex_id = next_vertex_id;
         Ok(())
     }
 
     fn add_edge(&mut self, edge: Edge, graph: &str) -> GraphStoreResult<()> {
-        let partition = self.require_partition(graph)?;
-        if !partition.vertex_ids.contains(&edge.source_id)
-            || !partition.vertex_ids.contains(&edge.target_id)
-        {
-            return Err(GraphStoreError::InvalidMutation(format!(
-                "edge {} references endpoint outside graph {graph:?}: {} -> {}",
-                edge.edge_id, edge.source_id, edge.target_id
-            )));
+        let mut owners = self
+            .edge_membership
+            .get(&edge.edge_id)
+            .cloned()
+            .unwrap_or_default();
+        owners.insert(graph.to_owned());
+        for owner in &owners {
+            let partition = self.require_partition(owner)?;
+            if !partition.vertex_ids.contains(&edge.source_id)
+                || !partition.vertex_ids.contains(&edge.target_id)
+            {
+                return Err(GraphStoreError::InvalidMutation(format!(
+                    "edge {} references endpoint outside graph {owner:?}: {} -> {}",
+                    edge.edge_id, edge.source_id, edge.target_id
+                )));
+            }
+            self.require_partition_vertex(partition, edge.source_id, owner)?;
+            self.require_partition_vertex(partition, edge.target_id, owner)?;
         }
-        self.require_partition_vertex(partition, edge.source_id, graph)?;
-        self.require_partition_vertex(partition, edge.target_id, graph)?;
         let eid = edge.edge_id;
         let next_edge_id = if eid >= self.next_edge_id {
             eid.checked_add(1).ok_or_else(|| {
@@ -146,12 +204,15 @@ impl GraphStore for MemoryGraphStore {
         } else {
             self.next_edge_id
         };
-        self.edges.insert(eid, edge.clone());
-        self.require_partition_mut(graph)?.add_edge(&edge);
-        self.edge_membership
-            .entry(eid)
-            .or_default()
-            .insert(graph.to_string());
+        let previous = self.edges.insert(eid, edge.clone());
+        for owner in &owners {
+            let partition = self.graphs.get_mut(owner).expect("validated edge owner");
+            if let Some(previous) = &previous {
+                partition.remove_edge(previous);
+            }
+            partition.add_edge(&edge);
+        }
+        self.edge_membership.insert(eid, owners);
         self.next_edge_id = next_edge_id;
         Ok(())
     }
@@ -327,11 +388,16 @@ impl GraphStore for MemoryGraphStore {
             .collect()
     }
 
-    fn vertex_graphs(&self, vertex_id: VertexId) -> BTreeSet<String> {
-        self.vertex_membership
-            .get(&vertex_id)
+    fn vertex_graphs(&self, vertex_id: VertexId) -> GraphStoreResult<BTreeSet<String>> {
+        Ok(MemoryGraphStore::vertex_graphs(self, vertex_id))
+    }
+
+    fn edge_graphs(&self, edge_id: EdgeId) -> GraphStoreResult<BTreeSet<String>> {
+        Ok(self
+            .edge_membership
+            .get(&edge_id)
             .cloned()
-            .unwrap_or_default()
+            .unwrap_or_default())
     }
 
     fn out_edge_ids(&self, vertex_id: VertexId, graph: &str) -> GraphStoreResult<BTreeSet<EdgeId>> {
@@ -483,12 +549,12 @@ impl GraphStore for MemoryGraphStore {
         Ok(out)
     }
 
-    fn get_vertex(&self, vertex_id: VertexId) -> Option<&Vertex> {
-        self.vertices.get(&vertex_id)
+    fn get_vertex(&self, vertex_id: VertexId) -> GraphStoreResult<Option<Vertex>> {
+        Ok(MemoryGraphStore::get_vertex(self, vertex_id).cloned())
     }
 
-    fn get_edge(&self, edge_id: EdgeId) -> Option<&Edge> {
-        self.edges.get(&edge_id)
+    fn get_edge(&self, edge_id: EdgeId) -> GraphStoreResult<Option<Edge>> {
+        Ok(MemoryGraphStore::get_edge(self, edge_id).cloned())
     }
 
     fn next_vertex_id(&mut self) -> GraphStoreResult<VertexId> {
@@ -537,7 +603,79 @@ impl GraphStore for MemoryGraphStore {
         Ok(id)
     }
 
-    fn clear(&mut self) {
+    fn clear(&mut self) -> GraphStoreResult<()> {
+        MemoryGraphStore::clear(self);
+        Ok(())
+    }
+
+    fn vertices(&self) -> GraphStoreResult<BTreeMap<VertexId, Vertex>> {
+        Ok(MemoryGraphStore::vertices(self))
+    }
+
+    fn edges(&self) -> GraphStoreResult<BTreeMap<EdgeId, Edge>> {
+        Ok(MemoryGraphStore::edges(self))
+    }
+}
+
+// Concrete memory-only accessors remain infallible; generic graph execution
+// uses the fallible, owned-record storage interface above.
+impl MemoryGraphStore {
+    pub fn create_graph(&mut self, name: &str) {
+        self.graphs.entry(name.to_string()).or_default();
+    }
+
+    pub fn drop_graph(&mut self, name: &str) {
+        // AGE drops every per-graph label table with the graph, so a
+        // re-created graph starts a fresh label / sequence space.
+        self.label_registries.remove(name);
+        let Some(partition) = self.graphs.remove(name) else {
+            return;
+        };
+        for vid in &partition.vertex_ids {
+            if let Some(set) = self.vertex_membership.get_mut(vid) {
+                set.remove(name);
+            }
+        }
+        for eid in &partition.edge_ids {
+            if let Some(set) = self.edge_membership.get_mut(eid) {
+                set.remove(name);
+            }
+        }
+        // Drop any vertex / edge that no longer has any membership.
+        let orphan_vertices: Vec<VertexId> = partition.vertex_ids.iter().copied().collect();
+        for vid in orphan_vertices {
+            self.release_vertex_if_orphan(vid);
+        }
+        let orphan_edges: Vec<EdgeId> = partition.edge_ids.iter().copied().collect();
+        for eid in orphan_edges {
+            self.release_edge_if_orphan(eid);
+        }
+    }
+
+    pub fn graph_names(&self) -> Vec<String> {
+        self.graphs.keys().cloned().collect()
+    }
+
+    pub fn has_graph(&self, name: &str) -> bool {
+        self.graphs.contains_key(name)
+    }
+
+    pub fn vertex_graphs(&self, vertex_id: VertexId) -> BTreeSet<String> {
+        self.vertex_membership
+            .get(&vertex_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub fn get_vertex(&self, vertex_id: VertexId) -> Option<&Vertex> {
+        self.vertices.get(&vertex_id)
+    }
+
+    pub fn get_edge(&self, edge_id: EdgeId) -> Option<&Edge> {
+        self.edges.get(&edge_id)
+    }
+
+    pub fn clear(&mut self) {
         self.vertices.clear();
         self.edges.clear();
         self.graphs.clear();
@@ -548,11 +686,11 @@ impl GraphStore for MemoryGraphStore {
         self.next_edge_id = 1;
     }
 
-    fn vertices(&self) -> BTreeMap<VertexId, Vertex> {
+    pub fn vertices(&self) -> BTreeMap<VertexId, Vertex> {
         self.vertices.clone()
     }
 
-    fn edges(&self) -> BTreeMap<EdgeId, Edge> {
+    pub fn edges(&self) -> BTreeMap<EdgeId, Edge> {
         self.edges.clone()
     }
 }

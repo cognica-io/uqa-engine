@@ -38,11 +38,13 @@ use super::{
 
 mod analyzers;
 mod foreign;
+mod graph_access;
 mod graphs;
 mod indexes;
 mod keys;
 mod migration;
 mod models;
+mod path_index_data;
 mod physical_indexes;
 mod records;
 mod relations;
@@ -72,6 +74,7 @@ use records::{
 pub struct KeyValueCatalog {
     store: Arc<dyn KeyValueStore>,
     sequence_lock: Arc<Mutex<()>>,
+    graph_indexes_lock: Arc<Mutex<()>>,
 }
 
 impl KeyValueCatalog {
@@ -79,6 +82,7 @@ impl KeyValueCatalog {
         Self {
             store,
             sequence_lock: Arc::new(Mutex::new(())),
+            graph_indexes_lock: Arc::new(Mutex::new(())),
         }
     }
 
@@ -88,6 +92,117 @@ impl KeyValueCatalog {
 }
 
 impl CatalogFacade for KeyValueCatalog {
+    fn clear_path_index_data(&self, index: &str) -> StorageBackendResult<()> {
+        self.clear_path_index_data_impl(index)
+    }
+
+    fn save_path_index_pairs(
+        &self,
+        index: &str,
+        sequence: &str,
+        pairs: &[(u64, u64)],
+    ) -> StorageBackendResult<()> {
+        self.save_path_index_pairs_impl(index, sequence, pairs)
+    }
+
+    fn finish_path_index_data(
+        &self,
+        index: &str,
+        graph: &str,
+        definition: &str,
+    ) -> StorageBackendResult<()> {
+        self.finish_path_index_data_impl(index, graph, definition)
+    }
+
+    fn path_index_data_is_current(
+        &self,
+        index: &str,
+        definition: &str,
+    ) -> StorageBackendResult<bool> {
+        self.path_index_data_is_current_impl(index, definition)
+    }
+
+    fn path_index_pairs(
+        &self,
+        index: &str,
+        sequence: &str,
+        after: Option<(u64, u64)>,
+        limit: usize,
+    ) -> StorageBackendResult<Vec<(u64, u64)>> {
+        self.path_index_pairs_impl(index, sequence, after, limit)
+    }
+
+    fn graph_vertex(&self, id: u64) -> StorageBackendResult<Option<crate::GraphVertexRow>> {
+        self.graph_vertex_impl(id)
+    }
+
+    fn graph_edge(&self, id: u64) -> StorageBackendResult<Option<EdgeRow>> {
+        self.graph_edge_impl(id)
+    }
+
+    fn graph_entity_ids(
+        &self,
+        filter: crate::GraphEntityFilter<'_>,
+        after: Option<u64>,
+        limit: usize,
+    ) -> StorageBackendResult<Vec<u64>> {
+        self.graph_entity_ids_impl(filter, after, limit)
+    }
+
+    fn graph_entity_count(
+        &self,
+        filter: crate::GraphEntityFilter<'_>,
+    ) -> StorageBackendResult<u64> {
+        let mut after = None;
+        let mut count = 0_u64;
+        loop {
+            let ids = self.graph_entity_ids_impl(filter, after, 256)?;
+            if ids.is_empty() {
+                return Ok(count);
+            }
+            after = ids.last().copied();
+            count = count
+                .checked_add(
+                    u64::try_from(ids.len())
+                        .map_err(|error| StorageBackendError::Other(error.to_string()))?,
+                )
+                .ok_or_else(|| StorageBackendError::Other("graph entity count overflow".into()))?;
+        }
+    }
+
+    fn graph_entity_max_id(
+        &self,
+        kind: crate::GraphEntityKind,
+    ) -> StorageBackendResult<Option<u64>> {
+        let filter = crate::GraphEntityFilter::new(kind, None);
+        let mut after = None;
+        loop {
+            let ids = self.graph_entity_ids_impl(filter, after, 256)?;
+            if ids.is_empty() {
+                return Ok(after);
+            }
+            after = ids.last().copied();
+        }
+    }
+
+    fn graph_entity_memberships(
+        &self,
+        kind: crate::GraphEntityKind,
+        id: u64,
+    ) -> StorageBackendResult<Vec<String>> {
+        self.graph_entity_memberships_impl(kind, id)
+    }
+
+    fn graph_has_membership(
+        &self,
+        kind: crate::GraphEntityKind,
+        id: u64,
+        graph: &str,
+    ) -> StorageBackendResult<bool> {
+        self.store
+            .contains_key(&graph_membership_key(kind.as_str(), id, graph)?)
+    }
+
     fn set_metadata(&self, key: &str, value: &str) -> StorageBackendResult<()> {
         self.set_metadata_impl(key, value)
     }
@@ -97,7 +212,8 @@ impl CatalogFacade for KeyValueCatalog {
     }
 
     fn migrate_relation_namespace(&self) -> StorageBackendResult<()> {
-        self.migrate_relation_namespace_impl()
+        self.migrate_relation_namespace_impl()?;
+        self.ensure_graph_lookup_indexes()
     }
 
     fn save_schema_row(&self, schema: &SchemaRow) -> StorageBackendResult<()> {
@@ -251,6 +367,10 @@ impl CatalogFacade for KeyValueCatalog {
 
     fn load_named_graphs(&self) -> StorageBackendResult<Vec<String>> {
         self.load_named_graphs_impl()
+    }
+    fn named_graph_exists(&self, name: &str) -> StorageBackendResult<bool> {
+        self.store
+            .contains_key(&single_str_key(TAG_NAMED_GRAPH, name)?)
     }
 
     fn save_vertex(

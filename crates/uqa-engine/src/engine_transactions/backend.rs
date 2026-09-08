@@ -65,13 +65,46 @@ impl Engine {
         self.replace_unwritten_backend_transaction(&mut stack, true, "refresh statement snapshot")?;
         if establish_fixed_snapshot {
             let catalog_baseline = self.capture_fixed_transaction_catalog_baseline()?;
-            let snapshot = if backend.supports_concurrent_pinned_read_and_write() {
-                FixedTransactionSnapshot::Pinned(self.open_independent_pinned_read_snapshot()?)
+            let (snapshot, graph_snapshot) = if backend.supports_concurrent_pinned_read_and_write()
+            {
+                let snapshot: std::sync::Arc<Engine> =
+                    self.open_independent_pinned_read_snapshot()?.into();
+                let uqa_graph::GraphStoreHandle::Persistent(graph_store) = snapshot
+                    .new_graph_store()
+                    .map_err(|error| SQLError::Internal(error.to_string()))?
+                else {
+                    return Err(SQLError::Internal(
+                        "persistent snapshot has no graph storage".into(),
+                    ));
+                };
+                let graph_store = graph_store.retain_resource(snapshot.clone());
+                (FixedTransactionSnapshot::Pinned(snapshot), graph_store)
             } else {
                 let snapshot = self.capture_detached_fixed_transaction_snapshot()?;
+                let graph_snapshot =
+                    self.detach_graph_storage_snapshot(&self.visible_graph_handles())?;
                 self.restart_backend_after_detached_snapshot(&mut stack)?;
-                FixedTransactionSnapshot::Detached(snapshot)
+                (FixedTransactionSnapshot::Detached(snapshot), graph_snapshot)
             };
+            self.install_fixed_graph_snapshot(&graph_snapshot)?;
+            // FirstSnapshotSet belongs to the outer transaction even when
+            // the first read occurs inside an existing SQL savepoint. Those
+            // savepoints must restore the fixed graph view, not a live view.
+            let graph_overlay = self.session.state.read().graph_overlay.clone();
+            for (index, frame) in stack.iter_mut().enumerate() {
+                if index != 0 {
+                    frame
+                        .session_snapshot
+                        .graph_overlay
+                        .clone_from(&graph_overlay);
+                }
+                for savepoint in &mut frame.savepoints {
+                    savepoint
+                        .session_snapshot
+                        .graph_overlay
+                        .clone_from(&graph_overlay);
+                }
+            }
             let frame = stack.first_mut().ok_or_else(|| {
                 SQLError::Internal("fixed snapshot transaction frame disappeared".into())
             })?;

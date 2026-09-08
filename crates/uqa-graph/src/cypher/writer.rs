@@ -16,7 +16,7 @@ use uqa_core::{Edge, EdgeId, Value, Vertex, VertexId};
 use crate::cypher::ast::{
     CreateClause, CypherClause, CypherExpr, CypherQuery, DeleteClause, MergeClause, NodePattern,
     PathElement, PathPattern, PropertyAccess, RelDirection, RelPattern, SetClause, SetItem,
-    SetOperator, UnwindClause, Variable,
+    SetOperator, Variable,
 };
 use crate::cypher::executor::{Binding, BindingRow, CypherError, CypherExecutor, ResultRow};
 use crate::store::GraphStore;
@@ -75,7 +75,7 @@ impl<'a, G: GraphStore> CypherWriter<'a, G> {
                     bindings = self.exec_delete(d, bindings)?;
                 }
                 CypherClause::Unwind(u) => {
-                    bindings = self.exec_unwind(u, bindings)?;
+                    bindings = self.reader().exec_unwind(u, bindings)?;
                 }
                 CypherClause::With(w) => {
                     let (cols, projected) = self.reader().exec_return_like(
@@ -213,7 +213,7 @@ impl<'a, G: GraphStore> CypherWriter<'a, G> {
         let vid = self
             .store
             .allocate_vertex_id(&label, &self.graph)
-            .map_err(|error| CypherError::Storage(error.to_string()))?;
+            .map_err(CypherError::from)?;
         let vertex = Vertex {
             vertex_id: vid,
             label,
@@ -245,7 +245,7 @@ impl<'a, G: GraphStore> CypherWriter<'a, G> {
         let eid = self
             .store
             .allocate_edge_id(&label, &self.graph)
-            .map_err(|error| CypherError::Storage(error.to_string()))?;
+            .map_err(CypherError::from)?;
         let edge = Edge {
             edge_id: eid,
             source_id: src_id,
@@ -444,31 +444,6 @@ impl<'a, G: GraphStore> CypherWriter<'a, G> {
     // -----------------------------------------------------------------
     // UNWIND
     // -----------------------------------------------------------------
-
-    fn exec_unwind(
-        &mut self,
-        clause: &UnwindClause,
-        bindings: Vec<BindingRow>,
-    ) -> Result<Vec<BindingRow>, CypherError> {
-        let mut next = Vec::new();
-        for row in bindings {
-            let value = self.reader().eval(&clause.expr, &row)?;
-            // AGE semantics: lists spread one row per element, null
-            // yields no rows, any other scalar passes through as a
-            // single row.
-            let items = match value {
-                Value::List(items) => items,
-                Value::Null => continue,
-                other => vec![other],
-            };
-            for item in items {
-                let mut new_row = row.clone();
-                new_row.insert(clause.variable.clone(), Binding::Value(item));
-                next.push(new_row);
-            }
-        }
-        Ok(next)
-    }
 }
 
 fn apply_property_update(

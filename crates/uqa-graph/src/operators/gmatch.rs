@@ -150,22 +150,22 @@ impl<'a> GMatch<'a> {
             if !edge_pattern.satisfies(&edge) {
                 continue;
             }
-            let source = store.get_vertex(edge.source_id).ok_or_else(|| {
+            let source = store.get_vertex(edge.source_id)?.ok_or_else(|| {
                 GraphStoreError::CorruptGraph(format!(
                     "edge {} references missing source vertex {}",
                     edge.edge_id, edge.source_id
                 ))
             })?;
-            if !source_pattern.satisfies(source) {
+            if !source_pattern.satisfies(&source) {
                 continue;
             }
-            let target = store.get_vertex(edge.target_id).ok_or_else(|| {
+            let target = store.get_vertex(edge.target_id)?.ok_or_else(|| {
                 GraphStoreError::CorruptGraph(format!(
                     "edge {} references missing target vertex {}",
                     edge.edge_id, edge.target_id
                 ))
             })?;
-            if !target_pattern.satisfies(target) {
+            if !target_pattern.satisfies(&target) {
                 continue;
             }
             if !seen_assignments.insert((edge.source_id, edge.target_id)) {
@@ -253,30 +253,30 @@ impl<'a> GMatch<'a> {
             if !first.satisfies(&first_edge) {
                 continue;
             }
-            let source = store.get_vertex(first_edge.source_id).ok_or_else(|| {
+            let source = store.get_vertex(first_edge.source_id)?.ok_or_else(|| {
                 GraphStoreError::CorruptGraph(format!(
                     "edge {} references missing source vertex {}",
                     first_edge.edge_id, first_edge.source_id
                 ))
             })?;
-            if !source_pattern.satisfies(source) {
+            if !source_pattern.satisfies(&source) {
                 continue;
             }
-            let middle = store.get_vertex(first_edge.target_id).ok_or_else(|| {
+            let middle = store.get_vertex(first_edge.target_id)?.ok_or_else(|| {
                 GraphStoreError::CorruptGraph(format!(
                     "edge {} references missing middle vertex {}",
                     first_edge.edge_id, first_edge.target_id
                 ))
             })?;
-            if !middle_pattern.satisfies(middle) {
+            if !middle_pattern.satisfies(&middle) {
                 continue;
             }
 
             for second_edge_id in store.out_edge_ids(first_edge.target_id, self.graph)? {
-                let second_edge = store.get_edge(second_edge_id).ok_or_else(|| {
+                let second_edge = store.get_edge(second_edge_id)?.ok_or_else(|| {
                     GraphStoreError::CorruptGraph(format!("missing path edge {second_edge_id}"))
                 })?;
-                if !second.satisfies(second_edge) {
+                if !second.satisfies(&second_edge) {
                     continue;
                 }
                 if first_edge.source_id == second_edge.target_id
@@ -284,13 +284,13 @@ impl<'a> GMatch<'a> {
                 {
                     continue;
                 }
-                let target = store.get_vertex(second_edge.target_id).ok_or_else(|| {
+                let target = store.get_vertex(second_edge.target_id)?.ok_or_else(|| {
                     GraphStoreError::CorruptGraph(format!(
                         "edge {} references missing target vertex {}",
                         second_edge.edge_id, second_edge.target_id
                     ))
                 })?;
-                if !target_pattern.satisfies(target) {
+                if !target_pattern.satisfies(&target) {
                     continue;
                 }
                 let assignment = (
@@ -305,7 +305,7 @@ impl<'a> GMatch<'a> {
                     first,
                     second,
                     &first_edge,
-                    second_edge,
+                    &second_edge,
                     &mut entries,
                     &mut graph_payloads,
                 )?;
@@ -384,7 +384,7 @@ impl<'a> GMatch<'a> {
         edge_ids
             .into_iter()
             .map(|edge_id| {
-                store.get_edge(edge_id).cloned().ok_or_else(|| {
+                store.get_edge(edge_id)?.ok_or_else(|| {
                     GraphStoreError::CorruptGraph(format!("missing pattern edge {edge_id}"))
                 })
             })
@@ -407,10 +407,10 @@ impl<'a> GMatch<'a> {
         for vp in &self.pattern.vertex_patterns {
             let mut cands = Vec::new();
             for vid in &graph_vids {
-                let vtx = store.get_vertex(*vid).ok_or_else(|| {
+                let vtx = store.get_vertex(*vid)?.ok_or_else(|| {
                     GraphStoreError::CorruptGraph(format!("missing candidate vertex {vid}"))
                 })?;
-                if vp.satisfies(vtx) {
+                if vp.satisfies(&vtx) {
                     cands.push(*vid);
                 }
             }
@@ -467,13 +467,13 @@ impl<'a> GMatch<'a> {
         ep: &EdgePattern,
     ) -> GraphStoreResult<bool> {
         for eid in store.out_edge_ids(src, graph)? {
-            let edge = store.get_edge(eid).ok_or_else(|| {
+            let edge = store.get_edge(eid)?.ok_or_else(|| {
                 GraphStoreError::CorruptGraph(format!("missing pattern edge {eid}"))
             })?;
             if !tgt_set.contains(&edge.target_id) {
                 continue;
             }
-            if ep.satisfies(edge) {
+            if ep.satisfies(&edge) {
                 return Ok(true);
             }
         }
@@ -488,13 +488,13 @@ impl<'a> GMatch<'a> {
         ep: &EdgePattern,
     ) -> GraphStoreResult<bool> {
         for eid in store.in_edge_ids(tgt, graph)? {
-            let edge = store.get_edge(eid).ok_or_else(|| {
+            let edge = store.get_edge(eid)?.ok_or_else(|| {
                 GraphStoreError::CorruptGraph(format!("missing pattern edge {eid}"))
             })?;
             if !src_set.contains(&edge.source_id) {
                 continue;
             }
-            if ep.satisfies(edge) {
+            if ep.satisfies(&edge) {
                 return Ok(true);
             }
         }
@@ -561,13 +561,13 @@ impl<'a> GMatch<'a> {
             };
             let mut found = false;
             for eid in store.out_edge_ids(src_id, graph)? {
-                let edge = store.get_edge(eid).ok_or_else(|| {
+                let edge = store.get_edge(eid)?.ok_or_else(|| {
                     GraphStoreError::CorruptGraph(format!("missing pattern edge {eid}"))
                 })?;
                 if edge.target_id != tgt_id {
                     continue;
                 }
-                if ep.satisfies(edge) {
+                if ep.satisfies(&edge) {
                     found = true;
                     break;
                 }
@@ -593,13 +593,13 @@ impl<'a> GMatch<'a> {
                 continue;
             };
             for eid in store.out_edge_ids(src_id, graph)? {
-                let edge = store.get_edge(eid).ok_or_else(|| {
+                let edge = store.get_edge(eid)?.ok_or_else(|| {
                     GraphStoreError::CorruptGraph(format!("missing pattern edge {eid}"))
                 })?;
                 if edge.target_id != tgt_id {
                     continue;
                 }
-                if ep.satisfies(edge) {
+                if ep.satisfies(&edge) {
                     return Ok(false);
                 }
             }
@@ -622,10 +622,10 @@ impl<'a> GMatch<'a> {
                 continue;
             };
             for eid in store.out_edge_ids(src_id, graph)? {
-                let edge = store.get_edge(eid).ok_or_else(|| {
+                let edge = store.get_edge(eid)?.ok_or_else(|| {
                     GraphStoreError::CorruptGraph(format!("missing pattern edge {eid}"))
                 })?;
-                if edge.target_id == tgt_id && ep.satisfies(edge) {
+                if edge.target_id == tgt_id && ep.satisfies(&edge) {
                     edges.insert(eid);
                     break;
                 }

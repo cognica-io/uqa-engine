@@ -30,7 +30,7 @@ impl LabelIndex {
         let mut idx = Self::default();
         for vid in store.vertex_ids_in_graph(graph)? {
             for eid in store.out_edge_ids(vid, graph)? {
-                let edge = store.get_edge(eid).ok_or_else(|| {
+                let edge = store.get_edge(eid)?.ok_or_else(|| {
                     GraphStoreError::CorruptGraph(format!("missing indexed edge {eid}"))
                 })?;
                 idx.label_to_edges
@@ -94,7 +94,7 @@ impl VertexPropertyIndex {
                 .collect();
 
         for vertex_id in store.vertex_ids_in_graph(graph)? {
-            let vertex = store.get_vertex(vertex_id).ok_or_else(|| {
+            let vertex = store.get_vertex(vertex_id)?.ok_or_else(|| {
                 GraphStoreError::CorruptGraph(format!(
                     "graph {graph:?} references missing indexed vertex {vertex_id}"
                 ))
@@ -128,77 +128,9 @@ impl VertexPropertyIndex {
     }
 }
 
-/// Pre-indexed reachable `(start, end)` pairs for fixed label
-/// sequences. Lookup is keyed by the slash-joined sequence so the RPQ
-/// operator can lift a `Label / Label / ...` expression into a direct
-/// hit without running NFA simulation.
-#[derive(Debug, Clone, Default)]
-pub struct PathIndex {
-    path_pairs: BTreeMap<String, BTreeSet<(VertexId, VertexId)>>,
-}
-
-impl PathIndex {
-    pub fn build<G: GraphStore>(
-        store: &G,
-        graph: &str,
-        label_sequences: &[Vec<String>],
-    ) -> GraphStoreResult<Self> {
-        let mut idx = Self::default();
-        for seq in label_sequences {
-            let key = seq.join("/");
-            let mut pairs: BTreeSet<(VertexId, VertexId)> = BTreeSet::new();
-            for start in store.vertex_ids_in_graph(graph)? {
-                let ends = follow_path(store, graph, start, seq)?;
-                for end in ends {
-                    pairs.insert((start, end));
-                }
-            }
-            idx.path_pairs.insert(key, pairs);
-        }
-        Ok(idx)
-    }
-
-    pub fn lookup(&self, label_sequence: &[String]) -> Option<&BTreeSet<(VertexId, VertexId)>> {
-        let key = label_sequence.join("/");
-        self.path_pairs.get(&key)
-    }
-
-    pub fn has_path(&self, label_sequence: &[String]) -> bool {
-        let key = label_sequence.join("/");
-        self.path_pairs.contains_key(&key)
-    }
-
-    pub fn indexed_paths(&self) -> Vec<String> {
-        self.path_pairs.keys().cloned().collect()
-    }
-}
-
-fn follow_path<G: GraphStore>(
-    store: &G,
-    graph: &str,
-    start: VertexId,
-    labels: &[String],
-) -> GraphStoreResult<BTreeSet<VertexId>> {
-    let mut current: BTreeSet<VertexId> = BTreeSet::from([start]);
-    for label in labels {
-        let mut next_set: BTreeSet<VertexId> = BTreeSet::new();
-        for vid in &current {
-            for eid in store.out_edge_ids(*vid, graph)? {
-                let edge = store.get_edge(eid).ok_or_else(|| {
-                    GraphStoreError::CorruptGraph(format!("missing path-index edge {eid}"))
-                })?;
-                if &edge.label == label {
-                    next_set.insert(edge.target_id);
-                }
-            }
-        }
-        current = next_set;
-        if current.is_empty() {
-            break;
-        }
-    }
-    Ok(current)
-}
+// Path-index handles retain only definitions for durable stores.
+mod path_index;
+pub use path_index::PathIndex;
 
 #[cfg(test)]
 mod tests {

@@ -23,6 +23,9 @@ impl OperatorTreeDriver for EngineDriver<'_> {
         reason = "preserves exhaustive IR variant order"
     )]
     fn execute_node(&self, op: &OperatorTree) -> DriverResult<OperatorOutput> {
+        if matches!(self.execution, super::DriverExecution::Public) {
+            return super::execution::execute_public_physical_node(self, op);
+        }
         let posting = match op {
             OperatorTree::Empty => Ok(PostingList::new()),
             OperatorTree::Term {

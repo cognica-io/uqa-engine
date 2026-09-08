@@ -149,14 +149,13 @@ use uqa_scoring::{
 use uqa_sql::SQLError;
 use uqa_storage::{
     document_store::Document, AnalyzerPhase, CatalogFacade, CatalogIndexRow, ColumnStatsInput,
-    ColumnStatsRow, DocumentStore, EdgeRow, GraphSnapshot, GraphVertexRow, HNSWIndex,
-    HNSWIndexParams, IVFIndex, IVFIndexParams, InvertedIndex, ManagedConnection,
-    MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex, PersistentStorageBackend,
-    PersistentStorageProvider, PersistentStorageSession, RelationIdentity,
-    SQLiteCompressedContainerAnchor, SQLiteStorageProvider, SequenceOptions, SequenceOwner,
-    SequenceOwnerDependency, SequenceReservationResult, SequenceRow, StorageBackendError,
-    StorageBackendResult, StorageSavepointId, StoredDocument, TableSchema, VectorFieldSchema,
-    VectorIndex, VectorIndexOpenMode, VectorIndexSpec, ViewRow,
+    ColumnStatsRow, DocumentStore, HNSWIndex, HNSWIndexParams, IVFIndex, IVFIndexParams,
+    InvertedIndex, ManagedConnection, MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex,
+    PersistentStorageBackend, PersistentStorageProvider, PersistentStorageSession,
+    RelationIdentity, SQLiteCompressedContainerAnchor, SQLiteStorageProvider, SequenceOptions,
+    SequenceOwner, SequenceOwnerDependency, SequenceReservationResult, SequenceRow,
+    StorageBackendError, StorageBackendResult, StorageSavepointId, StoredDocument, TableSchema,
+    VectorFieldSchema, VectorIndex, VectorIndexOpenMode, VectorIndexSpec, ViewRow,
 };
 
 pub use engine_notifications::SQLNotification;
@@ -183,7 +182,6 @@ pub use functions::{
 const SEQUENCES_METADATA_KEY: &str = "sql_sequences_json";
 /// Metadata key prefix for per-graph AGE label registries
 /// (`graph_label_registry::<graph>` -> JSON `GraphLabelRegistry`).
-const GRAPH_LABELS_METADATA_PREFIX: &str = "graph_label_registry::";
 const FUNCTIONS_METADATA_KEY: &str = "sql_functions_json";
 const DATABASE_SECURITY_METADATA_KEY: &str = "sql_database_security_json";
 const ROLES_METADATA_KEY: &str = "sql_roles_json";
@@ -487,7 +485,7 @@ struct TransactionFrame {
 }
 
 enum FixedTransactionSnapshot {
-    Pinned(Box<Engine>),
+    Pinned(Arc<Engine>),
     Detached(SessionPortalTableSnapshots),
 }
 
@@ -550,6 +548,8 @@ struct TransactionSavepoint {
 /// Lightweight SQL-session state that follows transaction/savepoint rollback for every backend. It is intentionally separate from the database-sized memory-engine snapshot so persistent sessions receive identical SET, search-path, PREPARE, and statement-cache semantics. Sequence `currval` and last-used entries produced after the snapshot are reapplied because sequence functions are nontransactional in `PostgreSQL`.
 #[derive(Clone, Default)]
 struct SessionStateSnapshot {
+    /// A pinned physical graph view plus this transaction's changed identities. Savepoints retain only handles and changed-id checkpoints, never graph payload replicas.
+    graph_overlay: Option<GraphTransactionOverlay>,
     search_path: Vec<String>,
     temporary_namespace_allocated: bool,
     session_vars: BTreeMap<String, String>,
@@ -562,6 +562,12 @@ struct SessionStateSnapshot {
     listened_channels: Vec<String>,
     current_user: String,
     session_user: String,
+}
+
+#[derive(Clone)]
+struct GraphTransactionOverlay {
+    store: Arc<uqa_graph::PersistentGraphStore>,
+    names: Arc<BTreeSet<String>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

@@ -75,7 +75,7 @@ impl<'a> GraphEmbedding<'a> {
             return Ok(GraphPostingList::new());
         }
         for vid in &vertices {
-            if store.get_vertex(*vid).is_none() {
+            if store.get_vertex(*vid)?.is_none() {
                 return Err(GraphStoreError::CorruptGraph(format!(
                     "graph embedding graph {:?} references missing vertex {vid}",
                     self.graph
@@ -87,7 +87,7 @@ impl<'a> GraphEmbedding<'a> {
         let mut all_labels: BTreeSet<String> = BTreeSet::new();
         for vid in &vertices {
             for eid in store.out_edge_ids(*vid, self.graph)? {
-                let edge = store.get_edge(eid).ok_or_else(|| {
+                let edge = store.get_edge(eid)?.ok_or_else(|| {
                     GraphStoreError::CorruptGraph(format!("missing embedding edge {eid}"))
                 })?;
                 all_labels.insert(edge.label.clone());
@@ -158,7 +158,7 @@ impl<'a> GraphEmbedding<'a> {
             .map_err(|error| allocation_error("edge-label distribution", label_dims, &error))?;
         label_dist.resize(label_dims, 0.0_f64);
         for eid in &out_edges {
-            let edge = store.get_edge(*eid).ok_or_else(|| {
+            let edge = store.get_edge(*eid)?.ok_or_else(|| {
                 GraphStoreError::CorruptGraph(format!("missing embedding edge {eid}"))
             })?;
             if let Some(&idx) = label_to_idx.get(&edge.label) {
@@ -190,7 +190,7 @@ impl<'a> GraphEmbedding<'a> {
             let mut next_frontier: BTreeSet<VertexId> = BTreeSet::new();
             for v in &frontier {
                 for eid in store.out_edge_ids(*v, self.graph)? {
-                    let edge = store.get_edge(eid).ok_or_else(|| {
+                    let edge = store.get_edge(eid)?.ok_or_else(|| {
                         GraphStoreError::CorruptGraph(format!("missing embedding edge {eid}"))
                     })?;
                     if !graph_vertices.contains(&edge.target_id) {
