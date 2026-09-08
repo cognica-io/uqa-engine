@@ -6,6 +6,8 @@
 
 //! Deferred backend transactions, statement snapshots, and writer promotion.
 
+use std::collections::BTreeMap;
+
 use super::{BackendTransactionMode, Engine, FixedTransactionSnapshot, SQLError, TransactionFrame};
 
 impl Engine {
@@ -288,6 +290,19 @@ impl Engine {
                 "{action} requires an open transaction without storage writes"
             )));
         }
+        // INSERT/COPY reserve document IDs while staging rows, before taking
+        // the backend writer. Both key-lock rechecks and writer promotion can
+        // rebuild table handles after a concurrent commit, from physical rows
+        // that do not yet include those reservations. Preserve them for the
+        // same physical table lifetime, never across DROP/recreate. Actual
+        // transaction/savepoint rollback uses its separate restoration path.
+        let reservations = self
+            .storage
+            .tables
+            .read()
+            .values()
+            .map(|table| (table.storage_generation(), *table.next_id.lock()))
+            .collect::<BTreeMap<_, _>>();
         if let Err(error) = backend.rollback_transaction() {
             let failure = Self::storage_tx_error(action, &error);
             return Err(self.abort_failed_backend_transaction_replacement(
@@ -343,6 +358,12 @@ impl Engine {
                 backend.as_ref(),
                 failure,
             ));
+        }
+        for table in self.storage.tables.read().values() {
+            if let Some(reserved) = reservations.get(&table.storage_generation()) {
+                let mut next = table.next_id.lock();
+                *next = (*next).max(*reserved);
+            }
         }
         stack[0].backend_mode = if deferred {
             BackendTransactionMode::Deferred
