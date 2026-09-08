@@ -14,7 +14,7 @@ use super::{
 use uqa_execution::ScalarExpr;
 use uqa_planner::{QueryPlan, RelationalPlan, SourcePlan};
 
-type AnalyzeValues = BTreeMap<String, Vec<Value>>;
+type AnalyzeValues = BTreeMap<String, analyze_helpers::ColumnAnalyzeValues>;
 type AnalyzeNullCounts = BTreeMap<String, u64>;
 
 mod analyze;

@@ -56,6 +56,14 @@ SQLite catalogs expose `CatalogFacade::cache_revisions()` as lightweight generat
 
 Custom providers can implement this optional method with the same transaction-visible contract. Returning `None` retains conservative full refresh; an empty `Some(CatalogCacheRevisions::default())` asserts that nothing has changed and is not a substitute for unsupported tracking. Revisions must not be recycled while cached snapshots can still exist. SQLite catalog version 44 installs durable revision tracking; older binaries must not reopen the upgraded database.
 
+## Automatic column statistics
+
+Persistent query planning consumes saved estimates instead of synchronously scanning tables. A database-level background worker gathers a projected sample of at most 4,096 rows per relation hierarchy, releases its read snapshot, and publishes only if the table identity and committed change generation still match. First collection, committed-change thresholds, and a maximum dirty age of 60 seconds schedule refreshes automatically. Existing estimates remain available while maintenance is pending; explicit `ANALYZE` scans the full requested relation hierarchy.
+
+Both collection paths omit text and binary values above 1,024 bytes from stored range, histogram, and most-common-value (MCV) samples. Other encoded values have an 8,192-byte budget. Values are omitted rather than truncated, so no invented prefix becomes an equality or ordering key; stored table data is unchanged. Row and NULL counts include these observations, and each omitted non-null observation contributes one conservatively distinct value to the estimate. The bounded-value policy follows the approach used by [PostgreSQL scalar analysis](https://github.com/postgres/postgres/blob/REL_18_STABLE/src/backend/commands/analyze.c).
+
+On reopening an older catalog, oversized statistical payloads are not decoded into unbounded value collections. Usable counts and bounded samples remain available, and a durable statistics-format marker schedules one background replacement even when no new rows are written. An analyzed relation with no eligible automatic columns does not repeatedly schedule work merely because its statistics map is empty.
+
 ## SQLCipher
 
 `Engine::open_encrypted` uses the SQLCipher storage path. The key is required for every open and is not recoverable from the database. Operational rules are:

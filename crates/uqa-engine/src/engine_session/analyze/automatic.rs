@@ -79,7 +79,8 @@ impl Engine {
             return Ok(None);
         };
         let maintenance = MaintenanceState::load_for(catalog, name, table.object_id())?;
-        if !maintenance.due(table.column_stats.read().is_empty(), now_ms()) {
+        let missing = maintenance.missing(table.column_stats.read().is_empty());
+        if !maintenance.due(missing, now_ms()) {
             return Ok(None);
         }
         let columns = table

@@ -123,7 +123,7 @@ fn refresh_due_tables(engine: &Engine) -> StorageBackendResult<()> {
                 return Ok(false);
             };
             let state = MaintenanceState::load_for(catalog, &name, table.object_id())?;
-            let missing = state.analyzed_rows.is_none() && table.column_stats.read().is_empty();
+            let missing = state.missing(table.column_stats.read().is_empty());
             if !state.due(missing, now_ms()) {
                 return Ok(false);
             }

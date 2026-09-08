@@ -7,6 +7,7 @@
 //! Durable automatic-statistics scheduling, independent of query planning.
 
 mod cache;
+pub(crate) mod value_size;
 mod worker;
 pub(crate) use cache::StatisticsSnapshots;
 
@@ -63,6 +64,7 @@ pub(crate) struct MaintenanceState {
     changes: u64,
     dirty_since_ms: u64,
     analyzed_rows: Option<u64>,
+    statistics_format: u32,
 }
 
 pub(crate) fn now_ms() -> u64 {
@@ -109,6 +111,10 @@ impl MaintenanceState {
         self.changes != 0
     }
 
+    pub(crate) fn missing(&self, statistics_empty: bool) -> bool {
+        self.analyzed_rows.is_none() && statistics_empty
+    }
+
     pub(crate) fn invalidates_existing_statistics(&self) -> bool {
         // Initial imported statistics predate this maintenance protocol.
         // A new write adopts that baseline before marking it stale.
@@ -116,7 +122,8 @@ impl MaintenanceState {
     }
 
     pub(crate) fn due(&self, missing: bool, now: u64) -> bool {
-        missing
+        self.statistics_format != value_size::FORMAT_VERSION
+            || missing
             || (self.dirty()
                 && (self.analyzed_rows == Some(0)
                     || self.changes >= 50 + self.analyzed_rows.unwrap_or(0) / 10
@@ -133,6 +140,7 @@ impl MaintenanceState {
         state.changes = 0;
         state.dirty_since_ms = 0;
         state.analyzed_rows = Some(rows);
+        state.statistics_format = value_size::FORMAT_VERSION;
         state.save(catalog, table)
     }
 
@@ -148,6 +156,7 @@ impl MaintenanceState {
         state.changes = 0;
         state.dirty_since_ms = 0;
         state.analyzed_rows = Some(rows);
+        state.statistics_format = value_size::FORMAT_VERSION;
         state.save(catalog, table)
     }
 
@@ -348,11 +357,19 @@ mod tests {
             changes: 1,
             dirty_since_ms: 100,
             analyzed_rows: Some(100),
+            statistics_format: value_size::FORMAT_VERSION,
             ..MaintenanceState::default()
         };
         assert!(!state.due(false, 101));
         assert!(state.due(false, 60_100));
         state.changes = 60;
         assert!(state.due(false, 101));
+    }
+
+    #[test]
+    fn legacy_statistics_are_refreshed_without_waiting_for_another_write() {
+        let old: MaintenanceState =
+            serde_json::from_str(r#"{"generation":4,"changes":0,"analyzed_rows":120}"#).unwrap();
+        assert!(old.due(false, 0));
     }
 }

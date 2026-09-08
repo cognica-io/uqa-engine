@@ -12,7 +12,9 @@ use std::sync::Arc;
 use uqa_core::DocId;
 use uqa_storage::{DocumentStore, StorageBackendError, StorageBackendResult};
 
-use super::super::{build_analyze_stats, collect_analyze_values, HierarchyAnalyzeInputs};
+use super::super::{
+    build_analyze_stats, collect_analyze_values, ColumnAnalyzeValues, HierarchyAnalyzeInputs,
+};
 use crate::{ColumnStatsMap, Engine};
 
 const SAMPLE_ROWS: usize = 4_096;
@@ -92,7 +94,7 @@ pub(super) fn collect(
     let (reservoir, snapshots) = sample_ids(engine, name)?;
     let mut values = columns
         .iter()
-        .map(|column| (column.clone(), Vec::new()))
+        .map(|column| (column.clone(), ColumnAnalyzeValues::default()))
         .collect::<BTreeMap<_, _>>();
     let mut null_counts = columns
         .iter()

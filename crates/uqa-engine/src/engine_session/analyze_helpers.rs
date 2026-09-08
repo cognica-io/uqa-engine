@@ -11,6 +11,27 @@ use super::{
     StorageBackendResult, Value,
 };
 
+#[derive(Default)]
+pub(super) struct ColumnAnalyzeValues {
+    pub retained: Vec<Value>,
+    pub omitted: u64,
+}
+
+impl ColumnAnalyzeValues {
+    fn push(&mut self, value: Value) {
+        if crate::engine_statistics::value_size::accepts(&value) {
+            self.retained.push(value);
+        } else {
+            self.omitted += 1;
+        }
+    }
+
+    pub(super) fn extend(&mut self, other: Self) {
+        self.retained.extend(other.retained);
+        self.omitted += other.omitted;
+    }
+}
+
 pub(super) fn increment_analyze_null(
     counts: &mut AnalyzeNullCounts,
     column: &str,
@@ -34,7 +55,7 @@ pub(super) fn collect_analyze_values(
     let mut values = AnalyzeValues::new();
     let mut nulls = AnalyzeNullCounts::new();
     for column in columns {
-        values.insert(column.clone(), Vec::new());
+        values.insert(column.clone(), ColumnAnalyzeValues::default());
         nulls.insert(column.clone(), 0);
     }
     let fields = columns.iter().map(String::as_str).collect::<Vec<_>>();
@@ -65,8 +86,8 @@ pub(super) fn collect_analyze_values(
     Ok((values, nulls))
 }
 
-const HISTOGRAM_BUCKETS: usize = 100;
-const MCV_COUNT: usize = 10;
+const HISTOGRAM_BUCKETS: usize = crate::engine_statistics::value_size::HISTOGRAM_VALUES - 1;
+const MCV_COUNT: usize = crate::engine_statistics::value_size::MCV_VALUES;
 
 pub(super) fn distinct_count(values: &[Value]) -> StorageBackendResult<u64> {
     let mut set: std::collections::BTreeSet<&Value> = std::collections::BTreeSet::new();
@@ -101,7 +122,7 @@ pub(super) fn build_histogram(values: &[&Value]) -> Vec<Value> {
     boundaries
 }
 
-pub(super) fn build_mcv(values: &[Value], total: u64) -> (Vec<Value>, Vec<f64>) {
+pub(super) fn build_mcv(values: &[Value], total: u64, distinct: u64) -> (Vec<Value>, Vec<f64>) {
     if values.is_empty() || total == 0 {
         return (Vec::new(), Vec::new());
     }
@@ -109,7 +130,6 @@ pub(super) fn build_mcv(values: &[Value], total: u64) -> (Vec<Value>, Vec<f64>) 
     for value in values {
         *counts.entry(value).or_insert(0) += 1;
     }
-    let distinct = counts.len();
     if distinct == 0 {
         return (Vec::new(), Vec::new());
     }

@@ -8,6 +8,7 @@
 
 mod automatic;
 
+use super::analyze_helpers::ColumnAnalyzeValues;
 use super::{
     build_histogram, build_mcv, collect_analyze_values, distinct_count, Arc, BTreeMap,
     CatalogFacade, ColumnStatsInput, DocId, Engine, Ordering, RelationIdentity,
@@ -16,7 +17,7 @@ use super::{
 
 struct HierarchyAnalyzeInputs {
     row_count: u64,
-    values: BTreeMap<String, Vec<Value>>,
+    values: BTreeMap<String, ColumnAnalyzeValues>,
     null_counts: BTreeMap<String, u64>,
 }
 
@@ -41,6 +42,12 @@ fn build_analyze_stats(
                 "ANALYZE lost the null counter for column `{column}`"
             ))
         })?;
+        // Omitted wide values contribute non-null, conservatively distinct
+        // observations. They are not truncated into false equality/range keys.
+        let distinct = distinct_count(&values.retained)?
+            .checked_add(values.omitted)
+            .ok_or_else(|| StorageBackendError::Other("ANALYZE distinct count overflow".into()))?;
+        let values = values.retained;
         let comparable = values
             .iter()
             .filter(|value| {
@@ -50,11 +57,11 @@ fn build_analyze_stats(
                 )
             })
             .collect::<Vec<_>>();
-        let (mcv_values, mcv_frequencies) = build_mcv(&values, row_count);
+        let (mcv_values, mcv_frequencies) = build_mcv(&values, row_count, distinct);
         stats.insert(
             column.clone(),
             uqa_planner::ColumnStats {
-                distinct_count: distinct_count(&values)?,
+                distinct_count: distinct,
                 null_count,
                 min_value: comparable.iter().min().map(|value| (*value).clone()),
                 max_value: comparable.iter().max().map(|value| (*value).clone()),
@@ -284,7 +291,7 @@ impl Engine {
     ) -> StorageBackendResult<HierarchyAnalyzeInputs> {
         let mut col_values = columns
             .iter()
-            .map(|column| (column.clone(), Vec::new()))
+            .map(|column| (column.clone(), ColumnAnalyzeValues::default()))
             .collect::<BTreeMap<_, _>>();
         let mut col_nulls = columns
             .iter()
