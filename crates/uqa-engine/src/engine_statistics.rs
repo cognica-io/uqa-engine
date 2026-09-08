@@ -6,7 +6,9 @@
 
 //! Durable automatic-statistics scheduling, independent of query planning.
 
+mod cache;
 mod worker;
+pub(crate) use cache::StatisticsSnapshots;
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};

@@ -13,6 +13,7 @@ use uqa_storage::{ColumnStatsInput, SQLiteStorageBackend};
 
 use super::Engine;
 
+mod cache_refresh;
 mod external_refresh;
 
 fn sqlite_data_version(engine: &Engine) -> u64 {

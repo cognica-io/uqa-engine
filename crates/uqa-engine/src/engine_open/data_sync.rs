@@ -95,6 +95,20 @@ impl Engine {
             return Ok(());
         }
         self.synchronize_external_commits()?;
+        if self
+            .epochs
+            .table_data
+            .seen
+            .load(std::sync::atomic::Ordering::Acquire)
+            != self
+                .epochs
+                .table_data
+                .published
+                .load(std::sync::atomic::Ordering::Acquire)
+            && self.refresh_tracked_storage_snapshot()?
+        {
+            return Ok(());
+        }
         self.refresh_table_data_cache(false)
     }
 
@@ -328,10 +342,28 @@ impl Engine {
         {
             return Ok(());
         }
+        if self.refresh_tracked_pinned_snapshot(
+            table_catalog_epoch,
+            table_data_epoch,
+            catalog_registry_epoch,
+        )? {
+            if let Some(version) = stable_storage_version {
+                self.epochs
+                    .seen_storage_change_version
+                    .store(version, std::sync::atomic::Ordering::Release);
+            }
+            return Ok(());
+        }
 
         self.clear_persistent_table_bindings_for_catalog_reload();
         self.reload_table_catalog(table_catalog_epoch)?;
-        self.refresh_table_data_cache(true)?;
+        // Newly restored table handles already include their statistics and
+        // physical data snapshot. Do not decode the same statistics twice.
+        self.epochs
+            .table_data
+            .seen
+            .store(table_data_epoch, std::sync::atomic::Ordering::Release);
+        self.synchronize_partition_identity_watermarks()?;
         self.reload_catalog_registries(catalog_registry_epoch)?;
         if let Some(version) = stable_storage_version {
             self.epochs

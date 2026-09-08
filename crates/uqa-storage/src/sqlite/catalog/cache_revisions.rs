@@ -1,0 +1,109 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Storage-owned, rollback-safe cache generations for every catalog session.
+
+use std::fmt::Write as _;
+
+use super::{quote_sql_identifier, Catalog, Result, SQLiteError};
+use crate::CatalogCacheRevisions;
+
+impl Catalog {
+    pub(super) fn install_cache_revision_tracking(conn: &rusqlite::Connection) -> Result<()> {
+        let tables = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND substr(name, 1, 1) = '_' AND name <> '_cache_revisions' ORDER BY name")?
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        for table in tables {
+            let columns = Self::table_columns(conn, &table)?.unwrap_or_default();
+            for (event, images) in [
+                ("INSERT", &["NEW"][..]),
+                ("DELETE", &["OLD"][..]),
+                ("UPDATE", &["OLD", "NEW"][..]),
+            ] {
+                let trigger = quote_sql_identifier(&format!("uqa_cache_{table}_{event}"));
+                let mut body = String::new();
+                for image in images {
+                    let (kind, name) =
+                        revision_scope(&table, columns.contains_key("table_name"), image);
+                    write!(body,
+                        "INSERT INTO _cache_revisions(kind, name, generation) VALUES ({kind}, {name}, 1) \
+                         ON CONFLICT(kind, name) DO UPDATE SET generation = generation + 1;"
+                    ).expect("writing a cache revision trigger to a String cannot fail");
+                }
+                conn.execute_batch(&format!(
+                    "CREATE TRIGGER IF NOT EXISTS {trigger} AFTER {event} ON {} BEGIN {body} END;",
+                    quote_sql_identifier(&table),
+                ))?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn cache_revisions(&self) -> Result<CatalogCacheRevisions> {
+        self.conn.with(|conn| {
+            let mut revisions = CatalogCacheRevisions {
+                storage_schema: u64::from(conn.pragma_query_value(
+                    None,
+                    "schema_version",
+                    |row| row.get::<_, u32>(0),
+                )?),
+                ..CatalogCacheRevisions::default()
+            };
+            let mut statement = conn.prepare_cached(
+                "SELECT kind, name, generation FROM _cache_revisions ORDER BY kind, name",
+            )?;
+            let mut rows = statement.query([])?;
+            while let Some(row) = rows.next()? {
+                let kind: String = row.get(0)?;
+                let name: String = row.get(1)?;
+                let generation = u64::try_from(row.get::<_, i64>(2)?)
+                    .map_err(|_| SQLiteError::StorageBackend("negative cache revision".into()))?;
+                match kind.as_str() {
+                    "catalog" => revisions.table_catalog = generation,
+                    "registry" => revisions.registries = generation,
+                    "data" => {
+                        revisions.table_data.insert(name, generation);
+                    }
+                    "statistics" => {
+                        revisions.column_statistics.insert(name, generation);
+                    }
+                    "maintenance" => {
+                        revisions.statistics_maintenance.insert(name, generation);
+                    }
+                    _ => {
+                        return Err(SQLiteError::StorageBackend(format!(
+                            "unknown cache revision kind `{kind}`"
+                        )))
+                    }
+                }
+            }
+            Ok(revisions)
+        })
+    }
+}
+
+fn revision_scope(table: &str, has_table_name: bool, image: &str) -> (String, String) {
+    match table {
+        "_tables" => ("'catalog'".into(), "''".into()),
+        "_column_stats" => ("'statistics'".into(), format!("{image}.table_name")),
+        "_metadata" => {
+            let key = format!("{image}.key");
+            let maintenance = "uqa.statistics.maintenance.v1:";
+            let next_id = "uqa.table_next_id.v1:";
+            (
+                format!("CASE WHEN substr({key}, 1, {}) = '{maintenance}' THEN 'maintenance' WHEN substr({key}, 1, {}) = '{next_id}' THEN 'data' ELSE 'registry' END", maintenance.len(), next_id.len()),
+                format!("CASE WHEN substr({key}, 1, {}) = '{maintenance}' THEN substr({key}, {}) WHEN substr({key}, 1, {}) = '{next_id}' THEN substr({key}, {}) ELSE '' END", maintenance.len(), maintenance.len() + 1, next_id.len(), next_id.len() + 1),
+            )
+        }
+        // These rows define access paths, not the data stored in those paths.
+        "_table_field_analyzers" | "_catalog_indexes" | "_btree_indexes" => {
+            ("'registry'".into(), "''".into())
+        }
+        _ if has_table_name => ("'data'".into(), format!("{image}.table_name")),
+        _ => ("'registry'".into(), "''".into()),
+    }
+}

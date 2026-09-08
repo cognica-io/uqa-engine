@@ -381,6 +381,7 @@ impl Engine {
     ) -> StorageBackendResult<Self> {
         let restore_catalog = Arc::clone(&storage_session.catalog);
         let restore_backend = Arc::clone(&storage_session.backend);
+        let cache_revisions_before = restore_catalog.cache_revisions()?;
         let mut engine = Self::empty_persistent_session(storage_session, provider);
         if initialize_catalog {
             restore_backend.migrate_document_storage()?;
@@ -434,7 +435,12 @@ impl Engine {
         // Initial catalog migrations and physical-index repairs above may
         // commit. Establish the backend monitor baseline only after every
         // one-time write has completed.
-        if let Some(version) = restore_backend.change_version()? {
+        let cache_revisions_after = restore_catalog.cache_revisions()?;
+        let stable_restore = cache_revisions_before == cache_revisions_after;
+        if stable_restore {
+            *engine.epochs.storage_cache_revisions.lock() = cache_revisions_after;
+        }
+        if let Some(version) = restore_backend.change_version()?.filter(|_| stable_restore) {
             engine
                 .epochs
                 .seen_storage_change_version

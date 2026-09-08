@@ -31,7 +31,7 @@ use super::catalog_lifecycle::{
 };
 
 /// Bump this every time a migration is added.
-pub const CURRENT_SCHEMA_VERSION: u32 = 43;
+pub const CURRENT_SCHEMA_VERSION: u32 = 44;
 
 const LEGACY_VIEWS_METADATA_KEY: &str = "sql_views_json";
 const LEGACY_SEQUENCES_METADATA_KEY: &str = "sql_sequences_json";
@@ -42,6 +42,7 @@ pub struct Catalog {
 }
 
 mod analyzers;
+mod cache_revisions;
 mod facade;
 mod foreign_indexes;
 mod graph;

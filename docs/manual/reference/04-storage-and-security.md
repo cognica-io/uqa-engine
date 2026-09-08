@@ -48,6 +48,14 @@ let engine = Engine::from_persistent_provider(provider)?;
 
 All sessions created from this engine share the provider and durable data while keeping SQL transaction and session state independent.
 
+## Cross-session cache refresh
+
+Sessions created with `Engine::new_session()` share immutable committed definitions and statistics while retaining independent statement gates, transactions, and physical storage handles. Reuse these sessions for independent database operations; cloning an `Arc<Engine>` still shares one SQL session and its statement gate.
+
+SQLite catalogs expose `CatalogFacade::cache_revisions()` as lightweight generations for table definitions, registries, table data, column statistics, and statistics-maintenance records. The counters are read from the same pinned transaction snapshot as the data and advance atomically with storage mutations, including direct catalog writes. Rollback and savepoint rollback restore both the mutation and its counters. A data-only commit refreshes only the affected table's physical caches; unchanged schemas and statistics remain shared. Statistics-only commits replace the affected statistics snapshot and reuse its decoded contents across readers. Unchanged snapshots do not reread the counter map.
+
+Custom providers can implement this optional method with the same transaction-visible contract. Returning `None` retains conservative full refresh; an empty `Some(CatalogCacheRevisions::default())` asserts that nothing has changed and is not a substitute for unsupported tracking. Revisions must not be recycled while cached snapshots can still exist. SQLite catalog version 44 installs durable revision tracking; older binaries must not reopen the upgraded database.
+
 ## SQLCipher
 
 `Engine::open_encrypted` uses the SQLCipher storage path. The key is required for every open and is not recoverable from the database. Operational rules are:

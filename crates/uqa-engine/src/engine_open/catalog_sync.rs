@@ -395,6 +395,9 @@ impl Engine {
             return Ok(());
         }
 
+        if self.refresh_tracked_storage_snapshot()? {
+            return Ok(());
+        }
         let _refresh = self.epochs.table_catalog.refresh.lock();
         let target_epoch = self
             .epochs
@@ -414,6 +417,7 @@ impl Engine {
     }
 
     pub(crate) fn reload_table_catalog_after_rollback(&self) -> StorageBackendResult<()> {
+        *self.epochs.storage_cache_revisions.lock() = None;
         self.clear_persistent_table_bindings_for_catalog_reload();
         let target_epoch = self
             .epochs
@@ -563,6 +567,9 @@ impl Engine {
             .load(std::sync::atomic::Ordering::Acquire)
             == target_epoch
         {
+            return Ok(());
+        }
+        if self.refresh_tracked_storage_snapshot()? {
             return Ok(());
         }
         let _refresh = self.epochs.catalog_registry.refresh.lock();

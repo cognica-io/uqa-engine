@@ -14,6 +14,7 @@ use super::{
     TableState, Value, VectorIndex, GRAPH_LABELS_METADATA_PREFIX, SQL_FUNCTION_DEPTH_LIMIT,
 };
 
+mod cache_refresh;
 mod catalog_sync;
 mod data_sync;
 mod graphs;

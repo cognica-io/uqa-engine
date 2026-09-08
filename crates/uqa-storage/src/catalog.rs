@@ -15,7 +15,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::backend::{StorageBackendError, StorageBackendResult};
 
+mod cache_revisions;
 mod schema;
+
+pub use cache_revisions::CatalogCacheRevisions;
 mod table;
 
 pub use schema::{SchemaAclEntry, SchemaPrivileges, SchemaRow};
@@ -599,6 +602,12 @@ pub fn sequence_value_reservation(
 
 /// Engine-facing catalog facade for persistent metadata.
 pub trait CatalogFacade: Send + Sync {
+    /// Read transactional cache generations without loading schemas or column
+    /// statistics. Providers without change tracking use conservative reloads.
+    fn cache_revisions(&self) -> StorageBackendResult<Option<CatalogCacheRevisions>> {
+        Ok(None)
+    }
+
     fn set_metadata(&self, key: &str, value: &str) -> StorageBackendResult<()>;
     fn get_metadata(&self, key: &str) -> StorageBackendResult<Option<String>>;
     fn fts_storage_was_reset(&self) -> bool {

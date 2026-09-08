@@ -18,6 +18,10 @@ fn into_storage_result<T>(result: Result<T>) -> StorageBackendResult<T> {
 }
 
 impl CatalogFacade for Catalog {
+    fn cache_revisions(&self) -> StorageBackendResult<Option<crate::CatalogCacheRevisions>> {
+        into_storage_result(Catalog::cache_revisions(self)).map(Some)
+    }
+
     fn set_metadata(&self, key: &str, value: &str) -> StorageBackendResult<()> {
         into_storage_result(Catalog::set_metadata(self, key, value))
     }

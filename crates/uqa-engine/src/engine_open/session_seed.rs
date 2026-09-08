@@ -37,6 +37,7 @@ impl Engine {
             return Ok(None);
         }
         let epochs = self.epochs.published_epochs();
+        let cache_revisions = self.epochs.storage_cache_revisions.lock().clone();
         let session = Self::empty_persistent_session(
             PersistentStorageSession::new(
                 Arc::clone(&storage.catalog),
@@ -70,6 +71,7 @@ impl Engine {
                 .seen_storage_change_version
                 .store(version, Ordering::Release);
         }
+        *session.epochs.storage_cache_revisions.lock() = cache_revisions;
         Ok(Some(session))
     }
 

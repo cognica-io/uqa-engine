@@ -72,7 +72,7 @@ impl Catalog {
         Ok(true)
     }
 
-    pub(super) fn table_columns(
+    pub(in crate::sqlite::catalog) fn table_columns(
         conn: &rusqlite::Connection,
         table_name: &str,
     ) -> Result<Option<std::collections::BTreeMap<String, String>>> {

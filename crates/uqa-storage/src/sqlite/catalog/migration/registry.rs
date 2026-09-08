@@ -93,8 +93,17 @@ impl Catalog {
                     tx.commit()?;
                 }
             }
-            Self::ensure_column_stats_shape(conn)?;
-            let fts_storage_was_reset = Self::ensure_fts_storage_shape(conn)?;
+            let repair = conn.savepoint()?;
+            let schema_before_repair: i64 =
+                repair.pragma_query_value(None, "schema_version", |row| row.get(0))?;
+            Self::ensure_column_stats_shape(&repair)?;
+            let fts_storage_was_reset = Self::ensure_fts_storage_shape(&repair)?;
+            let schema_after_repair: i64 =
+                repair.pragma_query_value(None, "schema_version", |row| row.get(0))?;
+            if schema_before_repair != schema_after_repair {
+                Self::install_cache_revision_tracking(&repair)?;
+            }
+            repair.commit()?;
             Ok(fts_storage_was_reset)
         })
     }

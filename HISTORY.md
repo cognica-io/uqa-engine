@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Reused unchanged SQLite table definitions, physical handles, and decoded statistics across data-only and automatic-statistics commits. Transactional, per-table cache revisions preserve snapshot and rollback visibility, refresh only changed dependencies, and share decoded committed statistics across independent sessions without a database-wide load lock. SQLite catalog version 44 installs durable invalidation tracking atomically.
 - Preserved staged document-ID reservations when deferred transaction snapshots refresh for key-lock rechecks or writer promotion after a concurrent statistics or catalog commit, preventing INSERT/COPY from reusing IDs and overwriting earlier rows in the same statement or transaction.
 - Replaced synchronous full-table statistics collection during persistent query planning with automatic database-level background maintenance. Committed-change thresholds and dirty-age scheduling use durable counters, preserve existing estimates during refresh, survive restart, and respect rollback. Bounded projected samples avoid unrelated BLOB payloads; explicit full refresh persists through the ANALYZE transaction path and histogram construction avoids redundant payload copies.
 - Shared immutable catalog registries and table definitions across statement snapshots and new sessions from a stable committed parent, while retaining independent physical storage handles, copy-on-write mutations, transaction isolation, and temporary-object visibility.
