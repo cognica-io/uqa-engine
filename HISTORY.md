@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserved staged document-ID reservations when deferred transaction snapshots refresh for key-lock rechecks or writer promotion after a concurrent statistics or catalog commit, preventing INSERT/COPY from reusing IDs and overwriting earlier rows in the same statement or transaction.
 - Replaced synchronous full-table statistics collection during persistent query planning with automatic database-level background maintenance. Committed-change thresholds and dirty-age scheduling use durable counters, preserve existing estimates during refresh, survive restart, and respect rollback. Bounded projected samples avoid unrelated BLOB payloads; explicit full refresh persists through the ANALYZE transaction path and histogram construction avoids redundant payload copies.
 - Shared immutable catalog registries and table definitions across statement snapshots and new sessions from a stable committed parent, while retaining independent physical storage handles, copy-on-write mutations, transaction isolation, and temporary-object visibility.
 - Pinned external catalog refresh to one read snapshot so concurrent commits cannot mix catalog generations or deadlock recursive rule/trigger validation during reopen.

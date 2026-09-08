@@ -90,3 +90,101 @@ fn explicit_analysis_supersedes_an_inflight_automatic_sample() {
         .publish_automatic_analysis("public.t", sampled)
         .unwrap());
 }
+
+#[test]
+fn statistics_commit_preserves_unpublished_document_id_reservations() {
+    for promote in [false, true] {
+        let (_directory, writer, worker) = sessions();
+        writer
+            .sql("CREATE TABLE entries (key TEXT PRIMARY KEY)", &[])
+            .unwrap();
+        writer.begin().unwrap();
+        let first = writer.allocate_next_id("entries").unwrap();
+        assert!(worker.run_automatic_analyze("public.t").unwrap());
+        if promote {
+            writer.prepare_explicit_transaction_writer().unwrap();
+        } else {
+            writer.refresh_explicit_statement_snapshot().unwrap();
+        }
+        let second = writer.allocate_next_id("entries").unwrap();
+        assert_eq!(
+            second,
+            first + 1,
+            "catalog refresh reused a reserved document ID (promote={promote})"
+        );
+        writer.rollback().unwrap();
+    }
+}
+
+#[test]
+fn copy_preserves_all_rows_when_statistics_commit_during_staging() {
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::Arc;
+
+    use uqa_core::Value;
+    use uqa_sql::SQLError;
+
+    let (directory, writer, worker) = sessions();
+    let worker = Arc::new(worker);
+    let maintenance = Arc::downgrade(&worker);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let invoked = Arc::clone(&calls);
+    writer
+        .register_scalar_function("maintain_statistics", move |_: &[Value]| {
+            if invoked.fetch_add(1, Ordering::AcqRel) == 1 {
+                assert!(maintenance
+                    .upgrade()
+                    .unwrap()
+                    .run_automatic_analyze("public.t")
+                    .unwrap());
+            }
+            Ok::<_, SQLError>(Value::Int(0))
+        })
+        .unwrap();
+    writer
+        .sql(
+            "CREATE TABLE entries (key TEXT PRIMARY KEY, marker INTEGER DEFAULT maintain_statistics())",
+            &[],
+        )
+        .unwrap();
+    writer.begin().unwrap();
+    for input in [b"first\nsecond\n".as_slice(), b"third\nfourth\n".as_slice()] {
+        assert_eq!(
+            writer
+                .copy_from("COPY entries (key) FROM STDIN", input)
+                .unwrap(),
+            2
+        );
+    }
+    writer.commit().unwrap();
+    assert_eq!(calls.load(Ordering::Acquire), 4);
+    let expected = ["first", "fourth", "second", "third"].map(|key| Value::Str(key.to_string()));
+    let rows = writer
+        .sql("SELECT key FROM entries ORDER BY key", &[])
+        .unwrap();
+    assert_eq!(
+        rows.rows
+            .iter()
+            .map(|row| row["key"].clone())
+            .collect::<Vec<_>>(),
+        expected
+    );
+    // The scheduling hook is process-local; persist only ordinary SQL defaults
+    // before testing the independent reopen boundary.
+    writer
+        .sql("ALTER TABLE entries ALTER COLUMN marker DROP DEFAULT", &[])
+        .unwrap();
+    drop(writer);
+    drop(worker);
+    let reopened = Engine::open(&directory.path().join("statistics.db")).unwrap();
+    let rows = reopened
+        .sql("SELECT key FROM entries ORDER BY key", &[])
+        .unwrap();
+    assert_eq!(
+        rows.rows
+            .iter()
+            .map(|row| row["key"].clone())
+            .collect::<Vec<_>>(),
+        expected
+    );
+}
