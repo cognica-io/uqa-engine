@@ -16,6 +16,9 @@ use std::collections::BTreeMap;
 pub struct CatalogCacheRevisions {
     pub table_catalog: u64,
     pub registries: u64,
+    /// Per-graph generations, separate from SQL registries. `None` preserves
+    /// conservative restoration for providers without graph-scoped tracking.
+    pub graphs: Option<BTreeMap<String, u64>>,
     pub table_data: BTreeMap<String, u64>,
     pub column_statistics: BTreeMap<String, u64>,
     pub statistics_maintenance: BTreeMap<String, u64>,

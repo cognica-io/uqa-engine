@@ -6,11 +6,18 @@
 
 //! Normalized global graph tables and lookup indexes.
 
-pub(super) const SQL: &str = r"
-    DROP TABLE IF EXISTS _graphs;
-    DROP TABLE IF EXISTS _graph_vertices;
-    DROP TABLE IF EXISTS _graph_edges;
+pub(super) fn migrate(tx: &rusqlite::Transaction<'_>) -> super::Result<()> {
+    tx.execute_batch(
+        "DROP TABLE IF EXISTS _graphs;
+         DROP TABLE IF EXISTS _graph_vertices;
+         DROP TABLE IF EXISTS _graph_edges;",
+    )?;
+    tx.execute_batch(CREATE_SQL)?;
+    Ok(())
+}
 
+/// Non-destructive schema installation, also used when upgrading relational-only catalogs.
+pub(super) const CREATE_SQL: &str = r"
     CREATE TABLE IF NOT EXISTS _named_graphs (
         name TEXT PRIMARY KEY
     );

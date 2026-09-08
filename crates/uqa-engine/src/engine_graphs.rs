@@ -226,7 +226,7 @@ impl Engine {
         let mut candidate = uqa_graph::MemoryGraphStore::new();
         candidate.create_graph(name);
         self.persist_graph_candidate(name, &candidate)?;
-        graphs.insert(name.to_string(), candidate);
+        graphs.insert(name.to_string(), std::sync::Arc::new(candidate));
         drop(graphs);
         self.note_catalog_registry_changed();
         Ok(true)
@@ -343,7 +343,7 @@ impl Engine {
                 "graph `{graph}` does not exist"
             )));
         };
-        let mut candidate = store.clone();
+        let mut candidate = store.as_ref().clone();
         let created = candidate
             .create_label(graph, label, kind)
             .map_err(graph_store_error)?
@@ -352,7 +352,7 @@ impl Engine {
             return Ok(false);
         }
         self.persist_graph_candidate(graph, &candidate)?;
-        graphs.insert(graph.to_string(), candidate);
+        graphs.insert(graph.to_string(), std::sync::Arc::new(candidate));
         drop(graphs);
         self.note_catalog_registry_changed();
         Ok(true)
@@ -399,7 +399,7 @@ impl Engine {
                 "graph `{graph}` does not exist"
             )));
         };
-        let mut candidate = store.clone();
+        let mut candidate = store.as_ref().clone();
         let dropped = candidate
             .drop_label(graph, label)
             .map_err(graph_store_error)?
@@ -408,7 +408,7 @@ impl Engine {
             return Ok(false);
         }
         self.persist_graph_candidate(graph, &candidate)?;
-        graphs.insert(graph.to_string(), candidate);
+        graphs.insert(graph.to_string(), std::sync::Arc::new(candidate));
         self.invalidate_graph_path_indexes(graph);
         drop(graphs);
         self.note_catalog_registry_changed();
@@ -436,7 +436,7 @@ impl Engine {
                 "graph `{to}` already exists"
             )));
         }
-        let mut candidate = store.clone();
+        let mut candidate = store.as_ref().clone();
         let labels = candidate.graph_labels(from).map_err(graph_store_error)?;
         candidate
             .rename_graph(from, to)
@@ -456,7 +456,7 @@ impl Engine {
             catalog.drop_named_graph_data(from)?;
         }
         graphs.remove(from);
-        graphs.insert(to.to_string(), candidate);
+        graphs.insert(to.to_string(), std::sync::Arc::new(candidate));
         self.invalidate_graph_path_indexes(from);
         drop(graphs);
         self.note_catalog_registry_changed();
@@ -482,7 +482,10 @@ impl Engine {
         use uqa_graph::GraphStore as _;
         self.synchronize_catalog_registries()?;
         let mut graphs = self.durable.graphs.write();
-        let mut candidate = graphs.get(graph).cloned().unwrap_or_default();
+        let mut candidate = graphs
+            .get(graph)
+            .map(|store| store.as_ref().clone())
+            .unwrap_or_default();
         if !candidate.has_graph(graph) {
             candidate.create_graph(graph);
         }
@@ -490,7 +493,7 @@ impl Engine {
             .add_vertex(vertex, graph)
             .map_err(graph_store_error)?;
         self.persist_graph_candidate(graph, &candidate)?;
-        graphs.insert(graph.to_string(), candidate);
+        graphs.insert(graph.to_string(), std::sync::Arc::new(candidate));
         self.invalidate_graph_path_indexes(graph);
         drop(graphs);
         self.note_catalog_registry_changed();
@@ -508,13 +511,16 @@ impl Engine {
         use uqa_graph::GraphStore as _;
         self.synchronize_catalog_registries()?;
         let mut graphs = self.durable.graphs.write();
-        let mut candidate = graphs.get(graph).cloned().unwrap_or_default();
+        let mut candidate = graphs
+            .get(graph)
+            .map(|store| store.as_ref().clone())
+            .unwrap_or_default();
         if !candidate.has_graph(graph) {
             candidate.create_graph(graph);
         }
         candidate.add_edge(edge, graph).map_err(graph_store_error)?;
         self.persist_graph_candidate(graph, &candidate)?;
-        graphs.insert(graph.to_string(), candidate);
+        graphs.insert(graph.to_string(), std::sync::Arc::new(candidate));
         self.invalidate_graph_path_indexes(graph);
         drop(graphs);
         self.note_catalog_registry_changed();
@@ -542,7 +548,10 @@ impl Engine {
         use uqa_graph::GraphStore as _;
         self.synchronize_catalog_registries()?;
         let mut graphs = self.durable.graphs.write();
-        let mut candidate = graphs.get(graph).cloned().unwrap_or_default();
+        let mut candidate = graphs
+            .get(graph)
+            .map(|store| store.as_ref().clone())
+            .unwrap_or_default();
         if !candidate.has_graph(graph) {
             candidate.create_graph(graph);
         }
@@ -556,7 +565,7 @@ impl Engine {
             .map_err(graph_store_error)?;
         }
         self.persist_graph_candidate(graph, &candidate)?;
-        graphs.insert(graph.to_string(), candidate);
+        graphs.insert(graph.to_string(), std::sync::Arc::new(candidate));
         self.invalidate_graph_path_indexes(graph);
         drop(graphs);
         self.note_catalog_registry_changed();
@@ -590,7 +599,8 @@ impl Engine {
             let Some(store) = graphs.get(graph) else {
                 return Ok(false);
             };
-            uqa_graph::PathIndex::build(store, graph, label_sequences).map_err(graph_store_error)?
+            uqa_graph::PathIndex::build(store.as_ref(), graph, label_sequences)
+                .map_err(graph_store_error)?
         };
         if let Some(catalog) = self.storage.catalog.as_ref() {
             let seq_json = serde_json::to_string(label_sequences)?;
@@ -651,7 +661,7 @@ impl Engine {
     ) -> StorageBackendResult<Option<R>> {
         self.synchronize_catalog_registries()?;
         let graphs = self.durable.graphs.read();
-        Ok(graphs.get(name).map(f))
+        Ok(graphs.get(name).map(|store| f(store)))
     }
 
     /// Mutable borrow of a named graph for vertex / edge insertion.
@@ -673,10 +683,10 @@ impl Engine {
         let Some(store) = graphs.get(name) else {
             return Ok(None);
         };
-        let mut candidate = store.clone();
+        let mut candidate = store.as_ref().clone();
         let result = f(&mut candidate).map_err(graph_store_error)?;
         self.persist_graph_candidate(name, &candidate)?;
-        graphs.insert(name.to_string(), candidate);
+        graphs.insert(name.to_string(), std::sync::Arc::new(candidate));
         self.invalidate_graph_path_indexes(name);
         drop(graphs);
         self.note_catalog_registry_changed();
@@ -725,7 +735,10 @@ impl Engine {
             .map_err(|err| uqa_graph::cypher::CypherError::Storage(err.to_string()))?;
         let mut graphs = self.durable.graphs.write();
         let existed = graphs.contains_key(graph);
-        let mut candidate = graphs.get(graph).cloned().unwrap_or_default();
+        let mut candidate = graphs
+            .get(graph)
+            .map(|store| store.as_ref().clone())
+            .unwrap_or_default();
         if !candidate.has_graph(graph) {
             candidate.create_graph(graph);
         }
@@ -759,7 +772,7 @@ impl Engine {
         if mutates || !existed {
             self.persist_graph_candidate(graph, &candidate)
                 .map_err(|err| uqa_graph::cypher::CypherError::Storage(err.to_string()))?;
-            graphs.insert(graph.to_string(), candidate);
+            graphs.insert(graph.to_string(), std::sync::Arc::new(candidate));
             self.invalidate_graph_path_indexes(graph);
             drop(graphs);
             self.note_catalog_registry_changed();

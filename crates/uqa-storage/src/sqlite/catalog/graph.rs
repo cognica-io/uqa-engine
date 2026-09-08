@@ -7,10 +7,68 @@
 //! Named graph entities, membership, and snapshot replacement.
 
 use super::{
-    decode_catalog_id, encode_catalog_id, params, Catalog, EdgeRow, GraphSnapshot, Result,
+    decode_catalog_id, encode_catalog_id, params, Catalog, EdgeRow, GraphSnapshot,
+    OptionalExtension, Result, SQLiteError,
 };
 
 impl Catalog {
+    /// Indexed, graph-scoped hydration. LEFT JOIN retains invalid memberships
+    /// so missing entities cannot silently disappear from a restored graph.
+    pub fn load_named_graph_snapshot(&self, name: &str) -> Result<Option<GraphSnapshot>> {
+        self.conn.with(|conn| {
+            let exists: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM _named_graphs WHERE name = ?1)",
+                [name], |row| row.get(0),
+            )?;
+            let mut stmt = conn.prepare_cached(
+                "SELECT m.entity_type, m.entity_id, v.vertex_id, v.label, v.properties_json, \
+                        e.edge_id, e.source_id, e.target_id, e.label, e.properties_json \
+                 FROM _graph_membership AS m \
+                 LEFT JOIN _graph_vertices AS v ON m.entity_type = 'vertex' AND v.vertex_id = m.entity_id \
+                 LEFT JOIN _graph_edges AS e ON m.entity_type = 'edge' AND e.edge_id = m.entity_id \
+                 WHERE m.graph_name = ?1 ORDER BY m.entity_type, m.entity_id",
+            )?;
+            let mut rows = stmt.query([name])?;
+            let mut snapshot = GraphSnapshot {
+                vertices: Vec::new(), edges: Vec::new(),
+                label_registry_json: conn.query_row(
+                    "SELECT value FROM _metadata WHERE key = ?1",
+                    [format!("graph_label_registry::{name}")], |row| row.get(0),
+                ).optional()?.unwrap_or_default(),
+            };
+            while let Some(row) = rows.next()? {
+                if !exists {
+                    return Err(SQLiteError::StorageBackend(format!("graph membership references unregistered graph `{name}`")));
+                }
+                let kind: String = row.get(0)?;
+                let id = decode_catalog_id("graph membership entity", row.get(1)?)?;
+                match kind.as_str() {
+                    "vertex" => {
+                        if row.get::<_, Option<i64>>(2)?.is_none() {
+                            return Err(SQLiteError::StorageBackend(format!("graph `{name}` references missing vertex {id}")));
+                        }
+                        snapshot.vertices.push(crate::GraphVertexRow {
+                            vertex_id: id, label: row.get(3)?, properties_json: row.get(4)?,
+                        });
+                    }
+                    "edge" => {
+                        if row.get::<_, Option<i64>>(5)?.is_none() {
+                            return Err(SQLiteError::StorageBackend(format!("graph `{name}` references missing edge {id}")));
+                        }
+                        snapshot.edges.push(EdgeRow {
+                            edge_id: id,
+                            source_id: decode_catalog_id("edge source vertex", row.get(6)?)?,
+                            target_id: decode_catalog_id("edge target vertex", row.get(7)?)?,
+                            label: row.get(8)?, properties_json: row.get(9)?,
+                        });
+                    }
+                    _ => return Err(SQLiteError::StorageBackend(format!("graph `{name}` has invalid membership type `{kind}`"))),
+                }
+            }
+            Ok(exists.then_some(snapshot))
+        })
+    }
+
     /// Register the existence of a named graph in the catalog.
     pub fn save_named_graph(&self, name: &str) -> Result<()> {
         self.conn.with(|c| {

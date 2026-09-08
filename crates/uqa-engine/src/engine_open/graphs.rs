@@ -7,13 +7,61 @@
 //! Graph entity, membership, and AGE label-registry restoration.
 
 use super::{BTreeMap, CatalogFacade, Engine, StorageBackendError, StorageBackendResult};
+use std::collections::BTreeSet;
+use std::sync::Arc;
 
 impl Engine {
     pub(super) fn restore_graphs_from_catalog(
         &self,
         catalog: &dyn CatalogFacade,
     ) -> StorageBackendResult<()> {
+        // Rollback recovery and load-only session construction can arrive
+        // without a backend transaction. A shared version must always pair
+        // its generation and contents from one pinned storage snapshot.
+        let owned_snapshot = self
+            .storage
+            .backend
+            .as_ref()
+            .filter(|backend| !backend.in_transaction());
+        if let Some(backend) = owned_snapshot {
+            backend.begin_read_transaction()?;
+        }
+        let result = self.restore_pinned_graphs_from_catalog(catalog);
+        let cleanup = owned_snapshot.map_or(Ok(()), |backend| backend.rollback_transaction());
+        match (result, cleanup) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+            (Err(error), Err(cleanup)) => Err(StorageBackendError::Other(format!(
+                "graph restoration failed: {error}; snapshot cleanup failed: {cleanup}"
+            ))),
+        }
+    }
+
+    fn restore_pinned_graphs_from_catalog(
+        &self,
+        catalog: &dyn CatalogFacade,
+    ) -> StorageBackendResult<()> {
         use uqa_graph::GraphStore as _;
+
+        if let Some(current) = catalog
+            .cache_revisions()?
+            .and_then(|revisions| revisions.graphs)
+        {
+            let previous = self.epochs.storage_cache_revisions.lock().clone();
+            self.refresh_graph_snapshots(
+                catalog,
+                previous
+                    .as_ref()
+                    .and_then(|revisions| revisions.graphs.as_ref()),
+                &current,
+            )?;
+            return Ok(());
+        }
+
+        // Providers without graph generations keep the full, validated load.
+        // Replace the outer allocation instead of copy-on-writing every graph
+        // just to immediately throw the copies away.
+        self.durable.graphs.restore(&Arc::new(BTreeMap::new()));
 
         // Step 1: register every named graph (the registry table is
         // authoritative for empty graphs).
@@ -23,7 +71,7 @@ impl Engine {
             graphs.entry(name.clone()).or_default();
             if let Some(store) = graphs.get_mut(name) {
                 if !store.has_graph(name) {
-                    store.create_graph(name);
+                    Arc::make_mut(store).create_graph(name);
                 }
             }
         }
@@ -42,7 +90,7 @@ impl Engine {
     }
 
     fn import_graph_label_registries(
-        graphs: &mut BTreeMap<String, uqa_graph::MemoryGraphStore>,
+        graphs: &mut BTreeMap<String, Arc<uqa_graph::MemoryGraphStore>>,
         catalog: &dyn CatalogFacade,
     ) -> StorageBackendResult<()> {
         for (graph_name, store) in graphs.iter_mut() {
@@ -50,7 +98,7 @@ impl Engine {
             if let Some(json) = catalog.get_metadata(&key)? {
                 if !json.is_empty() {
                     let registry = serde_json::from_str::<uqa_graph::GraphLabelRegistry>(&json)?;
-                    store.import_label_registry(graph_name, &registry);
+                    Arc::make_mut(store).import_label_registry(graph_name, &registry);
                 }
             }
         }
@@ -96,7 +144,7 @@ impl Engine {
     }
 
     fn restore_graph_memberships(
-        graphs: &mut BTreeMap<String, uqa_graph::MemoryGraphStore>,
+        graphs: &mut BTreeMap<String, Arc<uqa_graph::MemoryGraphStore>>,
         memberships: &[(String, u64, String)],
         vertex_by_id: &BTreeMap<u64, uqa_core::Vertex>,
         edge_by_id: &BTreeMap<u64, uqa_core::Edge>,
@@ -146,6 +194,7 @@ impl Engine {
                     "graph `{graph_name}` references missing vertex {entity_id}"
                 ))
             })?;
+            let store = Arc::make_mut(store);
             store
                 .insert_raw_vertex(vertex.clone())
                 .map_err(|error| StorageBackendError::Other(error.to_string()))?;
@@ -167,6 +216,7 @@ impl Engine {
                     "graph `{graph_name}` references missing edge {entity_id}"
                 ))
             })?;
+            let store = Arc::make_mut(store);
             store
                 .insert_raw_edge(edge.clone())
                 .map_err(|error| StorageBackendError::Other(error.to_string()))?;
@@ -178,7 +228,7 @@ impl Engine {
     }
 
     fn restore_graph_label_registries(
-        graphs: &mut BTreeMap<String, uqa_graph::MemoryGraphStore>,
+        graphs: &mut BTreeMap<String, Arc<uqa_graph::MemoryGraphStore>>,
     ) -> StorageBackendResult<()> {
         use uqa_graph::GraphStore as _;
 
@@ -192,8 +242,116 @@ impl Engine {
             store
                 .edges_in_graph(graph_name)
                 .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-            store.rebuild_label_registry_from_ids(graph_name);
+            Arc::make_mut(store).rebuild_label_registry_from_ids(graph_name);
         }
         Ok(())
+    }
+
+    pub(super) fn refresh_graph_snapshots(
+        &self,
+        catalog: &dyn CatalogFacade,
+        previous: Option<&BTreeMap<String, u64>>,
+        current: &BTreeMap<String, u64>,
+    ) -> StorageBackendResult<BTreeSet<String>> {
+        let changed = match previous {
+            Some(previous) => previous
+                .keys()
+                .chain(current.keys())
+                .filter(|name| previous.get(*name) != current.get(*name))
+                .cloned()
+                .collect(),
+            None => current
+                .keys()
+                .chain(self.durable.graphs.read().keys())
+                .cloned()
+                .collect::<BTreeSet<_>>(),
+        };
+        if changed.is_empty() {
+            return Ok(changed);
+        }
+        let private = self
+            .storage
+            .backend
+            .as_ref()
+            .map(|backend| backend.transaction_has_written())
+            .transpose()?
+            .unwrap_or(false);
+        // Load without holding the session's graph map. A failed load leaves
+        // the old immutable snapshot untouched and the generation unobserved.
+        let mut replacements = Vec::new();
+        for name in &changed {
+            let load = || Self::load_named_graph(catalog, name);
+            let graph = if private {
+                load()?.map(Arc::new)
+            } else {
+                self.row_locks.graph_snapshots.load(
+                    name,
+                    current.get(name).copied().unwrap_or_default(),
+                    load,
+                )?
+            };
+            replacements.push((name, graph));
+        }
+        let mut graphs = self.durable.graphs.write();
+        for (name, graph) in replacements {
+            if let Some(graph) = graph {
+                graphs.insert(name.clone(), graph);
+            } else {
+                graphs.remove(name);
+            }
+        }
+        Ok(changed)
+    }
+
+    fn load_named_graph(
+        catalog: &dyn CatalogFacade,
+        name: &str,
+    ) -> StorageBackendResult<Option<uqa_graph::MemoryGraphStore>> {
+        use uqa_graph::GraphStore as _;
+        let Some(snapshot) = catalog.load_named_graph_snapshot(name)? else {
+            return Ok(None);
+        };
+        let mut graph = uqa_graph::MemoryGraphStore::new();
+        graph.create_graph(name);
+        if !snapshot.label_registry_json.is_empty() {
+            graph
+                .import_label_registry(name, &serde_json::from_str(&snapshot.label_registry_json)?);
+        }
+        for vertex in snapshot.vertices {
+            let id = vertex.vertex_id;
+            graph
+                .insert_raw_vertex(uqa_core::Vertex {
+                    vertex_id: id,
+                    label: vertex.label,
+                    properties: serde_json::from_str(&vertex.properties_json)?,
+                })
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+            graph
+                .attach_vertex(id, name)
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+        }
+        for edge in snapshot.edges {
+            let id = edge.edge_id;
+            graph
+                .insert_raw_edge(uqa_core::Edge {
+                    edge_id: id,
+                    source_id: edge.source_id,
+                    target_id: edge.target_id,
+                    label: edge.label,
+                    properties: serde_json::from_str(&edge.properties_json)?,
+                })
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+            graph
+                .attach_edge(id, name)
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+        }
+        graph
+            .vertex_ids_in_graph(name)
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+        graph
+            .edges_in_graph(name)
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+        graph.rebuild_label_registry_from_ids(name);
+        Ok(Some(graph))
     }
 }

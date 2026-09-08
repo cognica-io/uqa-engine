@@ -82,6 +82,20 @@ impl Engine {
         }
         if registries_changed {
             self.reload_catalog_registries(registry_epoch)?;
+        } else if let Some(graphs) = current.graphs.as_ref() {
+            let changed = self.refresh_graph_snapshots(
+                catalog.as_ref(),
+                previous
+                    .as_ref()
+                    .and_then(|previous| previous.graphs.as_ref()),
+                graphs,
+            )?;
+            if !changed.is_empty() {
+                // Graph namespaces and AGE label relations also appear in
+                // regnamespace/regclass output, independently of SQL DDL.
+                self.clear_regtype_output_cache();
+            }
+            self.refresh_changed_graph_path_indexes(catalog.as_ref(), &changed)?;
         }
         // Generations become observed only after every dependent cache was
         // restored successfully. An error leaves the snapshot eligible to retry.

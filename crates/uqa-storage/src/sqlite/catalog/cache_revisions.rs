@@ -6,6 +6,7 @@
 
 //! Storage-owned, rollback-safe cache generations for every catalog session.
 
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use super::{quote_sql_identifier, Catalog, Result, SQLiteError};
@@ -27,12 +28,30 @@ impl Catalog {
                 let trigger = quote_sql_identifier(&format!("uqa_cache_{table}_{event}"));
                 let mut body = String::new();
                 for image in images {
-                    let (kind, name) =
-                        revision_scope(&table, columns.contains_key("table_name"), image);
-                    write!(body,
-                        "INSERT INTO _cache_revisions(kind, name, generation) VALUES ({kind}, {name}, 1) \
-                         ON CONFLICT(kind, name) DO UPDATE SET generation = generation + 1;"
-                    ).expect("writing a cache revision trigger to a String cannot fail");
+                    if matches!(table.as_str(), "_graph_vertices" | "_graph_edges") {
+                        let (entity_type, id) = if table == "_graph_vertices" {
+                            ("vertex", "vertex_id")
+                        } else {
+                            ("edge", "edge_id")
+                        };
+                        // A global entity can belong to several graphs. Its
+                        // property changes invalidate exactly those owners.
+                        write!(
+                            body,
+                            "INSERT INTO _cache_revisions(kind, name, generation) \
+                             SELECT 'graph', graph_name, 1 FROM _graph_membership \
+                             WHERE entity_type = '{entity_type}' AND entity_id = {image}.{id} \
+                             ON CONFLICT(kind, name) DO UPDATE SET generation = generation + 1;"
+                        )
+                        .expect("write graph revision trigger");
+                    } else {
+                        let (kind, name) =
+                            revision_scope(&table, columns.contains_key("table_name"), image);
+                        write!(body,
+                            "INSERT INTO _cache_revisions(kind, name, generation) VALUES ({kind}, {name}, 1) \
+                             ON CONFLICT(kind, name) DO UPDATE SET generation = generation + 1;"
+                        ).expect("writing a cache revision trigger to a String cannot fail");
+                    }
                 }
                 conn.execute_batch(&format!(
                     "CREATE TRIGGER IF NOT EXISTS {trigger} AFTER {event} ON {} BEGIN {body} END;",
@@ -46,6 +65,7 @@ impl Catalog {
     pub fn cache_revisions(&self) -> Result<CatalogCacheRevisions> {
         self.conn.with(|conn| {
             let mut revisions = CatalogCacheRevisions {
+                graphs: Some(BTreeMap::new()),
                 storage_schema: u64::from(conn.pragma_query_value(
                     None,
                     "schema_version",
@@ -65,6 +85,13 @@ impl Catalog {
                 match kind.as_str() {
                     "catalog" => revisions.table_catalog = generation,
                     "registry" => revisions.registries = generation,
+                    "graph" => {
+                        revisions
+                            .graphs
+                            .as_mut()
+                            .expect("graph tracking enabled")
+                            .insert(name, generation);
+                    }
                     "data" => {
                         revisions.table_data.insert(name, generation);
                     }
@@ -90,13 +117,16 @@ fn revision_scope(table: &str, has_table_name: bool, image: &str) -> (String, St
     match table {
         "_tables" => ("'catalog'".into(), "''".into()),
         "_column_stats" => ("'statistics'".into(), format!("{image}.table_name")),
+        "_named_graphs" => ("'graph'".into(), format!("{image}.name")),
+        "_graph_membership" => ("'graph'".into(), format!("{image}.graph_name")),
         "_metadata" => {
             let key = format!("{image}.key");
             let maintenance = "uqa.statistics.maintenance.v1:";
             let next_id = "uqa.table_next_id.v1:";
+            let graph_labels = "graph_label_registry::";
             (
-                format!("CASE WHEN substr({key}, 1, {}) = '{maintenance}' THEN 'maintenance' WHEN substr({key}, 1, {}) = '{next_id}' THEN 'data' ELSE 'registry' END", maintenance.len(), next_id.len()),
-                format!("CASE WHEN substr({key}, 1, {}) = '{maintenance}' THEN substr({key}, {}) WHEN substr({key}, 1, {}) = '{next_id}' THEN substr({key}, {}) ELSE '' END", maintenance.len(), maintenance.len() + 1, next_id.len(), next_id.len() + 1),
+                format!("CASE WHEN substr({key}, 1, {}) = '{maintenance}' THEN 'maintenance' WHEN substr({key}, 1, {}) = '{next_id}' THEN 'data' WHEN substr({key}, 1, {}) = '{graph_labels}' THEN 'graph' ELSE 'registry' END", maintenance.len(), next_id.len(), graph_labels.len()),
+                format!("CASE WHEN substr({key}, 1, {}) = '{maintenance}' THEN substr({key}, {}) WHEN substr({key}, 1, {}) = '{next_id}' THEN substr({key}, {}) WHEN substr({key}, 1, {}) = '{graph_labels}' THEN substr({key}, {}) ELSE '' END", maintenance.len(), maintenance.len() + 1, next_id.len(), next_id.len() + 1, graph_labels.len(), graph_labels.len() + 1),
             )
         }
         // These rows define access paths, not the data stored in those paths.

@@ -17,7 +17,9 @@ use super::{
 mod cache_refresh;
 mod catalog_sync;
 mod data_sync;
+mod graph_cache;
 mod graphs;
+pub(crate) use graph_cache::GraphSnapshots;
 mod lifecycle;
 mod registries;
 mod session_seed;

@@ -247,6 +247,10 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::load_named_graphs(self))
     }
 
+    fn load_named_graph_snapshot(&self, name: &str) -> StorageBackendResult<Option<GraphSnapshot>> {
+        into_storage_result(Catalog::load_named_graph_snapshot(self, name))
+    }
+
     fn save_vertex(
         &self,
         vertex_id: u64,

@@ -84,6 +84,7 @@ pub(crate) struct RowLockManager {
     cross: Option<CrossAttachment>,
     column_stats: RwLock<std::collections::BTreeMap<String, crate::ColumnStatsMap>>,
     pub(crate) statistics_snapshots: crate::engine_statistics::StatisticsSnapshots,
+    pub(crate) graph_snapshots: crate::engine_open::GraphSnapshots,
     pub(crate) automatic_statistics: crate::engine_statistics::AutomaticStatistics,
 }
 

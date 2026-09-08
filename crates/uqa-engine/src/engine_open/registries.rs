@@ -334,10 +334,43 @@ impl Engine {
                     "path index `{key}` references missing graph `{graph}`"
                 ))
             })?;
-            let idx = uqa_graph::PathIndex::build(store, graph, &label_sequences)
+            let idx = uqa_graph::PathIndex::build(store.as_ref(), graph, &label_sequences)
                 .map_err(|error| StorageBackendError::Other(error.to_string()))?;
             drop(graphs);
             self.durable.path_indexes.write().insert(key, idx);
+        }
+        Ok(())
+    }
+
+    pub(super) fn refresh_changed_graph_path_indexes(
+        &self,
+        catalog: &dyn CatalogFacade,
+        changed: &std::collections::BTreeSet<String>,
+    ) -> StorageBackendResult<()> {
+        if changed.is_empty() {
+            return Ok(());
+        }
+        self.durable.path_indexes.write().retain(|key, _| {
+            key.split_once("::")
+                .is_none_or(|(graph, _)| !changed.contains(graph))
+        });
+        for (key, json) in catalog.load_path_indexes()? {
+            let Some((graph, _)) = key.split_once("::") else {
+                continue;
+            };
+            if !changed.contains(graph) {
+                continue;
+            }
+            let sequences: Vec<Vec<String>> = serde_json::from_str(&json)?;
+            let graphs = self.durable.graphs.read();
+            let store = graphs.get(graph).ok_or_else(|| {
+                StorageBackendError::Other(format!(
+                    "path index `{key}` references missing graph `{graph}`"
+                ))
+            })?;
+            let index = uqa_graph::PathIndex::build(store.as_ref(), graph, &sequences)
+                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+            self.durable.path_indexes.write().insert(key, index);
         }
         Ok(())
     }

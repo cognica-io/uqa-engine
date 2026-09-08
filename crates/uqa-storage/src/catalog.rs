@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use crate::backend::{StorageBackendError, StorageBackendResult};
 
 mod cache_revisions;
+mod graph_snapshot;
 mod schema;
 
 pub use cache_revisions::CatalogCacheRevisions;
@@ -725,6 +726,12 @@ pub trait CatalogFacade: Send + Sync {
     fn save_named_graph(&self, name: &str) -> StorageBackendResult<()>;
     fn drop_named_graph(&self, name: &str) -> StorageBackendResult<()>;
     fn load_named_graphs(&self) -> StorageBackendResult<Vec<String>>;
+    /// Load only the entities and label metadata owned by one named graph.
+    /// The caller pins the storage transaction. The default implementation
+    /// preserves compatibility with providers exposing only bulk graph reads.
+    fn load_named_graph_snapshot(&self, name: &str) -> StorageBackendResult<Option<GraphSnapshot>> {
+        graph_snapshot::load(self, name)
+    }
     fn save_vertex(
         &self,
         vertex_id: u64,

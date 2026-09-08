@@ -243,7 +243,7 @@ impl StoredView {
 }
 
 pub(super) struct DurableCatalogState {
-    pub(super) graphs: CatalogCell<BTreeMap<String, uqa_graph::MemoryGraphStore>>,
+    pub(super) graphs: CatalogCell<BTreeMap<String, Arc<uqa_graph::MemoryGraphStore>>>,
     pub(super) models: CatalogCell<BTreeMap<String, DeepModel>>,
     pub(super) scoring_params: CatalogCell<BTreeMap<String, String>>,
     pub(super) views: CatalogCell<BTreeMap<RelationIdentity, StoredView>>,
@@ -282,7 +282,7 @@ pub(super) struct DurableCatalogState {
 
 #[derive(Clone)]
 pub(super) struct DurableCatalogSnapshot {
-    pub(super) graphs: Arc<BTreeMap<String, uqa_graph::MemoryGraphStore>>,
+    pub(super) graphs: Arc<BTreeMap<String, Arc<uqa_graph::MemoryGraphStore>>>,
     pub(super) models: Arc<BTreeMap<String, DeepModel>>,
     pub(super) scoring_params: Arc<BTreeMap<String, String>>,
     pub(super) views: Arc<BTreeMap<RelationIdentity, StoredView>>,

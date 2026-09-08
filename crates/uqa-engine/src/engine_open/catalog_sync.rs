@@ -628,7 +628,6 @@ impl Engine {
             .filter(|(_, view)| view.persistence == uqa_sql::ast::RelationPersistence::Temporary)
             .map(|(relation, view)| (relation.clone(), view.clone()))
             .collect::<BTreeMap<_, _>>();
-        self.durable.graphs.write().clear();
         *self.durable.views.write() = temporary_views;
         self.clear_persistent_table_bindings_for_catalog_reload();
         self.durable.schemas.write().clear();
