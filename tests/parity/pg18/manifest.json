@@ -37,14 +37,16 @@
     "sequence_introspection": "tests/parity/pg18/sequence_introspection_oracle.expected.txt",
     "transaction_catalog_visibility": "tests/parity/pg18/transaction_catalog_visibility_oracle.expected.txt",
     "tpch_fixture": "benchmarks/tpch/expected/pg18.json",
-    "stateful_indexes": "tests/parity/pg18/indexes_stateful.expected.json"
+    "stateful_indexes": "tests/parity/pg18/indexes_stateful.expected.json",
+    "domain_semantics": "tests/parity/pg18/domains_oracle.expected.json",
+    "wire_result_descriptors": "tests/parity/pg18/wire_result_oracle.expected.json"
   },
   "parser_chain": {
     "crate": "crates/uqa-pg-query",
     "wrapper_repository": "https://github.com/jaepil/pg_query.rs",
-    "wrapper_revision": "516b3a03fed42e606ce01bc8b5a864a1698c210d",
+    "wrapper_revision": "50329932e504c8ad96208a3bbafdec7d9fdaf81d",
     "library_repository": "https://github.com/jaepil/libpg_query",
-    "library_revision": "898cd71c96375d6d4219916996701571dbe2b239"
+    "library_revision": "a5356d05a1269f2982b906611d7e545c550bb369"
   },
   "milestones": {
     "M0": {
@@ -136,7 +138,8 @@
       "routines.alter-volatility-null-input-lifecycle",
       "routines.function-procedure-drop-cascade",
       "routines.function-procedure-drop-cascade-extended",
-      "ddl.check-constraint-inheritance"
+      "ddl.check-constraint-inheritance",
+      "types.domain-declarations-and-coercion"
     ],
     "M4": [
       "dml.returning-row-images-extended",
@@ -852,11 +855,19 @@
     },
     {
       "id": "protocol.simple-query-command-completion",
-      "postgresql_reference": "tests/parity/pg18/command_completion_oracle.expected.json; https://www.postgresql.org/docs/18/protocol-flow.html#PROTOCOL-FLOW-SIMPLE-QUERY",
-      "uqa_test": "crates/uqa-engine/tests/engine_queries/sql_simple_query.rs",
-      "supported_version": "PostgreSQL 18.4",
+      "postgresql_reference": "tests/parity/pg18/command_completion_oracle.expected.json; https://www.postgresql.org/docs/18/protocol-flow.html#PROTOCOL-FLOW-SIMPLE-QUERY; tests/parity/pg18/wire_result_oracle.expected.json",
+      "uqa_test": "crates/uqa-engine/tests/engine_queries/sql_simple_query.rs; cargo test -p uqa-pg-server --test integration",
+      "supported_version": "PostgreSQL 18.4 embedded command completion and TCP Simple Query sessions with explicit trust policy, role authorization, protocol negotiation, typed text results, cancellation, notifications, and disconnect rollback",
       "status": "partial",
-      "open_issue": "The 105-message PostgreSQL 18.4 command-completion oracle passes on memory and SQLite, with separate callback, durable-commit, deferred-constraint, and transaction-recovery tests. Integrate the API with the real SQL server and run the unmodified upstream and client suites."
+      "open_issue": "The 105-message embedded command-completion oracle and 21-case wire result fixture pass. Run the unmodified upstream corpus and complete client matrix against the real server; Extended Query execution, COPY streaming, binary output, result origin identities, credential authentication, TLS, and multiple databases still require implementation and verification."
+    },
+    {
+      "id": "types.domain-declarations-and-coercion",
+      "postgresql_reference": "tests/parity/pg18/domains_oracle.expected.json; PostgreSQL 18.4 CREATE DOMAIN, type conversion, PL/pgSQL declarations, and trigger semantics",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_queries::sql_domains; cargo test -p uqa-engine --test integration sql_temporal_types",
+      "supported_version": "145 PostgreSQL 18.4 comparisons on memory and SQLite covering domain declarations, defaults, nested constraints, arrays, catalog identities and owners, assignment and cast semantics, quoted names, typed routine arguments and locals, record fields, trigger returns, implicit coercion effects, transactions, and persistence; temporal precision and interval modifiers retain their declared metadata",
+      "status": "partial",
+      "open_issue": "Complete domain lifecycle DDL, privileges, dependencies, constraint and catalog metadata, collation support, and the unmodified upstream domain matrix still require implementation and verification."
     }
   ]
 }
