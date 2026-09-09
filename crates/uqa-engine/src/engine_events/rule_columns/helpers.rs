@@ -188,5 +188,5 @@ pub(super) fn is_default_values_insert(rows: &[Vec<Expr>]) -> bool {
 }
 
 pub(super) fn same_identifier(left: &str, right: &str) -> bool {
-    left == right || left.eq_ignore_ascii_case(right)
+    left == right
 }

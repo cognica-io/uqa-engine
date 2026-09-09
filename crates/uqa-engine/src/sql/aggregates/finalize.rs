@@ -431,7 +431,9 @@ pub(in crate::sql) fn projection_label_at(proj: &ProjectionPlan) -> String {
         ScalarExpr::Column(c) => c.clone(),
         ScalarExpr::QualifiedColumn { column, .. } => column.clone(),
         ScalarExpr::Star | ScalarExpr::QualifiedStar(_) => "*".into(),
-        ScalarExpr::Func { name, .. } => name.clone(),
+        ScalarExpr::Func { name, .. } => uqa_sql::parse_regobject_name(name)
+            .and_then(|mut names| names.pop())
+            .unwrap_or_else(|| name.clone()),
         _ => "?column?".into(),
     }
 }

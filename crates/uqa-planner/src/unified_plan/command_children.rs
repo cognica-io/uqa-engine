@@ -30,7 +30,7 @@ impl CommandPlan {
         }
     }
 
-    /// Query children evaluated in the command's WITH scope. Source-plan subqueries are owned by `source_input`.
+    /// Query children evaluated in the command's WITH scope, including every `scalar_subqueries` entry. Source-plan subqueries are owned by `source_input`; visitors should not traverse `scalar_subqueries` separately.
     pub fn query_inputs(&self) -> Vec<&QueryPlan> {
         match self {
             Self::Insert(plan) => plan

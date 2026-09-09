@@ -189,6 +189,8 @@ A top-level `WITH name [(column, ...)] AS (statement)` definition accepts `INSER
 
 Every data-modifying CTE executes once and to completion, even if the main query never reads it, requests no rows, or uses `NOT MATERIALIZED`. The commands and main query read the same statement snapshot; a sibling's writes become available through its `RETURNING` output. A later SQL statement sees the committed changes. An error rolls back the statement's changes and follows the surrounding transaction's failure rules.
 
+MERGE retains its WITH scope in source queries, matched and target-only conditions, correlated assignments, and RETURNING, including automatically updatable views and SQL-standard routine bodies. Statement-level BEFORE triggers run before source evaluation; rows inserted by those triggers do not enter the current MERGE matching snapshot. MERGE action and RETURNING expressions are analyzed before statement-trigger execution.
+
 Data-modifying CTEs must belong to the top-level statement. They cannot appear inside another CTE or a subquery, recursively reference their own output, or be stored in a view, materialized view, or declared cursor. `CREATE TABLE AS` can consume their results. A target with `DO ALSO`, conditional `DO INSTEAD`, `DO INSTEAD NOTHING`, or multiple-statement `DO INSTEAD` rewrite rules is rejected.
 
 ```sql execute

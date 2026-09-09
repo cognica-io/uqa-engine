@@ -42,7 +42,7 @@ pub(super) fn run_merge_inner_with_ctes(
     if let Some(result) = super::execute_view_merge(engine, stmt, params, inherited_ctes)? {
         return Ok(result);
     }
-    privileges::ensure_merge_privileges(engine, stmt)?;
+    privileges::ensure_merge_privileges(engine, stmt, inherited_ctes)?;
     let _transition_capture_scope = crate::sql::triggers::TransitionCaptureScope::enter();
     let target_table = stmt.target.clone();
     engine.lock_relation(
@@ -71,17 +71,19 @@ pub(super) fn run_merge_inner_with_ctes(
     }
     let target_qual = stmt.target_qualifier.clone();
     let target_tables = engine.hierarchy_scan_tables(&target_table, stmt.include_descendants)?;
+    let statement_events = super::statement_events::MergeStatementEvents::from_plan(stmt);
     let mut ctes = CteScope::new_for_statement(engine, stmt.statement_privilege_subject.as_deref());
     if let Some(parent) = inherited_ctes {
         ctes.inherit_cte_bindings(parent);
     }
-    if ctes.command_cte_snapshot().is_none() && stmt.ctes.iter().any(|cte| cte.body.modifies_data())
+    if ctes.command_cte_snapshot().is_none()
+        && (stmt.ctes.iter().any(|cte| cte.body.modifies_data())
+            || statement_events.has_before_statement_trigger(engine, &target_table)?)
     {
         ctes.set_command_cte_snapshot(Some(std::sync::Arc::new(
             engine.capture_statement_read_snapshot()?,
         )));
     }
-    crate::sql::select::materialize_plan_ctes(engine, &stmt.ctes, params, &mut ctes)?;
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
     for clause in &stmt.when_clauses {
         match clause {
@@ -105,82 +107,38 @@ pub(super) fn run_merge_inner_with_ctes(
             _ => {}
         }
     }
-    let has_insert_action = stmt
-        .when_clauses
-        .iter()
-        .any(|clause| matches!(clause, MergeWhenPlan::InsertNotMatched { .. }));
-    let has_update_action = stmt.when_clauses.iter().any(|clause| {
-        matches!(
-            clause,
-            MergeWhenPlan::UpdateMatched { .. } | MergeWhenPlan::UpdateNotMatchedBySource { .. }
-        )
-    });
-    let has_delete_action = stmt.when_clauses.iter().any(|clause| {
-        matches!(
-            clause,
-            MergeWhenPlan::DeleteMatched { .. } | MergeWhenPlan::DeleteNotMatchedBySource { .. }
-        )
-    });
-    let update_statement_columns = stmt
-        .when_clauses
-        .iter()
-        .filter_map(|clause| match clause {
-            MergeWhenPlan::UpdateMatched { assignments, .. }
-            | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => Some(assignments),
-            _ => None,
-        })
-        .flatten()
-        .map(|assignment| assignment.column.clone())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
     let statement_snapshot = ctes.command_cte_snapshot();
     let snapshot_engine = statement_snapshot
         .as_deref()
         .map(|snapshot| engine.statement_read_snapshot_engine(snapshot));
     let read_engine = snapshot_engine.as_ref().unwrap_or(engine);
-    let source_rows = build_join_spill_with_ctes(read_engine, &stmt.source, params, &mut ctes)?;
+    let analysis_scope = super::merge_analysis_scope(engine, stmt, inherited_ctes);
+    let source_schema = crate::sql::select::analyze_source_plan_schema(
+        read_engine,
+        &stmt.source,
+        params,
+        &analysis_scope,
+        None,
+    )?;
     let returning_source_relation = uqa_sql::ast::InternalRelationId::allocate();
     validate_returning_alias_relations(
         &target_qual,
         &stmt.returning_aliases,
-        Some(source_rows.row_schema()),
+        Some(&source_schema),
     )?;
     let null_target_row = dml_null_target_row(engine, &target_table, &target_qual)?;
     validate_merge_action_scopes(
         engine,
         stmt,
         &null_target_row.schema,
-        source_rows.row_schema(),
+        &source_schema,
         params,
+        &analysis_scope,
     )?;
-    for (enabled, event, columns) in [
-        (
-            has_insert_action,
-            uqa_sql::ast::TriggerEvent::Insert,
-            &[][..],
-        ),
-        (
-            has_update_action,
-            uqa_sql::ast::TriggerEvent::Update,
-            update_statement_columns.as_slice(),
-        ),
-        (
-            has_delete_action,
-            uqa_sql::ast::TriggerEvent::Delete,
-            &[][..],
-        ),
-    ] {
-        if enabled {
-            crate::sql::triggers::fire_statement_triggers(
-                engine,
-                &target_table,
-                uqa_sql::ast::TriggerTiming::Before,
-                event,
-                columns,
-            )?;
-        }
-    }
+    super::merge_returning_schema(engine, stmt, params, &source_schema, &analysis_scope)?;
+    statement_events.fire_before(engine, &target_table)?;
+    crate::sql::select::materialize_plan_ctes(engine, &stmt.ctes, params, &mut ctes)?;
+    let source_rows = build_join_spill_with_ctes(read_engine, &stmt.source, params, &mut ctes)?;
     let mut affected = 0_u64;
     let mut returning_rows = Vec::new();
 
@@ -868,7 +826,7 @@ pub(super) fn run_merge_inner_with_ctes(
         super::super::publish_prepared_mutation_action(engine, action, false, &mut publication)?;
     }
     finish_mutation_publication(engine, &mut publication)?;
-    let delete_transition = if has_delete_action {
+    let delete_transition = if statement_events.delete {
         crate::sql::triggers::build_transition_tables(
             engine,
             &target_table,
@@ -879,18 +837,18 @@ pub(super) fn run_merge_inner_with_ctes(
     } else {
         Vec::new()
     };
-    let update_transition = if has_update_action {
+    let update_transition = if statement_events.update {
         crate::sql::triggers::build_transition_tables(
             engine,
             &target_table,
             uqa_sql::ast::TriggerEvent::Update,
-            &update_statement_columns,
+            &statement_events.updated_columns,
             events.after_rows(),
         )?
     } else {
         Vec::new()
     };
-    let insert_transition = if has_insert_action {
+    let insert_transition = if statement_events.insert {
         crate::sql::triggers::build_transition_tables(
             engine,
             &target_table,
@@ -909,9 +867,9 @@ pub(super) fn run_merge_inner_with_ctes(
         .collect::<Vec<_>>();
     transition_tables.extend(referential_transition.iter());
     let root_events = [
-        (has_delete_action, uqa_sql::ast::TriggerEvent::Delete),
-        (has_update_action, uqa_sql::ast::TriggerEvent::Update),
-        (has_insert_action, uqa_sql::ast::TriggerEvent::Insert),
+        (statement_events.delete, uqa_sql::ast::TriggerEvent::Delete),
+        (statement_events.update, uqa_sql::ast::TriggerEvent::Update),
+        (statement_events.insert, uqa_sql::ast::TriggerEvent::Insert),
     ]
     .into_iter()
     .filter_map(|(enabled, event)| enabled.then_some(event))
@@ -932,17 +890,17 @@ pub(super) fn run_merge_inner_with_ctes(
         )?;
         for (enabled, event, columns) in [
             (
-                has_delete_action,
+                statement_events.delete,
                 uqa_sql::ast::TriggerEvent::Delete,
                 &[][..],
             ),
             (
-                has_update_action,
+                statement_events.update,
                 uqa_sql::ast::TriggerEvent::Update,
-                update_statement_columns.as_slice(),
+                statement_events.updated_columns.as_slice(),
             ),
             (
-                has_insert_action,
+                statement_events.insert,
                 uqa_sql::ast::TriggerEvent::Insert,
                 &[][..],
             ),

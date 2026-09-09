@@ -29,6 +29,7 @@ use super::{
 
 mod codec;
 mod returning;
+pub(super) mod statement_events;
 
 use codec::{
     decode_merge_pair, decode_prepared_mutation_action_row, encode_merge_pair, merge_pair_schema,
@@ -52,8 +53,7 @@ pub(in crate::sql) fn merge_command_returning_schema(
     if stmt.returning.is_empty() {
         return Ok(None);
     }
-    let mut ctes = CteScope::new_for_statement(engine, stmt.statement_privilege_subject.as_deref());
-    ctes.scalar_subqueries.clone_from(&stmt.subqueries);
+    let ctes = merge_analysis_scope(engine, stmt, None);
     let source_schema =
         crate::sql::select::analyze_source_plan_schema(engine, &stmt.source, params, &ctes, None)?;
     validate_returning_alias_relations(
@@ -62,18 +62,31 @@ pub(in crate::sql) fn merge_command_returning_schema(
         Some(&source_schema),
     )?;
     let target = dml_null_target_row(engine, &stmt.target, &stmt.target_qualifier)?;
-    validate_merge_action_scopes(engine, stmt, &target.schema, &source_schema, params)?;
+    validate_merge_action_scopes(engine, stmt, &target.schema, &source_schema, params, &ctes)?;
+    merge_returning_schema(engine, stmt, params, &source_schema, &ctes)
+}
+
+fn merge_returning_schema(
+    engine: &Engine,
+    stmt: &MergePlan,
+    params: &[SQLParam],
+    source_schema: &uqa_execution::RowSchema,
+    ctes: &CteScope,
+) -> Result<Option<uqa_execution::RowSchema>, SQLError> {
+    if stmt.returning.is_empty() {
+        return Ok(None);
+    }
     let source_relation = uqa_sql::ast::InternalRelationId::allocate();
     let projections = expanded_merge_returning_projections(
         engine,
         &stmt.target,
         &stmt.target_qualifier,
         &stmt.returning_aliases,
-        &source_schema,
+        source_schema,
         source_relation,
         &stmt.returning,
     )?;
-    let returning_source_schema = merge_returning_source_schema(&source_schema, source_relation);
+    let returning_source_schema = merge_returning_source_schema(source_schema, source_relation);
     let star_schema = returning_target_schema(engine, &stmt.target)?;
     let expression_schema = returning_expression_schema(
         &star_schema,
@@ -88,7 +101,7 @@ pub(in crate::sql) fn merge_command_returning_schema(
         &star_schema,
         &stmt.subqueries,
         params,
-        &ctes,
+        ctes,
     )
     .map(Some)
 }
@@ -147,12 +160,11 @@ fn execute_view_merge(
     Ok(None)
 }
 
-fn validate_view_merge_dispatch_contract(
+fn merge_analysis_scope(
     engine: &Engine,
     stmt: &MergePlan,
-    params: &[SQLParam],
     inherited_ctes: Option<&CteScope>,
-) -> Result<(), SQLError> {
+) -> CteScope {
     let mut scope =
         CteScope::new_for_statement(engine, stmt.statement_privilege_subject.as_deref());
     if let Some(parent) = inherited_ctes {
@@ -162,6 +174,16 @@ fn validate_view_merge_dispatch_contract(
         scope.insert_deferred(cte.clone());
     }
     scope.scalar_subqueries.clone_from(&stmt.subqueries);
+    scope
+}
+
+fn validate_view_merge_dispatch_contract(
+    engine: &Engine,
+    stmt: &MergePlan,
+    params: &[SQLParam],
+    inherited_ctes: Option<&CteScope>,
+) -> Result<(), SQLError> {
+    let scope = merge_analysis_scope(engine, stmt, inherited_ctes);
     let source =
         crate::sql::select::analyze_source_plan_schema(engine, &stmt.source, params, &scope, None)?;
     super::view_automatic::validate_public_merge_targets(engine, stmt)?;
@@ -212,12 +234,25 @@ pub(in crate::sql) fn validate_merge_action_scopes(
     target_schema: &uqa_execution::RowSchema,
     source_schema: &uqa_execution::RowSchema,
     params: &[SQLParam],
+    ctes: &CteScope,
 ) -> Result<(), SQLError> {
     let matched_schema =
         uqa_execution::RowSchema::join(target_schema, source_schema, std::iter::empty());
     let expression_type = |expression: &uqa_execution::ScalarExpr,
                            schema: &uqa_execution::RowSchema| {
-        uqa_execution::scalar_type_with_resolver(expression, schema, params, engine)
+        crate::sql::select::analyze_projection_output_schema(
+            engine,
+            &[ProjectionPlan {
+                expr: expression.clone(),
+                alias: None,
+            }],
+            schema,
+            schema,
+            &stmt.subqueries,
+            params,
+            ctes,
+        )
+        .map(|output| output.column_type(0).cloned())
     };
     let validate_boolean = |expression: &uqa_execution::ScalarExpr,
                             schema: &uqa_execution::RowSchema,

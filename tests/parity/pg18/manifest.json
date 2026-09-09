@@ -844,11 +844,11 @@
     },
     {
       "id": "query.data-modifying-ctes",
-      "postgresql_reference": "tests/parity/pg18/cte_commands_oracle.expected.json; https://www.postgresql.org/docs/18/queries-with.html#QUERIES-WITH-MODIFYING",
+      "postgresql_reference": "tests/parity/pg18/cte_commands_oracle.expected.json; tests/parity/pg18/cte_command_composition_oracle.expected.json; https://www.postgresql.org/docs/18/queries-with.html#QUERIES-WITH-MODIFYING",
       "uqa_test": "crates/uqa-engine/tests/engine_queries/sql_cte_commands.rs",
       "supported_version": "PostgreSQL 18.4",
       "status": "partial",
-      "open_issue": "The 98-statement PostgreSQL 18.4 oracle passes on memory and SQLite for typed RETURNING, unreferenced and exactly-once execution, sibling snapshot visibility, recursive query inputs, automatic and trigger-driven views, rewrite-rule restrictions, rollback, and SQL-standard routine dependencies. A separate SQLite test verifies routine binding across reopen and relation rename. Complete the unmodified upstream WITH and MERGE corpus and remaining dependency combinations before closing this item."
+      "open_issue": "The 98-statement PostgreSQL 18.4 oracle passes on memory and SQLite for typed RETURNING, unreferenced and exactly-once execution, sibling snapshot visibility, recursive query inputs, automatic and trigger-driven views, rewrite-rule restrictions, rollback, and SQL-standard routine dependencies. A further 56-statement composition oracle verifies MERGE view and privilege scopes, statement-trigger timing and snapshots, validation before effects, stored routine binding, quoted rule columns, and qualified function output labels. Separate SQLite tests verify UPDATE and MERGE routine binding across reopen and relation rename. Complete the unmodified upstream WITH and MERGE corpus and remaining dependency combinations before closing this item."
     },
     {
       "id": "protocol.simple-query-command-completion",

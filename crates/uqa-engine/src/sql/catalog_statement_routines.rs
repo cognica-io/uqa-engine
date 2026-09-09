@@ -100,6 +100,9 @@ pub(crate) fn mark_catalog_statement_relations_bound(
             }
             CommandPlan::Notify { .. } => {}
             CommandPlan::Merge(plan) => {
+                for cte in &mut plan.ctes {
+                    mark_cte_relations_bound(&mut cte.body);
+                }
                 mark_source_relations_bound(&mut plan.source);
                 for subquery in &mut plan.subqueries {
                     mark_query_relations_bound(subquery);
@@ -236,7 +239,7 @@ fn merge_statement_routine_inputs(plan: &MergePlan) -> CommandRoutineInputs {
             .map(|projection| projection.expr.clone()),
     );
     CommandRoutineInputs {
-        ctes: Vec::new(),
+        ctes: plan.ctes.clone(),
         source: Some(source),
         expressions,
         subqueries: plan.subqueries.clone(),
@@ -722,6 +725,10 @@ fn collect_cte_routine_references(
         uqa_planner::CtePlanBody::Command(command) => {
             for cte in command.ctes() {
                 collect_cte_routine_references(&cte.body, references)?;
+                if let Some(cycle) = &cte.cycle {
+                    collect_scalar_routine_references(&cycle.mark_value, &[], references)?;
+                    collect_scalar_routine_references(&cycle.mark_default, &[], references)?;
+                }
             }
             for query in command.query_inputs() {
                 collect_query_routine_references(query, references)?;

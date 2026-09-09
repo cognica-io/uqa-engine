@@ -11,10 +11,14 @@ use uqa_engine::Engine;
 use uqa_sql::ColumnType;
 
 fn verify_command_cte_oracle(engine: &Engine) {
-    let oracle: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../../tests/parity/pg18/cte_commands_oracle.expected.json"
-    ))
-    .unwrap();
+    verify_oracle(
+        engine,
+        include_str!("../../../../tests/parity/pg18/cte_commands_oracle.expected.json"),
+    );
+}
+
+fn verify_oracle(engine: &Engine, input: &str) {
+    let oracle: serde_json::Value = serde_json::from_str(input).unwrap();
     assert!(oracle["postgresql_version"]
         .as_str()
         .unwrap()
@@ -62,6 +66,7 @@ fn verify_command_cte_oracle(engine: &Engine) {
                 .column_types
                 .iter()
                 .map(|ty| match ty {
+                    Some(ColumnType::Boolean) => 16,
                     Some(ColumnType::Integer) => 23,
                     Some(ColumnType::BigInteger) => 20,
                     Some(ColumnType::Text) => 25,
@@ -93,6 +98,24 @@ fn verify_command_cte_oracle(engine: &Engine) {
 #[test]
 fn command_ctes_match_postgresql_memory() {
     verify_command_cte_oracle(&Engine::new());
+}
+
+#[test]
+fn command_cte_composition_matches_postgresql_memory() {
+    verify_oracle(
+        &Engine::new(),
+        include_str!("../../../../tests/parity/pg18/cte_command_composition_oracle.expected.json"),
+    );
+}
+
+#[test]
+fn command_cte_composition_matches_postgresql_sqlite() {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = Engine::open(&directory.path().join("cte-composition.db")).unwrap();
+    verify_oracle(
+        &engine,
+        include_str!("../../../../tests/parity/pg18/cte_command_composition_oracle.expected.json"),
+    );
 }
 
 #[test]
@@ -146,5 +169,55 @@ fn command_cte_routine_bindings_survive_reopen_and_rename() {
             .unwrap()
             .value_at(0, 0),
         Some(&Value::Int(102))
+    );
+}
+
+#[test]
+fn merge_cte_routine_binding_survives_reopen_and_rename() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("merge-cte-routine.uqa");
+    {
+        let engine = Engine::open(&path).unwrap();
+        engine.sql("CREATE SCHEMA saved;
+            CREATE TABLE saved.input_values (id integer PRIMARY KEY, amount integer);
+            INSERT INTO saved.input_values VALUES (1, 10);
+            CREATE FUNCTION saved.bump(value integer) RETURNS integer LANGUAGE SQL IMMUTABLE RETURN value + 1;
+            CREATE FUNCTION saved.bump(value text) RETURNS text LANGUAGE SQL IMMUTABLE RETURN value || 'x';
+            SET search_path = saved, public;
+            CREATE FUNCTION saved.merge_values() RETURNS integer LANGUAGE SQL BEGIN ATOMIC
+                WITH source AS (SELECT id, bump(amount) AS amount FROM input_values)
+                MERGE INTO input_values target USING source ON target.id = source.id
+                WHEN MATCHED THEN UPDATE SET amount = source.amount;
+                SELECT amount FROM input_values WHERE id = 1;
+            END", &[]).unwrap();
+    }
+    {
+        let engine = Engine::open(&path).unwrap();
+        engine
+            .sql(
+                "ALTER TABLE saved.input_values RENAME TO renamed; DROP FUNCTION saved.bump(text)",
+                &[],
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .sql("DROP FUNCTION saved.bump(integer)", &[])
+                .unwrap_err()
+                .sqlstate(),
+            Some("2BP01")
+        );
+        let result = engine.sql("SELECT saved.merge_values()", &[]).unwrap();
+        assert_eq!(result.columns, ["merge_values"]);
+        assert_eq!(result.value_at(0, 0), Some(&Value::Int(11)));
+    }
+    let engine = Engine::open(&path).unwrap();
+    let result = engine.sql("SELECT saved.merge_values()", &[]).unwrap();
+    assert_eq!(result.value_at(0, 0), Some(&Value::Int(12)));
+    assert_eq!(
+        engine
+            .sql("SELECT amount FROM saved.renamed", &[])
+            .unwrap()
+            .value_at(0, 0),
+        Some(&Value::Int(12))
     );
 }

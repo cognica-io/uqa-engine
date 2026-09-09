@@ -76,7 +76,11 @@ fn ensure_merge_mutation_privileges(engine: &Engine, stmt: &MergePlan) -> Result
     Ok(())
 }
 
-pub(super) fn ensure_merge_privileges(engine: &Engine, stmt: &MergePlan) -> Result<(), SQLError> {
+pub(super) fn ensure_merge_privileges(
+    engine: &Engine,
+    stmt: &MergePlan,
+    inherited_ctes: Option<&CteScope>,
+) -> Result<(), SQLError> {
     ensure_merge_mutation_privileges(engine, stmt)?;
     let privilege_expressions = super::super::merge_privilege_expressions(stmt);
     super::super::super::ensure_target_table_select_for_expressions(
@@ -91,8 +95,7 @@ pub(super) fn ensure_merge_privileges(engine: &Engine, stmt: &MergePlan) -> Resu
             required_columns: &[],
         },
     )?;
-    let mut ctes = CteScope::new_for_statement(engine, stmt.statement_privilege_subject.as_deref());
-    ctes.scalar_subqueries.clone_from(&stmt.subqueries);
+    let ctes = super::super::merge_analysis_scope(engine, stmt, inherited_ctes);
     crate::sql::select::ensure_select_privileges_for_source_expressions(
         &stmt.source,
         &privilege_expressions,

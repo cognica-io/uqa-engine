@@ -28,7 +28,7 @@ pub(super) fn view_rule_insert_column_type(
                 .enumerate()
                 .find_map(|(position, internal)| {
                     let public = schema.public_name(position).unwrap_or(internal);
-                    public.eq_ignore_ascii_case(column).then_some(position)
+                    (public == column).then_some(position)
                 })
         else {
             return Err(SQLError::UnknownColumn(format!(

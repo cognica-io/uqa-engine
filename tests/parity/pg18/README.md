@@ -359,3 +359,14 @@ The default container name is `pg-parity`, the default published PostgreSQL port
 ```sh
 bash tests/parity/pg18/clients/run.sh
 ```
+
+## Command CTE and Simple Query oracles
+
+`cte_commands_oracle.expected.json` contains 98 PostgreSQL 18.4 statements covering data-modifying CTE result types, snapshots, statement effects, and diagnostics. `cte_command_composition_oracle.expected.json` adds 56 statements covering MERGE CTE scopes in automatic views and privilege analysis, statement-trigger order and snapshots, validation before trigger effects, SQL-standard routine dependencies, quoted rewrite-rule column names, and qualified function output labels. `command_completion_oracle.expected.json` contains 105 Simple Query messages covering ordered command tags and transaction boundaries. Engine tests execute all three fixtures on memory and SQLite, and separate SQLite tests verify bound UPDATE and MERGE routines after reopen and relation rename.
+
+The fixtures record SQL input, PostgreSQL version, ordered command tags, primary errors and SQLSTATEs, column labels and type OIDs, and rows. Reproduce a fixture by passing its JSON to `capture_command_completion_oracle.py --rows` in a fresh PostgreSQL 18.4 database through `PG_COMPLETION_CONNECTION`; the composition fixture also requires a fresh `merge_actor` role name. The capture script uses libpq and preserves each case as one Simple Query message.
+
+```sh
+cargo test -p uqa-engine --test integration sql_cte_commands
+cargo test -p uqa-engine --test integration sql_simple_query
+```

@@ -1,0 +1,948 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SCHEMA merge_scope",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET search_path = merge_scope, public",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE source_values (id integer PRIMARY KEY, amount integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE target_values (id integer PRIMARY KEY, amount integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO source_values VALUES (1, 10)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO target_values VALUES (1, 10)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE event_log (id serial PRIMARY KEY, relation_name text, observed integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION record_before() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO event_log (relation_name, observed) SELECT TG_TABLE_NAME, sum(amount) FROM source_values; RETURN NULL; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TRIGGER source_before BEFORE UPDATE ON source_values FOR EACH STATEMENT EXECUTE FUNCTION record_before()",
+      "command_tags": [
+        "CREATE TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TRIGGER target_before BEFORE UPDATE ON target_values FOR EACH STATEMENT EXECUTE FUNCTION record_before()",
+      "command_tags": [
+        "CREATE TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "WITH changed AS (UPDATE source_values SET amount = amount + 1 RETURNING *) MERGE INTO target_values t USING changed s ON t.id = s.id WHEN MATCHED THEN UPDATE SET amount = s.amount RETURNING t.amount",
+      "command_tags": [
+        "MERGE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "amount"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "11"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT relation_name, observed FROM event_log ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "relation_name",
+            "observed"
+          ],
+          "type_oids": [
+            25,
+            23
+          ],
+          "rows": [
+            [
+              "target_values",
+              "10"
+            ],
+            [
+              "source_values",
+              "10"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TRIGGER target_before ON target_values",
+      "command_tags": [
+        "DROP TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION add_target_before() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO target_values VALUES (2, 99); RETURN NULL; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TRIGGER target_before BEFORE UPDATE ON target_values FOR EACH STATEMENT EXECUTE FUNCTION add_target_before()",
+      "command_tags": [
+        "CREATE TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "MERGE INTO target_values t USING (VALUES (1, 20)) AS s(id, amount) ON t.id = s.id WHEN MATCHED THEN UPDATE SET amount = s.amount WHEN NOT MATCHED BY SOURCE THEN DELETE RETURNING t.id, t.amount",
+      "command_tags": [
+        "MERGE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "20"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM target_values ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "20"
+            ],
+            [
+              "2",
+              "99"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TRIGGER target_before ON target_values",
+      "command_tags": [
+        "DROP TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW target_view AS SELECT id, amount + 1 AS displayed FROM target_values",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW simple_target AS SELECT id, amount FROM target_values",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "WITH c AS (SELECT 7 AS bonus) MERGE INTO simple_target t USING (VALUES (1)) s(id) ON t.id = s.id AND EXISTS (SELECT 1 FROM c WHERE bonus = 7) WHEN MATCHED THEN UPDATE SET amount = (SELECT bonus + t.id FROM c) RETURNING t.id, (SELECT bonus + t.amount FROM c) AS result",
+      "command_tags": [
+        "MERGE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "result"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "15"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH c AS (SELECT 3 AS bonus) MERGE INTO simple_target t USING (VALUES (1)) s(id) ON t.id = s.id WHEN NOT MATCHED BY SOURCE AND EXISTS (SELECT 1 FROM c WHERE bonus > t.id) THEN UPDATE SET amount = (SELECT bonus FROM c) RETURNING t.id, t.amount",
+      "command_tags": [
+        "MERGE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "3"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH changed AS (UPDATE source_values SET amount = amount + 1 RETURNING amount) MERGE INTO simple_target t USING (VALUES (1)) s(id) ON t.id = s.id WHEN MATCHED THEN UPDATE SET amount = (SELECT amount + t.id FROM changed) RETURNING t.amount, (SELECT amount FROM changed) AS input",
+      "command_tags": [
+        "MERGE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "amount",
+            "input"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "13",
+              "12"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION source_bonus() RETURNS integer LANGUAGE SQL IMMUTABLE RETURN 5",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION bound_merge() RETURNS integer LANGUAGE SQL BEGIN ATOMIC WITH c AS (SELECT id, source_bonus() AS amount FROM source_values) MERGE INTO target_values t USING c s ON t.id = s.id WHEN MATCHED THEN UPDATE SET amount = s.amount; SELECT amount FROM target_values WHERE id = 1; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET search_path = public",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT merge_scope.bound_merge()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "bound_merge"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SET search_path = merge_scope, public",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE source_values RENAME TO renamed_source",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT bound_merge()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "bound_merge"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW quoted_target AS SELECT id AS \"Id\", amount AS \"id\" FROM target_values",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE RULE quoted_insert AS ON INSERT TO quoted_target DO INSTEAD INSERT INTO target_values (id, amount) VALUES (NEW.\"Id\", NEW.\"id\")",
+      "command_tags": [
+        "CREATE RULE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO quoted_target (\"Id\", \"id\") VALUES (8, 31)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id, amount FROM target_values WHERE id = 8",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "8",
+              "31"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE case_columns (\"Id\" integer, \"id\" text)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW case_view AS SELECT * FROM case_columns",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE RULE case_insert AS ON INSERT TO case_view DO INSTEAD INSERT INTO case_columns VALUES (NEW.\"Id\", NEW.\"id\")",
+      "command_tags": [
+        "CREATE RULE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO case_view (\"id\", \"Id\") VALUES ('word', 5)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM case_columns",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "Id",
+            "id"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "5",
+              "word"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION \"Mixed.Name\"() RETURNS integer LANGUAGE SQL IMMUTABLE RETURN 7",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT merge_scope.\"Mixed.Name\"()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "Mixed.Name"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE guard_calls START 100",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION guard_before() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('guard_calls'); RETURN NULL; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TRIGGER guard_before BEFORE UPDATE ON target_values FOR EACH STATEMENT EXECUTE FUNCTION guard_before()",
+      "command_tags": [
+        "CREATE TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "MERGE INTO target_values t USING (VALUES (1)) s(id) ON t.id = s.id WHEN MATCHED THEN UPDATE SET amount = 1 RETURNING absent_result",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"absent_result\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT last_value, is_called FROM guard_calls",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "100",
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH c AS (SELECT 1 AS id) MERGE INTO target_values t USING (VALUES (1)) s(id) ON t.id = s.id WHEN MATCHED THEN UPDATE SET amount = (SELECT absent_input FROM c)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"absent_input\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT last_value, is_called FROM guard_calls",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "100",
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TRIGGER guard_before ON target_values",
+      "command_tags": [
+        "DROP TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE ROLE merge_actor",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "GRANT USAGE ON SCHEMA merge_scope TO merge_actor",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "GRANT SELECT, UPDATE ON target_values, renamed_source TO merge_actor",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE merge_actor",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "WITH c AS (SELECT id, amount FROM renamed_source) MERGE INTO target_values t USING c s ON t.id = s.id WHEN MATCHED THEN UPDATE SET amount = s.amount RETURNING t.id, t.amount",
+      "command_tags": [
+        "MERGE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "12"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    }
+  ]
+}

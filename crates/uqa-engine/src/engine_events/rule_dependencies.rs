@@ -144,11 +144,12 @@ where
     fn bind_merge(
         &mut self,
         merge: &mut uqa_sql::ast::MergeStmt,
-        ctes: &BTreeSet<String>,
+        inherited: &BTreeSet<String>,
     ) -> Result<(), SQLError> {
         (self.visit_relation)(&mut merge.target)?;
-        self.bind_from(&mut merge.source, ctes)?;
-        self.bind_expr(&mut merge.join_condition, ctes)?;
+        let ctes = self.bind_ctes(&mut merge.with, inherited)?;
+        self.bind_from(&mut merge.source, &ctes)?;
+        self.bind_expr(&mut merge.join_condition, &ctes)?;
         for clause in &mut merge.when_clauses {
             match clause {
                 uqa_sql::ast::MergeWhen::UpdateMatched {
@@ -160,20 +161,20 @@ where
                     assignments,
                 } => {
                     if let Some(condition) = condition {
-                        self.bind_expr(condition, ctes)?;
+                        self.bind_expr(condition, &ctes)?;
                     }
                     for (_, expression) in assignments {
-                        self.bind_expr(expression, ctes)?;
+                        self.bind_expr(expression, &ctes)?;
                     }
                 }
                 uqa_sql::ast::MergeWhen::InsertNotMatched {
                     condition, values, ..
                 } => {
                     if let Some(condition) = condition {
-                        self.bind_expr(condition, ctes)?;
+                        self.bind_expr(condition, &ctes)?;
                     }
                     for expression in values {
-                        self.bind_expr(expression, ctes)?;
+                        self.bind_expr(expression, &ctes)?;
                     }
                 }
                 uqa_sql::ast::MergeWhen::DeleteMatched { condition }
@@ -182,13 +183,13 @@ where
                 | uqa_sql::ast::MergeWhen::NothingNotMatched { condition }
                 | uqa_sql::ast::MergeWhen::NothingNotMatchedBySource { condition } => {
                     if let Some(condition) = condition {
-                        self.bind_expr(condition, ctes)?;
+                        self.bind_expr(condition, &ctes)?;
                     }
                 }
             }
         }
         for projection in &mut merge.returning {
-            self.bind_expr(&mut projection.expr, ctes)?;
+            self.bind_expr(&mut projection.expr, &ctes)?;
         }
         Ok(())
     }
