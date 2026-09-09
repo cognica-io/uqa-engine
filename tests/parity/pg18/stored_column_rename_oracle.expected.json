@@ -1,0 +1,1822 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE public.stored_column_source(id integer, amount integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO public.stored_column_source VALUES(1,42)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.stored_column_reader() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT amount FROM public.stored_column_source; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.stored_column_mutator() RETURNS integer LANGUAGE SQL BEGIN ATOMIC UPDATE public.stored_column_source SET amount=amount+1 WHERE id=1 RETURNING amount; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE public.stored_column_source RENAME COLUMN amount TO total",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT public.stored_column_reader() AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "42"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT public.stored_column_mutator() AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "43"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT total FROM public.stored_column_source",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "total"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "43"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE public.stored_column_source CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('public.stored_column_reader()') IS NULL AS reader_gone, to_regprocedure('public.stored_column_mutator()') IS NULL AS mutator_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "reader_gone",
+            "mutator_gone"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE public.stored_column_queries(id integer, amount integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO public.stored_column_queries VALUES(1,10),(2,20)",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.stored_column_alias() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT s.amount FROM public.stored_column_queries AS s WHERE s.id=1; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.stored_column_cte() RETURNS integer LANGUAGE SQL BEGIN ATOMIC WITH x AS (SELECT amount FROM public.stored_column_queries WHERE id=1) SELECT amount FROM x; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.stored_column_subquery() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT q.amount FROM (SELECT amount FROM public.stored_column_queries WHERE id=1) AS q; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.stored_column_join() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT l.amount+r.amount FROM public.stored_column_queries l JOIN public.stored_column_queries r ON l.id+1=r.id; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.stored_column_aggregate() RETURNS bigint LANGUAGE SQL BEGIN ATOMIC SELECT sum(amount) FROM public.stored_column_queries WHERE amount>0; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.stored_column_rows() RETURNS TABLE(id integer, amount integer) LANGUAGE SQL BEGIN ATOMIC SELECT * FROM public.stored_column_queries ORDER BY id; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.stored_column_parameter(amount integer) RETURNS integer LANGUAGE SQL RETURN amount+1",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.stored_column_parameter_table(amount integer) RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT s.amount+stored_column_parameter_table.amount FROM public.stored_column_queries s WHERE s.id=1; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.stored_column_shadow() RETURNS integer LANGUAGE SQL BEGIN ATOMIC WITH stored_column_queries AS (SELECT 99 AS amount) SELECT amount FROM stored_column_queries; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.stored_column_late() RETURNS integer LANGUAGE SQL AS 'SELECT amount FROM public.stored_column_queries WHERE id=1'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW public.stored_column_query_view AS SELECT amount FROM public.stored_column_queries WHERE id=1",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.stored_column_via_view() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT amount FROM public.stored_column_query_view; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE public.stored_column_queries RENAME COLUMN amount TO total",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT public.stored_column_alias(), public.stored_column_cte(), public.stored_column_subquery(), public.stored_column_join(), public.stored_column_aggregate()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "stored_column_alias",
+            "stored_column_cte",
+            "stored_column_subquery",
+            "stored_column_join",
+            "stored_column_aggregate"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "10",
+              "10",
+              "10",
+              "30",
+              "30"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM public.stored_column_rows()",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "10"
+            ],
+            [
+              "2",
+              "20"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT public.stored_column_parameter(8), public.stored_column_parameter_table(8), public.stored_column_shadow(), public.stored_column_via_view()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "stored_column_parameter",
+            "stored_column_parameter_table",
+            "stored_column_shadow",
+            "stored_column_via_view"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "9",
+              "18",
+              "99",
+              "10"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT public.stored_column_late()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"amount\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SAVEPOINT restore_column",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE public.stored_column_queries RENAME COLUMN total TO changed",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT public.stored_column_alias(), public.stored_column_cte()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "stored_column_alias",
+            "stored_column_cte"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "10",
+              "10"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK TO restore_column",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT public.stored_column_alias(), public.stored_column_cte()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "stored_column_alias",
+            "stored_column_cte"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "10",
+              "10"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "COMMIT",
+      "command_tags": [
+        "COMMIT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE public.stored_column_queries ADD COLUMN amount integer DEFAULT 1000",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM public.stored_column_rows()",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "10"
+            ],
+            [
+              "2",
+              "20"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE public.stored_column_queries DROP COLUMN amount",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE public.stored_column_queries RENAME COLUMN total TO amount",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT public.stored_column_late()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "stored_column_late"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "10"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE public.stored_column_queries CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION public.stored_column_late(), public.stored_column_parameter(integer), public.stored_column_shadow()",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE public.stored_column_dml(id integer PRIMARY KEY, amount integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO public.stored_column_dml VALUES(1,10)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.stored_column_insert(p_id integer,p_amount integer) RETURNS integer LANGUAGE SQL BEGIN ATOMIC INSERT INTO public.stored_column_dml(id,amount) VALUES(p_id,p_amount) RETURNING amount; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.stored_column_update() RETURNS integer LANGUAGE SQL BEGIN ATOMIC UPDATE public.stored_column_dml t SET amount=s.n FROM (VALUES(1,15)) s(id,n) WHERE t.id=s.id RETURNING t.amount; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.stored_column_delete() RETURNS integer LANGUAGE SQL BEGIN ATOMIC DELETE FROM public.stored_column_dml t USING (VALUES(1)) s(id) WHERE t.id=s.id RETURNING t.amount; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.stored_column_merge() RETURNS integer LANGUAGE SQL BEGIN ATOMIC MERGE INTO public.stored_column_dml t USING (VALUES(2,25)) s(id,n) ON t.id=s.id WHEN MATCHED THEN UPDATE SET amount=s.n WHEN NOT MATCHED THEN INSERT(id,amount) VALUES(s.id,s.n) RETURNING t.amount; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.stored_column_cte_update() RETURNS integer LANGUAGE SQL BEGIN ATOMIC WITH changed AS(UPDATE public.stored_column_dml SET amount=amount+1 WHERE id=2 RETURNING amount) SELECT amount FROM changed; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE PROCEDURE public.stored_column_procedure(p_id integer,p_amount integer) LANGUAGE SQL BEGIN ATOMIC INSERT INTO public.stored_column_dml(id,amount) VALUES(p_id,p_amount); END",
+      "command_tags": [
+        "CREATE PROCEDURE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE public.stored_column_dml RENAME COLUMN amount TO total",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT public.stored_column_insert(2,20)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "stored_column_insert"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "20"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT public.stored_column_update()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "stored_column_update"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "15"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT public.stored_column_delete()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "stored_column_delete"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "15"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT public.stored_column_merge()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "stored_column_merge"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "25"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT public.stored_column_cte_update()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "stored_column_cte_update"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "26"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CALL public.stored_column_procedure(3,30)",
+      "command_tags": [
+        "CALL"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id,total FROM public.stored_column_dml ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "total"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "26"
+            ],
+            [
+              "3",
+              "30"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE public.stored_column_dml RENAME COLUMN missing TO other",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"missing\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER TABLE public.stored_column_dml RENAME COLUMN total TO id",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42701",
+        "message": "column \"id\" of relation \"stored_column_dml\" already exists"
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER TABLE public.stored_column_dml RENAME COLUMN total TO total",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42701",
+        "message": "column \"total\" of relation \"stored_column_dml\" already exists"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT public.stored_column_cte_update()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "stored_column_cte_update"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "27"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE public.stored_column_dml CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SCHEMA \"Column.Scope\"",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE \"Column.Scope\".\"Mixed.Table\"(\"Id\" integer, \"Old.Amount\" integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO \"Column.Scope\".\"Mixed.Table\" VALUES(1,7)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.stored_column_quoted() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT \"Old.Amount\" FROM \"Column.Scope\".\"Mixed.Table\"; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE \"Column.Scope\".\"Mixed.Table\" RENAME COLUMN \"Old.Amount\" TO \"New.Amount\"",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT public.stored_column_quoted()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "stored_column_quoted"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA \"Column.Scope\" CASCADE",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE ROLE stored_column_owner",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "GRANT CREATE ON SCHEMA public TO stored_column_owner",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE stored_column_owner",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE public.stored_column_owned(id integer, amount integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO public.stored_column_owned VALUES(1,14)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SCHEMA stored_column_private",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_private.reader() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT amount FROM public.stored_column_owned; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE stored_column_owner",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE public.stored_column_owned RENAME COLUMN amount TO total",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT stored_column_private.reader()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "reader"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "14"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE public.stored_column_owned ADD COLUMN amount integer DEFAULT 1000",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT stored_column_private.reader()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "reader"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "14"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE public.stored_column_owned DROP COLUMN amount",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE public.stored_column_owned RENAME COLUMN total TO amount",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT stored_column_private.reader()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "reader"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "14"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE public.stored_column_owned CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA stored_column_private",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "REVOKE CREATE ON SCHEMA public FROM stored_column_owner",
+      "command_tags": [
+        "REVOKE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP ROLE stored_column_owner",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE public.stored_column_left(id integer, amount integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE public.stored_column_right(amount integer, other integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO public.stored_column_left VALUES(1,5),(2,7)",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO public.stored_column_right VALUES(5,9),(11,13)",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.stored_column_using() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT amount FROM public.stored_column_left JOIN public.stored_column_right USING(amount); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.stored_column_natural() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT amount FROM public.stored_column_left NATURAL JOIN public.stored_column_right; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.stored_column_full() RETURNS TABLE(amount integer,id integer,other integer) LANGUAGE SQL BEGIN ATOMIC SELECT * FROM public.stored_column_left FULL JOIN public.stored_column_right USING(amount) ORDER BY amount; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.stored_column_positional_alias() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT s.a FROM public.stored_column_left s(i,a) WHERE i=1; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.stored_column_lateral() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT s.n FROM public.stored_column_left t CROSS JOIN LATERAL (SELECT t.amount+1 AS n) s WHERE t.id=1; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE public.stored_column_left RENAME COLUMN amount TO total",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT public.stored_column_using(), public.stored_column_natural(), public.stored_column_positional_alias(), public.stored_column_lateral()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "stored_column_using",
+            "stored_column_natural",
+            "stored_column_positional_alias",
+            "stored_column_lateral"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "5",
+              "5",
+              "5",
+              "6"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM public.stored_column_full()",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "amount",
+            "id",
+            "other"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "5",
+              "1",
+              "9"
+            ],
+            [
+              "7",
+              "2",
+              null
+            ],
+            [
+              "11",
+              null,
+              "13"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE public.stored_column_right RENAME COLUMN amount TO value",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT public.stored_column_using(), public.stored_column_natural()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "stored_column_using",
+            "stored_column_natural"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "5",
+              "5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM public.stored_column_full()",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "amount",
+            "id",
+            "other"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "5",
+              "1",
+              "9"
+            ],
+            [
+              "7",
+              "2",
+              null
+            ],
+            [
+              "11",
+              null,
+              "13"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE public.stored_column_left, public.stored_column_right CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    }
+  ]
+}

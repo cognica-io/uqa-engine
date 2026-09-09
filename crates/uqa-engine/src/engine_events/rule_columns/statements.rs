@@ -9,8 +9,27 @@
 use uqa_sql::ast::{MergeStmt, MergeWhen, RuleEvent};
 
 use super::{
-    action_returning_scope, ColumnBindingContext, ColumnScope, RuleColumnBinder, SQLError,
+    action_returning_scope, ColumnBindingContext, ColumnBindingMode, ColumnScope, Engine,
+    RelationIdentity, RuleColumnBinder, RuleColumnDependency, SQLError, Statement,
 };
+
+impl Engine {
+    pub(crate) fn rewrite_stored_statement_column(
+        &self,
+        statement: &mut Statement,
+        relation: &RelationIdentity,
+        from: &str,
+        to: &str,
+    ) -> Result<bool, SQLError> {
+        let mode = ColumnBindingMode::Rename { relation, from, to };
+        let mut binder = RuleColumnBinder::new(self, mode);
+        binder.bind_statement(statement, &[], &ColumnBindingContext::default())?;
+        Ok(binder.finish().contains(&RuleColumnDependency {
+            relation: relation.clone(),
+            column: from.to_string(),
+        }))
+    }
+}
 
 impl RuleColumnBinder<'_> {
     pub(super) fn bind_merge(

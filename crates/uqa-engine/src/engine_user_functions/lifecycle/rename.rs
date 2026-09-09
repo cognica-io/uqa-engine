@@ -33,6 +33,26 @@ impl Engine {
         from: &RelationIdentity,
         to: &RelationIdentity,
     ) -> Result<(), SQLError> {
+        self.rewrite_stored_routine_bodies(|statement| {
+            crate::engine_events::rewrite_stored_statement_relation(statement, from, to)
+        })
+    }
+
+    pub(crate) fn rewrite_routine_column_references(
+        &self,
+        relation: &RelationIdentity,
+        from: &str,
+        to: &str,
+    ) -> Result<(), SQLError> {
+        self.rewrite_stored_routine_bodies(|statement| {
+            self.rewrite_stored_statement_column(statement, relation, from, to)
+        })
+    }
+
+    fn rewrite_stored_routine_bodies(
+        &self,
+        mut rewrite: impl FnMut(&mut uqa_sql::ast::Statement) -> Result<bool, SQLError>,
+    ) -> Result<(), SQLError> {
         let registry = self.durable.sql_user_functions.read().clone();
         let mut rewritten = BTreeMap::new();
         let mut any_changed = false;
@@ -43,9 +63,7 @@ impl Engine {
                 let mut changed = false;
                 if let FunctionBody::Statements(statements) = &mut definition.body {
                     for statement in statements {
-                        changed |= crate::engine_events::rewrite_stored_statement_relation(
-                            statement, from, to,
-                        )?;
+                        changed |= rewrite(statement)?;
                     }
                 }
                 if changed {

@@ -518,6 +518,8 @@ For the implemented CASCADE graph, `DROP FUNCTION signature CASCADE` removes the
 
 Relation and sequence deletion follows [stored relation and routine dependencies](02-ddl.md#stored-relation-and-routine-dependencies), including function/view cycles, indirect domain and generated-column dependencies, and creation-bound `regclass` constants and parameter defaults. [Domain deletion](02-ddl.md#domain-declarations-and-deletion) also follows direct column references in SQL-standard query and mutation-command bodies, preserving routines that use only unrelated columns.
 
+[Column renames](02-ddl.md#alter-table) rewrite and recompile SQL-standard query and mutation-command bodies against the same column identity. Stored projections retain their output names, unrelated routine parameters and CTE bindings retain their names, and later reuse of the old column name does not redirect the routine.
+
 Durable SQL and PL/pgSQL routine definitions are restored with the catalog. Restoration installs routine definitions before rebinding stored views and compiles routine bodies after every row-producing relation is present, so a stored view may call a routine while another SQL-standard routine reads that view. Stored join plans use the loaded catalog statistics during restoration so rollback does not reenter the transaction-state lock. Rust, Python, Node.js, and browser WASM runtime callbacks are not durable and must be registered after process start.
 
 ## Cancellation and failure

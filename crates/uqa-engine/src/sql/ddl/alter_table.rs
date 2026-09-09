@@ -627,17 +627,24 @@ fn run_alter_table_action(
                 .try_table_has_column(&stmt.table, &from)
                 .map_err(|err| ddl_storage_error("ALTER TABLE RENAME COLUMN", err))?
             {
-                return Err(SQLError::Unsupported(format!(
-                    "ALTER TABLE RENAME COLUMN: column `{from}` does not exist"
-                )));
+                return Err(SQLError::Routine {
+                    sqlstate: "42703".into(),
+                    message: format!("column \"{from}\" does not exist"),
+                });
             }
             if engine
                 .try_table_has_column(&stmt.table, &to)
                 .map_err(|err| ddl_storage_error("ALTER TABLE RENAME COLUMN", err))?
             {
-                return Err(SQLError::Unsupported(format!(
-                    "ALTER TABLE RENAME COLUMN: column `{to}` already exists"
-                )));
+                let relation = crate::RelationIdentity::from_legacy_name(&stmt.table)
+                    .map_err(SQLError::Internal)?;
+                return Err(SQLError::Routine {
+                    sqlstate: "42701".into(),
+                    message: format!(
+                        "column \"{to}\" of relation \"{}\" already exists",
+                        relation.name
+                    ),
+                });
             }
             engine
                 .try_rename_column(&stmt.table, &from, &to)

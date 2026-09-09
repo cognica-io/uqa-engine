@@ -359,6 +359,20 @@ impl Engine {
         }
     }
 
+    fn rename_column_analyzer_assignments(&self, table_name: &str, from: &str, to: &str) {
+        let mut analyzers = self.durable.table_field_analyzers.write();
+        let mut moved = Vec::new();
+        analyzers.retain(|(table, field), value| {
+            if table == table_name && field == from {
+                moved.push(((table_name.to_string(), to.to_string()), value.clone()));
+                false
+            } else {
+                true
+            }
+        });
+        analyzers.extend(moved);
+    }
+
     pub(super) fn try_rename_column_inner(
         &self,
         table: &str,
@@ -432,19 +446,7 @@ impl Engine {
             self.create_vector_field(&table_name, to, dimensions)?;
         }
         self.rename_catalog_index_column_refs(&table_name, from, to)?;
-        {
-            let mut analyzers = self.durable.table_field_analyzers.write();
-            let mut moved = Vec::new();
-            analyzers.retain(|(table, field), value| {
-                if table == &table_name && field == from {
-                    moved.push(((table_name.clone(), to.to_string()), value.clone()));
-                    false
-                } else {
-                    true
-                }
-            });
-            analyzers.extend(moved);
-        }
+        self.rename_column_analyzer_assignments(&table_name, from, to);
         if self.is_persistent() {
             if let Some(catalog) = self.storage.catalog.as_ref() {
                 catalog.rename_column_data(&table_name, from, to)?;
@@ -460,6 +462,11 @@ impl Engine {
             }
             self.try_save_table_schema(&table_name, &t)?;
         }
+        let relation = Self::resolved_relation_identity(&table_name)?;
+        self.rewrite_routine_column_references(&relation, from, to)
+            .map_err(|error| {
+                StorageBackendError::Other(format!("rewrite routine column references: {error}"))
+            })?;
         self.rename_event_column_inner(&table_name, from, to)?;
         self.mark_column_stats_dirty(&table_name, &t)?;
         self.refresh_value_indexes_for_table(&table_name)?;

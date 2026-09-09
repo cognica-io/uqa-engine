@@ -118,3 +118,6 @@ mod stored_relation_drop;
 
 #[path = "pg18_semantics/domain_drop.rs"]
 mod domain_drop;
+
+#[path = "pg18_semantics/stored_column_rename.rs"]
+mod stored_column_rename;
