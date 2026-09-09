@@ -431,8 +431,8 @@ fn cte_values_body_is_preserved() {
     };
     let cte = &select.with[0];
     assert_eq!(cte.columns, ["id", "label"]);
-    assert_eq!(cte.query.values.len(), 2);
-    assert!(cte.query.projections.is_empty());
+    assert_eq!(cte.body.query().unwrap().values.len(), 2);
+    assert!(cte.body.query().unwrap().projections.is_empty());
 }
 
 #[test]

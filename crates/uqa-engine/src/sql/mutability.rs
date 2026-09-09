@@ -115,7 +115,7 @@ pub(super) fn command_payload_may_write_database(
     }
     match command {
         uqa_planner::CommandPlan::Insert(plan) => {
-            if queries_may_write_database(engine, plan.ctes.iter().map(|cte| cte.query.as_ref()))? {
+            if ctes_may_write_database(engine, &plan.ctes)? {
                 return Ok(true);
             }
             if let Some(source) = plan.source.as_deref() {
@@ -126,7 +126,7 @@ pub(super) fn command_payload_may_write_database(
             queries_may_write_database(engine, &plan.subqueries)
         }
         uqa_planner::CommandPlan::Update(plan) => {
-            if queries_may_write_database(engine, plan.ctes.iter().map(|cte| cte.query.as_ref()))? {
+            if ctes_may_write_database(engine, &plan.ctes)? {
                 return Ok(true);
             }
             if let Some(source) = plan.source.as_deref() {
@@ -143,7 +143,7 @@ pub(super) fn command_payload_may_write_database(
             queries_may_write_database(engine, &plan.subqueries)
         }
         uqa_planner::CommandPlan::Delete(plan) => {
-            if queries_may_write_database(engine, plan.ctes.iter().map(|cte| cte.query.as_ref()))? {
+            if ctes_may_write_database(engine, &plan.ctes)? {
                 return Ok(true);
             }
             if let Some(source) = plan.source.as_deref() {
@@ -160,6 +160,9 @@ pub(super) fn command_payload_may_write_database(
             queries_may_write_database(engine, &plan.subqueries)
         }
         uqa_planner::CommandPlan::Merge(plan) => {
+            if ctes_may_write_database(engine, &plan.ctes)? {
+                return Ok(true);
+            }
             if source_may_mutate_engine(
                 engine,
                 &plan.source,
@@ -173,6 +176,35 @@ pub(super) fn command_payload_may_write_database(
         }
         _ => Ok(false),
     }
+}
+
+fn command_may_write_database(
+    engine: &Engine,
+    command: &uqa_planner::CommandPlan,
+) -> Result<bool, SQLError> {
+    super::read_only::forbidden_command(
+        engine,
+        &uqa_planner::UnifiedPlan::Command(Box::new(command.clone())),
+    )
+    .map(|forbidden| forbidden.is_some())
+}
+
+fn ctes_may_write_database(
+    engine: &Engine,
+    ctes: &[uqa_planner::CtePlan],
+) -> Result<bool, SQLError> {
+    for cte in ctes {
+        let writes = match &cte.body {
+            uqa_planner::CtePlanBody::Query(query) => query_may_write_database(engine, query)?,
+            uqa_planner::CtePlanBody::Command(command) => {
+                command_may_write_database(engine, command)?
+            }
+        };
+        if writes {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn queries_may_write_database<'a>(
@@ -404,13 +436,21 @@ fn query_source_may_mutate_engine(
     classification: MutabilityClassification,
 ) -> Result<bool, SQLError> {
     for cte in &query.ctes {
-        if query_source_may_mutate_engine(
-            engine,
-            &cte.query,
-            visiting_views,
-            visiting_routines,
-            classification,
-        )? {
+        let mutates = match &cte.body {
+            uqa_planner::CtePlanBody::Query(query) => query_source_may_mutate_engine(
+                engine,
+                query,
+                visiting_views,
+                visiting_routines,
+                classification,
+            )?,
+            uqa_planner::CtePlanBody::Command(command) => {
+                classification.include_session_mutations
+                    || classification.procedural_state_requires_transaction
+                    || command_may_write_database(engine, command)?
+            }
+        };
+        if mutates {
             return Ok(true);
         }
     }

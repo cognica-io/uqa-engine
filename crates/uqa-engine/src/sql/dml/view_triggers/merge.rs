@@ -687,15 +687,22 @@ fn execute_view_merge_pairs(
     Ok((affected, returning))
 }
 
-pub(in crate::sql) fn run_view_merge_inner(
+fn validate_view_merge_scope(
     engine: &Engine,
+    target: &ViewDmlTarget,
     plan: &MergePlan,
     params: &[SQLParam],
-) -> Result<SQLResult, SQLError> {
-    let target = resolve_view_target(engine, &plan.target)?;
-    validate_view_merge_targets(&target, plan)?;
+    inherited_ctes: Option<&CteScope>,
+) -> Result<(), SQLError> {
+    validate_view_merge_targets(target, plan)?;
     let mut analysis_scope =
         CteScope::new_for_statement(engine, plan.statement_privilege_subject.as_deref());
+    if let Some(parent) = inherited_ctes {
+        analysis_scope.inherit_cte_bindings(parent);
+    }
+    for cte in &plan.ctes {
+        analysis_scope.insert_deferred(cte.clone());
+    }
     analysis_scope
         .scalar_subqueries
         .clone_from(&plan.subqueries);
@@ -714,7 +721,7 @@ pub(in crate::sql) fn run_view_merge_inner(
         Some(&source_schema),
     )?;
     let null_target = target_row(
-        &target,
+        target,
         &plan.target_qualifier,
         &vec![Value::Null; target.columns.len()],
     )?;
@@ -725,15 +732,43 @@ pub(in crate::sql) fn run_view_merge_inner(
         &source_schema,
         params,
     )?;
+    Ok(())
+}
+
+pub(in crate::sql) fn run_view_merge_inner(
+    engine: &Engine,
+    plan: &MergePlan,
+    params: &[SQLParam],
+    inherited_ctes: Option<&CteScope>,
+) -> Result<SQLResult, SQLError> {
+    let target = resolve_view_target(engine, &plan.target)?;
+    validate_view_merge_scope(engine, &target, plan, params, inherited_ctes)?;
     let events = ViewMergeEvents::from_plan(plan);
-    let statement_snapshot = events
-        .has_before_statement_trigger(engine, &target.canonical_name)?
-        .then(|| engine.capture_statement_snapshot_engine())
-        .transpose()?;
+    let has_before_statement_trigger =
+        events.has_before_statement_trigger(engine, &target.canonical_name)?;
+    let statement_snapshot = match inherited_ctes.and_then(CteScope::command_cte_snapshot) {
+        Some(snapshot) => Some(snapshot),
+        None if has_before_statement_trigger
+            || plan.ctes.iter().any(|cte| cte.body.modifies_data()) =>
+        {
+            Some(std::sync::Arc::new(
+                engine.capture_statement_read_snapshot()?,
+            ))
+        }
+        None => None,
+    };
     events.fire_before(engine, &target.canonical_name)?;
-    let read_engine = statement_snapshot.as_ref().unwrap_or(engine);
+    let snapshot_engine = statement_snapshot
+        .as_deref()
+        .map(|snapshot| engine.statement_read_snapshot_engine(snapshot));
+    let read_engine = snapshot_engine.as_ref().unwrap_or(engine);
     let mut ctes =
         CteScope::new_for_statement(read_engine, plan.statement_privilege_subject.as_deref());
+    if let Some(parent) = inherited_ctes {
+        ctes.inherit_cte_bindings(parent);
+    }
+    ctes.set_command_cte_snapshot(statement_snapshot.clone());
+    crate::sql::select::materialize_plan_ctes(engine, &plan.ctes, params, &mut ctes)?;
     ctes.scalar_subqueries.clone_from(&plan.subqueries);
     let source_privilege_expressions = super::super::merge::merge_privilege_expressions(plan);
     crate::sql::select::ensure_select_privileges_for_source_expressions(

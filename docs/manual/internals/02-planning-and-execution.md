@@ -33,6 +33,8 @@ Retrieval function calls remain syntax expressions until the engine and planner 
 
 The plan owns read queries and physical command bodies. Relational query blocks cover CTEs, set operations, joins, values and function sources, subqueries, filters, scalar projection, aggregation, windows, ordering, distinctness, offset, and limit. Mutation plans own sources, scalar assignments, conflict behavior, conditions, CTEs, and `RETURNING` expressions.
 
+Each AST CTE owns a `CteBody` and each planner CTE owns a `CtePlanBody`, so visitors must handle both query and mutation bodies. Command CTEs materialize their typed `RETURNING` outputs once. Their read snapshot contains frozen table and catalog handles; the evaluation scope holds no `Engine`, session, or transaction capability. The execution boundary constructs the read view and keeps mutation effects on the live command path.
+
 `ScalarExpr` is the executable scalar IR. Scalar subqueries point to owned query-plan slots and execute inside the current physical scope; the executor does not reconstruct a parser statement at runtime.
 
 ## Statement capability boundaries

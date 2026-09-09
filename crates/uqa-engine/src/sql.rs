@@ -33,8 +33,10 @@ use uqa_sql::ast::{
     AlterTableAction, AlterTableStmt, BinaryOp, ColumnType, CreateIndex, CreateTable, DropKind,
     DropStmt, ForeignKey, ForeignKeyAction, ForeignKeyMatch, SetOpKind, Statement,
 };
+#[cfg(test)]
+use uqa_sql::compile;
 use uqa_sql::expr::{value_to_tensor, value_to_vector};
-use uqa_sql::{compile, ResultRow, SQLError, SQLParam, SQLResult};
+use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult};
 use uqa_storage::document_store::{Document, DocumentMetadata, StoredDocument};
 
 use crate::{Engine, HNSWIndexParams, IVFIndexParams, ScoredEntry, VectorIndexSpec};
@@ -45,8 +47,10 @@ mod catalog;
 pub(crate) use catalog::rename_view_column_query;
 pub(crate) use catalog::snapshot_table_relation_oid;
 mod catalog_statement_routines;
+mod completion;
 mod copy;
 mod correlation;
+mod cte_validation;
 mod cursor;
 mod ddl;
 pub(crate) mod dml;

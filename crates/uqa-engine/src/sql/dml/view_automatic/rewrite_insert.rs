@@ -24,6 +24,7 @@ pub(in crate::sql::dml) fn rewrite_insert_to_base(
     engine: &Engine,
     statement: &InsertPlan,
     params: &[uqa_sql::SQLParam],
+    inherited_ctes: Option<&super::CteScope>,
 ) -> Result<InsertPlan, SQLError> {
     validate_public_view_targets(
         engine,
@@ -51,7 +52,12 @@ pub(in crate::sql::dml) fn rewrite_insert_to_base(
     let next_privilege_subject = super::super::view_privileges::ensure_insert(engine, &plan)?;
     plan.target_privilege_subject = Some(next_privilege_subject);
     let mut implicit_width = if statement.columns.is_empty() {
-        Some(insert_input_width(engine, statement, params)?)
+        Some(insert_input_width(
+            engine,
+            statement,
+            params,
+            inherited_ctes,
+        )?)
     } else {
         None
     };
@@ -128,11 +134,12 @@ pub(in crate::sql::dml) fn rewrite_insert_to_base(
         }
         let target_qualifier = plan.target_qualifier.clone();
         if visited.len() == 1 {
-            validate_insert_expressions(engine, &plan, &layer, params)?;
+            validate_insert_expressions(engine, &plan, &layer, params, inherited_ctes)?;
         }
         let conflict_subquery_ids = insert_conflict_subquery_ids(&plan);
         rewrite_correlated_dml_context(
             CorrelatedDmlContext {
+                inherited_ctes,
                 engine,
                 layer: &layer,
                 target_qualifier: &plan.target_qualifier,
@@ -148,6 +155,7 @@ pub(in crate::sql::dml) fn rewrite_insert_to_base(
         let returning_subquery_ids = returning_subquery_ids(&plan.returning);
         rewrite_correlated_dml_context(
             CorrelatedDmlContext {
+                inherited_ctes,
                 engine,
                 layer: &layer,
                 target_qualifier: &plan.target_qualifier,

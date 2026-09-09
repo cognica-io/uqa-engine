@@ -36,8 +36,7 @@ pub(in crate::compiler) fn compile_create_table(
         .as_ref()
         .ok_or_else(|| SQLError::Internal("CREATE TABLE without relation".into()))?;
     let persistence = crate::compiler::relation_persistence(relation, "CREATE TABLE")?;
-    let on_commit =
-        crate::compiler::compile_on_commit(stmt.oncommit(), persistence, "CREATE TABLE")?;
+    let on_commit = crate::compiler::compile_on_commit(stmt.oncommit(), persistence)?;
     let hierarchy = crate::compiler::compile_table_hierarchy(stmt)?;
     let name = range_var_name(relation);
     if name.is_empty() {
@@ -434,6 +433,8 @@ pub(in crate::compiler) fn compile_column_def(
         ForeignKey,
     }
     let mut last_enforceable = None;
+    let mut saw_deferrability = false;
+    let mut saw_initial_timing = false;
     for c in &col.constraints {
         let inner = c
             .node
@@ -542,6 +543,65 @@ pub(in crate::compiler) fn compile_column_def(
                         period: false,
                     });
                     last_enforceable = Some(EnforceableConstraint::ForeignKey);
+                    saw_deferrability = false;
+                    saw_initial_timing = false;
+                }
+                pg_query::protobuf::ConstrType::ConstrAttrDeferrable
+                | pg_query::protobuf::ConstrType::ConstrAttrNotDeferrable
+                | pg_query::protobuf::ConstrType::ConstrAttrDeferred
+                | pg_query::protobuf::ConstrType::ConstrAttrImmediate => {
+                    use pg_query::protobuf::ConstrType;
+                    let kind = cstr.contype();
+                    let clause = match kind {
+                        ConstrType::ConstrAttrDeferrable => "DEFERRABLE",
+                        ConstrType::ConstrAttrNotDeferrable => "NOT DEFERRABLE",
+                        ConstrType::ConstrAttrDeferred => "INITIALLY DEFERRED",
+                        _ => "INITIALLY IMMEDIATE",
+                    };
+                    if !matches!(last_enforceable, Some(EnforceableConstraint::ForeignKey)) {
+                        return Err(SQLError::Routine {
+                            sqlstate: "42601".into(),
+                            message: format!("misplaced {clause} clause"),
+                        });
+                    }
+                    let reference = references.as_mut().ok_or_else(|| {
+                        SQLError::Internal("REFERENCES timing attribute lost its constraint".into())
+                    })?;
+                    if matches!(
+                        kind,
+                        ConstrType::ConstrAttrDeferrable | ConstrType::ConstrAttrNotDeferrable
+                    ) {
+                        if saw_deferrability {
+                            return Err(SQLError::Routine {
+                                sqlstate: "42601".into(),
+                                message: "multiple DEFERRABLE/NOT DEFERRABLE clauses not allowed"
+                                    .into(),
+                            });
+                        }
+                        saw_deferrability = true;
+                        reference.deferrable = kind == ConstrType::ConstrAttrDeferrable;
+                    } else {
+                        if saw_initial_timing {
+                            return Err(SQLError::Routine {
+                                sqlstate: "42601".into(),
+                                message:
+                                    "multiple INITIALLY IMMEDIATE/DEFERRED clauses not allowed"
+                                        .into(),
+                            });
+                        }
+                        saw_initial_timing = true;
+                        reference.initially_deferred = kind == ConstrType::ConstrAttrDeferred;
+                        if reference.initially_deferred && !saw_deferrability {
+                            reference.deferrable = true;
+                        }
+                    }
+                    if reference.initially_deferred && !reference.deferrable {
+                        return Err(SQLError::Routine {
+                            sqlstate: "42601".into(),
+                            message: "constraint declared INITIALLY DEFERRED must be DEFERRABLE"
+                                .into(),
+                        });
+                    }
                 }
                 pg_query::protobuf::ConstrType::ConstrAttrEnforced
                 | pg_query::protobuf::ConstrType::ConstrAttrNotEnforced => {

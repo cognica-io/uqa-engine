@@ -37,6 +37,14 @@ pub(in crate::sql) fn execute_query_plan_output(
     ctes: &mut CteScope,
     output_mode: QueryOutputMode,
 ) -> Result<QueryOutput, SQLError> {
+    if plan.ctes.iter().any(|cte| cte.body.modifies_data()) {
+        super::analyze_query_plan_schema(engine, plan, params, ctes, None)?;
+        if ctes.command_cte_snapshot().is_none() {
+            ctes.set_command_cte_snapshot(Some(std::sync::Arc::new(
+                engine.capture_statement_read_snapshot()?,
+            )));
+        }
+    }
     let mut relation_lookup = ctes.enter_relation_lookup_mode(plan.relations_bound)?;
     let mut visible_ctes =
         relation_lookup.enter_visible_ctes(plan.ctes.iter().map(|cte| cte.name.as_str()));
@@ -52,7 +60,8 @@ pub(in crate::sql) fn execute_query_plan_output(
             .map(|cte| cte.name.as_str())
             .collect::<BTreeSet<_>>();
         for cte in ordered_ctes.iter().copied().filter(|cte| {
-            !recursive.contains(cte.name.as_str())
+            !cte.body.modifies_data()
+                && !recursive.contains(cte.name.as_str())
                 && reachable.contains(&cte.name)
                 && match cte.materialization {
                     uqa_sql::ast::CteMaterialization::Default => {
@@ -62,7 +71,11 @@ pub(in crate::sql) fn execute_query_plan_output(
                     uqa_sql::ast::CteMaterialization::NotMaterialized => true,
                 }
                 && matches!(
-                    query_contains_volatile_function(engine, &cte.query),
+                    cte.body
+                        .query()
+                        .map_or(Ok(true), |query| query_contains_volatile_function(
+                            engine, query
+                        )),
                     Ok(false)
                 )
         }) {
@@ -73,7 +86,8 @@ pub(in crate::sql) fn execute_query_plan_output(
             engine,
             ordered_ctes.into_iter().filter(|cte| {
                 reachable.contains(&cte.name)
-                    && (recursive.contains(cte.name.as_str())
+                    && (cte.body.modifies_data()
+                        || recursive.contains(cte.name.as_str())
                         || matches!(
                             cte.materialization,
                             uqa_sql::ast::CteMaterialization::Materialized
@@ -83,7 +97,9 @@ pub(in crate::sql) fn execute_query_plan_output(
                             uqa_sql::ast::CteMaterialization::Default
                         ) && !single_reference.contains(&cte.name))
                         || !matches!(
-                            query_contains_volatile_function(engine, &cte.query),
+                            cte.body.query().map_or(Ok(true), |query| {
+                                query_contains_volatile_function(engine, query)
+                            }),
                             Ok(false)
                         ))
             }),
@@ -92,6 +108,11 @@ pub(in crate::sql) fn execute_query_plan_output(
             &filters,
         )?;
     }
+    let statement_snapshot = ctes.command_cte_snapshot();
+    let snapshot_engine = statement_snapshot
+        .as_deref()
+        .map(|snapshot| engine.statement_read_snapshot_engine(snapshot));
+    let engine = snapshot_engine.as_ref().unwrap_or(engine);
     match &plan.root {
         RelationalPlan::QueryBlock(block) => {
             execute_query_block_output(engine, block, params, ctes, output_mode)

@@ -34,16 +34,59 @@ use super::{
     NodeEnum, Result, SQLError, Statement,
 };
 
-pub fn compile(sql: &str) -> Result<Vec<Statement>> {
+/// A syntactically valid statement retaining its exact source slice. Compilation is separate so an execution boundary can analyze statements in order after preceding commands have completed.
+#[derive(Debug, Clone)]
+pub struct ParsedStatement<'sql> {
+    sql: &'sql str,
+    node: Box<Node>,
+}
+
+impl<'sql> ParsedStatement<'sql> {
+    /// Original SQL, without reconstructing or rewriting the parser tree.
+    pub const fn sql(&self) -> &'sql str {
+        self.sql
+    }
+
+    /// Compile this statement into the engine's internal SQL representation.
+    pub fn compile(&self) -> Result<Statement> {
+        compile_stmt(&self.node)
+    }
+}
+
+/// Parse an entire SQL message before exposing any statement for execution. `PostgreSQL` syntax errors reject the whole message; semantic compilation errors can be surfaced later, at the affected statement's boundary.
+pub fn parse_statements(sql: &str) -> Result<Vec<ParsedStatement<'_>>> {
     let parsed = pg_query::parse(sql)?;
     let mut out = Vec::with_capacity(parsed.protobuf.stmts.len());
     for raw in parsed.protobuf.stmts {
         let node = raw
             .stmt
             .ok_or_else(|| SQLError::Internal("parser returned an empty statement".into()))?;
-        out.push(compile_stmt(&node)?);
+        let start = usize::try_from(raw.stmt_location).map_err(|_| {
+            SQLError::Internal("parser returned a negative statement offset".into())
+        })?;
+        let end = if raw.stmt_len == 0 {
+            sql.len()
+        } else {
+            let len = usize::try_from(raw.stmt_len).map_err(|_| {
+                SQLError::Internal("parser returned a negative statement length".into())
+            })?;
+            start
+                .checked_add(len)
+                .ok_or_else(|| SQLError::Internal("parser statement offset overflow".into()))?
+        };
+        let source = sql.get(start..end).ok_or_else(|| {
+            SQLError::Internal("parser statement bounds do not match SQL text".into())
+        })?;
+        out.push(ParsedStatement { sql: source, node });
     }
     Ok(out)
+}
+
+pub fn compile(sql: &str) -> Result<Vec<Statement>> {
+    parse_statements(sql)?
+        .iter()
+        .map(ParsedStatement::compile)
+        .collect()
 }
 
 pub fn resolve_deferred_create_table(

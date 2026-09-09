@@ -6,7 +6,9 @@
 
 //! Durable catalog AST binding and dependency traversal.
 
+mod ctes;
 mod routines;
+use ctes::{collect_cte_relation_dependencies, collect_cte_source_routine_dependencies};
 
 use std::collections::BTreeSet;
 
@@ -207,7 +209,13 @@ where
                 || visible.clone(),
                 |recursive| inherited.union(recursive).cloned().collect(),
             );
-            self.bind_select(&mut cte.query, &body_scope)?;
+            match &mut cte.body {
+                uqa_sql::ast::CteBody::Query(query) => self.bind_select(query, &body_scope)?,
+                uqa_sql::ast::CteBody::Insert(plan) => self.bind_insert(plan, &body_scope)?,
+                uqa_sql::ast::CteBody::Update(plan) => self.bind_update(plan, &body_scope)?,
+                uqa_sql::ast::CteBody::Delete(plan) => self.bind_delete(plan, &body_scope)?,
+                uqa_sql::ast::CteBody::Merge(plan) => self.bind_merge(plan, &body_scope)?,
+            }
             if let Some(cycle) = &mut cte.cycle {
                 self.bind_expr(&mut cycle.mark_value, &body_scope)?;
                 self.bind_expr(&mut cycle.mark_default, &body_scope)?;
@@ -612,7 +620,7 @@ impl Engine {
     }
 }
 
-pub(super) fn rewrite_rule_statement_relation(
+pub(crate) fn rewrite_stored_statement_relation(
     statement: &mut Statement,
     from: &RelationIdentity,
     to: &RelationIdentity,
@@ -667,7 +675,7 @@ pub(super) fn rewrite_stored_rule_relation(
         changed = true;
     }
     for action in &mut rule.definition.actions {
-        changed |= rewrite_rule_statement_relation(action, from, to)?;
+        changed |= rewrite_stored_statement_relation(action, from, to)?;
     }
     if let Some(condition) = &mut rule.definition.condition {
         let from_name = from.qualified_name();
@@ -732,7 +740,7 @@ pub(super) fn collect_query_relation_dependencies(
             || visible_ctes.clone(),
             |recursive| inherited_ctes.union(recursive).cloned().collect(),
         );
-        collect_query_relation_dependencies(&cte.query, dependencies, &body_scope)?;
+        collect_cte_relation_dependencies(&cte.body, dependencies, &body_scope)?;
         visible_ctes.insert(cte.name.clone());
     }
     match &query.root {
@@ -799,7 +807,7 @@ pub(super) fn collect_query_routine_dependencies(
         }
     });
     for cte in &query.ctes {
-        collect_query_source_routine_dependencies(&cte.query, dependencies);
+        collect_cte_source_routine_dependencies(&cte.body, dependencies);
     }
     collect_relational_source_routine_dependencies(&query.root, dependencies);
 }
@@ -809,7 +817,7 @@ fn collect_query_source_routine_dependencies(
     dependencies: &mut RuleDependencies,
 ) {
     for cte in &query.ctes {
-        collect_query_source_routine_dependencies(&cte.query, dependencies);
+        collect_cte_source_routine_dependencies(&cte.body, dependencies);
     }
     collect_relational_source_routine_dependencies(&query.root, dependencies);
 }

@@ -8,13 +8,13 @@
 
 #[derive(Debug, thiserror::Error)]
 pub enum SQLError {
-    #[error("parse error: {0}")]
+    #[error("{0}")]
     Parse(String),
-    #[error("unsupported SQL feature: {0}")]
+    #[error("{0}")]
     Unsupported(String),
     #[error("relation \"{0}\" does not exist")]
     UnknownTable(String),
-    #[error("unknown column: {0}")]
+    #[error("column \"{0}\" does not exist")]
     UnknownColumn(String),
     #[error("column reference \"{0}\" is ambiguous")]
     AmbiguousColumn(String),
@@ -45,6 +45,13 @@ pub enum SQLError {
 }
 
 impl SQLError {
+    pub fn unknown_qualified_column(qualifier: &str, column: &str) -> Self {
+        Self::Routine {
+            sqlstate: "42703".into(),
+            message: format!("column {qualifier}.{column} does not exist"),
+        }
+    }
+
     /// `PostgreSQL` `SQLSTATE` code for the error, mirroring the
     /// the current exception-to-state mapping. `None` for
     /// errors that do not carry a defined `SQLSTATE`.
@@ -88,6 +95,7 @@ impl From<pg_query::Error> for SQLError {
                     message,
                 }
             }
+            pg_query::Error::Parse(message) => SQLError::Parse(message),
             other => SQLError::Parse(other.to_string()),
         }
     }

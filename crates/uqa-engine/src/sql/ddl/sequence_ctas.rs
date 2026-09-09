@@ -82,7 +82,7 @@ fn run_create_table_as_inner(
     }
     let preliminary_name = create_table_as_target_name(engine, execution)?;
     if should_skip_existing_create_table_as(engine, &preliminary_name, execution.if_not_exists)? {
-        return Ok(SQLResult::empty());
+        return Ok(SQLResult::empty().with_command_tag("CREATE TABLE AS"));
     }
     let columns = create_table_as_columns(&query_schema, execution.column_names)?;
     if execution.persistence != uqa_sql::ast::RelationPersistence::Temporary {
@@ -104,7 +104,7 @@ fn run_create_table_as_inner(
     }
     let name = create_table_as_target_name(engine, execution)?;
     if should_skip_existing_create_table_as(engine, &name, execution.if_not_exists)? {
-        return Ok(SQLResult::empty());
+        return Ok(SQLResult::empty().with_command_tag("CREATE TABLE AS"));
     }
     if execution.persistence != uqa_sql::ast::RelationPersistence::Temporary {
         engine.ensure_relation_creation_privilege(&name)?;
@@ -139,7 +139,12 @@ fn run_create_table_as_inner(
     let affected = result.as_ref().map_or(Ok(0), |result| {
         materialize_create_table_as_rows(engine, &name, &columns, result)
     })?;
-    Ok(SQLResult::from_affected(affected))
+    let tag = if execution.with_no_data {
+        "CREATE TABLE AS".to_string()
+    } else {
+        format!("SELECT {affected}")
+    };
+    Ok(SQLResult::from_affected(affected).with_command_tag(tag))
 }
 
 fn create_table_as_target_name(

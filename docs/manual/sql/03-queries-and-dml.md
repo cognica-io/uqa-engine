@@ -183,6 +183,25 @@ JOIN source AS right_source ON right_source.id = left_source.id
 ORDER BY left_source.id;
 ```
 
+### Data-modifying CTEs
+
+A top-level `WITH name [(column, ...)] AS (statement)` definition accepts `INSERT`, `UPDATE`, `DELETE`, or `MERGE`. Its `RETURNING` list defines the CTE's result columns and SQL types, including when no rows are changed. An explicit CTE column list renames those outputs by position. Without `RETURNING`, the command still executes, but its CTE name cannot be used as a query source.
+
+Every data-modifying CTE executes once and to completion, even if the main query never reads it, requests no rows, or uses `NOT MATERIALIZED`. The commands and main query read the same statement snapshot; a sibling's writes become available through its `RETURNING` output. A later SQL statement sees the committed changes. An error rolls back the statement's changes and follows the surrounding transaction's failure rules.
+
+Data-modifying CTEs must belong to the top-level statement. They cannot appear inside another CTE or a subquery, recursively reference their own output, or be stored in a view, materialized view, or declared cursor. `CREATE TABLE AS` can consume their results. A target with `DO ALSO`, conditional `DO INSTEAD`, `DO INSTEAD NOTHING`, or multiple-statement `DO INSTEAD` rewrite rules is rejected.
+
+```sql execute
+CREATE TABLE cte_pending (id INTEGER PRIMARY KEY, body TEXT);
+CREATE TABLE cte_archive (id INTEGER PRIMARY KEY, body TEXT);
+INSERT INTO cte_pending VALUES (1, 'archived'), (2, 'pending');
+
+WITH moved AS (
+    DELETE FROM cte_pending WHERE id = 1 RETURNING id, body
+)
+INSERT INTO cte_archive SELECT id, body FROM moved RETURNING id, body;
+```
+
 ## Set operations
 
 `UNION`, `INTERSECT`, and `EXCEPT` support distinct and `ALL` forms where specified:

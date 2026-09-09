@@ -30,7 +30,10 @@ fn reorder_query_joins(
     statistics: &dyn SourceStatistics,
 ) -> JoinGraphResult<()> {
     for cte in &mut query.ctes {
-        reorder_query_joins(&mut cte.query, statistics)?;
+        match &mut cte.body {
+            crate::CtePlanBody::Query(query) => reorder_query_joins(query, statistics)?,
+            crate::CtePlanBody::Command(command) => reorder_command_joins(command, statistics)?,
+        }
     }
     match &mut query.root {
         RelationalPlan::QueryBlock(block) => {
@@ -63,6 +66,16 @@ fn reorder_query_joins(
     Ok(())
 }
 
+fn reorder_cte_joins(
+    cte: &mut crate::CtePlan,
+    statistics: &dyn SourceStatistics,
+) -> JoinGraphResult<()> {
+    match &mut cte.body {
+        crate::CtePlanBody::Query(query) => reorder_query_joins(query, statistics),
+        crate::CtePlanBody::Command(command) => reorder_command_joins(command, statistics),
+    }
+}
+
 fn reorder_command_joins(
     command: &mut CommandPlan,
     statistics: &dyn SourceStatistics,
@@ -71,7 +84,7 @@ fn reorder_command_joins(
         CommandPlan::Insert(plan) => reorder_insert_joins(plan, statistics)?,
         CommandPlan::Update(plan) => {
             for cte in &mut plan.ctes {
-                reorder_query_joins(&mut cte.query, statistics)?;
+                reorder_cte_joins(cte, statistics)?;
             }
             if let Some(source) = &mut plan.source {
                 reorder_source_joins(source, &[], statistics)?;
@@ -82,7 +95,7 @@ fn reorder_command_joins(
         }
         CommandPlan::Delete(plan) => {
             for cte in &mut plan.ctes {
-                reorder_query_joins(&mut cte.query, statistics)?;
+                reorder_cte_joins(cte, statistics)?;
             }
             if let Some(source) = &mut plan.source {
                 reorder_source_joins(source, &[], statistics)?;
@@ -92,6 +105,9 @@ fn reorder_command_joins(
             }
         }
         CommandPlan::Merge(plan) => {
+            for cte in &mut plan.ctes {
+                reorder_cte_joins(cte, statistics)?;
+            }
             reorder_source_joins(&mut plan.source, &[], statistics)?;
             for subquery in &mut plan.subqueries {
                 reorder_query_joins(subquery, statistics)?;
@@ -168,7 +184,10 @@ fn reorder_insert_joins(
     statistics: &dyn SourceStatistics,
 ) -> JoinGraphResult<()> {
     for cte in &mut plan.ctes {
-        reorder_query_joins(&mut cte.query, statistics)?;
+        match &mut cte.body {
+            crate::CtePlanBody::Query(query) => reorder_query_joins(query, statistics)?,
+            crate::CtePlanBody::Command(command) => reorder_command_joins(command, statistics)?,
+        }
     }
     if let Some(source) = &mut plan.source {
         reorder_query_joins(source, statistics)?;

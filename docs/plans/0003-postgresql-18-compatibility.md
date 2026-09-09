@@ -126,6 +126,8 @@ The following compact ledger is the readable projection of the machine-readable 
 | `regression.core-and-isolation` | `M4` | `partial` |
 | `clients.driver-and-operations-matrix` | `M5` | `partial` |
 | `compatibility.complete-zero-exemption-audit` | `M6` | `not_audited` |
+| `query.data-modifying-ctes` | `M4` | `partial` |
+| `protocol.simple-query-command-completion` | `M5` | `partial` |
 
 <!-- pg18-manifest-status:end -->
 
@@ -296,6 +298,8 @@ The extended protocol slice now resolves Bind and FunctionCall format vectors th
 Drive remaining work from the PostgreSQL 18 official regression schedules rather than an ad hoc feature list. Import queries and expected behavior in license-compatible differential harnesses, categorize failures by parser, binder, type system, planner, executor, catalog, transaction, protocol, or administration, and maintain a burn-down manifest with owners and evidence.
 
 The official PostgreSQL 18.4 regression corpus is now pinned by release-archive SHA-256 and source commit, with an exact inventory of 791 original files and ownership accounting for all 354 core and isolation tests. The runner preserves the original parallel schedules, psql commands, concurrent session specifications, expected-output variants, and support data; it runs the four extra tests as well, with a fresh cluster for catalog reindexing and prepared transactions enabled for their isolation specs. The full PostgreSQL reference is a required pre-merge job and retains the original driver logs, results, diffs, server logs, and provenance. Its success verifies the harness environment only. The complete UQA SQL server, actual UQA execution of the corpus, failure classification, and fixes remain required; all upstream UQA cases retain `not_audited` status, and `regression.core-and-isolation` remains partial.
+
+The embedded Simple Query boundary now parses a complete message before execution, delivers ordered statement results with PostgreSQL command tags, and withholds the final result until an implicit transaction commits. A 105-message PostgreSQL 18.4 oracle passes on both memory and SQLite engines; separate tests cover consumer failures, durable commit visibility, deferred constraints, and failed-transaction recovery. Data-modifying CTEs have a 98-statement result, type, diagnostic, and state oracle covering all four DML forms, recursive query inputs, statement snapshots, automatic and trigger-driven views, rewrite-rule restrictions, and SQL-standard routine dependencies. A separate SQLite case verifies bound CTE routines across reopen and relation rename. These tests establish engine behavior for the server adapter; they do not replace the unmodified upstream corpus or close either compatibility item.
 
 Close the existing embedded-runtime gaps: PostgreSQL integer widths and overflow, numeric precision and formatting, collations, domains, enums, user composites and user-defined ranges, unlogged crash recovery, advanced materialized-view behavior, inheritance and partitioning, complete row-lock and isolation regression coverage, the remaining advanced trigger and rewrite-rule matrices, sequences, COPY, complete system catalogs, roles and ACLs, MVCC snapshots and deadlock behavior, prepared statements and portals, large objects, extensions, replication-facing protocol, WAL, and administration surfaces.
 

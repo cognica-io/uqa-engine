@@ -47,7 +47,6 @@ pub(crate) fn relation_persistence(
 pub(crate) fn compile_on_commit(
     action: pg_query::protobuf::OnCommitAction,
     persistence: RelationPersistence,
-    statement: &str,
 ) -> Result<OnCommitAction> {
     use pg_query::protobuf::OnCommitAction as PgOnCommitAction;
 
@@ -59,7 +58,7 @@ pub(crate) fn compile_on_commit(
     {
         return Err(SQLError::Routine {
             sqlstate: "42P16".into(),
-            message: format!("ON COMMIT can only be used on temporary tables in {statement}"),
+            message: "ON COMMIT can only be used on temporary tables".into(),
         });
     }
     Ok(match action {
@@ -95,7 +94,7 @@ pub(crate) fn validate_create_table_envelope(
             "{statement}: table storage options are not supported"
         )));
     }
-    compile_on_commit(stmt.oncommit(), persistence, statement)?;
+    compile_on_commit(stmt.oncommit(), persistence)?;
     if !stmt.tablespacename.is_empty() {
         return Err(SQLError::Unsupported(format!(
             "{statement}: TABLESPACE is not supported"

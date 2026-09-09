@@ -68,7 +68,7 @@ pub(super) fn validate_qualified_column(
         if candidate.has_qualified_column(qualifier, column) {
             return Ok(());
         }
-        return Err(SQLError::UnknownColumn(format!("{qualifier}.{column}")));
+        return Err(SQLError::unknown_qualified_column(qualifier, column));
     }
     Err(SQLError::UnknownTable(qualifier.to_string()))
 }

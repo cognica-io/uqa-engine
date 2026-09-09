@@ -29,6 +29,8 @@ use super::{
 
 mod codec;
 mod staging;
+mod view_rules;
+use view_rules::{required_view_rule_insert_input_positions, view_rule_insert_column_type};
 
 use codec::{
     decode_prepared_insert_spill_row, encode_prepared_insert_spill_row,
@@ -60,11 +62,32 @@ pub(in crate::sql) fn run_insert(
     })
 }
 
-#[expect(clippy::too_many_lines, reason = "preserves DML lock and event order")]
+pub(in crate::sql) fn run_insert_with_ctes(
+    engine: &Engine,
+    mut stmt: InsertPlan,
+    params: &[SQLParam],
+    ctes: &CteScope,
+) -> Result<SQLResult, SQLError> {
+    stmt.table = super::resolve_dml_target_name(engine, &stmt.table, stmt.target_relation_bound)?;
+    super::run_mutation_command(engine, move |engine| {
+        run_insert_inner_with_ctes(engine, &stmt, params, Some(ctes))
+    })
+}
+
 pub(in crate::sql) fn run_insert_inner(
     engine: &Engine,
     stmt: &InsertPlan,
     params: &[SQLParam],
+) -> Result<SQLResult, SQLError> {
+    run_insert_inner_with_ctes(engine, stmt, params, None)
+}
+
+#[expect(clippy::too_many_lines, reason = "preserves DML lock and event order")]
+fn run_insert_inner_with_ctes(
+    engine: &Engine,
+    stmt: &InsertPlan,
+    params: &[SQLParam],
+    inherited_ctes: Option<&CteScope>,
 ) -> Result<SQLResult, SQLError> {
     if let Some(kind) = super::view_triggers::target_view_kind(engine, &stmt.table)? {
         if kind == crate::StoredViewKind::Materialized {
@@ -86,10 +109,16 @@ pub(in crate::sql) fn run_insert_inner(
             uqa_sql::ast::RuleEvent::Insert,
         )? {
             let _ = super::view_privileges::ensure_insert(engine, stmt)?;
-            return super::view_triggers::run_view_insert_inner(engine, stmt, params);
+            return super::view_triggers::run_view_insert_inner(
+                engine,
+                stmt,
+                params,
+                inherited_ctes,
+            );
         }
-        let rewritten = super::view_automatic::rewrite_insert_to_base(engine, stmt, params)?;
-        return run_insert_inner(engine, &rewritten, params);
+        let rewritten =
+            super::view_automatic::rewrite_insert_to_base(engine, stmt, params, inherited_ctes)?;
+        return run_insert_inner_with_ctes(engine, &rewritten, params, inherited_ctes);
     }
     let _transition_capture_scope = crate::sql::triggers::TransitionCaptureScope::enter();
     engine.lock_relation(
@@ -283,10 +312,18 @@ pub(in crate::sql) fn run_insert_inner(
         } else {
             false
         };
-    let statement_snapshot = (has_before_insert_statement_trigger
-        || has_before_update_statement_trigger)
-        .then(|| engine.capture_statement_snapshot_engine())
-        .transpose()?;
+    let statement_snapshot = match inherited_ctes.and_then(CteScope::command_cte_snapshot) {
+        Some(snapshot) => Some(snapshot),
+        None if has_before_insert_statement_trigger
+            || has_before_update_statement_trigger
+            || stmt.ctes.iter().any(|cte| cte.body.modifies_data()) =>
+        {
+            Some(std::sync::Arc::new(
+                engine.capture_statement_read_snapshot()?,
+            ))
+        }
+        None => None,
+    };
     if insert_original_query {
         crate::sql::triggers::fire_statement_triggers(
             engine,
@@ -305,13 +342,20 @@ pub(in crate::sql) fn run_insert_inner(
             columns,
         )?;
     }
-    let read_engine = statement_snapshot.as_ref().unwrap_or(engine);
+    let snapshot_engine = statement_snapshot
+        .as_deref()
+        .map(|snapshot| engine.statement_read_snapshot_engine(snapshot));
+    let read_engine = snapshot_engine.as_ref().unwrap_or(engine);
     let mut scope = CteScope::new_for_command(
         read_engine,
         stmt.statement_privilege_subject.as_deref(),
         stmt.relations_bound,
     )?;
-    crate::sql::select::materialize_plan_ctes(read_engine, &stmt.ctes, params, &mut scope)?;
+    if let Some(parent) = inherited_ctes {
+        scope.inherit_cte_bindings(parent);
+    }
+    scope.set_command_cte_snapshot(statement_snapshot.clone());
+    crate::sql::select::materialize_plan_ctes(engine, &stmt.ctes, params, &mut scope)?;
     scope.scalar_subqueries.clone_from(&stmt.subqueries);
     // Resolve the table's primary-key column name. Auto-increment (SERIAL / BIGSERIAL) wins; otherwise the scalar PRIMARY KEY column wins; otherwise use the conventional legacy `id` slot. Both VALUES and SELECT sources must derive the internal doc id from this same column or later primary-key rewrites can address a different row than the one that was inserted.
     let (auto_id_col, id_column, accepts_supplied_identity) =
@@ -850,70 +894,6 @@ pub(in crate::sql) fn run_insert_inner(
             affected
         },
     ))
-}
-
-fn view_rule_insert_column_type(
-    engine: &Engine,
-    stmt: &InsertPlan,
-    input_position: usize,
-) -> Result<Option<ColumnType>, SQLError> {
-    for plan in &stmt.view_rule_insert_plans {
-        let Some(column) = plan.supplied_columns.get(input_position) else {
-            continue;
-        };
-        let definition = engine
-            .view_definition(&plan.relation)?
-            .ok_or_else(|| SQLError::UnknownTable(plan.relation.clone()))?;
-        let schema = engine.stored_view_schema(&definition)?;
-        let Some(position) =
-            schema
-                .columns()
-                .iter()
-                .enumerate()
-                .find_map(|(position, internal)| {
-                    let public = schema.public_name(position).unwrap_or(internal);
-                    public.eq_ignore_ascii_case(column).then_some(position)
-                })
-        else {
-            return Err(SQLError::UnknownColumn(format!(
-                "{}.{}",
-                plan.relation, column
-            )));
-        };
-        return Ok(schema.column_type(position).cloned());
-    }
-    Ok(None)
-}
-
-fn required_view_rule_insert_input_positions(
-    engine: &Engine,
-    stmt: &InsertPlan,
-) -> Result<Option<BTreeSet<usize>>, SQLError> {
-    let mut required = BTreeSet::new();
-    for plan in &stmt.view_rule_insert_plans {
-        let Some(columns) = crate::sql::rules::relation_rule_row_columns(
-            engine,
-            &plan.relation,
-            uqa_sql::ast::RuleEvent::Insert,
-        )?
-        else {
-            return Ok(None);
-        };
-        required.extend(
-            plan.supplied_columns
-                .iter()
-                .enumerate()
-                .filter_map(|(position, column)| columns.contains(column).then_some(position)),
-        );
-        if crate::sql::rules::relation_suppresses_original_query(
-            engine,
-            &plan.relation,
-            uqa_sql::ast::RuleEvent::Insert,
-        )? {
-            break;
-        }
-    }
-    Ok(Some(required))
 }
 
 fn fire_insert_after_triggers(

@@ -531,7 +531,13 @@ fn upgrade_ctes(ctes: &mut [CTE]) -> bool {
             changed |= cycle.mark_value.upgrade_legacy_serialized_dispatches();
             changed |= cycle.mark_default.upgrade_legacy_serialized_dispatches();
         }
-        changed | cte.query.upgrade_legacy_serialized_dispatches()
+        let mut statement = cte.body.clone().into_statement();
+        let body_changed = statement.upgrade_legacy_serialized_dispatches();
+        if body_changed {
+            cte.body = super::CteBody::try_from(statement)
+                .expect("dispatch migration preserves the CTE statement kind");
+        }
+        changed | body_changed
     })
 }
 
@@ -681,7 +687,8 @@ impl Statement {
             Self::Execute { params, .. } | Self::Call { args: params, .. } => upgrade_exprs(params),
             Self::Values { rows } => upgrade_rows(rows),
             Self::Merge(merge) => {
-                let mut changed = merge.source.upgrade_legacy_serialized_dispatches();
+                let mut changed = upgrade_ctes(&mut merge.with);
+                changed |= merge.source.upgrade_legacy_serialized_dispatches();
                 changed |= merge.join_condition.upgrade_legacy_serialized_dispatches();
                 for clause in &mut merge.when_clauses {
                     changed |= clause.upgrade_legacy_serialized_dispatches();

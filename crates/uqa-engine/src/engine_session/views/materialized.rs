@@ -50,7 +50,7 @@ impl Engine {
     pub(crate) fn register_materialized_view_plan(
         &self,
         registration: MaterializedViewRegistration<'_>,
-    ) -> Result<(), SQLError> {
+    ) -> Result<Option<u64>, SQLError> {
         let MaterializedViewRegistration {
             name,
             column_names,
@@ -86,7 +86,7 @@ impl Engine {
                 SQLError::Internal(format!("resolve relation `{name}`: {error}"))
             })? {
                 if if_not_exists {
-                    return Ok(());
+                    return Ok(None);
                 }
                 return Err(SQLError::Routine {
                     sqlstate: "42P07".into(),
@@ -101,6 +101,9 @@ impl Engine {
                 let result = crate::sql::execute_query_plan(engine, &plan, params)?;
                 materialized_rows(&result, &output_columns)?
             };
+            let affected_rows = u64::try_from(materialized_rows.len()).map_err(|_| {
+                SQLError::Internal("materialized-view row count exceeds u64".into())
+            })?;
             let relation = RelationIdentity::from_legacy_name(&name).map_err(|error| {
                 SQLError::Internal(format!("invalid materialized-view name: {error}"))
             })?;
@@ -133,7 +136,7 @@ impl Engine {
             }
             engine.durable.views.write().insert(relation, view);
             engine.note_catalog_registry_changed();
-            Ok(())
+            Ok((!with_no_data).then_some(affected_rows))
         })
     }
 

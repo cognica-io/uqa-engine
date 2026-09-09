@@ -38,6 +38,7 @@ impl SQLBatchExecution {
             .map(|result| {
                 let column_types = vec![None; result.columns.len()];
                 SQLResult {
+                    command_tag: None,
                     columns: result.columns,
                     column_types,
                     rows: result.rows,

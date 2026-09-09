@@ -16,6 +16,34 @@ use super::{CteScope, LockIdentityOptions};
 use crate::engine_capabilities::RelationLookupMode;
 
 impl CteScope {
+    pub(in crate::sql) fn command_cte_snapshot(
+        &self,
+    ) -> Option<std::sync::Arc<crate::engine_session::StatementReadSnapshot>> {
+        self.command_cte_snapshot.clone()
+    }
+
+    pub(in crate::sql) fn set_command_cte_snapshot(
+        &mut self,
+        snapshot: Option<std::sync::Arc<crate::engine_session::StatementReadSnapshot>>,
+    ) {
+        self.command_cte_snapshot = snapshot;
+    }
+
+    pub(in crate::sql) fn inherit_cte_bindings(&mut self, parent: &Self) {
+        self.rows.clone_from(&parent.rows);
+        self.deferred_ctes.clone_from(&parent.deferred_ctes);
+        self.non_returning_ctes
+            .clone_from(&parent.non_returning_ctes);
+        self.visible_cte_names.clone_from(&parent.visible_cte_names);
+        self.recursive_control_widths
+            .clone_from(&parent.recursive_control_widths);
+        self.command_cte_snapshot
+            .clone_from(&parent.command_cte_snapshot);
+        if self.privilege_subject.is_none() {
+            self.privilege_subject.clone_from(&parent.privilege_subject);
+        }
+    }
+
     /// Override only relation privilege checks while preserving SQL-visible `current_user` and the caller's namespace.
     pub(in crate::sql) fn enter_privilege_subject(
         &mut self,
@@ -52,15 +80,22 @@ impl CteScope {
 
     pub(in crate::sql) fn insert_shared(&mut self, name: String, rows: uqa_execution::SharedSpill) {
         self.deferred_ctes.remove(&name);
+        self.non_returning_ctes.remove(&name);
         self.rows.insert(name, rows);
     }
 
     pub(in crate::sql) fn insert_deferred(&mut self, plan: CtePlan) {
         self.rows.remove(&plan.name);
+        if plan.body.returns_rows() {
+            self.non_returning_ctes.remove(&plan.name);
+        } else {
+            self.non_returning_ctes.insert(plan.name.clone());
+        }
         self.deferred_ctes.insert(plan.name.clone(), plan);
     }
 
     pub(in crate::sql) fn remove_deferred(&mut self, name: &str) -> Option<CtePlan> {
+        self.non_returning_ctes.remove(name);
         self.deferred_ctes.remove(name)
     }
 
@@ -127,6 +162,7 @@ impl CteScope {
         &mut self,
         name: &str,
     ) -> Option<uqa_execution::SharedSpill> {
+        self.non_returning_ctes.remove(name);
         self.rows.remove(name)
     }
 

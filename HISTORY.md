@@ -6,6 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Added data-modifying CTEs for INSERT, UPDATE, DELETE, and MERGE, with typed RETURNING results, statement snapshot sharing, and execution of unreferenced commands. PostgreSQL 18 differential fixtures cover command results, state changes, and diagnostics on memory and SQLite engines.
+- Added `Engine::sql_simple_query` for ordered per-statement results and `SQLResult::command_tag` for PostgreSQL command completion. Complete-message parsing, implicit transaction segments, deferred commit errors, and callback failures preserve the transaction's actual outcome.
+
+### Fixed
+
+- Matched PostgreSQL duplicate-key and foreign-key diagnostics, including schema-qualified and temporary relations, and preserved inline foreign-key deferrability when compiling column constraints.
+- Updated bound SQL-standard routine bodies when a referenced relation is renamed, preserving execution, exact routine dependencies, and SQLite reopen behavior for data-modifying CTEs.
+
+### Changed
+
+- Rust AST CTEs now expose `body: CteBody` instead of the SELECT-only `query` field, and planner CTEs expose `CtePlanBody`. Match the query or command variant when traversing WITH definitions. The SELECT-only serialized `query` representation remains readable in existing catalogs.
+
 ## [0.2.3] - 2026-09-09
 
 See the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.2.3/docs/manual/reference/10-upgrading.md) for Rust graph API changes, custom storage requirements, automatic statistics, and persistent catalog migration.

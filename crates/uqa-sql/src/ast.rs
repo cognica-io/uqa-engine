@@ -251,7 +251,7 @@ pub enum AlterTableAction {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InsertStmt {
     pub table: String,
     /// Whether `table` is a stored catalog identity rather than a name to resolve in the executing session.
@@ -419,7 +419,7 @@ pub enum DiscardTarget {
     Temp,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UpdateStmt {
     pub table: String,
     /// Whether `table` is a stored catalog identity rather than a name to resolve in the executing session.
@@ -440,7 +440,7 @@ pub struct UpdateStmt {
     pub returning_aliases: ReturningAliases,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DeleteStmt {
     pub table: String,
     /// Whether `table` is a stored catalog identity rather than a name to resolve in the executing session.
@@ -730,8 +730,10 @@ pub struct TruncateTarget {
     pub include_descendants: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MergeStmt {
+    #[serde(default)]
+    pub with: Vec<CTE>,
     pub target: String,
     pub target_qualifier: String,
     pub target_alias: Option<String>,
@@ -745,7 +747,7 @@ pub struct MergeStmt {
     pub returning_aliases: ReturningAliases,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MergeWhen {
     /// `WHEN MATCHED [AND <cond>] THEN UPDATE SET ...`.
     UpdateMatched {

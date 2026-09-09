@@ -40,6 +40,7 @@ pub(super) fn eval_postgres_functions(name: &str, args: &[Value]) -> Option<Resu
         "num_nulls",
         "num_nonnulls",
         "current_database",
+        "version",
         "current_catalog",
         "current_user",
         "session_user",
@@ -316,6 +317,21 @@ fn eval_postgres_function(name: &str, args: &[Value]) -> Result<Value> {
             // The engine has one database and one logical user identity; schema
             // identifiers are intercepted above because they are session-scoped.
             "current_database" | "current_catalog" => Ok(Value::Str("uqa".into())),
+            "version" => {
+                if !args.is_empty() {
+                    return Err(SQLError::BadArity {
+                        name: name.into(),
+                        expected: "0".into(),
+                        actual: args.len(),
+                    });
+                }
+                Ok(Value::Str(format!(
+                    "UQA Engine {} on {}-{}, PostgreSQL 18 compatible",
+                    env!("CARGO_PKG_VERSION"),
+                    std::env::consts::ARCH,
+                    std::env::consts::OS,
+                )))
+            }
             "current_user" | "session_user" => Ok(Value::Str("uqa".into())),
             "array_positions" => {
                 if args.len() != 2 {

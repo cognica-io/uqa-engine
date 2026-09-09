@@ -32,6 +32,26 @@ impl Drop for SQLExecutionScope<'_> {
 }
 
 impl Engine {
+    /// Execute a simple-query message, delivering each statement's result in order. The whole message is parsed before execution, and implicit transaction segments retain the same boundaries as [`Engine::sql`]. The final result is delivered only after its implicit transaction has committed. Earlier results may have been delivered when a later statement fails; such failure still rolls back its implicit segment. An empty message delivers one result with no command completion.
+    pub fn sql_simple_query(
+        &self,
+        query: &str,
+        params: &[SQLParam],
+        mut consume: impl FnMut(&SQLResult) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        let _statement = self.runtime.statement_gate.lock();
+        let (_execution, nested) = SQLExecutionScope::enter(&self.runtime.sql_execution_depth);
+        self.synchronize_table_catalog()
+            .map_err(|error| SQLError::Internal(format!("refresh table catalog: {error}")))?;
+        self.synchronize_table_data().map_err(|error| {
+            SQLError::Internal(format!("refresh committed table data: {error}"))
+        })?;
+        self.synchronize_catalog_registries().map_err(|error| {
+            SQLError::Internal(format!("refresh durable catalog registries: {error}"))
+        })?;
+        super::driver::execute_simple_query(self, query, params, nested, &mut consume)
+    }
+
     /// Run a single SQL statement against the engine.
     pub fn sql(&self, query: &str, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
         let _statement = self.runtime.statement_gate.lock();

@@ -96,12 +96,15 @@ pub(super) fn build_table_source_operator<'a>(
             if let Some(plan) = ctes.deferred_for_scan(name) {
                 let streamed = {
                     let mut scoped_ctes = ctes.enter_lock_identity_emission(false);
-                    try_build_streaming_subquery_operator(
-                        engine,
-                        &plan.query,
-                        params,
-                        &mut scoped_ctes,
-                    )?
+                    match plan.body.query() {
+                        Some(query) => try_build_streaming_subquery_operator(
+                            engine,
+                            query,
+                            params,
+                            &mut scoped_ctes,
+                        )?,
+                        None => None,
+                    }
                 };
                 if let Some(operator) = streamed {
                     let source_columns = operator.schema().to_vec();
@@ -119,27 +122,33 @@ pub(super) fn build_table_source_operator<'a>(
                         operator, &qualifier, filters, engine, params, ctes,
                     ));
                 }
-                let materialized =
-                    if plan.materialization == uqa_sql::ast::CteMaterialization::NotMaterialized {
-                        let output = {
-                            let mut scoped_ctes = ctes.enter_lock_identity_emission(false);
-                            execute_query_plan_output(
-                                engine,
-                                &plan.query,
-                                params,
-                                &mut scoped_ctes,
-                                QueryOutputMode::SharedSpill,
-                            )?
-                        };
-                        alias_query_output_to_shared(engine, output, &plan.columns)?
-                    } else {
-                        materialize_plan_ctes(engine, std::slice::from_ref(&plan), params, ctes)?;
-                        ctes.materialized_for_scan(name).ok_or_else(|| {
-                            SQLError::Internal(format!(
-                                "deferred CTE `{name}` did not produce a materialized input"
-                            ))
-                        })?
+                let materialized = if plan.materialization
+                    == uqa_sql::ast::CteMaterialization::NotMaterialized
+                    && !plan.body.modifies_data()
+                {
+                    let output = {
+                        let mut scoped_ctes = ctes.enter_lock_identity_emission(false);
+                        execute_query_plan_output(
+                            engine,
+                            plan.body.query().ok_or_else(|| {
+                                SQLError::Internal(
+                                    "data-modifying CTE entered the folded query path".into(),
+                                )
+                            })?,
+                            params,
+                            &mut scoped_ctes,
+                            QueryOutputMode::SharedSpill,
+                        )?
                     };
+                    alias_query_output_to_shared(engine, output, &plan.columns)?
+                } else {
+                    materialize_plan_ctes(engine, std::slice::from_ref(&plan), params, ctes)?;
+                    ctes.materialized_for_scan(name).ok_or_else(|| {
+                        SQLError::Internal(format!(
+                            "deferred CTE `{name}` did not produce a materialized input"
+                        ))
+                    })?
+                };
                 let scan: Box<dyn PhysicalOperator + 'a> =
                     Box::new(uqa_execution::SharedSpillScan::new(materialized));
                 let source_columns = scan.schema().to_vec();

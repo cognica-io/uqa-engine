@@ -13,7 +13,9 @@
 
 mod analysis;
 mod catalog_sources;
+mod commands;
 mod cte_controls;
+mod ctes;
 mod projection;
 mod routine_binding;
 mod scope;
@@ -51,7 +53,7 @@ use sources::{alias_table_schema, table_function_member_source, JoinSchemaBindin
 use type_resolution::{set_operation_output_schema, QueryFunctionTypeResolver};
 
 use super::{
-    cte_references_own_name, expr_contains_subquery, ordered_plan_ctes, projection_columns,
+    cte_references_own_name, expr_contains_subquery, projection_columns,
     user_function_output_columns, CteScope, QueryBlockPlan, QueryPlan, RelationalPlan, SQLError,
     SQLParam, ScalarExpr, SourcePlan, Value,
 };
@@ -72,9 +74,16 @@ struct SchemaScope {
     resolution: RelationNameResolution,
     ctes: BTreeMap<String, RowSchema>,
     deferred_ctes: BTreeMap<String, uqa_planner::CtePlan>,
+    non_returning_ctes: BTreeSet<String>,
     visiting_views: BTreeSet<String>,
     validate_references: bool,
     stored_expression_outer: Option<RowSchema>,
+}
+
+fn non_returning_cte_error(name: &str) -> SQLError {
+    SQLError::Unsupported(format!(
+        "WITH query \"{name}\" does not have a RETURNING clause"
+    ))
 }
 
 impl SchemaScope {
@@ -95,6 +104,7 @@ impl SchemaScope {
                 })
                 .collect(),
             deferred_ctes: ctes.deferred_ctes().clone(),
+            non_returning_ctes: ctes.non_returning_ctes.clone(),
             visiting_views: BTreeSet::new(),
             validate_references: false,
             stored_expression_outer: None,
@@ -113,6 +123,7 @@ impl SchemaScope {
             resolution,
             ctes: BTreeMap::new(),
             deferred_ctes: BTreeMap::new(),
+            non_returning_ctes: BTreeSet::new(),
             visiting_views: BTreeSet::new(),
             validate_references: true,
             stored_expression_outer: None,
@@ -167,32 +178,7 @@ impl SchemaScope {
         outer: Option<&RowSchema>,
         preserve_top_level_unknown: bool,
     ) -> Result<RowSchema, SQLError> {
-        let mut previous = Vec::with_capacity(plan.ctes.len());
-        for cte in ordered_plan_ctes(plan)? {
-            let self_recursive = cte_references_own_name(cte);
-            let provisional = if self_recursive {
-                self.bind_recursive_seed(routines, &cte.query, params, outer)?
-            } else {
-                self.bind_query(routines, &cte.query, params, outer)?
-            };
-            let provisional = rename_schema(&provisional, &cte.columns, None);
-            let provisional = if self_recursive {
-                extend_recursive_cte_binding_schema(routines, cte, provisional, params)?
-            } else {
-                extend_cte_generated_schema(routines, cte, provisional, params)?
-            };
-            previous.push((
-                cte.name.clone(),
-                self.ctes.insert(cte.name.clone(), provisional),
-            ));
-
-            if self_recursive {
-                let complete = self.bind_query(routines, &cte.query, params, outer)?;
-                let complete = rename_schema(&complete, &cte.columns, None);
-                let complete = extend_cte_generated_schema(routines, cte, complete, params)?;
-                self.ctes.insert(cte.name.clone(), complete);
-            }
-        }
+        let previous = self.bind_cte_schemas(routines, &plan.ctes, params, outer)?;
 
         let result = self.bind_root(
             routines,
@@ -201,16 +187,7 @@ impl SchemaScope {
             outer,
             preserve_top_level_unknown,
         );
-        for (name, schema) in previous.into_iter().rev() {
-            match schema {
-                Some(schema) => {
-                    self.ctes.insert(name, schema);
-                }
-                None => {
-                    self.ctes.remove(&name);
-                }
-            }
-        }
+        self.restore_cte_schemas(previous);
         result
     }
 
@@ -476,11 +453,25 @@ impl SchemaScope {
                 let qualifier = alias.as_deref().unwrap_or(qualifier);
                 let cte_name = super::cte_reference_name(name);
                 if let Some(schema) = cte_name.as_ref().and_then(|name| self.ctes.get(name)) {
+                    if let Some(name) = cte_name
+                        .as_ref()
+                        .filter(|name| self.non_returning_ctes.contains(*name))
+                    {
+                        return Err(non_returning_cte_error(name));
+                    }
                     return alias_table_schema(schema, qualifier, column_aliases);
+                }
+                if let Some(plan) = cte_name
+                    .as_ref()
+                    .and_then(|name| self.deferred_ctes.get(name))
+                {
+                    if !plan.body.returns_rows() {
+                        return Err(non_returning_cte_error(&plan.name));
+                    }
                 }
                 if let Some(plan) = cte_name.and_then(|name| self.deferred_ctes.remove(&name)) {
                     let result = self
-                        .bind_query(routines, &plan.query, params, outer)
+                        .bind_cte_body(routines, &plan.body, params, outer)
                         .and_then(|schema| {
                             let schema = rename_schema(&schema, &plan.columns, Some(qualifier));
                             alias_table_schema(&schema, qualifier, column_aliases)

@@ -24,13 +24,24 @@ pub(super) fn optimize_unified_plan(
     }
 }
 
+pub(super) fn optimize_cte(
+    body: &mut crate::CtePlanBody,
+    config: &OptimizerConfig,
+    aggregates: &dyn AggregateClassifier,
+) {
+    match body {
+        crate::CtePlanBody::Query(query) => optimize_query(query, config, aggregates),
+        crate::CtePlanBody::Command(command) => optimize_command(command, config, aggregates),
+    }
+}
+
 pub(super) fn optimize_query(
     query: &mut QueryPlan,
     config: &OptimizerConfig,
     aggregates: &dyn AggregateClassifier,
 ) {
     for cte in &mut query.ctes {
-        optimize_query(&mut cte.query, config, aggregates);
+        optimize_cte(&mut cte.body, config, aggregates);
     }
     match &mut query.root {
         RelationalPlan::QueryBlock(block) => optimize_query_block(block, config, aggregates),

@@ -165,11 +165,13 @@
       "ddl.rewrite-rules",
       "graph.age-default-label-drop",
       "graph.age-cypher-complete-matrix",
-      "regression.core-and-isolation"
+      "regression.core-and-isolation",
+      "query.data-modifying-ctes"
     ],
     "M5": [
       "protocol.frontend-backend-3.2-extended",
-      "clients.driver-and-operations-matrix"
+      "clients.driver-and-operations-matrix",
+      "protocol.simple-query-command-completion"
     ],
     "M6": [
       "compatibility.complete-zero-exemption-audit"
@@ -839,6 +841,22 @@
       "supported_version": "No complete PostgreSQL 18 compatibility claim",
       "status": "not_audited",
       "open_issue": "The final current-state audit must verify every manifest item, M0 through M5 exit gate, PostgreSQL 18.4 oracle result, client and protocol matrix, persistent reopen behavior, and manual claim with zero semantic exemptions."
+    },
+    {
+      "id": "query.data-modifying-ctes",
+      "postgresql_reference": "tests/parity/pg18/cte_commands_oracle.expected.json; https://www.postgresql.org/docs/18/queries-with.html#QUERIES-WITH-MODIFYING",
+      "uqa_test": "crates/uqa-engine/tests/engine_queries/sql_cte_commands.rs",
+      "supported_version": "PostgreSQL 18.4",
+      "status": "partial",
+      "open_issue": "The 98-statement PostgreSQL 18.4 oracle passes on memory and SQLite for typed RETURNING, unreferenced and exactly-once execution, sibling snapshot visibility, recursive query inputs, automatic and trigger-driven views, rewrite-rule restrictions, rollback, and SQL-standard routine dependencies. A separate SQLite test verifies routine binding across reopen and relation rename. Complete the unmodified upstream WITH and MERGE corpus and remaining dependency combinations before closing this item."
+    },
+    {
+      "id": "protocol.simple-query-command-completion",
+      "postgresql_reference": "tests/parity/pg18/command_completion_oracle.expected.json; https://www.postgresql.org/docs/18/protocol-flow.html#PROTOCOL-FLOW-SIMPLE-QUERY",
+      "uqa_test": "crates/uqa-engine/tests/engine_queries/sql_simple_query.rs",
+      "supported_version": "PostgreSQL 18.4",
+      "status": "partial",
+      "open_issue": "The 105-message PostgreSQL 18.4 command-completion oracle passes on memory and SQLite, with separate callback, durable-commit, deferred-constraint, and transaction-recovery tests. Integrate the API with the real SQL server and run the unmodified upstream and client suites."
     }
   ]
 }

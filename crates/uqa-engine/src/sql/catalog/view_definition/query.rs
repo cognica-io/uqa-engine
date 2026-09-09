@@ -25,7 +25,7 @@ impl Deparser<'_> {
         let mut rendered = String::new();
         if query.ctes.iter().any(|cte| cte.recursive) {
             for cte in &query.ctes {
-                scope.ctes.insert(cte.name.clone(), cte_columns(cte));
+                scope.ctes.insert(cte.name.clone(), cte_columns(cte)?);
             }
         }
         for (index, cte) in query.ctes.iter().enumerate() {
@@ -54,12 +54,12 @@ impl Deparser<'_> {
                 rendered,
                 "(\n{}{}\n{})",
                 " ".repeat(child.indent),
-                self.query(&cte.query, &child, None)?,
+                self.query(view_cte_query(cte)?, &child, None)?,
                 " ".repeat(child.indent)
             )
             .expect("writing to a String cannot fail");
             self.cte_search_cycle(&mut rendered, cte, &scope)?;
-            scope.ctes.insert(cte.name.clone(), cte_columns(cte));
+            scope.ctes.insert(cte.name.clone(), cte_columns(cte)?);
         }
         if !query.ctes.is_empty() {
             rendered.push('\n');
@@ -447,8 +447,14 @@ impl Deparser<'_> {
     }
 }
 
-fn cte_columns(cte: &uqa_planner::CtePlan) -> Vec<String> {
-    let mut columns = query_columns(&cte.query);
+pub(super) fn view_cte_query(cte: &uqa_planner::CtePlan) -> Result<&QueryPlan, SQLError> {
+    cte.body.query().ok_or_else(|| {
+        SQLError::Unsupported("views must not contain data-modifying statements in WITH".into())
+    })
+}
+
+fn cte_columns(cte: &uqa_planner::CtePlan) -> Result<Vec<String>, SQLError> {
+    let mut columns = query_columns(view_cte_query(cte)?);
     for (column, alias) in columns.iter_mut().zip(&cte.columns) {
         column.clone_from(alias);
     }
@@ -458,7 +464,7 @@ fn cte_columns(cte: &uqa_planner::CtePlan) -> Vec<String> {
     if let Some(cycle) = &cte.cycle {
         columns.extend([cycle.mark_column.clone(), cycle.path_column.clone()]);
     }
-    columns
+    Ok(columns)
 }
 
 fn clause(rendered: &mut String, keyword: &str, body: &str, indent: usize) {

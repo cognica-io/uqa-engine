@@ -11,11 +11,14 @@ use std::fmt::Write as _;
 use uqa_core::{TemporalValue, Value};
 
 use crate::ast::{
-    CteMaterialization, DeleteStmt, Expr, FrameBound, FrameMode, FromClause, InsertStmt, JoinKind,
-    LockWait, NullsOrder, OnConflictAction, OrderBy, Projection, ReturningAliases, SelectStmt,
-    SetOpKind, Statement, TableFunction, UpdateStmt, WindowReferenceKind, WindowSpec, CTE,
+    CteBody, CteMaterialization, Expr, FrameBound, FrameMode, FromClause, JoinKind, LockWait,
+    NullsOrder, OrderBy, Projection, ReturningAliases, SelectStmt, SetOpKind, Statement,
+    TableFunction, WindowReferenceKind, WindowSpec, CTE,
 };
 use crate::SQLError;
+
+mod commands;
+use commands::{delete_sql, insert_sql, merge_sql, update_sql};
 
 /// Render one executable statement represented by UQA's durable SQL AST.
 pub fn statement_sql(statement: &Statement) -> Result<String, SQLError> {
@@ -24,6 +27,7 @@ pub fn statement_sql(statement: &Statement) -> Result<String, SQLError> {
         Statement::Insert(insert) => Ok(insert_sql(insert)),
         Statement::Update(update) => Ok(update_sql(update)),
         Statement::Delete(delete) => Ok(delete_sql(delete)),
+        Statement::Merge(merge) => Ok(merge_sql(merge)),
         Statement::Notify { channel, payload } => {
             let payload = if payload.is_empty() {
                 String::new()
@@ -41,127 +45,6 @@ pub fn statement_sql(statement: &Statement) -> Result<String, SQLError> {
 /// Render one compiler-owned scalar expression without consulting runtime state.
 pub fn expression_sql(expression: &Expr) -> Result<String, SQLError> {
     render_expr(expression)
-}
-
-fn insert_sql(statement: &InsertStmt) -> String {
-    let mut rendered = with_sql(&statement.with);
-    rendered.push_str("INSERT INTO ");
-    rendered.push_str(&only_relation(
-        &statement.table,
-        statement.include_descendants,
-    ));
-    render_target_alias(&mut rendered, &statement.table, &statement.target_qualifier);
-    if !statement.columns.is_empty() {
-        rendered.push_str(" (");
-        rendered.push_str(&ident_list(&statement.columns));
-        rendered.push(')');
-    }
-    if statement.rows.as_slice() == [Vec::new()] {
-        rendered.push_str(" DEFAULT VALUES");
-    } else if !statement.rows.is_empty() {
-        rendered.push_str(" VALUES ");
-        rendered.push_str(&rows_sql(&statement.rows));
-    } else if let Some(select) = statement.select_source.as_deref() {
-        rendered.push(' ');
-        rendered.push_str(&select_sql(select));
-    }
-    if let Some(conflict) = &statement.on_conflict {
-        rendered.push_str(" ON CONFLICT");
-        if let Some(constraint) = &conflict.constraint {
-            rendered.push_str(" ON CONSTRAINT ");
-            rendered.push_str(&ident(constraint));
-        }
-        if !conflict.conflict_columns.is_empty() || !conflict.expressions.is_empty() {
-            rendered.push_str(" (");
-            let keys = conflict
-                .conflict_columns
-                .iter()
-                .map(|name| ident(name))
-                .chain(
-                    conflict
-                        .expressions
-                        .iter()
-                        .map(|expr| format!("({})", expr_sql(expr))),
-                )
-                .collect::<Vec<_>>();
-            rendered.push_str(&keys.join(", "));
-            rendered.push(')');
-        }
-        if let Some(predicate) = &conflict.predicate {
-            rendered.push_str(" WHERE ");
-            rendered.push_str(&expr_sql(predicate));
-        }
-        match &conflict.action {
-            OnConflictAction::Nothing => rendered.push_str(" DO NOTHING"),
-            OnConflictAction::Update {
-                assignments,
-                r#where,
-            } => {
-                rendered.push_str(" DO UPDATE SET ");
-                rendered.push_str(&assignments_sql(assignments));
-                if let Some(predicate) = r#where {
-                    rendered.push_str(" WHERE ");
-                    rendered.push_str(&expr_sql(predicate));
-                }
-            }
-        }
-    }
-    render_returning(
-        &mut rendered,
-        &statement.returning_aliases,
-        &statement.returning,
-    );
-    rendered
-}
-
-fn update_sql(statement: &UpdateStmt) -> String {
-    let mut rendered = with_sql(&statement.with);
-    rendered.push_str("UPDATE ");
-    rendered.push_str(&only_relation(
-        &statement.table,
-        statement.include_descendants,
-    ));
-    render_target_alias(&mut rendered, &statement.table, &statement.target_qualifier);
-    rendered.push_str(" SET ");
-    rendered.push_str(&assignments_sql(&statement.assignments));
-    if let Some(source) = &statement.from {
-        rendered.push_str(" FROM ");
-        rendered.push_str(&from_sql(source));
-    }
-    if let Some(predicate) = &statement.r#where {
-        rendered.push_str(" WHERE ");
-        rendered.push_str(&expr_sql(predicate));
-    }
-    render_returning(
-        &mut rendered,
-        &statement.returning_aliases,
-        &statement.returning,
-    );
-    rendered
-}
-
-fn delete_sql(statement: &DeleteStmt) -> String {
-    let mut rendered = with_sql(&statement.with);
-    rendered.push_str("DELETE FROM ");
-    rendered.push_str(&only_relation(
-        &statement.table,
-        statement.include_descendants,
-    ));
-    render_target_alias(&mut rendered, &statement.table, &statement.target_qualifier);
-    if let Some(source) = &statement.using {
-        rendered.push_str(" USING ");
-        rendered.push_str(&from_sql(source));
-    }
-    if let Some(predicate) = &statement.r#where {
-        rendered.push_str(" WHERE ");
-        rendered.push_str(&expr_sql(predicate));
-    }
-    render_returning(
-        &mut rendered,
-        &statement.returning_aliases,
-        &statement.returning,
-    );
-    rendered
 }
 
 fn select_sql(statement: &SelectStmt) -> String {
@@ -647,7 +530,13 @@ fn cte_sql(cte: &CTE) -> String {
         CteMaterialization::NotMaterialized => "NOT MATERIALIZED ",
     });
     rendered.push('(');
-    rendered.push_str(&select_sql(&cte.query));
+    rendered.push_str(&match &cte.body {
+        CteBody::Query(query) => select_sql(query),
+        CteBody::Insert(command) => insert_sql(command),
+        CteBody::Update(command) => update_sql(command),
+        CteBody::Delete(command) => delete_sql(command),
+        CteBody::Merge(command) => merge_sql(command),
+    });
     rendered.push(')');
     if let Some(search) = &cte.search {
         write!(

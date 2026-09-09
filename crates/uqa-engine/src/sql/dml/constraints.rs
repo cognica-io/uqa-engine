@@ -31,6 +31,11 @@ pub(in crate::sql) use staging::{
     stage_prepared_document_rewrite, stage_prepared_document_rewrite_with_parent,
 };
 
+pub(in crate::sql) fn foreign_key_relation_name(table: &str) -> String {
+    crate::RelationIdentity::from_legacy_name(table)
+        .map_or_else(|_| table.to_string(), |relation| relation.name)
+}
+
 pub(in crate::sql) struct ForeignKeyLookup {
     pub(in crate::sql) values: Vec<Value>,
     comparison: ForeignKeyComparison,
@@ -258,7 +263,8 @@ fn lock_document_foreign_key_dependencies(
         let violation = || SQLError::Routine {
             sqlstate: "23503".into(),
             message: format!(
-                "insert or update on table \"{table}\" violates foreign key constraint \"{}\"",
+                "insert or update on table \"{}\" violates foreign key constraint \"{}\"",
+                foreign_key_relation_name(table),
                 fk.name.as_deref().unwrap_or("<unnamed>")
             ),
         };
@@ -450,7 +456,8 @@ pub(crate) fn validate_deferred_foreign_key_checks(
         return Err(SQLError::Routine {
             sqlstate: "23503".into(),
             message: format!(
-                "insert or update on table \"{table}\" violates foreign key constraint \"{}\"",
+                "insert or update on table \"{}\" violates foreign key constraint \"{}\"",
+                foreign_key_relation_name(&table),
                 validation
                     .foreign_key
                     .name
@@ -644,20 +651,10 @@ pub(in crate::sql) fn validate_key_constraints(
         if ignored_doc_id == Some(conflict_id) {
             continue;
         }
-        let kind = match constraint.kind {
-            uqa_sql::ast::TableKeyConstraintKind::PrimaryKey => "PRIMARY KEY",
-            uqa_sql::ast::TableKeyConstraintKind::Unique => "UNIQUE",
-        };
-        let name = constraint
-            .name
-            .as_deref()
-            .map_or_else(String::new, |name| format!(" `{name}`"));
+        let name = constraint.name.as_deref().unwrap_or("<unnamed>");
         return Err(SQLError::Routine {
             sqlstate: "23505".into(),
-            message: format!(
-                "{kind} constraint{name} violated: duplicate value for columns ({}) in table `{table}`",
-                constraint.columns.join(", ")
-            ),
+            message: format!("duplicate key value violates unique constraint \"{name}\""),
         });
     }
     Ok(())

@@ -131,6 +131,7 @@ pub(super) fn function_volatility_with_binding(
             "current_schema"
                 | "current_schemas"
                 | "pg_backend_pid"
+                | "version"
                 | "pg_listening_channels"
                 | "to_regclass"
                 | "to_regnamespace"
@@ -286,7 +287,12 @@ fn query_contains_volatile_function_inner(
     visiting_views: &mut BTreeSet<String>,
 ) -> Result<bool, SQLError> {
     for cte in &plan.ctes {
-        if query_contains_volatile_function_inner(engine, &cte.query, visiting_views)? {
+        if match &cte.body {
+            uqa_planner::CtePlanBody::Query(query) => {
+                query_contains_volatile_function_inner(engine, query, visiting_views)?
+            }
+            uqa_planner::CtePlanBody::Command(_) => true,
+        } {
             return Ok(true);
         }
     }

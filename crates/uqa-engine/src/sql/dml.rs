@@ -62,7 +62,7 @@ fn dml_storage_error(action: &str, err: impl std::fmt::Display) -> SQLError {
 }
 
 /// Resolve a statement's mutation target once, before any internal storage or rewrite path can observe its textual name.
-fn resolve_dml_target_name(
+pub(in crate::sql) fn resolve_dml_target_name(
     engine: &Engine,
     name: &str,
     target_relation_bound: bool,
@@ -723,7 +723,14 @@ fn validate_mutation_columns<'a>(
             )));
         }
         if !known.contains(column) {
-            return Err(SQLError::UnknownColumn(format!("{table}.{column}")));
+            let relation = RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
+            return Err(SQLError::Routine {
+                sqlstate: "42703".into(),
+                message: format!(
+                    "column \"{column}\" of relation \"{}\" does not exist",
+                    relation.name
+                ),
+            });
         }
     }
     Ok(())
@@ -888,6 +895,45 @@ pub(in crate::sql) use merge::*;
 pub(in crate::sql) use update::*;
 pub(in crate::sql) use update_from::*;
 pub(in crate::sql) use vectors::*;
+
+pub(in crate::sql) fn execute_cte_command(
+    engine: &Engine,
+    command: &uqa_planner::CommandPlan,
+    params: &[SQLParam],
+    ctes: &CteScope,
+) -> Result<SQLResult, SQLError> {
+    let mut command = command.clone();
+    let subject = ctes.privilege_subject()?.to_string();
+    match &mut command {
+        uqa_planner::CommandPlan::Insert(plan) => {
+            plan.statement_privilege_subject
+                .get_or_insert(subject.clone());
+            plan.target_privilege_subject.get_or_insert(subject);
+            insert::run_insert_with_ctes(engine, *plan.clone(), params, ctes)
+        }
+        uqa_planner::CommandPlan::Update(plan) => {
+            plan.statement_privilege_subject
+                .get_or_insert(subject.clone());
+            plan.target_privilege_subject.get_or_insert(subject);
+            update::run_update_with_ctes(engine, *plan.clone(), params, ctes)
+        }
+        uqa_planner::CommandPlan::Delete(plan) => {
+            plan.statement_privilege_subject
+                .get_or_insert(subject.clone());
+            plan.target_privilege_subject.get_or_insert(subject);
+            delete::run_delete_with_ctes(engine, *plan.clone(), params, ctes)
+        }
+        uqa_planner::CommandPlan::Merge(plan) => {
+            plan.statement_privilege_subject
+                .get_or_insert(subject.clone());
+            plan.target_privilege_subject.get_or_insert(subject);
+            merge::run_merge_with_ctes(engine, *plan.clone(), params, ctes)
+        }
+        _ => Err(SQLError::Internal(
+            "non-DML command in a WITH definition".into(),
+        )),
+    }
+}
 
 pub(in crate::sql) fn cursor_command_returning_schema(
     engine: &Engine,

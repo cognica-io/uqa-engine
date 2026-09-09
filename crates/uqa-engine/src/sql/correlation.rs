@@ -217,7 +217,9 @@ fn query_has_external_reference(
     if plan.ctes.iter().any(|cte| cte.recursive) {
         for cte in &plan.ctes {
             let columns = if cte.columns.is_empty() {
-                query_output_columns(&cte.query)
+                cte.body
+                    .query()
+                    .map_or_else(RelationColumns::default, query_output_columns)
             } else {
                 RelationColumns::known(cte.columns.clone())
             };
@@ -226,14 +228,18 @@ fn query_has_external_reference(
     }
     for cte in &plan.ctes {
         let columns = if cte.columns.is_empty() {
-            query_output_columns(&cte.query)
+            cte.body
+                .query()
+                .map_or_else(RelationColumns::default, query_output_columns)
         } else {
             RelationColumns::known(cte.columns.clone())
         };
         if cte.recursive {
             ctes.insert(cte.name.clone(), columns.clone());
         }
-        if query_has_external_reference(engine, &cte.query, scopes)? {
+        if cte.body.query().map_or(Ok(true), |query| {
+            query_has_external_reference(engine, query, scopes)
+        })? {
             return Ok(true);
         }
         ctes.insert(cte.name.clone(), columns);

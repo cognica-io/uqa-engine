@@ -28,6 +28,8 @@ mod sql_blocking_spill;
 mod sql_correlated_subqueries;
 #[path = "sql_cte.rs"]
 mod sql_cte;
+#[path = "engine_queries/sql_cte_commands.rs"]
+mod sql_cte_commands;
 #[path = "engine_queries/sql_cte_pg18_controls.rs"]
 mod sql_cte_pg18_controls;
 #[path = "sql_cursor.rs"]
@@ -64,6 +66,8 @@ mod sql_prepared;
 mod sql_row_locks;
 #[path = "engine_queries/sql_row_locks_recheck.rs"]
 mod sql_row_locks_recheck;
+#[path = "engine_queries/sql_simple_query.rs"]
+mod sql_simple_query;
 #[path = "sql_subqueries.rs"]
 mod sql_subqueries;
 #[path = "sql_subquery.rs"]

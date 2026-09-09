@@ -159,6 +159,7 @@ pub(in crate::sql) fn run_call(
         row.insert(column.clone(), value.clone());
     }
     Ok(SQLResult {
+        command_tag: None,
         column_types,
         columns,
         rows: vec![row],

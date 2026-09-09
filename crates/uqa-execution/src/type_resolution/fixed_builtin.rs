@@ -313,6 +313,7 @@ fn builtin_binding_is_non_immutable(binding: &FunctionBinding) -> bool {
                 | "pg_get_expr"
                 | "pg_get_partkeydef"
                 | "pg_backend_pid"
+                | "version"
                 | "pg_listening_channels"
                 | "pg_notify"
                 | "pg_notification_queue_usage"
@@ -578,7 +579,7 @@ fn overloads(name: &str) -> Option<Vec<BuiltinFunctionOverload>> {
         ],
         "pg_get_partkeydef" => vec![overload(&local, &[ColumnType::Oid], ColumnType::Text)],
         "pg_backend_pid" => vec![overload(&local, &[], ColumnType::Integer)],
-        "pg_listening_channels" => vec![overload(&local, &[], ColumnType::Text)],
+        "version" | "pg_listening_channels" => vec![overload(&local, &[], ColumnType::Text)],
         "pg_notify" => vec![overload(
             &local,
             &[ColumnType::Text, ColumnType::Text],
@@ -857,6 +858,7 @@ fn local_name(name: &str) -> Option<String> {
             | "pg_get_expr"
             | "pg_get_partkeydef"
             | "pg_backend_pid"
+            | "version"
             | "pg_listening_channels"
             | "pg_notify"
             | "pg_notification_queue_usage"

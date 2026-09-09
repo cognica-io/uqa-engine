@@ -402,6 +402,7 @@ impl UnifiedPlan {
                     })
                     .collect();
                 Self::Command(Box::new(CommandPlan::Merge(Box::new(MergePlan {
+                    ctes: lower_ctes(&statement.with, aggregates),
                     target: statement.target,
                     statement_privilege_subject: None,
                     target_privilege_subject: None,

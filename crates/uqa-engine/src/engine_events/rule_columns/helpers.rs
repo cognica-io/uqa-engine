@@ -135,8 +135,11 @@ pub(super) fn select_output_names(select: &SelectStmt) -> Vec<String> {
             .map(|position| format!("column{position}"))
             .collect();
     }
-    select
-        .projections
+    projection_output_names(&select.projections)
+}
+
+pub(super) fn projection_output_names(projections: &[uqa_sql::ast::Projection]) -> Vec<String> {
+    projections
         .iter()
         .map(|projection| {
             projection

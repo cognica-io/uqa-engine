@@ -54,11 +54,30 @@ engine.sql(
 `SQLResult` contains:
 
 - `columns`: projected column labels in order
+- `column_types`: SQL types in projection order, including empty results
 - `rows`: compatibility rows represented as `BTreeMap<String, Value>`
 - `value_at(row, column)`: positional access that distinguishes repeated labels
 - `affected_rows`: the DML row count
+- `command_tag`: optional PostgreSQL command completion text, such as `SELECT 2`, `INSERT 0 1`, or `CREATE TABLE`
 
 When projected labels repeat, `SQLResult` retains the distinct final values in a positional carrier while keeping `rows` for existing named-map callers. Use `value_at`, a cursor, or the columnar path to address repeated labels by position.
+
+### Simple Query messages
+
+`Engine::sql_simple_query(query, params, consume)` accepts a SQL message containing zero or more statements and a `FnMut(&SQLResult) -> Result<(), SQLError>` callback. It parses the complete message before executing any statement, then delivers results in statement order. An empty message delivers one empty result with no `command_tag`.
+
+Statements outside explicit transaction blocks share an implicit transaction segment. Explicit transaction commands control the segment boundaries. The final result is delivered after its implicit transaction commits, so a deferred constraint failure prevents that final callback. Earlier callbacks may already have observed results when a later statement fails; those earlier results do not establish that the segment committed. An execution error stops the remaining statements, and a callback error rolls back an implicit segment that is still open. A final callback runs after commit and cannot undo that commit.
+
+```rust
+let engine = uqa_engine::Engine::new();
+let mut tags = Vec::new();
+engine.sql_simple_query("SELECT 1; SELECT 2", &[], |result| {
+    tags.push(result.command_tag.clone());
+    Ok(())
+})?;
+assert_eq!(tags, [Some("SELECT 1".into()), Some("SELECT 1".into())]);
+# Ok::<(), uqa_engine::SQLError>(())
+```
 
 ## Stream results
 

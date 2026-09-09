@@ -296,7 +296,10 @@ pub(super) fn bind_ctes(items: &[CTE], r: &mut dyn VariableResolver) -> Result<V
                         })
                     })
                     .transpose()?,
-                query: Box::new(bind_select(&cte.query, r)?),
+                body: crate::ast::CteBody::try_from(bind_statement(
+                    &cte.body.clone().into_statement(),
+                    r,
+                )?)?,
             })
         })
         .collect()
@@ -571,6 +574,7 @@ pub fn bind_statement(stmt: &Statement, r: &mut dyn VariableResolver) -> Result<
         }
         Statement::Merge(merge) => {
             let mut out = merge.clone();
+            out.with = bind_ctes(&merge.with, r)?;
             out.source = bind_from(&merge.source, r)?;
             out.join_condition = bind_expr(&merge.join_condition, r)?;
             out.when_clauses = merge

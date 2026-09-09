@@ -336,8 +336,5 @@ fn row_locking_distinguishes_a_join_alias_from_its_inputs() {
         )
         .unwrap_err();
     assert_eq!(error.sqlstate(), Some("0A000"));
-    assert_eq!(
-        error.to_string(),
-        "unsupported SQL feature: FOR UPDATE cannot be applied to a join"
-    );
+    assert_eq!(error.to_string(), "FOR UPDATE cannot be applied to a join");
 }

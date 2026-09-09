@@ -5,7 +5,7 @@
 //
 
 use super::{
-    compile, is_transaction_control, lower_statement, optimize_engine_plan, query_has_row_locks,
+    is_transaction_control, lower_statement, optimize_engine_plan, query_has_row_locks,
     query_may_mutate_engine, query_requires_statement_transaction, Arc, Engine, SQLError, SQLParam,
     SQLResult, UnifiedPlanExecutor,
 };
@@ -15,7 +15,7 @@ pub(crate) fn execute(
     sql: &str,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    execute_with_context(engine, sql, params, false)
+    execute_with_context(engine, sql, params, false, &mut None)
 }
 
 pub(crate) fn execute_nested(
@@ -23,7 +23,46 @@ pub(crate) fn execute_nested(
     sql: &str,
     params: &[SQLParam],
 ) -> Result<SQLResult, SQLError> {
-    execute_with_context(engine, sql, params, true)
+    execute_with_context(engine, sql, params, true, &mut None)
+}
+
+type ResultConsumer<'a> = Option<&'a mut dyn FnMut(&SQLResult) -> Result<(), SQLError>>;
+
+enum StatementInput<'sql> {
+    Cached(Arc<uqa_sql::Statement>),
+    Parsed(uqa_sql::ParsedStatement<'sql>),
+}
+
+impl StatementInput<'_> {
+    fn compile(self) -> Result<uqa_sql::Statement, SQLError> {
+        match self {
+            Self::Cached(statement) => Ok(statement.as_ref().clone()),
+            Self::Parsed(statement) => statement.compile(),
+        }
+    }
+}
+
+pub(super) fn execute_simple_query(
+    engine: &Engine,
+    sql: &str,
+    params: &[SQLParam],
+    nested_statement: bool,
+    consume: &mut dyn FnMut(&SQLResult) -> Result<(), SQLError>,
+) -> Result<(), SQLError> {
+    let mut consumer: ResultConsumer<'_> = Some(consume);
+    let result = execute_with_context(engine, sql, params, nested_statement, &mut consumer)?;
+    consume_result(engine, &result, &mut consumer)
+}
+
+fn consume_result(
+    engine: &Engine,
+    result: &SQLResult,
+    consumer: &mut ResultConsumer<'_>,
+) -> Result<(), SQLError> {
+    if let Some(consume) = consumer {
+        consume(result).map_err(|error| abort_explicit_statement_error(engine, error))?;
+    }
+    Ok(())
 }
 
 fn execute_with_context(
@@ -31,6 +70,7 @@ fn execute_with_context(
     sql: &str,
     params: &[SQLParam],
     nested_statement: bool,
+    consumer: &mut ResultConsumer<'_>,
 ) -> Result<SQLResult, SQLError> {
     // Reject cancelled tokens up-front so a stale cancel signal does
     // not leak into a fresh batch. Callers that want the
@@ -57,7 +97,7 @@ fn execute_with_context(
             }
         }
     }
-    execute_uncached_or_snapshot_scoped(engine, sql, params, nested_statement)
+    execute_uncached_or_snapshot_scoped(engine, sql, params, nested_statement, consumer)
 }
 
 #[inline(never)]
@@ -70,6 +110,7 @@ fn execute_uncached_or_snapshot_scoped(
     sql: &str,
     params: &[SQLParam],
     nested_statement: bool,
+    consumer: &mut ResultConsumer<'_>,
 ) -> Result<SQLResult, SQLError> {
     // Parse an uncached batch completely before executing its first statement.
     // This preserves syntax atomicity. Exact single-statement cache hits reuse
@@ -78,9 +119,15 @@ fn execute_uncached_or_snapshot_scoped(
     // can affect the following statement's semantics.
     let cached_statement = engine.cached_sql_statement(sql);
     let (statements, mut cached_entry) = match cached_statement {
-        Some(cached) => (vec![cached.statement.as_ref().clone()], Some(cached)),
-        None => match compile(sql) {
-            Ok(statements) => (statements, None),
+        Some(cached) => (
+            vec![StatementInput::Cached(cached.statement.clone())],
+            Some(cached),
+        ),
+        None => match uqa_sql::parse_statements(sql) {
+            Ok(statements) => (
+                statements.into_iter().map(StatementInput::Parsed).collect(),
+                None,
+            ),
             Err(error) => return Err(abort_explicit_statement_error(engine, error)),
         },
     };
@@ -88,14 +135,18 @@ fn execute_uncached_or_snapshot_scoped(
         return Ok(SQLResult::empty());
     }
     let is_single_statement = statements.len() == 1;
+    let final_statement_index = statements.len() - 1;
     let simple_query_batch = !is_single_statement;
     let mut implicit_segment_open = false;
     let execution = (|| -> Result<SQLResult, SQLError> {
         let mut last = SQLResult::empty();
-        for statement in statements {
+        for (statement_index, statement) in statements.into_iter().enumerate() {
             if let Err(error) = engine.cancellation_token().check() {
                 return Err(abort_explicit_statement_error(engine, error.into()));
             }
+            let statement = statement
+                .compile()
+                .map_err(|error| abort_explicit_statement_error(engine, error))?;
             let transaction = match &statement {
                 uqa_sql::ast::Statement::Transaction(transaction) => Some(transaction.clone()),
                 _ => None,
@@ -133,6 +184,10 @@ fn execute_uncached_or_snapshot_scoped(
                 }
                 implicit_segment_open = false;
                 last = SQLResult::empty();
+                last.command_tag = Some("BEGIN".into());
+                if statement_index != final_statement_index {
+                    consume_result(engine, &last, consumer)?;
+                }
                 continue;
             }
             if simple_query_batch
@@ -171,6 +226,16 @@ fn execute_uncached_or_snapshot_scoped(
                 {
                     engine.push_sql_notice("WARNING", "there is no transaction in progress");
                     last = SQLResult::empty();
+                    last.command_tag = Some(
+                        super::completion::transaction_completion(
+                            transaction.as_ref().expect("checked transaction command"),
+                            false,
+                        )
+                        .into(),
+                    );
+                    if statement_index != final_statement_index {
+                        consume_result(engine, &last, consumer)?;
+                    }
                     continue;
                 }
                 if simple_query_batch
@@ -201,6 +266,9 @@ fn execute_uncached_or_snapshot_scoped(
                     })
                 {
                     implicit_segment_open = false;
+                }
+                if statement_index != final_statement_index {
+                    consume_result(engine, &last, consumer)?;
                 }
                 continue;
             }
@@ -272,6 +340,9 @@ fn execute_uncached_or_snapshot_scoped(
                 match executor.execute(&optimized) {
                     Ok(result) => last = result,
                     Err(error) => return Err(engine.abort_sql_transaction_after_error(error)),
+                }
+                if statement_index != final_statement_index {
+                    consume_result(engine, &last, consumer)?;
                 }
                 continue;
             }
@@ -419,6 +490,9 @@ fn execute_uncached_or_snapshot_scoped(
                     nested_statement || simple_query_batch,
                 )
                 .execute(optimized.as_ref())?;
+            }
+            if statement_index != final_statement_index {
+                consume_result(engine, &last, consumer)?;
             }
         }
         Ok(last)

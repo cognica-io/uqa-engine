@@ -102,6 +102,40 @@ impl RuleReturningRequest {
         subqueries
     }
 
+    fn inspect_cte_body(
+        &mut self,
+        body: &uqa_planner::CtePlanBody,
+        aliases: &ReturningAliases,
+        inherited: &BTreeSet<String>,
+    ) {
+        match body {
+            uqa_planner::CtePlanBody::Query(query) => self.inspect_query(query, aliases, inherited),
+            uqa_planner::CtePlanBody::Command(command) => {
+                let mut scope = inherited.clone();
+                if let Some(qualifier) = command.target_qualifier() {
+                    scope.insert(qualifier.to_ascii_lowercase());
+                }
+                if let Some(source) = command.source_input() {
+                    collect_source_qualifiers(source, &mut scope);
+                    self.inspect_source(source, aliases, inherited);
+                }
+                if let Some(aliases) = command.returning_aliases() {
+                    scope.insert(aliases.old.to_ascii_lowercase());
+                    scope.insert(aliases.new.to_ascii_lowercase());
+                }
+                for cte in command.ctes() {
+                    self.inspect_cte_body(&cte.body, aliases, &scope);
+                }
+                for query in command.query_inputs() {
+                    self.inspect_query(query, aliases, &scope);
+                }
+                for expression in command.expressions() {
+                    let _ = self.inspect_expression(expression, aliases, &scope);
+                }
+            }
+        }
+    }
+
     fn inspect_query(
         &mut self,
         query: &QueryPlan,
@@ -109,7 +143,7 @@ impl RuleReturningRequest {
         inherited: &BTreeSet<String>,
     ) {
         for cte in &query.ctes {
-            self.inspect_query(&cte.query, aliases, inherited);
+            self.inspect_cte_body(&cte.body, aliases, inherited);
         }
         match &query.root {
             RelationalPlan::QueryBlock(block) => {

@@ -186,11 +186,15 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
 
     pub(super) fn execute(&mut self, plan: &UnifiedPlan) -> Result<SQLResult, SQLError> {
         self.runtime.check_cancelled()?;
+        super::cte_validation::validate_plan(self.engine, plan)?;
         super::read_only::validate_transaction_plan(self.engine, plan)?;
-        match plan {
+        let transaction_failed = self.engine.transaction_failed();
+        let mut result = match plan {
             UnifiedPlan::Query(query) => self.execute_query(query),
             UnifiedPlan::Command(command) => self.execute_command(command),
-        }
+        }?;
+        super::completion::set_command_completion(plan, &mut result, transaction_failed);
+        Ok(result)
     }
 
     fn execute_query(&self, query: &QueryPlan) -> Result<SQLResult, SQLError> {
@@ -207,6 +211,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         plan: &UnifiedPlan,
     ) -> Result<select::QueryOutput, SQLError> {
         self.runtime.check_cancelled()?;
+        super::cte_validation::validate_plan(self.engine, plan)?;
         super::read_only::validate_transaction_plan(self.engine, plan)?;
         let UnifiedPlan::Query(query) = plan else {
             return Err(SQLError::Unsupported(
@@ -294,6 +299,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             Value::Str(self.session.show_variable(name)?),
         );
         Ok(SQLResult {
+            command_tag: None,
             columns: vec![name.to_string()],
             column_types: vec![Some(uqa_sql::ColumnType::Text)],
             rows: vec![row],
@@ -586,17 +592,23 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 options,
                 query,
             } => {
-                self.engine
-                    .register_materialized_view_plan(MaterializedViewRegistration {
-                        name,
-                        column_names,
-                        plan: (**query).clone(),
-                        if_not_exists: *if_not_exists,
-                        with_no_data: *with_no_data,
-                        options,
-                        params: self.params,
-                    })?;
-                Ok(SQLResult::empty())
+                let populated_rows =
+                    self.engine
+                        .register_materialized_view_plan(MaterializedViewRegistration {
+                            name,
+                            column_names,
+                            plan: (**query).clone(),
+                            if_not_exists: *if_not_exists,
+                            with_no_data: *with_no_data,
+                            options,
+                            params: self.params,
+                        })?;
+                let completion = populated_rows.map_or_else(
+                    || "CREATE MATERIALIZED VIEW".to_string(),
+                    |rows| format!("SELECT {rows}"),
+                );
+                Ok(SQLResult::from_affected(populated_rows.unwrap_or(0))
+                    .with_command_tag(completion))
             }
             CommandPlan::RefreshMaterializedView {
                 name,

@@ -40,7 +40,7 @@ fn dml_command<'a>(
     }
 }
 
-fn forbidden_command(
+pub(super) fn forbidden_command(
     engine: &Engine,
     plan: &UnifiedPlan,
 ) -> Result<Option<&'static str>, SQLError> {

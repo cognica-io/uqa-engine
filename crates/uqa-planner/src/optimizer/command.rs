@@ -24,7 +24,7 @@ pub(super) fn optimize_command(
     match command {
         CommandPlan::Insert(plan) => {
             for cte in &mut plan.ctes {
-                optimize_query(&mut cte.query, config, aggregates);
+                super::traversal::optimize_cte(&mut cte.body, config, aggregates);
             }
             if let Some(source) = &mut plan.source {
                 optimize_query(source, config, aggregates);
@@ -53,7 +53,7 @@ pub(super) fn optimize_command(
         }
         CommandPlan::Update(plan) => {
             for cte in &mut plan.ctes {
-                optimize_query(&mut cte.query, config, aggregates);
+                super::traversal::optimize_cte(&mut cte.body, config, aggregates);
             }
             if let Some(source) = &mut plan.source {
                 optimize_source(source, config, aggregates);
@@ -72,7 +72,7 @@ pub(super) fn optimize_command(
         }
         CommandPlan::Delete(plan) => {
             for cte in &mut plan.ctes {
-                optimize_query(&mut cte.query, config, aggregates);
+                super::traversal::optimize_cte(&mut cte.body, config, aggregates);
             }
             if let Some(source) = &mut plan.source {
                 optimize_source(source, config, aggregates);
@@ -89,6 +89,9 @@ pub(super) fn optimize_command(
             }
         }
         CommandPlan::Merge(plan) => {
+            for cte in &mut plan.ctes {
+                super::traversal::optimize_cte(&mut cte.body, config, aggregates);
+            }
             optimize_source(&mut plan.source, config, aggregates);
             optimize_scalar_slot(&mut plan.join_condition, config);
             for clause in &mut plan.when_clauses {

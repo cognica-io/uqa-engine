@@ -23,7 +23,7 @@ pub(super) fn resolve(
         return Err(SQLError::UnknownTable(qualifier.to_string()));
     }
     if !schema.has_qualified_column(qualifier, column) {
-        return Err(SQLError::UnknownColumn(format!("{qualifier}.{column}")));
+        return Err(SQLError::unknown_qualified_column(qualifier, column));
     }
     Ok(schema.qualified_type(qualifier, column).cloned())
 }

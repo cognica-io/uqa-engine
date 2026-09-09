@@ -31,6 +31,7 @@ impl SQLExecution {
         let column_types = vec![None; response.columns.len()];
         Self {
             result: SQLResult {
+                command_tag: None,
                 columns: response.columns,
                 column_types,
                 rows: response.rows,

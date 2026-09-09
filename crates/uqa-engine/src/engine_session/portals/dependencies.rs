@@ -98,9 +98,9 @@ pub(super) fn collect_session_portal_query_dependencies(
         return Ok(());
     }
     for cte in &query.ctes {
-        collect_session_portal_query_dependencies(
+        collect_session_portal_cte_dependencies(
             engine,
-            &cte.query,
+            &cte.body,
             dependencies,
             visiting_views,
             visiting_routines,
@@ -142,6 +142,64 @@ pub(super) fn collect_session_portal_query_dependencies(
         }
     }
     Ok(())
+}
+
+fn collect_session_portal_cte_dependencies(
+    engine: &Engine,
+    body: &uqa_planner::CtePlanBody,
+    dependencies: &mut SessionPortalTableDependencies,
+    visiting_views: &mut std::collections::BTreeSet<String>,
+    visiting_routines: &mut std::collections::BTreeSet<String>,
+) -> Result<(), SQLError> {
+    match body {
+        uqa_planner::CtePlanBody::Query(query) => collect_session_portal_query_dependencies(
+            engine,
+            query,
+            dependencies,
+            visiting_views,
+            visiting_routines,
+        ),
+        uqa_planner::CtePlanBody::Command(command) => {
+            if let Some(target) = command.mutation_target() {
+                collect_session_portal_relation_dependencies(
+                    engine,
+                    target,
+                    true,
+                    dependencies,
+                    visiting_views,
+                    visiting_routines,
+                )?;
+            }
+            for cte in command.ctes() {
+                collect_session_portal_cte_dependencies(
+                    engine,
+                    &cte.body,
+                    dependencies,
+                    visiting_views,
+                    visiting_routines,
+                )?;
+            }
+            for query in command.query_inputs() {
+                collect_session_portal_query_dependencies(
+                    engine,
+                    query,
+                    dependencies,
+                    visiting_views,
+                    visiting_routines,
+                )?;
+            }
+            if let Some(source) = command.source_input() {
+                collect_session_portal_source_dependencies(
+                    engine,
+                    source,
+                    dependencies,
+                    visiting_views,
+                    visiting_routines,
+                )?;
+            }
+            Ok(())
+        }
+    }
 }
 
 pub(super) fn collect_session_portal_relational_dependencies(
@@ -475,7 +533,19 @@ pub(super) fn bind_session_portal_query_relations(
         if cte.recursive {
             definition_scope.insert(cte.name.clone());
         }
-        bind_session_portal_query_relations(engine, &mut cte.query, &definition_scope)?;
+        super::super::view_binding::bind_cte_plan_relations(
+            &mut cte.body,
+            &definition_scope,
+            &mut |name| {
+                let mut name = name.to_string();
+                bind_session_portal_relation_reference(
+                    engine,
+                    &mut name,
+                    &std::collections::BTreeSet::new(),
+                )?;
+                Ok::<_, SQLError>(name)
+            },
+        )?;
         visible_ctes.insert(cte.name.clone());
     }
     bind_session_portal_relational_plan(engine, &mut query.root, &visible_ctes)?;
@@ -527,39 +597,7 @@ pub(super) fn bind_session_portal_source_plan(
 ) -> Result<(), SQLError> {
     match source {
         SourcePlan::Table { name, .. } => {
-            if crate::RelationIdentity::parse_reference(name)
-                .ok()
-                .is_some_and(|(schema, name)| schema.is_none() && visible_ctes.contains(&name))
-            {
-                return Ok(());
-            }
-            let requested = name.clone();
-            if let Some(canonical) = super::super::canonical_virtual_relation_reference(&requested)
-            {
-                *name = canonical;
-                return Ok(());
-            }
-            if crate::RelationIdentity::parse_reference(&requested)
-                .ok()
-                .is_some_and(|(schema, relation)| {
-                    schema.is_none()
-                        && crate::sql::active_trigger_transition_relation_names()
-                            .contains(&relation)
-                })
-            {
-                return Ok(());
-            }
-            if let Some(canonical) =
-                crate::sql::resolve_age_label_relation_name(engine, &requested)?
-            {
-                *name = canonical;
-                return Ok(());
-            }
-            match engine.try_resolve_visible_relation_kind(&requested)? {
-                Some((canonical, _)) => *name = canonical,
-                None => return Err(SQLError::UnknownTable(requested)),
-            }
-            Ok(())
+            bind_session_portal_relation_reference(engine, name, visible_ctes)
         }
         SourcePlan::Join { left, right, .. } => {
             bind_session_portal_source_plan(engine, left, visible_ctes)?;
@@ -579,4 +617,40 @@ pub(super) fn bind_session_portal_source_plan(
         }
         SourcePlan::Values { .. } => Ok(()),
     }
+}
+
+fn bind_session_portal_relation_reference(
+    engine: &Engine,
+    name: &mut String,
+    visible_ctes: &std::collections::BTreeSet<String>,
+) -> Result<(), SQLError> {
+    if crate::RelationIdentity::parse_reference(name)
+        .ok()
+        .is_some_and(|(schema, name)| schema.is_none() && visible_ctes.contains(&name))
+    {
+        return Ok(());
+    }
+    let requested = name.clone();
+    if let Some(canonical) = super::super::canonical_virtual_relation_reference(&requested) {
+        *name = canonical;
+        return Ok(());
+    }
+    if crate::RelationIdentity::parse_reference(&requested)
+        .ok()
+        .is_some_and(|(schema, relation)| {
+            schema.is_none()
+                && crate::sql::active_trigger_transition_relation_names().contains(&relation)
+        })
+    {
+        return Ok(());
+    }
+    if let Some(canonical) = crate::sql::resolve_age_label_relation_name(engine, &requested)? {
+        *name = canonical;
+        return Ok(());
+    }
+    match engine.try_resolve_visible_relation_kind(&requested)? {
+        Some((canonical, _)) => *name = canonical,
+        None => return Err(SQLError::UnknownTable(requested)),
+    }
+    Ok(())
 }

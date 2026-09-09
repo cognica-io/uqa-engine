@@ -603,7 +603,7 @@ fn unique_constraint_basic() {
     assert_err_contains(
         &engine,
         "INSERT INTO t (id, email) VALUES (2, 'a@test.com')",
-        "UNIQUE constraint",
+        "duplicate key value violates unique constraint \"t_email_key\"",
     );
 }
 
@@ -645,7 +645,7 @@ fn primary_key_enforces_uniqueness() {
     assert_err_contains(
         &engine,
         "INSERT INTO t (id, val) VALUES (1, 'b')",
-        "PRIMARY KEY constraint",
+        "duplicate key value violates unique constraint \"t_pkey\"",
     );
 }
 

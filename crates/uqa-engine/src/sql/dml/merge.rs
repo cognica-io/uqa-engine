@@ -103,17 +103,64 @@ pub(in crate::sql) fn run_merge(
 ) -> Result<SQLResult, SQLError> {
     stmt.target = super::resolve_dml_target_name(engine, &stmt.target, false)?;
     super::run_mutation_command(engine, move |engine| {
-        execution::run_merge_inner(engine, &stmt, params)
+        execution::run_merge_inner_with_ctes(engine, &stmt, params, None)
     })
+}
+
+pub(in crate::sql) fn run_merge_with_ctes(
+    engine: &Engine,
+    mut stmt: MergePlan,
+    params: &[SQLParam],
+    ctes: &CteScope,
+) -> Result<SQLResult, SQLError> {
+    stmt.target = super::resolve_dml_target_name(engine, &stmt.target, false)?;
+    super::run_mutation_command(engine, move |engine| {
+        execution::run_merge_inner_with_ctes(engine, &stmt, params, Some(ctes))
+    })
+}
+
+fn execute_view_merge(
+    engine: &Engine,
+    stmt: &MergePlan,
+    params: &[SQLParam],
+    inherited_ctes: Option<&CteScope>,
+) -> Result<Option<SQLResult>, SQLError> {
+    if super::view_triggers::target_view_kind(engine, &stmt.target)?.is_some() {
+        validate_view_merge_dispatch_contract(engine, stmt, params, inherited_ctes)?;
+        return match super::view_automatic::merge_view_target_path(engine, stmt)? {
+            super::view_automatic::MergeViewTargetPath::AutomaticRewrite => {
+                let rewritten = super::view_automatic::rewrite_merge_to_base(
+                    engine,
+                    stmt,
+                    params,
+                    inherited_ctes,
+                )?;
+                execution::run_merge_inner_with_ctes(engine, &rewritten, params, inherited_ctes)
+            }
+            super::view_automatic::MergeViewTargetPath::ViewTriggers => {
+                let _ = super::view_privileges::ensure_merge(engine, stmt)?;
+                super::view_triggers::run_view_merge_inner(engine, stmt, params, inherited_ctes)
+            }
+        }
+        .map(Some);
+    }
+    Ok(None)
 }
 
 fn validate_view_merge_dispatch_contract(
     engine: &Engine,
     stmt: &MergePlan,
     params: &[SQLParam],
+    inherited_ctes: Option<&CteScope>,
 ) -> Result<(), SQLError> {
     let mut scope =
         CteScope::new_for_statement(engine, stmt.statement_privilege_subject.as_deref());
+    if let Some(parent) = inherited_ctes {
+        scope.inherit_cte_bindings(parent);
+    }
+    for cte in &stmt.ctes {
+        scope.insert_deferred(cte.clone());
+    }
     scope.scalar_subqueries.clone_from(&stmt.subqueries);
     let source =
         crate::sql::select::analyze_source_plan_schema(engine, &stmt.source, params, &scope, None)?;

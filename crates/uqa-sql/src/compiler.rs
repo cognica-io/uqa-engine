@@ -38,8 +38,8 @@ mod tree;
 mod types;
 
 pub use dispatch::{
-    compile, plan_only_for_test, resolve_deferred_create_foreign_table,
-    resolve_deferred_create_table,
+    compile, parse_statements, plan_only_for_test, resolve_deferred_create_foreign_table,
+    resolve_deferred_create_table, ParsedStatement,
 };
 pub use types::{
     parse_regobject_name, parse_regprocedure_name, parse_regtype_name, ParsedRegprocedureName,

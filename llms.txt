@@ -29,7 +29,7 @@ When generating SQL:
 
 - [Data types](docs/manual/sql/01-data-types.md): Scalars, temporal values, JSON, arrays, vectors, tensors, NULL, and conversions.
 - [DDL](docs/manual/sql/02-ddl.md): Schemas, relations, constraints, indexes, views, sequences, and foreign tables.
-- [Queries and DML](docs/manual/sql/03-queries-and-dml.md): SELECT, joins, CTEs, grouping, windows, sets, and mutation.
+- [Queries and DML](docs/manual/sql/03-queries-and-dml.md): SELECT, joins, recursive and data-modifying CTEs, grouping, windows, sets, and mutation.
 - [Expressions and functions](docs/manual/sql/04-expressions-and-functions.md): Operators, scalar functions, aggregates, windows, and general table functions.
 - [Analyzer SQL](docs/manual/sql/05-analyzers.md): Exact analyzer JSON, built-ins including `standard_cjk`, lifecycle functions, GIN binding, and diagnostics.
 - [Retrieval SQL](docs/manual/sql/06-retrieval.md): Text, vector, hybrid, fusion, model retrieval, and tuple-producing operator joins.
@@ -39,7 +39,7 @@ When generating SQL:
 ## Guides and APIs
 
 - [Tutorials](docs/manual/tutorials/README.md): Ordered, working database exercises.
-- [Rust engine API](docs/manual/reference/02-rust-engine-api.md): Engine lifecycle, parameters, results, cursors, and direct APIs.
+- [Rust engine API](docs/manual/reference/02-rust-engine-api.md): Engine lifecycle, parameters, results, Simple Query messages and command completion, cursors, and direct APIs.
 - [HTTP Engine API](docs/manual/reference/09-http-engine.md): Direct authenticated local and Cloud SQL from Rust, Python, Node.js, and browsers, including native CLI project lookup, explicit deployment configuration, atomic batches, NDJSON streaming, CORS, and connection security.
 - [CLI](docs/manual/reference/03-cli.md): `usql` commands and persistent database usage.
 - [Search and ranking](docs/manual/reference/05-search-and-ranking.md): Retrieval behavior and evaluation guidance.

@@ -98,7 +98,7 @@ impl Engine {
         let mut resolution = self.resolve_sql_function_drop_targets(stmt, &registry, kind)?;
         self.ensure_routine_drop_owners(&registry, &resolution.targets)?;
         let cascaded_routines =
-            Self::expand_stored_routine_drop_dependents(&registry, stmt.cascade, &mut resolution)?;
+            self.expand_stored_routine_drop_dependents(&registry, stmt.cascade, &mut resolution)?;
         let dependents = self.routine_object_dependents(&resolution.targets, stmt.cascade)?;
         if stmt.cascade {
             append_routine_cascade_notice(&mut resolution.notices, &cascaded_routines, &dependents);
@@ -194,6 +194,7 @@ impl Engine {
     }
 
     fn expand_stored_routine_drop_dependents(
+        &self,
         registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
         cascade: bool,
         resolution: &mut RoutineDropResolution,
@@ -218,7 +219,7 @@ impl Engine {
                         sqlstate: "2BP01".into(),
                         message: format!(
                             "cannot drop function {} because other objects depend on it",
-                            target.label()
+                            self.routine_drop_display_label(&target)?
                         ),
                     });
                 }
@@ -228,6 +229,20 @@ impl Engine {
             }
         }
         Ok(cascaded_routines)
+    }
+
+    fn routine_drop_display_label(&self, target: &RoutineDropTarget) -> Result<String, SQLError> {
+        let label = target.label();
+        let oid = crate::sql::resolve_regprocedure_oid(self, &label)
+            .map_err(SQLError::Internal)?
+            .ok_or_else(|| {
+                SQLError::Internal(format!("resolved routine {label} has no catalog OID"))
+            })?;
+        crate::sql::resolve_regtype_output(self, &uqa_sql::ast::ColumnType::Regprocedure, oid)
+            .map_err(SQLError::Internal)?
+            .ok_or_else(|| {
+                SQLError::Internal(format!("resolved routine {label} has no display identity"))
+            })
     }
 
     fn routine_object_dependents(

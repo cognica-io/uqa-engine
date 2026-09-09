@@ -65,7 +65,7 @@ pub(crate) fn mark_catalog_statement_relations_bound(
             CommandPlan::Insert(plan) => {
                 plan.relations_bound = true;
                 for cte in &mut plan.ctes {
-                    mark_query_relations_bound(&mut cte.query);
+                    mark_cte_relations_bound(&mut cte.body);
                 }
                 if let Some(source) = &mut plan.source {
                     mark_query_relations_bound(source);
@@ -77,7 +77,7 @@ pub(crate) fn mark_catalog_statement_relations_bound(
             CommandPlan::Update(plan) => {
                 plan.relations_bound = true;
                 for cte in &mut plan.ctes {
-                    mark_query_relations_bound(&mut cte.query);
+                    mark_cte_relations_bound(&mut cte.body);
                 }
                 if let Some(source) = &mut plan.source {
                     mark_source_relations_bound(source);
@@ -89,7 +89,7 @@ pub(crate) fn mark_catalog_statement_relations_bound(
             CommandPlan::Delete(plan) => {
                 plan.relations_bound = true;
                 for cte in &mut plan.ctes {
-                    mark_query_relations_bound(&mut cte.query);
+                    mark_cte_relations_bound(&mut cte.body);
                 }
                 if let Some(source) = &mut plan.source {
                     mark_source_relations_bound(source);
@@ -390,7 +390,7 @@ fn collect_query_routine_references(
     references: &mut Vec<BoundRoutineReference>,
 ) -> Result<(), SQLError> {
     for cte in &query.ctes {
-        collect_query_routine_references(&cte.query, references)?;
+        collect_cte_routine_references(&cte.body, references)?;
         if let Some(cycle) = &cte.cycle {
             collect_scalar_routine_references(&cycle.mark_value, &[], references)?;
             collect_scalar_routine_references(&cycle.mark_default, &[], references)?;
@@ -677,10 +677,74 @@ fn collect_window_routine_references(
     Ok(())
 }
 
+fn mark_cte_relations_bound(body: &mut uqa_planner::CtePlanBody) {
+    match body {
+        uqa_planner::CtePlanBody::Query(query) => mark_query_relations_bound(query),
+        uqa_planner::CtePlanBody::Command(command) => {
+            match command.as_mut() {
+                CommandPlan::Insert(plan) => {
+                    plan.relations_bound = true;
+                    plan.target_relation_bound = true;
+                }
+                CommandPlan::Update(plan) => {
+                    plan.relations_bound = true;
+                    plan.target_relation_bound = true;
+                }
+                CommandPlan::Delete(plan) => {
+                    plan.relations_bound = true;
+                    plan.target_relation_bound = true;
+                }
+                _ => {}
+            }
+            if let Some(ctes) = command.ctes_mut() {
+                for cte in ctes {
+                    mark_cte_relations_bound(&mut cte.body);
+                }
+            }
+            for query in command.query_inputs_mut() {
+                mark_query_relations_bound(query);
+            }
+            if let Some(source) = command.source_input_mut() {
+                mark_source_relations_bound(source);
+            }
+        }
+    }
+}
+
+fn collect_cte_routine_references(
+    body: &uqa_planner::CtePlanBody,
+    references: &mut Vec<BoundRoutineReference>,
+) -> Result<(), SQLError> {
+    match body {
+        uqa_planner::CtePlanBody::Query(query) => {
+            collect_query_routine_references(query, references)
+        }
+        uqa_planner::CtePlanBody::Command(command) => {
+            for cte in command.ctes() {
+                collect_cte_routine_references(&cte.body, references)?;
+            }
+            for query in command.query_inputs() {
+                collect_query_routine_references(query, references)?;
+            }
+            if let Some(source) = command.source_input() {
+                collect_source_routine_references(source, command.scalar_subqueries(), references)?;
+            }
+            for expression in command.expressions() {
+                collect_scalar_routine_references(
+                    expression,
+                    command.scalar_subqueries(),
+                    references,
+                )?;
+            }
+            Ok(())
+        }
+    }
+}
+
 fn mark_query_relations_bound(query: &mut QueryPlan) {
     query.relations_bound = true;
     for cte in &mut query.ctes {
-        mark_query_relations_bound(&mut cte.query);
+        mark_cte_relations_bound(&mut cte.body);
     }
     match &mut query.root {
         RelationalPlan::QueryBlock(block) => {

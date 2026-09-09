@@ -49,7 +49,7 @@ fn compile_into_target(into: &pg_query::protobuf::IntoClause, command: &str) -> 
         .as_ref()
         .ok_or_else(|| SQLError::Internal(format!("{command} target has no name")))?;
     let persistence = relation_persistence(relation, command)?;
-    let on_commit = compile_on_commit(into.on_commit(), persistence, command)?;
+    let on_commit = compile_on_commit(into.on_commit(), persistence)?;
     let column_names = into
         .col_names
         .iter()

@@ -28,6 +28,47 @@ struct RoutineRenameTarget {
 }
 
 impl Engine {
+    pub(crate) fn rewrite_routine_relation_references(
+        &self,
+        from: &RelationIdentity,
+        to: &RelationIdentity,
+    ) -> Result<(), SQLError> {
+        let registry = self.durable.sql_user_functions.read().clone();
+        let mut rewritten = BTreeMap::new();
+        let mut any_changed = false;
+        for (name, overloads) in registry {
+            let mut next = Vec::with_capacity(overloads.len());
+            for function in overloads {
+                let mut definition = function.def.clone();
+                let mut changed = false;
+                if let FunctionBody::Statements(statements) = &mut definition.body {
+                    for statement in statements {
+                        changed |= crate::engine_events::rewrite_stored_statement_relation(
+                            statement, from, to,
+                        )?;
+                    }
+                }
+                if changed {
+                    let compiled = self.compile_persisted_sql_function(&definition)?;
+                    next.push(Arc::new(SQLUserFunction {
+                        def: definition,
+                        compiled,
+                    }));
+                    any_changed = true;
+                } else {
+                    next.push(function);
+                }
+            }
+            rewritten.insert(name, next);
+        }
+        if any_changed {
+            self.persist_sql_functions_snapshot(&rewritten)?;
+            *self.durable.sql_user_functions.write() = rewritten;
+            self.note_catalog_registry_changed();
+        }
+        Ok(())
+    }
+
     pub(crate) fn rename_sql_routine(&self, stmt: &RenameRoutineStmt) -> Result<(), SQLError> {
         self.with_implicit_transaction(|engine| engine.rename_sql_routine_inner(stmt))
     }

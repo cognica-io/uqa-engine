@@ -50,14 +50,19 @@ impl Deparser<'_> {
     ) -> Result<(), SQLError> {
         let mut scope = parent.clone();
         for cte in &query.ctes {
-            let mut names = query_columns(&cte.query);
+            let mut names = query_columns(super::query::view_cte_query(cte)?);
             for (name, alias) in names.iter_mut().zip(&cte.columns) {
                 name.clone_from(alias);
             }
             scope.ctes.insert(cte.name.clone(), names);
         }
         for cte in &mut query.ctes {
-            self.rename_query(&mut cte.query, &scope.child(), rename)?;
+            let query = cte.body.query_mut().ok_or_else(|| {
+                SQLError::Unsupported(
+                    "views must not contain data-modifying statements in WITH".into(),
+                )
+            })?;
+            self.rename_query(query, &scope.child(), rename)?;
         }
         match &mut query.root {
             RelationalPlan::QueryBlock(block) => self.rename_block(block, &scope, rename)?,

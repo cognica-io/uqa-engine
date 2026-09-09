@@ -1,0 +1,794 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null
+    },
+    {
+      "sql": "CREATE SCHEMA completion_probe",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null
+    },
+    {
+      "sql": "SET search_path = completion_probe",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null
+    },
+    {
+      "sql": "CREATE TABLE items (id integer PRIMARY KEY, value integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "INSERT INTO items VALUES (1, 10), (2, 20), (3, 30)",
+      "command_tags": [
+        "INSERT 0 3"
+      ],
+      "error": null
+    },
+    {
+      "sql": "SELECT * FROM items WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null
+    },
+    {
+      "sql": "VALUES (1), (2)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null
+    },
+    {
+      "sql": "UPDATE items SET value = value + 1 WHERE id < 3 RETURNING id",
+      "command_tags": [
+        "UPDATE 2"
+      ],
+      "error": null
+    },
+    {
+      "sql": "DELETE FROM items WHERE false RETURNING id",
+      "command_tags": [
+        "DELETE 0"
+      ],
+      "error": null
+    },
+    {
+      "sql": "WITH inserted AS (INSERT INTO items VALUES (4, 40) RETURNING *) SELECT * FROM inserted",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null
+    },
+    {
+      "sql": "MERGE INTO items t USING (VALUES (1, 100), (5, 50)) s(id, value) ON t.id = s.id WHEN MATCHED THEN UPDATE SET value = s.value WHEN NOT MATCHED THEN INSERT VALUES (s.id, s.value)",
+      "command_tags": [
+        "MERGE 2"
+      ],
+      "error": null
+    },
+    {
+      "sql": "CREATE INDEX items_value ON items (value)",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null
+    },
+    {
+      "sql": "ALTER TABLE items ADD COLUMN extra text",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "CREATE TABLE copied AS SELECT id FROM items",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null
+    },
+    {
+      "sql": "CREATE TABLE IF NOT EXISTS copied AS SELECT 42",
+      "command_tags": [
+        "CREATE TABLE AS"
+      ],
+      "error": null
+    },
+    {
+      "sql": "CREATE TABLE empty_copy AS SELECT id FROM items WITH NO DATA",
+      "command_tags": [
+        "CREATE TABLE AS"
+      ],
+      "error": null
+    },
+    {
+      "sql": "CREATE VIEW item_view AS SELECT id FROM items",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null
+    },
+    {
+      "sql": "ALTER VIEW item_view RENAME TO renamed_view",
+      "command_tags": [
+        "ALTER VIEW"
+      ],
+      "error": null
+    },
+    {
+      "sql": "CREATE MATERIALIZED VIEW item_snapshot AS SELECT id FROM items",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null
+    },
+    {
+      "sql": "CREATE MATERIALIZED VIEW empty_snapshot AS SELECT id FROM items WITH NO DATA",
+      "command_tags": [
+        "CREATE MATERIALIZED VIEW"
+      ],
+      "error": null
+    },
+    {
+      "sql": "CREATE MATERIALIZED VIEW IF NOT EXISTS item_snapshot AS SELECT id FROM items",
+      "command_tags": [
+        "CREATE MATERIALIZED VIEW"
+      ],
+      "error": null
+    },
+    {
+      "sql": "REFRESH MATERIALIZED VIEW item_snapshot",
+      "command_tags": [
+        "REFRESH MATERIALIZED VIEW"
+      ],
+      "error": null
+    },
+    {
+      "sql": "ALTER MATERIALIZED VIEW item_snapshot RENAME TO renamed_snapshot",
+      "command_tags": [
+        "ALTER MATERIALIZED VIEW"
+      ],
+      "error": null
+    },
+    {
+      "sql": "CREATE SEQUENCE item_sequence",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "ALTER SEQUENCE item_sequence RESTART WITH 10",
+      "command_tags": [
+        "ALTER SEQUENCE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "CREATE FUNCTION completion_fn(integer) RETURNS integer LANGUAGE SQL AS $$ SELECT $1 + 1 $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null
+    },
+    {
+      "sql": "ALTER FUNCTION completion_fn(integer) IMMUTABLE",
+      "command_tags": [
+        "ALTER FUNCTION"
+      ],
+      "error": null
+    },
+    {
+      "sql": "ALTER ROUTINE completion_fn(integer) RENAME TO renamed_fn",
+      "command_tags": [
+        "ALTER ROUTINE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "CREATE PROCEDURE completion_proc() LANGUAGE SQL AS $$ SELECT 1 $$",
+      "command_tags": [
+        "CREATE PROCEDURE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "CALL completion_proc()",
+      "command_tags": [
+        "CALL"
+      ],
+      "error": null
+    },
+    {
+      "sql": "ALTER PROCEDURE completion_proc() RENAME TO renamed_proc",
+      "command_tags": [
+        "ALTER PROCEDURE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "CREATE ROLE uqa_completion_probe_role",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "ALTER ROLE uqa_completion_probe_role NOLOGIN",
+      "command_tags": [
+        "ALTER ROLE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "GRANT SELECT ON items TO PUBLIC",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null
+    },
+    {
+      "sql": "REVOKE SELECT ON items FROM PUBLIC",
+      "command_tags": [
+        "REVOKE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "GRANT uqa_completion_probe_role TO CURRENT_USER",
+      "command_tags": [
+        "GRANT ROLE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "REVOKE uqa_completion_probe_role FROM CURRENT_USER",
+      "command_tags": [
+        "REVOKE ROLE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "GRANT EXECUTE ON FUNCTION renamed_fn(integer) TO PUBLIC",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null
+    },
+    {
+      "sql": "REVOKE EXECUTE ON FUNCTION renamed_fn(integer) FROM PUBLIC",
+      "command_tags": [
+        "REVOKE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "PREPARE completion_insert AS INSERT INTO items VALUES ($1, $2, NULL) RETURNING id",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "EXECUTE completion_insert(6, 60)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null
+    },
+    {
+      "sql": "PREPARE completion_select AS SELECT id FROM items WHERE id = $1",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "EXECUTE completion_select(6)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null
+    },
+    {
+      "sql": "DEALLOCATE completion_insert",
+      "command_tags": [
+        "DEALLOCATE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "DEALLOCATE ALL",
+      "command_tags": [
+        "DEALLOCATE ALL"
+      ],
+      "error": null
+    },
+    {
+      "sql": "EXPLAIN SELECT id FROM items",
+      "command_tags": [
+        "EXPLAIN"
+      ],
+      "error": null
+    },
+    {
+      "sql": "ANALYZE items",
+      "command_tags": [
+        "ANALYZE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "VACUUM items",
+      "command_tags": [
+        "VACUUM"
+      ],
+      "error": null
+    },
+    {
+      "sql": "SHOW search_path",
+      "command_tags": [
+        "SHOW"
+      ],
+      "error": null
+    },
+    {
+      "sql": "RESET search_path",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null
+    },
+    {
+      "sql": "SET search_path = completion_probe",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null
+    },
+    {
+      "sql": "BEGIN; DECLARE completion_cursor SCROLL CURSOR FOR SELECT id FROM items ORDER BY id; FETCH 2 FROM completion_cursor; MOVE 1 FROM completion_cursor; CLOSE completion_cursor; COMMIT",
+      "command_tags": [
+        "BEGIN",
+        "DECLARE CURSOR",
+        "FETCH 2",
+        "MOVE 1",
+        "CLOSE CURSOR",
+        "COMMIT"
+      ],
+      "error": null
+    },
+    {
+      "sql": "BEGIN; DECLARE completion_cursor CURSOR FOR SELECT id FROM items; CLOSE ALL; ROLLBACK",
+      "command_tags": [
+        "BEGIN",
+        "DECLARE CURSOR",
+        "CLOSE CURSOR ALL",
+        "ROLLBACK"
+      ],
+      "error": null
+    },
+    {
+      "sql": "BEGIN; SAVEPOINT completion_savepoint; SELECT 1 / 0",
+      "command_tags": [
+        "BEGIN",
+        "SAVEPOINT"
+      ],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero"
+      }
+    },
+    {
+      "sql": "COMMIT",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null
+    },
+    {
+      "sql": "BEGIN; SAVEPOINT completion_savepoint; SELECT 1 / 0",
+      "command_tags": [
+        "BEGIN",
+        "SAVEPOINT"
+      ],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero"
+      }
+    },
+    {
+      "sql": "ROLLBACK TO completion_savepoint; RELEASE completion_savepoint; SELECT 1; COMMIT",
+      "command_tags": [
+        "ROLLBACK",
+        "RELEASE",
+        "SELECT 1",
+        "COMMIT"
+      ],
+      "error": null
+    },
+    {
+      "sql": "INSERT INTO items VALUES (7, 70, NULL); SELECT 1 / 0; INSERT INTO items VALUES (8, 80, NULL)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero"
+      }
+    },
+    {
+      "sql": "SELECT id FROM items WHERE id IN (7, 8)",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null
+    },
+    {
+      "sql": "INSERT INTO items VALUES (9, 90, NULL); COMMIT; INSERT INTO items VALUES (10, 100, NULL); SELECT 1 / 0",
+      "command_tags": [
+        "INSERT 0 1",
+        "COMMIT",
+        "INSERT 0 1"
+      ],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero"
+      }
+    },
+    {
+      "sql": "SELECT id FROM items WHERE id IN (9, 10)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null
+    },
+    {
+      "sql": "INSERT INTO items VALUES (11, 110, NULL); BEGIN; ROLLBACK; SELECT id FROM items WHERE id = 11",
+      "command_tags": [
+        "INSERT 0 1",
+        "BEGIN",
+        "ROLLBACK",
+        "SELECT 0"
+      ],
+      "error": null
+    },
+    {
+      "sql": "COMMIT; ROLLBACK",
+      "command_tags": [
+        "COMMIT",
+        "ROLLBACK"
+      ],
+      "error": null
+    },
+    {
+      "sql": "SET CONSTRAINTS ALL IMMEDIATE",
+      "command_tags": [
+        "SET CONSTRAINTS"
+      ],
+      "error": null
+    },
+    {
+      "sql": "LISTEN completion_channel",
+      "command_tags": [
+        "LISTEN"
+      ],
+      "error": null
+    },
+    {
+      "sql": "NOTIFY completion_channel, 'done'",
+      "command_tags": [
+        "NOTIFY"
+      ],
+      "error": null
+    },
+    {
+      "sql": "UNLISTEN *",
+      "command_tags": [
+        "UNLISTEN"
+      ],
+      "error": null
+    },
+    {
+      "sql": "DISCARD PLANS",
+      "command_tags": [
+        "DISCARD PLANS"
+      ],
+      "error": null
+    },
+    {
+      "sql": "DISCARD SEQUENCES",
+      "command_tags": [
+        "DISCARD SEQUENCES"
+      ],
+      "error": null
+    },
+    {
+      "sql": "DISCARD TEMP",
+      "command_tags": [
+        "DISCARD TEMP"
+      ],
+      "error": null
+    },
+    {
+      "sql": "DO $$ BEGIN PERFORM 1; END $$",
+      "command_tags": [
+        "DO"
+      ],
+      "error": null
+    },
+    {
+      "sql": "TRUNCATE copied",
+      "command_tags": [
+        "TRUNCATE TABLE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "DROP FUNCTION renamed_fn(integer)",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null
+    },
+    {
+      "sql": "DROP PROCEDURE renamed_proc()",
+      "command_tags": [
+        "DROP PROCEDURE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "DROP VIEW renamed_view",
+      "command_tags": [
+        "DROP VIEW"
+      ],
+      "error": null
+    },
+    {
+      "sql": "DROP MATERIALIZED VIEW renamed_snapshot, empty_snapshot",
+      "command_tags": [
+        "DROP MATERIALIZED VIEW"
+      ],
+      "error": null
+    },
+    {
+      "sql": "DROP INDEX items_value",
+      "command_tags": [
+        "DROP INDEX"
+      ],
+      "error": null
+    },
+    {
+      "sql": "DROP SEQUENCE item_sequence",
+      "command_tags": [
+        "DROP SEQUENCE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "DROP TABLE items, copied, empty_copy",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "DROP ROLE uqa_completion_probe_role",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "DROP SCHEMA completion_probe",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null
+    },
+    {
+      "sql": "RESET ALL",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null
+    },
+    {
+      "sql": "DISCARD ALL",
+      "command_tags": [
+        "DISCARD ALL"
+      ],
+      "error": null
+    },
+    {
+      "sql": "  /* only a comment */ ; -- and another\n ;",
+      "command_tags": [
+        null
+      ],
+      "error": null
+    },
+    {
+      "sql": "CREATE TABLE boundary_probe (id integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "INSERT INTO boundary_probe VALUES (1); COMMIT; CREATE TABLE invalid_on_commit (id integer) ON COMMIT DROP",
+      "command_tags": [
+        "INSERT 0 1",
+        "COMMIT"
+      ],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "ON COMMIT can only be used on temporary tables"
+      }
+    },
+    {
+      "sql": "SELECT id FROM boundary_probe WHERE id = 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null
+    },
+    {
+      "sql": "INSERT INTO boundary_probe VALUES (2); CREATE TABLE invalid_on_commit (id integer) ON COMMIT DROP",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "ON COMMIT can only be used on temporary tables"
+      }
+    },
+    {
+      "sql": "SELECT id FROM boundary_probe WHERE id = 2",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null
+    },
+    {
+      "sql": "INSERT INTO boundary_probe VALUES (3); SELECT FROM",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "syntax error at end of input"
+      }
+    },
+    {
+      "sql": "SELECT id FROM boundary_probe WHERE id = 3",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null
+    },
+    {
+      "sql": "DROP TABLE boundary_probe",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "CREATE TEMP TABLE completion_ref_parent (id integer PRIMARY KEY)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "CREATE TEMP TABLE completion_ref_child (id integer REFERENCES completion_ref_parent DEFERRABLE INITIALLY DEFERRED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "INSERT INTO completion_ref_child VALUES (1); SELECT 1",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": {
+        "sqlstate": "23503",
+        "message": "insert or update on table \"completion_ref_child\" violates foreign key constraint \"completion_ref_child_id_fkey\""
+      }
+    },
+    {
+      "sql": "SELECT * FROM completion_ref_child",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null
+    },
+    {
+      "sql": "CREATE TEMP TABLE completion_ref_implied (id integer REFERENCES completion_ref_parent INITIALLY DEFERRED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "CREATE TEMP TABLE completion_ref_reversed (id integer REFERENCES completion_ref_parent INITIALLY DEFERRED DEFERRABLE)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "CREATE TEMP TABLE completion_ref_immediate (id integer REFERENCES completion_ref_parent INITIALLY IMMEDIATE NOT DEFERRABLE)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null
+    },
+    {
+      "sql": "CREATE TEMP TABLE invalid_ref (id integer REFERENCES completion_ref_parent NOT DEFERRABLE INITIALLY DEFERRED)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "constraint declared INITIALLY DEFERRED must be DEFERRABLE"
+      }
+    },
+    {
+      "sql": "CREATE TEMP TABLE invalid_ref (id integer REFERENCES completion_ref_parent INITIALLY DEFERRED NOT DEFERRABLE)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "constraint declared INITIALLY DEFERRED must be DEFERRABLE"
+      }
+    },
+    {
+      "sql": "CREATE TEMP TABLE invalid_ref (id integer REFERENCES completion_ref_parent DEFERRABLE NOT DEFERRABLE)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "multiple DEFERRABLE/NOT DEFERRABLE clauses not allowed"
+      }
+    },
+    {
+      "sql": "CREATE TEMP TABLE invalid_ref (id integer REFERENCES completion_ref_parent INITIALLY DEFERRED INITIALLY IMMEDIATE)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "multiple INITIALLY IMMEDIATE/DEFERRED clauses not allowed"
+      }
+    },
+    {
+      "sql": "CREATE TEMP TABLE invalid_ref (id integer CHECK (id > 0) DEFERRABLE)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "misplaced DEFERRABLE clause"
+      }
+    },
+    {
+      "sql": "DROP TABLE completion_ref_child, completion_ref_implied, completion_ref_reversed, completion_ref_immediate, completion_ref_parent",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null
+    }
+  ],
+  "oracle_setup": {
+    "database": "fresh PostgreSQL database",
+    "extensions": [
+      "age 1.8.0"
+    ],
+    "source_commit": "f5cc81719e6da4cbdb1f797c48b693e91018153a"
+  }
+}

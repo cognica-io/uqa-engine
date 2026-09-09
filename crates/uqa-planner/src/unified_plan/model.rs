@@ -17,7 +17,7 @@ const fn default_include_descendants() -> bool {
 /// There is deliberately no `Legacy`, `Opaque`, or raw-`Statement` variant:
 /// adding a SQL statement kind must update the exhaustive lowerer and the
 /// physical driver.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum UnifiedPlan {
     Query(Box<QueryPlan>),
     Command(Box<CommandPlan>),
@@ -45,7 +45,63 @@ pub struct CtePlan {
     pub search: Option<CteSearchPlan>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cycle: Option<CteCyclePlan>,
-    pub query: Box<QueryPlan>,
+    #[serde(flatten)]
+    pub body: CtePlanBody,
+}
+
+/// A relational CTE or a command whose RETURNING relation feeds its consumers.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum CtePlanBody {
+    #[serde(rename = "query")]
+    Query(Box<QueryPlan>),
+    #[serde(rename = "command")]
+    Command(Box<CommandPlan>),
+}
+
+impl CtePlanBody {
+    pub fn query(&self) -> Option<&QueryPlan> {
+        match self {
+            Self::Query(query) => Some(query),
+            Self::Command(_) => None,
+        }
+    }
+
+    pub fn query_mut(&mut self) -> Option<&mut QueryPlan> {
+        match self {
+            Self::Query(query) => Some(query),
+            Self::Command(_) => None,
+        }
+    }
+
+    pub const fn modifies_data(&self) -> bool {
+        matches!(self, Self::Command(_))
+    }
+
+    /// Whether this WITH definition exposes a relation to its consumers.
+    pub fn returns_rows(&self) -> bool {
+        match self {
+            Self::Query(_) => true,
+            Self::Command(command) => command
+                .returning()
+                .is_some_and(|returning| !returning.is_empty()),
+        }
+    }
+
+    pub fn into_plan(self) -> UnifiedPlan {
+        match self {
+            Self::Query(query) => UnifiedPlan::Query(query),
+            Self::Command(command) => UnifiedPlan::Command(command),
+        }
+    }
+}
+
+impl From<UnifiedPlan> for CtePlanBody {
+    fn from(plan: UnifiedPlan) -> Self {
+        match plan {
+            UnifiedPlan::Query(query) => Self::Query(query),
+            UnifiedPlan::Command(command) => Self::Command(command),
+        }
+    }
 }
 
 /// Generated traversal-order column for a recursive CTE.
@@ -265,19 +321,19 @@ pub struct ExpressionPlan {
     pub subqueries: Vec<QueryPlan>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssignmentPlan {
     pub column: String,
     pub value: ScalarExpr,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ViewCheckPlan {
     pub view: String,
     pub predicate: ScalarExpr,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ViewRuleReturningPlan {
     pub relation: String,
     pub target_qualifier: String,
@@ -286,21 +342,21 @@ pub struct ViewRuleReturningPlan {
     pub subqueries: Vec<QueryPlan>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ViewRuleInsertPlan {
     pub relation: String,
     pub supplied_columns: Vec<String>,
     pub input_columns: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ViewRuleUpdatePlan {
     pub relation: String,
     pub assigned_columns: Vec<String>,
     pub input_columns: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InsertPlan {
     pub table: String,
     pub target_relation_bound: bool,
@@ -326,7 +382,7 @@ pub struct InsertPlan {
     pub view_rule_returning: Option<ViewRuleReturningPlan>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConflictPlan {
     pub predicate: Option<Box<ScalarExpr>>,
     pub constraint: Option<String>,
@@ -335,7 +391,7 @@ pub struct ConflictPlan {
     pub action: ConflictActionPlan,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ConflictActionPlan {
     Nothing,
     Update {
@@ -344,7 +400,7 @@ pub enum ConflictActionPlan {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UpdatePlan {
     pub table: String,
     pub target_relation_bound: bool,
@@ -369,7 +425,7 @@ pub struct UpdatePlan {
     pub view_rule_returning: Option<ViewRuleReturningPlan>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DeletePlan {
     pub table: String,
     pub target_relation_bound: bool,
@@ -391,8 +447,10 @@ pub struct DeletePlan {
     pub view_rule_returning: Option<ViewRuleReturningPlan>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MergePlan {
+    #[serde(default)]
+    pub ctes: Vec<CtePlan>,
     pub target: String,
     /// Effective role used for non-target privilege checks in an internally rewritten statement.
     pub statement_privilege_subject: Option<String>,
@@ -411,7 +469,7 @@ pub struct MergePlan {
     pub view_checks: Vec<ViewCheckPlan>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum MergeWhenPlan {
     UpdateMatched {
         condition: Option<ScalarExpr>,
@@ -446,7 +504,7 @@ pub enum MergeWhenPlan {
 /// Non-query statement plans. Mutations own physical sources and scalar IR;
 /// query-bearing catalog commands own explicit query children. Typed DDL and
 /// procedural payloads contain catalog data, never a second SQL dispatcher.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum CommandPlan {
     CreateTable(Box<uqa_sql::ast::CreateTable>),
     CreateTableIfNotExists(uqa_sql::ast::DeferredCreateTable),

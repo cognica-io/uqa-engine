@@ -26,6 +26,13 @@ use helpers::{
     table_alias_count_error, unique_current_name,
 };
 
+fn cte_output_names(body: &uqa_sql::ast::CteBody) -> Vec<String> {
+    if let Some(query) = body.query() {
+        return select_output_names(query);
+    }
+    helpers::projection_output_names(body.returning().unwrap_or_default())
+}
+
 #[derive(Clone, Copy)]
 enum ColumnBindingMode<'a> {
     Bind,
@@ -462,7 +469,7 @@ impl<'a> RuleColumnBinder<'a> {
             .filter(|cte| cte.recursive)
             .map(|cte| {
                 let columns = if cte.columns.is_empty() {
-                    select_output_names(&cte.query)
+                    cte_output_names(&cte.body)
                 } else {
                     cte.columns.clone()
                 };
@@ -473,12 +480,14 @@ impl<'a> RuleColumnBinder<'a> {
             visible.ctes.entry(name).or_insert(columns);
         }
         for cte in ctes {
-            self.bind_select(&mut cte.query, outer, &visible)?;
+            let mut statement = cte.body.clone().into_statement();
+            self.bind_statement(&mut statement, outer, &visible)?;
+            cte.body = statement.try_into()?;
             if let Some(cycle) = &mut cte.cycle {
                 self.bind_expr(&mut cycle.mark_value, outer, &visible)?;
                 self.bind_expr(&mut cycle.mark_default, outer, &visible)?;
             }
-            let mut columns = select_output_names(&cte.query);
+            let mut columns = cte_output_names(&cte.body);
             apply_positional_aliases(&mut columns, &cte.columns);
             if let Some(search) = &cte.search {
                 columns.push(search.sequence_column.clone());

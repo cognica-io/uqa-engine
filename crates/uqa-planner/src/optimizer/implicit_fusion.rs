@@ -50,11 +50,58 @@ pub(super) fn rewrite_implicit_hybrid_fusion(
 /// persist Bayesian text calibration. This mirrors the rewrite's source-aware
 /// qualifier policy before optimization changes the predicate.
 pub fn query_contains_implicit_hybrid_fusion(query: &QueryPlan) -> bool {
-    query
-        .ctes
-        .iter()
-        .any(|cte| query_contains_implicit_hybrid_fusion(&cte.query))
+    query.ctes.iter().any(cte_contains_implicit_hybrid_fusion)
         || relational_contains_implicit_hybrid_fusion(&query.root)
+}
+
+fn cte_contains_implicit_hybrid_fusion(cte: &crate::CtePlan) -> bool {
+    match &cte.body {
+        crate::CtePlanBody::Query(query) => query_contains_implicit_hybrid_fusion(query),
+        crate::CtePlanBody::Command(command) => match command.as_ref() {
+            crate::CommandPlan::Insert(plan) => {
+                plan.ctes.iter().any(cte_contains_implicit_hybrid_fusion)
+                    || plan
+                        .source
+                        .as_deref()
+                        .is_some_and(query_contains_implicit_hybrid_fusion)
+                    || plan
+                        .subqueries
+                        .iter()
+                        .any(query_contains_implicit_hybrid_fusion)
+            }
+            crate::CommandPlan::Update(plan) => {
+                plan.ctes.iter().any(cte_contains_implicit_hybrid_fusion)
+                    || plan
+                        .source
+                        .as_deref()
+                        .is_some_and(source_contains_implicit_hybrid_fusion)
+                    || plan
+                        .subqueries
+                        .iter()
+                        .any(query_contains_implicit_hybrid_fusion)
+            }
+            crate::CommandPlan::Delete(plan) => {
+                plan.ctes.iter().any(cte_contains_implicit_hybrid_fusion)
+                    || plan
+                        .source
+                        .as_deref()
+                        .is_some_and(source_contains_implicit_hybrid_fusion)
+                    || plan
+                        .subqueries
+                        .iter()
+                        .any(query_contains_implicit_hybrid_fusion)
+            }
+            crate::CommandPlan::Merge(plan) => {
+                plan.ctes.iter().any(cte_contains_implicit_hybrid_fusion)
+                    || source_contains_implicit_hybrid_fusion(&plan.source)
+                    || plan
+                        .subqueries
+                        .iter()
+                        .any(query_contains_implicit_hybrid_fusion)
+            }
+            _ => false,
+        },
+    }
 }
 
 fn relational_contains_implicit_hybrid_fusion(plan: &RelationalPlan) -> bool {

@@ -123,7 +123,7 @@ pub(crate) fn bind_query_plan_relations<E>(
             || visible_ctes.clone(),
             |ctes| inherited_ctes.union(ctes).cloned().collect(),
         );
-        bind_query_plan_relations(&mut cte.query, &body_ctes, resolve)?;
+        bind_cte_plan_relations(&mut cte.body, &body_ctes, resolve)?;
         visible_ctes.insert(cte.name.clone());
     }
     bind_relational_plan_relations(&mut plan.root, &visible_ctes, resolve)?;
@@ -285,7 +285,7 @@ pub(super) fn query_plan_references_relation(
     if query
         .ctes
         .iter()
-        .any(|cte| query_plan_references_relation(&cte.query, target, &ctes))
+        .any(|cte| cte_plan_references_relation(&cte.body, target, &ctes))
     {
         return true;
     }
@@ -403,10 +403,13 @@ fn relational_plan_has_legacy_routine_identity(plan: &RelationalPlan) -> bool {
 }
 
 fn query_plan_sources_have_legacy_routine_identity(plan: &QueryPlan) -> bool {
-    plan.ctes
-        .iter()
-        .any(|cte| query_plan_sources_have_legacy_routine_identity(&cte.query))
-        || relational_plan_has_legacy_routine_identity(&plan.root)
+    plan.ctes.iter().any(|cte| {
+        cte_relational_inputs_any(
+            &cte.body,
+            &query_plan_sources_have_legacy_routine_identity,
+            &source_plan_has_legacy_routine_identity,
+        )
+    }) || relational_plan_has_legacy_routine_identity(&plan.root)
 }
 
 pub(crate) fn query_plan_has_legacy_routine_identity(plan: &QueryPlan) -> bool {
@@ -475,10 +478,13 @@ fn relational_plan_references_function(plan: &RelationalPlan, target: &FunctionB
 }
 
 fn query_plan_sources_reference_function(plan: &QueryPlan, target: &FunctionBinding) -> bool {
-    plan.ctes
-        .iter()
-        .any(|cte| query_plan_sources_reference_function(&cte.query, target))
-        || relational_plan_references_function(&plan.root, target)
+    plan.ctes.iter().any(|cte| {
+        cte_relational_inputs_any(
+            &cte.body,
+            &|query| query_plan_sources_reference_function(query, target),
+            &|source| source_plan_references_function(source, target),
+        )
+    }) || relational_plan_references_function(&plan.root, target)
 }
 
 pub(crate) fn query_plan_references_function(plan: &QueryPlan, target: &FunctionBinding) -> bool {
@@ -583,7 +589,7 @@ fn rewrite_query_source_routine_identity(
 ) -> bool {
     let mut changed = false;
     for cte in &mut plan.ctes {
-        changed |= rewrite_query_source_routine_identity(&mut cte.query, target, new_name);
+        changed |= rewrite_cte_source_routine_identity(&mut cte.body, target, new_name);
     }
     changed | rewrite_relational_plan_source_routine_identity(&mut plan.root, target, new_name)
 }
@@ -610,4 +616,133 @@ pub(crate) fn rewrite_query_plan_routine_identity(
         }
     });
     changed | rewrite_query_source_routine_identity(plan, target, new_name)
+}
+
+pub(crate) fn bind_cte_plan_relations<E>(
+    body: &mut uqa_planner::CtePlanBody,
+    inherited: &std::collections::BTreeSet<String>,
+    resolve: &mut impl FnMut(&str) -> Result<String, E>,
+) -> Result<(), E> {
+    let uqa_planner::CtePlanBody::Command(command) = body else {
+        let uqa_planner::CtePlanBody::Query(query) = body else {
+            unreachable!()
+        };
+        return bind_query_plan_relations(query, inherited, resolve);
+    };
+    if let Some(target) = command.mutation_target_mut() {
+        *target = resolve(target)?;
+    }
+    match command.as_mut() {
+        uqa_planner::CommandPlan::Insert(plan) => {
+            plan.target_relation_bound = true;
+            plan.relations_bound = true;
+        }
+        uqa_planner::CommandPlan::Update(plan) => {
+            plan.target_relation_bound = true;
+            plan.relations_bound = true;
+        }
+        uqa_planner::CommandPlan::Delete(plan) => {
+            plan.target_relation_bound = true;
+            plan.relations_bound = true;
+        }
+        _ => {}
+    }
+    let mut visible = inherited.clone();
+    if let Some(ctes) = command.ctes_mut() {
+        let recursive = ctes.iter().any(|cte| cte.recursive).then(|| {
+            ctes.iter()
+                .map(|cte| cte.name.clone())
+                .collect::<std::collections::BTreeSet<_>>()
+        });
+        for cte in ctes {
+            let scope = recursive.as_ref().map_or_else(
+                || visible.clone(),
+                |names| inherited.union(names).cloned().collect(),
+            );
+            bind_cte_plan_relations(&mut cte.body, &scope, resolve)?;
+            visible.insert(cte.name.clone());
+        }
+    }
+    if let Some(source) = command.source_input_mut() {
+        bind_source_plan_relations(source, &visible, resolve)?;
+    }
+    for query in command.query_inputs_mut() {
+        bind_query_plan_relations(query, &visible, resolve)?;
+    }
+    Ok(())
+}
+
+fn cte_plan_references_relation(
+    body: &uqa_planner::CtePlanBody,
+    target: &RelationIdentity,
+    inherited: &std::collections::BTreeSet<String>,
+) -> bool {
+    match body {
+        uqa_planner::CtePlanBody::Query(query) => {
+            query_plan_references_relation(query, target, inherited)
+        }
+        uqa_planner::CtePlanBody::Command(command) => {
+            let mut visible = inherited.clone();
+            visible.extend(command.ctes().iter().map(|cte| cte.name.clone()));
+            command
+                .mutation_target()
+                .is_some_and(|name| relation_reference_matches(name, target))
+                || command
+                    .ctes()
+                    .iter()
+                    .any(|cte| cte_plan_references_relation(&cte.body, target, &visible))
+                || command
+                    .source_input()
+                    .is_some_and(|source| source_plan_references_relation(source, target, &visible))
+                || command
+                    .query_inputs()
+                    .iter()
+                    .any(|query| query_plan_references_relation(query, target, &visible))
+        }
+    }
+}
+
+fn cte_relational_inputs_any(
+    body: &uqa_planner::CtePlanBody,
+    query: &dyn Fn(&QueryPlan) -> bool,
+    source: &dyn Fn(&uqa_planner::SourcePlan) -> bool,
+) -> bool {
+    match body {
+        uqa_planner::CtePlanBody::Query(plan) => query(plan),
+        uqa_planner::CtePlanBody::Command(command) => {
+            command
+                .ctes()
+                .iter()
+                .any(|cte| cte_relational_inputs_any(&cte.body, query, source))
+                || command.query_inputs().iter().any(|plan| query(plan))
+                || command.source_input().is_some_and(source)
+        }
+    }
+}
+
+fn rewrite_cte_source_routine_identity(
+    body: &mut uqa_planner::CtePlanBody,
+    target: &FunctionBinding,
+    new_name: &str,
+) -> bool {
+    match body {
+        uqa_planner::CtePlanBody::Query(query) => {
+            rewrite_query_source_routine_identity(query, target, new_name)
+        }
+        uqa_planner::CtePlanBody::Command(command) => {
+            let mut changed = false;
+            if let Some(ctes) = command.ctes_mut() {
+                for cte in ctes {
+                    changed |= rewrite_cte_source_routine_identity(&mut cte.body, target, new_name);
+                }
+            }
+            if let Some(source) = command.source_input_mut() {
+                changed |= rewrite_source_plan_routine_identity(source, target, new_name);
+            }
+            for query in command.query_inputs_mut() {
+                changed |= rewrite_query_source_routine_identity(query, target, new_name);
+            }
+            changed
+        }
+    }
 }

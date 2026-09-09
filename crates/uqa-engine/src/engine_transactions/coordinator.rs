@@ -119,6 +119,17 @@ impl Engine {
         self.session_execution_view().transaction_depth()
     }
 
+    /// Whether the current transaction has failed and requires rollback.
+    /// This reports the engine's transaction state, including failures raised
+    /// outside SQL text execution and recovery through a savepoint.
+    pub fn transaction_failed(&self) -> bool {
+        self.session
+            .transactions
+            .lock()
+            .last()
+            .is_some_and(|frame| frame.status != TransactionStatus::Active)
+    }
+
     pub(crate) fn in_transaction_block(&self) -> bool {
         self.session
             .transactions

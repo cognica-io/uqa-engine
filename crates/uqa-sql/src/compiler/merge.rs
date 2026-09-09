@@ -179,6 +179,12 @@ pub(super) fn compile_merge(stmt: &pg_query::protobuf::MergeStmt) -> Result<crat
 
     let (returning, returning_aliases) = compile_returning_clause(stmt.returning_clause.as_ref())?;
     Ok(MergeStmt {
+        with: stmt
+            .with_clause
+            .as_ref()
+            .map(super::compile_with_clause)
+            .transpose()?
+            .unwrap_or_default(),
         target,
         target_qualifier,
         target_alias,

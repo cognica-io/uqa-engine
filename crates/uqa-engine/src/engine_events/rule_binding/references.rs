@@ -126,6 +126,29 @@ pub(crate) fn rule_expr_references_whole_row(expr: &Expr) -> bool {
     detector.whole_row
 }
 
+pub(crate) fn first_rule_row_reference_in_statement(
+    engine: &crate::Engine,
+    statement: &Statement,
+) -> Result<Option<String>, SQLError> {
+    let target = match statement {
+        Statement::Insert(plan) => Some(plan.table.as_str()),
+        Statement::Update(plan) => Some(plan.table.as_str()),
+        Statement::Delete(plan) => Some(plan.table.as_str()),
+        Statement::Merge(plan) => Some(plan.target.as_str()),
+        _ => None,
+    };
+    let columns = target
+        .map(|table| crate::sql::query_source_column_names(engine, table, false))
+        .transpose()?
+        .flatten()
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    let mut detector = RuleRowReferenceDetector::default();
+    let _ = bind_rule_action(engine, statement, &columns, &mut detector)?;
+    Ok(detector.qualifier)
+}
+
 pub(crate) fn rule_statement_references_row(
     engine: &crate::Engine,
     statement: &Statement,
