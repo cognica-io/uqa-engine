@@ -31,6 +31,8 @@ Persistent engines now maintain column statistics automatically in a database-le
 
 Read the [release history](https://github.com/cognica-io/uqa-engine/blob/v0.2.3/HISTORY.md#023---2026-09-09) for the complete changes and the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.2.3/docs/manual/reference/10-upgrading.md) for the Rust graph API changes and persistent catalog migration before updating an application or custom storage provider.
 
+The development branch adds [data-modifying CTEs](https://github.com/cognica-io/uqa-engine/blob/v0.2.3/docs/manual/sql/03-queries-and-dml.md#data-modifying-ctes) and the Rust [Simple Query API with PostgreSQL command completion](https://github.com/cognica-io/uqa-engine/blob/v0.2.3/docs/manual/reference/02-rust-engine-api.md#simple-query-messages). These changes are recorded under [Unreleased](https://github.com/cognica-io/uqa-engine/blob/v0.2.3/HISTORY.md#unreleased).
+
 ## Mathematical foundation
 
 [A Typed Carrier Algebra for Unified Query Execution](https://github.com/cognica-io/uqa-engine/blob/v0.2.3/docs/papers/A%20Typed%20Carrier%20Algebra%20for%20Unified%20Query%20Execution.pdf) states the implementation-grounded theory behind UQA Engine. It distinguishes document support, weighted relations, decorated postings, ranked views, SQL bags, join tuples, graph context, and aggregate state while showing how they compose through one typed planning and execution framework.
