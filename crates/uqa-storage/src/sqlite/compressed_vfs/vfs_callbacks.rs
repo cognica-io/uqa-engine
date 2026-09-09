@@ -8,9 +8,8 @@
 
 use super::{
     c_char, c_int, ffi, fill_random, fs, invalid_data, normalize_path, options_for_path, ptr,
-    sync_parent_directory, AtomicOrdering, AtomicU64, CStr, CompressedSQLiteFile, Duration, File,
-    FileHandle, OpenOptions, Path, PathBuf, SystemTime, VfsFile, IO_METHODS, SQLITE_LOCK_NONE,
-    UNIX_EPOCH,
+    sync_parent_directory, AtomicOrdering, AtomicU64, CStr, CompressedSQLiteFile, Duration,
+    FileHandle, FileLocks, Path, PathBuf, SystemTime, VfsFile, IO_METHODS, UNIX_EPOCH,
 };
 
 pub(super) unsafe extern "C" fn vfs_open(
@@ -43,9 +42,9 @@ pub(super) unsafe extern "C" fn vfs_open(
     if flags & ffi::SQLITE_OPEN_CREATE == 0 && !normalized.exists() {
         return ffi::SQLITE_CANTOPEN;
     }
-    let lock_path = lock_path(&normalized);
-    let open_result = VfsFile::open(normalized, options, flags, read_only)
-        .and_then(|container| open_lock_file(&lock_path).map(|lock_file| (container, lock_file)));
+    let open_result = FileLocks::open(&normalized).and_then(|locks| {
+        VfsFile::open(normalized, options, flags, read_only).map(|container| (container, locks))
+    });
     let compressed = file.cast::<CompressedSQLiteFile>();
     unsafe {
         ptr::write(
@@ -59,13 +58,12 @@ pub(super) unsafe extern "C" fn vfs_open(
         );
     }
     match open_result {
-        Ok((container, lock_file)) => {
+        Ok((container, locks)) => {
             let handle = Box::new(FileHandle {
                 file: container,
-                lock_file,
+                locks,
                 read_only,
                 delete_on_close,
-                lock_state: SQLITE_LOCK_NONE,
             });
             unsafe {
                 (*compressed).base.pMethods = &raw const IO_METHODS;
@@ -95,21 +93,26 @@ pub(super) unsafe extern "C" fn vfs_delete(
         Ok(path) => PathBuf::from(path),
         Err(_) => return ffi::SQLITE_IOERR_DELETE,
     };
-    let remove = |path: &Path| match fs::remove_file(path) {
-        Ok(()) => Ok(true),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error),
-    };
-    let file_result = remove(&normalized);
-    let lock_result = remove(&lock_path(&normalized));
-    let namespace_changed = match (file_result, lock_result) {
-        (Ok(file_removed), Ok(lock_removed)) => file_removed || lock_removed,
-        _ => return ffi::SQLITE_IOERR_DELETE,
+    let Ok(namespace_changed) = remove_file_and_locks(&normalized) else {
+        return ffi::SQLITE_IOERR_DELETE;
     };
     if sync_dir != 0 && namespace_changed && sync_parent_directory(&normalized).is_err() {
         return ffi::SQLITE_IOERR_DIR_FSYNC;
     }
     ffi::SQLITE_OK
+}
+
+pub(super) fn remove_file_and_locks(path: &Path) -> std::io::Result<bool> {
+    let locks = super::locking::lock_paths(path);
+    let mut changed = false;
+    for path in std::iter::once(path).chain(locks.iter().map(PathBuf::as_path)) {
+        match fs::remove_file(path) {
+            Ok(()) => changed = true,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(changed)
 }
 
 pub(super) unsafe extern "C" fn vfs_access(
@@ -232,22 +235,4 @@ fn temp_path() -> std::io::Result<PathBuf> {
         "uqa-compressed-sqlite-{}-{id}.tmp",
         std::process::id()
     )))
-}
-
-fn lock_path(path: &Path) -> PathBuf {
-    let mut raw = path.as_os_str().to_os_string();
-    raw.push(".lock");
-    PathBuf::from(raw)
-}
-
-fn open_lock_file(path: &Path) -> std::io::Result<File> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(path)
 }

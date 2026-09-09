@@ -62,6 +62,7 @@ mod directory_sync;
 mod file;
 mod format;
 mod io_callbacks;
+mod locking;
 mod options;
 mod record_scan;
 mod registration;
@@ -80,6 +81,7 @@ use format::{
     verify_header_authentication,
 };
 use io_callbacks::IO_METHODS;
+use locking::FileLocks;
 use record_scan::scan_committed_records;
 use registration::{normalize_path, options_for_path};
 use vfs_callbacks::{
@@ -149,6 +151,8 @@ const DEFAULT_LEVEL: i32 = 3;
 const SQLITE_LOCK_NONE: c_int = 0;
 const SQLITE_LOCK_SHARED: c_int = 1;
 const SQLITE_LOCK_RESERVED: c_int = 2;
+const SQLITE_LOCK_PENDING: c_int = 3;
+const SQLITE_LOCK_EXCLUSIVE: c_int = 4;
 
 #[derive(Debug, Clone)]
 struct OpenOptionsEntry {
@@ -238,10 +242,9 @@ struct CompressedSQLiteFile {
 
 struct FileHandle {
     file: VfsFile,
-    lock_file: File,
+    locks: FileLocks,
     read_only: bool,
     delete_on_close: bool,
-    lock_state: c_int,
 }
 
 #[derive(Debug)]

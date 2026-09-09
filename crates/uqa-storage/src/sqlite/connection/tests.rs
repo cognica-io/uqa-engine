@@ -692,3 +692,69 @@ fn compressed_encrypted_anchor_rejects_whole_file_rollback() {
     };
     assert!(!error.to_string().is_empty());
 }
+
+#[test]
+fn compressed_writer_reservation_coexists_with_an_existing_reader() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("reserved-reader.uqac.sqlite3");
+    let options = SQLiteCompressionOptions::default();
+    let reader = ManagedConnection::open_compressed(&path, options).unwrap();
+    reader.with(|connection| {
+        connection.execute_batch("CREATE TABLE values_before_commit (value INTEGER); INSERT INTO values_before_commit VALUES (1)")?;
+        Ok(())
+    }).unwrap();
+    let writer = ManagedConnection::open_compressed(&path, options).unwrap();
+    reader.begin_deferred_transaction().unwrap();
+    let before: i64 = reader
+        .with(|connection| {
+            Ok(
+                connection.query_row("SELECT value FROM values_before_commit", [], |row| {
+                    row.get(0)
+                })?,
+            )
+        })
+        .unwrap();
+    assert_eq!(before, 1);
+    writer.begin_transaction().unwrap();
+    writer
+        .with(|connection| {
+            connection.execute("UPDATE values_before_commit SET value = 2", [])?;
+            Ok(())
+        })
+        .unwrap();
+    let still_before: i64 = reader
+        .with(|connection| {
+            Ok(
+                connection.query_row("SELECT value FROM values_before_commit", [], |row| {
+                    row.get(0)
+                })?,
+            )
+        })
+        .unwrap();
+    assert_eq!(still_before, 1);
+    // A new connection must recognize the writer reservation and leave its live rollback journal alone.
+    let newcomer = ManagedConnection::open_compressed(&path, options).unwrap();
+    let newcomer_before: i64 = newcomer
+        .with(|connection| {
+            Ok(
+                connection.query_row("SELECT value FROM values_before_commit", [], |row| {
+                    row.get(0)
+                })?,
+            )
+        })
+        .unwrap();
+    assert_eq!(newcomer_before, 1);
+    drop(newcomer);
+    reader.rollback_transaction().unwrap();
+    writer.commit_transaction().unwrap();
+    let after: i64 = reader
+        .with(|connection| {
+            Ok(
+                connection.query_row("SELECT value FROM values_before_commit", [], |row| {
+                    row.get(0)
+                })?,
+            )
+        })
+        .unwrap();
+    assert_eq!(after, 2);
+}

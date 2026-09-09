@@ -13,6 +13,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Corrected compressed SQLite writer reservations so existing and new readers remain available until a writer requests exclusive access; pending writers block new readers, and other processes can detect live rollback-journal reservations. This prevents spurious writer-promotion failures during concurrent background statistics and VACUUM FULL.
 - Preserved MERGE CTE scope in automatic-view rewrites, privilege analysis, and stored SQL routines; ran statement-level BEFORE triggers before source evaluation while retaining the original statement snapshot. Invalid MERGE expressions are rejected before trigger effects.
 - Kept quoted rewrite-rule column names case-sensitive and returned unqualified output labels for schema-qualified function calls.
 - Matched PostgreSQL duplicate-key and foreign-key diagnostics, including schema-qualified and temporary relations, and preserved inline foreign-key deferrability when compiling column constraints.
