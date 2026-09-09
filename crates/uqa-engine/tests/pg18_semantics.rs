@@ -112,3 +112,6 @@ mod to_reg_lookups;
 
 #[path = "pg18_semantics/schema_drop.rs"]
 mod schema_drop;
+
+#[path = "pg18_semantics/stored_relation_drop.rs"]
+mod stored_relation_drop;

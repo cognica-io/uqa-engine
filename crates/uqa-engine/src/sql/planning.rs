@@ -170,6 +170,70 @@ pub(crate) fn optimize_engine_plan(
     plan: uqa_planner::UnifiedPlan,
 ) -> Result<uqa_planner::UnifiedPlan, SQLError> {
     let callback_error = std::cell::RefCell::new(None);
+    let statistics = EngineSourceStatistics {
+        engine,
+        error: &callback_error,
+    };
+    let optimized = optimize_plan_with_statistics(engine, plan, &statistics);
+    if let Some(error) = callback_error.into_inner() {
+        return Err(error);
+    }
+    optimized
+}
+
+/// Catalog restoration runs while the transaction state is being rebuilt. Cost stored routines from the loaded table catalog instead of opening a query snapshot or invoking access estimators that consult the transaction stack.
+pub(crate) fn optimize_loaded_catalog_plan(
+    engine: &Engine,
+    plan: uqa_planner::UnifiedPlan,
+) -> Result<uqa_planner::UnifiedPlan, SQLError> {
+    let callback_error = std::cell::RefCell::new(None);
+    let statistics = |name: &str| {
+        let read = || -> Result<Option<uqa_planner::RelationStats>, SQLError> {
+            let Some(table) = engine.try_table(name).map_err(|error| {
+                SQLError::Internal(format!("read loaded optimizer table: {error}"))
+            })?
+            else {
+                return Ok(None);
+            };
+            let mut row_count = 0_u64;
+            for member in engine.hierarchy_scan_tables(name, true)? {
+                let table = engine
+                    .try_table(&member)
+                    .map_err(|error| {
+                        SQLError::Internal(format!("read loaded hierarchy table: {error}"))
+                    })?
+                    .ok_or_else(|| SQLError::UnknownTable(member.clone()))?;
+                let count = table.document_store.read().len().map_err(|error| {
+                    SQLError::Internal(format!("read loaded optimizer row count: {error}"))
+                })?;
+                row_count = row_count
+                    .checked_add(u64::try_from(count).map_err(|_| {
+                        SQLError::Internal("optimizer row count exceeds u64".into())
+                    })?)
+                    .ok_or_else(|| {
+                        SQLError::Internal("optimizer hierarchy row count overflow".into())
+                    })?;
+            }
+            let columns = table.column_stats.read().clone();
+            Ok(Some(uqa_planner::RelationStats { row_count, columns }))
+        };
+        match read() {
+            Ok(statistics) => statistics,
+            Err(error) => {
+                *callback_error.borrow_mut() = Some(error);
+                None
+            }
+        }
+    };
+    let optimized = optimize_plan_with_statistics(engine, plan, &statistics);
+    callback_error.into_inner().map_or(optimized, Err)
+}
+
+fn optimize_plan_with_statistics(
+    engine: &Engine,
+    plan: uqa_planner::UnifiedPlan,
+    statistics: &dyn uqa_planner::SourceStatistics,
+) -> Result<uqa_planner::UnifiedPlan, SQLError> {
     let mut optimizer_config = uqa_planner::optimizer::OptimizerConfig::default();
     if volatility::unified_plan_contains_volatile_function(engine, &plan) {
         // Predicate prioritization and DPccp both move expressions across
@@ -179,19 +243,12 @@ pub(crate) fn optimize_engine_plan(
         optimizer_config.enable_filter_pushdown = false;
         optimizer_config.enable_join_reordering = false;
     }
-    let statistics = EngineSourceStatistics {
-        engine,
-        error: &callback_error,
-    };
     let optimized = uqa_planner::optimizer::optimize_with_aggregates_and_statistics(
         plan,
         &optimizer_config,
         &|name: &str| engine.has_registered_aggregate_function(name),
-        &statistics,
+        statistics,
     );
-    if let Some(error) = callback_error.into_inner() {
-        return Err(error);
-    }
     optimized.map_err(|error| SQLError::Internal(format!("optimize SQL join order: {error}")))
 }
 

@@ -7,9 +7,11 @@
 //! Durable catalog AST binding and dependency traversal.
 
 mod ctes;
+mod expressions;
 mod routines;
 mod types;
 use ctes::{collect_cte_relation_dependencies, collect_cte_source_routine_dependencies};
+pub(crate) use expressions::{visit_stored_expression, visit_stored_statement_expressions};
 pub(crate) use types::{
     stored_expression_type_names, stored_statement_relation_names, stored_statement_type_names,
 };
@@ -31,7 +33,10 @@ pub(crate) use routines::{
     rewrite_statement_routine_identity, statement_references_routine_identity,
 };
 
+type ExpressionCallback<'a> = &'a mut dyn FnMut(&mut Expr) -> Result<(), SQLError>;
+
 struct StoredAstVisitor<'a, R, F> {
+    expression: Option<ExpressionCallback<'a>>,
     ty: Option<&'a mut dyn FnMut(&mut String)>,
     relation: &'a mut R,
     routine: &'a mut F,
@@ -349,12 +354,16 @@ where
         Ok(())
     }
 
-    fn bind_expression_type(&mut self, expression: &mut Expr) {
+    fn bind_expression_type(&mut self, expression: &mut Expr) -> Result<(), SQLError> {
+        if let Some(visit) = self.expression.as_mut() {
+            visit(expression)?;
+        }
         if let (Some(visit), Expr::Cast { ty, .. } | Expr::TypedLiteral { ty, .. }) =
             (self.ty.as_mut(), expression)
         {
             visit(ty);
         }
+        Ok(())
     }
 
     fn bind_expr(
@@ -362,7 +371,7 @@ where
         expression: &mut Expr,
         visible_ctes: &BTreeSet<String>,
     ) -> Result<(), SQLError> {
-        self.bind_expression_type(expression);
+        self.bind_expression_type(expression)?;
         match expression {
             Expr::Func {
                 name,
@@ -547,6 +556,7 @@ impl Engine {
                                   _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
          -> Result<(), SQLError> { Ok(()) };
         StoredAstVisitor {
+            expression: None,
             ty: None,
             relation: &mut bind,
             routine: &mut ignore_routine,
@@ -578,6 +588,7 @@ impl Engine {
                                   _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
          -> Result<(), SQLError> { Ok(()) };
         StoredAstVisitor {
+            expression: None,
             ty: None,
             relation: &mut bind,
             routine: &mut ignore_routine,
@@ -615,6 +626,7 @@ impl Engine {
                                   _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
          -> Result<(), SQLError> { Ok(()) };
         StoredAstVisitor {
+            expression: None,
             ty: None,
             relation: &mut bind,
             routine: &mut ignore_routine,
@@ -658,6 +670,7 @@ pub(crate) fn rewrite_stored_statement_relation(
                               _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
      -> Result<(), SQLError> { Ok(()) };
     StoredAstVisitor {
+        expression: None,
         ty: None,
         relation: &mut rewrite,
         routine: &mut ignore_routine,
@@ -711,6 +724,7 @@ pub(super) fn rewrite_stored_rule_relation(
                                   _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
          -> Result<(), SQLError> { Ok(()) };
         StoredAstVisitor {
+            expression: None,
             ty: None,
             relation: &mut rewrite,
             routine: &mut ignore_routine,

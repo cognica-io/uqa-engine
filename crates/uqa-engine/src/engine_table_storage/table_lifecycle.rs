@@ -186,6 +186,8 @@ impl Engine {
         cascade: bool,
     ) -> StorageBackendResult<()> {
         let canonical_names = self.canonical_hierarchy_drop_targets(names, cascade)?;
+        self.drop_relation_routine_dependents(&canonical_names, cascade, "table")
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         let (target_names, targets) = Self::drop_target_sets(&canonical_names)?;
         let entries = self.table_entries();
 

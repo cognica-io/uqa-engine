@@ -171,6 +171,8 @@ impl Engine {
             .filter(|relation| schemas.contains(&relation.schema))
             .map(RelationIdentity::qualified_name)
             .collect::<Vec<_>>();
+        self.drop_relation_routine_dependents(&views, true, "view")?;
+        let views = self.remaining_view_drop_targets(&views)?;
         let closure = self.cascade_view_closure(views)?;
         for view in &closure {
             self.lock_relation(view, crate::row_locks::RelationLockMode::AccessExclusive)?;

@@ -9,6 +9,8 @@
 mod cascade;
 mod dependencies;
 mod drop_planning;
+mod regclass;
+mod relation_dependencies;
 mod rename;
 
 use std::collections::{BTreeMap, BTreeSet};

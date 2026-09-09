@@ -532,6 +532,33 @@ Foreign tables use the same nullable relation ACL and per-column ACL model as ot
 
 Foreign tables accept ordinary `BEFORE` and `AFTER` row and statement trigger definitions for `INSERT`, `UPDATE`, `DELETE`, and `TRUNCATE`, including `UPDATE OF` and `WHEN`; constraint triggers, transition relations, and `INSTEAD OF` timing are rejected with PostgreSQL's foreign-table diagnostic. Creation enforces the foreign table's `TRIGGER` privilege and the function's `EXECUTE` privilege. The foreign table owner controls trigger rename and `ALTER FOREIGN TABLE` or historical `ALTER TABLE` enable modes, while `DROP TRIGGER` derives authority from the same live owner. `pg_trigger`, `pg_class.relhastriggers`, function dependencies, owner transfer, rollback, cross-engine refresh, durable reopen, and automatic trigger removal with `DROP FOREIGN TABLE` use the durable trigger catalog. The built-in foreign wrappers remain read-only, so writable foreign-table DML and trigger execution remain compatibility work.
 
+## Stored relation and routine dependencies
+
+`DROP TABLE`, `DROP FOREIGN TABLE`, `DROP VIEW`, `DROP MATERIALIZED VIEW`, and `DROP SEQUENCE` accept relation identifiers and use `RESTRICT` unless `CASCADE` is specified. SQL-standard `RETURN` and `BEGIN ATOMIC` routine bodies retain dependencies on referenced relations. A dependent routine prevents removal with SQLSTATE `2BP01`; a successful command returns its `DROP` tag without rows.
+
+`CASCADE` follows dependencies through stored views, routines, domain defaults, and typed or generated columns until no additional objects depend on the removed objects. This includes routines reached through a view in another schema and cycles between a view and a routine. Dropping a function or schema follows the same routine/view closure. The owner of the requested object authorizes the cascade; dependent objects do not require separate ownership or schema access. Referencing tables and unrelated columns remain. Multi-target failures are atomic, and dependency removal follows transaction and savepoint rollback, catalog refresh, and durable reopen.
+
+`regclass` casts of string literals, literal sequence arguments to `nextval`, `currval`, and `setval`, and string literals supplied to `regclass` routine arguments or parameter defaults retain the relation OID chosen at routine creation. Named arguments and scalar domains over `regclass` use the same binding. Sequence rename and recreation of the old name do not retarget these bindings. String-literal SQL and PL/pgSQL bodies retain execution-time body lookup. Explicit `text` sequence arguments also retain execution-time lookup. Integer-to-`regclass` conversions and implicit conversion at the SQL routine result boundary do not establish a stored relation dependency; parameter defaults remain creation-bound regardless of body syntax. See [routine lifecycle](08-transactions-and-routines.md#routine-lifecycle) and [compatibility accounting](09-compatibility.md) for the remaining dependency implementation work.
+
+```sql execute
+CREATE TABLE routine_drop_source (id integer);
+CREATE VIEW routine_drop_bridge AS SELECT id FROM routine_drop_source;
+CREATE FUNCTION routine_drop_reader() RETURNS integer LANGUAGE SQL
+BEGIN ATOMIC
+    SELECT id FROM routine_drop_bridge LIMIT 1;
+END;
+DROP TABLE routine_drop_source CASCADE;
+SELECT to_regclass('routine_drop_bridge') IS NULL AS view_removed,
+       to_regprocedure('routine_drop_reader()') IS NULL AS routine_removed;
+
+CREATE SEQUENCE routine_drop_sequence START 7;
+CREATE FUNCTION routine_drop_next() RETURNS bigint LANGUAGE SQL
+RETURN nextval('routine_drop_sequence');
+ALTER SEQUENCE routine_drop_sequence RENAME TO routine_drop_sequence_moved;
+SELECT routine_drop_next();
+DROP SEQUENCE routine_drop_sequence_moved CASCADE;
+```
+
 ## TRUNCATE and DROP
 
 ```sql

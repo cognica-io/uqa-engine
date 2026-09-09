@@ -173,27 +173,7 @@ impl Engine {
             return Ok(());
         }
         let mut registry = self.durable.domains.read().clone();
-        let mut dependents = DomainDependents::default();
-        for (table, state) in self.table_entries() {
-            self.domain_schema_dependents(
-                &table,
-                &state.columns.read(),
-                &state.table_checks.read(),
-                false,
-                targets,
-                &mut dependents,
-            )?;
-        }
-        for (identity, table) in self.durable.foreign_tables.read().clone() {
-            self.domain_schema_dependents(
-                &identity.qualified_name(),
-                &table.columns,
-                &table.checks,
-                true,
-                targets,
-                &mut dependents,
-            )?;
-        }
+        let dependents = self.domain_drop_dependents(targets)?;
         self.drop_domain_view_dependents(targets, &dependents)?;
         self.drop_domain_schema_dependents(&dependents)?;
         registry.retain(|_, domain| !targets.contains(&domain.oid));
@@ -215,6 +195,44 @@ impl Engine {
         *self.durable.domains.write() = registry;
         self.note_catalog_registry_changed();
         Ok(())
+    }
+
+    fn domain_drop_dependents(
+        &self,
+        targets: &BTreeSet<u32>,
+    ) -> Result<DomainDependents, SQLError> {
+        let mut dependents = DomainDependents::default();
+        for (table, state) in self.table_entries() {
+            self.domain_schema_dependents(
+                &table,
+                &state.columns.read(),
+                &state.table_checks.read(),
+                false,
+                targets,
+                &mut dependents,
+            )?;
+        }
+        for (identity, table) in self.durable.foreign_tables.read().clone() {
+            self.domain_schema_dependents(
+                &identity.qualified_name(),
+                &table.columns,
+                &table.checks,
+                true,
+                targets,
+                &mut dependents,
+            )?;
+        }
+        Ok(dependents)
+    }
+
+    pub(crate) fn domain_drop_view_names(
+        &self,
+        targets: &BTreeSet<u32>,
+    ) -> Result<Vec<String>, SQLError> {
+        if targets.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.domain_dependent_view_names(targets, &self.domain_drop_dependents(targets)?)
     }
 
     fn domain_schema_dependents(
@@ -260,11 +278,11 @@ impl Engine {
         Ok(())
     }
 
-    fn drop_domain_view_dependents(
+    fn domain_dependent_view_names(
         &self,
         targets: &BTreeSet<u32>,
         dependents: &DomainDependents,
-    ) -> Result<(), SQLError> {
+    ) -> Result<Vec<String>, SQLError> {
         let mut views = BTreeSet::new();
         for (identity, mut view) in self.durable.views.read().clone() {
             let mut depends = false;
@@ -285,7 +303,15 @@ impl Engine {
                     .map_err(|error| storage_error(&error))?,
             );
         }
-        let closure = self.cascade_view_closure(views.into_iter().collect())?;
+        self.cascade_view_closure(views.into_iter().collect())
+    }
+
+    fn drop_domain_view_dependents(
+        &self,
+        targets: &BTreeSet<u32>,
+        dependents: &DomainDependents,
+    ) -> Result<(), SQLError> {
+        let closure = self.domain_dependent_view_names(targets, dependents)?;
         self.drop_rules_depending_on_relations_inner(&closure)
             .map_err(|error| storage_error(&error))?;
         self.drop_views_inner(&closure, false)

@@ -77,18 +77,39 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
         DropKind::Table => {
             let mut tables = Vec::new();
             for name in &stmt.names {
-                match engine.try_resolve_visible_relation_kind(name)? {
-                    Some((canonical, "table")) => tables.push(canonical),
-                    Some((canonical, kind)) => {
-                        return Err(SQLError::Unsupported(format!(
-                            "DROP TABLE: relation `{canonical}` is a {kind}, not a table"
-                        )));
+                let (_, local) =
+                    crate::RelationIdentity::parse_reference(name).map_err(SQLError::Internal)?;
+                match engine.resolve_visible_relation_kind(name)? {
+                    RelationResolution::Found(canonical, "table") => tables.push(canonical),
+                    RelationResolution::Found(_, _) => {
+                        return Err(SQLError::Routine {
+                            sqlstate: "42809".into(),
+                            message: format!("\"{local}\" is not a table"),
+                        });
                     }
-                    None if stmt.if_exists => {}
-                    None => {
-                        return Err(SQLError::Unsupported(format!(
-                            "DROP TABLE: relation `{name}` does not exist"
-                        )));
+                    RelationResolution::MissingSchema(schema) if stmt.if_exists => {
+                        engine.push_sql_notice(
+                            "NOTICE",
+                            &format!("schema \"{schema}\" does not exist, skipping"),
+                        );
+                    }
+                    RelationResolution::MissingRelation if stmt.if_exists => {
+                        engine.push_sql_notice(
+                            "NOTICE",
+                            &format!("table \"{local}\" does not exist, skipping"),
+                        );
+                    }
+                    RelationResolution::MissingSchema(schema) => {
+                        return Err(SQLError::Routine {
+                            sqlstate: "3F000".into(),
+                            message: format!("schema \"{schema}\" does not exist"),
+                        });
+                    }
+                    RelationResolution::MissingRelation => {
+                        return Err(SQLError::Routine {
+                            sqlstate: "42P01".into(),
+                            message: format!("table \"{local}\" does not exist"),
+                        });
                     }
                 }
             }
@@ -106,6 +127,7 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
                 });
             }
             if !stmt.cascade {
+                engine.drop_relation_routine_dependents(&tables, false, "table")?;
                 let restrict_dependents = engine
                     .try_drop_table_restrict_dependents(&tables)
                     .map_err(|err| ddl_storage_error("DROP TABLE dependency preflight", err))?;
@@ -172,6 +194,11 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
             for table in &foreign_tables {
                 engine.ensure_foreign_table_drop_authority(table)?;
             }
+            engine.drop_relation_routine_dependents(
+                &foreign_tables,
+                stmt.cascade,
+                "foreign table",
+            )?;
             let target_names = foreign_tables.iter().cloned().collect();
             let owned_sequences = engine
                 .foreign_table_owned_sequence_names(&foreign_tables)
@@ -284,7 +311,7 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
                     }
                 }
             }
-            engine.drop_views(&views, stmt.cascade)?;
+            engine.drop_views(&views, stmt.cascade, expected_kind)?;
         }
         DropKind::Sequence => {
             let mut sequences = Vec::new();

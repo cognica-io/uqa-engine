@@ -75,8 +75,9 @@ impl Engine {
         resolution: &mut RoutineDropResolution,
         domains: &mut BTreeSet<u32>,
     ) -> Result<(), SQLError> {
+        let mut relations = BTreeSet::new();
         loop {
-            let previous = (resolution.targets.len(), domains.len());
+            let previous = (resolution.targets.len(), domains.len(), relations.len());
             self.expand_stored_routine_drop_dependents(registry, true, resolution)?;
             let bindings = resolution
                 .targets
@@ -84,9 +85,17 @@ impl Engine {
                 .map(RoutineDropTarget::binding)
                 .collect::<Vec<_>>();
             self.expand_domain_drop_targets(domains, &bindings)?;
+            relations.extend(
+                self.routine_object_dependents(&resolution.targets, true)?
+                    .views,
+            );
+            relations.extend(self.domain_drop_view_names(domains)?);
+            relations = self.relation_drop_closure(relations)?;
             for (name, overloads) in registry {
                 for function in overloads {
-                    if self.routine_references_domain(&function.def, domains)? {
+                    if self.routine_references_domain(&function.def, domains)?
+                        || self.stored_routine_references_relations(&function.def, &relations)?
+                    {
                         let target = RoutineDropTarget {
                             object_id: function.def.object_id,
                             name: name.clone(),
@@ -99,7 +108,7 @@ impl Engine {
                     }
                 }
             }
-            if previous == (resolution.targets.len(), domains.len()) {
+            if previous == (resolution.targets.len(), domains.len(), relations.len()) {
                 break;
             }
         }

@@ -133,6 +133,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `types.floating-point-width` | `M3` | `partial` |
 | `execution.sql-value-clocks` | `M3` | `partial` |
 | `ddl.schema-drop-cascade` | `M3` | `partial` |
+| `ddl.stored-relation-routine-dependencies` | `M3` | `partial` |
 
 <!-- pg18-manifest-status:end -->
 
@@ -352,6 +353,8 @@ After implementation and review changes converge, push the final pull-request he
 Live wire verification requires `UQA_PG18_DOCKER_HOST` to name the test server host as reachable from the client container; this is explicit because the correct address differs between Docker Desktop, native Linux Docker, and remote container runtimes. It uses a PostgreSQL 18 client container named `pg-parity` by default, and `UQA_PG18_WIRE_CONTAINER` selects another container.
 
 Run repository policy scripts, binding builds and examples, and supported-platform CI whenever the parser dependency, public AST, catalog serialization, value representation, or wire types change.
+
+Stored relation/routine deletion now follows SQL-standard relation bodies, constant regclass identities, owned sequences, function/view cycles, and indirect domain and generated-column dependencies. The 205-case PostgreSQL 18.4 transcript exercises RESTRICT, CASCADE, namespace and owner boundaries, rename and old-name recreation, source-body late binding, and multi-target failures. Dedicated SQLite tests cover savepoint rollback, observer refresh, and reopen; stored join-plan restoration uses loaded catalog statistics without entering query transaction locks. Full catalog, diagnostic, coercion, temporary-lifetime, and isolation coverage remains required under `ddl.stored-relation-routine-dependencies`.
 
 ## Completion accounting
 

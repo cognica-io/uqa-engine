@@ -1,0 +1,3163 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SCHEMA rdrop_owned",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE rdrop_owned.data (id integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW public.rdrop_bridge AS SELECT id FROM rdrop_owned.data",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.rdrop_reader() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT id FROM public.rdrop_bridge LIMIT 1; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.rdrop_outer() RETURNS integer LANGUAGE SQL RETURN public.rdrop_reader()",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA rdrop_owned CASCADE",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regclass('public.rdrop_bridge') IS NULL AS view_gone, to_regprocedure('public.rdrop_reader()') IS NULL AS reader_gone, to_regprocedure('public.rdrop_outer()') IS NULL AS outer_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "view_gone",
+            "reader_gone",
+            "outer_gone"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE public.rdrop_table (id integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.rdrop_table_reader() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT id FROM public.rdrop_table LIMIT 1; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE public.rdrop_table",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop table rdrop_table because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT to_regclass('public.rdrop_table') IS NOT NULL AS table_survives",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "table_survives"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE public.rdrop_table CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('public.rdrop_table_reader()') IS NULL AS routine_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "routine_gone"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW public.rdrop_view AS SELECT 1 AS id",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.rdrop_view_reader() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT id FROM public.rdrop_view; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP VIEW public.rdrop_view",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop view rdrop_view because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP VIEW public.rdrop_view CASCADE",
+      "command_tags": [
+        "DROP VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('public.rdrop_view_reader()') IS NULL AS routine_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "routine_gone"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE public.rdrop_seq",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.rdrop_next() RETURNS bigint LANGUAGE SQL RETURN nextval('public.rdrop_seq')",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SEQUENCE public.rdrop_seq",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop sequence rdrop_seq because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP SEQUENCE public.rdrop_seq CASCADE",
+      "command_tags": [
+        "DROP SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('public.rdrop_next()') IS NULL AS routine_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "routine_gone"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE public.rdrop_dynamic (id integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.rdrop_dynamic_reader() RETURNS integer LANGUAGE SQL AS $$ SELECT id FROM public.rdrop_dynamic LIMIT 1 $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE public.rdrop_dynamic",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('public.rdrop_dynamic_reader()') IS NOT NULL AS dynamic_routine_survives",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "dynamic_routine_survives"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION public.rdrop_dynamic_reader()",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.rdrop_seed() RETURNS integer LANGUAGE SQL RETURN 42",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW public.rdrop_function_bridge AS SELECT public.rdrop_seed() AS id",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.rdrop_function_reader() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT id FROM public.rdrop_function_bridge; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION public.rdrop_seed() CASCADE",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regclass('public.rdrop_function_bridge') IS NULL AS view_gone, to_regprocedure('public.rdrop_function_reader()') IS NULL AS routine_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "view_gone",
+            "routine_gone"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.rdrop_cycle() RETURNS integer LANGUAGE SQL RETURN 1",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW public.rdrop_cycle_view AS SELECT public.rdrop_cycle() AS id",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE OR REPLACE FUNCTION public.rdrop_cycle() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT id FROM public.rdrop_cycle_view; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP VIEW public.rdrop_cycle_view CASCADE",
+      "command_tags": [
+        "DROP VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regclass('public.rdrop_cycle_view') IS NULL AS view_gone, to_regprocedure('public.rdrop_cycle()') IS NULL AS routine_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "view_gone",
+            "routine_gone"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SCHEMA rdrop_chain",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN rdrop_chain.number AS integer",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE public.rdrop_typed (id integer, amount rdrop_chain.number)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW public.rdrop_typed_view AS SELECT amount::integer AS value FROM public.rdrop_typed",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.rdrop_typed_reader() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT value FROM public.rdrop_typed_view LIMIT 1; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA rdrop_chain CASCADE",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regclass('public.rdrop_typed_view') IS NULL AS view_gone, to_regprocedure('public.rdrop_typed_reader()') IS NULL AS routine_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "view_gone",
+            "routine_gone"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO public.rdrop_typed VALUES (12) RETURNING id",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "12"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE public.rdrop_typed",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE public.rdrop_renamed_seq",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.rdrop_renamed_next() RETURNS bigint LANGUAGE SQL RETURN nextval('public.rdrop_renamed_seq')",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER SEQUENCE public.rdrop_renamed_seq RENAME TO rdrop_seq_moved",
+      "command_tags": [
+        "ALTER SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE public.rdrop_renamed_seq START 100",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT public.rdrop_renamed_next() AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP SEQUENCE public.rdrop_renamed_seq",
+      "command_tags": [
+        "DROP SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SEQUENCE public.rdrop_seq_moved",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop sequence rdrop_seq_moved because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP SEQUENCE public.rdrop_seq_moved CASCADE",
+      "command_tags": [
+        "DROP SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('public.rdrop_renamed_next()') IS NULL AS routine_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "routine_gone"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE public.rdrop_late_seq",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.rdrop_late_next() RETURNS bigint LANGUAGE SQL RETURN nextval('public.rdrop_late_seq'::text)",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SEQUENCE public.rdrop_late_seq",
+      "command_tags": [
+        "DROP SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('public.rdrop_late_next()') IS NOT NULL AS routine_survives",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "routine_survives"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE public.rdrop_late_seq START 25",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT public.rdrop_late_next() AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "25"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION public.rdrop_late_next()",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SEQUENCE public.rdrop_late_seq",
+      "command_tags": [
+        "DROP SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW public.rdrop_regclass_view AS SELECT 1 AS id",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.rdrop_regclass_ref() RETURNS regclass LANGUAGE SQL RETURN 'public.rdrop_regclass_view'::regclass",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP VIEW public.rdrop_regclass_view",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop view rdrop_regclass_view because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP VIEW public.rdrop_regclass_view CASCADE",
+      "command_tags": [
+        "DROP VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('public.rdrop_regclass_ref()') IS NULL AS routine_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "routine_gone"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE public.rdrop_default_seq",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.rdrop_default_ref(x regclass DEFAULT 'public.rdrop_default_seq') RETURNS regclass LANGUAGE SQL AS 'SELECT x'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SEQUENCE public.rdrop_default_seq",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop sequence rdrop_default_seq because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP SEQUENCE public.rdrop_default_seq CASCADE",
+      "command_tags": [
+        "DROP SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('public.rdrop_default_ref(regclass)') IS NULL AS routine_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "routine_gone"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SCHEMA rdrop_bind",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE rdrop_bind.seq",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET search_path TO rdrop_bind, public",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.rdrop_search_next() RETURNS bigint LANGUAGE SQL RETURN nextval('seq')",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET search_path TO public",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE public.seq START 100",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT public.rdrop_search_next() AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP SEQUENCE public.seq",
+      "command_tags": [
+        "DROP SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA rdrop_bind CASCADE",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('public.rdrop_search_next()') IS NULL AS routine_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "routine_gone"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE public.rdrop_owned_serial(id serial, value integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.rdrop_serial_next() RETURNS bigint LANGUAGE SQL RETURN nextval('public.rdrop_owned_serial_id_seq')",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW public.rdrop_serial_view AS SELECT public.rdrop_serial_next() AS id",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.rdrop_serial_reader() RETURNS bigint LANGUAGE SQL BEGIN ATOMIC SELECT id FROM public.rdrop_serial_view; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE public.rdrop_owned_serial",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop table rdrop_owned_serial because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP TABLE public.rdrop_owned_serial CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('public.rdrop_serial_next()') IS NULL AS next_gone, to_regclass('public.rdrop_serial_view') IS NULL AS view_gone, to_regprocedure('public.rdrop_serial_reader()') IS NULL AS reader_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "next_gone",
+            "view_gone",
+            "reader_gone"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE public.rdrop_multi_a(id integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE public.rdrop_multi_b(id integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.rdrop_multi_reader() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT a.id FROM public.rdrop_multi_a a JOIN public.rdrop_multi_b b ON a.id = b.id LIMIT 1; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE public.rdrop_multi_a, public.rdrop_multi_b",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop desired object(s) because other objects depend on them"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP TABLE public.rdrop_multi_a, public.rdrop_missing CASCADE",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "table \"rdrop_missing\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT to_regclass('public.rdrop_multi_a') IS NOT NULL AS table_survives, to_regprocedure('public.rdrop_multi_reader()') IS NOT NULL AS routine_survives",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "table_survives",
+            "routine_survives"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE public.rdrop_multi_a, public.rdrop_multi_b CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('public.rdrop_multi_reader()') IS NULL AS routine_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "routine_gone"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE MATERIALIZED VIEW public.rdrop_materialized AS SELECT 3 AS id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.rdrop_materialized_reader() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT id FROM public.rdrop_materialized; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP MATERIALIZED VIEW public.rdrop_materialized",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop materialized view rdrop_materialized because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP MATERIALIZED VIEW public.rdrop_materialized CASCADE",
+      "command_tags": [
+        "DROP MATERIALIZED VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('public.rdrop_materialized_reader()') IS NULL AS routine_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "routine_gone"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE public.rdrop_command (id integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE PROCEDURE public.rdrop_insert() LANGUAGE SQL BEGIN ATOMIC INSERT INTO public.rdrop_command VALUES (1); END",
+      "command_tags": [
+        "CREATE PROCEDURE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE public.rdrop_command",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop table rdrop_command because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP TABLE public.rdrop_command CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('public.rdrop_insert()') IS NULL AS procedure_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "procedure_gone"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE public.rdrop_bound_table(id integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO public.rdrop_bound_table VALUES (7)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.rdrop_bound_reader() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT id FROM public.rdrop_bound_table; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE public.rdrop_bound_table RENAME TO rdrop_bound_moved",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE public.rdrop_bound_table(id integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE public.rdrop_bound_table",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT public.rdrop_bound_reader() AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE public.rdrop_bound_moved CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('public.rdrop_bound_reader()') IS NULL AS reader_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "reader_gone"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.rdrop_generated_seed(x integer) RETURNS integer LANGUAGE SQL IMMUTABLE RETURN x + 1",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE public.rdrop_generated(id integer, derived integer GENERATED ALWAYS AS (public.rdrop_generated_seed(id)) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW public.rdrop_generated_view AS SELECT derived FROM public.rdrop_generated",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW public.rdrop_generated_keep AS SELECT id FROM public.rdrop_generated",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.rdrop_generated_reader() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT derived FROM public.rdrop_generated_view LIMIT 1; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION public.rdrop_generated_seed(integer) CASCADE",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('public.rdrop_generated_reader()') IS NULL AS reader_gone, to_regclass('public.rdrop_generated_view') IS NULL AS dependent_gone, to_regclass('public.rdrop_generated_keep') IS NOT NULL AS unrelated_survives",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "reader_gone",
+            "dependent_gone",
+            "unrelated_survives"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO public.rdrop_generated VALUES (6) RETURNING id",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE public.rdrop_generated CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.rdrop_domain_seed() RETURNS integer LANGUAGE SQL RETURN 3",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN public.rdrop_domain AS integer DEFAULT public.rdrop_domain_seed()",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE public.rdrop_domain_table(id integer, amount public.rdrop_domain)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW public.rdrop_domain_view AS SELECT amount::integer AS amount FROM public.rdrop_domain_table",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.rdrop_domain_reader() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT amount FROM public.rdrop_domain_view LIMIT 1; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION public.rdrop_domain_seed() CASCADE",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regtype('public.rdrop_domain') IS NULL AS domain_gone, to_regclass('public.rdrop_domain_view') IS NULL AS view_gone, to_regprocedure('public.rdrop_domain_reader()') IS NULL AS reader_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "domain_gone",
+            "view_gone",
+            "reader_gone"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO public.rdrop_domain_table VALUES (8) RETURNING id",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "8"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE public.rdrop_domain_table",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE ROLE rdrop_owner",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SCHEMA rdrop_private",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "REVOKE ALL ON SCHEMA rdrop_private FROM PUBLIC",
+      "command_tags": [
+        "REVOKE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE public.rdrop_authority(id integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE public.rdrop_authority OWNER TO rdrop_owner",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW rdrop_private.bridge AS SELECT id FROM public.rdrop_authority",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.rdrop_authority_reader() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT id FROM rdrop_private.bridge LIMIT 1; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE rdrop_owner",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE public.rdrop_authority CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regclass('rdrop_private.bridge') IS NULL AS view_gone, to_regprocedure('public.rdrop_authority_reader()') IS NULL AS routine_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "view_gone",
+            "routine_gone"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA rdrop_private CASCADE",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP ROLE rdrop_owner",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SERVER rdrop_foreign_server FOREIGN DATA WRAPPER memory_fdw OPTIONS (kind 'memory')",
+      "command_tags": [
+        "CREATE SERVER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FOREIGN TABLE public.rdrop_foreign(id integer) SERVER rdrop_foreign_server",
+      "command_tags": [
+        "CREATE FOREIGN TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.rdrop_foreign_reader() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT id FROM public.rdrop_foreign LIMIT 1; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP FOREIGN TABLE public.rdrop_foreign",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop foreign table rdrop_foreign because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP FOREIGN TABLE public.rdrop_foreign CASCADE",
+      "command_tags": [
+        "DROP FOREIGN TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('public.rdrop_foreign_reader()') IS NULL AS routine_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "routine_gone"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE public.rdrop_default_display",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.rdrop_default_display_fn(x regclass DEFAULT 'public.rdrop_default_display') RETURNS regclass LANGUAGE SQL AS 'SELECT x'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT public.rdrop_default_display_fn()::text AS relation",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "relation"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "rdrop_default_display"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER SEQUENCE public.rdrop_default_display RENAME TO rdrop_default_display_new",
+      "command_tags": [
+        "ALTER SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT public.rdrop_default_display_fn()::text AS relation",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "relation"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "rdrop_default_display_new"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP SEQUENCE public.rdrop_default_display_new CASCADE",
+      "command_tags": [
+        "DROP SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('public.rdrop_default_display_fn(regclass)') IS NULL AS routine_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "routine_gone"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE implicit_return_seq",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION implicit_relation_return() RETURNS regclass LANGUAGE SQL RETURN 'implicit_return_seq'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SEQUENCE implicit_return_seq",
+      "command_tags": [
+        "DROP SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SEQUENCE implicit_return_seq CASCADE",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "sequence \"implicit_return_seq\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT to_regprocedure('implicit_relation_return()') IS NULL AS routine_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "routine_gone"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE implicit_number_seq",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DO $$ BEGIN EXECUTE format('CREATE FUNCTION implicit_number_next() RETURNS bigint LANGUAGE SQL RETURN nextval(%s)', 'implicit_number_seq'::regclass::oid); END $$",
+      "command_tags": [
+        "DO"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SEQUENCE implicit_number_seq",
+      "command_tags": [
+        "DROP SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SEQUENCE implicit_number_seq CASCADE",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "sequence \"implicit_number_seq\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT to_regprocedure('implicit_number_next()') IS NULL AS routine_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "routine_gone"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION implicit_target(x regclass) RETURNS regclass LANGUAGE SQL RETURN x",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE implicit_argument_seq",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION implicit_argument_ref() RETURNS regclass LANGUAGE SQL RETURN implicit_target('implicit_argument_seq')",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SEQUENCE implicit_argument_seq",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop sequence implicit_argument_seq because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP SEQUENCE implicit_argument_seq CASCADE",
+      "command_tags": [
+        "DROP SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('implicit_argument_ref()') IS NULL AS routine_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "routine_gone"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION implicit_target(regclass) CASCADE",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN implicit_relation_domain AS regclass",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE implicit_domain_seq",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION implicit_domain_default(x implicit_relation_domain DEFAULT 'implicit_domain_seq') RETURNS regclass LANGUAGE SQL AS 'SELECT x'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SEQUENCE implicit_domain_seq",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop sequence implicit_domain_seq because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP SEQUENCE implicit_domain_seq CASCADE",
+      "command_tags": [
+        "DROP SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'implicit_domain_default') AS routine_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "routine_gone"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE numeric_cast_integer",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DO $$ BEGIN EXECUTE format('CREATE FUNCTION numeric_cast_integer_ref() RETURNS regclass LANGUAGE SQL RETURN %s::regclass', 'numeric_cast_integer'::regclass::oid); END $$",
+      "command_tags": [
+        "DO"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SEQUENCE numeric_cast_integer",
+      "command_tags": [
+        "DROP SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SEQUENCE IF EXISTS numeric_cast_integer CASCADE",
+      "command_tags": [
+        "DROP SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('numeric_cast_integer_ref()') IS NULL AS routine_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "routine_gone"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION IF EXISTS numeric_cast_integer_ref()",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE numeric_cast_numeric_text",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DO $$ BEGIN EXECUTE format('CREATE FUNCTION numeric_cast_numeric_text_ref() RETURNS regclass LANGUAGE SQL RETURN ''%s''::regclass', 'numeric_cast_numeric_text'::regclass::oid); END $$",
+      "command_tags": [
+        "DO"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SEQUENCE numeric_cast_numeric_text",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop sequence numeric_cast_numeric_text because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP SEQUENCE IF EXISTS numeric_cast_numeric_text CASCADE",
+      "command_tags": [
+        "DROP SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('numeric_cast_numeric_text_ref()') IS NULL AS routine_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "routine_gone"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION IF EXISTS numeric_cast_numeric_text_ref()",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE public.named_relation_seq",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.named_relation_target(x regclass) RETURNS regclass LANGUAGE SQL RETURN x",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.named_relation_ref() RETURNS regclass LANGUAGE SQL RETURN public.named_relation_target(x => 'public.named_relation_seq')",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SEQUENCE public.named_relation_seq",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop sequence named_relation_seq because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP SEQUENCE public.named_relation_seq CASCADE",
+      "command_tags": [
+        "DROP SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('public.named_relation_ref()') IS NULL AS routine_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "routine_gone"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION public.named_relation_target(regclass)",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    }
+  ],
+  "reference_setup": [
+    "CREATE FOREIGN DATA WRAPPER memory_fdw"
+  ]
+}

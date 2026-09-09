@@ -35,7 +35,8 @@ impl Engine {
         }
         let mut changed = self.bind_routine_definition_dependencies(def, mode)?;
         let mut compiled = self.compile_routine_for_mode(def, mode)?;
-        let body_changed = self.bind_sql_standard_body_routines(def, &compiled)?;
+        let body_changed = self.bind_sql_standard_body_routines(def, &compiled)?
+            | self.bind_routine_regclass_constants(def)?;
         changed |= body_changed;
         if body_changed {
             compiled = self.compile_routine_for_mode(def, mode)?;

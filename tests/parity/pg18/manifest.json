@@ -143,7 +143,8 @@
       "execution.prepared-parameter-contracts",
       "types.floating-point-width",
       "execution.sql-value-clocks",
-      "ddl.schema-drop-cascade"
+      "ddl.schema-drop-cascade",
+      "ddl.stored-relation-routine-dependencies"
     ],
     "M4": [
       "dml.returning-row-images-extended",
@@ -904,6 +905,14 @@
       "supported_version": "162 PostgreSQL 18.4 cases on memory, SQLite, and forced-spill engines: Schema ownership and RESTRICT errors, multi-target atomicity, duplicate and missing names, quoted identifiers, table/view/materialized-view/sequence/routine/domain cascades across schemas, typed columns and generated dependents, default and CHECK removal, SQL-standard routine bodies, transaction rollback, and durable public-schema deletion",
       "status": "partial",
       "open_issue": "Full pg_depend catalog identity coverage, precise complete cascade notice details, virtual catalog schema lifecycle, every supported dependency kind and indirect path, and the full upstream object-dependency and isolation schedules remain implementation and verification work."
+    },
+    {
+      "id": "ddl.stored-relation-routine-dependencies",
+      "postgresql_reference": "PostgreSQL 18.4 live command tags, result rows, type OIDs, SQLSTATEs and diagnostics in tests/parity/pg18/stored_relation_drop_oracle.expected.json; https://www.postgresql.org/docs/18/sql-dropfunction.html; https://www.postgresql.org/docs/18/ddl-depend.html",
+      "uqa_test": "cargo test -p uqa-engine --test integration stored_relation_drop; cargo test -p uqa-engine --test integration schema_drop; cargo test -p uqa-engine --test integration sql_routine_identity",
+      "supported_version": "Unreleased: SQL-standard routine dependencies on tables, foreign tables, views, materialized views, owned sequences, and constant regclass references; RESTRICT, multi-target atomicity, function/view cycles, domain and generated-column chains, preserved late-bound bodies, creation-bound sequence/default identity through rename, and rollback/refresh/reopen lifecycle. PostgreSQL 18.4 differential transcript covers 205 cases on memory, SQLite, and forced-spill engines.",
+      "status": "partial",
+      "open_issue": "Complete pg_depend projection and deletion ordering, full notice and error detail fields, additional stored type and constant coercion paths, temporary-object lifetimes, and the complete upstream dependency and isolation matrix still require implementation and differential verification."
     }
   ]
 }

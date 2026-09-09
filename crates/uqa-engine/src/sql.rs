@@ -100,7 +100,7 @@ use planning::compile_logical_plans;
 use planning::lower_statement;
 pub(super) use planning::{
     execute_compiled_statement, execute_compiled_statement_with_privilege_subject,
-    optimize_engine_plan,
+    optimize_engine_plan, optimize_loaded_catalog_plan,
 };
 pub(crate) use plpgsql_exec::{call_bound_user_scalar_function, call_user_scalar_function};
 use select::query_has_row_locks;
@@ -116,7 +116,7 @@ use catalog::build_info_schema_rows;
 pub(crate) use catalog::query_source_column_names;
 pub(crate) use catalog::{
     foreign_table_relation_oid, plpgsql_catalog, resolve_age_label_relation_name,
-    resolve_catalog_column_type, resolve_catalog_column_type_name,
+    resolve_bound_regclass_oid, resolve_catalog_column_type, resolve_catalog_column_type_name,
     resolve_catalog_domain_type_by_oid, resolve_regclass_kind_by_oid, resolve_regclass_oid,
     resolve_regnamespace_oid, resolve_regobject_oid, resolve_regprocedure_oid, resolve_regrole_oid,
     resolve_regtype_output, runtime_constraints, schema_object_oid, sequence_relation_oid,

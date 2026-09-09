@@ -324,6 +324,11 @@ impl Engine {
         }
         dependent_columns.sort();
         dependent_columns.dedup();
+        for (table, column, _) in &dependent_columns {
+            dependent_views.extend(self.views_depending_on_column(table, column).map_err(
+                |error| SQLError::Internal(format!("inspect generated column views: {error}")),
+            )?);
+        }
         dependent_defaults.sort();
         dependent_defaults.dedup();
         dependent_checks.sort();

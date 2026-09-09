@@ -238,6 +238,9 @@ impl Engine {
                     });
                 }
             }
+        }
+        self.drop_relation_routine_dependents(names, cascade, "sequence")?;
+        for name in names {
             let dependents = self.sequence_drop_dependents(name)?;
             if !cascade {
                 dependents.ensure_empty_for_restrict(name)?;

@@ -456,6 +456,19 @@ fn execute_in_subquery(
 
 fn scalar_source_type(expression: &ScalarExpr, context: &ScalarEvalContext<'_>) -> Option<String> {
     match expression {
+        ScalarExpr::Func {
+            binding: Some(binding),
+            ..
+        } if binding
+            .invocation
+            .as_ref()
+            .is_some_and(|invocation| invocation.return_type.is_some()) =>
+        {
+            return binding
+                .invocation
+                .as_ref()
+                .and_then(|invocation| invocation.return_type.clone());
+        }
         ScalarExpr::Cast { ty, .. } | ScalarExpr::TypedLiteral { ty, .. } => {
             return Some(ty.clone())
         }
