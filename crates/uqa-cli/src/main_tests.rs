@@ -311,7 +311,7 @@ fn command_text_uses_one_implicit_transaction_for_multiple_statements() {
 }
 
 #[test]
-fn command_text_distinguishes_implicit_discard_from_explicit_begin() {
+fn command_text_applies_each_discard_targets_transaction_contract() {
     let engine = Engine::new();
     let mut session = Session {
         engine,
@@ -335,11 +335,20 @@ fn command_text_distinguishes_implicit_discard_from_explicit_begin() {
         .unwrap();
     assert!(session.engine.lastval().is_err());
 
+    session
+        .execute_command_text_with_history(
+            "BEGIN; SELECT nextval('command_discard_sequence'); DISCARD SEQUENCES;",
+            &mut out,
+            false,
+        )
+        .unwrap();
+    assert!(session.engine.lastval().is_err());
     let error = session
-        .execute_command_text_with_history("BEGIN; DISCARD SEQUENCES;", &mut out, false)
+        .execute_command_text_with_history("DISCARD ALL;", &mut out, false)
         .unwrap_err();
     assert!(error.starts_with("25001:"), "{error}");
     session.engine.sql("ROLLBACK", &[]).unwrap();
+    assert!(session.engine.lastval().is_err());
 }
 
 #[test]
