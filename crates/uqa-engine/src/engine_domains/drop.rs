@@ -32,12 +32,57 @@ fn references_domain(ty: &ColumnType, targets: &BTreeSet<u32>) -> bool {
 
 #[derive(Default)]
 struct DomainDependents {
+    indexes: BTreeSet<crate::RelationIdentity>,
     columns: BTreeSet<(String, String, bool)>,
     defaults: BTreeSet<(String, String, bool)>,
     checks: BTreeSet<(String, String, bool)>,
 }
 
 impl Engine {
+    pub(crate) fn domain_drop_column_names(
+        &self,
+        targets: &BTreeSet<u32>,
+    ) -> Result<BTreeSet<(String, String)>, SQLError> {
+        Ok(self
+            .domain_drop_dependents(targets)?
+            .columns
+            .into_iter()
+            .map(|(table, column, _)| (table, column))
+            .collect())
+    }
+
+    pub(crate) fn domain_drop_has_dependents(
+        &self,
+        targets: &BTreeSet<u32>,
+    ) -> Result<bool, SQLError> {
+        let dependents = self.domain_drop_dependents(targets)?;
+        if !dependents.indexes.is_empty()
+            || !dependents.columns.is_empty()
+            || !dependents.defaults.is_empty()
+            || !dependents.checks.is_empty()
+            || !self
+                .domain_dependent_view_names(targets, &dependents)?
+                .is_empty()
+        {
+            return Ok(true);
+        }
+        for domain in self
+            .durable
+            .domains
+            .read()
+            .clone()
+            .values()
+            .filter(|domain| !targets.contains(&domain.oid))
+        {
+            for check in &domain.definition.checks {
+                if self.expression_references_domain(&check.expression, targets)? {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+
     fn type_name_references_domain(&self, name: &str, targets: &BTreeSet<u32>) -> bool {
         crate::sql::resolve_catalog_column_type(self, name)
             .is_some_and(|ty| references_domain(&ty, targets))
@@ -201,7 +246,10 @@ impl Engine {
         &self,
         targets: &BTreeSet<u32>,
     ) -> Result<DomainDependents, SQLError> {
-        let mut dependents = DomainDependents::default();
+        let mut dependents = DomainDependents {
+            indexes: self.domain_dependent_indexes(targets)?,
+            ..DomainDependents::default()
+        };
         for (table, state) in self.table_entries() {
             self.domain_schema_dependents(
                 &table,
@@ -275,6 +323,35 @@ impl Engine {
                 dependents.checks.insert((table.to_string(), name, foreign));
             }
         }
+        loop {
+            let previous = dependents.columns.len();
+            let removed = dependents
+                .columns
+                .iter()
+                .filter(|(name, _, _)| name == table)
+                .map(|(_, column, _)| column.clone())
+                .collect::<Vec<_>>();
+            for column in columns {
+                let Some(generated) = &column.generated else {
+                    continue;
+                };
+                for removed in &removed {
+                    if crate::engine_table_storage::schema_expr_references_column(
+                        &generated.expression,
+                        removed,
+                    ) {
+                        dependents.columns.insert((
+                            table.to_string(),
+                            column.name.clone(),
+                            foreign,
+                        ));
+                    }
+                }
+            }
+            if previous == dependents.columns.len() {
+                break;
+            }
+        }
         Ok(())
     }
 
@@ -318,6 +395,9 @@ impl Engine {
     }
 
     fn drop_domain_schema_dependents(&self, dependents: &DomainDependents) -> Result<(), SQLError> {
+        for index in &dependents.indexes {
+            crate::sql::drop_index_dependency(self, index)?;
+        }
         let mut tables = BTreeSet::new();
         tables.extend(dependents.columns.iter().map(|(table, _, _)| table));
         tables.extend(dependents.defaults.iter().map(|(table, _, _)| table));
@@ -352,5 +432,36 @@ impl Engine {
             }
         }
         Ok(())
+    }
+
+    fn domain_dependent_indexes(
+        &self,
+        targets: &BTreeSet<u32>,
+    ) -> Result<BTreeSet<crate::RelationIdentity>, SQLError> {
+        let mut indexes = BTreeSet::new();
+        for row in self.durable.catalog_indexes.read().clone().values() {
+            let definition = crate::engine_catalog_indexes::index_definition(row)
+                .map_err(|error| storage_error(&error))?;
+            let keys: Vec<uqa_sql::ast::IndexKey> = serde_json::from_str(&row.columns_json)
+                .map_err(|error| SQLError::Internal(error.to_string()))?;
+            let mut depends = definition
+                .key_types
+                .iter()
+                .any(|ty| references_domain(ty, targets));
+            for expression in keys
+                .iter()
+                .filter_map(|key| match key {
+                    uqa_sql::ast::IndexKey::Expression(expression) => Some(expression.as_ref()),
+                    uqa_sql::ast::IndexKey::Column(_) => None,
+                })
+                .chain(definition.predicate.as_deref())
+            {
+                depends |= self.expression_references_domain(expression, targets)?;
+            }
+            if depends {
+                indexes.insert(row.relation.clone());
+            }
+        }
+        Ok(indexes)
     }
 }

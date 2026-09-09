@@ -12,6 +12,54 @@ use super::{
 };
 
 impl Engine {
+    pub(crate) fn drop_domain_types_and_routines(
+        &self,
+        targets: &BTreeSet<u32>,
+        cascade: bool,
+    ) -> Result<(), SQLError> {
+        if targets.is_empty() {
+            return Ok(());
+        }
+        let registry = self.durable.sql_user_functions.read().clone();
+        let mut resolution = RoutineDropResolution {
+            targets: Vec::new(),
+            seen_targets: BTreeSet::new(),
+            notices: Vec::new(),
+        };
+        let mut domains = targets.clone();
+        self.expand_routine_domain_drop(&registry, &mut resolution, &mut domains)?;
+        if !cascade
+            && (domains != *targets
+                || !resolution.targets.is_empty()
+                || self.domain_drop_has_dependents(targets)?)
+        {
+            let message = if targets.len() == 1 {
+                let oid = *targets.first().expect("one root domain");
+                let name = crate::sql::resolve_regtype_output(
+                    self,
+                    &uqa_sql::ast::ColumnType::Regtype,
+                    i64::from(oid),
+                )
+                .map_err(SQLError::Internal)?
+                .ok_or_else(|| SQLError::Internal("DROP DOMAIN target disappeared".into()))?;
+                format!("cannot drop type {name} because other objects depend on it")
+            } else {
+                "cannot drop desired object(s) because other objects depend on them".into()
+            };
+            return Err(SQLError::Routine {
+                sqlstate: "2BP01".into(),
+                message,
+            });
+        }
+        let dependents = self.routine_object_dependents(&resolution.targets, true)?;
+        self.commit_sql_function_drop(SQLFunctionDropPlan {
+            domains,
+            targets: resolution.targets,
+            dependents,
+            notices: resolution.notices,
+        })
+    }
+
     /// Namespace ownership authorizes contained objects without requiring ownership of their dependents.
     pub(crate) fn drop_schema_types_and_routines(
         &self,
@@ -85,16 +133,22 @@ impl Engine {
                 .map(RoutineDropTarget::binding)
                 .collect::<Vec<_>>();
             self.expand_domain_drop_targets(domains, &bindings)?;
-            relations.extend(
-                self.routine_object_dependents(&resolution.targets, true)?
-                    .views,
+            let dependents = self.routine_object_dependents(&resolution.targets, true)?;
+            let mut columns = self.domain_drop_column_names(domains)?;
+            columns.extend(
+                dependents
+                    .columns
+                    .into_iter()
+                    .map(|(table, column, _)| (table, column)),
             );
+            relations.extend(dependents.views);
             relations.extend(self.domain_drop_view_names(domains)?);
             relations = self.relation_drop_closure(relations)?;
             for (name, overloads) in registry {
                 for function in overloads {
                     if self.routine_references_domain(&function.def, domains)?
                         || self.stored_routine_references_relations(&function.def, &relations)?
+                        || self.stored_routine_references_columns(&function.def, &columns)?
                     {
                         let target = RoutineDropTarget {
                             object_id: function.def.object_id,

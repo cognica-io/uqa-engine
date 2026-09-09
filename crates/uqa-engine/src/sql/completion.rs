@@ -70,6 +70,7 @@ fn command_completion(
             DropKind::MaterializedView => "DROP MATERIALIZED VIEW",
             DropKind::Schema => "DROP SCHEMA",
             DropKind::Sequence => "DROP SEQUENCE",
+            DropKind::Domain => "DROP DOMAIN",
         },
         CommandPlan::AlterTable(statement) => match statement.actions.as_slice() {
             [AlterTableAction::RenameTrigger { .. }] => "ALTER TRIGGER",
@@ -84,6 +85,7 @@ fn command_completion(
         CommandPlan::CreateView { .. } => "CREATE VIEW",
         CommandPlan::RefreshMaterializedView { .. } => "REFRESH MATERIALIZED VIEW",
         CommandPlan::CreateSchema { .. } => "CREATE SCHEMA",
+        CommandPlan::AlterSchemaOwner { .. } => "ALTER SCHEMA",
         CommandPlan::Notify { .. } => "NOTIFY",
         CommandPlan::Listen { .. } => "LISTEN",
         CommandPlan::Unlisten { .. } => "UNLISTEN",

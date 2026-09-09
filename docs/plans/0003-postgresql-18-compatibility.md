@@ -134,6 +134,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `execution.sql-value-clocks` | `M3` | `partial` |
 | `ddl.schema-drop-cascade` | `M3` | `partial` |
 | `ddl.stored-relation-routine-dependencies` | `M3` | `partial` |
+| `ddl.domain-drop-cascade` | `M3` | `partial` |
 
 <!-- pg18-manifest-status:end -->
 
@@ -355,6 +356,8 @@ Live wire verification requires `UQA_PG18_DOCKER_HOST` to name the test server h
 Run repository policy scripts, binding builds and examples, and supported-platform CI whenever the parser dependency, public AST, catalog serialization, value representation, or wire types change.
 
 Stored relation/routine deletion now follows SQL-standard relation bodies, constant regclass identities, owned sequences, function/view cycles, and indirect domain and generated-column dependencies. The 205-case PostgreSQL 18.4 transcript exercises RESTRICT, CASCADE, namespace and owner boundaries, rename and old-name recreation, source-body late binding, and multi-target failures. Dedicated SQLite tests cover savepoint rollback, observer refresh, and reopen; stored join-plan restoration uses loaded catalog statistics without entering query transaction locks. Full catalog, diagnostic, coercion, temporary-lifetime, and isolation coverage remains required under `ddl.stored-relation-routine-dependencies`.
+
+Domain deletion now runs one name/ownership preflight before a joint domain, column, routine, and view dependency closure. The 208-case PostgreSQL 18.4 transcript checks DROP DOMAIN command completion, owner and containing-schema-owner authority, schema USAGE, missing and wrong-kind targets, RESTRICT, multi-target failures, derived domains and arrays, default/CHECK removal, stored generated domain casts, expression/partial indexes, direct SQL-standard SELECT and INSERT/UPDATE/DELETE/MERGE column dependencies, and preservation of unrelated columns, routines, and late-bound bodies. The same implementation transfers schema ownership with ACL preservation and excludes inaccessible schemas from current-schema and regtype lookup. A SQLite lifecycle test verifies savepoint rollback, stable domain identity, catalog refresh, ownership transfer, and reopen before and after deletion. Full catalog rows, cascade diagnostics, namespace lifetimes, and upstream type-deletion/isolation coverage remain required under `ddl.domain-drop-cascade`.
 
 ## Completion accounting
 

@@ -1,0 +1,3125 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN domain_drop_missing",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"domain_drop_missing\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP DOMAIN IF EXISTS domain_drop_missing",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN absent_domain_schema.missing",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "3F000",
+        "message": "schema \"absent_domain_schema\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP DOMAIN integer",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "\"pg_catalog.int4\" is not a domain"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP DOMAIN IF EXISTS text",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "\"text\" is not a domain"
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE DOMAIN public.domain_drop_basic AS integer",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN public.domain_drop_basic",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regtype('public.domain_drop_basic') IS NULL AS domain_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "domain_gone"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN public.domain_drop_amount AS integer CHECK (VALUE > 0)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE public.domain_drop_table(id integer, amount public.domain_drop_amount)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO public.domain_drop_table VALUES (1, 2)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW public.domain_drop_view AS SELECT amount::integer AS amount FROM public.domain_drop_table",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW public.domain_drop_keep AS SELECT id FROM public.domain_drop_table",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.domain_drop_reader() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT amount FROM public.domain_drop_view; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN public.domain_drop_amount",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type domain_drop_amount because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP DOMAIN public.domain_drop_amount CASCADE",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM public.domain_drop_table",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regclass('public.domain_drop_view') IS NULL AS view_gone, to_regprocedure('public.domain_drop_reader()') IS NULL AS routine_gone, to_regclass('public.domain_drop_keep') IS NOT NULL AS unrelated_survives",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "view_gone",
+            "routine_gone",
+            "unrelated_survives"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE public.domain_drop_table CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN public.domain_drop_parent AS integer",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN public.domain_drop_child AS public.domain_drop_parent",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE public.domain_drop_arrays(keep integer, values public.domain_drop_child[])",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.domain_drop_argument(x public.domain_drop_parent) RETURNS integer LANGUAGE SQL AS $$ SELECT x::integer $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN public.domain_drop_parent",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type domain_drop_parent because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP DOMAIN public.domain_drop_parent CASCADE",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regtype('public.domain_drop_child') IS NULL AS child_gone, NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname='domain_drop_argument') AS routine_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "child_gone",
+            "routine_gone"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO public.domain_drop_arrays VALUES (8) RETURNING *",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "keep"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "8"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE public.domain_drop_arrays",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN public.domain_drop_expression AS integer",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE public.domain_drop_expression_table(id integer, n integer DEFAULT 3::public.domain_drop_expression, doubled integer GENERATED ALWAYS AS ((id::public.domain_drop_expression)::integer * 2) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW public.domain_drop_expression_view AS SELECT doubled FROM public.domain_drop_expression_table",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.domain_drop_expression_reader() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT doubled FROM public.domain_drop_expression_view LIMIT 1; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN public.domain_drop_expression CASCADE",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO public.domain_drop_expression_table(id) VALUES (5) RETURNING *",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "5",
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regclass('public.domain_drop_expression_view') IS NULL AS view_gone, to_regprocedure('public.domain_drop_expression_reader()') IS NULL AS routine_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "view_gone",
+            "routine_gone"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE public.domain_drop_expression_table",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN public.domain_drop_multi_a AS integer",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN public.domain_drop_multi_b AS public.domain_drop_multi_a",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN public.domain_drop_multi_a, public.domain_drop_multi_b",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regtype('public.domain_drop_multi_a') IS NULL AS a_gone, to_regtype('public.domain_drop_multi_b') IS NULL AS b_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a_gone",
+            "b_gone"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN public.domain_drop_atomic AS integer",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN public.domain_drop_atomic, public.domain_drop_missing CASCADE",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"public.domain_drop_missing\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT to_regtype('public.domain_drop_atomic') IS NOT NULL AS domain_survives",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "domain_survives"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN public.domain_drop_atomic, public.domain_drop_atomic",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SCHEMA domain_drop_owner_schema",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE ROLE domain_drop_owner",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE ROLE domain_drop_schema_owner",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "GRANT USAGE, CREATE ON SCHEMA domain_drop_owner_schema TO domain_drop_owner",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE domain_drop_owner",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN domain_drop_owner_schema.amount AS integer",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER SCHEMA domain_drop_owner_schema OWNER TO domain_drop_schema_owner",
+      "command_tags": [
+        "ALTER SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE domain_drop_schema_owner",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN domain_drop_owner_schema.amount",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA domain_drop_owner_schema CASCADE",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP ROLE domain_drop_owner",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP ROLE domain_drop_schema_owner",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN IF EXISTS absent_domain_schema.missing",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN integer[]",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "\"pg_catalog.int4[]\" is not a domain"
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE DOMAIN public.domain_drop_array_kind AS integer",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN public.domain_drop_array_kind[] CASCADE",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "\"public.domain_drop_array_kind[]\" is not a domain"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT to_regtype('public.domain_drop_array_kind') IS NOT NULL AS element_survives",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "element_survives"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN public.domain_drop_array_kind",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SCHEMA \"Domain.Drop\"",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN \"Domain.Drop\".\"Mixed.Amount\" AS integer",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET search_path TO \"Domain.Drop\", public",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN \"Mixed.Amount\"",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN \"Missing.Amount\"",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"Missing.Amount\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "RESET search_path",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA \"Domain.Drop\"",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN public.domain_drop_direct AS integer",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE public.domain_drop_direct_table(id integer, amount public.domain_drop_direct)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO public.domain_drop_direct_table VALUES(1,4)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.domain_drop_direct_read() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT amount::integer FROM public.domain_drop_direct_table; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.domain_drop_direct_keep() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT id FROM public.domain_drop_direct_table; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.domain_drop_direct_whole() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT count(*) FROM public.domain_drop_direct_table; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.domain_drop_direct_late() RETURNS integer LANGUAGE SQL AS 'SELECT amount::integer FROM public.domain_drop_direct_table'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.domain_drop_direct_cte() RETURNS integer LANGUAGE SQL BEGIN ATOMIC WITH x AS (SELECT amount FROM public.domain_drop_direct_table) SELECT amount::integer FROM x; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.domain_drop_direct_filter() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT id FROM public.domain_drop_direct_table WHERE amount > 0; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.domain_drop_direct_outer() RETURNS integer LANGUAGE SQL RETURN public.domain_drop_direct_read()",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW public.domain_drop_direct_function_view AS SELECT public.domain_drop_direct_read() AS n",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.domain_drop_direct_update() RETURNS void LANGUAGE SQL BEGIN ATOMIC UPDATE public.domain_drop_direct_table SET amount=8 WHERE id=1; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.domain_drop_direct_insert() RETURNS void LANGUAGE SQL BEGIN ATOMIC INSERT INTO public.domain_drop_direct_table VALUES(2,8); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.domain_drop_direct_delete() RETURNS void LANGUAGE SQL BEGIN ATOMIC DELETE FROM public.domain_drop_direct_table WHERE amount>10; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.domain_drop_direct_merge() RETURNS void LANGUAGE SQL BEGIN ATOMIC MERGE INTO public.domain_drop_direct_table t USING (VALUES (1,8)) s(id,n) ON t.id=s.id WHEN MATCHED THEN UPDATE SET amount=s.n; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.domain_drop_direct_cte_dml() RETURNS integer LANGUAGE SQL BEGIN ATOMIC WITH changed AS (UPDATE public.domain_drop_direct_table SET amount=8 RETURNING id) SELECT id FROM changed; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.domain_drop_direct_delete_keep() RETURNS void LANGUAGE SQL BEGIN ATOMIC DELETE FROM public.domain_drop_direct_table WHERE id<0; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.domain_drop_direct_merge_keep() RETURNS void LANGUAGE SQL BEGIN ATOMIC MERGE INTO public.domain_drop_direct_table t USING (VALUES (1)) s(id) ON t.id=s.id WHEN MATCHED THEN UPDATE SET id=s.id; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN public.domain_drop_direct CASCADE",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('public.domain_drop_direct_read()') IS NULL AS reader_gone, to_regprocedure('public.domain_drop_direct_cte()') IS NULL AS cte_gone, to_regprocedure('public.domain_drop_direct_filter()') IS NULL AS filter_gone, to_regprocedure('public.domain_drop_direct_outer()') IS NULL AS outer_gone, to_regclass('public.domain_drop_direct_function_view') IS NULL AS view_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "reader_gone",
+            "cte_gone",
+            "filter_gone",
+            "outer_gone",
+            "view_gone"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT public.domain_drop_direct_keep() AS kept, public.domain_drop_direct_whole() AS whole, to_regprocedure('public.domain_drop_direct_late()') IS NOT NULL AS late_survives",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "kept",
+            "whole",
+            "late_survives"
+          ],
+          "type_oids": [
+            23,
+            23,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "1",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname IN ('domain_drop_direct_update','domain_drop_direct_insert','domain_drop_direct_delete','domain_drop_direct_merge','domain_drop_direct_cte_dml')) AS dml_gone, to_regprocedure('public.domain_drop_direct_delete_keep()') IS NOT NULL AS delete_survives, to_regprocedure('public.domain_drop_direct_merge_keep()') IS NOT NULL AS merge_survives",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "dml_gone",
+            "delete_survives",
+            "merge_survives"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE public.domain_drop_direct_table CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION public.domain_drop_direct_late()",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN public.domain_drop_cast AS integer",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN public.domain_drop_check AS integer CHECK (VALUE::public.domain_drop_cast > 0)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN public.domain_drop_default AS integer DEFAULT 2::public.domain_drop_cast",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW public.domain_drop_cast_view AS SELECT 1::public.domain_drop_cast AS n",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN public.domain_drop_cast RESTRICT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type domain_drop_cast because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP DOMAIN public.domain_drop_cast CASCADE",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regtype('public.domain_drop_check') IS NOT NULL AS check_domain_survives, to_regtype('public.domain_drop_default') IS NULL AS default_domain_gone, to_regclass('public.domain_drop_cast_view') IS NULL AS cast_view_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "check_domain_survives",
+            "default_domain_gone",
+            "cast_view_gone"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (-1)::public.domain_drop_check::integer AS unchecked",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "unchecked"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "-1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN public.domain_drop_check",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN public.domain_drop_tx AS integer",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE public.domain_drop_tx_table(id integer, amount public.domain_drop_tx)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO public.domain_drop_tx_table VALUES(1,9)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SAVEPOINT domain_drop_savepoint",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN public.domain_drop_tx CASCADE",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM public.domain_drop_tx_table",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK TO domain_drop_savepoint",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM public.domain_drop_tx_table",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "9"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "COMMIT",
+      "command_tags": [
+        "COMMIT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN public.domain_drop_tx CASCADE",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE public.domain_drop_tx_table",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE ROLE domain_drop_alter_a",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE ROLE domain_drop_alter_b",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE ROLE domain_drop_alter_c",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SCHEMA domain_drop_alter_schema",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER SCHEMA domain_drop_alter_schema OWNER TO domain_drop_alter_a",
+      "command_tags": [
+        "ALTER SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE domain_drop_alter_c",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER SCHEMA domain_drop_alter_schema OWNER TO domain_drop_alter_a",
+      "command_tags": [
+        "ALTER SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER SCHEMA domain_drop_alter_schema OWNER TO domain_drop_alter_b",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of schema domain_drop_alter_schema"
+      },
+      "results": []
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE domain_drop_alter_a",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER SCHEMA domain_drop_alter_schema OWNER TO domain_drop_alter_b",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be able to SET ROLE \"domain_drop_alter_b\""
+      },
+      "results": []
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "GRANT domain_drop_alter_b TO domain_drop_alter_a",
+      "command_tags": [
+        "GRANT ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE domain_drop_alter_a",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER SCHEMA domain_drop_alter_schema OWNER TO domain_drop_alter_b",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for database uqa"
+      },
+      "results": []
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "GRANT CREATE ON DATABASE uqa TO domain_drop_alter_b",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE domain_drop_alter_a",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER SCHEMA domain_drop_alter_schema OWNER TO domain_drop_alter_b",
+      "command_tags": [
+        "ALTER SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT r.rolname FROM pg_namespace n JOIN pg_roles r ON n.nspowner=r.oid WHERE n.nspname='domain_drop_alter_schema'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "rolname"
+          ],
+          "type_oids": [
+            19
+          ],
+          "rows": [
+            [
+              "domain_drop_alter_b"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "GRANT USAGE ON SCHEMA domain_drop_alter_schema TO domain_drop_alter_c",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE domain_drop_alter_b",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN domain_drop_alter_schema.amount AS integer",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE domain_drop_alter_c",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN domain_drop_alter_schema.amount",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of type domain_drop_alter_schema.amount"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP DOMAIN IF EXISTS domain_drop_alter_schema.missing",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "REVOKE USAGE ON SCHEMA domain_drop_alter_schema FROM domain_drop_alter_c",
+      "command_tags": [
+        "REVOKE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE domain_drop_alter_c",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN IF EXISTS domain_drop_alter_schema.amount",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for schema domain_drop_alter_schema"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP DOMAIN IF EXISTS domain_drop_alter_schema.missing",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for schema domain_drop_alter_schema"
+      },
+      "results": []
+    },
+    {
+      "sql": "SET search_path TO domain_drop_alter_schema, public",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT current_schema() AS current, current_schemas(false) AS schemas, to_regtype('amount') IS NULL AS hidden_type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "current",
+            "schemas",
+            "hidden_type"
+          ],
+          "type_oids": [
+            19,
+            1003,
+            16
+          ],
+          "rows": [
+            [
+              "public",
+              "{public}",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regtype('domain_drop_alter_schema.amount') IS NOT NULL AS qualified_type",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "permission denied for schema domain_drop_alter_schema"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP DOMAIN IF EXISTS amount",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "RESET search_path",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA domain_drop_alter_schema CASCADE",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "REVOKE CREATE ON DATABASE uqa FROM domain_drop_alter_b",
+      "command_tags": [
+        "REVOKE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP ROLE domain_drop_alter_a, domain_drop_alter_b, domain_drop_alter_c",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN public.domain_drop_constraints AS integer",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE public.domain_drop_constraints_table(id integer, n integer CHECK(n::public.domain_drop_constraints>0))",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE INDEX domain_drop_constraints_index ON public.domain_drop_constraints_table (((id::public.domain_drop_constraints)::integer))",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE INDEX domain_drop_constraints_partial ON public.domain_drop_constraints_table(id) WHERE (id::public.domain_drop_constraints)>0",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN public.domain_drop_constraints RESTRICT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type domain_drop_constraints because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP DOMAIN public.domain_drop_constraints CASCADE",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regclass('public.domain_drop_constraints_index') IS NULL AS index_gone, to_regclass('public.domain_drop_constraints_partial') IS NULL AS partial_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "index_gone",
+            "partial_gone"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO public.domain_drop_constraints_table VALUES(-1,-1) RETURNING *",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "-1",
+              "-1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE public.domain_drop_constraints_table",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN public.domain_drop_multi_dep_a AS integer",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN public.domain_drop_multi_dep_b AS integer",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE public.domain_drop_multi_dep_table(id integer, a public.domain_drop_multi_dep_a, b public.domain_drop_multi_dep_b)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN public.domain_drop_multi_dep_a, public.domain_drop_multi_dep_b RESTRICT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop desired object(s) because other objects depend on them"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT to_regtype('public.domain_drop_multi_dep_a') IS NOT NULL AS a_survives, to_regtype('public.domain_drop_multi_dep_b') IS NOT NULL AS b_survives",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a_survives",
+            "b_survives"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN IF EXISTS public.domain_drop_multi_dep_a, public.missing_domain_skip, public.domain_drop_multi_dep_b CASCADE",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO public.domain_drop_multi_dep_table VALUES(3) RETURNING *",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE public.domain_drop_multi_dep_table",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN public.domain_drop_read_only AS integer",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN READ ONLY",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN public.domain_drop_read_only",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "25006",
+        "message": "cannot execute DROP DOMAIN in a read-only transaction"
+      },
+      "results": []
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN public.domain_drop_read_only",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN public.domain_drop_checked AS integer CHECK(VALUE>0)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE public.domain_drop_checked_generated (id integer, value integer GENERATED ALWAYS AS ((id::public.domain_drop_checked)::integer) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO public.domain_drop_checked_generated(id) VALUES(-1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "value for domain domain_drop_checked violates check constraint \"domain_drop_checked_check\""
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO public.domain_drop_checked_generated(id) VALUES(2) RETURNING *",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "value"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN public.domain_drop_checked CASCADE",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO public.domain_drop_checked_generated VALUES(-1) RETURNING *",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "-1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE public.domain_drop_checked_generated",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN public.domain_drop_generated_chain AS integer",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE public.domain_drop_generated_chain_table(id integer, amount public.domain_drop_generated_chain, doubled integer GENERATED ALWAYS AS (amount*2) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO public.domain_drop_generated_chain_table(id,amount) VALUES(1,4)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION public.domain_drop_generated_chain_read() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT doubled FROM public.domain_drop_generated_chain_table; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW public.domain_drop_generated_chain_view AS SELECT doubled FROM public.domain_drop_generated_chain_table",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN public.domain_drop_generated_chain CASCADE",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM public.domain_drop_generated_chain_table",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('public.domain_drop_generated_chain_read()') IS NULL AS routine_gone, to_regclass('public.domain_drop_generated_chain_view') IS NULL AS view_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "routine_gone",
+            "view_gone"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE public.domain_drop_generated_chain_table",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN public.domain_drop_index_only AS integer",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE public.domain_drop_index_only_table(id integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE INDEX domain_drop_index_only_index ON public.domain_drop_index_only_table (((id::public.domain_drop_index_only)::integer))",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN public.domain_drop_index_only RESTRICT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type domain_drop_index_only because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP DOMAIN public.domain_drop_index_only CASCADE",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO public.domain_drop_index_only_table VALUES(1) RETURNING *",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regclass('public.domain_drop_index_only_index') IS NULL AS index_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "index_gone"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE public.domain_drop_index_only_table",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regtype('absent_type_namespace.none')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "to_regtype"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'absent_type_namespace.none'::regtype",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "3F000",
+        "message": "schema \"absent_type_namespace\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT to_regprocedure('absent_type_namespace.none()')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "to_regprocedure"
+          ],
+          "type_oids": [
+            2202
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ]
+    }
+  ]
+}

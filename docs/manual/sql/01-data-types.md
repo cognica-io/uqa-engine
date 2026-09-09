@@ -11,7 +11,7 @@ UQA Engine has PostgreSQL 18-compatible type names mapped to the value carriers 
 | `SMALLSERIAL`, `SERIAL2`, `SERIAL`, `SERIAL4`, `BIGSERIAL`, `SERIAL8` | Width-preserving integer column with generated sequence behavior |
 | `OID`, `XID` | Distinct unsigned 32-bit PostgreSQL identities over the integer carrier |
 | `REGTYPE` | Type-catalog OID over the integer carrier; cast to text or use PostgreSQL result formatting for its visible SQL name |
-| User-defined domains | A distinct catalog type over its base value, with [declaration defaults and conversion-time constraints](02-ddl.md#domain-declarations) |
+| User-defined domains | A distinct catalog type over its base value, with [declaration defaults and conversion-time constraints](02-ddl.md#domain-declarations-and-deletion) |
 | `REAL`, `FLOAT4` | IEEE 754 single-precision inputs, arithmetic, and sums over a widened floating runtime carrier |
 | `FLOAT8`, `DOUBLE PRECISION` | Double-precision declaration over the floating runtime carrier |
 | `NUMERIC(p,s)`, `DECIMAL(p,s)` | Exact decimal carrier with declared precision and scale checks |

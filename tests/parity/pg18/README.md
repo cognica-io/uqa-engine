@@ -370,3 +370,9 @@ The fixtures record SQL input, PostgreSQL version, ordered command tags, primary
 cargo test -p uqa-engine --test integration sql_cte_commands
 cargo test -p uqa-engine --test integration sql_simple_query
 ```
+
+## Domain deletion oracle
+
+`domain_drop_oracle.expected.json` contains 208 PostgreSQL 18.4 cases covering domain deletion, schema ownership transfer, namespace access, exact command tags and errors, type/column/index/routine/view dependency cascades, multi-target atomicity, and transaction boundaries. The `domain_drop` engine tests run it on memory, SQLite, and forced-spill execution; a separate SQLite test covers ownership and dependency restoration, sibling-engine refresh, stable domain identity, and durable reopen.
+
+Reproduce the transcript with `capture_command_completion_oracle.py --rows` in a fresh PostgreSQL 18.4 database named `uqa`, with fresh `domain_drop_*` role names and a superuser connection in `PG_COMPLETION_CONNECTION`. The database name is significant because the ownership cases grant CREATE on that database. The checked-in JSON itself is accepted as input, and the capture tool verifies the first `SELECT version()` before writing reference evidence.

@@ -167,6 +167,17 @@ fn parsed_regtype_oid(
 ) -> Result<Option<i64>, SQLError> {
     let (schema, local) = object_name(&parsed.names)?;
     if let Some(schema) = schema {
+        if engine.schema_security_for_privilege(schema).is_none() {
+            return Err(SQLError::Routine {
+                sqlstate: "3F000".into(),
+                message: format!("schema \"{schema}\" does not exist"),
+            });
+        }
+        engine.require_schema_privilege(
+            schema,
+            &engine.current_user_name(),
+            crate::engine_schema_security::SchemaAclPrivilege::Usage,
+        )?;
         return Ok(type_oid_in_schema(
             catalog,
             schema,
@@ -346,7 +357,7 @@ pub(crate) fn resolve_regnamespace_oid(
         })
 }
 
-fn lookup_regtype_oid(engine: &Engine, name: &str) -> Result<Option<i64>, SQLError> {
+pub(crate) fn resolve_regtype_oid(engine: &Engine, name: &str) -> Result<Option<i64>, SQLError> {
     match numeric_regobject_oid(name) {
         NumericRegobjectOid::Valid(oid) => return Ok(Some(oid)),
         NumericRegobjectOid::InvalidSyntax | NumericRegobjectOid::OutOfRange => return Ok(None),
@@ -429,7 +440,10 @@ pub(crate) fn resolve_regobject_oid(
         ColumnType::Regclass => lookup_regclass_oid(engine, name),
         ColumnType::Regnamespace => lookup_regnamespace_oid(engine, name),
         ColumnType::Regrole => lookup_regrole_oid(engine, name),
-        ColumnType::Regtype => lookup_regtype_oid(engine, name),
+        ColumnType::Regtype => match resolve_regtype_oid(engine, name) {
+            Err(SQLError::Routine { sqlstate, .. }) if sqlstate == "3F000" => Ok(None),
+            result => result,
+        },
         _ => Err(SQLError::Internal(format!(
             "unsupported regobject lookup type `{}`",
             ty.sql_name()

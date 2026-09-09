@@ -629,6 +629,12 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 name,
                 if_not_exists,
             } => self.execute_create_schema(name, *if_not_exists),
+            CommandPlan::AlterSchemaOwner { name, new_owner } => {
+                self.engine.with_implicit_transaction(|engine| {
+                    engine.alter_schema_owner(name, new_owner)?;
+                    Ok(SQLResult::empty())
+                })
+            }
             CommandPlan::Notify { channel, payload } => {
                 self.engine.notify(channel, payload)?;
                 Ok(SQLResult::empty())

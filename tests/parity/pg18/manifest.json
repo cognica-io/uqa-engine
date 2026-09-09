@@ -39,7 +39,8 @@
     "tpch_fixture": "benchmarks/tpch/expected/pg18.json",
     "stateful_indexes": "tests/parity/pg18/indexes_stateful.expected.json",
     "domain_semantics": "tests/parity/pg18/domains_oracle.expected.json",
-    "wire_result_descriptors": "tests/parity/pg18/wire_result_oracle.expected.json"
+    "wire_result_descriptors": "tests/parity/pg18/wire_result_oracle.expected.json",
+    "domain_drop": "tests/parity/pg18/domain_drop_oracle.expected.json"
   },
   "parser_chain": {
     "crate": "crates/uqa-pg-query",
@@ -144,7 +145,8 @@
       "types.floating-point-width",
       "execution.sql-value-clocks",
       "ddl.schema-drop-cascade",
-      "ddl.stored-relation-routine-dependencies"
+      "ddl.stored-relation-routine-dependencies",
+      "ddl.domain-drop-cascade"
     ],
     "M4": [
       "dml.returning-row-images-extended",
@@ -913,6 +915,14 @@
       "supported_version": "Unreleased: SQL-standard routine dependencies on tables, foreign tables, views, materialized views, owned sequences, and constant regclass references; RESTRICT, multi-target atomicity, function/view cycles, domain and generated-column chains, preserved late-bound bodies, creation-bound sequence/default identity through rename, and rollback/refresh/reopen lifecycle. PostgreSQL 18.4 differential transcript covers 205 cases on memory, SQLite, and forced-spill engines.",
       "status": "partial",
       "open_issue": "Complete pg_depend projection and deletion ordering, full notice and error detail fields, additional stored type and constant coercion paths, temporary-object lifetimes, and the complete upstream dependency and isolation matrix still require implementation and differential verification."
+    },
+    {
+      "id": "ddl.domain-drop-cascade",
+      "postgresql_reference": "PostgreSQL 18.4 live command tags, result rows, type OIDs, SQLSTATEs and diagnostics in tests/parity/pg18/domain_drop_oracle.expected.json; https://www.postgresql.org/docs/18/sql-dropdomain.html",
+      "uqa_test": "cargo test -p uqa-engine --test integration domain_drop; cargo test -p uqa-engine --test integration stored_relation_drop; cargo test -p uqa-engine --test integration schema_drop",
+      "supported_version": "Unreleased: 208 PostgreSQL 18.4 cases on memory, SQLite, and forced-spill engines cover DROP DOMAIN and schema ownership transfer; domain/schema-owner authority, namespace USAGE and type lookup, exact missing/wrong-kind/RESTRICT errors, multi-target atomicity, derived domains, typed/generated columns, index expressions and predicates, defaults/CHECKs, direct and transitive query and INSERT/UPDATE/DELETE/MERGE routine dependencies, and read-only/savepoint behavior. A SQLite lifecycle test checks rollback, stable type identity, cross-engine refresh, ownership transfer, and reopen.",
+      "status": "partial",
+      "open_issue": "Complete pg_depend and pg_shdepend catalog rows, deletion ordering and notice/detail fields, virtual catalog domains and namespace lifetimes, and the complete upstream type-deletion and isolation matrix remain required implementation work."
     }
   ]
 }

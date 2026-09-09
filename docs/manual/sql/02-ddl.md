@@ -31,6 +31,8 @@ Schema-qualified objects are supported, and the role active at `CREATE SCHEMA` o
 
 Every named graph reserves a namespace of its own name and `ag_catalog` is reserved for the Apache AGE catalog, so `CREATE SCHEMA` rejects those names as existing or reserved schemas and `DROP SCHEMA graph_name` fails until the graph is dropped; see [Graph SQL and Cypher](07-graph.md).
 
+`ALTER SCHEMA name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }` transfers schema ownership and rewrites owner-rooted ACL entries while retaining other grants. Unless the requested owner is already current, the caller must own the schema and be able to SET ROLE to the new owner; the new owner must have database CREATE privilege. A superuser bypasses these privilege checks. A missing role reports `42704`, a missing schema reports `3F000`, and insufficient authority reports `42501`. It returns `ALTER SCHEMA` without rows and participates in transaction rollback, refresh, and reopen.
+
 `DROP SCHEMA [IF EXISTS] name [, ...] [CASCADE | RESTRICT]` accepts namespace identifiers and returns the `DROP SCHEMA` command tag without rows. The schema owner, an inheriting role, or a superuser may remove the schema, including objects owned by other roles. `RESTRICT` is the default; a contained table, view, materialized view, sequence, function, procedure, or domain prevents removal with `2BP01`. A missing schema reports `3F000`; `IF EXISTS` skips it with a notice. A nonowner reports `42501` before dependency checks. Duplicate targets are removed once, and all target names and ownership checks precede deletion.
 
 `CASCADE` removes contained objects and the implemented dependency closure across schemas. Dependent views and SQL-standard routines are removed; referencing tables survive after removal of dependent foreign keys, defaults, CHECK constraints, or typed and generated columns. Domains based on a removed type are removed, as are domains whose defaults require a removed type or function. Remaining columns retain their rows. The whole statement participates in transaction and savepoint rollback. The ordinary `public` schema may be dropped and remains absent across reopen; creating it again is explicit. Named graph namespaces continue to remove their graphs with `CASCADE`. Full dependency catalog coverage, complete notice details, and virtual catalog-schema deletion remain tracked implementation work in [Compatibility](09-compatibility.md).
@@ -44,7 +46,7 @@ INSERT INTO schema_drop_reference VALUES (42);
 DROP TABLE schema_drop_reference;
 ```
 
-## Domain declarations
+## Domain declarations and deletion
 
 ```sql
 CREATE DOMAIN schema_name.domain_name AS base_type
@@ -66,6 +68,23 @@ CREATE TABLE domain_orders (id integer, amount positive_amount);
 INSERT INTO domain_orders (id) VALUES (1);
 INSERT INTO domain_orders VALUES (2, 5);
 SELECT id, amount FROM domain_orders ORDER BY id;
+```
+
+`DROP DOMAIN [IF EXISTS] name [, ...] [CASCADE | RESTRICT]` removes domains after resolving every target and checking domain-owner or containing-schema-owner authority. Qualified names require schema `USAGE`; unqualified names skip inaccessible search-path schemas. `IF EXISTS` reports missing types or schemas as notices, while a non-domain type still reports `42809`. Missing domains report `42704`, missing schemas report `3F000`, and insufficient authority reports `42501`.
+
+RESTRICT is the default and reports `2BP01` when another object depends on a target. Explicitly naming both a base and its derived domain permits their joint deletion when no outside dependency remains. CASCADE removes derived domains, typed columns, generated columns, dependent views and SQL-standard routines, and indexes whose expressions or predicates require the domain. Defaults and CHECK constraints that require it are removed while their independent columns and domains survive. A table retains its unrelated columns and rows. SQL-standard query and INSERT, UPDATE, DELETE, and MERGE bodies retain column dependencies; routines reading only unrelated columns and string-literal SQL bodies survive column deletion.
+
+The command returns `DROP DOMAIN` with no result rows. All target and dependency changes participate in transaction and savepoint rollback, catalog refresh, and SQLite reopen. Domain deletion in a read-only transaction reports `25006`.
+
+```sql execute
+CREATE DOMAIN cleanup_amount AS integer CHECK (VALUE > 0);
+CREATE TABLE cleanup_orders (id integer, amount cleanup_amount);
+INSERT INTO cleanup_orders VALUES (1, 5);
+CREATE FUNCTION cleanup_amount_reader() RETURNS integer
+    LANGUAGE SQL BEGIN ATOMIC SELECT amount::integer FROM cleanup_orders; END;
+DROP DOMAIN cleanup_amount CASCADE;
+SELECT * FROM cleanup_orders;
+SELECT to_regprocedure('cleanup_amount_reader()') IS NULL AS routine_removed;
 ```
 
 ## Tables

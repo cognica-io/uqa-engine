@@ -134,6 +134,7 @@ fn reorder_command_joins(
         | CommandPlan::AlterForeignTable(_)
         | CommandPlan::AlterView(_)
         | CommandPlan::CreateSchema { .. }
+        | CommandPlan::AlterSchemaOwner { .. }
         | CommandPlan::Notify { .. }
         | CommandPlan::Listen { .. }
         | CommandPlan::Unlisten { .. }

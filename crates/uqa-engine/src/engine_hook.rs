@@ -21,7 +21,7 @@ impl uqa_sql::expr::EngineHook for Engine {
     }
 
     fn resolve_regtype_input(&self, name: &str) -> Result<Option<i64>, SQLError> {
-        crate::sql::resolve_regobject_oid(self, &uqa_sql::ast::ColumnType::Regtype, name)?
+        crate::sql::resolve_regtype_oid(self, name)?
             .map(Some)
             .ok_or_else(|| SQLError::Routine {
                 sqlstate: "42704".into(),

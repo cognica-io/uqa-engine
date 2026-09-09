@@ -268,6 +268,9 @@ impl UnifiedPlan {
                 name,
                 if_not_exists,
             })),
+            Statement::AlterSchemaOwner { name, new_owner } => {
+                Self::Command(Box::new(CommandPlan::AlterSchemaOwner { name, new_owner }))
+            }
             Statement::Notify { channel, payload } => {
                 Self::Command(Box::new(CommandPlan::Notify { channel, payload }))
             }
@@ -521,6 +524,7 @@ impl CommandPlan {
             Self::CreateMaterializedView { .. } => "CreateMaterializedView",
             Self::RefreshMaterializedView { .. } => "RefreshMaterializedView",
             Self::CreateSchema { .. } => "CreateSchema",
+            Self::AlterSchemaOwner { .. } => "AlterSchemaOwner",
             Self::Notify { .. } => "Notify",
             Self::Listen { .. } => "Listen",
             Self::Unlisten { .. } => "Unlisten",

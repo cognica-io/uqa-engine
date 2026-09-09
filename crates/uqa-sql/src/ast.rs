@@ -117,6 +117,7 @@ pub enum DropKind {
     MaterializedView,
     Schema,
     Sequence,
+    Domain,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -560,6 +561,10 @@ pub enum Statement {
     CreateSchema {
         name: String,
         if_not_exists: bool,
+    },
+    AlterSchemaOwner {
+        name: String,
+        new_owner: String,
     },
     /// `NOTIFY channel [, 'payload']` queues one asynchronous notification for delivery when the outer transaction commits.
     Notify {

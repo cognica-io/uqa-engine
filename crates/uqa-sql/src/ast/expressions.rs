@@ -745,6 +745,7 @@ impl Statement {
             | Self::AlterView(_)
             | Self::RefreshMaterializedView { .. }
             | Self::CreateSchema { .. }
+            | Self::AlterSchemaOwner { .. }
             | Self::Notify { .. }
             | Self::Listen { .. }
             | Self::Unlisten { .. }

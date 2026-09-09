@@ -474,11 +474,15 @@ fn infer_expression(
         }
         Expr::Cast { expr, ty } => {
             infer_expression(engine, columns, expr, dependencies)?;
-            generation_type_from_name(ty).ok_or_else(|| {
-                SQLError::TypeMismatch(format!(
-                    "generation expression cast uses unsupported type `{ty}`"
-                ))
-            })
+            crate::sql::resolve_catalog_column_type(engine, ty)
+                .as_ref()
+                .map(column_generation_type)
+                .or_else(|| generation_type_from_name(ty))
+                .ok_or_else(|| {
+                    SQLError::TypeMismatch(format!(
+                        "generation expression cast uses unsupported type `{ty}`"
+                    ))
+                })
         }
         Expr::Func {
             name,

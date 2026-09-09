@@ -278,6 +278,7 @@ pub(super) fn rewrite_command_scalars(
         | CommandPlan::AlterView(_)
         | CommandPlan::RefreshMaterializedView { .. }
         | CommandPlan::CreateSchema { .. }
+        | CommandPlan::AlterSchemaOwner { .. }
         | CommandPlan::Notify { .. }
         | CommandPlan::Listen { .. }
         | CommandPlan::Unlisten { .. }

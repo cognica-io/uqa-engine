@@ -14,6 +14,31 @@ use super::{
 };
 
 impl Engine {
+    pub(super) fn stored_routine_references_columns(
+        &self,
+        definition: &CreateFunction,
+        columns: &BTreeSet<(String, String)>,
+    ) -> Result<bool, SQLError> {
+        let FunctionBody::Statements(statements) = &definition.body else {
+            return Ok(false);
+        };
+        if columns.is_empty() {
+            return Ok(false);
+        }
+        for statement in statements {
+            let dependencies = self.stored_statement_column_dependencies(statement)?;
+            if dependencies.iter().any(|dependency| {
+                columns.contains(&(
+                    dependency.relation.qualified_name(),
+                    dependency.column.clone(),
+                ))
+            }) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     fn relation_routine_drop_error(
         &self,
         names: &[String],

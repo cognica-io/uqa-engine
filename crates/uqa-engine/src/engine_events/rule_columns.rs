@@ -8,6 +8,7 @@
 
 mod expressions;
 mod helpers;
+mod statements;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -256,6 +257,7 @@ impl<'a> RuleColumnBinder<'a> {
             Statement::Insert(insert) => self.bind_insert(insert, outer, context),
             Statement::Update(update) => self.bind_update(update, outer, context),
             Statement::Delete(delete) => self.bind_delete(delete, outer, context),
+            Statement::Merge(merge) => self.bind_merge(merge, outer, context),
             Statement::Notify { .. } => Ok(()),
             _ => Err(SQLError::Internal(
                 "validated rewrite-rule action has an unsupported statement kind".into(),
@@ -895,6 +897,13 @@ impl<'a> RuleColumnBinder<'a> {
 }
 
 impl Engine {
+    pub(crate) fn stored_statement_column_dependencies(
+        &self,
+        statement: &Statement,
+    ) -> Result<BTreeSet<RuleColumnDependency>, SQLError> {
+        self.bind_rule_action_column_dependencies(&mut statement.clone())
+    }
+
     pub(in crate::engine_events) fn bind_rule_condition_column_dependencies(
         &self,
         condition: &mut Expr,

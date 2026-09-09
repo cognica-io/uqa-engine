@@ -40,6 +40,12 @@ pub(in crate::sql) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLRes
             Ok(SQLResult::empty())
         });
     }
+    if stmt.kind == DropKind::Domain {
+        return engine.with_implicit_transaction(|engine| {
+            engine.drop_domains_sql(&stmt)?;
+            Ok(SQLResult::empty())
+        });
+    }
     let mut lock_targets = std::collections::BTreeSet::new();
     match stmt.kind {
         DropKind::Table | DropKind::ForeignTable | DropKind::View | DropKind::MaterializedView => {
@@ -60,6 +66,7 @@ pub(in crate::sql) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLRes
         }
         DropKind::Index => unreachable!("DROP INDEX has a bound execution path"),
         DropKind::Schema => unreachable!("DROP SCHEMA has a namespace dependency path"),
+        DropKind::Domain => unreachable!("DROP DOMAIN has a type dependency path"),
         DropKind::Sequence => {}
     }
     for table in lock_targets {
@@ -354,6 +361,7 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
             engine.drop_sequences_sql_inner(&sequences, stmt.cascade)?;
         }
         DropKind::Schema => unreachable!("DROP SCHEMA has a namespace dependency path"),
+        DropKind::Domain => unreachable!("DROP DOMAIN has a type dependency path"),
     }
     Ok(SQLResult::empty())
 }

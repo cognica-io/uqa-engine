@@ -7,6 +7,7 @@
 //! Durable domain identities and catalog publication.
 
 mod drop;
+mod lifecycle;
 
 use std::collections::BTreeMap;
 

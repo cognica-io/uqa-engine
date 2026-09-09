@@ -115,3 +115,6 @@ mod schema_drop;
 
 #[path = "pg18_semantics/stored_relation_drop.rs"]
 mod stored_relation_drop;
+
+#[path = "pg18_semantics/domain_drop.rs"]
+mod domain_drop;

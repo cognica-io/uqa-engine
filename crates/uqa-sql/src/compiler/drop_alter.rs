@@ -6,6 +6,8 @@
 
 //! DROP, ALTER TABLE, and RENAME lowering.
 
+mod domains;
+
 use super::relations::{
     collect_def_elem_options, validate_materialized_view_options, validate_view_options,
 };
@@ -84,6 +86,7 @@ pub(super) fn compile_drop(stmt: &pg_query::protobuf::DropStmt) -> Result<Statem
         ObjectType::ObjectMatview => DropKind::MaterializedView,
         ObjectType::ObjectSequence => DropKind::Sequence,
         ObjectType::ObjectSchema => DropKind::Schema,
+        ObjectType::ObjectDomain => DropKind::Domain,
         ObjectType::ObjectFunction => return compile_drop_function(stmt, false),
         ObjectType::ObjectProcedure => return compile_drop_function(stmt, true),
         other => {
@@ -99,6 +102,9 @@ pub(super) fn compile_drop(stmt: &pg_query::protobuf::DropStmt) -> Result<Statem
             .as_ref()
             .ok_or_else(|| SQLError::Internal("DROP contains an empty target".into()))?;
         match inner {
+            NodeEnum::TypeName(ty) if kind == DropKind::Domain => {
+                names.push(domains::compile_drop_domain_name(ty)?);
+            }
             NodeEnum::List(list) => {
                 let parts = list
                     .items

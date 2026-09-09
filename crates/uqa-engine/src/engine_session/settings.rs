@@ -46,44 +46,31 @@ impl Engine {
     /// path: a durable schema, a virtual system schema such as `ag_catalog`,
     /// or a graph namespace.
     pub fn current_schema_name(&self) -> StorageBackendResult<Option<String>> {
-        self.synchronize_catalog_registries()?;
-        let session = self.session.state.read();
-        let schemas = self.durable.schemas.read();
-        let graphs = self.durable.graphs.read();
-        Ok(session
-            .search_path
-            .iter()
-            .find(|name| {
-                schemas.contains_key(name.as_str())
-                    || super::schemas::is_virtual_system_schema(name)
-                    || graphs.contains_key(name.as_str())
-            })
-            .cloned())
+        Ok(self.current_schema_names(false)?.into_iter().next())
     }
 
-    /// Existing schemas visible through this logical session's search path.
-    /// `PostgreSQL` implicitly searches `pg_catalog` unless it is already named
-    /// explicitly; the flag controls whether that implicit entry is returned.
+    /// Existing schemas with USAGE privilege in this logical session's search path.
+    /// `PostgreSQL` implicitly searches `pg_catalog` unless it is already named explicitly.
     pub fn current_schema_names(
         &self,
         include_implicit: bool,
     ) -> StorageBackendResult<Vec<String>> {
         self.synchronize_catalog_registries()?;
-        let session = self.session.state.read();
-        let schemas = self.durable.schemas.read();
-        let graphs = self.durable.graphs.read();
-        let path = &session.search_path;
+        let path = self.session.state.read().search_path.clone();
+        let user = self.current_user_name();
         let mut out = Vec::new();
         if include_implicit && !path.iter().any(|name| name == "pg_catalog") {
             out.push("pg_catalog".to_string());
         }
         for name in path {
-            if (schemas.contains_key(name.as_str())
-                || super::schemas::is_virtual_system_schema(name)
-                || graphs.contains_key(name.as_str()))
-                && !out.contains(name)
+            if !out.contains(&name)
+                && self.schema_has_privilege_for_role(
+                    &name,
+                    &user,
+                    crate::engine_schema_security::SchemaAclPrivilege::Usage,
+                )
             {
-                out.push(name.clone());
+                out.push(name);
             }
         }
         Ok(out)

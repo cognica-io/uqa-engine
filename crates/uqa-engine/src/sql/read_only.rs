@@ -61,6 +61,7 @@ pub(super) fn forbidden_command(
         CommandPlan::Merge(merge) => dml_command(engine, &merge.target, "MERGE", command),
         CommandPlan::Drop(drop) if drop.kind == DropKind::Table => Ok(Some("DROP TABLE")),
         CommandPlan::Drop(drop) if drop.kind == DropKind::Sequence => Ok(Some("DROP SEQUENCE")),
+        CommandPlan::Drop(drop) if drop.kind == DropKind::Domain => Ok(Some("DROP DOMAIN")),
         CommandPlan::Drop(_) => Ok(Some("DROP")),
         CommandPlan::AlterTable(_) => Ok(Some("ALTER TABLE")),
         CommandPlan::AlterForeignTable(_) => Ok(Some("ALTER FOREIGN TABLE")),
@@ -69,6 +70,7 @@ pub(super) fn forbidden_command(
         CommandPlan::CreateMaterializedView { .. } => Ok(Some("CREATE MATERIALIZED VIEW")),
         CommandPlan::RefreshMaterializedView { .. } => Ok(Some("REFRESH MATERIALIZED VIEW")),
         CommandPlan::CreateSchema { .. } => Ok(Some("CREATE SCHEMA")),
+        CommandPlan::AlterSchemaOwner { .. } => Ok(Some("ALTER SCHEMA")),
         CommandPlan::Analyze { .. } => Ok(None),
         // VACUUM's transaction-block prohibition has precedence over read-only validation and is enforced by its executor.
         CommandPlan::Vacuum(_) => Ok(None),

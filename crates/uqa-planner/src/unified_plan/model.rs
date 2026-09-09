@@ -540,6 +540,10 @@ pub enum CommandPlan {
         name: String,
         if_not_exists: bool,
     },
+    AlterSchemaOwner {
+        name: String,
+        new_owner: String,
+    },
     Notify {
         channel: String,
         payload: String,
