@@ -291,6 +291,68 @@ pub(in crate::sql) fn dml_command_returning_schema(
     }
 }
 
+pub(in crate::sql) fn validate_insert_returning(
+    engine: &Engine,
+    plan: &uqa_planner::InsertPlan,
+    params: &[SQLParam],
+    inherited: Option<&CteScope>,
+) -> Result<(), SQLError> {
+    if plan.returning.is_empty() {
+        return Ok(());
+    }
+    let target = returning_target_schema(engine, &plan.table)?;
+    if plan.source.is_none() {
+        let width = if plan.columns.is_empty() {
+            target.len()
+        } else {
+            plan.columns.len()
+        };
+        for row in &plan.rows {
+            if row.len() > width || (!plan.columns.is_empty() && row.len() < width) {
+                return Err(SQLError::Routine {
+                    sqlstate: "42601".into(),
+                    message: if row.len() > width {
+                        "INSERT has more expressions than target columns"
+                    } else {
+                        "INSERT has more target columns than expressions"
+                    }
+                    .into(),
+                });
+            }
+        }
+    }
+    let mut scope = inherited
+        .cloned()
+        .unwrap_or_else(|| CteScope::new_for_current_routine(engine));
+    for cte in &plan.ctes {
+        scope.insert_deferred(cte.clone());
+    }
+    scope.scalar_subqueries.clone_from(&plan.subqueries);
+    let expressions = returning_expression_schema(
+        &target,
+        &plan.target_qualifier,
+        &plan.returning_aliases,
+        None,
+    );
+    let projections = expanded_returning_projections(
+        engine,
+        &plan.table,
+        &plan.target_qualifier,
+        &plan.returning_aliases,
+        &plan.returning,
+    )?;
+    crate::sql::select::analyze_projection_output_schema(
+        engine,
+        &projections,
+        &expressions,
+        &target,
+        &plan.subqueries,
+        params,
+        &scope,
+    )?;
+    Ok(())
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "keeps DML row-image inputs aligned"
@@ -485,6 +547,12 @@ pub(in crate::sql) fn expanded_returning_projections(
             }
             _ => projections.push(projection.clone()),
         }
+    }
+    if !returning.is_empty() && projections.is_empty() {
+        return Err(SQLError::Routine {
+            sqlstate: "42601".into(),
+            message: "RETURNING must have at least one column".into(),
+        });
     }
     Ok(projections)
 }

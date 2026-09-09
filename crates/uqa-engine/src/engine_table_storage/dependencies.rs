@@ -545,7 +545,13 @@ impl Engine {
         table_name: &str,
         column: &str,
     ) -> StorageBackendResult<()> {
-        self.ensure_no_dependent_views("ALTER TABLE DROP COLUMN", table_name)?;
+        let views = self.views_depending_on_column(table_name, column)?;
+        if !views.is_empty() {
+            return Err(StorageBackendError::Other(format!(
+                "ALTER TABLE DROP COLUMN `{table_name}`.`{column}` rejected: dependent view(s) {}",
+                views.join(", ")
+            )));
+        }
         let target = Self::resolved_relation_identity(table_name)?;
         let entries = self.table_entries();
         let target_state = entries

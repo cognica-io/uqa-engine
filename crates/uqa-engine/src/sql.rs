@@ -44,8 +44,8 @@ use crate::{Engine, HNSWIndexParams, IVFIndexParams, ScoredEntry, VectorIndexSpe
 mod age_cypher;
 mod aggregates;
 mod catalog;
-pub(crate) use catalog::rename_view_column_query;
 pub(crate) use catalog::snapshot_table_relation_oid;
+pub(crate) use catalog::{rename_view_column_query, view_query_references_column};
 mod catalog_statement_routines;
 mod completion;
 mod copy;
@@ -125,7 +125,7 @@ pub(crate) use catalog::{
 pub(in crate::sql) use catalog::{virtual_relation_accepts_row_lock, virtual_relation_schema};
 pub(crate) use ddl::{
     bind_stored_check_expression_routines, bind_stored_schema_expression_routines,
-    convert_value_to_column_type, convert_value_to_column_type_with_engine,
+    convert_value_to_column_type, convert_value_to_column_type_with_engine, drop_column_cascade,
     drop_constraint_dependency, drop_index_dependency, validate_check_expression,
     validate_default_expression, validate_postgres_column_name,
     validate_postgres_relation_column_type, validate_vector_dimensions,

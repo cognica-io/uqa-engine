@@ -339,7 +339,7 @@ fn drop_key_constraint_dependencies(
     Ok(local_dependents)
 }
 
-pub(super) fn drop_column_cascade(
+pub(crate) fn drop_column_cascade(
     engine: &Engine,
     table: &str,
     column: &str,
@@ -347,6 +347,20 @@ pub(super) fn drop_column_cascade(
 ) -> Result<(), SQLError> {
     if !ensure_drop_column_exists(engine, table, column, if_exists)? {
         return Ok(());
+    }
+    let views = engine
+        .views_depending_on_column(table, column)
+        .map_err(|error| ddl_storage_error("DROP COLUMN dependency", error))?;
+    let closure = engine.cascade_view_closure(views)?;
+    engine
+        .drop_rules_depending_on_relations_inner(&closure)
+        .map_err(|error| ddl_storage_error("DROP COLUMN dependency", error))?;
+    engine.drop_views_inner(&closure, false)?;
+    for generated in engine
+        .generated_columns_referencing_column(table, column)
+        .map_err(|error| ddl_storage_error("DROP COLUMN dependency", error))?
+    {
+        drop_column_cascade(engine, table, &generated, true)?;
     }
     let dependents = foreign_keys_referencing_column(engine, table, column)?;
     for (referrer, name) in dependents {

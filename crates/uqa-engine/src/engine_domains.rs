@@ -6,6 +6,8 @@
 
 //! Durable domain identities and catalog publication.
 
+mod drop;
+
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};

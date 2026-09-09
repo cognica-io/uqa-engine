@@ -6,6 +6,8 @@
 
 //! Rename creation-bound view column references without changing public row types.
 
+use std::cell::Cell;
+
 use uqa_planner::{QueryBlockPlan, QueryPlan, RelationalPlan, ScalarExpr, SourcePlan};
 use uqa_sql::ast::BinaryOp;
 
@@ -20,6 +22,25 @@ pub(crate) fn rename_view_column_query(
     from: &str,
     to: &str,
 ) -> Result<(), SQLError> {
+    change_bound_view_column(engine, query, table, from, to).map(|_| ())
+}
+
+pub(crate) fn view_query_references_column(
+    engine: &crate::Engine,
+    query: &QueryPlan,
+    table: &str,
+    column: &str,
+) -> Result<bool, SQLError> {
+    change_bound_view_column(engine, &mut query.clone(), table, column, column)
+}
+
+fn change_bound_view_column(
+    engine: &crate::Engine,
+    query: &mut QueryPlan,
+    table: &str,
+    from: &str,
+    to: &str,
+) -> Result<bool, SQLError> {
     let catalog = engine.catalog_read_view();
     let dynamic = engine.session_execution_view().relation_name_resolution();
     let mut bound = dynamic.clone();
@@ -31,14 +52,21 @@ pub(crate) fn rename_view_column_query(
         pretty: false,
         wrap: 0,
     };
-    let rename = Rename { table, from, to };
-    deparser.rename_query(query, &Scope::default(), &rename)
+    let rename = Rename {
+        table,
+        from,
+        to,
+        referenced: Cell::new(false),
+    };
+    deparser.rename_query(query, &Scope::default(), &rename)?;
+    Ok(rename.referenced.get())
 }
 
 struct Rename<'a> {
     table: &'a str,
     from: &'a str,
     to: &'a str,
+    referenced: Cell<bool>,
 }
 
 impl Deparser<'_> {
@@ -278,6 +306,7 @@ impl Deparser<'_> {
 
 fn renamed_column(column: &Column, rename: &Rename<'_>) -> ScalarExpr {
     let name = if column.relation.as_deref() == Some(rename.table) && column.name == rename.from {
+        rename.referenced.set(true);
         rename.to
     } else {
         &column.name

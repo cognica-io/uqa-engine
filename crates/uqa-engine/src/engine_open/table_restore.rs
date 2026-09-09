@@ -233,8 +233,15 @@ impl Engine {
         for schema in &schemas {
             Self::validate_schema_name(&schema.name)?;
         }
-        if !schemas.iter().any(|schema| schema.name == "public") {
-            catalog.save_schema_row(&uqa_storage::SchemaRow::legacy("public"))?;
+        // Bootstrap once; an initialized database may legitimately have dropped public.
+        if catalog
+            .get_metadata("sql_schema_catalog_initialized")?
+            .is_none()
+        {
+            if !schemas.iter().any(|schema| schema.name == "public") {
+                catalog.save_schema_row(&uqa_storage::SchemaRow::legacy("public"))?;
+            }
+            catalog.set_metadata("sql_schema_catalog_initialized", "true")?;
         }
         Self::migrate_table_identities(catalog)?;
         Self::repair_dangling_hierarchy_parents(catalog)?;

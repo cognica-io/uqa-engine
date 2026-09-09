@@ -858,7 +858,7 @@ fn wrong_kind_and_cascade_drops_are_atomic_and_schema_ownership_persists() {
         assert_eq!(missing.sqlstate(), Some("42883"), "{missing}");
 
         let nonempty_schema = engine.sql("DROP SCHEMA owned", &[]).unwrap_err();
-        assert!(nonempty_schema.to_string().contains("not empty"));
+        assert_eq!(nonempty_schema.sqlstate(), Some("2BP01"));
         assert!(engine.has_schema("owned").unwrap());
     }
 
@@ -868,7 +868,7 @@ fn wrong_kind_and_cascade_drops_are_atomic_and_schema_ownership_persists() {
         assert_eq!(missing.sqlstate(), Some("42883"), "{missing}");
         assert_function_exists(&engine);
         let nonempty_schema = engine.sql("DROP SCHEMA owned", &[]).unwrap_err();
-        assert!(nonempty_schema.to_string().contains("not empty"));
+        assert_eq!(nonempty_schema.sqlstate(), Some("2BP01"));
 
         engine
             .sql("DROP FUNCTION owned.keep_fn(integer)", &[])

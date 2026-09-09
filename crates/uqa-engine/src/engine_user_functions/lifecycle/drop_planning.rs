@@ -99,11 +99,36 @@ impl Engine {
         self.ensure_routine_drop_owners(&registry, &resolution.targets)?;
         let cascaded_routines =
             self.expand_stored_routine_drop_dependents(&registry, stmt.cascade, &mut resolution)?;
+        let mut domains = BTreeSet::new();
+        if stmt.cascade {
+            self.expand_routine_domain_drop(&registry, &mut resolution, &mut domains)?;
+        } else {
+            let bindings = resolution
+                .targets
+                .iter()
+                .map(RoutineDropTarget::binding)
+                .collect::<Vec<_>>();
+            self.expand_domain_drop_targets(&mut domains, &bindings)?;
+            if !domains.is_empty()
+                || !self
+                    .domain_checks_depending_on_routines(&bindings)?
+                    .is_empty()
+            {
+                let label = self.routine_drop_display_label(&resolution.targets[0])?;
+                return Err(SQLError::Routine {
+                    sqlstate: "2BP01".into(),
+                    message: format!(
+                        "cannot drop function {label} because other objects depend on it"
+                    ),
+                });
+            }
+        }
         let dependents = self.routine_object_dependents(&resolution.targets, stmt.cascade)?;
         if stmt.cascade {
             append_routine_cascade_notice(&mut resolution.notices, &cascaded_routines, &dependents);
         }
         Ok(SQLFunctionDropPlan {
+            domains,
             targets: resolution.targets,
             dependents,
             notices: resolution.notices,
@@ -193,7 +218,7 @@ impl Engine {
         Ok(resolution)
     }
 
-    fn expand_stored_routine_drop_dependents(
+    pub(super) fn expand_stored_routine_drop_dependents(
         &self,
         registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
         cascade: bool,
@@ -245,7 +270,7 @@ impl Engine {
             })
     }
 
-    fn routine_object_dependents(
+    pub(super) fn routine_object_dependents(
         &self,
         targets: &[RoutineDropTarget],
         cascade: bool,
@@ -339,11 +364,18 @@ impl Engine {
         plan: SQLFunctionDropPlan,
     ) -> Result<(), SQLError> {
         let SQLFunctionDropPlan {
+            domains,
             targets,
             dependents,
             notices,
         } = plan;
+        let bindings = targets
+            .iter()
+            .map(RoutineDropTarget::binding)
+            .collect::<Vec<_>>();
+        self.drop_domain_routine_checks(&bindings)?;
         self.drop_routine_object_dependents(&dependents)?;
+        self.commit_domain_drop(&domains)?;
         self.commit_routine_registry_drop(&targets)?;
         for (level, message) in notices {
             self.push_sql_notice(level, &message);

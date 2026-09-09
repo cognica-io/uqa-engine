@@ -28,7 +28,7 @@ When generating SQL:
 ## SQL contracts
 
 - [Data types](docs/manual/sql/01-data-types.md): Scalars, floating-point conversion and arithmetic widths, temporal precision, interval fields, domains, JSON, arrays, vectors, tensors, NULL, and conversions.
-- [DDL](docs/manual/sql/02-ddl.md): Schemas, domain declarations, relations, constraints, indexes, views, sequences, and foreign tables.
+- [DDL](docs/manual/sql/02-ddl.md): Schemas and dependency-aware deletion, domain declarations, relations, constraints, indexes, views, sequences, and foreign tables.
 - [Queries and DML](docs/manual/sql/03-queries-and-dml.md): SELECT, joins, recursive and data-modifying CTEs, grouping, windows, sets, and mutation.
 - [Expressions and functions](docs/manual/sql/04-expressions-and-functions.md): Operators, scalar functions, statement and transaction clocks, aggregates, windows, and general table functions.
 - [Analyzer SQL](docs/manual/sql/05-analyzers.md): Exact analyzer JSON, built-ins including `standard_cjk`, lifecycle functions, GIN binding, and diagnostics.

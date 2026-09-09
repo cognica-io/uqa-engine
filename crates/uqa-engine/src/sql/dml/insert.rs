@@ -192,6 +192,7 @@ fn run_insert_inner_with_ctes(
     }
     let default_values =
         stmt.source.is_none() && stmt.columns.is_empty() && stmt.rows.iter().all(Vec::is_empty);
+    super::conflict::validate_insert_returning(engine, stmt, params, inherited_ctes)?;
     let privilege_subject = stmt
         .target_privilege_subject
         .clone()
@@ -491,15 +492,9 @@ fn run_insert_inner_with_ctes(
     let implicit_columns = stmt.columns.is_empty();
     let columns: Vec<String> = if implicit_columns {
         // INSERT without explicit column list: project the table schema.
-        let cols = engine
+        engine
             .try_table_columns(&stmt.table)
-            .map_err(|error| dml_storage_error("INSERT", error))?;
-        if cols.is_empty() {
-            return Err(SQLError::Unsupported(
-                "INSERT without column list against a table with no schema".into(),
-            ));
-        }
-        cols
+            .map_err(|error| dml_storage_error("INSERT", error))?
     } else {
         stmt.columns.clone()
     };
@@ -536,11 +531,15 @@ fn run_insert_inner_with_ctes(
     for row in input_rows {
         cancel.check()?;
         if row.len() > columns.len() || (!implicit_columns && row.len() != columns.len()) {
-            return Err(SQLError::TypeMismatch(format!(
-                "row width {} != column count {}",
-                row.len(),
-                columns.len()
-            )));
+            return Err(SQLError::Routine {
+                sqlstate: "42601".into(),
+                message: if row.len() > columns.len() {
+                    "INSERT has more expressions than target columns"
+                } else {
+                    "INSERT has more target columns than expressions"
+                }
+                .into(),
+            });
         }
         let mut document = Document::new();
         for (i, col) in columns.iter().take(row.len()).enumerate() {

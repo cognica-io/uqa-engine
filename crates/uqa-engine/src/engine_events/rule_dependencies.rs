@@ -8,7 +8,11 @@
 
 mod ctes;
 mod routines;
+mod types;
 use ctes::{collect_cte_relation_dependencies, collect_cte_source_routine_dependencies};
+pub(crate) use types::{
+    stored_expression_type_names, stored_statement_relation_names, stored_statement_type_names,
+};
 
 use std::collections::BTreeSet;
 
@@ -28,8 +32,9 @@ pub(crate) use routines::{
 };
 
 struct StoredAstVisitor<'a, R, F> {
-    visit_relation: &'a mut R,
-    visit_routine: &'a mut F,
+    ty: Option<&'a mut dyn FnMut(&mut String)>,
+    relation: &'a mut R,
+    routine: &'a mut F,
 }
 
 impl<R, F> StoredAstVisitor<'_, R, F>
@@ -66,7 +71,7 @@ where
         insert: &mut uqa_sql::ast::InsertStmt,
         inherited: &BTreeSet<String>,
     ) -> Result<(), SQLError> {
-        (self.visit_relation)(&mut insert.table)?;
+        (self.relation)(&mut insert.table)?;
         let visible = self.bind_ctes(&mut insert.with, inherited)?;
         if let Some(source) = insert.select_source.as_deref_mut() {
             self.bind_select(source, &visible)?;
@@ -105,7 +110,7 @@ where
         update: &mut uqa_sql::ast::UpdateStmt,
         inherited: &BTreeSet<String>,
     ) -> Result<(), SQLError> {
-        (self.visit_relation)(&mut update.table)?;
+        (self.relation)(&mut update.table)?;
         let visible = self.bind_ctes(&mut update.with, inherited)?;
         if let Some(source) = &mut update.from {
             self.bind_from(source, &visible)?;
@@ -127,7 +132,7 @@ where
         delete: &mut uqa_sql::ast::DeleteStmt,
         inherited: &BTreeSet<String>,
     ) -> Result<(), SQLError> {
-        (self.visit_relation)(&mut delete.table)?;
+        (self.relation)(&mut delete.table)?;
         let visible = self.bind_ctes(&mut delete.with, inherited)?;
         if let Some(source) = &mut delete.using {
             self.bind_from(source, &visible)?;
@@ -146,7 +151,7 @@ where
         merge: &mut uqa_sql::ast::MergeStmt,
         inherited: &BTreeSet<String>,
     ) -> Result<(), SQLError> {
-        (self.visit_relation)(&mut merge.target)?;
+        (self.relation)(&mut merge.target)?;
         let ctes = self.bind_ctes(&mut merge.with, inherited)?;
         self.bind_from(&mut merge.source, &ctes)?;
         self.bind_expr(&mut merge.join_condition, &ctes)?;
@@ -294,7 +299,7 @@ where
                     |(schema, relation)| schema.is_none() && visible_ctes.contains(&relation),
                 );
                 if !is_cte {
-                    (self.visit_relation)(name)?;
+                    (self.relation)(name)?;
                 }
             }
             FromClause::Join {
@@ -318,10 +323,10 @@ where
                 args,
                 ..
             } => {
-                (self.visit_routine)(name, Some(binding))?;
+                (self.routine)(name, Some(binding))?;
                 if let Some(relations) = relations {
-                    (self.visit_relation)(&mut relations.left)?;
-                    (self.visit_relation)(&mut relations.right)?;
+                    (self.relation)(&mut relations.left)?;
+                    (self.relation)(&mut relations.right)?;
                 }
                 for expression in args {
                     self.bind_expr(expression, visible_ctes)?;
@@ -329,10 +334,10 @@ where
             }
             FromClause::FunctionGroup { functions, .. } => {
                 for function in functions {
-                    (self.visit_routine)(&mut function.name, Some(&mut function.binding))?;
+                    (self.routine)(&mut function.name, Some(&mut function.binding))?;
                     if let Some(relations) = &mut function.relations {
-                        (self.visit_relation)(&mut relations.left)?;
-                        (self.visit_relation)(&mut relations.right)?;
+                        (self.relation)(&mut relations.left)?;
+                        (self.relation)(&mut relations.right)?;
                     }
                     for expression in &mut function.args {
                         self.bind_expr(expression, visible_ctes)?;
@@ -344,11 +349,20 @@ where
         Ok(())
     }
 
+    fn bind_expression_type(&mut self, expression: &mut Expr) {
+        if let (Some(visit), Expr::Cast { ty, .. } | Expr::TypedLiteral { ty, .. }) =
+            (self.ty.as_mut(), expression)
+        {
+            visit(ty);
+        }
+    }
+
     fn bind_expr(
         &mut self,
         expression: &mut Expr,
         visible_ctes: &BTreeSet<String>,
     ) -> Result<(), SQLError> {
+        self.bind_expression_type(expression);
         match expression {
             Expr::Func {
                 name,
@@ -367,7 +381,7 @@ where
                 if let Some(filter) = filter {
                     self.bind_expr(filter, visible_ctes)?;
                 }
-                (self.visit_routine)(name, Some(binding))?;
+                (self.routine)(name, Some(binding))?;
             }
             Expr::Array(items) | Expr::Row(items) | Expr::And(items) | Expr::Or(items) => {
                 for item in items {
@@ -410,7 +424,7 @@ where
                         }
                     }
                 }
-                (self.visit_routine)(name, None)?;
+                (self.routine)(name, None)?;
             }
             Expr::Case {
                 base,
@@ -533,8 +547,9 @@ impl Engine {
                                   _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
          -> Result<(), SQLError> { Ok(()) };
         StoredAstVisitor {
-            visit_relation: &mut bind,
-            visit_routine: &mut ignore_routine,
+            ty: None,
+            relation: &mut bind,
+            routine: &mut ignore_routine,
         }
         .bind_statement(statement)?;
         Ok(RuleDependencies {
@@ -563,8 +578,9 @@ impl Engine {
                                   _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
          -> Result<(), SQLError> { Ok(()) };
         StoredAstVisitor {
-            visit_relation: &mut bind,
-            visit_routine: &mut ignore_routine,
+            ty: None,
+            relation: &mut bind,
+            routine: &mut ignore_routine,
         }
         .bind_expr(expression, &BTreeSet::new())?;
         Ok(RuleDependencies {
@@ -599,8 +615,9 @@ impl Engine {
                                   _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
          -> Result<(), SQLError> { Ok(()) };
         StoredAstVisitor {
-            visit_relation: &mut bind,
-            visit_routine: &mut ignore_routine,
+            ty: None,
+            relation: &mut bind,
+            routine: &mut ignore_routine,
         }
         .bind_statement(statement)?;
         match statement {
@@ -641,8 +658,9 @@ pub(crate) fn rewrite_stored_statement_relation(
                               _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
      -> Result<(), SQLError> { Ok(()) };
     StoredAstVisitor {
-        visit_relation: &mut rewrite,
-        visit_routine: &mut ignore_routine,
+        ty: None,
+        relation: &mut rewrite,
+        routine: &mut ignore_routine,
     }
     .bind_statement(statement)?;
     Ok(changed)
@@ -693,8 +711,9 @@ pub(super) fn rewrite_stored_rule_relation(
                                   _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
          -> Result<(), SQLError> { Ok(()) };
         StoredAstVisitor {
-            visit_relation: &mut rewrite,
-            visit_routine: &mut ignore_routine,
+            ty: None,
+            relation: &mut rewrite,
+            routine: &mut ignore_routine,
         }
         .bind_expr(condition, &BTreeSet::new())?;
     }

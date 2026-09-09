@@ -132,6 +132,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `execution.prepared-parameter-contracts` | `M3` | `partial` |
 | `types.floating-point-width` | `M3` | `partial` |
 | `execution.sql-value-clocks` | `M3` | `partial` |
+| `ddl.schema-drop-cascade` | `M3` | `partial` |
 
 <!-- pg18-manifest-status:end -->
 
@@ -322,6 +323,8 @@ Unspecified and unknown parameter inference, full PREPARE analysis, fixed result
 Floating-point input now rounds directly to its declared precision, arithmetic retains float4 or float8 operator selection and range errors, and SUM(real) preserves single-precision transitions in grouped, ordered, window, and spilled execution. Storage predicates retain declared column types, and cast projection labels are derived before type-name normalization. The 133-case PostgreSQL 18.4 oracle covers exact values, type OIDs, names, diagnostics, arrays, domains, and prepared parameters on memory, SQLite, and forced-spill engines. The complete upstream float4/float8 schedules, alternate input forms, floating functions, and remaining I/O and cast catalog entries stay open under types.floating-point-width.
 
 SQL current date/time expressions now retain their declared type, precision, result label, and grammar-owned built-in identity. Message timestamps are shared with nested execution, and transaction timestamps survive subsequent statements and savepoint rollback. A 90-case PostgreSQL 18.4 UTC transcript verifies descriptors, clock relationships, cursor fetch, nested SQL routines, and one-argument age on memory, SQLite, and forced-spill execution. Time-zone conversion and display, precision-reduction diagnostics, complete catalog overloads, and the full temporal schedules remain open implementation work.
+
+Schema DROP now validates every requested namespace and its ownership before removal, follows table, view, sequence, routine, and domain dependencies across namespaces, and retains unrelated columns and relations. Domain and routine dependencies share a fixed-point closure; SQL-standard body references and domain defaults participate in deletion. Public schema deletion survives reopen, and errors roll back the complete statement. The PostgreSQL 18.4 transcript and storage lifecycle regressions cover this bounded implementation. Complete catalog dependency rows, notice details, virtual schema lifecycle, additional dependency paths, and upstream isolation schedules remain tracked by ddl.schema-drop-cascade.
 
 ### 8. Client and operational compatibility
 

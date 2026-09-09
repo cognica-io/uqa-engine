@@ -109,3 +109,6 @@ mod temporal;
 mod three_valued_logic;
 #[path = "pg18_semantics/to_reg_lookups.rs"]
 mod to_reg_lookups;
+
+#[path = "pg18_semantics/schema_drop.rs"]
+mod schema_drop;

@@ -90,7 +90,7 @@ pub(in crate::sql) use index_definition::pg_get_indexdef_value;
 pub(in crate::sql) use regtypes::format_type_value;
 mod view_definition;
 pub(in crate::sql) use view_definition::pg_get_viewdef_value;
-pub(crate) use view_definition::rename_view_column_query;
+pub(crate) use view_definition::{rename_view_column_query, view_query_references_column};
 mod helpers;
 mod result_type;
 pub use result_type::{postgres_result_type, SQLTypeMetadata};

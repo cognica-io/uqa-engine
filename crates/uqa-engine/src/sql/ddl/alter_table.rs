@@ -25,8 +25,8 @@ mod constraint_lifecycle;
 mod foreign_key;
 mod recursion;
 
-pub(crate) use constraint_drop::drop_constraint_dependency;
-use constraint_drop::{drop_column_cascade, drop_column_restrict, drop_constraint};
+pub(crate) use constraint_drop::{drop_column_cascade, drop_constraint_dependency};
+use constraint_drop::{drop_column_restrict, drop_constraint};
 use constraint_lifecycle::{
     add_check_constraint, add_foreign_key_constraint, add_not_null_constraint, alter_constraint,
     ensure_constraint_name_available, set_not_null_constraint,

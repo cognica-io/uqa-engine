@@ -142,7 +142,8 @@
       "types.domain-declarations-and-coercion",
       "execution.prepared-parameter-contracts",
       "types.floating-point-width",
-      "execution.sql-value-clocks"
+      "execution.sql-value-clocks",
+      "ddl.schema-drop-cascade"
     ],
     "M4": [
       "dml.returning-row-images-extended",
@@ -895,6 +896,14 @@
       "supported_version": "90 PostgreSQL 18.4 UTC cases on memory, SQLite, and forced-spill execution: SQL current date/time types, precision modifiers and result labels, grammar-owned built-in identity despite search-path shadowing, transaction and message clock relationships, savepoint rollback, cursor fetch, nested SQL routines, and one-argument age direction and NULL handling",
       "status": "partial",
       "open_issue": "Session TimeZone conversion and display, precision-reduction warnings, complete pg_proc signatures and overload errors, and the full upstream current-time, date, and timestamp regression matrix require further implementation and differential verification."
+    },
+    {
+      "id": "ddl.schema-drop-cascade",
+      "postgresql_reference": "PostgreSQL 18.4 live command tags, result rows and type OIDs, SQLSTATEs and diagnostics in tests/parity/pg18/schema_drop_oracle.expected.json; https://www.postgresql.org/docs/18/sql-dropschema.html",
+      "uqa_test": "cargo test -p uqa-engine --test integration schema_drop; cargo test -p uqa-engine --test integration sql_ddl_dependencies; cargo test -p uqa-engine --lib engine_open",
+      "supported_version": "162 PostgreSQL 18.4 cases on memory, SQLite, and forced-spill engines: Schema ownership and RESTRICT errors, multi-target atomicity, duplicate and missing names, quoted identifiers, table/view/materialized-view/sequence/routine/domain cascades across schemas, typed columns and generated dependents, default and CHECK removal, SQL-standard routine bodies, transaction rollback, and durable public-schema deletion",
+      "status": "partial",
+      "open_issue": "Full pg_depend catalog identity coverage, precise complete cascade notice details, virtual catalog schema lifecycle, every supported dependency kind and indirect path, and the full upstream object-dependency and isolation schedules remain implementation and verification work."
     }
   ]
 }

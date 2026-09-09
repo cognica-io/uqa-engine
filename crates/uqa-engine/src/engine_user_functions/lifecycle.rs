@@ -6,6 +6,7 @@
 
 //! Routine registration, catalog persistence, alteration, and removal.
 
+mod cascade;
 mod dependencies;
 mod drop_planning;
 mod rename;
@@ -33,6 +34,7 @@ use super::{canonical_routine_type_name, CompiledFunctionBody, SQLUserFunction};
 use dependencies::{stored_routine_dependents, RoutineCompilationMode};
 
 struct SQLFunctionDropPlan {
+    domains: BTreeSet<u32>,
     targets: Vec<RoutineDropTarget>,
     dependents: RoutineObjectDependents,
     notices: Vec<(&'static str, String)>,

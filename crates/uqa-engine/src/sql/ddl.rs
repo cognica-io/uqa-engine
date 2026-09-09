@@ -28,8 +28,8 @@ mod hierarchy_alter;
 mod sequence_ctas;
 mod value_conversion;
 
-pub(crate) use alter_table::drop_constraint_dependency;
 pub(super) use alter_table::run_alter_table;
+pub(crate) use alter_table::{drop_column_cascade, drop_constraint_dependency};
 pub(crate) use constraint_validation::{
     bind_stored_check_expression_routines, validate_check_expression,
 };
