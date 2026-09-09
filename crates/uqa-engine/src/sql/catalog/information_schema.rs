@@ -17,7 +17,8 @@ use super::expression_text::{default_expr_text, schema_expr_text};
 use super::helpers::constraints::{constraint_catalog_rows, ConstraintCatalogKind};
 use super::helpers::information_schema_types::{
     info_character_maximum_length, info_character_octet_length, info_data_type,
-    info_datetime_precision, info_numeric_precision, info_numeric_scale, info_udt_name,
+    info_datetime_precision, info_interval_type, info_numeric_precision, info_numeric_scale,
+    info_udt_name,
 };
 use super::helpers::oids::{current_user_name, split_schema_name};
 use super::helpers::rows::{catalog_name, catalog_ordinal, int_value, row, str_value};
@@ -208,7 +209,7 @@ fn information_schema_column_row(
         ("numeric_precision_radix", Value::Int(10)),
         ("numeric_scale", info_numeric_scale(&column.ty)),
         ("datetime_precision", info_datetime_precision(&column.ty)),
-        ("interval_type", Value::Null),
+        ("interval_type", info_interval_type(&column.ty)),
         ("interval_precision", Value::Null),
         ("character_set_catalog", Value::Null),
         ("character_set_schema", Value::Null),

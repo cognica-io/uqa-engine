@@ -29,6 +29,12 @@
  */
 #include "postgres.h"
 
+#include <catalog/pg_type.h>
+#include <catalog/pg_collation_d.h>
+#include <utils/fmgroids.h>
+#include "pg_query_plpgsql_catalog.h"
+#include "pg_query_pg_type.c"
+
 #include "access/htup_details.h"
 #include "catalog/pg_db_role_setting_d.h"
 #include "catalog/pg_depend_d.h"
@@ -150,11 +156,6 @@ static int	oid_compare(const void *a, const void *b);
  */
 
 
-#include <catalog/pg_type.h>
-#include <catalog/pg_collation_d.h>
-#include <utils/fmgroids.h>
-#include "pg_query_pg_type.c"
-
 HeapTuple
 SearchSysCache1(int cacheId,
 				Datum key1)
@@ -169,6 +170,8 @@ SearchSysCache1(int cacheId,
 	HeapTupleHeader td;
 	Form_pg_type t = palloc0(sizeof(FormData_pg_type));
 	const PgQueryBuiltinType *bt;
+	PgQueryPlpgsqlTypeMetadata type_metadata;
+	Oid			type_oid;
 	Size		len,
 				data_len;
 	int			hoff;
@@ -176,20 +179,41 @@ SearchSysCache1(int cacheId,
     if (cacheId != TYPEOID)
         elog(ERROR, "Not implemented (SearchSysCache1 only supports TYPEOID cache (%d), got cache %d)", TYPEOID, cacheId);
 
-    bt = pg_query_builtin_type_by_oid(DatumGetObjectId(key1));
-    if (bt == NULL)
-        elog(ERROR, "Not implemented (SearchSysCache1 got TYPEOID cache request for type OID %d)", DatumGetObjectId(key1));
+	type_oid = DatumGetObjectId(key1);
+    bt = pg_query_builtin_type_by_oid(type_oid);
+    if (bt != NULL)
+    {
+        strlcpy(NameStr(t->typname), bt->typname, NAMEDATALEN);
+		t->typnamespace = PG_CATALOG_NAMESPACE;
+        t->typlen = bt->typlen;
+        t->typbyval = bt->typbyval;
+        t->typtype = bt->typtype;
+        t->typcategory = bt->typcategory;
+        t->typalign = bt->typalign;
+        t->typarray = bt->typarray;
+        t->typcollation = bt->typcollation;
+    }
+    else if (pg_query_plpgsql_catalog_available()
+             && pg_query_plpgsql_lookup_type_by_oid(type_oid, &type_metadata))
+    {
+        strlcpy(NameStr(t->typname), type_metadata.name, NAMEDATALEN);
+		t->typnamespace = type_metadata.namespace_oid;
+        t->typlen = type_metadata.length;
+        t->typbyval = type_metadata.by_value;
+        t->typtype = type_metadata.type_kind;
+        t->typcategory = type_metadata.category;
+        t->typalign = type_metadata.alignment;
+        t->typstorage = type_metadata.storage;
+        t->typarray = type_metadata.array_oid;
+        t->typelem = type_metadata.element_oid;
+        t->typbasetype = type_metadata.base_type_oid;
+        t->typcollation = type_metadata.collation_oid;
+        t->typsubscript = type_metadata.subscript_handler_oid;
+    }
+    else
+        elog(ERROR, "SearchSysCache1 could not resolve type OID %u", type_oid);
 
-    strlcpy(NameStr(t->typname), bt->typname, NAMEDATALEN);
-    t->typlen = bt->typlen;
-    t->typbyval = bt->typbyval;
-    t->typtype = bt->typtype;
-    t->typcategory = bt->typcategory;
-    t->typalign = bt->typalign;
-    t->typarray = bt->typarray;
-    t->typcollation = bt->typcollation;
-
-    t->oid = DatumGetObjectId(key1);
+    t->oid = type_oid;
     t->typisdefined = true;
 
     /*
@@ -202,7 +226,7 @@ SearchSysCache1(int cacheId,
      * subscript handler. int2vector and oidvector are correctly excluded
      * because no base type's typarray points to them.
      */
-    for (size_t i = 0; i < lengthof(pg_query_builtin_types); i++)
+    for (size_t i = 0; bt != NULL && i < lengthof(pg_query_builtin_types); i++)
     {
         if (pg_query_builtin_types[i].typarray == t->oid)
         {
@@ -354,20 +378,7 @@ GetSysCacheOid(int cacheId,
     {
         return pg_query_builtin_type_oid_by_name(DatumGetPointer(key1));
     }
-    else if (DatumGetObjectId(key2) == PG_PUBLIC_NAMESPACE)
-    {
-        /*
-         * For now, we assume that any unknown type in the public namespace
-         * is a row type. That is not correct for extensions or custom types,
-         * but requires a more invasive fix (e.g. by having the user pass in
-         * custom type data) that is not yet implemented.
-         */
-        return RECORDOID;
-    }
-    else
-    {
-        elog(ERROR, "Not implemented (GetSysCacheOid only supported for built-in catalog types or custom pseudotypes in public namespace)");
-    }
+    return InvalidOid;
 }
 
 

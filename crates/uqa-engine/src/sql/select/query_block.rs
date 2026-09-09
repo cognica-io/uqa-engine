@@ -846,7 +846,7 @@ fn collect_expr_prune_columns(
                 *valid = false;
             }
         }
-        ScalarExpr::Literal(_) | ScalarExpr::Param(_) => {}
+        ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. } | ScalarExpr::Param(_) => {}
         ScalarExpr::Default
         | ScalarExpr::Star
         | ScalarExpr::Position(_)

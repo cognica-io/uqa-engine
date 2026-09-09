@@ -76,3 +76,7 @@ Portions Copyright (c) 1994, The Regents of the University of California
 All other parts are licensed under the MIT license, see LICENSE file for details.<br>
 Copyright (c) 2021 Paul Mason <paul@form1.co.nz>
 Copyright (c) 2021-2023, Duboce Labs, Inc. (pganalyze) <team@pganalyze.com>
+
+## PL/pgSQL catalog types
+
+`parse_plpgsql_with_catalog` accepts an immutable `PlpgsqlCatalog` snapshot containing namespace OIDs, the effective type search path, and `PlpgsqlType` metadata. It distinguishes domain and other scalar declarations from composite records, preserving variable defaults and constraints. Catalog-aware `PLpgSQL_type` nodes include the resolved `typoid`, so callers can bind quoted types and domain arrays without re-resolving display names. The ordinary `parse_plpgsql` entry point retains its catalog-free behavior. Catalog pointers remain local to the synchronous parse; independent snapshots can be used concurrently.

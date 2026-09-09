@@ -17,6 +17,7 @@ members = [
     "crates/uqa-pg-query",
     "crates/uqa-sql",
     "crates/uqa-pg-wire",
+    "crates/uqa-pg-server",
     "crates/uqa-fdw",
     "crates/uqa-engine",
     "crates/uqa",

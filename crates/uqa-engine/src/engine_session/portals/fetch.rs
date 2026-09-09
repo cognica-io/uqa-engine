@@ -69,6 +69,7 @@ fn nullify_result_values(result: SQLResult) -> SQLResult {
         rows.push(row);
     }
     SQLResult {
+        kind: result.kind,
         command_tag: result.command_tag,
         positional_rows: Some(vec![vec![Value::Null; result.columns.len()]; row_count]),
         columns: result.columns,
@@ -898,6 +899,7 @@ fn select_result_rows(result: &SQLResult, indices: &[usize]) -> SQLResult {
             .collect::<Vec<_>>()
     });
     SQLResult {
+        kind: result.kind,
         command_tag: None,
         columns: result.columns.clone(),
         column_types: result.column_types.clone(),

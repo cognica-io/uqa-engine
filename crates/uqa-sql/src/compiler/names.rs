@@ -108,7 +108,7 @@ pub(crate) fn validate_create_table_envelope(
     Ok(())
 }
 
-pub(super) fn render_relation_component(component: &str) -> String {
+pub(crate) fn render_relation_component(component: &str) -> String {
     let can_render_bare = component
         .bytes()
         .enumerate()

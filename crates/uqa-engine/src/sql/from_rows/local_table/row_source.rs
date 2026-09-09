@@ -37,6 +37,7 @@ impl EngineTableRowSource {
         &mut self,
         max_rows: usize,
     ) -> uqa_execution::ExecResult<Vec<uqa_execution::PhysicalRow>> {
+        self.cancellation.check().map_err(SQLError::from)?;
         if max_rows == 0 {
             return Ok(Vec::new());
         }
@@ -57,6 +58,7 @@ impl EngineTableRowSource {
         let fields = self.columns.iter().map(String::as_str).collect::<Vec<_>>();
         let mut rows = Vec::with_capacity(max_rows);
         loop {
+            self.cancellation.check().map_err(SQLError::from)?;
             // A source must not return an empty batch before end-of-stream: TableScan treats it as EOF. Keep advancing storage pages when a pushed predicate rejects an entire page, and fill the requested output batch when selectivity permits it.
             let remaining = max_rows - rows.len();
             if remaining == 0 {
@@ -214,6 +216,7 @@ impl EngineTableRowSource {
         let store = self.table.document_store.read();
         let mut rows = Vec::with_capacity(max_rows.min(pins.len()));
         while rows.len() < max_rows && self.recheck_cursor < pins.len() {
+            self.cancellation.check().map_err(SQLError::from)?;
             let pin = &pins[self.recheck_cursor];
             self.recheck_cursor += 1;
             let mut document = if let Some(document) = pin.document.as_ref() {
@@ -269,6 +272,7 @@ impl EngineTableRowSource {
         let store = self.table.document_store.read();
         let mut rows = Vec::with_capacity(max_rows);
         while rows.len() < max_rows {
+            self.cancellation.check().map_err(SQLError::from)?;
             let remaining = max_rows - rows.len();
             let doc_ids = store.next_doc_ids(self.after, remaining).map_err(|error| {
                 SQLError::Internal(format!(

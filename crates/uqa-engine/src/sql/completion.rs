@@ -114,6 +114,7 @@ fn command_completion(
             }
         }
         CommandPlan::CreateSequence(_) => "CREATE SEQUENCE",
+        CommandPlan::CreateDomain(_) => "CREATE DOMAIN",
         CommandPlan::AlterSequence(_) => "ALTER SEQUENCE",
         CommandPlan::Prepare { .. } => "PREPARE",
         CommandPlan::Execute { .. } => {

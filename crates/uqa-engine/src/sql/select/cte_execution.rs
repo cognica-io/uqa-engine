@@ -624,6 +624,7 @@ pub(in crate::sql) fn run_explain(
         let mut row = ResultRow::new();
         row.insert("plan".to_string(), Value::Str(payload.to_string()));
         return Ok(SQLResult {
+            kind: uqa_sql::SQLResultKind::Rows,
             command_tag: None,
             columns: vec!["plan".to_string()],
             column_types: vec![Some(uqa_sql::ColumnType::Text)],
@@ -644,6 +645,7 @@ pub(in crate::sql) fn run_explain(
         rows.push(r);
     }
     Ok(SQLResult {
+        kind: uqa_sql::SQLResultKind::Rows,
         command_tag: None,
         columns: vec!["plan".to_string()],
         column_types: vec![Some(uqa_sql::ColumnType::Text)],

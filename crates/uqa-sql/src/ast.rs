@@ -13,11 +13,13 @@ use serde::{Deserialize, Serialize};
 
 mod constraints;
 mod cte;
+mod domains;
 mod events;
 mod expressions;
 mod from;
 mod function_binding;
 mod indexes;
+mod interval;
 mod locking;
 mod ranges;
 mod relation_hierarchy;
@@ -29,11 +31,13 @@ mod types;
 
 pub use constraints::*;
 pub use cte::*;
+pub use domains::*;
 pub use events::*;
 pub use expressions::*;
 pub use from::*;
 pub use function_binding::*;
 pub use indexes::*;
+pub use interval::*;
 pub use locking::*;
 pub use ranges::*;
 pub use relation_hierarchy::*;
@@ -503,6 +507,7 @@ pub struct VacuumStmt {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Statement {
+    CreateDomain(CreateDomain),
     CreateTable(CreateTable),
     CreateTableIfNotExists(DeferredCreateTable),
     CreateIndex(CreateIndex),

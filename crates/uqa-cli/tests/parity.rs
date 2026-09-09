@@ -99,6 +99,28 @@ fn copy_text_output_uses_postgresql_boolean_type_output() {
 }
 
 #[test]
+fn result_output_resolves_regtype_oids_with_session_catalog() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let sql = "CREATE DOMAIN cli_domain AS integer; SELECT pg_typeof(1), pg_typeof(1::cli_domain), ARRAY['integer'::regtype, 'cli_domain'::regtype]";
+    let output = run_usql(&["--copy-text", "-c", sql], "", dir.path());
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "integer\tcli_domain\t{integer,cli_domain}\n"
+    );
+    let output = run_usql(&["-c", sql], "", dir.path());
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert!(
+        stdout(&output)
+            .lines()
+            .any(|line| line.split('|').map(str::trim).collect::<Vec<_>>()
+                == ["integer", "cli_domain", "{integer,cli_domain}"]),
+        "{}",
+        stdout(&output)
+    );
+}
+
+#[test]
 fn command_string_ignores_interactive_history() {
     let dir = tempfile::tempdir().expect("tempdir");
     let history = dir.path().join("history-is-a-directory");

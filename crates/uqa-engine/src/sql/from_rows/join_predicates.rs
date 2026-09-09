@@ -51,7 +51,9 @@ fn expression_binding(expression: &ScalarExpr, schema: &RowSchema) -> (bool, boo
         }
         ScalarExpr::Position(position) => (*position < schema.len(), true),
         ScalarExpr::InternalColumn(column) => (schema.internal_slot(*column).is_some(), true),
-        ScalarExpr::Literal(_) | ScalarExpr::Param(_) => (true, false),
+        ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. } | ScalarExpr::Param(_) => {
+            (true, false)
+        }
         ScalarExpr::Func {
             args,
             order_by,

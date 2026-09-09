@@ -307,7 +307,7 @@ fn classify_signal(expression: &ScalarExpr) -> Option<(RetrievalSignalKind, Opti
         _ => return None,
     };
     let qualifier = match args.first()? {
-        ScalarExpr::Column(_) | ScalarExpr::Literal(_) => None,
+        ScalarExpr::Column(_) | ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. } => None,
         ScalarExpr::QualifiedColumn { qualifier, .. } => Some(qualifier.as_str()),
         _ => return None,
     };
@@ -414,6 +414,7 @@ fn contains_explicit_fusion(expression: &ScalarExpr) -> bool {
         | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
+        | ScalarExpr::TypedLiteral { .. }
         | ScalarExpr::Param(_)
         | ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. } => false,

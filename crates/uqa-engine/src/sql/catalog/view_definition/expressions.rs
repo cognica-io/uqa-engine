@@ -41,6 +41,7 @@ impl Deparser<'_> {
                 "executor-only column reached view SQL reconstruction".into(),
             )),
             ScalarExpr::Literal(value) => literal(value),
+            ScalarExpr::TypedLiteral { value, ty } => Ok(format!("({})::{ty}", literal(value)?)),
             ScalarExpr::Param(index) => Ok(format!("${index}")),
             ScalarExpr::Binary { op, lhs, rhs } => self.binary(*op, lhs, rhs, scope, subqueries),
             ScalarExpr::And(items) | ScalarExpr::Or(items) => {

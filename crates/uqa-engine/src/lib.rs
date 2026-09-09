@@ -85,6 +85,7 @@ mod engine_cancellation;
 mod engine_capabilities;
 mod engine_catalog_indexes;
 mod engine_database_security;
+mod engine_domains;
 mod engine_events;
 mod engine_fdw;
 mod engine_foreign_table_security;

@@ -14,8 +14,20 @@ use crate::ast::ColumnType;
 
 pub type ResultRow = BTreeMap<String, Value>;
 
+/// Whether execution produced a row descriptor, independently of its column or row count.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SQLResultKind {
+    #[default]
+    Command,
+    Rows,
+    /// An external result source did not provide descriptor information.
+    Unknown,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct SQLResult {
+    /// Descriptor presence, including zero-column and empty row results.
+    pub kind: SQLResultKind,
     /// `PostgreSQL` command completion, including its command-specific row count. Execution sets this from the command that actually ran; row constructors leave it absent because rows alone do not identify a SQL command.
     pub command_tag: Option<String>,
     /// Column order as the SELECT clause specified.
@@ -51,6 +63,7 @@ impl SQLResult {
     pub fn from_rows(columns: Vec<String>, rows: Vec<ResultRow>) -> Self {
         let column_types = vec![None; columns.len()];
         Self {
+            kind: SQLResultKind::Rows,
             command_tag: None,
             columns,
             column_types,
@@ -88,6 +101,7 @@ impl SQLResult {
             }
         }
         Self {
+            kind: SQLResultKind::Rows,
             command_tag: None,
             columns,
             column_types,

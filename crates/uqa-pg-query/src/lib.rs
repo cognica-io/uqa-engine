@@ -45,6 +45,8 @@ mod node_mut;
 mod node_ref;
 mod node_structs;
 mod parse_result;
+mod plpgsql_catalog;
+pub use plpgsql_catalog::{parse_plpgsql_with_catalog, PlpgsqlCatalog, PlpgsqlType};
 #[rustfmt::skip]
 pub mod protobuf;
 mod query;

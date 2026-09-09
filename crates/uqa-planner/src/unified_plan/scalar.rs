@@ -30,6 +30,7 @@ pub(super) fn lower_scalar_expression(
         }
         Expr::InternalColumn(column) => ScalarExpr::InternalColumn(column),
         Expr::Literal(value) => ScalarExpr::Literal(value),
+        Expr::TypedLiteral { value, ty } => ScalarExpr::TypedLiteral { value, ty },
         Expr::Param(index) => ScalarExpr::Param(index),
         Expr::Func {
             name,

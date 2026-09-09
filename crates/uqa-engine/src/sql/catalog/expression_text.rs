@@ -32,6 +32,7 @@ pub(super) fn schema_expr_text(expr: &Expr) -> String {
             unreachable!("executor-only column {column:?} reached catalog SQL rendering")
         }
         Expr::Literal(value) => schema_literal_text(value),
+        Expr::TypedLiteral { value, ty } => format!("({})::{ty}", schema_literal_text(value)),
         Expr::Param(index) => format!("${index}"),
         Expr::Func {
             name,

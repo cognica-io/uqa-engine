@@ -599,6 +599,7 @@ pub enum CommandPlan {
         name: Option<String>,
     },
     CreateSequence(uqa_sql::ast::CreateSequence),
+    CreateDomain(uqa_sql::ast::CreateDomain),
     AlterSequence(uqa_sql::ast::AlterSequence),
     CreateTableAs {
         name: String,

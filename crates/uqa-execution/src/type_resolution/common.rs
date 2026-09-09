@@ -62,7 +62,7 @@ pub(super) fn base_type(mut ty: &ColumnType) -> &ColumnType {
     while let ColumnType::Domain { base, .. } = ty {
         ty = base;
     }
-    ty
+    ty.without_temporal_modifiers()
 }
 
 pub fn values_column_types(
@@ -216,6 +216,12 @@ pub fn common_type(left: &ColumnType, right: &ColumnType) -> Result<ColumnType, 
     if left == right {
         return Ok(left.clone());
     }
+    if left != left.without_temporal_modifiers() || right != right.without_temporal_modifiers() {
+        return common_type(
+            left.without_temporal_modifiers(),
+            right.without_temporal_modifiers(),
+        );
+    }
     if matches!(left, ColumnType::Domain { .. }) || matches!(right, ColumnType::Domain { .. }) {
         return common_type(base_type(left), base_type(right));
     }
@@ -251,6 +257,84 @@ pub fn common_type(left: &ColumnType, right: &ColumnType) -> Result<ColumnType, 
             left.sql_name(),
             right.sql_name()
         ))),
+    }
+}
+
+pub(super) fn case_output_type(
+    expression: &ScalarExpr,
+    common: &ColumnType,
+    schema: &RowSchema,
+    params: &[SQLParam],
+    resolver: Option<&dyn FunctionTypeResolver>,
+) -> Result<ColumnType, SQLError> {
+    let ScalarExpr::Case {
+        base,
+        when,
+        else_branch,
+    } = expression
+    else {
+        return Ok(common.clone());
+    };
+    let mut output = None;
+    let mut include = |expression: Option<&ScalarExpr>| -> Result<(), SQLError> {
+        let ty = expression
+            .map(|expression| common_context_expression_type(expression, schema, params, resolver))
+            .transpose()?
+            .flatten();
+        let ty = ty
+            .filter(|ty| ty.regtype_name() == common.regtype_name())
+            .unwrap_or_else(|| common.without_type_modifiers());
+        output = merge_optional_types(output.take(), Some(ty))?;
+        Ok(())
+    };
+    for (condition, value) in when {
+        match constant_case_condition(base.as_deref(), condition, schema, params, resolver) {
+            Some(Value::Bool(false) | Value::Null) => {}
+            Some(Value::Bool(true)) => {
+                include(Some(value))?;
+                return Ok(output.unwrap_or_else(|| common.without_type_modifiers()));
+            }
+            _ => include(Some(value))?,
+        }
+    }
+    include(else_branch.as_deref())?;
+    Ok(output.unwrap_or_else(|| common.without_type_modifiers()))
+}
+
+fn constant_case_condition(
+    base: Option<&ScalarExpr>,
+    condition: &ScalarExpr,
+    schema: &RowSchema,
+    params: &[SQLParam],
+    resolver: Option<&dyn FunctionTypeResolver>,
+) -> Option<Value> {
+    let Some(base) = base else {
+        return constant_value(condition);
+    };
+    let left = constant_value(base)?;
+    let right = constant_value(condition)?;
+    let left_type = common_context_expression_type(base, schema, params, resolver).ok()?;
+    let right_type = common_context_expression_type(condition, schema, params, resolver).ok()?;
+    let operand_type = match (left_type, right_type) {
+        (Some(left), Some(right)) => super::equality_operand_type(&left, &right).ok()?,
+        (Some(known), None) | (None, Some(known)) => known.without_type_modifiers(),
+        (None, None) => ColumnType::Text,
+    };
+    let ty = operand_type.sql_name();
+    let left = uqa_sql::expr::cast_value(&left, &ty).ok()?;
+    let right = uqa_sql::expr::cast_value(&right, &ty).ok()?;
+    uqa_sql::expr::eval_binary_values(uqa_sql::ast::BinaryOp::Equal, &left, &right).ok()
+}
+
+fn constant_value(expression: &ScalarExpr) -> Option<Value> {
+    match expression {
+        ScalarExpr::Literal(value) => Some(value.clone()),
+        ScalarExpr::Cast { expr, ty } => uqa_sql::expr::cast_value(&constant_value(expr)?, ty).ok(),
+        ScalarExpr::Binary { op, lhs, rhs } => {
+            uqa_sql::expr::eval_binary_values(*op, &constant_value(lhs)?, &constant_value(rhs)?)
+                .ok()
+        }
+        _ => None,
     }
 }
 

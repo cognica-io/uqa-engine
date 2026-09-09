@@ -196,8 +196,8 @@ fn integer_to_bytea(value: i64, source_ty: Option<&str>) -> Result<Value> {
     let source = source_ty
         .map(split_type_modifier)
         .map(|(base, _)| base)
-        .unwrap_or("integer");
-    let bytes = match source {
+        .unwrap_or(std::borrow::Cow::Borrowed("integer"));
+    let bytes = match source.as_ref() {
         "smallint" | "int2" | "pg_catalog.int2" => i16::try_from(value)
             .map(i16::to_be_bytes)
             .map(|bytes| bytes.to_vec())

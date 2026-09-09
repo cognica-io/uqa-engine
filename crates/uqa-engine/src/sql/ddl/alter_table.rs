@@ -277,6 +277,15 @@ fn run_alter_table_inner(engine: &Engine, stmt: AlterTableStmt) -> Result<SQLRes
                 continue;
             }
         }
+        match &mut action {
+            AlterTableAction::AddColumn { column, .. } => {
+                column.ty = crate::sql::resolve_declared_column_type(engine, &column.ty)?;
+            }
+            AlterTableAction::AlterColumnType { ty, .. } => {
+                *ty = crate::sql::resolve_declared_column_type(engine, ty)?;
+            }
+            _ => {}
+        }
         materialize_recursive_action_names(engine, &table, recurse, &mut action)?;
         // Column merging can stop at an existing child column. Its CHECK still has an independent inheritance lifecycle and must reach every supplying edge.
         let column_check = if let AlterTableAction::AddColumn { column, .. } = &mut action {
@@ -484,7 +493,7 @@ fn run_alter_table_action(
                 )?;
             } else {
                 let default_expr = engine
-                    .try_column_default_expr(&stmt.table, &col_name)
+                    .try_column_insert_default_expr(&stmt.table, &col_name)
                     .map_err(|e| ddl_storage_error("ALTER TABLE ADD COLUMN default", e))?;
                 let missing_value = backfill_added_column(
                     engine,

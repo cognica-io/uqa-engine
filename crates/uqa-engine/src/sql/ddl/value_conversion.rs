@@ -20,6 +20,16 @@ pub(in crate::sql) fn coerce_to_column_type(
     column: &str,
     value: Value,
 ) -> Result<Value, SQLError> {
+    coerce_to_column_type_from(engine, table, column, value, None)
+}
+
+pub(in crate::sql) fn coerce_to_column_type_from(
+    engine: &Engine,
+    table: &str,
+    column: &str,
+    value: Value,
+    source: Option<&ColumnType>,
+) -> Result<Value, SQLError> {
     let cols = match engine
         .try_describe_table(table)
         .map_err(|err| ddl_storage_error("column type coercion", err))?
@@ -30,7 +40,41 @@ pub(in crate::sql) fn coerce_to_column_type(
     let Some(def) = cols.iter().find(|c| c.name == column) else {
         return Ok(value);
     };
-    convert_value_to_column_type_with_engine(engine, value, &def.ty)
+    coerce_assignment_value(engine, value, &def.ty, source)
+}
+
+pub(in crate::sql) fn coerce_assignment_value(
+    engine: &Engine,
+    value: Value,
+    target: &ColumnType,
+    source: Option<&ColumnType>,
+) -> Result<Value, SQLError> {
+    if source.is_some_and(|source| same_domain_identity(source, target)) {
+        return Ok(value);
+    }
+    let value = if target.is_character_string() {
+        source
+            .map(|source| uqa_sql::expr::format_regtype_value(&value, source, Some(engine)))
+            .transpose()?
+            .flatten()
+            .map(Value::Str)
+            .unwrap_or(value)
+    } else {
+        value
+    };
+    convert_value_to_column_type_with_engine(engine, value, target)
+}
+
+fn same_domain_identity(source: &ColumnType, target: &ColumnType) -> bool {
+    match (source, target) {
+        (ColumnType::Domain { oid: source, .. }, ColumnType::Domain { oid: target, .. }) => {
+            source == target
+        }
+        (ColumnType::Array(source), ColumnType::Array(target)) => {
+            same_domain_identity(source, target)
+        }
+        _ => false,
+    }
 }
 
 pub(super) fn coerce_json_value(value: Value, jsonb: bool) -> Result<Value, SQLError> {
@@ -186,10 +230,8 @@ fn convert_declared_value_to_column_type(
 
 fn type_requires_catalog_resolution(ty: &ColumnType) -> bool {
     match ty {
-        ColumnType::Regrole => true,
-        ColumnType::Array(element) | ColumnType::Domain { base: element, .. } => {
-            type_requires_catalog_resolution(element)
-        }
+        ColumnType::Regrole | ColumnType::Domain { .. } => true,
+        ColumnType::Array(element) => type_requires_catalog_resolution(element),
         _ => false,
     }
 }
@@ -199,18 +241,68 @@ pub(crate) fn convert_value_to_column_type_with_engine(
     value: Value,
     ty: &ColumnType,
 ) -> Result<Value, SQLError> {
+    if let Some(value) = crate::sql::domains::assign_domain_value(engine, &value, ty)? {
+        return Ok(value);
+    }
     if matches!(value, Value::Null) {
         return Ok(Value::Null);
+    }
+    if let ColumnType::Array(element) = ty {
+        if type_requires_catalog_resolution(element) {
+            return convert_catalog_array(engine, value, element);
+        }
     }
     if type_requires_catalog_resolution(ty) {
         return uqa_sql::expr::cast_value_with_type_resolution(
             &value,
             None,
-            &uqa_sql::expr::coercion_type_name(ty),
+            &ty.sql_name(),
             Some(engine),
         );
     }
     convert_value_to_column_type(value, ty)
+}
+
+fn convert_catalog_array(
+    engine: &Engine,
+    value: Value,
+    element: &ColumnType,
+) -> Result<Value, SQLError> {
+    let array = match value {
+        Value::Array(array) => array,
+        Value::Str(text) => uqa_sql::expr::parse_pg_array_literal(&text)?,
+        other => {
+            return Err(SQLError::TypeMismatch(format!(
+                "expected an array, got {other:?}"
+            )))
+        }
+    };
+    let values = convert_catalog_array_elements(engine, array.elements(), element)?;
+    ArrayValue::with_lower_bounds(values, array.lower_bounds().to_vec())
+        .map(Value::Array)
+        .ok_or_else(|| {
+            SQLError::TypeMismatch("multidimensional arrays must have matching dimensions".into())
+        })
+}
+
+fn convert_catalog_array_elements(
+    engine: &Engine,
+    values: &[Value],
+    element: &ColumnType,
+) -> Result<Vec<Value>, SQLError> {
+    let mut element = element;
+    while let ColumnType::Array(nested) = element {
+        element = nested;
+    }
+    values
+        .iter()
+        .map(|value| match value {
+            Value::List(values) => {
+                convert_catalog_array_elements(engine, values, element).map(Value::List)
+            }
+            value => convert_value_to_column_type_with_engine(engine, value.clone(), element),
+        })
+        .collect()
 }
 
 #[expect(
@@ -225,6 +317,10 @@ pub(crate) fn convert_value_to_column_type(
         return Ok(Value::Null);
     }
     match ty {
+        ColumnType::Named(name) => Err(SQLError::Routine {
+            sqlstate: "42704".into(),
+            message: format!("type \"{name}\" does not exist"),
+        }),
         ColumnType::SmallInteger => uqa_sql::expr::cast_value(&value, "smallint"),
         ColumnType::Integer => uqa_sql::expr::cast_value(&value, "integer"),
         ColumnType::BigInteger => uqa_sql::expr::cast_value(&value, "bigint"),
@@ -269,9 +365,10 @@ pub(crate) fn convert_value_to_column_type(
                 let retained = text.chars().take(length).collect::<String>();
                 let discarded = text.chars().skip(length).collect::<String>();
                 if !discarded.chars().all(|character| character == ' ') {
-                    return Err(SQLError::TypeMismatch(format!(
-                        "value too long for type character({length})"
-                    )));
+                    return Err(SQLError::Routine {
+                        sqlstate: "22001".into(),
+                        message: format!("value too long for type character({length})"),
+                    });
                 }
                 retained
             } else {
@@ -427,10 +524,15 @@ pub(crate) fn convert_value_to_column_type(
         }
         ColumnType::Date
         | ColumnType::Time
+        | ColumnType::TimePrecision(_)
         | ColumnType::TimeTz
+        | ColumnType::TimeTzPrecision(_)
         | ColumnType::Timestamp
+        | ColumnType::TimestampPrecision(_)
         | ColumnType::TimestampTz
-        | ColumnType::Interval => convert_temporal_value(value, ty),
+        | ColumnType::TimestampTzPrecision(_)
+        | ColumnType::Interval
+        | ColumnType::IntervalWithFields { .. } => convert_temporal_value(value, ty),
         ColumnType::Range(subtype) => uqa_sql::expr::cast_value(&value, subtype.range_name()),
         ColumnType::Multirange(subtype) => {
             uqa_sql::expr::cast_value(&value, subtype.multirange_name())
@@ -511,9 +613,10 @@ fn convert_varying_character(value: Value, length: u32) -> Result<Value, SQLErro
     if discarded.chars().all(|character| character == ' ') {
         Ok(Value::Str(retained))
     } else {
-        Err(SQLError::TypeMismatch(format!(
-            "value too long for type character varying({length})"
-        )))
+        Err(SQLError::Routine {
+            sqlstate: "22001".into(),
+            message: format!("value too long for type character varying({length})"),
+        })
     }
 }
 
@@ -541,6 +644,7 @@ pub(crate) fn validate_vector_dimensions(expected: u32, actual: usize) -> Result
 
 pub(in crate::sql) fn column_type_name(ty: &ColumnType) -> &str {
     match ty {
+        ColumnType::Named(name) => name,
         ColumnType::SmallInteger => "smallint",
         ColumnType::Integer => "integer",
         ColumnType::BigInteger => "bigint",
@@ -576,11 +680,11 @@ pub(in crate::sql) fn column_type_name(ty: &ColumnType) -> &str {
         ColumnType::Record => "record",
         ColumnType::Array(_) => "array",
         ColumnType::Date => "date",
-        ColumnType::Time => "time",
-        ColumnType::TimeTz => "time with time zone",
-        ColumnType::Timestamp => "timestamp",
-        ColumnType::TimestampTz => "timestamp with time zone",
-        ColumnType::Interval => "interval",
+        ColumnType::Time | ColumnType::TimePrecision(_) => "time",
+        ColumnType::TimeTz | ColumnType::TimeTzPrecision(_) => "time with time zone",
+        ColumnType::Timestamp | ColumnType::TimestampPrecision(_) => "timestamp",
+        ColumnType::TimestampTz | ColumnType::TimestampTzPrecision(_) => "timestamp with time zone",
+        ColumnType::Interval | ColumnType::IntervalWithFields { .. } => "interval",
         ColumnType::Range(subtype) => subtype.range_name(),
         ColumnType::Multirange(subtype) => subtype.multirange_name(),
         ColumnType::Vector(_) => "vector",
@@ -598,7 +702,7 @@ fn parse_boolean_text(text: &str) -> Option<bool> {
 }
 
 fn convert_temporal_value(value: Value, ty: &ColumnType) -> Result<Value, SQLError> {
-    uqa_sql::expr::cast_value(&value, column_type_name(ty))
+    uqa_sql::expr::cast_value(&value, &ty.sql_name())
 }
 
 pub(in crate::sql) fn value_to_text(value: &Value) -> String {

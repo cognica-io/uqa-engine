@@ -82,7 +82,7 @@ pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<V
             .map(Value::Array)
             .ok_or_else(|| SQLError::TypeMismatch("array dimensions changed during cast".into()));
     }
-    match base {
+    match base.as_ref() {
         "void" | "pg_catalog.void" => {
             let source = canonical_cast_source(source_ty, v);
             if matches!(
@@ -221,31 +221,31 @@ pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<V
             TemporalCastTarget::Time,
             TemporalValue::parse_time,
             "time",
+            modifier,
         ),
         "timetz" | "time with time zone" => cast_temporal(
             v,
             TemporalCastTarget::TimeTz,
             TemporalValue::parse_time_tz,
             "time with time zone",
+            modifier,
         ),
         "timestamp" | "datetime" | "timestamp without time zone" => cast_temporal(
             v,
             TemporalCastTarget::Timestamp,
             TemporalValue::parse_timestamp,
             "timestamp",
+            modifier,
         ),
         "timestamptz" | "timestamp with time zone" => cast_temporal(
             v,
             TemporalCastTarget::TimestampTz,
             TemporalValue::parse_timestamp_tz,
             "timestamp with time zone",
+            modifier,
         ),
-        "interval" => cast_temporal(
-            v,
-            TemporalCastTarget::Interval,
-            TemporalValue::parse_interval,
-            "interval",
-        ),
+        "interval" => temporal::cast_interval(v, ty),
+        name if name.starts_with("interval ") => temporal::cast_interval(v, ty),
         "int4range" => cast_range(v, source_ty, RangeSubtype::Integer),
         "int8range" => cast_range(v, source_ty, RangeSubtype::BigInteger),
         "numrange" => cast_range(v, source_ty, RangeSubtype::Numeric),
@@ -457,15 +457,7 @@ fn cast_uuid(value: &Value) -> Result<Value> {
     super::uuid::canonicalize_uuid(text).map(Value::Str)
 }
 
-/// Split `varchar(10)` / `numeric(10,2)` into `("varchar", Some("10"))`.
-pub(super) fn split_type_modifier(ty: &str) -> (&str, Option<&str>) {
-    match (ty.find('('), ty.rfind(')')) {
-        (Some(open), Some(close)) if close > open => {
-            (ty[..open].trim_end(), Some(&ty[open + 1..close]))
-        }
-        _ => (ty, None),
-    }
-}
+pub(super) use crate::ast::split_type_modifier;
 
 /// CAST to the integer family with `PostgreSQL` conversion rules:
 /// float8 rounds half-to-even, numeric rounds half-away-from-zero,

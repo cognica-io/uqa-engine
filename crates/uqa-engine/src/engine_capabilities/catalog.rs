@@ -543,6 +543,10 @@ impl CatalogReadView {
             .collect()
     }
 
+    pub(crate) fn domains(&self) -> impl Iterator<Item = &crate::engine_domains::StoredDomain> {
+        self.snapshot.durable.domains.values()
+    }
+
     pub(crate) fn sql_functions(
         &self,
         resolution: &RelationNameResolution,

@@ -100,6 +100,7 @@ impl ScalarExpr {
             | Self::InternalColumn(_)
             | Self::QualifiedColumn { .. }
             | Self::Literal(_)
+            | Self::TypedLiteral { .. }
             | Self::Param(_)
             | Self::ScalarSubquery(_)
             | Self::Exists { .. } => {}
@@ -113,7 +114,10 @@ impl ScalarExpr {
                 output.insert(name.clone());
                 true
             }
-            Self::Literal(_) | Self::Param(_) | Self::InternalColumn(_) => true,
+            Self::Literal(_)
+            | Self::TypedLiteral { .. }
+            | Self::Param(_)
+            | Self::InternalColumn(_) => true,
             Self::Func {
                 args,
                 order_by,
@@ -219,6 +223,7 @@ impl ScalarExpr {
             | Self::Position(_)
             | Self::InternalColumn(_)
             | Self::Literal(_)
+            | Self::TypedLiteral { .. }
             | Self::Param(_)
             | Self::ScalarSubquery(_)
             | Self::Exists { .. } => false,
@@ -284,6 +289,7 @@ impl ScalarExpr {
             | Self::Position(_)
             | Self::InternalColumn(_)
             | Self::Literal(_)
+            | Self::TypedLiteral { .. }
             | Self::Param(_) => false,
         }
     }
@@ -348,6 +354,7 @@ impl ScalarExpr {
             | Self::Position(_)
             | Self::InternalColumn(_)
             | Self::Literal(_)
+            | Self::TypedLiteral { .. }
             | Self::ScalarSubquery(_)
             | Self::Exists { .. } => false,
         }
@@ -419,6 +426,7 @@ impl ScalarExpr {
             | Self::Position(_)
             | Self::InternalColumn(_)
             | Self::Literal(_)
+            | Self::TypedLiteral { .. }
             | Self::Param(_)
             | Self::ScalarSubquery(_)
             | Self::Exists { .. }

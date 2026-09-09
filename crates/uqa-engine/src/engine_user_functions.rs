@@ -11,6 +11,7 @@
 
 mod combined_overloads;
 mod declaration;
+pub(crate) use declaration::resolve_plpgsql_datum_types;
 mod lifecycle;
 mod resolution;
 mod security;

@@ -175,6 +175,7 @@ pub(super) fn optimize_command(
         | CommandPlan::FetchCursor(_)
         | CommandPlan::CloseCursor { .. }
         | CommandPlan::CreateSequence(_)
+        | CommandPlan::CreateDomain(_)
         | CommandPlan::AlterSequence(_)
         | CommandPlan::Deallocate { .. }
         | CommandPlan::CreateForeignServer(_)

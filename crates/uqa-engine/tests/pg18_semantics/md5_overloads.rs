@@ -32,7 +32,7 @@ fn pg18_md5_preserves_text_and_bytea_overloads() {
             "text",
         ),
     ] {
-        assert_eq!(scalar(&eng, sql), Value::Str(expected.into()), "{sql}");
+        assert_eq!(super::text(&eng, sql), expected, "{sql}");
     }
     assert_eq!(scalar(&eng, "SELECT md5(NULL)"), Value::Null);
     assert_eq!(scalar(&eng, "SELECT md5(NULL::bytea)"), Value::Null);
@@ -58,7 +58,7 @@ fn pg18_md5_preserves_text_and_bytea_overloads() {
             )
             .unwrap();
         assert_eq!(result.rows[0]["value"], expected_hash);
-        assert_eq!(result.rows[0]["ty"], Value::Str("text".into()));
+        assert_eq!(result.rows[0]["ty"], Value::Int(25));
     }
     let unknown = eng
         .sql(
@@ -67,7 +67,7 @@ fn pg18_md5_preserves_text_and_bytea_overloads() {
         )
         .unwrap();
     assert_eq!(unknown.rows[0]["value"], Value::Null);
-    assert_eq!(unknown.rows[0]["ty"], Value::Str("text".into()));
+    assert_eq!(unknown.rows[0]["ty"], Value::Int(25));
 }
 
 #[test]
@@ -117,7 +117,7 @@ fn pg18_md5_ranks_user_overloads_and_pg_catalog_search_order() {
         ),
         ("SELECT md5_overload.md5('abc')", "user-text"),
     ] {
-        assert_eq!(scalar(&eng, sql), Value::Str(expected.into()), "{sql}");
+        assert_eq!(super::text(&eng, sql), expected, "{sql}");
     }
 
     eng.sql("SET search_path = md5_overload, pg_catalog, public", &[])
@@ -132,7 +132,7 @@ fn pg18_md5_ranks_user_overloads_and_pg_catalog_search_order() {
             "481e4551ec039aada760901cf52b1917",
         ),
     ] {
-        assert_eq!(scalar(&eng, sql), Value::Str(expected.into()), "{sql}");
+        assert_eq!(super::text(&eng, sql), expected, "{sql}");
     }
 }
 

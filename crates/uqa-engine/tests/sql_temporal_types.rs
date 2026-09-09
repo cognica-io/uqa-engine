@@ -8,6 +8,115 @@ use uqa_core::{TemporalValue, Value};
 use uqa_engine::Engine;
 
 #[test]
+fn interval_fields_and_precision_preserve_values_and_metadata_after_reopen() {
+    fn check(engine: &Engine) {
+        let result = engine
+            .sql(
+                "SELECT wide, years, minutes, fractional FROM interval_precision",
+                &[],
+            )
+            .unwrap();
+        for (index, expected) in [
+            "1 year 2 mons 3 days 04:05:06.79",
+            "1 year",
+            "1 year 2 mons 3 days 04:05:00",
+            "1 year 2 mons 3 days 04:05:06.79",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert_eq!(
+                uqa_sql::expr::value_to_string(result.rows[0].get(&result.columns[index]).unwrap()),
+                expected
+            );
+        }
+        let result = engine.sql("SELECT datetime_precision, interval_type FROM information_schema.columns WHERE table_name = 'interval_precision' ORDER BY ordinal_position", &[]).unwrap();
+        for (index, (precision, fields)) in [
+            (3, None),
+            (6, Some("YEAR")),
+            (6, Some("HOUR TO MINUTE")),
+            (3, Some("DAY TO SECOND(3)")),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert_eq!(
+                result.rows[index].get("datetime_precision"),
+                Some(&Value::Int(precision))
+            );
+            assert_eq!(
+                result.rows[index].get("interval_type"),
+                Some(&fields.map_or(Value::Null, |fields| Value::Str(fields.into())))
+            );
+        }
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("interval-precision.sqlite3");
+    for engine in [Engine::new(), Engine::open(&path).unwrap()] {
+        engine.sql("CREATE TABLE interval_precision (wide interval(3), years interval year, minutes interval hour to minute, fractional interval day to second(3))", &[]).unwrap();
+        engine.sql("INSERT INTO interval_precision SELECT value, value, value, value FROM (VALUES ('1 year 2 mons 3 days 04:05:06.7895'::interval)) AS inputs(value)", &[]).unwrap();
+        check(&engine);
+    }
+    check(&Engine::open(&path).unwrap());
+}
+
+#[test]
+fn temporal_precision_preserves_rounding_and_catalog_metadata_after_reopen() {
+    use uqa_engine::sql::postgres_result_type;
+    use uqa_sql::ast::ColumnType;
+
+    fn check(engine: &Engine) {
+        let result = engine
+            .sql("SELECT t, tz, ts, tstz FROM temporal_precision", &[])
+            .unwrap();
+        assert_eq!(
+            result.column_types,
+            vec![
+                Some(ColumnType::TimePrecision(3)),
+                Some(ColumnType::TimeTzPrecision(3)),
+                Some(ColumnType::TimestampPrecision(3)),
+                Some(ColumnType::TimestampTzPrecision(3)),
+            ]
+        );
+        for (position, expected) in [
+            "24:00:00",
+            "24:00:00+09",
+            "1999-12-31 23:59:59.999",
+            "2000-01-01 00:00:00.001+00",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let value = result.rows[0].get(&result.columns[position]).unwrap();
+            assert_eq!(uqa_sql::expr::value_to_string(value), expected);
+            let ty = result.column_types[position].as_ref().unwrap();
+            assert_eq!(postgres_result_type(ty).type_modifier, 3);
+        }
+        let precision = engine.sql("SELECT datetime_precision FROM information_schema.columns WHERE table_name = 'temporal_precision' ORDER BY ordinal_position", &[]).unwrap();
+        assert_eq!(precision.rows.len(), 4);
+        assert!(precision
+            .rows
+            .iter()
+            .all(|row| row.get("datetime_precision") == Some(&Value::Int(3))));
+        let catalog = engine.sql("SELECT atttypmod FROM pg_attribute WHERE attrelid = 'temporal_precision'::regclass AND attnum > 0 ORDER BY attnum", &[]).unwrap();
+        assert_eq!(catalog.rows.len(), 4);
+        assert!(catalog
+            .rows
+            .iter()
+            .all(|row| row.get("atttypmod") == Some(&Value::Int(3))));
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("temporal-precision.sqlite3");
+    for engine in [Engine::new(), Engine::open(&path).unwrap()] {
+        engine.sql("CREATE TABLE temporal_precision (t time(3), tz time(3) with time zone, ts timestamp(3), tstz timestamp(3) with time zone)", &[]).unwrap();
+        engine.sql("INSERT INTO temporal_precision VALUES ('23:59:59.9995', '23:59:59.9995+09', '1999-12-31 23:59:59.9995', '2000-01-01 00:00:00.0005+00')", &[]).unwrap();
+        check(&engine);
+    }
+    check(&Engine::open(&path).unwrap());
+}
+
+#[test]
 fn temporal_columns_store_typed_values_and_compare_by_time_key() {
     let engine = Engine::new();
     engine

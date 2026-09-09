@@ -176,6 +176,12 @@ pub enum Expr {
     #[doc(hidden)]
     InternalColumn(InternalColumnRef),
     Literal(Value),
+    /// An already-coerced runtime datum with its declared SQL type. Variable binding emits this leaf so reading a domain value does not repeat its constraints.
+    #[doc(hidden)]
+    TypedLiteral {
+        value: Value,
+        ty: String,
+    },
     /// A positional bind parameter (`$1`, `$2`, ...).
     Param(usize),
     /// `text_match(...)`, `knn_match(...)`, etc. - dispatched through
@@ -389,6 +395,7 @@ impl Expr {
             | Self::QualifiedColumn { .. }
             | Self::InternalColumn(_)
             | Self::Literal(_)
+            | Self::TypedLiteral { .. }
             | Self::Param(_) => {}
         }
         changed
@@ -487,6 +494,7 @@ impl Expr {
             | Self::QualifiedColumn { .. }
             | Self::InternalColumn(_)
             | Self::Literal(_)
+            | Self::TypedLiteral { .. }
             | Self::Param(_)
             | Self::ScalarSubquery(_)
             | Self::Exists { .. } => false,
@@ -633,6 +641,13 @@ impl Statement {
     pub fn upgrade_legacy_serialized_dispatches(&mut self) -> bool {
         match self {
             Self::Select(select) => select.upgrade_legacy_serialized_dispatches(),
+            Self::CreateDomain(domain) => {
+                let mut changed = upgrade_optional(&mut domain.default);
+                for check in &mut domain.checks {
+                    changed |= check.expression.upgrade_legacy_serialized_dispatches();
+                }
+                changed
+            }
             Self::Insert(insert) => {
                 let mut changed = upgrade_ctes(&mut insert.with);
                 changed |= upgrade_rows(&mut insert.rows);

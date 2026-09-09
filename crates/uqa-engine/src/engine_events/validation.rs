@@ -734,6 +734,7 @@ fn validate_rule_expr_scopes(engine: &Engine, expr: &Expr) -> Result<(), SQLErro
         }
         Expr::Default
         | Expr::Literal(_)
+        | Expr::TypedLiteral { .. }
         | Expr::Star
         | Expr::QualifiedStar(_)
         | Expr::Column(_)

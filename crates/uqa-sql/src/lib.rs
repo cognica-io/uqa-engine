@@ -52,4 +52,4 @@ pub use error::SQLError;
 pub use fts_query::{parse_query_string as parse_fts_query_string, tokenize as fts_tokenize};
 pub use fts_query::{FTSNode, FTSParser, FTSToken, FTSTokenType};
 pub use params::SQLParam;
-pub use result::{ResultRow, SQLResult};
+pub use result::{ResultRow, SQLResult, SQLResultKind};

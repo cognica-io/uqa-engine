@@ -26,7 +26,7 @@ use super::relation_catalog::build_pg_class;
 
 mod type_names;
 
-pub(crate) use type_names::resolve_catalog_column_type;
+pub(crate) use type_names::{resolve_catalog_column_type, resolve_catalog_domain_type_by_oid};
 
 fn cross_database_reference(name: &str) -> SQLError {
     SQLError::Unsupported(format!(
@@ -702,7 +702,7 @@ impl RegtypeOutputCatalog {
                 .is_some_and(|count| *count > 1);
         }
 
-        let types = build_pg_type()
+        let types = build_pg_type(&catalog)
             .into_iter()
             .filter_map(|row| {
                 Some((

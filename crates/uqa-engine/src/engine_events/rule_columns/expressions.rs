@@ -115,6 +115,7 @@ impl RuleColumnBinder<'_> {
             | Expr::Default
             | Expr::InternalColumn(_)
             | Expr::Literal(_)
+            | Expr::TypedLiteral { .. }
             | Expr::Param(_) => Ok(()),
         }
     }

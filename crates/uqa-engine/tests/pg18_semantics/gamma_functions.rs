@@ -46,11 +46,7 @@ fn pg18_gamma_functions_preserve_native_results_and_float8_types() {
         "SELECT pg_typeof(gamma('5'))",
         "SELECT pg_typeof(lgamma(NULL))",
     ] {
-        assert_eq!(
-            scalar(&engine, sql),
-            Value::Str("double precision".into()),
-            "{sql}"
-        );
+        assert_eq!(scalar(&engine, sql), Value::Int(701), "{sql}");
     }
     assert_eq!(scalar(&engine, "SELECT gamma(NULL)"), Value::Null);
     assert_eq!(float(&engine, "SELECT pg_catalog.gamma(5)"), 24.0);
@@ -65,7 +61,7 @@ fn pg18_gamma_functions_preserve_native_results_and_float8_types() {
                 &[SQLParam::Scalar(parameter.clone())],
             )
             .unwrap_or_else(|error| panic!("{parameter:?}: {error}"));
-        assert_eq!(result.rows[0]["ty"], Value::Str("double precision".into()));
+        assert_eq!(result.rows[0]["ty"], Value::Int(701));
         match (&result.rows[0]["value"], expected) {
             (Value::Float(actual), Some(expected)) => {
                 assert_float_close(*actual, expected, &format!("gamma({parameter:?})"));

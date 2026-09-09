@@ -299,6 +299,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             Value::Str(self.session.show_variable(name)?),
         );
         Ok(SQLResult {
+            kind: uqa_sql::SQLResultKind::Rows,
             command_tag: None,
             columns: vec![name.to_string()],
             column_types: vec![Some(uqa_sql::ColumnType::Text)],
@@ -741,6 +742,10 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             }
             CommandPlan::CreateSequence(statement) => {
                 run_create_sequence(self.engine, statement.clone())
+            }
+            CommandPlan::CreateDomain(statement) => {
+                super::domains::create_domain(self.engine, statement.clone())?;
+                Ok(SQLResult::empty())
             }
             CommandPlan::AlterSequence(statement) => {
                 run_alter_sequence(self.engine, statement.clone())

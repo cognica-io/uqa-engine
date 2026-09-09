@@ -233,6 +233,19 @@ pub(super) fn scalar_type_inner(
             qualified_column::resolve(schema, qualifier, column)
         }
         ScalarExpr::Literal(value) => Ok(common::value_type(value)),
+        ScalarExpr::TypedLiteral { ty, .. } => {
+            let target = match ColumnType::from_sql_name(ty) {
+                Ok(ty) => Ok(Some(ty)),
+                Err(error @ SQLError::Unsupported(_)) => match resolver {
+                    Some(resolver) => resolver
+                        .resolve_type_name(ty)?
+                        .map_or(Err(error), |ty| Ok(Some(ty))),
+                    None => Err(error),
+                },
+                Err(error) => Err(error),
+            }?;
+            Ok(target)
+        }
         ScalarExpr::Param(index) => Ok(index
             .checked_sub(1)
             .and_then(|index| params.get(index))
@@ -339,12 +352,16 @@ pub(super) fn scalar_type_inner(
             let simple = base.is_some();
             let base_type = base
                 .as_deref()
-                .map(|base| scalar_type_inner(base, schema, params, resolver))
+                .map(|base| common::common_context_expression_type(base, schema, params, resolver))
                 .transpose()?
                 .flatten();
             let mut result = None;
             for (condition, value) in when {
-                let condition_type = scalar_type_inner(condition, schema, params, resolver)?;
+                let condition_type = if simple {
+                    common::common_context_expression_type(condition, schema, params, resolver)?
+                } else {
+                    scalar_type_inner(condition, schema, params, resolver)?
+                };
                 if simple {
                     operators::binary_result_type(
                         uqa_sql::ast::BinaryOp::Equal,
@@ -363,7 +380,13 @@ pub(super) fn scalar_type_inner(
                     common::common_context_expression_type(value, schema, params, resolver)?,
                 )?;
             }
-            Ok(result)
+            match result {
+                Some(result) => {
+                    common::case_output_type(expression, &result, schema, params, resolver)
+                        .map(Some)
+                }
+                result => Ok(result),
+            }
         }
         ScalarExpr::Func {
             name,

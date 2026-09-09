@@ -811,7 +811,7 @@ fn eval_mutation_assignment(
             return Ok(None);
         }
         let value = match engine
-            .try_column_default_expr(table, column)
+            .try_column_insert_default_expr(table, column)
             .map_err(|error| dml_storage_error(action, error))?
         {
             Some(default) => eval_lowered_expression(engine, &default, None, params)?,
@@ -824,8 +824,12 @@ fn eval_mutation_assignment(
             "column `{column}` is a generated column; only DEFAULT may be assigned"
         )));
     }
+    let empty_schema = RowSchema::default();
+    let schema = row.map_or(&empty_schema, |row| &row.schema);
+    let hook = ScopedEngineHook::new(engine, ctes);
+    let source = uqa_execution::scalar_type_with_resolver(expression, schema, params, &hook)?;
     let value = eval_mutation_expr(engine, ctes, expression, row, params)?;
-    coerce_to_column_type(engine, table, column, value).map(Some)
+    super::ddl::coerce_to_column_type_from(engine, table, column, value, source.as_ref()).map(Some)
 }
 
 fn eval_view_rule_update_assignment(

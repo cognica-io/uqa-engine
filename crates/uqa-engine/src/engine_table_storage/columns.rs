@@ -51,6 +51,8 @@ impl Engine {
         mut column: uqa_sql::ast::ColumnDef,
         check_columns: Option<&[uqa_sql::ast::ColumnDef]>,
     ) -> StorageBackendResult<()> {
+        column.ty = crate::sql::resolve_declared_column_type(self, &column.ty)
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         let legacy_auto_increment = column
             .auto_increment
             .as_ref()

@@ -629,35 +629,35 @@ fn partition_operator_class(strategy: PartitionStrategy, ty: &ColumnType) -> i64
                 3_122
             }
         }
-        ColumnType::Time => {
+        ColumnType::Time | ColumnType::TimePrecision(_) => {
             if hash {
                 10_039
             } else {
                 10_038
             }
         }
-        ColumnType::TimeTz => {
+        ColumnType::TimeTz | ColumnType::TimeTzPrecision(_) => {
             if hash {
                 10_042
             } else {
                 10_041
             }
         }
-        ColumnType::Timestamp => {
+        ColumnType::Timestamp | ColumnType::TimestampPrecision(_) => {
             if hash {
                 10_046
             } else {
                 3_128
             }
         }
-        ColumnType::TimestampTz => {
+        ColumnType::TimestampTz | ColumnType::TimestampTzPrecision(_) => {
             if hash {
                 10_040
             } else {
                 3_127
             }
         }
-        ColumnType::Interval => {
+        ColumnType::Interval | ColumnType::IntervalWithFields { .. } => {
             if hash {
                 10_023
             } else {

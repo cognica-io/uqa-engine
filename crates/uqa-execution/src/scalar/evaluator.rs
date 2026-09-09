@@ -66,7 +66,7 @@ pub fn eval_scalar(
         ScalarExpr::QualifiedColumn { qualifier, column } => context
             .sql_context()
             .qualified_column_value(qualifier, column),
-        ScalarExpr::Literal(value) => Ok(value.clone()),
+        ScalarExpr::Literal(value) | ScalarExpr::TypedLiteral { value, .. } => Ok(value.clone()),
         ScalarExpr::Param(index) => eval_parameter(*index, context.params()),
         ScalarExpr::Func {
             name,
@@ -441,7 +441,9 @@ fn execute_in_subquery(
 
 fn scalar_source_type(expression: &ScalarExpr, context: &ScalarEvalContext<'_>) -> Option<String> {
     match expression {
-        ScalarExpr::Cast { ty, .. } => return Some(ty.clone()),
+        ScalarExpr::Cast { ty, .. } | ScalarExpr::TypedLiteral { ty, .. } => {
+            return Some(ty.clone())
+        }
         ScalarExpr::UnaryMinus(inner) => return scalar_source_type(inner, context),
         ScalarExpr::Literal(Value::Int(value)) if i32::try_from(*value).is_ok() => {
             return Some("integer".into());
@@ -464,7 +466,9 @@ fn scalar_source_type(expression: &ScalarExpr, context: &ScalarEvalContext<'_>) 
 fn scalar_integer_width(expression: &ScalarExpr) -> Option<IntegerWidth> {
     match expression {
         ScalarExpr::Literal(Value::Int(value)) => Some(integer_width_for_literal(*value)),
-        ScalarExpr::Cast { ty, .. } => integer_width_for_type(ty),
+        ScalarExpr::Cast { ty, .. } | ScalarExpr::TypedLiteral { ty, .. } => {
+            integer_width_for_type(ty)
+        }
         ScalarExpr::UnaryMinus(inner) => scalar_integer_width(inner),
         ScalarExpr::Binary {
             op: BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide,

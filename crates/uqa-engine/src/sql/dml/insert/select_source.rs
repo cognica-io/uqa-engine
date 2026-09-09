@@ -5,8 +5,8 @@
 //
 
 use super::{
-    apply_missing_column_defaults, attach_prepared_insert_identity, coerce_to_column_type,
-    dml_storage_error, encode_prepared_insert_spill_row, lock_document_key_dependencies,
+    apply_missing_column_defaults, attach_prepared_insert_identity, dml_storage_error,
+    encode_prepared_insert_spill_row, lock_document_key_dependencies,
     lock_existing_document_foreign_key_dependencies, partition_insert_target,
     physical_work_mem_bytes, prepare_auto_increment_identity, prepare_insert_identity,
     prepared_insert_spill_schema, refresh_insert_identity_after_trigger, stage_prepared_insert_row,
@@ -244,6 +244,7 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
         let result_width = result_width.ok_or_else(|| {
             SQLError::Internal("INSERT SELECT row consumer has no source width".into())
         })?;
+        let source_schema = &source_row.schema;
         let source_row = source_row.view();
         let mut document = Document::new();
         for (index, column) in columns.iter().take(result_width).enumerate() {
@@ -259,7 +260,13 @@ impl crate::sql::select::QueryRowConsumer for InsertSelectConsumer {
                 .unwrap_or(super::super::Value::Null);
             document.insert(
                 column.clone(),
-                coerce_to_column_type(engine, &stmt.table, column, value)?,
+                crate::sql::ddl::coerce_to_column_type_from(
+                    engine,
+                    &stmt.table,
+                    column,
+                    value,
+                    source_schema.column_types()[index].as_ref(),
+                )?,
             );
         }
         apply_missing_column_defaults(engine, &stmt.table, &mut document, params)?;

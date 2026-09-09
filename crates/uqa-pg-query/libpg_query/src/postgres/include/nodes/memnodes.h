@@ -130,6 +130,7 @@ typedef struct MemoryContextData
 	MemoryContext nextchild;	/* next child of same parent */
 	const char *name;			/* context name */
 	const char *ident;			/* context ID if any */
+	const void *libpg_query_plpgsql_catalog;
 	MemoryContextCallback *reset_cbs;	/* list of reset/delete callbacks */
 } MemoryContextData;
 

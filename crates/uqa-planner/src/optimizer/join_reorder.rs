@@ -151,6 +151,7 @@ fn reorder_command_joins(
         | CommandPlan::FetchCursor(_)
         | CommandPlan::CloseCursor { .. }
         | CommandPlan::CreateSequence(_)
+        | CommandPlan::CreateDomain(_)
         | CommandPlan::AlterSequence(_)
         | CommandPlan::Deallocate { .. }
         | CommandPlan::CreateForeignServer(_)
@@ -534,7 +535,7 @@ fn collect_resolved_aliases(
             output.insert(qualifier.clone());
             true
         }
-        ScalarExpr::Literal(_) | ScalarExpr::Param(_) => true,
+        ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. } | ScalarExpr::Param(_) => true,
         ScalarExpr::Func {
             args,
             order_by,
@@ -887,6 +888,7 @@ fn collect_scalar_qualifiers(expression: &ScalarExpr, output: &mut BTreeSet<Stri
         | ScalarExpr::Position(_)
         | ScalarExpr::InternalColumn(_)
         | ScalarExpr::Literal(_)
+        | ScalarExpr::TypedLiteral { .. }
         | ScalarExpr::Param(_)
         | ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. } => {}

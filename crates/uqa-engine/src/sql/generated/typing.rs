@@ -249,6 +249,7 @@ fn bind_function_calls(
         | Expr::QualifiedColumn { .. }
         | Expr::InternalColumn(_)
         | Expr::Literal(_)
+        | Expr::TypedLiteral { .. }
         | Expr::WindowCall { .. }
         | Expr::ScalarSubquery(_)
         | Expr::Exists { .. }
@@ -258,6 +259,9 @@ fn bind_function_calls(
 
 pub(super) fn column_generation_type(ty: &ColumnType) -> GenerationType {
     match ty {
+        ColumnType::Named(name) => {
+            unreachable!("unresolved declaration type {name} reached catalog projection")
+        }
         ColumnType::SmallInteger => GenerationType::SmallInteger,
         ColumnType::Integer => GenerationType::Integer,
         ColumnType::BigInteger => GenerationType::BigInteger,
@@ -296,11 +300,13 @@ pub(super) fn column_generation_type(ty: &ColumnType) -> GenerationType {
             GenerationType::Array(Box::new(column_generation_type(element)))
         }
         ColumnType::Date => GenerationType::Date,
-        ColumnType::Time => GenerationType::Time,
-        ColumnType::TimeTz => GenerationType::TimeTz,
-        ColumnType::Timestamp => GenerationType::Timestamp,
-        ColumnType::TimestampTz => GenerationType::TimestampTz,
-        ColumnType::Interval => GenerationType::Interval,
+        ColumnType::Time | ColumnType::TimePrecision(_) => GenerationType::Time,
+        ColumnType::TimeTz | ColumnType::TimeTzPrecision(_) => GenerationType::TimeTz,
+        ColumnType::Timestamp | ColumnType::TimestampPrecision(_) => GenerationType::Timestamp,
+        ColumnType::TimestampTz | ColumnType::TimestampTzPrecision(_) => {
+            GenerationType::TimestampTz
+        }
+        ColumnType::Interval | ColumnType::IntervalWithFields { .. } => GenerationType::Interval,
         ColumnType::Range(subtype) => GenerationType::Range(*subtype),
         ColumnType::Multirange(subtype) => GenerationType::Multirange(*subtype),
         ColumnType::Vector(_) => GenerationType::Vector,
@@ -363,6 +369,9 @@ fn infer_expression(
             .map(|column| column_generation_type(&column.ty))
             .ok_or_else(|| SQLError::UnknownColumn(name.clone())),
         Expr::Literal(value) => Ok(value_generation_type(value)),
+        Expr::TypedLiteral { ty, .. } => crate::sql::resolve_catalog_column_type(engine, ty)
+            .map(|ty| column_generation_type(&ty))
+            .ok_or_else(|| SQLError::Unsupported(format!("type {ty} does not exist"))),
         Expr::Array(items) => {
             let mut element = GenerationType::Null;
             for item in items {
@@ -833,7 +842,7 @@ pub(super) fn generation_expression_column_type(
             .iter()
             .find(|column| column.name == *name)
             .map(|column| column.ty.clone()),
-        Expr::Cast { ty, .. } => ColumnType::from_sql_name(ty).ok(),
+        Expr::Cast { ty, .. } | Expr::TypedLiteral { ty, .. } => ColumnType::from_sql_name(ty).ok(),
         Expr::Literal(Value::Str(_) | Value::Null) => None,
         _ => ColumnType::from_sql_name(&generation_type_name(inferred)).ok(),
     }

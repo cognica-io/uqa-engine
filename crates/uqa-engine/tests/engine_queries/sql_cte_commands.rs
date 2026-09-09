@@ -51,10 +51,23 @@ fn verify_oracle(engine: &Engine, input: &str) {
                         });
                     values
                         .into_iter()
-                        .map(|value| match value {
+                        .enumerate()
+                        .map(|(index, value)| match value {
                             Value::Null => None,
                             Value::Str(value) => Some(value),
                             Value::Bool(value) => Some(if value { "t" } else { "f" }.into()),
+                            Value::Int(value)
+                                if result.column_types[index] == Some(ColumnType::Regtype) =>
+                            {
+                                Some(
+                                    uqa_engine::sql::format_postgres_text(
+                                        &Value::Int(value),
+                                        &ColumnType::Regtype,
+                                        Some(engine),
+                                    )
+                                    .unwrap(),
+                                )
+                            }
                             Value::Int(value) => Some(value.to_string()),
                             Value::Float(value) => Some(value.to_string()),
                             value => panic!("unexpected value {value:?} for {sql}"),

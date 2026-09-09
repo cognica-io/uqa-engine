@@ -74,6 +74,7 @@ pub(in crate::sql) fn qualify_unqualified_columns(
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Literal(_)
+        | ScalarExpr::TypedLiteral { .. }
         | ScalarExpr::Param(_)
         | ScalarExpr::Star => expr.clone(),
         ScalarExpr::Array(items) => ScalarExpr::Array(

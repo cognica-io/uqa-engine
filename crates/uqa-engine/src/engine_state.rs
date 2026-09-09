@@ -243,6 +243,7 @@ impl StoredView {
 }
 
 pub(super) struct DurableCatalogState {
+    pub(super) domains: CatalogCell<BTreeMap<String, super::engine_domains::StoredDomain>>,
     pub(super) graphs: CatalogCell<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
     pub(super) models: CatalogCell<BTreeMap<String, DeepModel>>,
     pub(super) scoring_params: CatalogCell<BTreeMap<String, String>>,
@@ -282,6 +283,7 @@ pub(super) struct DurableCatalogState {
 
 #[derive(Clone)]
 pub(super) struct DurableCatalogSnapshot {
+    pub(super) domains: Arc<BTreeMap<String, super::engine_domains::StoredDomain>>,
     pub(super) graphs: Arc<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
     pub(super) models: Arc<BTreeMap<String, DeepModel>>,
     pub(super) scoring_params: Arc<BTreeMap<String, String>>,
@@ -320,6 +322,7 @@ pub(super) struct DurableCatalogSnapshot {
 impl DurableCatalogState {
     pub(super) fn new() -> Self {
         Self {
+            domains: CatalogCell::new(BTreeMap::new()),
             graphs: CatalogCell::new(BTreeMap::new()),
             models: CatalogCell::new(BTreeMap::new()),
             scoring_params: CatalogCell::new(BTreeMap::new()),
@@ -354,6 +357,7 @@ impl DurableCatalogState {
     /// Capture durable registries in the transaction coordinator's canonical lock order.
     pub(super) fn snapshot(&self) -> DurableCatalogSnapshot {
         DurableCatalogSnapshot {
+            domains: self.domains.snapshot(),
             graphs: self.graphs.snapshot(),
             models: self.models.snapshot(),
             scoring_params: self.scoring_params.snapshot(),
@@ -404,6 +408,7 @@ impl DurableCatalogState {
             .restore(&snapshot.foreign_table_security);
         self.sql_user_functions
             .restore(&snapshot.sql_user_functions);
+        self.domains.restore(&snapshot.domains);
         self.roles.restore(&snapshot.roles);
         self.role_memberships.restore(&snapshot.role_memberships);
         self.triggers.restore(&snapshot.triggers);

@@ -27,8 +27,8 @@ When generating SQL:
 
 ## SQL contracts
 
-- [Data types](docs/manual/sql/01-data-types.md): Scalars, temporal values, JSON, arrays, vectors, tensors, NULL, and conversions.
-- [DDL](docs/manual/sql/02-ddl.md): Schemas, relations, constraints, indexes, views, sequences, and foreign tables.
+- [Data types](docs/manual/sql/01-data-types.md): Scalars, temporal precision, interval fields, domains, JSON, arrays, vectors, tensors, NULL, and conversions.
+- [DDL](docs/manual/sql/02-ddl.md): Schemas, domain declarations, relations, constraints, indexes, views, sequences, and foreign tables.
 - [Queries and DML](docs/manual/sql/03-queries-and-dml.md): SELECT, joins, recursive and data-modifying CTEs, grouping, windows, sets, and mutation.
 - [Expressions and functions](docs/manual/sql/04-expressions-and-functions.md): Operators, scalar functions, aggregates, windows, and general table functions.
 - [Analyzer SQL](docs/manual/sql/05-analyzers.md): Exact analyzer JSON, built-ins including `standard_cjk`, lifecycle functions, GIN binding, and diagnostics.
@@ -41,6 +41,7 @@ When generating SQL:
 - [Tutorials](docs/manual/tutorials/README.md): Ordered, working database exercises.
 - [Rust engine API](docs/manual/reference/02-rust-engine-api.md): Engine lifecycle, parameters, results, Simple Query messages and command completion, cursors, and direct APIs.
 - [HTTP Engine API](docs/manual/reference/09-http-engine.md): Direct authenticated local and Cloud SQL from Rust, Python, Node.js, and browsers, including native CLI project lookup, explicit deployment configuration, atomic batches, NDJSON streaming, CORS, and connection security.
+- [PostgreSQL TCP server](docs/manual/reference/11-postgresql-server.md): Development Simple Query listener, protocol negotiation, explicit trust authentication, per-connection sessions, cancellation, notifications, and text result metadata.
 - [CLI](docs/manual/reference/03-cli.md): `usql` commands and persistent database usage.
 - [Search and ranking](docs/manual/reference/05-search-and-ranking.md): Retrieval behavior and evaluation guidance.
 - [Text analyzer pipelines](docs/manual/reference/06-text-analyzers.md): Pipeline stages, exact component vocabulary, phases, and bindings.

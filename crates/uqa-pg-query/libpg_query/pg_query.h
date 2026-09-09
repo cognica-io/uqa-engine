@@ -28,7 +28,20 @@ typedef struct {
 } PgQueryProtobuf;
 
 typedef struct {
+  int32_t start;
+  int32_t end;
+  int32_t token;
+  // Zero for an identifier or non-keyword token; otherwise the PostgreSQL
+  // keyword category encoded by ScanToken.keyword_kind in pg_query.proto.
+  int32_t keyword_kind;
+} PgQueryScanToken;
+
+typedef struct {
   PgQueryProtobuf pbuf;
+  // Direct token metadata for callers that do not need to decode pbuf. Owned
+  // by this result and released by pg_query_free_scan_result().
+  PgQueryScanToken* tokens;
+  size_t token_count;
   char* stderr_buffer;
   PgQueryError* error;
 } PgQueryScanResult;
@@ -72,6 +85,54 @@ typedef struct {
   char* plpgsql_funcs;
   PgQueryError* error;
 } PgQueryPlpgsqlParseResult;
+
+typedef enum {
+  PG_QUERY_CATALOG_LOOKUP_ERROR = -1,
+  PG_QUERY_CATALOG_LOOKUP_NOT_FOUND = 0,
+  PG_QUERY_CATALOG_LOOKUP_FOUND = 1
+} PgQueryCatalogLookupResult;
+
+typedef struct {
+  uint32_t oid;
+  uint32_t namespace_oid;
+  const char* name;
+  int16_t length;
+  bool by_value;
+  char type_kind;
+  char category;
+  char alignment;
+  char storage;
+  uint32_t array_oid;
+  uint32_t element_oid;
+  uint32_t base_type_oid;
+  uint32_t collation_oid;
+  uint32_t subscript_handler_oid;
+} PgQueryPlpgsqlTypeMetadata;
+
+// Catalog callbacks run synchronously during pg_query_parse_plpgsql_with_catalog.
+// They must not reenter libpg_query. A NULL schema_name requests an unqualified
+// lookup through the caller's effective type search path; a non-NULL name is
+// an exact namespace lookup. On PG_QUERY_CATALOG_LOOKUP_FOUND, every required
+// output field must be populated. Returned strings must remain valid until the
+// next catalog callback begins.
+typedef PgQueryCatalogLookupResult (*PgQueryPlpgsqlLookupNamespace)(
+    void* context, const char* schema_name, uint32_t* namespace_oid);
+typedef PgQueryCatalogLookupResult (*PgQueryPlpgsqlLookupTypeByName)(
+    void* context, const char* schema_name, const char* type_name,
+    PgQueryPlpgsqlTypeMetadata* type);
+typedef PgQueryCatalogLookupResult (*PgQueryPlpgsqlLookupTypeByOid)(
+    void* context, uint32_t type_oid, PgQueryPlpgsqlTypeMetadata* type);
+typedef const char* (*PgQueryPlpgsqlCatalogError)(void* context);
+
+// The catalog and its context must remain valid for the duration of the parse.
+// All four callbacks are required when a non-NULL catalog is supplied.
+typedef struct {
+  void* context;
+  PgQueryPlpgsqlLookupNamespace lookup_namespace;
+  PgQueryPlpgsqlLookupTypeByName lookup_type_by_name;
+  PgQueryPlpgsqlLookupTypeByOid lookup_type_by_oid;
+  PgQueryPlpgsqlCatalogError get_error;
+} PgQueryPlpgsqlCatalog;
 
 typedef struct {
   uint64_t fingerprint;
@@ -124,6 +185,9 @@ PgQueryParseResult pg_query_parse_opts(const char* input, int parser_options);
 PgQueryProtobufParseResult pg_query_parse_protobuf(const char* input);
 PgQueryProtobufParseResult pg_query_parse_protobuf_opts(const char* input, int parser_options);
 PgQueryPlpgsqlParseResult pg_query_parse_plpgsql(const char* input);
+// A supplied catalog adds each PLpgSQL_type's resolved typoid to the JSON output.
+PgQueryPlpgsqlParseResult pg_query_parse_plpgsql_with_catalog(
+    const char* input, const PgQueryPlpgsqlCatalog* catalog);
 
 PgQueryFingerprintResult pg_query_fingerprint(const char* input);
 PgQueryFingerprintResult pg_query_fingerprint_opts(const char* input, int parser_options);

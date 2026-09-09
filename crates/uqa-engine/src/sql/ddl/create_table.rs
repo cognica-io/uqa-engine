@@ -105,6 +105,9 @@ fn create_table_after_preflight(
     engine: &Engine,
     mut c: CreateTable,
 ) -> Result<SQLResult, SQLError> {
+    for column in &mut c.columns {
+        column.ty = crate::sql::resolve_declared_column_type(engine, &column.ty)?;
+    }
     prepare_create_table_hierarchy(engine, &mut c)?;
     super::constraint_indexes::name_constraint_indexes(engine, &c.name, &mut c.key_constraints)?;
     bind_create_table_relation_references(engine, &mut c)?;

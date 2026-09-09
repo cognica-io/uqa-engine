@@ -13,6 +13,7 @@ fn parameter(type_name: &str) -> RoutineParameterDescriptor {
     RoutineParameterDescriptor {
         name: None,
         type_name: type_name.into(),
+        column_type: ColumnType::from_sql_name(type_name).ok(),
         has_default: false,
         variadic: false,
     }

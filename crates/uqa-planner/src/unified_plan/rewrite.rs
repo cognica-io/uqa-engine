@@ -295,6 +295,7 @@ pub(super) fn rewrite_command_scalars(
         | CommandPlan::FetchCursor(_)
         | CommandPlan::CloseCursor { .. }
         | CommandPlan::CreateSequence(_)
+        | CommandPlan::CreateDomain(_)
         | CommandPlan::AlterSequence(_)
         | CommandPlan::Deallocate { .. }
         | CommandPlan::CreateForeignServer(_)
@@ -452,6 +453,7 @@ pub(super) fn rewrite_scalar(
         | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
+        | ScalarExpr::TypedLiteral { .. }
         | ScalarExpr::Param(_)
         | ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. } => {}

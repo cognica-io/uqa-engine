@@ -131,6 +131,7 @@ pub fn contains_retrieval(expression: &ScalarExpr) -> bool {
         | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
+        | ScalarExpr::TypedLiteral { .. }
         | ScalarExpr::Param(_)
         | ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. } => false,
@@ -173,6 +174,7 @@ fn scalar_operand(expression: &ScalarExpr) -> bool {
         ScalarExpr::Column(_)
             | ScalarExpr::QualifiedColumn { .. }
             | ScalarExpr::Literal(_)
+            | ScalarExpr::TypedLiteral { .. }
             | ScalarExpr::Param(_)
     )
 }

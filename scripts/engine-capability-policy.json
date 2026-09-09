@@ -34,7 +34,8 @@
         "crates/uqa-engine/src/sql/catalog/pg_catalog/sequences.rs",
         "crates/uqa-engine/src/sql/catalog/pg_catalog/types.rs",
         "crates/uqa-engine/src/sql/catalog/pg_namespace.rs",
-        "crates/uqa-engine/src/sql/catalog/pg_settings.rs"
+        "crates/uqa-engine/src/sql/catalog/pg_settings.rs",
+        "crates/uqa-engine/src/sql/catalog/plpgsql.rs"
       ],
       "engine_allowlist": []
     },

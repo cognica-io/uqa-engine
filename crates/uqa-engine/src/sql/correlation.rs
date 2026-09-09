@@ -727,6 +727,7 @@ fn expression_has_external_reference(expr: &ScalarExpr, scopes: &[QueryScope]) -
         | ScalarExpr::Star
         | ScalarExpr::Position(_)
         | ScalarExpr::Literal(_)
+        | ScalarExpr::TypedLiteral { .. }
         | ScalarExpr::Param(_)
         | ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. } => false,

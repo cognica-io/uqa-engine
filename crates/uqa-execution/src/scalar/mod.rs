@@ -33,6 +33,11 @@ pub enum ScalarExpr {
         column: String,
     },
     Literal(Value),
+    /// An already-coerced runtime datum whose declared type must survive lowering.
+    TypedLiteral {
+        value: Value,
+        ty: String,
+    },
     Param(usize),
     Func {
         name: String,

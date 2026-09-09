@@ -331,6 +331,7 @@ fn trigger_datum_indices_must_reference_existing_datums() {
 fn scalar_datum(name: &str) -> PLpgSQLDatum {
     PLpgSQLDatum::Var(Box::new(PLpgSQLVar {
         name: name.into(),
+        type_oid: None,
         type_name: "integer".into(),
         type_reference: None,
         default: None,

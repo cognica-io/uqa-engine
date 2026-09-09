@@ -463,6 +463,17 @@ impl Engine {
 }
 
 pub(super) fn default_runtime_parameter(name: &str) -> Option<&'static str> {
+    if name.eq_ignore_ascii_case("application_name") {
+        return Some("");
+    }
+    if name.eq_ignore_ascii_case("standard_conforming_strings")
+        || name.eq_ignore_ascii_case("integer_datetimes")
+    {
+        return Some("on");
+    }
+    if name.eq_ignore_ascii_case("server_version_num") {
+        return Some("180000");
+    }
     if name.eq_ignore_ascii_case("server_version") {
         return Some("18.0-uqa");
     }
@@ -505,7 +516,8 @@ pub(super) fn is_known_runtime_parameter(name: &str) -> bool {
 }
 
 pub(super) fn is_mutable_runtime_parameter(name: &str) -> bool {
-    name.eq_ignore_ascii_case("search_path")
+    name.eq_ignore_ascii_case("application_name")
+        || name.eq_ignore_ascii_case("search_path")
         || name.eq_ignore_ascii_case("client_encoding")
         || name.eq_ignore_ascii_case("datestyle")
         || name.eq_ignore_ascii_case("timezone")

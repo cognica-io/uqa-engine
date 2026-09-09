@@ -43,7 +43,7 @@ fn pg18_length_functions_preserve_text_character_and_bytea_semantics() {
         "SELECT pg_typeof(octet_length(NULL))",
         "SELECT pg_typeof(bit_length(NULL))",
     ] {
-        assert_eq!(scalar(&eng, sql), Value::Str("integer".into()), "{sql}");
+        assert_eq!(scalar(&eng, sql), Value::Int(23), "{sql}");
     }
     for sql in [
         "SELECT length(NULL)",

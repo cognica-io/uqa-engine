@@ -61,9 +61,6 @@ pub(super) fn outer_expression_contains_volatile_function(
     }
     match expression {
         ScalarExpr::ScalarSubquery(_) | ScalarExpr::Exists { .. } => false,
-        ScalarExpr::InSubquery { expr, .. } => {
-            outer_expression_contains_volatile_function(engine, expr)
-        }
         ScalarExpr::Func {
             name,
             binding,
@@ -95,6 +92,7 @@ pub(super) fn outer_expression_contains_volatile_function(
         }
         ScalarExpr::Not(inner)
         | ScalarExpr::UnaryMinus(inner)
+        | ScalarExpr::InSubquery { expr: inner, .. }
         | ScalarExpr::IsNull { expr: inner, .. }
         | ScalarExpr::Cast { expr: inner, .. } => {
             outer_expression_contains_volatile_function(engine, inner)
@@ -154,6 +152,7 @@ pub(super) fn outer_expression_contains_volatile_function(
         | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
+        | ScalarExpr::TypedLiteral { .. }
         | ScalarExpr::Param(_) => false,
     }
 }
@@ -264,6 +263,7 @@ pub(in crate::sql) fn collect_subquery_ids(expression: &ScalarExpr, output: &mut
         | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
+        | ScalarExpr::TypedLiteral { .. }
         | ScalarExpr::Param(_) => {}
     }
 }

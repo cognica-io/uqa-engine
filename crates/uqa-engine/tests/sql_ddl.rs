@@ -126,7 +126,7 @@ fn create_table_if_not_exists_checks_the_relation_before_its_definition() {
             &[],
         )
         .expect_err("a free target must analyze its definition");
-    assert_eq!(error.sqlstate(), Some("0A000"));
+    assert_eq!(error.sqlstate(), Some("42704"));
     assert!(error.to_string().contains("missing_type"));
     let error = engine
         .sql(
@@ -753,7 +753,7 @@ fn alter_column_type_preserves_oid_source_width_and_cast_context() {
         "SELECT small_value, pg_typeof(small_value) AS small_type FROM type_sources",
     );
     assert_eq!(row.rows[0]["small_value"], Value::Int(i64::from(u32::MAX)));
-    assert_eq!(row.rows[0]["small_type"], Value::Str("oid".into()));
+    assert_eq!(row.rows[0]["small_type"], Value::Int(26));
 
     let error = engine
         .sql(
@@ -767,7 +767,7 @@ fn alter_column_type_preserves_oid_source_width_and_cast_context() {
         "SELECT big_value, pg_typeof(big_value) AS big_type FROM type_sources",
     );
     assert_eq!(unchanged.rows[0]["big_value"], Value::Int(-1));
-    assert_eq!(unchanged.rows[0]["big_type"], Value::Str("bigint".into()));
+    assert_eq!(unchanged.rows[0]["big_type"], Value::Int(20));
 
     let error = engine
         .sql(

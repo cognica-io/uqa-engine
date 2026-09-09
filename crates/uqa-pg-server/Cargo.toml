@@ -1,0 +1,37 @@
+[package]
+name = "uqa-pg-server"
+description = "PostgreSQL protocol sessions backed by UQA Engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+publish = false
+autotests = false
+
+[dependencies]
+uqa-core = { workspace = true }
+uqa-engine = { workspace = true }
+uqa-pg-wire = { workspace = true }
+uqa-sql = { workspace = true }
+getrandom = { workspace = true }
+parking_lot = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.13"
+serde_json = { workspace = true }
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
+
+[[bin]]
+name = "uqa-pg-server"
+path = "src/main.rs"
+test = false
+
+[lints]
+workspace = true

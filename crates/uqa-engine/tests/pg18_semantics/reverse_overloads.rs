@@ -32,7 +32,7 @@ fn pg18_reverse_preserves_text_and_bytea_overloads() {
             "bytea",
         ),
     ] {
-        assert_eq!(scalar(&eng, sql), Value::Str(expected.into()), "{sql}");
+        assert_eq!(super::text(&eng, sql), expected, "{sql}");
     }
     assert_eq!(scalar(&eng, "SELECT reverse(NULL)"), Value::Null);
     assert_eq!(scalar(&eng, "SELECT reverse(NULL::bytea)"), Value::Null);
@@ -52,7 +52,7 @@ fn pg18_reverse_preserves_text_and_bytea_overloads() {
         )
         .unwrap();
     assert_eq!(text_param.rows[0]["value"], Value::Str("cba".into()));
-    assert_eq!(text_param.rows[0]["ty"], Value::Str("text".into()));
+    assert_eq!(text_param.rows[0]["ty"], Value::Int(25));
     let unknown_param = eng
         .sql(
             "SELECT reverse($1) AS value, pg_typeof(reverse($1)) AS ty",
@@ -60,7 +60,7 @@ fn pg18_reverse_preserves_text_and_bytea_overloads() {
         )
         .unwrap();
     assert_eq!(unknown_param.rows[0]["value"], Value::Null);
-    assert_eq!(unknown_param.rows[0]["ty"], Value::Str("text".into()));
+    assert_eq!(unknown_param.rows[0]["ty"], Value::Int(25));
 }
 
 #[test]
@@ -110,7 +110,7 @@ fn pg18_reverse_ranks_user_overloads_and_pg_catalog_search_order() {
         ("SELECT pg_catalog.reverse('abc')", "cba"),
         ("SELECT reverse_overload.reverse('abc')", "user-text"),
     ] {
-        assert_eq!(scalar(&eng, sql), Value::Str(expected.into()), "{sql}");
+        assert_eq!(super::text(&eng, sql), expected, "{sql}");
     }
 
     eng.sql(
@@ -124,6 +124,6 @@ fn pg18_reverse_ranks_user_overloads_and_pg_catalog_search_order() {
         ("SELECT reverse('abc')", "user-text"),
         ("SELECT reverse(1)", "user-int"),
     ] {
-        assert_eq!(scalar(&eng, sql), Value::Str(expected.into()), "{sql}");
+        assert_eq!(super::text(&eng, sql), expected, "{sql}");
     }
 }

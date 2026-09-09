@@ -103,7 +103,7 @@ fn pg18_array_transforms_bind_polymorphic_and_named_arguments() {
             &eng,
             "SELECT pg_typeof(array_sort(ARRAY[2::smallint,1::smallint]))"
         ),
-        Value::Str("smallint[]".into())
+        Value::Int(1005)
     );
     assert_eq!(
         scalar(

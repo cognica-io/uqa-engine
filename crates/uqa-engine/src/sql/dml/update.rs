@@ -919,7 +919,7 @@ pub(in crate::sql) fn row_independent_update_values(
 
 pub(in crate::sql) fn expr_is_row_independent(expr: &ScalarExpr) -> bool {
     match expr {
-        ScalarExpr::Literal(_) | ScalarExpr::Param(_) => true,
+        ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. } | ScalarExpr::Param(_) => true,
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)
         | ScalarExpr::And(items)

@@ -17,6 +17,7 @@ use uqa_sql::ast::{
 };
 use uqa_sql::SQLError;
 
+use crate::engine_capabilities::CatalogReadView;
 use crate::{Arc, Engine, RelationIdentity};
 
 use super::{canonical_routine_type_name, combined_overloads, SQLUserFunction};
@@ -452,6 +453,7 @@ impl Engine {
                 }
             } else {
                 static_routine_match(
+                    &self.catalog_read_view(),
                     function,
                     argument_names,
                     argument_types,
@@ -468,6 +470,7 @@ impl Engine {
             return Ok(None);
         };
         resolve_static_routine_overload(
+            &self.catalog_read_view(),
             name,
             overloads,
             argument_names,
@@ -480,6 +483,7 @@ impl Engine {
 }
 
 fn resolve_static_routine_overload(
+    catalog: &CatalogReadView,
     name: &str,
     overloads: Vec<Arc<SQLUserFunction>>,
     argument_names: &[Option<String>],
@@ -491,6 +495,7 @@ fn resolve_static_routine_overload(
     let mut match_error = None;
     for function in overloads {
         match static_routine_match(
+            catalog,
             function,
             argument_names,
             argument_types,
@@ -553,6 +558,7 @@ pub(super) fn retain_earliest_effective_signatures(candidates: &mut Vec<StaticFu
 }
 
 fn static_routine_match(
+    catalog: &CatalogReadView,
     function: Arc<SQLUserFunction>,
     argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
@@ -565,6 +571,7 @@ fn static_routine_match(
         .map(|index| &function.def.params[*index])
         .collect::<Vec<_>>();
     let Some(matched) = match_static_function_signature(
+        catalog,
         &parameters,
         argument_names,
         argument_types,
@@ -589,12 +596,14 @@ fn static_routine_match(
 }
 
 pub(super) fn static_function_match(
+    catalog: &CatalogReadView,
     function: Arc<SQLUserFunction>,
     argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
     explicit_variadic: bool,
 ) -> Result<Option<StaticFunctionMatch>, RoutineSignatureMatchError> {
     static_routine_match(
+        catalog,
         function,
         argument_names,
         argument_types,
@@ -604,6 +613,7 @@ pub(super) fn static_function_match(
 }
 
 fn match_static_function_signature(
+    catalog: &CatalogReadView,
     signature: &[&uqa_sql::ast::FunctionParam],
     argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
@@ -614,6 +624,7 @@ fn match_static_function_signature(
         .map(|parameter| RoutineParameterDescriptor {
             name: Some(parameter.name.clone()),
             type_name: canonical_routine_type_name(&parameter.type_name),
+            column_type: declared_parameter_type(catalog, &parameter.type_name),
             has_default: parameter.default.is_some(),
             variadic: parameter.mode == FunctionParamMode::Variadic,
         })
@@ -626,6 +637,21 @@ fn match_static_function_signature(
             explicit_variadic,
         },
     )
+}
+
+fn declared_parameter_type(catalog: &CatalogReadView, type_name: &str) -> Option<ColumnType> {
+    if let Some(element) = type_name.strip_suffix("[]") {
+        return declared_parameter_type(catalog, element).map(|ty| ColumnType::Array(Box::new(ty)));
+    }
+    ColumnType::from_sql_name(type_name).ok().or_else(|| {
+        catalog
+            .domains()
+            .map(crate::engine_domains::StoredDomain::column_type)
+            .find(|ty| {
+                canonical_routine_type_name(&ty.sql_name())
+                    == canonical_routine_type_name(type_name)
+            })
+    })
 }
 
 fn routine_call_parameter_indices(def: &CreateFunction, kind: RoutineCallKind) -> Vec<usize> {
@@ -712,6 +738,7 @@ fn routine_invocation_binding(
     RoutineInvocationBinding {
         argument_positions,
         argument_targets: matched.argument_targets.clone(),
+        argument_sources: matched.argument_sources.clone(),
         parameter_types,
         return_type,
         variadic_mode,

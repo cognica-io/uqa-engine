@@ -127,7 +127,13 @@ pub(in crate::sql) fn physical_projections(
         .map(|(index, projection)| {
             (
                 ProjectionTarget::Column(labels[index].clone()),
-                projection.expr.clone(),
+                match &projection.expr {
+                    ScalarExpr::Literal(uqa_core::Value::Null) => ScalarExpr::Cast {
+                        expr: Box::new(projection.expr.clone()),
+                        ty: "text".into(),
+                    },
+                    expression => expression.clone(),
+                },
             )
         })
         .collect()

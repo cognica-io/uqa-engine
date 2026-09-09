@@ -74,6 +74,7 @@ pub(super) fn forbidden_command(
         CommandPlan::Vacuum(_) => Ok(None),
         CommandPlan::Truncate { .. } => Ok(Some("TRUNCATE")),
         CommandPlan::CreateSequence(_) => Ok(Some("CREATE SEQUENCE")),
+        CommandPlan::CreateDomain(_) => Ok(Some("CREATE DOMAIN")),
         CommandPlan::AlterSequence(_) => Ok(Some("ALTER SEQUENCE")),
         CommandPlan::CreateTableAs { .. } => Ok(Some("CREATE TABLE AS")),
         CommandPlan::DeclareCursor { query, .. } => {

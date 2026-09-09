@@ -8,11 +8,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Added an unpublished PostgreSQL TCP server crate with independent authenticated-role sessions, explicit trust policy, Simple Query results, cancellation, notifications, and protocol 3.0/3.2 negotiation.
 - Added data-modifying CTEs for INSERT, UPDATE, DELETE, and MERGE, with typed RETURNING results, statement snapshot sharing, and execution of unreferenced commands. PostgreSQL 18 differential fixtures cover command results, state changes, and diagnostics on memory and SQLite engines.
 - Added `Engine::sql_simple_query` for ordered per-statement results and `SQLResult::command_tag` for PostgreSQL command completion. Complete-message parsing, implicit transaction segments, deferred commit errors, and callback failures preserve the transaction's actual outcome.
+- Added domain declarations with defaults, named CHECK and NOT NULL constraints, nested domains, domain arrays, catalog identities, transactional rollback, and SQLite persistence. PostgreSQL differential cases verify conversion errors, assignment versus explicit-cast behavior, preservation of already typed values, and constraint-function effects.
 
 ### Fixed
 
+- Connected the native PL/pgSQL parser to an immutable engine catalog snapshot so user-defined scalar declarations retain their initial values and declaration constraints. Updated the pinned PostgreSQL 18 parser chain with catalog type callbacks, resolved datum OIDs, and structured type-name preservation; quoted domains, domain arrays, and information-schema domains keep their identity in stored routines and anonymous blocks.
+- Preserved declared types when binding PL/pgSQL variables and record fields, applied domain constraints at field assignment, and validated trigger return records by position without repeating domain checks. Domain and domain-array catalog rows retain their creating role as owner. Implicit domain coercions in routine parameters, local variables, and returns include constraint-function effects when selecting the statement transaction mode.
+- Preserved time and timestamp precision and interval field restrictions through casts, assignments, arrays, function-source declarations, result descriptors, catalog metadata, and SQLite reopen. Rounding retains end-of-day time values and PostgreSQL's signed timestamp behavior; CASE result modifiers follow surviving constant branches without imposing declaration limits during common-type coercion.
 - Corrected compressed SQLite writer reservations so existing and new readers remain available until a writer requests exclusive access; pending writers block new readers, and other processes can detect live rollback-journal reservations. This prevents spurious writer-promotion failures during concurrent background statistics and VACUUM FULL.
 - Preserved MERGE CTE scope in automatic-view rewrites, privilege analysis, and stored SQL routines; ran statement-level BEFORE triggers before source evaluation while retaining the original statement snapshot. Invalid MERGE expressions are rejected before trigger effects.
 - Kept quoted rewrite-rule column names case-sensitive and returned unqualified output labels for schema-qualified function calls.
@@ -21,6 +26,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- `REGTYPE` values, including `pg_typeof`, now retain catalog OIDs in the integer carrier so comparisons and catalog lookups use type identity. Cast to text or use `sql::format_postgres_text` for the visible type name. `SQLResult::kind` distinguishes row descriptors from commands, including zero-column queries.
 - Rust AST CTEs now expose `body: CteBody` instead of the SELECT-only `query` field, and planner CTEs expose `CtePlanBody`. Match the query or command variant when traversing WITH definitions. The SELECT-only serialized `query` representation remains readable in existing catalogs.
 
 ## [0.2.3] - 2026-09-09

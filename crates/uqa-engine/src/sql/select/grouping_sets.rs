@@ -282,6 +282,7 @@ fn normalize_expression(
         | ScalarExpr::Position(_)
         | ScalarExpr::InternalColumn(_)
         | ScalarExpr::Literal(_)
+        | ScalarExpr::TypedLiteral { .. }
         | ScalarExpr::Param(_)
         | ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. }) => expression,

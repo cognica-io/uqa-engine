@@ -341,6 +341,9 @@ impl UnifiedPlan {
             Statement::CreateSequence(value) => {
                 Self::Command(Box::new(CommandPlan::CreateSequence(value)))
             }
+            Statement::CreateDomain(value) => {
+                Self::Command(Box::new(CommandPlan::CreateDomain(value)))
+            }
             Statement::AlterSequence(value) => {
                 Self::Command(Box::new(CommandPlan::AlterSequence(value)))
             }
@@ -529,6 +532,7 @@ impl CommandPlan {
             Self::FetchCursor(_) => "FetchCursor",
             Self::CloseCursor { .. } => "CloseCursor",
             Self::CreateSequence(_) => "CreateSequence",
+            Self::CreateDomain(_) => "CreateDomain",
             Self::AlterSequence(_) => "AlterSequence",
             Self::CreateTableAs { .. } => "CreateTableAs",
             Self::Prepare { .. } => "Prepare",

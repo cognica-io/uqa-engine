@@ -240,6 +240,9 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
         }
         NodeEnum::CreateForeignTableStmt(stmt) => compile_create_foreign_table_statement(stmt),
         NodeEnum::MergeStmt(stmt) => compile_merge(stmt).map(Statement::Merge),
+        NodeEnum::CreateDomainStmt(stmt) => {
+            super::domains::compile_create_domain(stmt).map(Statement::CreateDomain)
+        }
         NodeEnum::CreateFunctionStmt(stmt) => {
             compile_create_function(stmt).map(|f| Statement::CreateFunction(Box::new(f)))
         }

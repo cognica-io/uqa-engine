@@ -303,6 +303,8 @@ impl SchemaScope {
                     )
                 {
                     None
+                } else if matches!(&projection.expr, ScalarExpr::Literal(Value::Null)) {
+                    Some(ColumnType::Text)
                 } else {
                     self.bind_expression_type(
                         routines,

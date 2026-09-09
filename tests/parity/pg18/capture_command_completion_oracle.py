@@ -20,7 +20,7 @@ import os
 import sys
 
 
-def capture(queries, connection_string, include_rows=False):
+def capture(queries, connection_string, include_rows=False, include_fields=False):
     library = ctypes.util.find_library("pq")
     if library is None:
         raise RuntimeError("PostgreSQL libpq shared library was not found")
@@ -50,6 +50,11 @@ def capture(queries, connection_string, include_rows=False):
     ntuples = function("PQntuples", integer, pointer)
     fname = function("PQfname", string, pointer, integer)
     ftype = function("PQftype", ctypes.c_uint, pointer, integer)
+    fsize = function("PQfsize", integer, pointer, integer)
+    fmod = function("PQfmod", integer, pointer, integer)
+    ftable = function("PQftable", ctypes.c_uint, pointer, integer)
+    fcolumn = function("PQftablecol", integer, pointer, integer)
+    fformat = function("PQfformat", integer, pointer, integer)
     isnull = function("PQgetisnull", integer, pointer, integer, integer)
     connection = connect(connection_string.encode())
     if not connection:
@@ -71,13 +76,24 @@ def capture(queries, connection_string, include_rows=False):
                     code = result_status(result)
                     if code in (0, 1, 2):  # empty query, command, tuples
                         tags.append(command(result).decode() or None)
-                        if include_rows:
+                        if include_rows or include_fields:
                             width = nfields(result)
-                            results.append({
+                            row_result = {
                                 "columns": [fname(result, column).decode() for column in range(width)],
                                 "type_oids": [ftype(result, column) for column in range(width)],
                                 "rows": [[None if isnull(result, row, column) else value(result, row, column).decode() for column in range(width)] for row in range(ntuples(result))],
-                            })
+                            }
+                            if include_fields:
+                                row_result["fields"] = [{
+                                    "name": fname(result, column).decode(),
+                                    "table_oid": ftable(result, column),
+                                    "column_attribute_number": fcolumn(result, column),
+                                    "type_oid": ftype(result, column),
+                                    "type_size": fsize(result, column),
+                                    "type_modifier": fmod(result, column),
+                                    "format": fformat(result, column),
+                                } for column in range(width)]
+                            results.append(row_result)
                         if sql == "SELECT version()":
                             version = value(result, 0, 0).decode()
                             if not version.startswith("PostgreSQL 18."):
@@ -92,7 +108,7 @@ def capture(queries, connection_string, include_rows=False):
                 finally:
                     clear(result)
             record = {"sql": sql, "command_tags": tags, "error": error}
-            if include_rows:
+            if include_rows or include_fields:
                 record["results"] = results
             records.append(record)
         if version is None or not version.startswith("PostgreSQL 18."):
@@ -105,6 +121,7 @@ def capture(queries, connection_string, include_rows=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rows", action="store_true", help="also capture field names, PostgreSQL type OIDs, and every result row")
+    parser.add_argument("--fields", action="store_true", help="also capture full result field descriptors and rows")
     args = parser.parse_args()
     connection_string = os.environ.get("PG_COMPLETION_CONNECTION")
     if not connection_string:
@@ -113,7 +130,7 @@ def main():
     queries = [case["sql"] for case in fixture["cases"]]
     if not queries or queries[0] != "SELECT version()":
         raise RuntimeError("the first fixture query must identify the reference with SELECT version()")
-    result = capture(queries, connection_string, include_rows=args.rows)
+    result = capture(queries, connection_string, include_rows=args.rows, include_fields=args.fields)
     json.dump(result, sys.stdout, indent=2)
     sys.stdout.write("\n")
 

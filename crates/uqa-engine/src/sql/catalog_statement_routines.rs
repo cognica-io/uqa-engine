@@ -614,6 +614,7 @@ fn collect_scalar_routine_references(
         | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
+        | ScalarExpr::TypedLiteral { .. }
         | ScalarExpr::Param(_) => {}
     }
     Ok(())

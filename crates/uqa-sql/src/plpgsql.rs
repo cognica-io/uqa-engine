@@ -177,6 +177,8 @@ impl PLpgSQLDatum {
 #[derive(Debug, Clone)]
 pub struct PLpgSQLVar {
     pub name: String,
+    /// Resolved identity from a catalog-aware parse; absent in catalog-free JSON.
+    pub type_oid: Option<u32>,
     /// Normalized type name (`integer`, `text`, ...). The engine resolves
     /// catalog-backed references such as `%TYPE` before execution.
     pub type_name: String,
@@ -478,7 +480,10 @@ use parsing::{lower_row_fields, normalize_condition};
 pub use binding::{bind_expr, bind_select, bind_statement, ResolvedVariable, VariableResolver};
 pub use conditions::{condition_sqlstate, condition_sqlstates};
 pub use lowering_expression::compile_expression_text;
-pub use parsing::{parse_do_block, parse_function};
+pub use parsing::{
+    parse_do_block, parse_do_block_with_catalog, parse_function, parse_function_with_catalog,
+};
+pub use pg_query::{PlpgsqlCatalog, PlpgsqlType};
 
 #[cfg(test)]
 mod tests;

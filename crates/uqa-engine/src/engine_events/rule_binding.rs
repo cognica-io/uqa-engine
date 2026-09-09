@@ -290,7 +290,7 @@ fn bind_rule_expr_with_scope(
                     .unwrap_or_else(|| expr.clone())
             }
         }
-        Expr::Default | Expr::Literal(_) | Expr::Star => expr.clone(),
+        Expr::Default | Expr::Literal(_) | Expr::TypedLiteral { .. } | Expr::Star => expr.clone(),
         Expr::Func { .. } => bind_rule_function_expression(expr, resolver, scope, context)?,
         Expr::Array(items) => Expr::Array(bind_exprs(items, resolver, scope, context)?),
         Expr::Row(items) => Expr::Row(bind_expanding_exprs(items, resolver, scope, context)?),

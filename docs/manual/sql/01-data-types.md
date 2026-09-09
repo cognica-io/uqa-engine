@@ -10,6 +10,8 @@ UQA Engine has PostgreSQL 18-compatible type names mapped to the value carriers 
 | `INT2`, `INT4`, `INT8`, `INT` | PostgreSQL aliases preserving the corresponding declared width |
 | `SMALLSERIAL`, `SERIAL2`, `SERIAL`, `SERIAL4`, `BIGSERIAL`, `SERIAL8` | Width-preserving integer column with generated sequence behavior |
 | `OID`, `XID` | Distinct unsigned 32-bit PostgreSQL identities over the integer carrier |
+| `REGTYPE` | Type-catalog OID over the integer carrier; cast to text or use PostgreSQL result formatting for its visible SQL name |
+| User-defined domains | A distinct catalog type over its base value, with [declaration defaults and conversion-time constraints](02-ddl.md#domain-declarations) |
 | `REAL`, `FLOAT4` | Distinct single-precision declaration over the floating runtime carrier |
 | `FLOAT8`, `DOUBLE PRECISION` | Double-precision declaration over the floating runtime carrier |
 | `NUMERIC(p,s)`, `DECIMAL(p,s)` | Exact decimal carrier with declared precision and scale checks |
@@ -17,11 +19,11 @@ UQA Engine has PostgreSQL 18-compatible type names mapped to the value carriers 
 | `CHARACTER(n)`, `CHAR(n)` | Blank-padded fixed-length character value; default length is 1 |
 | `BOOLEAN`, `BOOL` | Boolean carrier |
 | `DATE` | Calendar date |
-| `TIME` | Time without timezone |
-| `TIMETZ`, `TIME WITH TIME ZONE` | Time with timezone |
-| `TIMESTAMP` | Timestamp without timezone |
-| `TIMESTAMPTZ`, `TIMESTAMP WITH TIME ZONE` | Timestamp with timezone semantics |
-| `INTERVAL` | Calendar/time interval |
+| `TIME[(p)]` | Time without timezone, with optional fractional-second precision |
+| `TIMETZ[(p)]`, `TIME[(p)] WITH TIME ZONE` | Time with timezone and optional fractional-second precision |
+| `TIMESTAMP[(p)]` | Timestamp without timezone and optional fractional-second precision |
+| `TIMESTAMPTZ[(p)]`, `TIMESTAMP[(p)] WITH TIME ZONE` | Timestamp with timezone semantics and optional fractional-second precision |
+| `INTERVAL [fields] [(p)]` | Calendar/time interval with optional stored-field restriction and fractional-second precision |
 | `JSON` | Validated JSON value |
 | `JSONB` | Canonical JSON value with JSONB operations |
 | `BYTEA` | Byte string |
@@ -64,6 +66,15 @@ Use exact decimal for financial values. Do not substitute floating point where e
 ## Temporal types
 
 Temporal types support comparisons, extraction, truncation, construction, formatting, parsing, age calculation, and current-time functions. The default session timezone is `UTC`, and `SET timezone` changes session behavior where timezone conversion applies.
+
+`TIME(p)`, `TIMESTAMP(p)`, and their timezone variants retain a fractional-second precision from 0 through 6 in column declarations, casts, function-source column definitions, array elements, result metadata, and persistent catalogs. Values are rounded when a cast or assignment applies the declaration. Rounding at the end of a day can produce `24:00:00`, which remains distinct from `00:00:00` as a time value. `pg_attribute.atttypmod` and `information_schema.columns.datetime_precision` expose the declared modifier after reopen.
+
+`INTERVAL` supports the fields `YEAR`, `MONTH`, `DAY`, `HOUR`, `MINUTE`, and `SECOND`, plus `YEAR TO MONTH`, `DAY TO HOUR`, `DAY TO MINUTE`, `DAY TO SECOND`, `HOUR TO MINUTE`, `HOUR TO SECOND`, and `MINUTE TO SECOND`. The least significant field determines truncation: for example, `INTERVAL HOUR TO MINUTE` preserves years, months, days, hours, and minutes while discarding seconds. `INTERVAL(p)` and ranges ending in `SECOND(p)` round fractional seconds. `information_schema.columns.interval_type` exposes an explicit field restriction, including its precision when present.
+
+```sql execute
+SELECT '23:59:59.9995'::time(3) AS midnight,
+       '1 year 2 mons 3 days 04:05:06.789'::interval hour to minute AS whole_minutes;
+```
 
 ```sql
 CREATE TABLE events (

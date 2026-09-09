@@ -327,6 +327,7 @@ fn requires_type_introspection_binding(expression: &ScalarExpr) -> bool {
         | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
+        | ScalarExpr::TypedLiteral { .. }
         | ScalarExpr::Param(_)
         | ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. } => false,
@@ -438,13 +439,13 @@ fn bind_common_type_cast(
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) {
-    let target = base_type(target);
+    let target = base_type(target).without_type_modifiers();
     let source = common_context_expression_type(expression, schema, params, resolver)
         .ok()
         .flatten();
     if source
         .as_ref()
-        .is_some_and(|source| base_type(source) == target)
+        .is_some_and(|source| base_type(source).without_type_modifiers() == target)
     {
         return;
     }

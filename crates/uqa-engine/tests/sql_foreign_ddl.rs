@@ -421,18 +421,15 @@ fn assert_declared_foreign_column_types(eng: &Engine) {
             &[],
         )
         .unwrap();
-    assert_eq!(types.rows[0]["s"], Value::Str("smallint".into()));
-    assert_eq!(types.rows[0]["b"], Value::Str("bigint".into()));
-    assert_eq!(types.rows[0]["r"], Value::Str("real".into()));
-    assert_eq!(types.rows[0]["d"], Value::Str("double precision".into()));
-    assert_eq!(types.rows[0]["n"], Value::Str("numeric".into()));
-    assert_eq!(types.rows[0]["v"], Value::Str("character varying".into()));
-    assert_eq!(types.rows[0]["u"], Value::Str("uuid".into()));
-    assert_eq!(
-        types.rows[0]["ts"],
-        Value::Str("timestamp with time zone".into())
-    );
-    assert_eq!(types.rows[0]["a"], Value::Str("smallint[]".into()));
+    assert_eq!(types.rows[0]["s"], Value::Int(21));
+    assert_eq!(types.rows[0]["b"], Value::Int(20));
+    assert_eq!(types.rows[0]["r"], Value::Int(700));
+    assert_eq!(types.rows[0]["d"], Value::Int(701));
+    assert_eq!(types.rows[0]["n"], Value::Int(1700));
+    assert_eq!(types.rows[0]["v"], Value::Int(1043));
+    assert_eq!(types.rows[0]["u"], Value::Int(2950));
+    assert_eq!(types.rows[0]["ts"], Value::Int(1184));
+    assert_eq!(types.rows[0]["a"], Value::Int(1005));
     assert_eq!(
         result.rows[0]["a"],
         Value::Array(

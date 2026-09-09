@@ -25,6 +25,7 @@ mod administrative;
 mod cursors;
 mod dispatch;
 mod dml;
+mod domains;
 mod drop_alter;
 mod events;
 mod hierarchy;
@@ -61,7 +62,7 @@ pub(crate) fn compile_pg_select(
 }
 
 pub(in crate::compiler) use hierarchy::compile_table_hierarchy;
-use names::render_relation_component;
+pub(crate) use names::render_relation_component;
 pub(super) use names::{
     compile_on_commit, compile_qualified_name, range_var_name, relation_persistence,
     validate_create_table_envelope,

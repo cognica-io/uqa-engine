@@ -30,7 +30,7 @@ fn pg18_crc_checksums_preserve_bytea_signatures() {
         "SELECT pg_typeof(crc32c(NULL::bytea))",
         "SELECT pg_typeof(crc32((SELECT decode('00ff10', 'hex'))))",
     ] {
-        assert_eq!(scalar(&eng, sql), Value::Str("bigint".into()), "{sql}");
+        assert_eq!(scalar(&eng, sql), Value::Int(20), "{sql}");
     }
     assert_eq!(scalar(&eng, "SELECT crc32(NULL)"), Value::Null);
     assert_eq!(scalar(&eng, "SELECT crc32c(NULL::bytea)"), Value::Null);
@@ -48,7 +48,7 @@ fn pg18_crc_checksums_preserve_bytea_signatures() {
             Value::Int(1_909_601_284)
         };
         assert_eq!(result.rows[0]["value"], expected);
-        assert_eq!(result.rows[0]["ty"], Value::Str("bigint".into()));
+        assert_eq!(result.rows[0]["ty"], Value::Int(20));
     }
 }
 

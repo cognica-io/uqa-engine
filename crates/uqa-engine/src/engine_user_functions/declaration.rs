@@ -199,12 +199,7 @@ fn resolve_routine_type_name_with_reference(
             }
             return Ok(canonical);
         }
-        ColumnType::from_sql_name(base).map_err(|error| match error {
-            SQLError::Unsupported(_) => {
-                SQLError::Unsupported(format!("routine type `{type_name}` is not implemented"))
-            }
-            other => other,
-        })?
+        crate::sql::resolve_catalog_column_type_name(engine, base)?
     };
     let mut resolved = resolved;
     for _ in 0..array_dimensions {
@@ -213,7 +208,7 @@ fn resolve_routine_type_name_with_reference(
     Ok(resolved.sql_name())
 }
 
-fn resolve_plpgsql_datum_types(
+pub(crate) fn resolve_plpgsql_datum_types(
     engine: &Engine,
     function: &mut uqa_sql::plpgsql::PLpgSQLFunction,
 ) -> Result<(), SQLError> {
@@ -221,6 +216,15 @@ fn resolve_plpgsql_datum_types(
         let uqa_sql::plpgsql::PLpgSQLDatum::Var(variable) = datum else {
             continue;
         };
+        if variable.type_reference.is_none() {
+            if let Some(ty) = variable
+                .type_oid
+                .and_then(|oid| crate::sql::resolve_catalog_domain_type_by_oid(engine, oid))
+            {
+                variable.type_name = ty.sql_name();
+                continue;
+            }
+        }
         variable.type_name = resolve_routine_type_name_with_reference(
             engine,
             &variable.type_name,
@@ -478,7 +482,8 @@ fn compile_function_body_inner(
     match def.language.as_str() {
         "plpgsql" => {
             stored_regrole_constants.reject(engine)?;
-            let mut function = uqa_sql::plpgsql::parse_function(def)?;
+            let catalog = crate::sql::plpgsql_catalog(engine)?;
+            let mut function = uqa_sql::plpgsql::parse_function_with_catalog(def, &catalog)?;
             resolve_plpgsql_datum_types(engine, &mut function)?;
             Ok(CompiledFunctionBody::PLpgSQL(function))
         }

@@ -31,6 +31,30 @@ Schema-qualified objects are supported, and the role active at `CREATE SCHEMA` o
 
 Every named graph reserves a namespace of its own name and `ag_catalog` is reserved for the Apache AGE catalog, so `CREATE SCHEMA` rejects those names as existing or reserved schemas and `DROP SCHEMA graph_name` fails until the graph is dropped; see [Graph SQL and Cypher](07-graph.md).
 
+## Domain declarations
+
+```sql
+CREATE DOMAIN schema_name.domain_name AS base_type
+    DEFAULT default_expression
+    CONSTRAINT not_null_name NOT NULL
+    CONSTRAINT check_name CHECK (VALUE > 0);
+```
+
+The schema, default, constraint names, and constraints are optional. A domain retains its own type identity over a scalar, array, or another domain. `VALUE` denotes the value being checked; CHECK expressions must return Boolean, cannot reference other columns or contain subqueries, and accept TRUE or NULL. Multiple CHECK constraints run in alphabetical order of their names, after inherited domain checks. A column default overrides the domain default.
+
+Domain creation participates in the surrounding transaction. Definitions, defaults, constraint bindings, and type identities survive SQLite reopen and remain available to new sessions. A duplicate type name reports `42710`; invalid CHECK result types report `42804`, failed checks report `23514`, and a prohibited NULL conversion reports `23502`.
+
+Constraints run when a value is converted into a domain. Assigning an already typed domain value preserves its identity without checking it again, including a typed NULL produced by an empty scalar subquery. Explicit casts follow the base type's explicit conversion rules; assignments enforce its declaration limits. For example, casting to a `varchar(5)` domain truncates an overlength string, while assigning an overlength string to its column reports `22001`.
+
+```sql execute
+CREATE DOMAIN positive_amount AS integer DEFAULT 1
+    NOT NULL CHECK (VALUE > 0);
+CREATE TABLE domain_orders (id integer, amount positive_amount);
+INSERT INTO domain_orders (id) VALUES (1);
+INSERT INTO domain_orders VALUES (2, 5);
+SELECT id, amount FROM domain_orders ORDER BY id;
+```
+
 ## Tables
 
 ```sql

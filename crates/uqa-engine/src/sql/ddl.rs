@@ -43,8 +43,9 @@ pub(super) use sequence_ctas::{
     run_alter_sequence, run_create_sequence, run_create_table_as, CreateTableAsExecution,
 };
 pub(super) use value_conversion::{
-    coerce_to_column_type, column_type_name, core_value_to_json, json_table_arg,
-    json_table_value_to_text, json_to_core_value, value_to_text,
+    coerce_assignment_value, coerce_to_column_type, coerce_to_column_type_from, column_type_name,
+    core_value_to_json, json_table_arg, json_table_value_to_text, json_to_core_value,
+    value_to_text,
 };
 pub(crate) use value_conversion::{
     convert_value_to_column_type, convert_value_to_column_type_with_engine,

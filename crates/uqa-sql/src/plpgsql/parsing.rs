@@ -25,6 +25,34 @@ pub fn parse_function(def: &CreateFunction) -> Result<PLpgSQLFunction> {
     parse_plpgsql_text(&text)
 }
 
+/// Parse a stored routine using the engine's catalog type snapshot.
+pub fn parse_function_with_catalog(
+    def: &CreateFunction,
+    catalog: &pg_query::PlpgsqlCatalog,
+) -> Result<PLpgSQLFunction> {
+    let FunctionBody::Source(body) = &def.body else {
+        return Err(SQLError::Internal(
+            "PL/pgSQL parser invoked on a SQL-standard body".into(),
+        ));
+    };
+    lower_plpgsql_json(&pg_query::parse_plpgsql_with_catalog(
+        &synthesize_create_text(def, body),
+        catalog,
+    )?)
+}
+
+/// Parse an anonymous block using the engine's catalog type snapshot.
+pub fn parse_do_block_with_catalog(
+    body: &str,
+    catalog: &pg_query::PlpgsqlCatalog,
+) -> Result<PLpgSQLFunction> {
+    let tag = fresh_dollar_tag(body);
+    lower_plpgsql_json(&pg_query::parse_plpgsql_with_catalog(
+        &format!("DO {tag}{body}{tag} LANGUAGE plpgsql;"),
+        catalog,
+    )?)
+}
+
 /// Parse a `DO $$ ... $$` body through `PostgreSQL`'s native inline-code path.
 pub fn parse_do_block(body: &str) -> Result<PLpgSQLFunction> {
     let tag = fresh_dollar_tag(body);
@@ -124,7 +152,10 @@ pub(super) fn fresh_dollar_tag(body: &str) -> String {
 }
 
 pub(super) fn parse_plpgsql_text(text: &str) -> Result<PLpgSQLFunction> {
-    let json = pg_query::parse_plpgsql(text)?;
+    lower_plpgsql_json(&pg_query::parse_plpgsql(text)?)
+}
+
+fn lower_plpgsql_json(json: &JSONValue) -> Result<PLpgSQLFunction> {
     let functions = json
         .as_array()
         .ok_or_else(|| SQLError::Internal("PL/pgSQL parse returned no function list".into()))?;
@@ -299,6 +330,13 @@ pub(super) fn lower_datum(raw: &JSONValue) -> Result<PLpgSQLDatum> {
         };
         return Ok(PLpgSQLDatum::Var(Box::new(PLpgSQLVar {
             name,
+            type_oid: json_optional_i64(datatype, "typoid")?
+                .map(|oid| {
+                    u32::try_from(oid).map_err(|_| {
+                        SQLError::Internal("PL/pgSQL variable has an invalid type OID".into())
+                    })
+                })
+                .transpose()?,
             type_name,
             type_reference,
             default,

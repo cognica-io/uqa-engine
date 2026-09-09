@@ -14,6 +14,7 @@ use super::{
     TableState, Value, VectorIndex, SQL_FUNCTION_DEPTH_LIMIT,
 };
 
+mod authenticated_session;
 mod cache_refresh;
 mod catalog_sync;
 mod data_sync;

@@ -267,8 +267,10 @@ fn collect_user_candidates(
     let mut procedure_matches = false;
     let mut matched_users = Vec::new();
     let mut match_error = None;
+    let catalog = request.engine.catalog_read_view();
     for function in users {
         match static_function_match(
+            &catalog,
             function.clone(),
             request.argument_names,
             request.argument_types,

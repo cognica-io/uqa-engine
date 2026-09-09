@@ -113,6 +113,12 @@
       "uqa-storage"
     ],
     "uqa-pg-query": [],
+    "uqa-pg-server": [
+      "uqa-core",
+      "uqa-engine",
+      "uqa-pg-wire",
+      "uqa-sql"
+    ],
     "uqa-pg-wire": [],
     "uqa-planner": [
       "uqa-core",

@@ -54,6 +54,7 @@ mod cte_validation;
 mod cursor;
 mod ddl;
 pub(crate) mod dml;
+mod domains;
 mod driver;
 mod engine_api;
 mod from_rows;
@@ -61,6 +62,8 @@ mod generated;
 mod hierarchy;
 mod mutability;
 mod plan_executor;
+mod result_text;
+pub use result_text::format_postgres_text;
 mod planning;
 mod plpgsql_exec;
 mod read_only;
@@ -80,11 +83,13 @@ mod volatility;
 mod where_eval;
 mod window;
 
+pub use catalog::{postgres_result_type, SQLTypeMetadata};
 pub(crate) use catalog_statement_routines::{
     bind_catalog_statement_routines, collect_expression_routine_references,
     mark_catalog_statement_relations_bound, BoundRoutineReference,
 };
 pub use cursor::{SQLCursor, SQLCursorSummary};
+pub(crate) use domains::{cast_domain_value, resolve_declared_column_type};
 pub(crate) use driver::{execute, execute_nested};
 use mutability::{
     is_transaction_control, query_may_mutate_engine, query_requires_statement_transaction,
@@ -109,8 +114,9 @@ use aggregates::{
 use catalog::build_info_schema_rows;
 pub(crate) use catalog::query_source_column_names;
 pub(crate) use catalog::{
-    foreign_table_relation_oid, resolve_age_label_relation_name, resolve_catalog_column_type,
-    resolve_catalog_column_type_name, resolve_regclass_kind_by_oid, resolve_regclass_oid,
+    foreign_table_relation_oid, plpgsql_catalog, resolve_age_label_relation_name,
+    resolve_catalog_column_type, resolve_catalog_column_type_name,
+    resolve_catalog_domain_type_by_oid, resolve_regclass_kind_by_oid, resolve_regclass_oid,
     resolve_regnamespace_oid, resolve_regobject_oid, resolve_regprocedure_oid, resolve_regrole_oid,
     resolve_regtype_output, runtime_constraints, schema_object_oid, sequence_relation_oid,
     view_relation_oid, RegtypeOutputCatalog,

@@ -11,16 +11,44 @@ use uqa_core::Value;
 use uqa_sql::ast::ColumnType;
 
 pub(in crate::sql::catalog) fn info_datetime_precision(ty: &ColumnType) -> Value {
+    if let Some(precision) = ty.temporal_precision() {
+        return Value::Int(i64::from(precision));
+    }
     match ty {
-        ColumnType::Time | ColumnType::TimeTz | ColumnType::Timestamp | ColumnType::TimestampTz => {
-            Value::Int(6)
+        ColumnType::Named(name) => {
+            unreachable!("unresolved declaration type {name} reached catalog projection")
         }
+        ColumnType::Time
+        | ColumnType::TimePrecision(_)
+        | ColumnType::TimeTz
+        | ColumnType::TimeTzPrecision(_)
+        | ColumnType::Timestamp
+        | ColumnType::TimestampPrecision(_)
+        | ColumnType::TimestampTz
+        | ColumnType::TimestampTzPrecision(_)
+        | ColumnType::Interval
+        | ColumnType::IntervalWithFields { .. } => Value::Int(6),
         _ => Value::Null,
     }
 }
 
+pub(in crate::sql::catalog) fn info_interval_type(ty: &ColumnType) -> Value {
+    let ColumnType::IntervalWithFields { fields, precision } = ty else {
+        return Value::Null;
+    };
+    let fields = fields.sql_suffix().trim();
+    if fields.is_empty() {
+        return Value::Null;
+    }
+    let precision = precision.map_or_else(String::new, |precision| format!("({precision})"));
+    Value::Str(format!("{}{precision}", fields.to_ascii_uppercase()))
+}
+
 pub(in crate::sql::catalog) fn info_character_maximum_length(ty: &ColumnType) -> Value {
     match ty {
+        ColumnType::Named(name) => {
+            unreachable!("unresolved declaration type {name} reached catalog projection")
+        }
         ColumnType::Character(length) | ColumnType::Varchar(Some(length)) => {
             Value::Int(i64::from(*length))
         }
@@ -30,6 +58,9 @@ pub(in crate::sql::catalog) fn info_character_maximum_length(ty: &ColumnType) ->
 
 pub(in crate::sql::catalog) fn info_character_octet_length(ty: &ColumnType) -> Value {
     match ty {
+        ColumnType::Named(name) => {
+            unreachable!("unresolved declaration type {name} reached catalog projection")
+        }
         // The engine catalog advertises UTF8, whose maximum encoded scalar
         // width is four bytes, matching PostgreSQL's information_schema.
         ColumnType::Character(length) | ColumnType::Varchar(Some(length)) => {
@@ -41,6 +72,9 @@ pub(in crate::sql::catalog) fn info_character_octet_length(ty: &ColumnType) -> V
 
 pub(in crate::sql::catalog) fn info_numeric_precision(ty: &ColumnType) -> Value {
     match ty {
+        ColumnType::Named(name) => {
+            unreachable!("unresolved declaration type {name} reached catalog projection")
+        }
         ColumnType::SmallInteger => Value::Int(16),
         ColumnType::Integer => Value::Int(32),
         ColumnType::BigInteger => Value::Int(64),
@@ -56,6 +90,9 @@ pub(in crate::sql::catalog) fn info_numeric_precision(ty: &ColumnType) -> Value 
 
 pub(in crate::sql::catalog) fn info_numeric_scale(ty: &ColumnType) -> Value {
     match ty {
+        ColumnType::Named(name) => {
+            unreachable!("unresolved declaration type {name} reached catalog projection")
+        }
         ColumnType::Numeric {
             scale: Some(scale), ..
         } => Value::Int(i64::from(*scale)),
@@ -65,6 +102,9 @@ pub(in crate::sql::catalog) fn info_numeric_scale(ty: &ColumnType) -> Value {
 
 pub(in crate::sql::catalog) fn info_udt_name(ty: &ColumnType) -> String {
     match ty {
+        ColumnType::Named(name) => {
+            unreachable!("unresolved declaration type {name} reached catalog projection")
+        }
         ColumnType::SmallInteger => "int2".into(),
         ColumnType::Integer => "int4".into(),
         ColumnType::BigInteger => "int8".into(),
@@ -100,6 +140,9 @@ pub(in crate::sql::catalog) fn info_udt_name(ty: &ColumnType) -> String {
         ColumnType::Range(subtype) => subtype.range_name().into(),
         ColumnType::Multirange(subtype) => subtype.multirange_name().into(),
         ColumnType::Array(element) => match element.as_ref() {
+            ColumnType::Named(name) => {
+                unreachable!("unresolved declaration type {name} reached catalog projection")
+            }
             ColumnType::SmallInteger => "_int2".into(),
             ColumnType::Integer => "_int4".into(),
             ColumnType::BigInteger => "_int8".into(),
@@ -133,11 +176,11 @@ pub(in crate::sql::catalog) fn info_udt_name(ty: &ColumnType) -> String {
             ColumnType::AnyArray => "_anyarray".into(),
             ColumnType::Record => "_record".into(),
             ColumnType::Date => "_date".into(),
-            ColumnType::Time => "_time".into(),
-            ColumnType::TimeTz => "_timetz".into(),
-            ColumnType::Timestamp => "_timestamp".into(),
-            ColumnType::TimestampTz => "_timestamptz".into(),
-            ColumnType::Interval => "_interval".into(),
+            ColumnType::Time | ColumnType::TimePrecision(_) => "_time".into(),
+            ColumnType::TimeTz | ColumnType::TimeTzPrecision(_) => "_timetz".into(),
+            ColumnType::Timestamp | ColumnType::TimestampPrecision(_) => "_timestamp".into(),
+            ColumnType::TimestampTz | ColumnType::TimestampTzPrecision(_) => "_timestamptz".into(),
+            ColumnType::Interval | ColumnType::IntervalWithFields { .. } => "_interval".into(),
             ColumnType::Vector(_) => "_vector".into(),
             ColumnType::Tensor(_) => "_tensor".into(),
             ColumnType::Domain { name, .. } => format!("_{name}"),
@@ -146,11 +189,11 @@ pub(in crate::sql::catalog) fn info_udt_name(ty: &ColumnType) -> String {
             ColumnType::Array(_) => info_udt_name(element),
         },
         ColumnType::Date => "date".into(),
-        ColumnType::Time => "time".into(),
-        ColumnType::TimeTz => "timetz".into(),
-        ColumnType::Timestamp => "timestamp".into(),
-        ColumnType::TimestampTz => "timestamptz".into(),
-        ColumnType::Interval => "interval".into(),
+        ColumnType::Time | ColumnType::TimePrecision(_) => "time".into(),
+        ColumnType::TimeTz | ColumnType::TimeTzPrecision(_) => "timetz".into(),
+        ColumnType::Timestamp | ColumnType::TimestampPrecision(_) => "timestamp".into(),
+        ColumnType::TimestampTz | ColumnType::TimestampTzPrecision(_) => "timestamptz".into(),
+        ColumnType::Interval | ColumnType::IntervalWithFields { .. } => "interval".into(),
         ColumnType::Vector(_) => "vector".into(),
         ColumnType::Tensor(_) => "tensor".into(),
         ColumnType::Domain { name, .. } => name.clone(),

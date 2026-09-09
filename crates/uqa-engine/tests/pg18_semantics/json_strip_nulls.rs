@@ -82,7 +82,7 @@ fn pg18_json_null_stripping_binds_defaults_names_types_and_parameters() {
         ("SELECT pg_typeof(jsonb_strip_nulls(NULL))", "jsonb"),
         ("SELECT pg_typeof(jsonb_strip_nulls('{}'))", "jsonb"),
     ] {
-        assert_eq!(scalar(&eng, sql), Value::Str(expected.into()), "{sql}");
+        assert_eq!(super::text(&eng, sql), expected, "{sql}");
     }
     assert_eq!(scalar(&eng, "SELECT json_strip_nulls(NULL)"), Value::Null);
     assert_eq!(
@@ -103,7 +103,7 @@ fn pg18_json_null_stripping_binds_defaults_names_types_and_parameters() {
         positional.rows[0]["value"],
         Value::Json(r#"{"x":[]}"#.into())
     );
-    assert_eq!(positional.rows[0]["ty"], Value::Str("json".into()));
+    assert_eq!(positional.rows[0]["ty"], Value::Int(114));
     let named = eng
         .sql(
             "SELECT jsonb_strip_nulls(strip_in_arrays => $1, target => $2) AS value, pg_typeof(jsonb_strip_nulls(strip_in_arrays => $1, target => $2)) AS ty",
@@ -114,7 +114,7 @@ fn pg18_json_null_stripping_binds_defaults_names_types_and_parameters() {
         )
         .unwrap();
     assert_eq!(named.rows[0]["value"], Value::JsonB(r#"{"x": []}"#.into()));
-    assert_eq!(named.rows[0]["ty"], Value::Str("jsonb".into()));
+    assert_eq!(named.rows[0]["ty"], Value::Int(3802));
 }
 
 #[test]
@@ -199,7 +199,7 @@ fn pg18_json_null_stripping_ranks_defaults_and_user_overloads_by_search_path() {
         ("SELECT json_strip_nulls('{}'::json, true)", "user-json-two"),
         ("SELECT json_strip_nulls('{}')", "user-text"),
     ] {
-        assert_eq!(scalar(&eng, sql), Value::Str(expected.into()), "{sql}");
+        assert_eq!(super::text(&eng, sql), expected, "{sql}");
     }
 
     let ambiguous = engine();

@@ -280,6 +280,7 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
             .transpose()?
             .map(Value::Int);
         sources.push(EngineTableRowSource {
+            cancellation: engine.cancellation_token(),
             table_name,
             table,
             column_definitions,

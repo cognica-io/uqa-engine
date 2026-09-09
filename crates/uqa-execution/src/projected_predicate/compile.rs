@@ -37,7 +37,9 @@ pub(super) fn compile(
             };
             ProjectedExpr::Field(index)
         }
-        ScalarExpr::Literal(value) => ProjectedExpr::Literal(value.clone()),
+        ScalarExpr::Literal(value) | ScalarExpr::TypedLiteral { value, .. } => {
+            ProjectedExpr::Literal(value.clone())
+        }
         ScalarExpr::Param(index) => ProjectedExpr::Literal(parameter(*index, params)?),
         ScalarExpr::Binary { op, lhs, rhs } => {
             let integer_width = scalar_integer_binary_width(lhs, rhs);
@@ -121,6 +123,9 @@ pub(super) fn compile(
             }
         }
         ScalarExpr::Cast { expr, ty } => {
+            if uqa_sql::ast::ColumnType::from_sql_name(ty).is_err() {
+                return Ok(None);
+            }
             let expression = require(expr, schema, params)?;
             match expression {
                 // A typed SQL literal is represented as CAST(literal AS type).

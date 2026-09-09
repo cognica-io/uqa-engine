@@ -50,6 +50,7 @@ pub(in crate::compiler) fn resolve_named_windows_in_expr(
     match expr {
         Expr::Default
         | Expr::Literal(_)
+        | Expr::TypedLiteral { .. }
         | Expr::Param(_)
         | Expr::Column(_)
         | Expr::QualifiedColumn { .. }
@@ -462,14 +463,36 @@ pub(in crate::compiler) fn compile_type_cast(tc: &pg_query::protobuf::TypeCast) 
         .type_name
         .as_ref()
         .ok_or_else(|| SQLError::Internal("TypeCast without a target type".into()))?;
+    let ty = compile_cast_type_name(type_name)?;
+    if matches!(
+        arg.node.as_ref(),
+        Some(NodeEnum::AConst(constant))
+            if matches!(
+                constant.val.as_ref(),
+                Some(pg_query::protobuf::a_const::Val::Sval(_))
+            )
+    ) {
+        let Expr::Literal(value) = &inner else {
+            return Err(SQLError::Internal(
+                "string constant did not compile to a literal".into(),
+            ));
+        };
+        if crate::ast::ColumnType::from_sql_name(&ty).is_ok() {
+            crate::expr::cast_value(value, &ty)?;
+        }
+    }
+    Ok(Expr::Cast {
+        expr: Box::new(inner),
+        ty,
+    })
+}
+
+fn compile_cast_type_name(type_name: &pg_query::protobuf::TypeName) -> Result<String> {
     let raw_names = extract_strings(&type_name.names)?;
     // libpg_query reports built-in types qualified as `pg_catalog.<name>`;
     // discard only that implicit qualification. Catalog-owned domains need
     // their schema retained through overload selection and runtime coercion.
-    let mut names = raw_names
-        .iter()
-        .map(|name| name.to_lowercase())
-        .collect::<Vec<_>>();
+    let mut names = raw_names;
     if names.first().is_some_and(|name| name == "pg_catalog") {
         names.remove(0);
     }
@@ -478,7 +501,24 @@ pub(in crate::compiler) fn compile_type_cast(tc: &pg_query::protobuf::TypeCast) 
             "TypeCast target has no name components".into(),
         ));
     }
-    let mut ty = names.join(".");
+    let mut ty = names
+        .iter()
+        .map(|name| crate::compiler::render_relation_component(name))
+        .collect::<Vec<_>>()
+        .join(".");
+    if crate::ast::ColumnType::from_sql_name(&ty).is_err()
+        || (names.len() == 1
+            && matches!(
+                names[0].as_str(),
+                "integer" | "smallint" | "bigint" | "boolean"
+            ))
+    {
+        let mut declared = crate::compiler::types::compile_pg_type_name(type_name, "cast")?;
+        while let crate::ast::ColumnType::Array(element) = declared {
+            declared = *element;
+        }
+        ty = declared.sql_name();
+    }
     if names.len() == 1 {
         ty = match ty.as_str() {
             "int2" => "smallint".to_string(),
@@ -489,11 +529,24 @@ pub(in crate::compiler) fn compile_type_cast(tc: &pg_query::protobuf::TypeCast) 
             _ => ty,
         };
     }
+    if ty == "interval" && !type_name.typmods.is_empty() {
+        ty = crate::compiler::types::compile_pg_type_name(type_name, "cast")?.sql_name();
+    }
     // Carry length / precision modifiers (`varchar(1)`, `numeric(10,2)`)
     // so the evaluator can truncate / rescale like PostgreSQL.
     if matches!(
         ty.as_str(),
-        "varchar" | "bpchar" | "char" | "character" | "character varying" | "numeric" | "decimal"
+        "varchar"
+            | "bpchar"
+            | "char"
+            | "character"
+            | "character varying"
+            | "numeric"
+            | "decimal"
+            | "time"
+            | "timetz"
+            | "timestamp"
+            | "timestamptz"
     ) {
         let mods = type_name
             .typmods
@@ -519,25 +572,5 @@ pub(in crate::compiler) fn compile_type_cast(tc: &pg_query::protobuf::TypeCast) 
     if !type_name.array_bounds.is_empty() && !ty.ends_with("[]") {
         ty.push_str("[]");
     }
-    if matches!(
-        arg.node.as_ref(),
-        Some(NodeEnum::AConst(constant))
-            if matches!(
-                constant.val.as_ref(),
-                Some(pg_query::protobuf::a_const::Val::Sval(_))
-            )
-    ) {
-        let Expr::Literal(value) = &inner else {
-            return Err(SQLError::Internal(
-                "string constant did not compile to a literal".into(),
-            ));
-        };
-        if crate::ast::ColumnType::from_sql_name(&ty).is_ok() {
-            crate::expr::cast_value(value, &ty)?;
-        }
-    }
-    Ok(Expr::Cast {
-        expr: Box::new(inner),
-        ty,
-    })
+    Ok(ty)
 }

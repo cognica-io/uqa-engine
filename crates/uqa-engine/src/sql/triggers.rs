@@ -18,7 +18,6 @@ use uqa_storage::document_store::Document;
 
 use crate::{Engine, RelationIdentity};
 
-use super::coerce_to_column_type;
 use super::plpgsql_exec::{execute_trigger_routine, TriggerRoutineContext};
 use super::scalar::eval_lowered_expression;
 
@@ -244,10 +243,7 @@ fn trigger_document(engine: &Engine, table: &str, value: Value) -> Result<Option
     let mut document = Document::new();
     for column in definitions {
         let value = values.get(&column.name).cloned().unwrap_or(Value::Null);
-        document.insert(
-            column.name.clone(),
-            coerce_to_column_type(engine, table, &column.name, value)?,
-        );
+        document.insert(column.name.clone(), value);
     }
     Ok(Some(document))
 }
@@ -334,6 +330,11 @@ fn invoke_trigger(
         engine,
         &function,
         &TriggerRoutineContext {
+            column_types: engine
+                .rule_relation_columns(invocation.table)?
+                .into_iter()
+                .map(|(_, ty)| Some(ty))
+                .collect(),
             old: invocation.old,
             new: invocation.new,
             name: invocation.trigger.definition.name.clone(),
@@ -664,16 +665,26 @@ pub(super) fn fire_before_row_triggers(
     new_document: Option<&Document>,
     updated_columns: &[String],
 ) -> Result<Option<Document>> {
+    let triggers =
+        engine.triggers_for(table, TriggerTiming::Before, event, true, updated_columns)?;
+    let original = if event == TriggerEvent::Delete {
+        old_document
+    } else {
+        new_document
+    };
+    if triggers.is_empty() {
+        return Ok(original.cloned());
+    }
     let types = trigger_column_types(engine, table)?;
     let old = trigger_record(engine, table, doc_id, old_document, false)?;
     let mut new = trigger_record(engine, table, doc_id, new_document, true)?;
-    for trigger in
-        engine.triggers_for(table, TriggerTiming::Before, event, true, updated_columns)?
-    {
+    let mut invoked = false;
+    for trigger in triggers {
         if !trigger_condition_matches(engine, trigger.definition.when.as_ref(), &old, &new, &types)?
         {
             continue;
         }
+        invoked = true;
         let returned = invoke_trigger(
             engine,
             TriggerInvocation {
@@ -694,8 +705,8 @@ pub(super) fn fire_before_row_triggers(
             new = returned;
         }
     }
-    if event == TriggerEvent::Delete {
-        return Ok(old_document.cloned());
+    if event == TriggerEvent::Delete || !invoked {
+        return Ok(original.cloned());
     }
     trigger_document(engine, table, new)
 }

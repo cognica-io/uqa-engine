@@ -178,6 +178,10 @@ impl<'a> EngineExpressionEvaluator<'a> {
         schema: &uqa_execution::RowSchema,
         row: &uqa_execution::PhysicalRow,
     ) -> ExecResult<Value> {
+        self.engine
+            .cancellation_token()
+            .check()
+            .map_err(SQLError::from)?;
         let view = schema.view(row);
         let hook = ScopedEngineHook::new(self.engine, &self.ctes);
         let context = PhysicalEvalContext::from_row_lookup(&view, self.params)
@@ -205,6 +209,10 @@ impl<'a> EngineExpressionEvaluator<'a> {
 
 impl ExpressionEvaluator for EngineExpressionEvaluator<'_> {
     fn evaluate(&self, expression: &ScalarExpr, row: &dyn RowLookup) -> ExecResult<Value> {
+        self.engine
+            .cancellation_token()
+            .check()
+            .map_err(SQLError::from)?;
         let hook = ScopedEngineHook::new(self.engine, &self.ctes);
         let context = PhysicalEvalContext::from_row_lookup(row, self.params)
             .with_function_hook(&hook)
@@ -343,6 +351,17 @@ impl FunctionTypeResolver for EngineExpressionEvaluator<'_> {
 }
 
 impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
+    fn resolve_regtype_input(&self, name: &str) -> Result<Option<i64>, SQLError> {
+        uqa_sql::expr::EngineHook::resolve_regtype_input(self.engine, name)
+    }
+    fn cast_domain(
+        &self,
+        value: &Value,
+        source: Option<&str>,
+        target: &uqa_sql::ast::ColumnType,
+    ) -> Result<Option<Value>, SQLError> {
+        crate::sql::cast_domain_value(self.engine, value, source, target)
+    }
     fn resolve_type_name(
         &self,
         name: &str,

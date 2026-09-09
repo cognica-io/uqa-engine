@@ -27,8 +27,8 @@ impl ResolvedVariable {
 
     fn into_expression(self) -> Expr {
         match self.declared_type {
-            Some(ty) => Expr::Cast {
-                expr: Box::new(Expr::Literal(self.value)),
+            Some(ty) => Expr::TypedLiteral {
+                value: self.value,
                 ty,
             },
             None => Expr::Literal(self.value),
@@ -121,7 +121,7 @@ pub fn bind_expr(expr: &Expr, r: &mut dyn VariableResolver) -> Result<Expr> {
         Expr::QualifiedStar(qualifier) => r
             .rewrite_qualified_whole_row(qualifier)?
             .unwrap_or_else(|| expr.clone()),
-        Expr::Default | Expr::Literal(_) | Expr::Star => expr.clone(),
+        Expr::Default | Expr::Literal(_) | Expr::TypedLiteral { .. } | Expr::Star => expr.clone(),
         Expr::Func {
             name,
             binding,

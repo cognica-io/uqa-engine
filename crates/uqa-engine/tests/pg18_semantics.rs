@@ -31,7 +31,23 @@ fn scalar_err(engine: &Engine, sql: &str) -> String {
 }
 
 fn text(engine: &Engine, sql: &str) -> String {
-    match scalar(engine, sql) {
+    let result = engine
+        .sql(sql, &[])
+        .unwrap_or_else(|error| panic!("{sql}: {error}"));
+    if result.column_types.first() == Some(&Some(uqa_sql::ColumnType::Regtype)) {
+        let value = &result.rows[0][&result.columns[0]];
+        return uqa_engine::sql::format_postgres_text(
+            value,
+            &uqa_sql::ColumnType::Regtype,
+            Some(engine),
+        )
+        .unwrap();
+    }
+    match result.rows[0]
+        .get(&result.columns[0])
+        .cloned()
+        .unwrap_or(Value::Null)
+    {
         Value::Str(s) => s,
         Value::Temporal(t) => t.to_sql_string(),
         Value::Decimal(d) => d.to_sql_string(),

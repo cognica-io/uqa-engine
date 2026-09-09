@@ -59,7 +59,7 @@ pub fn integer_width_for_type(ty: &str) -> Option<IntegerWidth> {
 fn integer_expr_width(expr: &Expr) -> Option<IntegerWidth> {
     match expr {
         Expr::Literal(Value::Int(value)) => Some(integer_width_for_literal(*value)),
-        Expr::Cast { ty, .. } => integer_width_for_type(ty),
+        Expr::Cast { ty, .. } | Expr::TypedLiteral { ty, .. } => integer_width_for_type(ty),
         Expr::Binary {
             op: BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide,
             lhs,
