@@ -12,7 +12,7 @@ UQA Engine has PostgreSQL 18-compatible type names mapped to the value carriers 
 | `OID`, `XID` | Distinct unsigned 32-bit PostgreSQL identities over the integer carrier |
 | `REGTYPE` | Type-catalog OID over the integer carrier; cast to text or use PostgreSQL result formatting for its visible SQL name |
 | User-defined domains | A distinct catalog type over its base value, with [declaration defaults and conversion-time constraints](02-ddl.md#domain-declarations) |
-| `REAL`, `FLOAT4` | Distinct single-precision declaration over the floating runtime carrier |
+| `REAL`, `FLOAT4` | IEEE 754 single-precision inputs, arithmetic, and sums over a widened floating runtime carrier |
 | `FLOAT8`, `DOUBLE PRECISION` | Double-precision declaration over the floating runtime carrier |
 | `NUMERIC(p,s)`, `DECIMAL(p,s)` | Exact decimal carrier with declared precision and scale checks |
 | `TEXT`, `VARCHAR(n)`, `NAME`, `UUID` | Distinct declared identities over text-compatible carriers; length and UUID input are validated |
@@ -42,7 +42,19 @@ Serial declarations allocate generated integer identities. Sequence functions `n
 
 ## Floating point
 
-`REAL`, `FLOAT4`, `FLOAT8`, and `DOUBLE PRECISION` use an IEEE 754 64-bit value. Floating-point equality, ordering, NaN, and infinity behavior should be tested for the application's edge cases. Vector inputs reject non-finite values even when a general floating expression can represent them.
+`REAL` (`FLOAT4`) converts inputs directly to IEEE 754 single precision. Widening the stored value to the engine's 64-bit carrier preserves that rounded value; casting it to `DOUBLE PRECISION` does not restore discarded precision. `FLOAT8` (`DOUBLE PRECISION`) uses double precision. Arrays, domain bases, column assignment, and declared prepared parameters apply the same conversions. PostgreSQL text output and character casts use the declared floating width.
+
+The `+`, `-`, `*`, and `/` operators use single precision when both operands are `REAL`. Mixing `REAL` with an integer, `NUMERIC`, or `DOUBLE PRECISION` selects double precision. `SUM(real)` rounds at each single-precision addition, while `AVG(real)` returns double precision. Aggregate `ORDER BY` controls the addition order. Grouped, window, and spilled aggregate state retain the selected width.
+
+Invalid floating text reports `22P02`; overflow or underflow outside the representable range reports `22003`. Representable subnormal values, signed zero, NaN, and infinity are retained. Division by zero reports `22012`, except that a NaN numerator remains NaN. Vector inputs still reject non-finite values.
+
+```sql execute
+SELECT 16777217::real::double precision AS rounded_input,
+       (16777216::real + 1::real)::double precision AS real_sum,
+       16777216::real + 1 AS mixed_sum;
+```
+
+The result is `16777216`, `16777216`, and `16777217`, respectively. The [compatibility ledger](09-compatibility.md) tracks the remaining complete floating-point regression and I/O matrix.
 
 ## Exact decimal
 

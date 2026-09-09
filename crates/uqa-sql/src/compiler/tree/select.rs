@@ -694,9 +694,106 @@ pub(in crate::compiler) fn compile_projections(
             Some(node) => compile_expr(node)?,
             None => return Err(SQLError::Internal("ResTarget without value".into())),
         };
+        let alias = match (
+            alias,
+            res_target.val.as_ref().and_then(|node| node.node.as_ref()),
+        ) {
+            (None, Some(NodeEnum::TypeCast(cast))) => cast
+                .arg
+                .as_ref()
+                .and_then(|argument| strong_projection_name(argument))
+                .or_else(|| {
+                    cast.type_name
+                        .as_ref()
+                        .and_then(|ty| ty.names.last())
+                        .and_then(|node| match node.node.as_ref() {
+                            Some(NodeEnum::String(name)) => Some(name.sval.clone()),
+                            _ => None,
+                        })
+                }),
+            (alias, _) => alias,
+        };
         out.push(Projection { expr, alias });
     }
     Ok(out)
+}
+
+fn strong_projection_name(node: &Node) -> Option<String> {
+    let name = |nodes: &[Node]| {
+        nodes
+            .iter()
+            .rev()
+            .find_map(|node| match node.node.as_ref() {
+                Some(NodeEnum::String(name)) => Some(name.sval.clone()),
+                _ => None,
+            })
+    };
+    match node.node.as_ref()? {
+        NodeEnum::ColumnRef(column) => name(&column.fields),
+        NodeEnum::FuncCall(function) => name(&function.funcname),
+        NodeEnum::TypeCast(cast) => cast
+            .arg
+            .as_ref()
+            .and_then(|argument| strong_projection_name(argument)),
+        NodeEnum::CollateClause(collate) => collate
+            .arg
+            .as_ref()
+            .and_then(|argument| strong_projection_name(argument)),
+        NodeEnum::AIndirection(indirection) => name(&indirection.indirection).or_else(|| {
+            indirection
+                .arg
+                .as_ref()
+                .and_then(|argument| strong_projection_name(argument))
+        }),
+        NodeEnum::CaseExpr(case) => case
+            .defresult
+            .as_ref()
+            .and_then(|argument| strong_projection_name(argument)),
+        NodeEnum::AArrayExpr(_) => Some("array".into()),
+        NodeEnum::RowExpr(_) => Some("row".into()),
+        NodeEnum::CoalesceExpr(_) => Some("coalesce".into()),
+        NodeEnum::GroupingFunc(_) => Some("grouping".into()),
+        NodeEnum::SqlvalueFunction(function) => {
+            sql_value_projection_name(function.op()).map(str::to_owned)
+        }
+        NodeEnum::MinMaxExpr(expression) => Some(
+            if expression.op == pg_query::protobuf::MinMaxOp::IsGreatest as i32 {
+                "greatest"
+            } else {
+                "least"
+            }
+            .into(),
+        ),
+        NodeEnum::AExpr(expression)
+            if expression.kind == pg_query::protobuf::AExprKind::AexprNullif as i32 =>
+        {
+            Some("nullif".into())
+        }
+        NodeEnum::SubLink(link)
+            if link.sub_link_type == pg_query::protobuf::SubLinkType::ExistsSublink as i32 =>
+        {
+            Some("exists".into())
+        }
+        _ => None,
+    }
+}
+
+fn sql_value_projection_name(op: pg_query::protobuf::SqlValueFunctionOp) -> Option<&'static str> {
+    use pg_query::protobuf::SqlValueFunctionOp as Op;
+    Some(match op {
+        Op::SvfopCurrentDate => "current_date",
+        Op::SvfopCurrentTime | Op::SvfopCurrentTimeN => "current_time",
+        Op::SvfopCurrentTimestamp | Op::SvfopCurrentTimestampN => "current_timestamp",
+        Op::SvfopLocaltime | Op::SvfopLocaltimeN => "localtime",
+        Op::SvfopLocaltimestamp | Op::SvfopLocaltimestampN => "localtimestamp",
+        Op::SvfopCurrentRole => "current_role",
+        Op::SvfopCurrentUser => "current_user",
+        Op::SvfopUser => "user",
+        Op::SvfopSessionUser => "session_user",
+        Op::SvfopCurrentCatalog => "current_catalog",
+        Op::SvfopCurrentSchema => "current_schema",
+        _ => return None,
+    })
 }
 
 pub(in crate::compiler) fn compile_order_by(

@@ -26,6 +26,27 @@ fn arithmetic_does_not_require_parser_ast() {
 }
 
 #[test]
+fn nested_real_arithmetic_retains_width_without_a_row_schema() {
+    let real = |value| ScalarExpr::TypedLiteral {
+        value: Value::Float(value),
+        ty: "real".into(),
+    };
+    let expression = ScalarExpr::Binary {
+        op: BinaryOp::Add,
+        lhs: Box::new(ScalarExpr::Binary {
+            op: BinaryOp::Add,
+            lhs: Box::new(real(16_777_216.0)),
+            rhs: Box::new(real(1.0)),
+        }),
+        rhs: Box::new(real(1.0)),
+    };
+    assert_eq!(
+        eval_scalar(&expression, &ScalarEvalContext::new(None, &[])).unwrap(),
+        Value::Float(16_777_216.0)
+    );
+}
+
+#[test]
 fn cast_uses_the_input_schema_declared_source_type() {
     let schema = RowSchema::with_types(vec!["support".into()], vec![Some(ColumnType::Regproc)]);
     let row = PhysicalRow::from_values(vec![Value::Int(0)]);

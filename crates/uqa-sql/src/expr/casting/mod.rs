@@ -101,7 +101,10 @@ pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<V
         "bigint" | "int8" | "bigserial" | "serial8" | "pg_catalog.int8" => {
             cast_integer(v, "bigint")
         }
-        "real" | "float4" | "float8" | "double" | "double precision" => {
+        "real" | "float4" | "pg_catalog.float4" => {
+            super::floating::to_float(v, super::FloatWidth::Real).map(Value::Float)
+        }
+        "float8" | "double" | "double precision" | "pg_catalog.float8" => {
             Ok(Value::Float(to_f64(v)?))
         }
         "numeric" | "decimal" => {
@@ -155,7 +158,7 @@ pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<V
                     ),
                     Value::Int(0),
                 ) => "-".into(),
-                _ => value_to_string(v),
+                _ => cast_text(v, source_ty),
             };
             Ok(Value::Str(text))
         }
@@ -182,7 +185,7 @@ pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<V
         "uuid" => cast_uuid(v),
         // varchar(n): an explicit cast truncates to the declared length.
         "varchar" | "character varying" => {
-            let text = value_to_string(v);
+            let text = cast_text(v, source_ty);
             let Some(modifier) = modifier else {
                 return Ok(Value::Str(text));
             };
@@ -194,9 +197,9 @@ pub fn cast_value_from(v: &Value, ty: &str, source_ty: Option<&str>) -> Result<V
         }
         // bpchar is physically blank-padded. Its implicit text coercion strips
         // those spaces, while a direct result retains them.
-        "bpchar" if modifier.is_none() => Ok(Value::FixedChar(value_to_string(v))),
+        "bpchar" if modifier.is_none() => Ok(Value::FixedChar(cast_text(v, source_ty))),
         "character" | "char" | "bpchar" => {
-            let text = value_to_string(v);
+            let text = cast_text(v, source_ty);
             let limit: usize = match modifier {
                 Some(modifier) => modifier.trim().parse().map_err(|_| {
                     SQLError::TypeMismatch(format!("bad length modifier {modifier}"))
@@ -443,6 +446,18 @@ fn postgres_type_display_name(name: &str) -> &str {
         "bpchar" => "character",
         other => other,
     }
+}
+
+fn cast_text(value: &Value, source: Option<&str>) -> String {
+    if let Value::Float(value) = value {
+        if source
+            .and_then(|source| crate::ast::ColumnType::from_sql_name(source).ok())
+            .is_some_and(|source| matches!(source, crate::ast::ColumnType::Real))
+        {
+            return super::floating::format_real(*value as f32);
+        }
+    }
+    value_to_string(value)
 }
 
 fn cast_uuid(value: &Value) -> Result<Value> {

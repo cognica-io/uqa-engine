@@ -440,7 +440,8 @@ fn emit_window_partition(
     let mut prefix_accumulator = None;
     if let Some(aggregate_name) = aggregate_name {
         if frame.is_none() {
-            let mut accumulator = AggregateAccumulator::builtin(aggregate_name);
+            let mut accumulator =
+                typed_window_accumulator(aggregate_name, &slot.args, &partition_schema, params)?;
             for index in 0..len {
                 let row = partition.get(index).map_err(exec_to_sql_error)?;
                 let value = window_aggregate_argument(
@@ -463,7 +464,12 @@ fn emit_window_partition(
                 ScalarFrameBound::CurrentRow
             ))
         ) {
-            prefix_accumulator = Some(AggregateAccumulator::builtin(aggregate_name));
+            prefix_accumulator = Some(typed_window_accumulator(
+                aggregate_name,
+                &slot.args,
+                &partition_schema,
+                params,
+            )?);
         }
     }
 
@@ -667,6 +673,23 @@ fn window_ntile(index: u64, rows: u64, buckets: u64) -> Result<i64, SQLError> {
         .map_err(|_| SQLError::TypeMismatch("ntile bucket number exceeds BIGINT".into()))
 }
 
+fn typed_window_accumulator(
+    name: &str,
+    args: &[ScalarExpr],
+    schema: &RowSchema,
+    params: &[SQLParam],
+) -> Result<AggregateAccumulator, SQLError> {
+    let input_type = args
+        .first()
+        .map(|argument| uqa_execution::scalar_type(argument, schema, params))
+        .transpose()?
+        .flatten();
+    Ok(AggregateAccumulator::builtin_with_input_type(
+        name,
+        input_type.as_ref(),
+    ))
+}
+
 fn window_aggregate_argument(
     name: &str,
     args: &[ScalarExpr],
@@ -724,7 +747,7 @@ fn evaluate_spilled_window_frame(
         eval_hook,
         subquery_runner,
     )?;
-    let mut accumulator = AggregateAccumulator::builtin(name);
+    let mut accumulator = typed_window_accumulator(name, args, &partition_schema, params)?;
     if start <= end && start < i128::from(partition.len()) && end >= 0 {
         let max_index = partition.len().checked_sub(1).ok_or_else(|| {
             SQLError::Internal("non-empty window frame lost its partition row".into())

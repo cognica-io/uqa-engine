@@ -113,8 +113,19 @@ fn bind_type_introspection_inner(
             mut lhs,
             mut rhs,
         } => {
+            let result_type = scalar_type_inner(&lhs, schema, params, resolver)
+                .and_then(|left| {
+                    let right = scalar_type_inner(&rhs, schema, params, resolver)?;
+                    super::operators::binary_result_type(op, left.as_ref(), right.as_ref())
+                })
+                .ok()
+                .flatten();
             bind_type_introspection_in_place(lhs.as_mut(), schema, params, resolver);
             bind_type_introspection_in_place(rhs.as_mut(), schema, params, resolver);
+            if let Some(ty @ (ColumnType::Real | ColumnType::DoublePrecision)) = result_type {
+                wrap_in_declared_cast(lhs.as_mut(), &ty);
+                wrap_in_declared_cast(rhs.as_mut(), &ty);
+            }
             ScalarExpr::Binary { op, lhs, rhs }
         }
         ScalarExpr::UnaryMinus(mut expr) => {
@@ -280,12 +291,10 @@ fn requires_type_introspection_binding(expression: &ScalarExpr) -> bool {
         ScalarExpr::Func { .. }
         | ScalarExpr::Array(_)
         | ScalarExpr::Case { .. }
-        | ScalarExpr::UnaryMinus(_) => true,
+        | ScalarExpr::UnaryMinus(_)
+        | ScalarExpr::Binary { .. } => true,
         ScalarExpr::Row(items) | ScalarExpr::And(items) | ScalarExpr::Or(items) => {
             items.iter().any(requires_type_introspection_binding)
-        }
-        ScalarExpr::Binary { lhs, rhs, .. } => {
-            requires_type_introspection_binding(lhs) || requires_type_introspection_binding(rhs)
         }
         ScalarExpr::Not(expression)
         | ScalarExpr::IsNull {
@@ -494,6 +503,9 @@ fn cast_requires_declared_source(target: &str) -> bool {
     while let Some(element) = target.strip_suffix("[]") {
         target = element.trim_end().to_string();
     }
+    if ColumnType::from_sql_name(&target).is_ok_and(|ty| ty.is_character_string()) {
+        return true;
+    }
     matches!(
         target.as_str(),
         "bytea"
@@ -513,9 +525,11 @@ fn cast_requires_declared_source(target: &str) -> bool {
 
 fn declared_source_wrapper(target: &str, source_type: ColumnType) -> Option<ColumnType> {
     let target = target.trim().to_ascii_lowercase();
-    if matches!(target.as_str(), "text" | "pg_catalog.text") {
+    if ColumnType::from_sql_name(&target).is_ok_and(|ty| ty.is_character_string()) {
         return match base_type(&source_type) {
-            source @ (ColumnType::Int2Vector | ColumnType::OidVector) => Some(source.clone()),
+            source @ (ColumnType::Int2Vector | ColumnType::OidVector | ColumnType::Real) => {
+                Some(source.clone())
+            }
             _ => None,
         };
     }

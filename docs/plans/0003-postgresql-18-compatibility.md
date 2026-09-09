@@ -130,6 +130,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `protocol.simple-query-command-completion` | `M5` | `partial` |
 | `types.domain-declarations-and-coercion` | `M3` | `partial` |
 | `execution.prepared-parameter-contracts` | `M3` | `partial` |
+| `types.floating-point-width` | `M3` | `partial` |
 
 <!-- pg18-manifest-status:end -->
 
@@ -316,6 +317,8 @@ Keep row schemas as static plan metadata from the first scan through the last co
 Prepared parameter declarations now survive SQL compilation and planning, and EXECUTE retains declared type identities for scalar, array, domain, and NULL values. The checked-in 125-case PostgreSQL 18.4 oracle compares result names and type OIDs, ordered values, SQLSTATEs and diagnostics, constant-error ordering, domain conversion effects, prepared-definition lifetime across transaction and savepoint rollback, DISCARD plan retention, temporary-relation rollback, and nontransactional sequence-state discard on memory and SQLite. Catalog refresh invalidates executable plans and delays replanning until the statement is used.
 
 Unspecified and unknown parameter inference, full PREPARE analysis, fixed result-type checks during replanning, pg_prepared_statements metadata, complete cast coverage, and real Extended Query execution remain tracked by execution.prepared-parameter-contracts. These fixes establish declared-parameter execution semantics; they do not satisfy the unmodified client or upstream-regression gates.
+
+Floating-point input now rounds directly to its declared precision, arithmetic retains float4 or float8 operator selection and range errors, and SUM(real) preserves single-precision transitions in grouped, ordered, window, and spilled execution. Storage predicates retain declared column types, and cast projection labels are derived before type-name normalization. The 133-case PostgreSQL 18.4 oracle covers exact values, type OIDs, names, diagnostics, arrays, domains, and prepared parameters on memory, SQLite, and forced-spill engines. The complete upstream float4/float8 schedules, alternate input forms, floating functions, and remaining I/O and cast catalog entries stay open under types.floating-point-width.
 
 ### 8. Client and operational compatibility
 

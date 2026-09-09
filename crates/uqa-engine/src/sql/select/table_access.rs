@@ -194,7 +194,16 @@ pub(in crate::sql) fn run_single_table_select_output(
     let predicate_schema = uqa_execution::RowSchema::with_qualified_types(
         qualifier,
         source_schema.clone(),
-        vec![None; source_schema.len()],
+        source_schema
+            .iter()
+            .map(|name| {
+                table_snapshot
+                    .columns
+                    .iter()
+                    .find(|column| column.name == *name)
+                    .map(|column| column.ty.clone())
+            })
+            .collect(),
     );
     let (pushed_predicate, residual_filter) =
         split_projected_filter(physical_filter.take(), &predicate_schema, params)?;

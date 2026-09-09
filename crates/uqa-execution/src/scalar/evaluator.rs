@@ -130,6 +130,21 @@ pub fn eval_scalar(
         ScalarExpr::Binary { op, lhs, rhs } => {
             let left = eval_scalar(lhs, context)?;
             let right = eval_scalar(rhs, context)?;
+            if (matches!(left, Value::Float(_)) || matches!(right, Value::Float(_)))
+                && matches!(
+                    op,
+                    BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide
+                )
+                && scalar_source_type(lhs, context).is_some_and(|ty| real_type_name(&ty))
+                && scalar_source_type(rhs, context).is_some_and(|ty| real_type_name(&ty))
+            {
+                return uqa_sql::expr::eval_float_arithmetic(
+                    *op,
+                    &left,
+                    &right,
+                    uqa_sql::expr::FloatWidth::Real,
+                );
+            }
             eval_binary_values_with_integer_width(
                 *op,
                 &left,
@@ -453,14 +468,22 @@ fn scalar_source_type(expression: &ScalarExpr, context: &ScalarEvalContext<'_>) 
         ScalarExpr::Literal(Value::Str(_) | Value::FixedChar(_)) => return None,
         _ => {}
     }
-    context
-        .row_schema()
-        .and_then(|schema| {
-            crate::scalar_type(expression, schema, context.params())
-                .ok()
-                .flatten()
-        })
-        .map(|ty| ty.sql_name())
+    let empty = crate::RowSchema::default();
+    crate::scalar_type(
+        expression,
+        context.row_schema().unwrap_or(&empty),
+        context.params(),
+    )
+    .ok()
+    .flatten()
+    .map(|ty| ty.sql_name())
+}
+
+fn real_type_name(name: &str) -> bool {
+    matches!(
+        uqa_sql::ast::ColumnType::from_sql_name(name),
+        Ok(uqa_sql::ast::ColumnType::Real)
+    )
 }
 
 fn scalar_integer_width(expression: &ScalarExpr) -> Option<IntegerWidth> {

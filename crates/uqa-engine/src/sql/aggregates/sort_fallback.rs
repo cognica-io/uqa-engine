@@ -118,6 +118,8 @@ pub(super) fn aggregate_sorted_input(
                     current_accumulators = new_aggregate_accumulators_with_budget(
                         engine,
                         &aggregate_targets,
+                        input_schema,
+                        params,
                         accumulator_budget,
                     )?;
                 }
@@ -142,6 +144,8 @@ pub(super) fn aggregate_sorted_input(
             let accumulators = new_aggregate_accumulators_with_budget(
                 engine,
                 &aggregate_targets,
+                input_schema,
+                params,
                 accumulator_budget,
             )?;
             if let Some(row) = super::output::finish_group(

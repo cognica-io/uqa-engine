@@ -35,7 +35,9 @@ pub fn format_postgres_text(
     Ok(match value {
         Value::Bool(value) => if *value { "t" } else { "f" }.into(),
         Value::FixedChar(value) => value.clone(),
-        Value::Float(value) if matches!(ty, ColumnType::Real) => format_real(*value as f32),
+        Value::Float(value) if matches!(ty, ColumnType::Real) => {
+            uqa_sql::expr::format_real(*value as f32)
+        }
         Value::Float(value) => uqa_graph::agtype::format_float_pg(*value),
         _ => value_to_string(value),
     })
@@ -82,18 +84,4 @@ fn format_array(
         });
     }
     Ok(format!("{prefix}{{{}}}", fields.join(",")))
-}
-
-fn format_real(value: f32) -> String {
-    if !value.is_finite() {
-        return uqa_graph::agtype::format_float_pg(f64::from(value));
-    }
-    let scientific = format!("{value:e}");
-    let (mantissa, exponent) = scientific.split_once('e').expect("scientific float output");
-    let exponent: i32 = exponent.parse().expect("scientific exponent");
-    if (-4..6).contains(&exponent) {
-        return value.to_string();
-    }
-    let sign = if exponent >= 0 { '+' } else { '-' };
-    format!("{mantissa}e{sign}{:02}", exponent.abs())
 }

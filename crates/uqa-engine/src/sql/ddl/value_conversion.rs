@@ -379,22 +379,9 @@ pub(crate) fn convert_value_to_column_type(
             padded.extend(std::iter::repeat_n(' ', padding));
             Ok(Value::FixedChar(padded))
         }
-        ColumnType::Real | ColumnType::DoublePrecision => match value {
-            Value::Float(_) => Ok(value),
-            Value::Int(i) => Ok(Value::Float(i as f64)),
-            Value::Decimal(d) => d
-                .to_f64()
-                .map(Value::Float)
-                .ok_or_else(|| SQLError::TypeMismatch("cannot cast decimal to real".into())),
-            Value::Bool(b) => Ok(Value::Float(if b { 1.0 } else { 0.0 })),
-            Value::Str(s) => s
-                .parse::<f64>()
-                .map(Value::Float)
-                .map_err(|e| SQLError::TypeMismatch(format!("cannot cast `{s}` to real: {e}"))),
-            other => Err(SQLError::TypeMismatch(format!(
-                "cannot cast {other:?} to real"
-            ))),
-        },
+        ColumnType::Real | ColumnType::DoublePrecision => {
+            uqa_sql::expr::cast_value(&value, &ty.sql_name())
+        }
         ColumnType::Numeric { precision, scale } => {
             let decimal = match value {
                 Value::Decimal(d) => d,

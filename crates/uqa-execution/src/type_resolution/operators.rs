@@ -102,6 +102,9 @@ pub(super) fn binary_result_type(
         return Ok(Some(ty));
     }
     if let Some(ty) = common_numeric_type(left, right) {
+        if matches!(ty, ColumnType::Real) && left != right {
+            return Ok(Some(ColumnType::DoublePrecision));
+        }
         return Ok(Some(ty));
     }
     if matches!(left, ColumnType::JsonB)

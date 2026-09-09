@@ -77,6 +77,8 @@ mod array_transforms;
 mod checksums;
 #[path = "pg18_semantics/comparisons_and_arrays.rs"]
 mod comparisons_and_arrays;
+#[path = "pg18_semantics/floating_point_width.rs"]
+mod floating_point_width;
 #[path = "pg18_semantics/gamma_functions.rs"]
 mod gamma_functions;
 #[path = "pg18_semantics/json_strip_nulls.rs"]

@@ -93,6 +93,10 @@ fn encode_accumulator(accumulator: AggregateAccumulator) -> Value {
         accumulator
             .statistics_sum_squares
             .map_or(Value::Null, Value::Decimal),
+        Value::Bool(matches!(
+            accumulator.state_plan,
+            super::AggregateStatePlan::SumReal
+        )),
     ])
 }
 
@@ -111,9 +115,9 @@ fn decode_accumulator(
             "partial aggregate accumulator is not a list".into(),
         ));
     };
-    if fields.len() != 18 {
+    if fields.len() != 19 {
         return Err(SQLError::Internal(format!(
-            "partial aggregate accumulator has {} fields, expected 18",
+            "partial aggregate accumulator has {} fields, expected 19",
             fields.len()
         )));
     }
@@ -150,6 +154,15 @@ fn decode_accumulator(
     accumulator.statistics_origin = optional_decimal(next(&mut fields)?)?;
     accumulator.statistics_sum = optional_decimal(next(&mut fields)?)?;
     accumulator.statistics_sum_squares = optional_decimal(next(&mut fields)?)?;
+    match next(&mut fields)? {
+        Value::Bool(true) => accumulator.state_plan = super::AggregateStatePlan::SumReal,
+        Value::Bool(false) => {}
+        _ => {
+            return Err(SQLError::Internal(
+                "invalid aggregate float width flag".into(),
+            ))
+        }
+    }
     Ok(accumulator)
 }
 
@@ -170,6 +183,7 @@ pub(super) fn merge_accumulators(
     let has_decimal = target.numeric_inputs.has_decimal() || source.numeric_inputs.has_decimal();
     let has_float =
         numeric_has_float(target.numeric_inputs) || numeric_has_float(source.numeric_inputs);
+    let target_empty = target.count == 0;
 
     target.count = target
         .count
@@ -192,7 +206,13 @@ pub(super) fn merge_accumulators(
         None
     };
     target.sum = if has_float {
-        target_float_total + source_float_total
+        if target_empty {
+            source_float_total
+        } else if source.count == 0 {
+            target_float_total
+        } else {
+            target.combine_float_sum(target_float_total, source_float_total)?
+        }
     } else {
         0.0
     };

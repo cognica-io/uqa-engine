@@ -15,7 +15,7 @@ pub fn value_to_string(v: &Value) -> String {
         Value::Null => "".into(),
         Value::Void => "".into(),
         Value::Int(i) => i.to_string(),
-        Value::Float(f) => f.to_string(),
+        Value::Float(f) => uqa_core::format_float_pg(*f),
         Value::Decimal(d) => d.to_sql_string(),
         Value::Str(s) => s.clone(),
         Value::FixedChar(s) => s.trim_end_matches(' ').to_string(),
@@ -205,32 +205,7 @@ pub(super) fn allocation_error(label: &str) -> SQLError {
 }
 
 pub(crate) fn to_f64(v: &Value) -> Result<f64> {
-    match v {
-        Value::Int(n) => Ok(*n as f64),
-        Value::Float(f) => Ok(*f),
-        Value::Decimal(d) => d.to_f64().ok_or_else(|| {
-            SQLError::TypeMismatch(format!("cannot cast {v:?} to double precision"))
-        }),
-        Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        // float8 casts accept PostgreSQL's textual forms, including
-        // Infinity / NaN spellings.
-        Value::Str(s) | Value::FixedChar(s) => {
-            let text = s.trim();
-            let lowered = text.to_ascii_lowercase();
-            match lowered.as_str() {
-                "infinity" | "inf" | "+infinity" | "+inf" => Ok(f64::INFINITY),
-                "-infinity" | "-inf" => Ok(f64::NEG_INFINITY),
-                "nan" => Ok(f64::NAN),
-                _ => text.parse().map_err(|_| SQLError::Routine {
-                    sqlstate: "22P02".into(),
-                    message: format!("invalid input syntax for type double precision: \"{s}\""),
-                }),
-            }
-        }
-        other => Err(SQLError::TypeMismatch(format!(
-            "expected number, got {other:?}"
-        ))),
-    }
+    super::floating::to_float(v, super::FloatWidth::DoublePrecision)
 }
 
 pub(super) fn to_decimal(v: &Value) -> Result<DecimalValue> {

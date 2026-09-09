@@ -140,7 +140,8 @@
       "routines.function-procedure-drop-cascade-extended",
       "ddl.check-constraint-inheritance",
       "types.domain-declarations-and-coercion",
-      "execution.prepared-parameter-contracts"
+      "execution.prepared-parameter-contracts",
+      "types.floating-point-width"
     ],
     "M4": [
       "dml.returning-row-images-extended",
@@ -877,6 +878,14 @@
       "supported_version": "PostgreSQL 18.4 declared scalar, array, and domain PREPARE parameter types, typed NULLs, assignment conversions, argument count and expression validation, constant failure ordering, domain input and execution effects, connection-owned definitions across rollback, lazy plan invalidation, transactional DISCARD variants, and sequence discard across rollback; 125 live cases on memory and SQLite",
       "status": "partial",
       "open_issue": "Unspecified and unknown parameter inference, complete PREPARE analysis, fixed result-type validation during replanning, pg_prepared_statements metadata, the complete cast and parameter matrix, and real Extended Query Parse/Bind/Describe/Execute remain to be implemented and verified."
+    },
+    {
+      "id": "types.floating-point-width",
+      "postgresql_reference": "PostgreSQL 18.4 live rows, result labels and type OIDs, SQLSTATEs, and diagnostics in tests/parity/pg18/floating_point_width_oracle.expected.json; https://www.postgresql.org/docs/18/datatype-numeric.html; PostgreSQL REL_18_STABLE float.c, float.h, and parse_target.c",
+      "uqa_test": "cargo test -p uqa-engine --test integration floating_point_width; cargo test -p uqa-engine --lib sql::aggregates; cargo test -p uqa-sql; cargo test -p uqa-execution",
+      "supported_version": "133 PostgreSQL 18.4 cases on memory, SQLite, and forced-spill execution: direct real input rounding, numeric and float conversion boundaries, float4 arithmetic, mixed numeric promotion to float8, range and division errors, NaN, infinity, signed zero, subnormals, declared-width character output, typed storage predicates, array and domain conversion, PREPARE binding, cast projection labels, and real SUM transitions including ordered aggregates, windows, and partial states",
+      "status": "partial",
+      "open_issue": "The full unmodified float4/float8 schedules, alternate floating input forms, every floating function and I/O entry point, and all associated catalog cast and overload rows require further implementation and differential verification."
     }
   ]
 }
