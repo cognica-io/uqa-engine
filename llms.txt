@@ -1,6 +1,6 @@
 # UQA Engine
 
-> UQA Engine 0.2.2 is an embedded Rust database that combines PostgreSQL 18-compatible relational SQL across its verified surface, full-text and vector retrieval, graph queries, ranked fusion, and host-language SQL callbacks in one runtime, with a direct authenticated HTTP client that native applications can initialize by local or Cloud project name through the installed `uqa` CLI.
+> UQA Engine 0.2.3 is an embedded Rust database that combines PostgreSQL 18-compatible relational SQL across its verified surface, full-text and vector retrieval, graph queries, ranked fusion, and host-language SQL callbacks in one runtime, with a direct authenticated HTTP client that native applications can initialize by local or Cloud project name through the installed `uqa` CLI.
 
 The manual is the canonical product contract. Parser acceptance alone does not prove execution support; follow the documented argument shape, result schema, state effects, and errors, then verify executable claims against tests or the engine.
 
@@ -57,4 +57,4 @@ When generating SQL:
 
 ## Release upgrades
 
-- [Upgrade guide](docs/manual/reference/10-upgrading.md): UQA Engine 0.2.2 packages, CHECK and NOT NULL inheritance, Rust AST origin fields, CHECK catalog migration, the Python CLI fix, and custom Rust storage requirements.
+- [Upgrade guide](docs/manual/reference/10-upgrading.md): UQA Engine 0.2.3 packages, Rust graph API and custom catalog changes, automatic statistics, session caches, and persistent storage migration.
