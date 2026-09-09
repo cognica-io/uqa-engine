@@ -711,6 +711,9 @@ pub(in crate::compiler) fn compile_projections(
                             _ => None,
                         })
                 }),
+            (None, Some(NodeEnum::SqlvalueFunction(function))) => {
+                sql_value_projection_name(function.op()).map(str::to_owned)
+            }
             (alias, _) => alias,
         };
         out.push(Projection { expr, alias });

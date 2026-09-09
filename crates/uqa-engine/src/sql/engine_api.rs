@@ -13,17 +13,38 @@ use super::{
 
 struct SQLExecutionScope<'a> {
     depth: &'a std::sync::atomic::AtomicUsize,
+    statement_clock: &'a std::sync::atomic::AtomicI64,
+    previous_clock: Option<i64>,
 }
 
 impl<'a> SQLExecutionScope<'a> {
-    fn enter(depth: &'a std::sync::atomic::AtomicUsize) -> (Self, bool) {
+    fn enter(engine: &'a Engine) -> (Self, bool) {
+        let depth = &engine.runtime.sql_execution_depth;
+        let statement_clock = &engine.session.statement_started_at_micros;
         let nested = depth.fetch_add(1, std::sync::atomic::Ordering::Relaxed) != 0;
-        (Self { depth }, nested)
+        let previous_clock = (!nested).then(|| {
+            statement_clock.swap(
+                uqa_sql::expr::clock_timestamp_micros(),
+                std::sync::atomic::Ordering::Relaxed,
+            )
+        });
+        (
+            Self {
+                depth,
+                statement_clock,
+                previous_clock,
+            },
+            nested,
+        )
     }
 }
 
 impl Drop for SQLExecutionScope<'_> {
     fn drop(&mut self) {
+        if let Some(previous) = self.previous_clock {
+            self.statement_clock
+                .store(previous, std::sync::atomic::Ordering::Relaxed);
+        }
         let previous = self
             .depth
             .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
@@ -40,7 +61,7 @@ impl Engine {
         mut consume: impl FnMut(&SQLResult) -> Result<(), SQLError>,
     ) -> Result<(), SQLError> {
         let _statement = self.runtime.statement_gate.lock();
-        let (_execution, nested) = SQLExecutionScope::enter(&self.runtime.sql_execution_depth);
+        let (_execution, nested) = SQLExecutionScope::enter(self);
         self.synchronize_table_catalog()
             .map_err(|error| SQLError::Internal(format!("refresh table catalog: {error}")))?;
         self.synchronize_table_data().map_err(|error| {
@@ -55,7 +76,7 @@ impl Engine {
     /// Run a single SQL statement against the engine.
     pub fn sql(&self, query: &str, params: &[SQLParam]) -> Result<SQLResult, SQLError> {
         let _statement = self.runtime.statement_gate.lock();
-        let (_execution, nested) = SQLExecutionScope::enter(&self.runtime.sql_execution_depth);
+        let (_execution, nested) = SQLExecutionScope::enter(self);
         self.synchronize_table_catalog()
             .map_err(|err| SQLError::Internal(format!("refresh table catalog: {err}")))?;
         self.synchronize_table_data()
@@ -76,7 +97,7 @@ impl Engine {
     /// snapshot is committed before the cursor is returned.
     pub fn sql_cursor(&self, query: &str, params: &[SQLParam]) -> Result<SQLCursor, SQLError> {
         let _statement = self.runtime.statement_gate.lock();
-        let (_execution, _) = SQLExecutionScope::enter(&self.runtime.sql_execution_depth);
+        let (_execution, _) = SQLExecutionScope::enter(self);
         self.synchronize_table_catalog()
             .map_err(|err| SQLError::Internal(format!("refresh table catalog: {err}")))?;
         self.synchronize_table_data()

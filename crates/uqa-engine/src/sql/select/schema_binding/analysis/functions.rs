@@ -372,6 +372,10 @@ fn builtin_scalar_function(name: &str, argument_count: usize) -> bool {
         ) | (
             "clock_timestamp"
                 | "statement_timestamp"
+                | "transaction_timestamp"
+                | "current_time"
+                | "localtime"
+                | "localtimestamp"
                 | "timeofday"
                 | "current_database"
                 | "current_catalog"

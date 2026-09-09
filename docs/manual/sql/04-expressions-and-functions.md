@@ -204,11 +204,25 @@ SELECT json_strip_nulls(strip_in_arrays => true, target => '{"keep":1,"drop":nul
 
 | Group | Functions |
 | --- | --- |
-| Current time | `now`, `current_timestamp`, `current_date`, `clock_timestamp`, `statement_timestamp`, `timeofday` |
+| Current time | `now`, `transaction_timestamp`, `statement_timestamp`, `clock_timestamp`, `current_date`, `current_time`, `current_timestamp`, `localtime`, `localtimestamp`, `timeofday` |
 | Conversion | `to_timestamp`, `to_date`, `to_char` |
 | Parts and truncation | `extract`, `date_part`, `date_trunc` |
 | Arithmetic and construction | `age`, `make_timestamp`, `make_date`, `make_interval`, `justify_hours` |
 | Validation | `isfinite` |
+
+`CURRENT_DATE`, `CURRENT_TIME[(precision)]`, `CURRENT_TIMESTAMP[(precision)]`, `LOCALTIME[(precision)]`, and `LOCALTIMESTAMP[(precision)]` are SQL value expressions. Their result types are `date`, `time with time zone`, `timestamp with time zone`, `time without time zone`, and `timestamp without time zone`, respectively. A precision from zero through six rounds fractional seconds and remains visible in result metadata. SQL value expressions keep their built-in identity even when the search path contains a user function with the same name.
+
+`now()` and `transaction_timestamp()` return the current transaction's start time. The SQL current date/time expressions use the same transaction clock, which survives subsequent statements, savepoints, rollback to a savepoint, and nested execution. `statement_timestamp()` returns the start time of the outer SQL message; statements in one Simple Query message share it. `clock_timestamp()` and `timeofday()` read the wall clock when evaluated. These expressions do not change transaction state. One-argument `age(timestamp)` subtracts its argument from midnight on the transaction's current date, while `age(a, b)` computes `a - b`.
+
+```sql execute
+SET TIME ZONE 'UTC';
+SELECT pg_typeof(CURRENT_TIME)::text AS time_type,
+       pg_typeof(LOCALTIMESTAMP)::text AS timestamp_type,
+       now() = CURRENT_TIMESTAMP AS same_transaction_clock,
+       CURRENT_TIMESTAMP(3) = CURRENT_TIMESTAMP::timestamptz(3) AS same_precision;
+```
+
+The results are `time with time zone`, `timestamp without time zone`, `true`, and `true`. The differential clock transcript uses UTC; session time-zone conversion and display, complete catalog signatures, and precision-reduction diagnostics remain open PostgreSQL compatibility bugs tracked in the [compatibility ledger](09-compatibility.md).
 
 ## Range and multirange functions
 

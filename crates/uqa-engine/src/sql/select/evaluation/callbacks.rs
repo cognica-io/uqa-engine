@@ -351,6 +351,14 @@ impl FunctionTypeResolver for EngineExpressionEvaluator<'_> {
 }
 
 impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
+    fn transaction_timestamp_micros(&self) -> Option<i64> {
+        Some(self.engine.transaction_timestamp_micros())
+    }
+
+    fn statement_timestamp_micros(&self) -> Option<i64> {
+        Some(self.engine.statement_timestamp_micros())
+    }
+
     fn resolve_regtype_input(&self, name: &str) -> Result<Option<i64>, SQLError> {
         uqa_sql::expr::EngineHook::resolve_regtype_input(self.engine, name)
     }

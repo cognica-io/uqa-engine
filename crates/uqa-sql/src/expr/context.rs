@@ -85,6 +85,16 @@ fn cast_regrole_array(
 /// accepted here: lowering assigns them physical query-plan slots executed by
 /// `uqa-execution::ScalarSubqueryRunner`.
 pub trait EngineHook {
+    /// Start of the current SQL transaction, in Unix microseconds.
+    fn transaction_timestamp_micros(&self) -> Option<i64> {
+        None
+    }
+
+    /// Start of the current frontend SQL message, in Unix microseconds.
+    fn statement_timestamp_micros(&self) -> Option<i64> {
+        None
+    }
+
     fn nextval(&self, name: &str) -> Result<i64>;
     fn currval(&self, name: &str) -> Result<i64>;
     fn lastval(&self) -> Result<i64> {

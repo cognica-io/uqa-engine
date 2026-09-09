@@ -317,18 +317,22 @@ pub(super) fn builtin_function_type_inner(
         "array_prepend" => Ok(argument(1)),
         "array_fill" => Ok(first().map(|ty| ColumnType::Array(Box::new(ty)))),
         "unnest" => Ok(first().and_then(array_element_type)),
-        "now" | "current_timestamp" | "clock_timestamp" | "statement_timestamp" => {
-            Ok(Some(ColumnType::TimestampTz))
-        }
+        "now"
+        | "current_timestamp"
+        | "clock_timestamp"
+        | "statement_timestamp"
+        | "transaction_timestamp"
+        | "to_timestamp" => Ok(Some(ColumnType::TimestampTz)),
+        "current_time" => Ok(Some(ColumnType::TimeTz)),
+        "localtime" => Ok(Some(ColumnType::Time)),
+        "localtimestamp" | "make_timestamp" => Ok(Some(ColumnType::Timestamp)),
         "current_date" | "make_date" | "to_date" => Ok(Some(ColumnType::Date)),
-        "to_timestamp" => Ok(Some(ColumnType::TimestampTz)),
         "age" | "make_interval" | "justify_hours" => Ok(Some(ColumnType::Interval)),
         "date_trunc" => Ok(argument(1).map(|ty| match base_type(&ty) {
             ColumnType::Interval => ColumnType::Interval,
             ColumnType::Timestamp => ColumnType::Timestamp,
             _ => ColumnType::TimestampTz,
         })),
-        "make_timestamp" => Ok(Some(ColumnType::Timestamp)),
         "current_database" | "current_catalog" | "current_schema" | "current_user"
         | "session_user" => Ok(Some(ColumnType::Name)),
         "current_schemas" => Ok(Some(ColumnType::Array(Box::new(ColumnType::Name)))),

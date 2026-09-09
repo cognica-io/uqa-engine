@@ -50,6 +50,7 @@ use uuid::{extract_uuid_timestamp, extract_uuid_version, generate_random_uuid, g
 mod binary;
 mod casting;
 mod conversion;
+mod current_time;
 mod scalar_array;
 mod scalar_core;
 mod scalar_dispatch;
@@ -77,6 +78,7 @@ use conversion::{
 };
 pub use conversion::{array_value_to_string, value_to_string, vector_value_to_string};
 pub use conversion::{value_to_tensor, value_to_vector};
+pub use current_time::clock_timestamp_micros;
 pub use floating::{eval_float_arithmetic, format_real, FloatWidth};
 #[cfg(test)]
 use scalar_dispatch::eval_scalar_function;

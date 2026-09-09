@@ -8,7 +8,7 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use parking_lot::{Mutex, ReentrantMutex, RwLock};
@@ -417,6 +417,8 @@ impl DurableCatalogState {
 }
 
 pub(super) struct SessionContext {
+    /// Start of the outer SQL message, shared with nested execution and portal workers.
+    pub(super) statement_started_at_micros: AtomicI64,
     /// Positive process identifier exposed by `pg_backend_pid()` and asynchronous notification responses. Portal workers share the owning session context and therefore retain the same identifier.
     pub(super) backend_process_id: AtomicI32,
     pub(super) backend_process_id_is_local: AtomicBool,
@@ -462,6 +464,7 @@ impl SessionContext {
             session_user: "uqa".to_string(),
         };
         Self {
+            statement_started_at_micros: AtomicI64::new(0),
             backend_process_id: AtomicI32::new(
                 crate::engine_notifications::allocate_backend_process_id(),
             ),

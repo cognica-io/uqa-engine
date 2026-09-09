@@ -12,6 +12,14 @@ use uqa_sql::SQLError;
 use super::Engine;
 
 impl uqa_sql::expr::EngineHook for Engine {
+    fn transaction_timestamp_micros(&self) -> Option<i64> {
+        Some(Engine::transaction_timestamp_micros(self))
+    }
+
+    fn statement_timestamp_micros(&self) -> Option<i64> {
+        Some(Engine::statement_timestamp_micros(self))
+    }
+
     fn resolve_regtype_input(&self, name: &str) -> Result<Option<i64>, SQLError> {
         crate::sql::resolve_regobject_oid(self, &uqa_sql::ast::ColumnType::Regtype, name)?
             .map(Some)

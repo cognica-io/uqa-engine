@@ -141,7 +141,8 @@
       "ddl.check-constraint-inheritance",
       "types.domain-declarations-and-coercion",
       "execution.prepared-parameter-contracts",
-      "types.floating-point-width"
+      "types.floating-point-width",
+      "execution.sql-value-clocks"
     ],
     "M4": [
       "dml.returning-row-images-extended",
@@ -886,6 +887,14 @@
       "supported_version": "133 PostgreSQL 18.4 cases on memory, SQLite, and forced-spill execution: direct real input rounding, numeric and float conversion boundaries, float4 arithmetic, mixed numeric promotion to float8, range and division errors, NaN, infinity, signed zero, subnormals, declared-width character output, typed storage predicates, array and domain conversion, PREPARE binding, cast projection labels, and real SUM transitions including ordered aggregates, windows, and partial states",
       "status": "partial",
       "open_issue": "The full unmodified float4/float8 schedules, alternate floating input forms, every floating function and I/O entry point, and all associated catalog cast and overload rows require further implementation and differential verification."
+    },
+    {
+      "id": "execution.sql-value-clocks",
+      "postgresql_reference": "PostgreSQL 18.4 live rows and complete result field descriptors in tests/parity/pg18/sql_value_clock_oracle.expected.json; https://www.postgresql.org/docs/18/functions-datetime.html#FUNCTIONS-DATETIME-CURRENT",
+      "uqa_test": "cargo test -p uqa-engine --test integration sql_value_clock; cargo test -p uqa-engine --test integration sql_datetime_functions; cargo test -p uqa-sql; cargo test -p uqa-execution",
+      "supported_version": "90 PostgreSQL 18.4 UTC cases on memory, SQLite, and forced-spill execution: SQL current date/time types, precision modifiers and result labels, grammar-owned built-in identity despite search-path shadowing, transaction and message clock relationships, savepoint rollback, cursor fetch, nested SQL routines, and one-argument age direction and NULL handling",
+      "status": "partial",
+      "open_issue": "Session TimeZone conversion and display, precision-reduction warnings, complete pg_proc signatures and overload errors, and the full upstream current-time, date, and timestamp regression matrix require further implementation and differential verification."
     }
   ]
 }

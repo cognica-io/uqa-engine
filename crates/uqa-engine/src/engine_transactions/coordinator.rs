@@ -250,6 +250,7 @@ impl Engine {
         }
         let read_only = read_only || characteristics.read_only;
         let outer = stack.is_empty();
+        let started_at_micros = self.statement_timestamp_micros();
         let session_snapshot = self.snapshot_session_state();
         let (storage_savepoint, data_snapshot, snapshot_change_baseline) = if outer {
             let (data_snapshot, baseline) = self.begin_outer_transaction_with_notifications(
@@ -301,6 +302,7 @@ impl Engine {
             TransactionFrameKind::SimpleQuery => (false, false),
         };
         stack.push(TransactionFrame {
+            started_at_micros,
             implicit_statement,
             explicit_transaction_block,
             storage_savepoint,

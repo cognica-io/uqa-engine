@@ -57,11 +57,7 @@ pub(super) fn function_volatility_with_binding(
     let identity = name.to_ascii_lowercase();
     let lower = builtin_function_dispatch_name(&identity);
 
-    // These implementations either mutate engine/session state or derive a
-    // fresh value on every evaluation.  `now`/`current_timestamp`,
-    // `statement_timestamp`, and `current_date` are intentionally included:
-    // the scalar evaluator currently obtains wall-clock time per call rather
-    // than owning a statement timestamp snapshot.
+    // These implementations either mutate engine/session state or derive a fresh value on every evaluation.
     if matches!(
         lower.as_str(),
         "random"
@@ -73,14 +69,6 @@ pub(super) fn function_volatility_with_binding(
             | "currval"
             | "lastval"
             | "setval"
-            | "now"
-            | "current_date"
-            | "current_time"
-            | "current_timestamp"
-            | "localtime"
-            | "localtimestamp"
-            | "statement_timestamp"
-            | "transaction_timestamp"
             | "clock_timestamp"
             | "timeofday"
             | "gen_random_uuid"
@@ -106,8 +94,7 @@ pub(super) fn function_volatility_with_binding(
             | "bayesian_match_with_prior"
             | "fts_match"
             | "multi_field_match"
-    ) || (lower == "age" && argument_count == 1)
-    {
+    ) {
         return FunctionVolatility::Volatile;
     }
 
@@ -129,6 +116,14 @@ pub(super) fn function_volatility_with_binding(
         || matches!(
             lower.as_str(),
             "current_schema"
+                | "now"
+                | "current_date"
+                | "current_time"
+                | "current_timestamp"
+                | "localtime"
+                | "localtimestamp"
+                | "statement_timestamp"
+                | "transaction_timestamp"
                 | "current_schemas"
                 | "pg_backend_pid"
                 | "version"
@@ -158,6 +153,7 @@ pub(super) fn function_volatility_with_binding(
                 | "has_schema_privilege"
                 | "has_sequence_privilege"
         )
+        || (lower == "age" && argument_count == 1)
     {
         FunctionVolatility::Stable
     } else {

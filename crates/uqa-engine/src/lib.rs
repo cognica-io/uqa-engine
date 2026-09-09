@@ -447,6 +447,7 @@ pub(crate) struct ConstraintModeState {
 }
 
 struct TransactionFrame {
+    started_at_micros: i64,
     /// Whether this outer frame is an implicit SQL-driver boundary rather than a user-visible `BEGIN` block. A simple-query batch promotes it when the batch reaches `BEGIN`.
     implicit_statement: bool,
     /// Whether the user has entered an explicit transaction block. A multi-statement simple-query message still owns one atomic frame, but `PostgreSQL` permits `DISCARD` there until `BEGIN` promotes it.

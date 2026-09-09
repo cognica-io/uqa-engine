@@ -131,6 +131,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `types.domain-declarations-and-coercion` | `M3` | `partial` |
 | `execution.prepared-parameter-contracts` | `M3` | `partial` |
 | `types.floating-point-width` | `M3` | `partial` |
+| `execution.sql-value-clocks` | `M3` | `partial` |
 
 <!-- pg18-manifest-status:end -->
 
@@ -319,6 +320,8 @@ Prepared parameter declarations now survive SQL compilation and planning, and EX
 Unspecified and unknown parameter inference, full PREPARE analysis, fixed result-type checks during replanning, pg_prepared_statements metadata, complete cast coverage, and real Extended Query execution remain tracked by execution.prepared-parameter-contracts. These fixes establish declared-parameter execution semantics; they do not satisfy the unmodified client or upstream-regression gates.
 
 Floating-point input now rounds directly to its declared precision, arithmetic retains float4 or float8 operator selection and range errors, and SUM(real) preserves single-precision transitions in grouped, ordered, window, and spilled execution. Storage predicates retain declared column types, and cast projection labels are derived before type-name normalization. The 133-case PostgreSQL 18.4 oracle covers exact values, type OIDs, names, diagnostics, arrays, domains, and prepared parameters on memory, SQLite, and forced-spill engines. The complete upstream float4/float8 schedules, alternate input forms, floating functions, and remaining I/O and cast catalog entries stay open under types.floating-point-width.
+
+SQL current date/time expressions now retain their declared type, precision, result label, and grammar-owned built-in identity. Message timestamps are shared with nested execution, and transaction timestamps survive subsequent statements and savepoint rollback. A 90-case PostgreSQL 18.4 UTC transcript verifies descriptors, clock relationships, cursor fetch, nested SQL routines, and one-argument age on memory, SQLite, and forced-spill execution. Time-zone conversion and display, precision-reduction diagnostics, complete catalog overloads, and the full temporal schedules remain open implementation work.
 
 ### 8. Client and operational compatibility
 
