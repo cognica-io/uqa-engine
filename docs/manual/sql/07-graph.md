@@ -101,7 +101,7 @@ SELECT drop_graph('catalog_demo_renamed', true) AS dropped;
 | Arguments | Graph name and Cypher source are string values; SQL calls require an output column definition list |
 | Result | One relation shaped by the declared output list; `agtype` columns contain canonical AGE-shaped text |
 | Effects | Read-only clauses only read graph state; supported Cypher mutations participate in the surrounding SQL transaction |
-| Errors | An unknown graph, malformed or unsupported Cypher, a missing or incompatible output definition, parameter mismatches, and runtime graph errors are rejected |
+| Errors | An unknown graph, malformed or unsupported Cypher, excessive expression nesting, a missing or incompatible output definition, parameter mismatches, and runtime graph errors are rejected |
 
 ```sql
 SELECT *
@@ -113,6 +113,8 @@ $$) AS result(service_id int, name agtype);
 ```
 
 The arguments are the graph name, Cypher source, and optional parameters through the typed API path. SQL calls require an output definition list. `agtype` returns canonical AGE-shaped text; UQA Engine also allows concrete SQL types in the list for direct relational composition.
+
+Cypher permits up to 64 levels of recursive expression parsing and expression-tree depth. Deeper parentheses, lists, maps, calls, CASE expressions, unary operators, and nested operator or indexing chains return a parse error before exhausting the stack. The limit measures depth; flat list width and independent projection items do not share a cumulative nesting budget.
 
 ## Supported Cypher clauses
 

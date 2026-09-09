@@ -89,3 +89,77 @@ fn known_pathological_inputs() {
         let _ = parse_cypher(c);
     }
 }
+
+#[test]
+fn deeply_nested_expressions_return_parse_errors() {
+    for (prefix, suffix) in [
+        ("[", "]"),
+        ("(", ")"),
+        ("{value: ", "}"),
+        ("coalesce(", ")"),
+        ("CASE WHEN true THEN ", " ELSE 0 END"),
+        ("NOT ", ""),
+        ("- ", ""),
+    ] {
+        let query = format!("RETURN {}0{}", prefix.repeat(4_096), suffix.repeat(4_096));
+        let error = parse_cypher(&query).expect_err("excessive expression nesting must fail");
+        assert!(
+            error.to_string().contains("expression nesting limit"),
+            "{error}"
+        );
+    }
+    let malformed = format!("SET {}NULL", "[".repeat(4_096));
+    assert!(parse_cypher(&malformed).is_err());
+}
+
+#[test]
+fn long_expression_chains_return_parse_errors() {
+    for suffix in [
+        " + 0",
+        " * 0",
+        " ^ 0",
+        " AND true",
+        " OR true",
+        " XOR true",
+        " IS NULL",
+        " IN []",
+        " < 0",
+        "[0]",
+        "[..]",
+        ".value",
+    ] {
+        let query = format!("RETURN 0{}", suffix.repeat(4_096));
+        let error = parse_cypher(&query).expect_err("excessive expression depth must fail");
+        assert!(
+            error.to_string().contains("expression nesting limit"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn wide_expressions_and_independent_projections_remain_valid() {
+    let elements = vec!["0"; 10_000].join(", ");
+    assert!(parse_cypher(&format!("RETURN [{elements}]")).is_ok());
+    let nested = format!("{}0{}", "[".repeat(16), "]".repeat(16));
+    let projections = vec![nested; 256].join(", ");
+    assert!(parse_cypher(&format!("RETURN {projections}")).is_ok());
+}
+
+#[test]
+fn expression_depth_boundary_is_consistent() {
+    for (prefix, suffix) in [("[", "]"), ("(", ")"), ("NOT ", "")] {
+        let accepted = format!("RETURN {}0{}", prefix.repeat(63), suffix.repeat(63));
+        assert!(parse_cypher(&accepted).is_ok());
+        let rejected = format!("RETURN {}0{}", prefix.repeat(64), suffix.repeat(64));
+        assert!(matches!(
+            parse_cypher(&rejected),
+            Err(uqa_graph::cypher::ParseError::ExpressionTooDeep { limit: 64, .. })
+        ));
+    }
+    assert!(parse_cypher(&format!("RETURN 0{}", " + 0".repeat(63))).is_ok());
+    assert!(matches!(
+        parse_cypher(&format!("RETURN 0{}", " + 0".repeat(64))),
+        Err(uqa_graph::cypher::ParseError::ExpressionTooDeep { limit: 64, .. })
+    ));
+}

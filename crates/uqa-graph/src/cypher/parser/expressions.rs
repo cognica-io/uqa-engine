@@ -13,7 +13,9 @@ use super::{
 
 impl Parser {
     pub(super) fn parse_expression(&mut self) -> Result<CypherExpr, ParseError> {
-        self.parse_or()
+        let expression = self.with_expression_recursion(Self::parse_or)?;
+        self.check_expression_depth(&expression)?;
+        Ok(expression)
     }
 
     pub(super) fn parse_or(&mut self) -> Result<CypherExpr, ParseError> {
@@ -25,6 +27,7 @@ impl Parser {
                 left: Box::new(left),
                 right: Box::new(right),
             });
+            self.check_expression_depth(&left)?;
         }
         Ok(left)
     }
@@ -38,6 +41,7 @@ impl Parser {
                 left: Box::new(left),
                 right: Box::new(right),
             });
+            self.check_expression_depth(&left)?;
         }
         Ok(left)
     }
@@ -51,13 +55,14 @@ impl Parser {
                 left: Box::new(left),
                 right: Box::new(right),
             });
+            self.check_expression_depth(&left)?;
         }
         Ok(left)
     }
 
     pub(super) fn parse_not(&mut self) -> Result<CypherExpr, ParseError> {
         if self.match_keyword("NOT") {
-            let operand = self.parse_not()?;
+            let operand = self.with_expression_recursion(Self::parse_not)?;
             return Ok(CypherExpr::UnaryOp(UnaryOp {
                 op: "NOT".into(),
                 operand: Box::new(operand),
@@ -70,6 +75,7 @@ impl Parser {
         let mut left = self.parse_addition()?;
 
         loop {
+            self.check_expression_depth(&left)?;
             if self.match_keyword("IS") {
                 left = if self.match_keyword("NOT") {
                     self.expect_keyword("NULL")?;
@@ -170,6 +176,7 @@ impl Parser {
                 left: Box::new(left),
                 right: Box::new(right),
             });
+            self.check_expression_depth(&left)?;
         }
         Ok(left)
     }
@@ -187,6 +194,7 @@ impl Parser {
                 left: Box::new(left),
                 right: Box::new(right),
             });
+            self.check_expression_depth(&left)?;
         }
         Ok(left)
     }
@@ -203,6 +211,7 @@ impl Parser {
                 left: Box::new(left),
                 right: Box::new(right),
             });
+            self.check_expression_depth(&left)?;
         }
         Ok(left)
     }
@@ -210,7 +219,7 @@ impl Parser {
     pub(super) fn parse_unary(&mut self) -> Result<CypherExpr, ParseError> {
         if self.peek().kind == TokenKind::Minus {
             self.advance();
-            let operand = self.parse_unary()?;
+            let operand = self.with_expression_recursion(Self::parse_unary)?;
             return Ok(CypherExpr::UnaryOp(UnaryOp {
                 op: "-".into(),
                 operand: Box::new(operand),
@@ -222,6 +231,7 @@ impl Parser {
     pub(super) fn parse_postfix(&mut self) -> Result<CypherExpr, ParseError> {
         let mut expr = self.parse_atom()?;
         loop {
+            self.check_expression_depth(&expr)?;
             if self.peek().kind == TokenKind::Dot {
                 self.advance();
                 let key = self.expect(TokenKind::Identifier, "property name")?.value;

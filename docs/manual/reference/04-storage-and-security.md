@@ -116,7 +116,7 @@ Before upgrading an application:
 3. Run representative SQL, text, vector, and graph checks.
 4. Verify that the older binary is not expected to open a newly migrated file.
 
-Storage formats may evolve before a stable release, so application and database rollouts should be coordinated. The [0.2.2 upgrade guide](10-upgrading.md) covers typed tuple metadata, named expression-index storage, and catalog dependency migrations introduced in the 0.2 series.
+Storage formats may evolve before a stable release, so application and database rollouts should be coordinated. The [0.2.3 upgrade guide](10-upgrading.md) covers direct graph storage, automatic statistics, cache revisions, and catalog migration, alongside the tuple metadata and expression-index changes introduced in the 0.2 series.
 
 ## Backups and copies
 

@@ -6,8 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-09-09
+
+See the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.2.3/docs/manual/reference/10-upgrading.md) for Rust graph API changes, custom storage requirements, automatic statistics, and persistent catalog migration.
+
 ### Fixed
 
+- Rejected excessively nested Cypher expressions and deep operator chains with parse errors before parser recursion or expression-tree cleanup can exhaust the stack. Wide lists and independent expressions retain their existing behavior.
 - Removed the complete resident graph and reachability-index replicas from persistent engines. Startup, new sessions, catalog refresh, and graph handle cloning now retain only metadata and session-bound storage handles; point, label, and adjacency reads use indexed durable records. Graph mutations use storage checkpoints, fixed transactions combine physical snapshots with changed identities, and cursors preserve their declaration-time graph view without hydrating a complete graph in RAM. SQLite catalog version 46 adds durable path-index data and invalidation; legacy key-value graph access indexes migrate atomically at initial open.
 - Bounded sampled statistics by value size as well as row count. Oversized text and binary values no longer become full-payload histogram or MCV copies; non-null counts remain represented in distinctness estimates, row and NULL counts are preserved, and legacy oversized statistics are bounded during reopen and automatically replaced without requiring another write.
 - Reused unchanged SQLite table definitions, physical handles, and decoded statistics across data-only and automatic-statistics commits. Transactional, per-table cache revisions preserve snapshot and rollback visibility, refresh only changed dependencies, and share decoded committed statistics across independent sessions without a database-wide load lock. SQLite catalog version 44 installs durable invalidation tracking atomically.
@@ -18,7 +23,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- Rust graph callbacks now receive `GraphStoreHandle`, and `GraphStore` reads return owned, fallible results. Custom graph stores implement paged identity access, edge memberships, and atomic mutation checkpoints; custom catalogs implement direct graph access and durable path-index data. See the [development upgrade notes](docs/manual/reference/10-upgrading.md#unreleased-development-changes) before updating an embedded application or storage provider.
+- Rust graph callbacks now receive `GraphStoreHandle`, and `GraphStore` reads return owned, fallible results. Custom graph stores implement paged identity access, edge memberships, and atomic mutation checkpoints; custom catalogs implement direct graph access and durable path-index data. See the [graph API upgrade notes](https://github.com/cognica-io/uqa-engine/blob/v0.2.3/docs/manual/reference/10-upgrading.md#rust-graph-api-and-custom-catalogs) before updating an embedded application or storage provider.
 
 ## [0.2.2] - 2026-09-06
 
