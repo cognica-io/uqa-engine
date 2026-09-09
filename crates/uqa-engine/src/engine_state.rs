@@ -422,8 +422,11 @@ pub(super) struct SessionContext {
     pub(super) backend_process_id_is_local: AtomicBool,
     /// Transactional session values share one lock so snapshots and restores
     /// cannot observe a mixture of old and new search-path, sequence,
-    /// prepared-plan, or statement-cache state.
+    /// or statement-cache state.
     pub(super) state: RwLock<super::SessionStateSnapshot>,
+    /// Prepared definitions belong to the connection and survive transaction or
+    /// savepoint rollback, including definitions created or removed after a boundary.
+    pub(super) prepared: RwLock<BTreeMap<String, super::PreparedStatementPlan>>,
     /// `PostgreSQL` sequence reservations are session-local and nontransactional. They are intentionally kept outside `SessionStateSnapshot` so rollback never rewinds consumption or restores blocks discarded by `ALTER SEQUENCE`.
     pub(super) sequence_caches:
         Mutex<BTreeMap<super::RelationIdentity, super::SessionSequenceCache>>,
@@ -451,7 +454,7 @@ impl SessionContext {
             session_vars: BTreeMap::new(),
             sequence_currvals: BTreeMap::new(),
             last_sequence: None,
-            prepared: BTreeMap::new(),
+            sequence_discard_generation: 0,
             sql_statement_cache: SQLStatementCache::default(),
             portal_names: BTreeSet::new(),
             listened_channels: Vec::new(),
@@ -464,6 +467,7 @@ impl SessionContext {
             ),
             backend_process_id_is_local: AtomicBool::new(true),
             state: RwLock::new(state),
+            prepared: RwLock::new(BTreeMap::new()),
             sequence_caches: Mutex::new(BTreeMap::new()),
             random_state: Mutex::new(random_state),
             transactions: Mutex::new(Vec::new()),

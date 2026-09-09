@@ -36,8 +36,8 @@ pub(in crate::sql) use routine_binding::{
     bind_expression_plan_routines_for_storage, bind_query_plan_routines_for_storage,
 };
 pub(in crate::sql) use scope::{
-    analyze_query_plan_schema, analyze_query_plan_schema_with_catalog, bind_expression_plan_type,
-    bind_query_plan_schema,
+    analyze_expression_plan_type, analyze_query_plan_schema,
+    analyze_query_plan_schema_with_catalog, bind_expression_plan_type, bind_query_plan_schema,
 };
 pub(in crate::sql) use scope::{overlay_outer_schema, values_types_in_scope};
 pub(in crate::sql) use sources::{

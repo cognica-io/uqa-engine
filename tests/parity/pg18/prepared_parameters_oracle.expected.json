@@ -1,0 +1,1926 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE declared(bigint, smallint, real, double precision, text, boolean, numeric) AS SELECT pg_typeof($1)::text AS t1, pg_typeof($2)::text AS t2, pg_typeof($3)::text AS t3, pg_typeof($4)::text AS t4, pg_typeof($5)::text AS t5, pg_typeof($6)::text AS t6, pg_typeof($7)::text AS t7, $1 AS value",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE declared(1, 2, 3, 4, 5, 'yes', 6)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "t1",
+            "t2",
+            "t3",
+            "t4",
+            "t5",
+            "t6",
+            "t7",
+            "value"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            20
+          ],
+          "rows": [
+            [
+              "bigint",
+              "smallint",
+              "real",
+              "double precision",
+              "text",
+              "boolean",
+              "numeric",
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE declared(NULL, NULL, NULL, NULL, NULL, NULL, NULL)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "t1",
+            "t2",
+            "t3",
+            "t4",
+            "t5",
+            "t6",
+            "t7",
+            "value"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            20
+          ],
+          "rows": [
+            [
+              "bigint",
+              "smallint",
+              "real",
+              "double precision",
+              "text",
+              "boolean",
+              "numeric",
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE declared(1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "wrong number of parameters for prepared statement \"declared\""
+      },
+      "results": []
+    },
+    {
+      "sql": "EXECUTE declared(1, 2, 3, 4, 5, true, 6, 7)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "wrong number of parameters for prepared statement \"declared\""
+      },
+      "results": []
+    },
+    {
+      "sql": "EXECUTE declared('bad', 2, 3, 4, 5, true, 6)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type bigint: \"bad\""
+      },
+      "results": []
+    },
+    {
+      "sql": "EXECUTE declared(1, 32768, 3, 4, 5, true, 6)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "smallint out of range"
+      },
+      "results": []
+    },
+    {
+      "sql": "PREPARE declared AS SELECT 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P05",
+        "message": "prepared statement \"declared\" already exists"
+      },
+      "results": []
+    },
+    {
+      "sql": "EXECUTE nonexistent",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "26000",
+        "message": "prepared statement \"nonexistent\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "DEALLOCATE nonexistent",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "26000",
+        "message": "prepared statement \"nonexistent\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "PREPARE modifiers(varchar(2), numeric(3,1), time(1), character(2)) AS SELECT $1 AS varying, $2 AS amount, $3 AS clock, $4 AS fixed",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE modifiers('abcdef', 12345.678, '12:34:56.789', 'abcdef')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "varying",
+            "amount",
+            "clock",
+            "fixed"
+          ],
+          "type_oids": [
+            1043,
+            1700,
+            1083,
+            1042
+          ],
+          "rows": [
+            [
+              "abcdef",
+              "12345.678",
+              "12:34:56.789",
+              "abcdef"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE unused(bigint, text) AS SELECT 1 AS value",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE unused(2, 3)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE unused(2)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "wrong number of parameters for prepared statement \"unused\""
+      },
+      "results": []
+    },
+    {
+      "sql": "EXECUTE unused('bad', 'x')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type bigint: \"bad\""
+      },
+      "results": []
+    },
+    {
+      "sql": "EXECUTE unused('1'::text, 'x')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "parameter $1 of type text cannot be coerced to the expected type bigint"
+      },
+      "results": []
+    },
+    {
+      "sql": "EXECUTE unused(true, 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "parameter $1 of type boolean cannot be coerced to the expected type bigint"
+      },
+      "results": []
+    },
+    {
+      "sql": "EXECUTE unused(1.6, 1)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE unused((SELECT 1), 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot use subquery in EXECUTE parameter"
+      },
+      "results": []
+    },
+    {
+      "sql": "EXECUTE unused(sum(1), 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42803",
+        "message": "aggregate functions are not allowed in EXECUTE parameters"
+      },
+      "results": []
+    },
+    {
+      "sql": "EXECUTE unused(row_number() OVER (), 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P20",
+        "message": "window functions are not allowed in EXECUTE parameters"
+      },
+      "results": []
+    },
+    {
+      "sql": "PREPARE absent_type(no_such_type) AS SELECT 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"no_such_type\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "PREPARE serial_type(serial) AS SELECT $1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"serial\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "PREPARE bad_modifier(varchar(-1)) AS SELECT $1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "syntax error at or near \"-\""
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE DOMAIN positive_prepared AS integer CHECK(VALUE > 0) NOT NULL",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE domain_parameter(positive_prepared) AS SELECT pg_typeof($1)::text AS kind, $1::integer AS value",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE domain_parameter(7)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "kind",
+            "value"
+          ],
+          "type_oids": [
+            25,
+            23
+          ],
+          "rows": [
+            [
+              "positive_prepared",
+              "7"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE domain_parameter(0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "value for domain positive_prepared violates check constraint \"positive_prepared_check\""
+      },
+      "results": []
+    },
+    {
+      "sql": "EXECUTE domain_parameter(NULL)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23502",
+        "message": "domain positive_prepared does not allow null values"
+      },
+      "results": []
+    },
+    {
+      "sql": "EXECUTE domain_parameter('7')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "kind",
+            "value"
+          ],
+          "type_oids": [
+            25,
+            23
+          ],
+          "rows": [
+            [
+              "positive_prepared",
+              "7"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE survived(bigint) AS SELECT pg_typeof($1)::text AS kind",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE survived(1)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "kind"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "bigint"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DEALLOCATE survived",
+      "command_tags": [
+        "DEALLOCATE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE survived(1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "26000",
+        "message": "prepared statement \"survived\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "PREPARE ignored_modifiers(varchar(0), numeric(0,100), time(50), character(0)) AS SELECT $1 AS a, $2 AS b, $3 AS c, $4 AS d",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "length for type varchar must be at least 1"
+      },
+      "results": []
+    },
+    {
+      "sql": "EXECUTE ignored_modifiers('abc', 123.456, '12:34:56.789', 'abc')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "26000",
+        "message": "prepared statement \"ignored_modifiers\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "PREPARE arrays(bigint[], smallint[]) AS SELECT pg_typeof($1)::text AS a, pg_typeof($2)::text AS b, $1 AS values",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE arrays(ARRAY[1,2], ARRAY[3,4])",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "values"
+          ],
+          "type_oids": [
+            25,
+            25,
+            1016
+          ],
+          "rows": [
+            [
+              "bigint[]",
+              "smallint[]",
+              "{1,2}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE arrays('{5,6}', '{7,8}')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "values"
+          ],
+          "type_oids": [
+            25,
+            25,
+            1016
+          ],
+          "rows": [
+            [
+              "bigint[]",
+              "smallint[]",
+              "{5,6}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE arrays(NULL, NULL)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "values"
+          ],
+          "type_oids": [
+            25,
+            25,
+            1016
+          ],
+          "rows": [
+            [
+              "bigint[]",
+              "smallint[]",
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE arrays(ARRAY[1], ARRAY[32768])",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "smallint out of range"
+      },
+      "results": []
+    },
+    {
+      "sql": "EXECUTE arrays(ARRAY['1'::text], ARRAY[2])",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "parameter $1 of type text[] cannot be coerced to the expected type bigint[]"
+      },
+      "results": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SAVEPOINT parameter_point",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE after_point(bigint) AS SELECT pg_typeof($1)::text AS kind",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK TO parameter_point",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE after_point(1)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "kind"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "bigint"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DEALLOCATE after_point",
+      "command_tags": [
+        "DEALLOCATE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK TO parameter_point",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE after_point(1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "26000",
+        "message": "prepared statement \"after_point\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE keep_plan(bigint) AS SELECT pg_typeof($1)::text AS kind",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DISCARD PLANS",
+      "command_tags": [
+        "DISCARD PLANS"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE keep_plan(1)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "kind"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "bigint"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DISCARD PLANS",
+      "command_tags": [
+        "DISCARD PLANS"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE keep_plan(2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "kind"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "bigint"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE keep_plan(3)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "kind"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "bigint"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE prepared_transient(id integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE transient_plan AS SELECT id FROM prepared_transient",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 1 AS still_usable",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "still_usable"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE transient_plan",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"prepared_transient\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "DEALLOCATE transient_plan",
+      "command_tags": [
+        "DEALLOCATE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE prepared_effect",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE effect_arguments(bigint, bigint) AS SELECT $1 AS a, $2 AS b",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE effect_arguments(nextval('prepared_effect'), 'bad')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type bigint: \"bad\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT last_value, is_called FROM prepared_effect",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE effect_arguments(nextval('prepared_effect'), missing_column)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"missing_column\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT last_value, is_called FROM prepared_effect",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE effect_arguments(nextval('prepared_effect'), '1'::text)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "parameter $2 of type text cannot be coerced to the expected type bigint"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT last_value, is_called FROM prepared_effect",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE effect_arguments(nextval('prepared_effect'), 1/0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT last_value, is_called FROM prepared_effect",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 1::serial",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"serial\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE SCHEMA prepared_named",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN prepared_named.serial AS smallint",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE qualified_serial(prepared_named.serial[]) AS SELECT pg_typeof($1)::text AS kind, $1::smallint[] AS value",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE qualified_serial('{1,2}')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "kind",
+            "value"
+          ],
+          "type_oids": [
+            25,
+            1005
+          ],
+          "rows": [
+            [
+              "prepared_named.serial[]",
+              "{1,2}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN serial AS bigint",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE named_serial(serial[]) AS SELECT pg_typeof($1)::text AS kind, $1::bigint[] AS value",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE named_serial('{1,2}')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "kind",
+            "value"
+          ],
+          "type_oids": [
+            25,
+            1016
+          ],
+          "rows": [
+            [
+              "serial[]",
+              "{1,2}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE parameter_trace",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN traced_parameter AS integer CHECK(nextval('parameter_trace') > 0 AND VALUE > 0)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE trace_parameters(bigint, traced_parameter[], traced_parameter) AS SELECT $1 AS first_value, $2::integer[] AS array_value, $3::integer AS scalar_value",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE trace_parameters(nextval('parameter_trace'), '{2,3}', 4)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "first_value",
+            "array_value",
+            "scalar_value"
+          ],
+          "type_oids": [
+            20,
+            1007,
+            23
+          ],
+          "rows": [
+            [
+              "3",
+              "{2,3}",
+              "4"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT last_value FROM parameter_trace",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "4"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE trace_parameters(nextval('parameter_trace'), ARRAY[5,6], 7)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "first_value",
+            "array_value",
+            "scalar_value"
+          ],
+          "type_oids": [
+            20,
+            1007,
+            23
+          ],
+          "rows": [
+            [
+              "5",
+              "{5,6}",
+              "7"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT last_value FROM parameter_trace",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "8"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE trace_parameters(nextval('parameter_trace'), '{0}', 4)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "value for domain traced_parameter violates check constraint \"traced_parameter_check\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT last_value FROM parameter_trace",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "9"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE trace_parameters(nextval('parameter_trace'), ARRAY[0], 4)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "value for domain traced_parameter violates check constraint \"traced_parameter_check\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT last_value FROM parameter_trace",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "11"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TEMP TABLE discarded_parameter_temp(id integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO discarded_parameter_temp VALUES (7)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DISCARD TEMP",
+      "command_tags": [
+        "DISCARD TEMP"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM discarded_parameter_temp",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT nextval('parameter_trace')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "nextval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "12"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DISCARD SEQUENCES",
+      "command_tags": [
+        "DISCARD SEQUENCES"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT currval('parameter_trace')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "currval of sequence \"parameter_trace\" is not yet defined in this session"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT lastval()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "lastval is not yet defined in this session"
+      },
+      "results": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SAVEPOINT discarded_sequence_point",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT nextval('parameter_trace')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "nextval"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "13"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DISCARD SEQUENCES",
+      "command_tags": [
+        "DISCARD SEQUENCES"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK TO discarded_sequence_point",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT lastval()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "lastval is not yet defined in this session"
+      },
+      "results": []
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DISCARD ALL",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "25001",
+        "message": "DISCARD ALL cannot run inside a transaction block"
+      },
+      "results": []
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DEALLOCATE ALL",
+      "command_tags": [
+        "DEALLOCATE ALL"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE declared(1,2,3,4,5,true,6)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "26000",
+        "message": "prepared statement \"declared\" does not exist"
+      },
+      "results": []
+    }
+  ]
+}

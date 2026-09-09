@@ -513,7 +513,7 @@ fn compile_cast_type_name(type_name: &pg_query::protobuf::TypeName) -> Result<St
                 "integer" | "smallint" | "bigint" | "boolean"
             ))
     {
-        let mut declared = crate::compiler::types::compile_pg_type_name(type_name, "cast")?;
+        let mut declared = crate::compiler::types::compile_pg_type_reference(type_name, "cast")?;
         while let crate::ast::ColumnType::Array(element) = declared {
             declared = *element;
         }

@@ -15,6 +15,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserved SQL PREPARE parameter declarations through compilation and execution, including typed NULLs, assignment conversions, domain arrays, exact argument errors, and constant validation before volatile argument effects. Prepared definitions survive transaction and savepoint rollback; DISCARD PLANS invalidates plans without removing definitions. Corrected transactional DISCARD variants, nontransactional sequence-state discard, and domain-array regtype output.
 - Connected the native PL/pgSQL parser to an immutable engine catalog snapshot so user-defined scalar declarations retain their initial values and declaration constraints. Updated the pinned PostgreSQL 18 parser chain with catalog type callbacks, resolved datum OIDs, and structured type-name preservation; quoted domains, domain arrays, and information-schema domains keep their identity in stored routines and anonymous blocks.
 - Preserved declared types when binding PL/pgSQL variables and record fields, applied domain constraints at field assignment, and validated trigger return records by position without repeating domain checks. Domain and domain-array catalog rows retain their creating role as owner. Implicit domain coercions in routine parameters, local variables, and returns include constraint-function effects when selecting the statement transaction mode.
 - Preserved time and timestamp precision and interval field restrictions through casts, assignments, arrays, function-source declarations, result descriptors, catalog metadata, and SQLite reopen. Rounding retains end-of-day time values and PostgreSQL's signed timestamp behavior; CASE result modifiers follow surviving constant branches without imposing declaration limits during common-type coercion.
@@ -26,6 +27,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Rust `Statement::Prepare` and `CommandPlan::Prepare` now retain `parameter_types`; existing serialized declarations without this field remain readable.
 - `REGTYPE` values, including `pg_typeof`, now retain catalog OIDs in the integer carrier so comparisons and catalog lookups use type identity. Cast to text or use `sql::format_postgres_text` for the visible type name. `SQLResult::kind` distinguishes row descriptors from commands, including zero-column queries.
 - Rust AST CTEs now expose `body: CteBody` instead of the SELECT-only `query` field, and planner CTEs expose `CtePlanBody`. Match the query or command variant when traversing WITH definitions. The SELECT-only serialized `query` representation remains readable in existing catalogs.
 

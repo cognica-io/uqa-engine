@@ -202,6 +202,19 @@ pub(super) fn compile_create_table_as(
 
 pub(super) fn compile_prepare(stmt: &pg_query::protobuf::PrepareStmt) -> Result<Statement> {
     let name = stmt.name.clone();
+    let parameter_types = stmt
+        .argtypes
+        .iter()
+        .map(|node| {
+            let Some(NodeEnum::TypeName(type_name)) = node.node.as_ref() else {
+                return Err(SQLError::Internal(
+                    "PREPARE parameter without type name".into(),
+                ));
+            };
+            super::types::compile_pg_type_reference(type_name, "PREPARE parameter")
+                .map(|ty| ty.without_type_modifiers())
+        })
+        .collect::<Result<Vec<_>>>()?;
     let body = stmt
         .query
         .as_deref()
@@ -209,6 +222,7 @@ pub(super) fn compile_prepare(stmt: &pg_query::protobuf::PrepareStmt) -> Result<
     let inner = compile_stmt(body)?;
     Ok(Statement::Prepare {
         name,
+        parameter_types,
         body: Box::new(inner),
     })
 }

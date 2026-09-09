@@ -612,6 +612,8 @@ pub enum CommandPlan {
     },
     Prepare {
         name: String,
+        #[serde(default)]
+        parameter_types: Vec<uqa_sql::ast::ColumnType>,
         body: Box<UnifiedPlan>,
     },
     Execute {

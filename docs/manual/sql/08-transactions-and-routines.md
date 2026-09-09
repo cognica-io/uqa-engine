@@ -95,7 +95,21 @@ EXECUTE find_task('open');
 DEALLOCATE find_task;
 ```
 
-Prepared plans are session-local. Catalog or function registry changes trigger the engine's plan cache invalidation and rebind rules. Applications must still handle a prepare or execute error when an incompatible change makes a plan invalid.
+`PREPARE name (type, ...) AS statement` declares positional value parameters. `EXECUTE name (expression, ...)` requires the statement's parameter count and applies SQL assignment conversions to declared types. Those types survive every execution, including `NULL` values, and determine overload selection and result metadata. Declaration modifiers are validated but do not impose parameter length, precision, or scale limits; domain declarations retain their own constraints. Scalar and array domain conversions preserve PostgreSQL's distinction between input conversion and runtime constraint checks.
+
+Prepared definitions belong to the session and survive transaction and savepoint rollback. `DEALLOCATE` remains effective after rollback, and `DISCARD PLANS` invalidates executable plans while retaining definitions and parameter types. Catalog refresh invalidates cached plans; the next execution replans the affected statement. A statement whose dependency disappeared can fail without preventing unrelated queries or cleanup.
+
+Duplicate prepared names report `42P05`; missing names report `26000`. An incorrect argument count reports `42601`, and an incompatible typed argument reports `42804`. Input conversion and domain constraints retain their specific SQLSTATEs. Subqueries, aggregates, and window functions are rejected as `EXECUTE` arguments before executable argument effects. Names, types, constant inputs, and constant-expression failures are checked before volatile executable arguments, preserving sequence effects and domain conversion order.
+
+```sql execute
+PREPARE manual_typed_parameter (bigint) AS
+SELECT pg_typeof($1)::text AS parameter_type, $1 AS value;
+EXECUTE manual_typed_parameter(7);
+EXECUTE manual_typed_parameter(NULL);
+DEALLOCATE manual_typed_parameter;
+```
+
+The [compatibility ledger](09-compatibility.md) tracks remaining parameter inference, preparation analysis, catalog metadata, and Extended Query work.
 
 ## SET and SHOW
 
@@ -126,7 +140,7 @@ SHOW timezone;
 
 `SET ROLE name` changes `current_user` for the session while preserving `session_user`; `RESET ROLE`, `SET ROLE NONE`, and `SET ROLE DEFAULT` restore the session identity. The embedded connection starts as the durable bootstrap superuser role `uqa`, so it may assume any defined role. A non-superuser session may assume a directly or transitively granted role only through membership edges whose `SET` option is true. A successful `SET ROLE` executed by a `SECURITY INVOKER` routine remains visible to the session, while an error restores the prior identity and any `SET ROLE` attempted inside a `SECURITY DEFINER` context fails with `42501`, including through a nested invoker.
 
-`DISCARD ALL`, `DISCARD PLANS`, and `DISCARD SEQUENCES` reset their implemented session state. `DISCARD TEMP` removes the session's temporary tables, views, sequences, and sequence state. PostgreSQL and UQA Engine reject `DISCARD` after an explicit `BEGIN`, while permitting it in the implicit transaction segment that encloses a multi-statement simple-query message.
+`DISCARD ALL` resets the implemented session state and is rejected after an explicit `BEGIN` with `25001`. `DISCARD PLANS`, `DISCARD SEQUENCES`, and `DISCARD TEMP` also work inside explicit transactions. `PLANS` preserves prepared definitions while invalidating their executable plans. `SEQUENCES` clears reserved values, `currval()`, and `lastval()` state; rollback does not restore the discarded session values. `TEMP` removes the session's temporary relations and associated sequence state, with relation removal subject to transaction rollback.
 
 `LOAD 'age'` (also `age.so`, `$libdir/age`, and `$libdir/age.so`) succeeds without side effects because the Apache AGE surface is embedded; any other library name fails as `could not access file "$libdir/name": No such file or directory` (`58P01`). See [Graph SQL and Cypher](07-graph.md) for the AGE session bootstrap.
 

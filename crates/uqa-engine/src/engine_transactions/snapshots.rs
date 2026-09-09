@@ -191,7 +191,17 @@ impl Engine {
     }
 
     pub(super) fn restore_session_state(&self, snapshot: &SessionStateSnapshot) {
-        *self.session.state.write() = snapshot.clone();
+        let mut restored = snapshot.clone();
+        let mut current = self.session.state.write();
+        // Sequence DDL can restore an old object and its session value, while
+        // DISCARD SEQUENCES must remain effective across every rollback boundary.
+        if current.sequence_discard_generation != snapshot.sequence_discard_generation {
+            restored.sequence_currvals = std::mem::take(&mut current.sequence_currvals);
+            restored.last_sequence = current.last_sequence.take();
+            restored.sequence_discard_generation = current.sequence_discard_generation;
+        }
+        *current = restored;
+        drop(current);
         self.session
             .portals
             .lock()

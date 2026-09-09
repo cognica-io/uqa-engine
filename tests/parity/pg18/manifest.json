@@ -139,7 +139,8 @@
       "routines.function-procedure-drop-cascade",
       "routines.function-procedure-drop-cascade-extended",
       "ddl.check-constraint-inheritance",
-      "types.domain-declarations-and-coercion"
+      "types.domain-declarations-and-coercion",
+      "execution.prepared-parameter-contracts"
     ],
     "M4": [
       "dml.returning-row-images-extended",
@@ -868,6 +869,14 @@
       "supported_version": "145 PostgreSQL 18.4 comparisons on memory and SQLite covering domain declarations, defaults, nested constraints, arrays, catalog identities and owners, assignment and cast semantics, quoted names, typed routine arguments and locals, record fields, trigger returns, implicit coercion effects, transactions, and persistence; temporal precision and interval modifiers retain their declared metadata",
       "status": "partial",
       "open_issue": "Complete domain lifecycle DDL, privileges, dependencies, constraint and catalog metadata, collation support, and the unmodified upstream domain matrix still require implementation and verification."
+    },
+    {
+      "id": "execution.prepared-parameter-contracts",
+      "postgresql_reference": "PostgreSQL 18.4 live results, type OIDs, SQLSTATEs, diagnostics, and sequence effects in tests/parity/pg18/prepared_parameters_oracle.expected.json; https://www.postgresql.org/docs/18/sql-prepare.html; https://www.postgresql.org/docs/18/sql-execute.html; https://www.postgresql.org/docs/18/sql-discard.html",
+      "uqa_test": "cargo test -p uqa-engine --test integration prepared_parameters_match_postgresql; cargo test -p uqa-engine --test integration sql_prepared; cargo test -p uqa-engine --test integration sql_show_discard; cargo test -p uqa-engine --test integration transaction_lifecycle",
+      "supported_version": "PostgreSQL 18.4 declared scalar, array, and domain PREPARE parameter types, typed NULLs, assignment conversions, argument count and expression validation, constant failure ordering, domain input and execution effects, connection-owned definitions across rollback, lazy plan invalidation, transactional DISCARD variants, and sequence discard across rollback; 125 live cases on memory and SQLite",
+      "status": "partial",
+      "open_issue": "Unspecified and unknown parameter inference, complete PREPARE analysis, fixed result-type validation during replanning, pg_prepared_statements metadata, the complete cast and parameter matrix, and real Extended Query Parse/Bind/Describe/Execute remain to be implemented and verified."
     }
   ]
 }

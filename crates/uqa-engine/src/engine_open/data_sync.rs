@@ -255,21 +255,12 @@ impl Engine {
         }
         self.synchronize_partition_identity_watermarks()?;
         self.clear_sql_statement_cache();
-        // Set the generation before rebinding prepared plans so optimizer
-        // statistics can resolve tables without recursively refreshing.
+        // Publish the refreshed generation and invalidate dependent executable plans.
         self.epochs
             .table_data
             .seen
             .store(target_epoch, std::sync::atomic::Ordering::Release);
-        if let Err(error) = self.rebind_prepared_plans() {
-            self.epochs
-                .table_data
-                .seen
-                .store(previous_epoch, std::sync::atomic::Ordering::Release);
-            return Err(StorageBackendError::Other(format!(
-                "re-optimize prepared plans after table data refresh: {error}"
-            )));
-        }
+        self.invalidate_prepared_plans();
         Ok(())
     }
 

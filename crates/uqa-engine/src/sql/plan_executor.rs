@@ -18,8 +18,7 @@ use crate::engine_capabilities::{MutationCoordinator, QueryRuntimeView, SessionE
 use crate::engine_session::{MaterializedViewRegistration, ViewRegistration};
 
 use super::scalar::{
-    analyze_physical_call_arguments, eval_physical, eval_physical_call_arguments,
-    PhysicalEvalContext,
+    analyze_physical_call_arguments, eval_physical_call_arguments, PhysicalEvalContext,
 };
 use super::{
     plpgsql_exec, run_alter_sequence, run_alter_table, run_create_index, run_create_sequence,
@@ -336,14 +335,24 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         run_explain(body, verbose, format, analysis.as_ref())
     }
 
-    fn execute_prepare(&self, name: &str, body: &UnifiedPlan) -> Result<SQLResult, SQLError> {
+    fn execute_prepare(
+        &self,
+        name: &str,
+        parameter_types: &[uqa_sql::ast::ColumnType],
+        body: &UnifiedPlan,
+    ) -> Result<SQLResult, SQLError> {
         if self.engine.lookup_prepared(name).is_some() {
-            return Err(SQLError::Unsupported(format!(
-                "Prepared statement `{name}` already exists"
-            )));
+            return Err(super::prepared::statement_error(
+                "42P05",
+                name,
+                "already exists",
+            ));
         }
-        self.engine
-            .register_prepared_plan(name.to_string(), body.clone())?;
+        self.engine.register_prepared_plan_with_types(
+            name.to_string(),
+            body.clone(),
+            parameter_types,
+        )?;
         Ok(SQLResult::empty())
     }
 
@@ -352,27 +361,23 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         name: &str,
         params: &[ExpressionPlan],
     ) -> Result<SQLResult, SQLError> {
-        let plan = self.engine.lookup_prepared(name).ok_or_else(|| {
-            SQLError::Unsupported(format!("Prepared statement `{name}` does not exist"))
-        })?;
-        let scope = select::CteScope::new_for_current_routine(self.engine);
-        let hook = select::ScopedEngineHook::new(self.engine, &scope);
-        let context = PhysicalEvalContext::new(None, self.params)
-            .with_function_hook(&hook)
-            .with_subquery_runner(&hook);
-        let bound: Vec<SQLParam> = params
-            .iter()
-            .map(|expression| eval_physical(expression, &context).map(SQLParam::Scalar))
-            .collect::<Result<_, _>>()?;
+        let plan = self
+            .engine
+            .prepared_plan_for_execution(name)?
+            .ok_or_else(|| super::prepared::statement_error("26000", name, "does not exist"))?;
+        let bound =
+            super::prepared::bind_execute_parameters(self.engine, name, params, self.params)?;
         UnifiedPlanExecutor::new_nested(self.engine, &bound).execute(&plan)
     }
 
     fn execute_deallocate(&self, name: Option<&str>) -> Result<SQLResult, SQLError> {
         if let Some(name) = name {
             if self.engine.lookup_prepared(name).is_none() {
-                return Err(SQLError::Unsupported(format!(
-                    "Prepared statement `{name}` does not exist"
-                )));
+                return Err(super::prepared::statement_error(
+                    "26000",
+                    name,
+                    "does not exist",
+                ));
             }
         }
         self.engine.deallocate_prepared(name);
@@ -771,7 +776,11 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                     params: self.params,
                 },
             ),
-            CommandPlan::Prepare { name, body } => self.execute_prepare(name, body),
+            CommandPlan::Prepare {
+                name,
+                parameter_types,
+                body,
+            } => self.execute_prepare(name, parameter_types, body),
             CommandPlan::Execute { name, params } => self.execute_prepared(name, params),
             CommandPlan::Deallocate { name } => self.execute_deallocate(name.as_deref()),
             CommandPlan::CreateForeignServer(statement) => {

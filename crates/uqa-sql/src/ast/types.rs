@@ -336,9 +336,9 @@ impl ColumnType {
                 .transpose()
         };
         match base {
-            "smallint" | "int2" | "smallserial" | "serial2" => Ok(Self::SmallInteger),
-            "integer" | "int" | "int4" | "serial" | "serial4" => Ok(Self::Integer),
-            "bigint" | "int8" | "bigserial" | "serial8" => Ok(Self::BigInteger),
+            "smallint" | "int2" => Ok(Self::SmallInteger),
+            "integer" | "int" | "int4" => Ok(Self::Integer),
+            "bigint" | "int8" => Ok(Self::BigInteger),
             "oid" => Ok(Self::Oid),
             "xid" => Ok(Self::Xid),
             "boolean" | "bool" => Ok(Self::Boolean),

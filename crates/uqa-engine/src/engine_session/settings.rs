@@ -298,17 +298,17 @@ impl Engine {
     pub fn discard(&self, target: uqa_sql::ast::DiscardTarget) -> Result<(), SQLError> {
         use uqa_sql::ast::DiscardTarget;
         let _statement = self.runtime.statement_gate.lock();
-        if self.in_explicit_transaction_block() {
+        if target == DiscardTarget::All && self.in_explicit_transaction_block() {
             return Err(SQLError::Routine {
                 sqlstate: "25001".into(),
-                message: "DISCARD cannot run inside a transaction block".into(),
+                message: "DISCARD ALL cannot run inside a transaction block".into(),
             });
         }
         if matches!(target, DiscardTarget::All | DiscardTarget::Temp) {
             self.discard_temporary_relations();
         }
         if matches!(target, DiscardTarget::All | DiscardTarget::Sequences) {
-            self.session.sequence_caches.lock().clear();
+            self.discard_sequence_session_values();
         }
         if target == DiscardTarget::All {
             if self.transaction_depth() == 0 {
@@ -321,9 +321,7 @@ impl Engine {
         match target {
             DiscardTarget::All => {
                 session.session_vars.clear();
-                session.prepared.clear();
-                session.sequence_currvals.clear();
-                session.last_sequence = None;
+                self.session.prepared.write().clear();
                 session.sql_statement_cache.clear();
                 session.search_path = vec!["public".to_string()];
                 let session_user = session.session_user.clone();
@@ -333,14 +331,10 @@ impl Engine {
                 return Ok(());
             }
             DiscardTarget::Plans => {
-                session.prepared.clear();
+                self.invalidate_prepared_plans();
                 session.sql_statement_cache.clear();
             }
-            DiscardTarget::Sequences => {
-                session.sequence_currvals.clear();
-                session.last_sequence = None;
-            }
-            DiscardTarget::Temp => {}
+            DiscardTarget::Sequences | DiscardTarget::Temp => {}
         }
         Ok(())
     }

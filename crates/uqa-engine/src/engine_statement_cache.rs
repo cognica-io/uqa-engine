@@ -30,8 +30,9 @@ pub(crate) struct CachedSQLStatement {
 
 #[derive(Clone)]
 pub(super) struct PreparedStatementPlan {
-    pub(super) logical_plan: uqa_planner::UnifiedPlan,
-    pub(super) plan: uqa_planner::UnifiedPlan,
+    pub(super) logical_plan: Arc<uqa_planner::UnifiedPlan>,
+    pub(super) plan: Option<uqa_planner::UnifiedPlan>,
+    pub(super) parameter_types: Vec<Option<uqa_sql::ast::ColumnType>>,
 }
 
 impl SQLStatementCache {

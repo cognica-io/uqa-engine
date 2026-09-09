@@ -932,6 +932,14 @@ fn format_regtype(
     let Some(entry) = catalog.types.get(&oid) else {
         return Ok(None);
     };
+    if catalog
+        .types
+        .get(&entry.element_oid)
+        .is_some_and(|element| element.array_oid == oid)
+    {
+        return format_regtype(engine, catalog, entry.element_oid)
+            .map(|element| element.map(|name| format!("{name}[]")));
+    }
     let Some(schema) = namespace_name(catalog, entry.namespace_oid) else {
         return Ok(None);
     };

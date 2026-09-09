@@ -546,7 +546,7 @@ struct TransactionSavepoint {
     constraint_modes: ConstraintModeState,
 }
 
-/// Lightweight SQL-session state that follows transaction/savepoint rollback for every backend. It is intentionally separate from the database-sized memory-engine snapshot so persistent sessions receive identical SET, search-path, PREPARE, and statement-cache semantics. Sequence `currval` and last-used entries produced after the snapshot are reapplied because sequence functions are nontransactional in `PostgreSQL`.
+/// Lightweight SQL-session state that follows transaction/savepoint rollback for every backend. It is intentionally separate from the database-sized memory-engine snapshot so persistent sessions receive identical SET, search-path, and statement-cache semantics. Sequence `currval` and last-used entries produced after the snapshot are reapplied because sequence functions are nontransactional in `PostgreSQL`.
 #[derive(Clone, Default)]
 struct SessionStateSnapshot {
     /// A pinned physical graph view plus this transaction's changed identities. Savepoints retain only handles and changed-id checkpoints, never graph payload replicas.
@@ -556,7 +556,7 @@ struct SessionStateSnapshot {
     session_vars: BTreeMap<String, String>,
     sequence_currvals: BTreeMap<RelationIdentity, SessionSequenceValue>,
     last_sequence: Option<SessionLastSequenceReference>,
-    prepared: BTreeMap<String, PreparedStatementPlan>,
+    sequence_discard_generation: u64,
     sql_statement_cache: SQLStatementCache,
     /// Names of portals that existed at this transaction or savepoint boundary. Rollback removes portals created later without rewinding cursor positions or resurrecting closed portals.
     portal_names: BTreeSet<String>,

@@ -384,7 +384,7 @@ pub(super) fn compile_pg_type_name(
                 let length = type_name
                     .typmods
                     .first()
-                    .map(expect_positive_character_length)
+                    .map(|node| expect_positive_character_length(node, "varchar"))
                     .transpose()?;
                 Ok(ColumnType::Varchar(length))
             }
@@ -398,7 +398,7 @@ pub(super) fn compile_pg_type_name(
                 let length = type_name
                     .typmods
                     .first()
-                    .map(expect_positive_character_length)
+                    .map(|node| expect_positive_character_length(node, "bpchar"))
                     .transpose()?
                     .unwrap_or(1);
                 Ok(ColumnType::Character(length))
@@ -567,6 +567,31 @@ pub(super) fn compile_pg_type_name(
         .fold(base, |element, _| ColumnType::Array(Box::new(element))))
 }
 
+/// Resolve a type reference without interpreting column-only serial pseudo-types.
+pub(super) fn compile_pg_type_reference(
+    type_name: &pg_query::protobuf::TypeName,
+    context: &str,
+) -> Result<ColumnType> {
+    let names = type_name
+        .names
+        .iter()
+        .map(extract_string)
+        .collect::<Result<Vec<_>>>()?;
+    if names.last().is_some_and(|name| {
+        matches!(
+            name.as_str(),
+            "serial" | "serial2" | "serial4" | "serial8" | "smallserial" | "bigserial"
+        )
+    }) {
+        let base = compile_named_type(&names, type_name)?;
+        return Ok(type_name
+            .array_bounds
+            .iter()
+            .fold(base, |element, _| ColumnType::Array(Box::new(element))));
+    }
+    compile_pg_type_name(type_name, context)
+}
+
 fn compile_named_type(
     names: &[String],
     type_name: &pg_query::protobuf::TypeName,
@@ -595,15 +620,14 @@ fn compile_named_type(
     Ok(ColumnType::Named(name))
 }
 
-fn expect_positive_character_length(node: &Node) -> Result<u32> {
+fn expect_positive_character_length(node: &Node, type_name: &str) -> Result<u32> {
     let length = expect_integer_const(node)?;
     u32::try_from(length)
         .ok()
         .filter(|length| *length > 0)
-        .ok_or_else(|| {
-            SQLError::TypeMismatch(format!(
-                "character length must be greater than zero, got {length}"
-            ))
+        .ok_or_else(|| SQLError::Routine {
+            sqlstate: "22023".into(),
+            message: format!("length for type {type_name} must be at least 1"),
         })
 }
 

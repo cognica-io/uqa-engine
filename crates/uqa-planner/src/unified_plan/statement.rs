@@ -364,9 +364,17 @@ impl UnifiedPlan {
                 on_commit,
                 query: Box::new(QueryPlan::lower_with(*body, aggregates)),
             })),
-            Statement::Prepare { name, body } => {
+            Statement::Prepare {
+                name,
+                parameter_types,
+                body,
+            } => {
                 let body = Box::new(Self::lower_with(*body, aggregates));
-                Self::Command(Box::new(CommandPlan::Prepare { name, body }))
+                Self::Command(Box::new(CommandPlan::Prepare {
+                    name,
+                    parameter_types,
+                    body,
+                }))
             }
             Statement::Execute { name, params } => Self::Command(Box::new(CommandPlan::Execute {
                 name,

@@ -129,6 +129,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `query.data-modifying-ctes` | `M4` | `partial` |
 | `protocol.simple-query-command-completion` | `M5` | `partial` |
 | `types.domain-declarations-and-coercion` | `M3` | `partial` |
+| `execution.prepared-parameter-contracts` | `M3` | `partial` |
 
 <!-- pg18-manifest-status:end -->
 
@@ -311,6 +312,10 @@ The relation-hierarchy slice now covers ordinary `INHERIT` and `NO INHERIT`, par
 Use PostgreSQL 18 SQLSTATE, primary error text where clients depend on it, transaction-abort behavior, command tags, row descriptions, OIDs, typmods, binary formats, and catalog visibility as part of the contract. Performance optimizations may differ but must not alter these observations.
 
 Keep row schemas as static plan metadata from the first scan through the last consumer. Materialize only where a final API or blocking physical operator requires owned rows; spilling does not justify materializing identity into ad hoc field names. Spill format version 1 records the declared schema and logical `(alias, column)` identity directly, and no legacy compatibility reader is maintained.
+
+Prepared parameter declarations now survive SQL compilation and planning, and EXECUTE retains declared type identities for scalar, array, domain, and NULL values. The checked-in 125-case PostgreSQL 18.4 oracle compares result names and type OIDs, ordered values, SQLSTATEs and diagnostics, constant-error ordering, domain conversion effects, prepared-definition lifetime across transaction and savepoint rollback, DISCARD plan retention, temporary-relation rollback, and nontransactional sequence-state discard on memory and SQLite. Catalog refresh invalidates executable plans and delays replanning until the statement is used.
+
+Unspecified and unknown parameter inference, full PREPARE analysis, fixed result-type checks during replanning, pg_prepared_statements metadata, complete cast coverage, and real Extended Query execution remain tracked by execution.prepared-parameter-contracts. These fixes establish declared-parameter execution semantics; they do not satisfy the unmodified client or upstream-regression gates.
 
 ### 8. Client and operational compatibility
 

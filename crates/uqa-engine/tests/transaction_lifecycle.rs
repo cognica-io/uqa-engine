@@ -409,7 +409,10 @@ fn explicit_memory_rollback_restores_every_sql_owned_registry() {
     assert!(eng.load_scoring_params("tx_score").unwrap().is_none());
     assert!(eng.load_model("tx_model").unwrap().is_none());
     assert!(eng.sql("SELECT tx_function()", &[]).is_err());
-    assert!(eng.sql("EXECUTE tx_prepared", &[]).is_err());
+    assert_eq!(
+        eng.sql("EXECUTE tx_prepared", &[]).unwrap().rows[0]["n"],
+        uqa_core::Value::Int(1)
+    );
     assert!(eng.currval("tx_sequence").is_err());
 
     let work_mem = eng.sql("SHOW work_mem", &[]).unwrap();
@@ -471,7 +474,10 @@ fn persistent_rollback_restores_transactional_session_state_but_not_random_state
         engine.sql("SHOW work_mem", &[]).unwrap().rows[0]["work_mem"],
         uqa_core::Value::Str("8MB".into())
     );
-    assert!(engine.sql("EXECUTE rolled_back", &[]).is_err());
+    assert_eq!(
+        engine.sql("EXECUTE rolled_back", &[]).unwrap().rows[0]["value"],
+        uqa_core::Value::Int(1)
+    );
     assert_eq!(
         engine.sql("SELECT random() AS value", &[]).unwrap().rows[0]["value"],
         expected_outer.rows[0]["value"]
@@ -505,7 +511,11 @@ fn persistent_rollback_restores_transactional_session_state_but_not_random_state
         engine.sql("SHOW work_mem", &[]).unwrap().rows[0]["work_mem"],
         uqa_core::Value::Str("12MB".into())
     );
-    let execute_error = engine.sql("EXECUTE after_savepoint", &[]).unwrap_err();
+    assert_eq!(
+        engine.sql("EXECUTE after_savepoint", &[]).unwrap().rows[0]["value"],
+        uqa_core::Value::Int(2)
+    );
+    let execute_error = engine.sql("EXECUTE absent_statement", &[]).unwrap_err();
     let aborted = engine.sql("SELECT 1", &[]).unwrap_err();
     assert_eq!(aborted.sqlstate(), Some("25P02"), "{execute_error}");
     engine

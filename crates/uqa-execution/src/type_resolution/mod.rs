@@ -34,6 +34,7 @@ mod reverse;
 mod routine_signature;
 mod string_binary;
 
+pub use cast_compatibility::assignment_type_compatible;
 #[doc(hidden)]
 pub use checksum::{resolve_checksum_overload, ResolvedChecksumOverload};
 pub use common::{

@@ -6,6 +6,9 @@
 
 //! Prepared-statement coverage.
 
+#[path = "sql_prepared/parameters.rs"]
+mod parameters;
+
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLResult};
 use uqa_sql::{ColumnType, SQLParam};
@@ -400,7 +403,12 @@ fn execute_missing_param_raises() {
         &engine,
         "PREPARE q AS SELECT name FROM employees WHERE id = $1 AND dept = $2",
     );
-    assert!(err(&engine, "EXECUTE q (1)").contains("No value supplied"));
+    let error = engine.sql("EXECUTE q (1)", &[]).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42601"));
+    assert_eq!(
+        error.to_string(),
+        "wrong number of parameters for prepared statement \"q\""
+    );
 }
 
 #[test]

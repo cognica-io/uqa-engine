@@ -285,12 +285,7 @@ impl Engine {
         self.clear_regtype_output_cache();
         self.clear_bayesian_params_cache();
         self.clear_sql_statement_cache();
-        if let Err(error) = self.rebind_prepared_plans() {
-            rollback();
-            return Err(StorageBackendError::Other(format!(
-                "re-optimize prepared plans after fixed-snapshot catalog refresh: {error}"
-            )));
-        }
+        self.invalidate_prepared_plans();
         if let Some(frame) = self.session.transactions.lock().first_mut() {
             frame.fixed_catalog_baseline = Some(latest_baseline);
         }
@@ -454,11 +449,6 @@ impl Engine {
 
     pub(super) fn reload_table_catalog(&self, target_epoch: u64) -> StorageBackendResult<()> {
         self.clear_regtype_output_cache();
-        let previous_epoch = self
-            .epochs
-            .table_catalog
-            .seen
-            .load(std::sync::atomic::Ordering::Acquire);
         let Some(catalog) = self.storage.catalog.as_ref() else {
             self.epochs
                 .table_catalog
@@ -530,15 +520,7 @@ impl Engine {
             .seen
             .store(target_epoch, std::sync::atomic::Ordering::Release);
         self.clear_sql_statement_cache();
-        if let Err(error) = self.rebind_prepared_plans() {
-            self.epochs
-                .table_catalog
-                .seen
-                .store(previous_epoch, std::sync::atomic::Ordering::Release);
-            return Err(StorageBackendError::Other(format!(
-                "re-optimize prepared plans after table catalog refresh: {error}"
-            )));
-        }
+        self.invalidate_prepared_plans();
         Ok(())
     }
 
@@ -608,11 +590,6 @@ impl Engine {
     pub(super) fn reload_catalog_registries(&self, target_epoch: u64) -> StorageBackendResult<()> {
         self.clear_regtype_output_cache();
         self.clear_bayesian_params_cache();
-        let previous_epoch = self
-            .epochs
-            .catalog_registry
-            .seen
-            .load(std::sync::atomic::Ordering::Acquire);
         let Some(catalog) = self.storage.catalog.as_ref() else {
             self.epochs
                 .catalog_registry
@@ -680,15 +657,7 @@ impl Engine {
             .seen
             .store(target_epoch, std::sync::atomic::Ordering::Release);
         self.clear_sql_statement_cache();
-        if let Err(error) = self.rebind_prepared_plans() {
-            self.epochs
-                .catalog_registry
-                .seen
-                .store(previous_epoch, std::sync::atomic::Ordering::Release);
-            return Err(StorageBackendError::Other(format!(
-                "re-optimize prepared plans after catalog registry refresh: {error}"
-            )));
-        }
+        self.invalidate_prepared_plans();
         Ok(())
     }
 }

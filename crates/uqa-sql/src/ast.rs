@@ -664,6 +664,8 @@ pub enum Statement {
     /// `PREPARE name AS <inner>`.
     Prepare {
         name: String,
+        #[serde(default)]
+        parameter_types: Vec<ColumnType>,
         body: Box<Statement>,
     },
     /// `EXECUTE name (param1, param2, ...)`.

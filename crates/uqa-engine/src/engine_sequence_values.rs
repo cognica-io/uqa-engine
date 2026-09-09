@@ -87,6 +87,23 @@ impl SequenceValueError {
 }
 
 impl Engine {
+    pub(super) fn discard_sequence_session_values(&self) {
+        self.session.sequence_caches.lock().clear();
+        {
+            let mut session = self.session.state.write();
+            session.sequence_discard_generation =
+                session.sequence_discard_generation.wrapping_add(1);
+            session.sequence_currvals.clear();
+            session.last_sequence = None;
+        }
+        for frame in self.session.transactions.lock().iter_mut() {
+            for history in frame.nontransactional_sequence_values.values_mut() {
+                history.session_currval = None;
+                history.defines_lastval = false;
+            }
+        }
+    }
+
     fn record_nontransactional_sequence_value(
         &self,
         definition_generation: [u8; 16],
@@ -469,7 +486,7 @@ impl Engine {
             .values()
             .find(|current| current.object_id == object_id)
             .map(|current| current.value)
-            .ok_or(SequenceValueError::CurrvalUndefined(name))
+            .ok_or(SequenceValueError::CurrvalUndefined(relation.name))
     }
 
     pub fn lastval(&self) -> Result<i64, String> {
