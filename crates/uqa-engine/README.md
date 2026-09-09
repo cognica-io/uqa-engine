@@ -27,7 +27,7 @@ It is designed for applications that need more than a relational table but do no
 
 Version 0.2.3 reads persistent graphs and path indexes directly from storage, removing complete resident replicas from engine startup, session creation, and catalog refresh. Immutable catalog definitions and decoded statistics are shared across sessions, and SQLite refreshes only changed table dependencies while preserving transaction and rollback visibility.
 
-Persistent engines now maintain column statistics automatically in a database-level background worker. Bounded row samples and value-size limits keep large payloads out of statistics, and legacy statistics are refreshed after reopen without requiring another write. The release also fixes staged document-ID reuse during concurrent transaction snapshot refresh, preventing INSERT and COPY from overwriting earlier rows.
+Persistent engines now maintain column statistics automatically in a database-level background worker. Bounded row samples and value-size limits keep large payloads out of statistics, and legacy statistics are refreshed after reopen without requiring another write. The release also fixes staged document-ID reuse during concurrent transaction snapshot refresh, preventing INSERT and COPY from overwriting earlier rows. Excessively nested Cypher expressions return parse errors instead of exhausting the process stack.
 
 Read the [release history](https://github.com/cognica-io/uqa-engine/blob/v0.2.3/HISTORY.md#023---2026-09-09) for the complete changes and the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.2.3/docs/manual/reference/10-upgrading.md) for the Rust graph API changes and persistent catalog migration before updating an application or custom storage provider.
 

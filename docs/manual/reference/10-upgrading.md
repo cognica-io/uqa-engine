@@ -37,6 +37,10 @@ Automatic collection samples at most 4,096 hierarchy rows. Both automatic and ex
 
 SQLite tracks transactional cache revisions so data-only or statistics-only commits reuse unchanged definitions and physical handles. `Engine::new_session()` shares immutable committed catalog and statistics allocations while retaining independent transactions and storage handles. Custom providers may implement `CatalogFacade::cache_revisions()` with the same snapshot and rollback guarantees or return `None` for conservative refresh; an empty revision map must not stand in for unsupported tracking. See [cross-session cache refresh](04-storage-and-security.md#cross-session-cache-refresh).
 
+## Cypher expression validation
+
+Deeply nested Cypher and long operator or indexing chains now fail with a parse error instead of exhausting the process stack. The parser limits recursive expression parsing and constructed expression trees to 64 levels; flat lists and independent projection items remain supported. Rust code that exhaustively matches `uqa_graph::cypher::ParseError` must handle `ExpressionTooDeep { limit, position }`. See the [Cypher contract](../sql/07-graph.md#cypher-table-function).
+
 ## SQL AST and CHECK catalog updates
 
 The 0.2 series adds `ColumnDef.check_is_local`, `ColumnDef.check_object_id`, `TableCheck.is_local`, and `TableCheck.object_id`. Rust applications constructing these structs directly initialize local-origin fields to `true` and unassigned CHECK identities to `None`; SQL compilation and engine-owned inheritance fill them automatically. Applications with custom catalogs must also implement the graph storage methods described above.

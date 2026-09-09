@@ -22,6 +22,7 @@ use crate::cypher::lexer::{is_keyword, tokenize, LexError, Token, TokenKind};
 mod atoms;
 mod clauses;
 mod expressions;
+mod limits;
 mod patterns;
 mod stream;
 
@@ -44,18 +45,25 @@ pub enum ParseError {
     },
     #[error("unexpected token {got:?} at position {position}")]
     Unexpected { got: String, position: usize },
+    #[error("Cypher expression nesting limit of {limit} exceeded at position {position}")]
+    ExpressionTooDeep { limit: usize, position: usize },
 }
 
 /// Parse a Cypher query string into a Cypher query AST.
 pub fn parse_cypher(source: &str) -> Result<CypherQuery, ParseError> {
     let tokens = tokenize(source)?;
-    let mut parser = Parser { tokens, pos: 0 };
+    let mut parser = Parser {
+        tokens,
+        pos: 0,
+        expression_recursion: 0,
+    };
     parser.parse()
 }
 
 struct Parser {
     tokens: Vec<Token>,
     pos: usize,
+    expression_recursion: usize,
 }
 
 const RESERVED_KEYWORDS: &[&str] = &[
