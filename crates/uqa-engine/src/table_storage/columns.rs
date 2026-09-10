@@ -34,17 +34,6 @@ impl Engine {
         })
     }
 
-    pub(crate) fn try_register_column_with_check_columns(
-        &self,
-        table: &str,
-        column: uqa_sql::ast::ColumnDef,
-        check_columns: &[uqa_sql::ast::ColumnDef],
-    ) -> StorageBackendResult<()> {
-        self.with_implicit_storage_transaction(|engine| {
-            engine.try_register_column_inner(table, column, Some(check_columns))
-        })
-    }
-
     pub(super) fn try_register_column_inner(
         &self,
         table: &str,

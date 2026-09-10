@@ -50,7 +50,7 @@ When generating SQL:
 
 ## Optional
 
-- [Internal architecture](docs/manual/internals/README.md): SQL analysis ownership, runtime adapters, crate dependency direction, and subsystem navigation.
+- [Internal architecture](docs/manual/internals/README.md): SQL analysis and schema execution ownership, runtime state adapters, crate dependency direction, and subsystem navigation.
 - [Storage internals](docs/manual/internals/03-storage.md): Provider-independent storage and graph contracts, SQLite provider ownership, transaction affinity, persistent formats, and migrations.
 - [Planning and execution](docs/manual/internals/02-planning-and-execution.md): Unified plans, operator joins, optimization, SQL mutation analysis, and execution-owned DML.
 - [Analyzer internals](docs/manual/internals/04-analyzer-pipeline.md): Analyzer representation and index/search phases.

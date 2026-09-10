@@ -8,8 +8,8 @@
 
 use super::scalar::eval_lowered_expression;
 use super::{
-    index_vectors_for_type, AlterTableAction, AlterTableStmt, BTreeMap, ColumnType, CreateTable,
-    Document, DropKind, DropStmt, Engine, RowUpdateVectors, SQLError, SQLResult, Value,
+    index_vectors_for_type, AlterTableAction, AlterTableStmt, BTreeMap, ColumnType, Document,
+    DropKind, DropStmt, Engine, RowUpdateVectors, SQLError, SQLResult, Value,
 };
 use crate::CatalogIndexRow;
 

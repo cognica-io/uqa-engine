@@ -185,3 +185,10 @@ pub fn replace_constraint_state(
     state.refresh_value_indexes()?;
     Ok(())
 }
+
+/// Bind a schema write to the caller's storage transaction and its freshly constructed publication context.
+pub type SchemaWrite<'a> =
+    Box<dyn FnOnce(&SchemaPublicationContext<'_>) -> StorageBackendResult<()> + 'a>;
+pub trait SchemaWriteTransaction {
+    fn with_schema_write(&self, write: SchemaWrite<'_>) -> StorageBackendResult<()>;
+}

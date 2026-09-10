@@ -359,30 +359,18 @@ impl Engine {
         Ok(())
     }
 
-    pub(crate) fn attach_implicit_sequence_owners(
-        &self,
-        table_name: &str,
-    ) -> StorageBackendResult<()> {
-        let table = self.try_table(table_name)?.ok_or_else(|| {
-            StorageBackendError::Other(format!("table `{table_name}` disappeared"))
-        })?;
-        let columns = table.columns.read().clone();
-        self.attach_implicit_sequence_owners_for_columns(table_name, table.object_id(), &columns)
-    }
-
     pub(crate) fn attach_implicit_sequence_owners_for_columns(
         &self,
         table_name: &str,
         table_object_id: [u8; 16],
         columns: &[uqa_sql::ast::ColumnDef],
     ) -> StorageBackendResult<()> {
-        for (sequence, owner) in
-            self.implicit_sequence_owner_bindings(table_name, table_object_id, columns)?
-        {
-            self.attach_sequence_owner_identity(&sequence, owner)
-                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-        }
-        Ok(())
+        uqa_execution::schema::sequences::ownership::attach_column_owners(
+            &self.implicit_ownership_context(),
+            table_name,
+            table_object_id,
+            columns,
+        )
     }
 
     pub(crate) fn validate_implicit_sequence_owners_for_columns(
@@ -392,7 +380,12 @@ impl Engine {
         columns: &[uqa_sql::ast::ColumnDef],
     ) -> StorageBackendResult<()> {
         for (sequence, expected) in
-            self.implicit_sequence_owner_bindings(table_name, table_object_id, columns)?
+            uqa_execution::schema::sequences::ownership::implicit_owner_bindings(
+                self,
+                table_name,
+                table_object_id,
+                columns,
+            )?
         {
             let relation = RelationIdentity::from_legacy_name(&sequence)
                 .map_err(StorageBackendError::Other)?;
@@ -411,53 +404,7 @@ impl Engine {
         Ok(())
     }
 
-    fn implicit_sequence_owner_bindings(
-        &self,
-        table_name: &str,
-        table_object_id: [u8; 16],
-        columns: &[uqa_sql::ast::ColumnDef],
-    ) -> StorageBackendResult<Vec<(String, SequenceOwner)>> {
-        let relation =
-            RelationIdentity::from_legacy_name(table_name).map_err(StorageBackendError::Other)?;
-        let mut bindings = Vec::new();
-        for column in columns {
-            let Some(provenance) = column.auto_increment.as_ref() else {
-                continue;
-            };
-            let Some(named_owner) = provenance.owner.as_ref() else {
-                continue;
-            };
-            if !stored_owner_names_current(&relation, column, named_owner) {
-                continue;
-            }
-            let Some(sequence) = provenance.sequence.as_deref() else {
-                continue;
-            };
-            let sequence = self.resolve_stored_sequence_reference_from_loaded_registry(sequence)?;
-            let column_object_id = column.object_id.ok_or_else(|| {
-                StorageBackendError::Other(format!(
-                    "column `{table_name}`.`{}` has no object identity",
-                    column.name
-                ))
-            })?;
-            let dependency = if provenance.is_identity() {
-                SequenceOwnerDependency::Internal
-            } else {
-                SequenceOwnerDependency::Automatic
-            };
-            bindings.push((
-                sequence,
-                SequenceOwner {
-                    table_object_id,
-                    column_object_id,
-                    dependency,
-                },
-            ));
-        }
-        Ok(bindings)
-    }
-
-    fn attach_sequence_owner_identity(
+    pub(crate) fn attach_sequence_owner_identity(
         &self,
         name: &str,
         owner: SequenceOwner,

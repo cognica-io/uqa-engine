@@ -7,3 +7,5 @@
 //! Sequence catalog execution and allocation dependencies.
 pub mod creation;
 pub mod implicit;
+
+pub mod ownership;

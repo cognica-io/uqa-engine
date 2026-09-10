@@ -29,9 +29,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use uqa_core::{DocId, Value};
-use uqa_sql::ast::{
-    AlterTableAction, AlterTableStmt, ColumnType, CreateTable, DropKind, DropStmt, Statement,
-};
+use uqa_sql::ast::{AlterTableAction, AlterTableStmt, ColumnType, DropKind, DropStmt, Statement};
 #[cfg(test)]
 use uqa_sql::compile;
 use uqa_sql::{SQLError, SQLParam, SQLResult};

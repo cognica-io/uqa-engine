@@ -110,3 +110,12 @@ impl TableSchemaState for SchemaTableBinding<'_> {
         self.engine.refresh_value_indexes_for_table(&self.name)
     }
 }
+
+impl uqa_execution::schema::publication::SchemaWriteTransaction for Engine {
+    fn with_schema_write(
+        &self,
+        write: uqa_execution::schema::publication::SchemaWrite<'_>,
+    ) -> StorageBackendResult<()> {
+        self.with_implicit_storage_transaction(|engine| write(&engine.schema_publication_context()))
+    }
+}

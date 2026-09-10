@@ -13,3 +13,5 @@ pub mod validation;
 pub mod sequences;
 
 pub mod publication;
+
+pub mod table_creation;

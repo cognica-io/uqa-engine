@@ -150,3 +150,39 @@ impl SequenceCreationPublication for Engine {
         Ok(true)
     }
 }
+
+impl Engine {
+    pub(crate) fn implicit_ownership_context(
+        &self,
+    ) -> uqa_execution::schema::sequences::ownership::ImplicitOwnershipContext<'_> {
+        uqa_execution::schema::sequences::ownership::ImplicitOwnershipContext {
+            names: self,
+            tables: self,
+            publication: self,
+        }
+    }
+}
+impl uqa_sql::schema::sequences::implicit_ownership::StoredSequenceNames for Engine {
+    fn stored_sequence_name(&self, reference: &str) -> Result<String, String> {
+        self.resolve_stored_sequence_reference_from_loaded_registry(reference)
+            .map_err(|error| error.to_string())
+    }
+}
+impl uqa_execution::schema::sequences::ownership::ImplicitOwnerTables for Engine {
+    fn table_owner_columns(
+        &self,
+        table: &str,
+    ) -> StorageBackendResult<Option<([u8; 16], Vec<uqa_sql::ast::ColumnDef>)>> {
+        self.try_table(table)
+            .map(|table| table.map(|table| (table.object_id(), table.columns.read().clone())))
+    }
+}
+impl uqa_execution::schema::sequences::ownership::ImplicitOwnerPublication for Engine {
+    fn attach_owner(
+        &self,
+        sequence: &str,
+        owner: uqa_storage::SequenceOwner,
+    ) -> Result<(), SQLError> {
+        self.attach_sequence_owner_identity(sequence, owner)
+    }
+}

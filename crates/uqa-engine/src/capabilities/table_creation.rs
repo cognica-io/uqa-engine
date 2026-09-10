@@ -136,3 +136,72 @@ impl Engine {
         }
     }
 }
+
+impl Engine {
+    pub(crate) fn create_table_context(
+        &self,
+    ) -> uqa_execution::schema::table_creation::CreateTableContext<'_> {
+        let runtime = self.query_runtime_view();
+        uqa_execution::schema::table_creation::CreateTableContext {
+            namespace: self,
+            analysis: self.table_declaration_context(),
+            sequences: self.implicit_sequence_context(),
+            ownership: self.implicit_ownership_context(),
+            schema_transactions: self,
+            publication: self,
+            notices: runtime.notices,
+        }
+    }
+}
+impl uqa_execution::schema::table_creation::TableCreationNamespace for Engine {
+    fn prepare_writer(&self) -> Result<bool, SQLError> {
+        self.prepare_explicit_transaction_writer()
+    }
+    fn temporary_name(&self, name: &str) -> Result<String, SQLError> {
+        self.try_temporary_relation_name_for_create(name)
+    }
+    fn persistent_name(&self, name: &str) -> Result<String, SQLError> {
+        self.try_relation_name_for_sql_create(name)
+    }
+    fn relation_exists(&self, name: &str) -> Result<bool, SQLError> {
+        self.resolve_bound_relation_kind(name)
+            .map(|resolution| matches!(resolution, super::RelationResolution::Found(_, _)))
+    }
+}
+impl uqa_execution::schema::table_creation::TableCreationPublication for Engine {
+    fn create_table(
+        &self,
+        name: &str,
+        persistence: RelationPersistence,
+        on_commit: OnCommitAction,
+    ) -> uqa_storage::StorageBackendResult<()> {
+        self.create_table_with_lifecycle(
+            name,
+            uqa_analysis::analyzer::standard_analyzer("english"),
+            Vec::new(),
+            persistence,
+            on_commit,
+        )
+    }
+    fn create_vector_field(
+        &self,
+        table: &str,
+        field: String,
+        dimensions: u32,
+    ) -> uqa_storage::StorageBackendResult<bool> {
+        Engine::create_vector_field(self, table, field, dimensions)
+    }
+    fn install_hierarchy(
+        &self,
+        table: &str,
+        hierarchy: uqa_sql::ast::TableHierarchy,
+    ) -> uqa_storage::StorageBackendResult<()> {
+        self.install_table_hierarchy(table, hierarchy)
+    }
+    fn persist_schema(&self, table: &str) -> uqa_storage::StorageBackendResult<bool> {
+        self.try_persist_table_schema(table)
+    }
+    fn refresh_value_indexes(&self, table: &str) -> uqa_storage::StorageBackendResult<()> {
+        self.refresh_value_indexes_for_table(table)
+    }
+}
