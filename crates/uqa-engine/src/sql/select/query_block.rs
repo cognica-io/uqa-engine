@@ -690,29 +690,7 @@ fn add_all_source_columns_to_prune(
     Ok(())
 }
 
-pub(in crate::sql) fn collect_from_qualifiers(from: &SourcePlan, out: &mut Vec<String>) {
-    match from {
-        SourcePlan::Join {
-            left, right, alias, ..
-        } => {
-            if let Some(alias) = alias {
-                out.push(alias.clone());
-            } else {
-                collect_from_qualifiers(left, out);
-                collect_from_qualifiers(right, out);
-            }
-        }
-        SourcePlan::Table { .. }
-        | SourcePlan::Values { .. }
-        | SourcePlan::Function { .. }
-        | SourcePlan::FunctionGroup { .. }
-        | SourcePlan::Subquery { .. } => {
-            if let Some(qualifier) = from.visible_qualifier() {
-                out.push(qualifier.to_string());
-            }
-        }
-    }
-}
+pub(in crate::sql) use uqa_sql::semantics::collect_from_qualifiers;
 
 fn collect_from_prune_columns(
     from: &SourcePlan,

@@ -9,124 +9,15 @@
 mod indexes;
 mod privileges;
 
-#[cfg(test)]
-use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-#[cfg(test)]
-use std::sync::Arc;
 
 use uqa_graph::GraphStore;
 use uqa_sql::SQLError;
 
-#[cfg(test)]
-use crate::engine_state::DurableCatalogState;
-
-#[cfg(test)]
-use super::CatalogReadSnapshot;
 use super::{
     CatalogReadView, CatalogSequenceSnapshot, CatalogTableSnapshot, RelationLookupMode,
     RelationNameResolution, RelationResolution,
 };
-
-#[cfg(test)]
-impl CatalogTableSnapshot {
-    pub(crate) fn fixture(columns: Vec<uqa_sql::ast::ColumnDef>) -> Self {
-        Self {
-            object_id: [1; 16],
-            security: Arc::new(crate::engine_state::TableSecurity {
-                role_owner: "uqa".into(),
-                acl: None,
-                column_acls: BTreeMap::new(),
-            }),
-            columns: Arc::new(columns),
-            columns_declared: true,
-            checks: Arc::new(Vec::new()),
-            foreign_keys: Arc::new(Vec::new()),
-            keys: Arc::new(Vec::new()),
-            hierarchy: Arc::new(uqa_sql::ast::TableHierarchy::default()),
-            persistence: uqa_sql::ast::RelationPersistence::Permanent,
-        }
-    }
-}
-
-impl RelationNameResolution {
-    pub(crate) fn search_path(&self) -> &[String] {
-        &self.search_path
-    }
-
-    pub(crate) fn search_path_contains(&self, schema: &str) -> bool {
-        self.search_path.iter().any(|candidate| candidate == schema)
-    }
-
-    pub(crate) fn current_user(&self) -> &str {
-        &self.current_user
-    }
-
-    pub(crate) fn lookup_mode(&self) -> RelationLookupMode {
-        self.lookup_mode
-    }
-
-    fn qualified_schema(&self, name: &str) -> Result<Option<(String, String)>, SQLError> {
-        let (schema, _) = crate::RelationIdentity::parse_reference(name).map_err(|error| {
-            SQLError::Internal(format!("resolve catalog relation `{name}`: {error}"))
-        })?;
-        Ok(schema.map(|schema| {
-            let resolved = if schema == "pg_temp" {
-                self.temporary_schema.clone()
-            } else {
-                schema.clone()
-            };
-            (schema, resolved)
-        }))
-    }
-
-    pub(crate) fn set_lookup_mode(
-        &mut self,
-        lookup_mode: RelationLookupMode,
-    ) -> RelationLookupMode {
-        std::mem::replace(&mut self.lookup_mode, lookup_mode)
-    }
-
-    fn raw_relation_lookup_candidates(
-        &self,
-        name: &str,
-    ) -> Result<Vec<crate::RelationIdentity>, SQLError> {
-        let (schema, relation) =
-            crate::RelationIdentity::parse_reference(name).map_err(|error| {
-                SQLError::Internal(format!("resolve catalog relation `{name}`: {error}"))
-            })?;
-        if let Some(schema) = schema {
-            let schema = if schema == "pg_temp" {
-                self.temporary_schema.clone()
-            } else {
-                schema
-            };
-            return Ok(vec![crate::RelationIdentity::new(schema, relation)]);
-        }
-        let mut candidates = vec![crate::RelationIdentity::new(
-            &self.temporary_schema,
-            &relation,
-        )];
-        candidates.extend(
-            self.search_path
-                .iter()
-                .filter(|schema| *schema != "pg_catalog" && *schema != "information_schema")
-                .map(|schema| crate::RelationIdentity::new(schema, &relation)),
-        );
-        Ok(candidates)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn fixture(search_path: Vec<String>, temporary_schema: String) -> Self {
-        Self {
-            search_path,
-            temporary_schema,
-            temporary_namespace_allocated: false,
-            current_user: "uqa".into(),
-            lookup_mode: RelationLookupMode::Dynamic,
-        }
-    }
-}
 
 impl CatalogReadView {
     /// Produce the only relation candidate set exposed to SQL binding and execution. Dynamic names are filtered by namespace `USAGE`; stored bindings must already be canonical and therefore bypass name lookup entirely.
@@ -925,16 +816,6 @@ impl CatalogReadView {
             }
         }
         Ok(None)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn fixture(tables: BTreeMap<crate::RelationIdentity, CatalogTableSnapshot>) -> Self {
-        Self {
-            snapshot: Arc::new(CatalogReadSnapshot {
-                tables,
-                durable: Arc::new(DurableCatalogState::new().snapshot()),
-            }),
-        }
     }
 
     fn collect_hierarchy_descendants(

@@ -1,0 +1,691 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Serializable relational, command, source, and scalar plan data model.
+
+use super::{NullsOrder, ScalarExpr, SetOpKind};
+
+const fn default_include_descendants() -> bool {
+    true
+}
+
+/// One fully lowered SQL statement.
+///
+/// There is deliberately no `Legacy`, `Opaque`, or raw-`Statement` variant:
+/// adding a SQL statement kind must update the exhaustive lowerer and the
+/// physical driver.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum UnifiedPlan {
+    Query(Box<QueryPlan>),
+    Command(Box<CommandPlan>),
+}
+
+/// A relational query with its CTE scope and one relational root.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct QueryPlan {
+    /// Whether relation references in this tree are stored catalog identities rather than names that must be resolved in the executing session.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub relations_bound: bool,
+    pub ctes: Vec<CtePlan>,
+    pub root: RelationalPlan,
+}
+
+/// A named query child owned by a [`QueryPlan`].
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CtePlan {
+    pub name: String,
+    pub columns: Vec<String>,
+    pub recursive: bool,
+    #[serde(default)]
+    pub materialization: crate::ast::CteMaterialization,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search: Option<CteSearchPlan>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cycle: Option<CteCyclePlan>,
+    #[serde(flatten)]
+    pub body: CtePlanBody,
+}
+
+/// A relational CTE or a command whose RETURNING relation feeds its consumers.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum CtePlanBody {
+    #[serde(rename = "query")]
+    Query(Box<QueryPlan>),
+    #[serde(rename = "command")]
+    Command(Box<CommandPlan>),
+}
+
+impl CtePlanBody {
+    pub fn query(&self) -> Option<&QueryPlan> {
+        match self {
+            Self::Query(query) => Some(query),
+            Self::Command(_) => None,
+        }
+    }
+
+    pub fn query_mut(&mut self) -> Option<&mut QueryPlan> {
+        match self {
+            Self::Query(query) => Some(query),
+            Self::Command(_) => None,
+        }
+    }
+
+    pub const fn modifies_data(&self) -> bool {
+        matches!(self, Self::Command(_))
+    }
+
+    /// Whether this WITH definition exposes a relation to its consumers.
+    pub fn returns_rows(&self) -> bool {
+        match self {
+            Self::Query(_) => true,
+            Self::Command(command) => command
+                .returning()
+                .is_some_and(|returning| !returning.is_empty()),
+        }
+    }
+
+    pub fn into_plan(self) -> UnifiedPlan {
+        match self {
+            Self::Query(query) => UnifiedPlan::Query(query),
+            Self::Command(command) => UnifiedPlan::Command(command),
+        }
+    }
+}
+
+impl From<UnifiedPlan> for CtePlanBody {
+    fn from(plan: UnifiedPlan) -> Self {
+        match plan {
+            UnifiedPlan::Query(query) => Self::Query(query),
+            UnifiedPlan::Command(command) => Self::Command(command),
+        }
+    }
+}
+
+/// Generated traversal-order column for a recursive CTE.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CteSearchPlan {
+    pub columns: Vec<String>,
+    pub breadth_first: bool,
+    pub sequence_column: String,
+}
+
+/// Generated cycle mark and path columns for a recursive CTE.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CteCyclePlan {
+    pub columns: Vec<String>,
+    pub mark_column: String,
+    pub mark_value: ScalarExpr,
+    pub mark_default: ScalarExpr,
+    pub path_column: String,
+}
+
+/// Relational nodes common to ordinary SQL, retrieval SQL, and table/graph
+/// functions.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum RelationalPlan {
+    /// A single SELECT query block. Its source is a separate plan tree and its
+    /// compute phase is classified as projection, aggregation, or windowing.
+    QueryBlock(Box<QueryBlockPlan>),
+    /// SQL set operations own both input plans; combined ordering and slicing
+    /// are properties of the set node rather than either branch.
+    SetOp {
+        kind: SetOpKind,
+        all: bool,
+        left: Box<QueryPlan>,
+        right: Box<QueryPlan>,
+        order_by: Vec<OrderPlan>,
+        limit: Option<Box<ScalarExpr>>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        with_ties: bool,
+        offset: Option<Box<ScalarExpr>>,
+        subqueries: Vec<QueryPlan>,
+    },
+    /// Standalone `VALUES`, used both as a statement and as a relational
+    /// source. Each cell remains an expression so parameters/functions bind at
+    /// execution time.
+    Values {
+        rows: Vec<Vec<ScalarExpr>>,
+        subqueries: Vec<QueryPlan>,
+    },
+}
+
+/// One SELECT block after `WITH` and set-operation structure has been pulled
+/// into explicit parent/child nodes.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct QueryBlockPlan {
+    pub projections: Vec<ProjectionPlan>,
+    pub from: Option<SourcePlan>,
+    pub r#where: Option<ScalarExpr>,
+    pub compute: ComputePlan,
+    pub group_by: Vec<ScalarExpr>,
+    pub grouping_sets: Vec<Vec<ScalarExpr>>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub group_distinct: bool,
+    pub having: Option<ScalarExpr>,
+    pub order_by: Vec<OrderPlan>,
+    pub limit: Option<ScalarExpr>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub with_ties: bool,
+    pub offset: Option<ScalarExpr>,
+    pub distinct: bool,
+    pub distinct_on: Vec<ScalarExpr>,
+    pub subqueries: Vec<QueryPlan>,
+    pub access: AccessPathPlan,
+    /// `FOR UPDATE` / `FOR SHARE` clauses belonging to this query block.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub locking: Vec<crate::ast::LockingClause>,
+}
+
+/// Cross-paradigm access decision made after the relational and scalar
+/// portions of a query block have both been lowered.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum AccessPathPlan {
+    /// Ordinary row-source execution.
+    Row,
+    /// Use the shared document-support/operator algebra for the block predicate.
+    OperatorTree {
+        /// The relational ORDER BY/OFFSET/LIMIT can be pushed into the
+        /// retrieval function before row materialization.
+        score_limit_pushdown: bool,
+    },
+    /// Split a mixed predicate into posting-list candidates followed by
+    /// row-level residual evaluation.
+    Hybrid,
+}
+
+/// Physical strategy selected for a relational join.
+///
+/// `Auto` is used for an unreordered SQL join and lets physical lowering pick
+/// hash execution for a splittable equality predicate or nested-loop execution
+/// otherwise. `Hash` is an optimizer commitment produced by `DPccp` and must be
+/// executable; physical lowering reports an internal planning error if that
+/// invariant is violated.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum JoinExecutionStrategy {
+    #[default]
+    Auto,
+    Hash,
+}
+
+/// One independently resolved and bound function inside a range-function group.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TableFunctionPlan {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding: Option<crate::ast::FunctionBinding>,
+    #[serde(default)]
+    pub output_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relations: Option<crate::ast::OperatorJoinRelations>,
+    pub args: Vec<ScalarExpr>,
+    pub column_aliases: Vec<String>,
+    pub column_types: Vec<String>,
+}
+
+/// The row-producing source below a query block.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum SourcePlan {
+    Table {
+        name: String,
+        #[serde(default)]
+        qualifier: String,
+        alias: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        column_aliases: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bound_columns: Option<Vec<String>>,
+        #[serde(default = "default_include_descendants")]
+        include_descendants: bool,
+    },
+    Join {
+        left: Box<SourcePlan>,
+        right: Box<SourcePlan>,
+        kind: crate::ast::JoinKind,
+        on: Option<ScalarExpr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        using: Option<crate::ast::JoinUsing>,
+        #[serde(default)]
+        natural: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        alias: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        column_aliases: Vec<String>,
+        lateral: bool,
+        #[serde(default)]
+        strategy: JoinExecutionStrategy,
+    },
+    Values {
+        rows: Vec<Vec<ScalarExpr>>,
+        alias: Option<String>,
+        column_aliases: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        internal_relation: Option<crate::ast::InternalRelationId>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        internal_column_types: Vec<Option<crate::ast::ColumnType>>,
+    },
+    Function {
+        name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        binding: Option<crate::ast::FunctionBinding>,
+        #[serde(default)]
+        output_name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        relations: Option<crate::ast::OperatorJoinRelations>,
+        args: Vec<ScalarExpr>,
+        alias: Option<String>,
+        column_aliases: Vec<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        ordinality: bool,
+        column_types: Vec<String>,
+    },
+    FunctionGroup {
+        functions: Vec<TableFunctionPlan>,
+        alias: Option<String>,
+        column_aliases: Vec<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        ordinality: bool,
+    },
+    Subquery {
+        body: Box<QueryPlan>,
+        alias: Option<String>,
+        column_aliases: Vec<String>,
+    },
+}
+
+/// The SELECT-list phase chosen during lowering.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum ComputePlan {
+    Project,
+    Aggregate,
+    Window,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ProjectionPlan {
+    pub expr: ScalarExpr,
+    pub alias: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct OrderPlan {
+    pub expr: ScalarExpr,
+    pub descending: bool,
+    pub nulls: Option<NullsOrder>,
+}
+
+/// Executable scalar IR plus every query-valued descendant it owns.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ExpressionPlan {
+    pub scalar: ScalarExpr,
+    pub subqueries: Vec<QueryPlan>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AssignmentPlan {
+    pub column: String,
+    pub value: ScalarExpr,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ViewCheckPlan {
+    pub view: String,
+    pub predicate: ScalarExpr,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ViewRuleReturningPlan {
+    pub relation: String,
+    pub target_qualifier: String,
+    pub returning: Vec<ProjectionPlan>,
+    pub aliases: crate::ast::ReturningAliases,
+    pub subqueries: Vec<QueryPlan>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ViewRuleInsertPlan {
+    pub relation: String,
+    pub supplied_columns: Vec<String>,
+    pub input_columns: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ViewRuleUpdatePlan {
+    pub relation: String,
+    pub assigned_columns: Vec<String>,
+    pub input_columns: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct InsertPlan {
+    pub table: String,
+    pub target_relation_bound: bool,
+    /// Whether non-target relation references are stored catalog identities rather than names that must be resolved in the executing session.
+    pub relations_bound: bool,
+    /// Effective role used for non-target privilege checks in an internally rewritten statement.
+    pub statement_privilege_subject: Option<String>,
+    /// Effective role used only for privilege checks on an internally rewritten target relation.
+    pub target_privilege_subject: Option<String>,
+    pub target_qualifier: String,
+    pub include_descendants: bool,
+    pub columns: Vec<String>,
+    pub ctes: Vec<CtePlan>,
+    pub rows: Vec<Vec<ScalarExpr>>,
+    pub source: Option<Box<QueryPlan>>,
+    pub on_conflict: Option<ConflictPlan>,
+    pub returning: Vec<ProjectionPlan>,
+    pub returning_aliases: crate::ast::ReturningAliases,
+    pub subqueries: Vec<QueryPlan>,
+    pub view_checks: Vec<ViewCheckPlan>,
+    pub view_rule_relations: Vec<String>,
+    pub view_rule_insert_plans: Vec<ViewRuleInsertPlan>,
+    pub view_rule_returning: Option<ViewRuleReturningPlan>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ConflictPlan {
+    pub predicate: Option<Box<ScalarExpr>>,
+    pub constraint: Option<String>,
+    pub conflict_columns: Vec<String>,
+    pub expressions: Vec<ScalarExpr>,
+    pub action: ConflictActionPlan,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum ConflictActionPlan {
+    Nothing,
+    Update {
+        assignments: Vec<AssignmentPlan>,
+        predicate: Option<Box<ScalarExpr>>,
+    },
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UpdatePlan {
+    pub table: String,
+    pub target_relation_bound: bool,
+    /// Whether non-target relation references are stored catalog identities rather than names that must be resolved in the executing session.
+    pub relations_bound: bool,
+    /// Effective role used for non-target privilege checks in an internally rewritten statement.
+    pub statement_privilege_subject: Option<String>,
+    /// Effective role used only for privilege checks on an internally rewritten target relation.
+    pub target_privilege_subject: Option<String>,
+    pub target_qualifier: String,
+    pub include_descendants: bool,
+    pub assignments: Vec<AssignmentPlan>,
+    pub predicate: Option<ScalarExpr>,
+    pub ctes: Vec<CtePlan>,
+    pub source: Option<Box<SourcePlan>>,
+    pub returning: Vec<ProjectionPlan>,
+    pub returning_aliases: crate::ast::ReturningAliases,
+    pub subqueries: Vec<QueryPlan>,
+    pub view_checks: Vec<ViewCheckPlan>,
+    pub view_rule_relations: Vec<String>,
+    pub view_rule_update_plans: Vec<ViewRuleUpdatePlan>,
+    pub view_rule_returning: Option<ViewRuleReturningPlan>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DeletePlan {
+    pub table: String,
+    pub target_relation_bound: bool,
+    /// Whether non-target relation references are stored catalog identities rather than names that must be resolved in the executing session.
+    pub relations_bound: bool,
+    /// Effective role used for non-target privilege checks in an internally rewritten statement.
+    pub statement_privilege_subject: Option<String>,
+    /// Effective role used only for privilege checks on an internally rewritten target relation.
+    pub target_privilege_subject: Option<String>,
+    pub target_qualifier: String,
+    pub include_descendants: bool,
+    pub predicate: Option<ScalarExpr>,
+    pub ctes: Vec<CtePlan>,
+    pub source: Option<Box<SourcePlan>>,
+    pub returning: Vec<ProjectionPlan>,
+    pub returning_aliases: crate::ast::ReturningAliases,
+    pub subqueries: Vec<QueryPlan>,
+    pub view_rule_relations: Vec<String>,
+    pub view_rule_returning: Option<ViewRuleReturningPlan>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MergePlan {
+    #[serde(default)]
+    pub ctes: Vec<CtePlan>,
+    pub target: String,
+    /// Effective role used for non-target privilege checks in an internally rewritten statement.
+    pub statement_privilege_subject: Option<String>,
+    /// Effective role used only for privilege checks on an internally rewritten target relation.
+    pub target_privilege_subject: Option<String>,
+    pub target_qualifier: String,
+    pub target_alias: Option<String>,
+    pub include_descendants: bool,
+    pub target_predicate: Option<ScalarExpr>,
+    pub source: Box<SourcePlan>,
+    pub join_condition: ScalarExpr,
+    pub when_clauses: Vec<MergeWhenPlan>,
+    pub returning: Vec<ProjectionPlan>,
+    pub returning_aliases: crate::ast::ReturningAliases,
+    pub subqueries: Vec<QueryPlan>,
+    pub view_checks: Vec<ViewCheckPlan>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum MergeWhenPlan {
+    UpdateMatched {
+        condition: Option<ScalarExpr>,
+        assignments: Vec<AssignmentPlan>,
+    },
+    DeleteMatched {
+        condition: Option<ScalarExpr>,
+    },
+    UpdateNotMatchedBySource {
+        condition: Option<ScalarExpr>,
+        assignments: Vec<AssignmentPlan>,
+    },
+    DeleteNotMatchedBySource {
+        condition: Option<ScalarExpr>,
+    },
+    InsertNotMatched {
+        condition: Option<ScalarExpr>,
+        columns: Vec<String>,
+        values: Vec<ScalarExpr>,
+    },
+    NothingMatched {
+        condition: Option<ScalarExpr>,
+    },
+    NothingNotMatched {
+        condition: Option<ScalarExpr>,
+    },
+    NothingNotMatchedBySource {
+        condition: Option<ScalarExpr>,
+    },
+}
+
+/// Non-query statement plans. Mutations own physical sources and scalar IR;
+/// query-bearing catalog commands own explicit query children. Typed DDL and
+/// procedural payloads contain catalog data, never a second SQL dispatcher.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum CommandPlan {
+    CreateTable(Box<crate::ast::CreateTable>),
+    CreateTableIfNotExists(crate::ast::DeferredCreateTable),
+    CreateIndex(crate::ast::CreateIndex),
+    Insert(Box<InsertPlan>),
+    Update(Box<UpdatePlan>),
+    Delete(Box<DeletePlan>),
+    Drop(crate::ast::DropStmt),
+    AlterTable(Box<crate::ast::AlterTableStmt>),
+    AlterView(crate::ast::AlterViewStmt),
+    CreateView {
+        name: String,
+        column_names: Vec<String>,
+        query: Box<QueryPlan>,
+        or_replace: bool,
+        persistence: crate::ast::RelationPersistence,
+        options: Vec<(String, String)>,
+    },
+    CreateMaterializedView {
+        name: String,
+        column_names: Vec<String>,
+        if_not_exists: bool,
+        with_no_data: bool,
+        options: Vec<(String, String)>,
+        query: Box<QueryPlan>,
+    },
+    RefreshMaterializedView {
+        name: String,
+        concurrently: bool,
+        with_no_data: bool,
+    },
+    CreateSchema {
+        name: String,
+        if_not_exists: bool,
+    },
+    AlterSchemaOwner {
+        name: String,
+        new_owner: String,
+    },
+    Notify {
+        channel: String,
+        payload: String,
+    },
+    Listen {
+        channel: String,
+    },
+    Unlisten {
+        channel: Option<String>,
+    },
+    SetVariable {
+        name: String,
+        value: String,
+        #[serde(default)]
+        local: bool,
+        #[serde(default)]
+        is_default: bool,
+    },
+    ResetVariable {
+        name: String,
+    },
+    ResetAllVariables,
+    SetConstraints {
+        constraints: Vec<crate::ast::SetConstraintName>,
+        deferred: bool,
+    },
+    ShowVariable {
+        name: String,
+    },
+    Discard {
+        target: crate::ast::DiscardTarget,
+    },
+    Load {
+        library: String,
+    },
+    Explain {
+        analyze: bool,
+        verbose: bool,
+        format: Option<String>,
+        body: Box<UnifiedPlan>,
+    },
+    Analyze {
+        table: Option<String>,
+    },
+    Vacuum(crate::ast::VacuumStmt),
+    Truncate {
+        tables: Vec<crate::ast::TruncateTarget>,
+        cascade: bool,
+        restart_identity: bool,
+    },
+    Transaction(crate::ast::TransactionStmt),
+    DeclareCursor {
+        name: String,
+        binary: bool,
+        scroll: Option<bool>,
+        hold: bool,
+        query: Box<QueryPlan>,
+    },
+    FetchCursor(crate::ast::FetchCursorStmt),
+    CloseCursor {
+        name: Option<String>,
+    },
+    CreateSequence(crate::ast::CreateSequence),
+    CreateDomain(crate::ast::CreateDomain),
+    AlterSequence(crate::ast::AlterSequence),
+    CreateTableAs {
+        name: String,
+        if_not_exists: bool,
+        column_names: Vec<String>,
+        with_no_data: bool,
+        persistence: crate::ast::RelationPersistence,
+        on_commit: crate::ast::OnCommitAction,
+        query: Box<QueryPlan>,
+    },
+    Prepare {
+        name: String,
+        #[serde(default)]
+        parameter_types: Vec<crate::ast::ColumnType>,
+        body: Box<UnifiedPlan>,
+    },
+    Execute {
+        name: String,
+        params: Vec<ExpressionPlan>,
+    },
+    Deallocate {
+        name: Option<String>,
+    },
+    CreateForeignServer(crate::ast::CreateForeignServer),
+    CreateForeignTable(crate::ast::CreateForeignTable),
+    CreateForeignTableIfNotExists(crate::ast::DeferredCreateForeignTable),
+    AlterForeignTable(crate::ast::AlterForeignTableStmt),
+    Merge(Box<MergePlan>),
+    CreateFunction(Box<crate::ast::CreateFunction>),
+    DropFunction(crate::ast::DropFunctionStmt),
+    AlterRoutine(crate::ast::AlterRoutineStmt),
+    AlterRoutineOwner(crate::ast::AlterRoutineOwnerStmt),
+    RenameRoutine(crate::ast::RenameRoutineStmt),
+    GrantRoutine(crate::ast::GrantRoutineStmt),
+    GrantTable(crate::ast::GrantTableStmt),
+    GrantSequence(crate::ast::GrantSequenceStmt),
+    GrantDatabase(crate::ast::GrantDatabaseStmt),
+    GrantSchema(crate::ast::GrantSchemaStmt),
+    GrantRole(crate::ast::GrantRoleStmt),
+    CreateRole(crate::ast::CreateRoleStmt),
+    AlterRole(crate::ast::AlterRoleStmt),
+    DropRole(crate::ast::DropRoleStmt),
+    CreateTrigger(crate::ast::CreateTrigger),
+    DropTrigger(crate::ast::DropTrigger),
+    CreateRule(crate::ast::CreateRule),
+    DropRule(crate::ast::DropRule),
+    DoBlock {
+        language: String,
+        body: String,
+    },
+    Call {
+        name: String,
+        args: Vec<ExpressionPlan>,
+    },
+}
+
+/// Classification hook for engine-registered aggregate functions. Built-in
+/// aggregates are always recognised; the callback extends that set without
+/// making the planner depend on the engine.
+pub trait AggregateClassifier {
+    fn is_registered_aggregate(&self, name: &str) -> bool;
+}
+
+impl<F> AggregateClassifier for F
+where
+    F: Fn(&str) -> bool,
+{
+    fn is_registered_aggregate(&self, name: &str) -> bool {
+        self(name)
+    }
+}
+
+pub(super) struct NoRegisteredAggregates;
+
+impl AggregateClassifier for NoRegisteredAggregates {
+    fn is_registered_aggregate(&self, _name: &str) -> bool {
+        false
+    }
+}

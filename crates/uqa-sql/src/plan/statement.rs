@@ -1,0 +1,588 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Top-level SQL statement lowering and command naming.
+
+use super::model::NoRegisteredAggregates;
+use super::query::{lower_assignments, lower_ctes, lower_merge_when};
+use super::rewrite::{rewrite_command_scalars, rewrite_query_scalars};
+use super::scalar::lower_scalar_expression;
+use super::{
+    AggregateClassifier, CommandPlan, ConflictActionPlan, ConflictPlan, DeletePlan, ExpressionPlan,
+    InsertPlan, MergePlan, ProjectionPlan, QueryPlan, RelationalPlan, ScalarExpr, SourcePlan,
+    Statement, UnifiedPlan, UpdatePlan,
+};
+
+impl UnifiedPlan {
+    /// Lower a statement using only the built-in SQL aggregate catalogue.
+    #[must_use]
+    pub fn lower(statement: Statement) -> Self {
+        Self::lower_with(statement, &NoRegisteredAggregates)
+    }
+
+    /// Lower a statement with engine-local aggregate classification.
+    #[must_use]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "plan lowering preserves exhaustive variants and structural identities"
+    )]
+    pub fn lower_with(statement: Statement, aggregates: &dyn AggregateClassifier) -> Self {
+        match statement {
+            Statement::Select(query) => {
+                Self::Query(Box::new(QueryPlan::lower_with(*query, aggregates)))
+            }
+            Statement::Values { rows } => {
+                let mut subqueries = Vec::new();
+                let rows = rows
+                    .into_iter()
+                    .map(|row| {
+                        row.into_iter()
+                            .map(|expr| lower_scalar_expression(expr, aggregates, &mut subqueries))
+                            .collect()
+                    })
+                    .collect();
+                Self::Query(Box::new(QueryPlan {
+                    relations_bound: false,
+                    ctes: Vec::new(),
+                    root: RelationalPlan::Values { rows, subqueries },
+                }))
+            }
+            Statement::CreateTable(value) => {
+                Self::Command(Box::new(CommandPlan::CreateTable(Box::new(value))))
+            }
+            Statement::CreateTableIfNotExists(value) => {
+                Self::Command(Box::new(CommandPlan::CreateTableIfNotExists(value)))
+            }
+            Statement::CreateIndex(value) => {
+                Self::Command(Box::new(CommandPlan::CreateIndex(value)))
+            }
+            Statement::Insert(statement) => {
+                let ctes = lower_ctes(&statement.with, aggregates);
+                let source = statement
+                    .select_source
+                    .map(|query| Box::new(QueryPlan::lower_with(*query, aggregates)));
+                let mut subqueries = Vec::new();
+                let rows = statement
+                    .rows
+                    .into_iter()
+                    .map(|row| {
+                        row.into_iter()
+                            .map(|expr| lower_scalar_expression(expr, aggregates, &mut subqueries))
+                            .collect()
+                    })
+                    .collect();
+                let on_conflict = statement.on_conflict.map(|conflict| {
+                    let action = match conflict.action {
+                        crate::ast::OnConflictAction::Nothing => ConflictActionPlan::Nothing,
+                        crate::ast::OnConflictAction::Update {
+                            assignments,
+                            r#where,
+                        } => ConflictActionPlan::Update {
+                            assignments: lower_assignments(
+                                assignments,
+                                aggregates,
+                                &mut subqueries,
+                            ),
+                            predicate: r#where.map(|expr| {
+                                Box::new(lower_scalar_expression(
+                                    *expr,
+                                    aggregates,
+                                    &mut subqueries,
+                                ))
+                            }),
+                        },
+                    };
+                    ConflictPlan {
+                        predicate: conflict.predicate.map(|expr| {
+                            Box::new(lower_scalar_expression(*expr, aggregates, &mut subqueries))
+                        }),
+                        constraint: conflict.constraint,
+                        conflict_columns: conflict.conflict_columns,
+                        expressions: conflict
+                            .expressions
+                            .into_iter()
+                            .map(|expr| lower_scalar_expression(expr, aggregates, &mut subqueries))
+                            .collect(),
+                        action,
+                    }
+                });
+                let returning = statement
+                    .returning
+                    .into_iter()
+                    .map(|projection| {
+                        ProjectionPlan::lower_with(projection, aggregates, &mut subqueries)
+                    })
+                    .collect();
+                Self::Command(Box::new(CommandPlan::Insert(Box::new(InsertPlan {
+                    table: statement.table,
+                    target_relation_bound: statement.target_relation_bound,
+                    relations_bound: false,
+                    statement_privilege_subject: None,
+                    target_privilege_subject: None,
+                    target_qualifier: statement.target_qualifier,
+                    include_descendants: statement.include_descendants,
+                    columns: statement.columns,
+                    ctes,
+                    rows,
+                    source,
+                    on_conflict,
+                    returning,
+                    returning_aliases: statement.returning_aliases,
+                    subqueries,
+                    view_checks: Vec::new(),
+                    view_rule_relations: Vec::new(),
+                    view_rule_insert_plans: Vec::new(),
+                    view_rule_returning: None,
+                }))))
+            }
+            Statement::Update(statement) => {
+                let ctes = lower_ctes(&statement.with, aggregates);
+                let mut subqueries = Vec::new();
+                let source = statement
+                    .from
+                    .map(|from| SourcePlan::lower_with(from, aggregates, &mut subqueries));
+                let assignments =
+                    lower_assignments(statement.assignments, aggregates, &mut subqueries);
+                let predicate = statement
+                    .r#where
+                    .map(|expr| lower_scalar_expression(expr, aggregates, &mut subqueries));
+                let returning = statement
+                    .returning
+                    .into_iter()
+                    .map(|projection| {
+                        ProjectionPlan::lower_with(projection, aggregates, &mut subqueries)
+                    })
+                    .collect();
+                Self::Command(Box::new(CommandPlan::Update(Box::new(UpdatePlan {
+                    table: statement.table,
+                    target_relation_bound: statement.target_relation_bound,
+                    relations_bound: false,
+                    statement_privilege_subject: None,
+                    target_privilege_subject: None,
+                    target_qualifier: statement.target_qualifier,
+                    include_descendants: statement.include_descendants,
+                    assignments,
+                    predicate,
+                    ctes,
+                    source: source.map(Box::new),
+                    returning,
+                    returning_aliases: statement.returning_aliases,
+                    subqueries,
+                    view_checks: Vec::new(),
+                    view_rule_relations: Vec::new(),
+                    view_rule_update_plans: Vec::new(),
+                    view_rule_returning: None,
+                }))))
+            }
+            Statement::Delete(statement) => {
+                let ctes = lower_ctes(&statement.with, aggregates);
+                let mut subqueries = Vec::new();
+                let source = statement
+                    .using
+                    .map(|from| SourcePlan::lower_with(from, aggregates, &mut subqueries));
+                let predicate = statement
+                    .r#where
+                    .map(|expr| lower_scalar_expression(expr, aggregates, &mut subqueries));
+                let returning = statement
+                    .returning
+                    .into_iter()
+                    .map(|projection| {
+                        ProjectionPlan::lower_with(projection, aggregates, &mut subqueries)
+                    })
+                    .collect();
+                Self::Command(Box::new(CommandPlan::Delete(Box::new(DeletePlan {
+                    table: statement.table,
+                    target_relation_bound: statement.target_relation_bound,
+                    relations_bound: false,
+                    statement_privilege_subject: None,
+                    target_privilege_subject: None,
+                    target_qualifier: statement.target_qualifier,
+                    include_descendants: statement.include_descendants,
+                    predicate,
+                    ctes,
+                    source: source.map(Box::new),
+                    returning,
+                    returning_aliases: statement.returning_aliases,
+                    subqueries,
+                    view_rule_relations: Vec::new(),
+                    view_rule_returning: None,
+                }))))
+            }
+            Statement::Drop(value) => Self::Command(Box::new(CommandPlan::Drop(value))),
+            Statement::AlterTable(value) => {
+                Self::Command(Box::new(CommandPlan::AlterTable(Box::new(value))))
+            }
+            Statement::AlterForeignTable(value) => {
+                Self::Command(Box::new(CommandPlan::AlterForeignTable(value)))
+            }
+            Statement::AlterView(value) => Self::Command(Box::new(CommandPlan::AlterView(value))),
+            Statement::CreateView {
+                name,
+                column_names,
+                body,
+                or_replace,
+                persistence,
+                options,
+            } => {
+                let query = Box::new(QueryPlan::lower_with(*body, aggregates));
+                Self::Command(Box::new(CommandPlan::CreateView {
+                    name,
+                    column_names,
+                    query,
+                    or_replace,
+                    persistence,
+                    options,
+                }))
+            }
+            Statement::CreateMaterializedView {
+                name,
+                column_names,
+                if_not_exists,
+                with_no_data,
+                options,
+                body,
+            } => Self::Command(Box::new(CommandPlan::CreateMaterializedView {
+                name,
+                column_names,
+                if_not_exists,
+                with_no_data,
+                options,
+                query: Box::new(QueryPlan::lower_with(*body, aggregates)),
+            })),
+            Statement::RefreshMaterializedView {
+                name,
+                concurrently,
+                with_no_data,
+            } => Self::Command(Box::new(CommandPlan::RefreshMaterializedView {
+                name,
+                concurrently,
+                with_no_data,
+            })),
+            Statement::CreateSchema {
+                name,
+                if_not_exists,
+            } => Self::Command(Box::new(CommandPlan::CreateSchema {
+                name,
+                if_not_exists,
+            })),
+            Statement::AlterSchemaOwner { name, new_owner } => {
+                Self::Command(Box::new(CommandPlan::AlterSchemaOwner { name, new_owner }))
+            }
+            Statement::Notify { channel, payload } => {
+                Self::Command(Box::new(CommandPlan::Notify { channel, payload }))
+            }
+            Statement::Listen { channel } => {
+                Self::Command(Box::new(CommandPlan::Listen { channel }))
+            }
+            Statement::Unlisten { channel } => {
+                Self::Command(Box::new(CommandPlan::Unlisten { channel }))
+            }
+            Statement::SetVariable {
+                name,
+                value,
+                local,
+                is_default,
+            } => Self::Command(Box::new(CommandPlan::SetVariable {
+                name,
+                value,
+                local,
+                is_default,
+            })),
+            Statement::ResetVariable { name } => {
+                Self::Command(Box::new(CommandPlan::ResetVariable { name }))
+            }
+            Statement::ResetAllVariables => Self::Command(Box::new(CommandPlan::ResetAllVariables)),
+            Statement::SetConstraints {
+                constraints,
+                deferred,
+            } => Self::Command(Box::new(CommandPlan::SetConstraints {
+                constraints,
+                deferred,
+            })),
+            Statement::ShowVariable { name } => {
+                Self::Command(Box::new(CommandPlan::ShowVariable { name }))
+            }
+            Statement::Discard { target } => {
+                Self::Command(Box::new(CommandPlan::Discard { target }))
+            }
+            Statement::Load { library } => Self::Command(Box::new(CommandPlan::Load { library })),
+            Statement::Explain {
+                analyze,
+                verbose,
+                format,
+                body,
+            } => Self::Command(Box::new(CommandPlan::Explain {
+                analyze,
+                verbose,
+                format,
+                body: Box::new(Self::lower_with(*body, aggregates)),
+            })),
+            Statement::Analyze { table } => Self::Command(Box::new(CommandPlan::Analyze { table })),
+            Statement::Vacuum(vacuum) => Self::Command(Box::new(CommandPlan::Vacuum(vacuum))),
+            Statement::Truncate {
+                tables,
+                cascade,
+                restart_identity,
+            } => Self::Command(Box::new(CommandPlan::Truncate {
+                tables,
+                cascade,
+                restart_identity,
+            })),
+            Statement::Transaction(value) => {
+                Self::Command(Box::new(CommandPlan::Transaction(value)))
+            }
+            Statement::DeclareCursor(cursor) => {
+                Self::Command(Box::new(CommandPlan::DeclareCursor {
+                    name: cursor.name,
+                    binary: cursor.binary,
+                    scroll: cursor.scroll,
+                    hold: cursor.hold,
+                    query: Box::new(QueryPlan::lower_with(*cursor.query, aggregates)),
+                }))
+            }
+            Statement::FetchCursor(cursor) => {
+                Self::Command(Box::new(CommandPlan::FetchCursor(cursor)))
+            }
+            Statement::CloseCursor { name } => {
+                Self::Command(Box::new(CommandPlan::CloseCursor { name }))
+            }
+            Statement::CreateSequence(value) => {
+                Self::Command(Box::new(CommandPlan::CreateSequence(value)))
+            }
+            Statement::CreateDomain(value) => {
+                Self::Command(Box::new(CommandPlan::CreateDomain(value)))
+            }
+            Statement::AlterSequence(value) => {
+                Self::Command(Box::new(CommandPlan::AlterSequence(value)))
+            }
+            Statement::CreateTableAs {
+                name,
+                if_not_exists,
+                column_names,
+                with_no_data,
+                persistence,
+                on_commit,
+                body,
+            } => Self::Command(Box::new(CommandPlan::CreateTableAs {
+                name,
+                if_not_exists,
+                column_names,
+                with_no_data,
+                persistence,
+                on_commit,
+                query: Box::new(QueryPlan::lower_with(*body, aggregates)),
+            })),
+            Statement::Prepare {
+                name,
+                parameter_types,
+                body,
+            } => {
+                let body = Box::new(Self::lower_with(*body, aggregates));
+                Self::Command(Box::new(CommandPlan::Prepare {
+                    name,
+                    parameter_types,
+                    body,
+                }))
+            }
+            Statement::Execute { name, params } => Self::Command(Box::new(CommandPlan::Execute {
+                name,
+                params: params
+                    .into_iter()
+                    .map(|expr| ExpressionPlan::lower_with(expr, aggregates))
+                    .collect(),
+            })),
+            Statement::Deallocate { name } => {
+                Self::Command(Box::new(CommandPlan::Deallocate { name }))
+            }
+            Statement::CreateForeignServer(value) => {
+                Self::Command(Box::new(CommandPlan::CreateForeignServer(value)))
+            }
+            Statement::CreateForeignTable(value) => {
+                Self::Command(Box::new(CommandPlan::CreateForeignTable(value)))
+            }
+            Statement::CreateForeignTableIfNotExists(value) => {
+                Self::Command(Box::new(CommandPlan::CreateForeignTableIfNotExists(value)))
+            }
+            Statement::Merge(statement) => {
+                let mut subqueries = Vec::new();
+                let source = SourcePlan::lower_with(statement.source, aggregates, &mut subqueries);
+                let join_condition =
+                    lower_scalar_expression(statement.join_condition, aggregates, &mut subqueries);
+                let when_clauses = statement
+                    .when_clauses
+                    .into_iter()
+                    .map(|clause| lower_merge_when(clause, aggregates, &mut subqueries))
+                    .collect();
+                let returning = statement
+                    .returning
+                    .into_iter()
+                    .map(|projection| {
+                        ProjectionPlan::lower_with(projection, aggregates, &mut subqueries)
+                    })
+                    .collect();
+                Self::Command(Box::new(CommandPlan::Merge(Box::new(MergePlan {
+                    ctes: lower_ctes(&statement.with, aggregates),
+                    target: statement.target,
+                    statement_privilege_subject: None,
+                    target_privilege_subject: None,
+                    target_qualifier: statement.target_qualifier,
+                    target_alias: statement.target_alias,
+                    include_descendants: statement.include_descendants,
+                    target_predicate: None,
+                    source: Box::new(source),
+                    join_condition,
+                    when_clauses,
+                    returning,
+                    returning_aliases: statement.returning_aliases,
+                    subqueries,
+                    view_checks: Vec::new(),
+                }))))
+            }
+            Statement::CreateFunction(value) => {
+                Self::Command(Box::new(CommandPlan::CreateFunction(value)))
+            }
+            Statement::DropFunction(value) => {
+                Self::Command(Box::new(CommandPlan::DropFunction(value)))
+            }
+            Statement::AlterRoutine(value) => {
+                Self::Command(Box::new(CommandPlan::AlterRoutine(value)))
+            }
+            Statement::AlterRoutineOwner(value) => {
+                Self::Command(Box::new(CommandPlan::AlterRoutineOwner(value)))
+            }
+            Statement::RenameRoutine(value) => {
+                Self::Command(Box::new(CommandPlan::RenameRoutine(value)))
+            }
+            Statement::GrantRoutine(value) => {
+                Self::Command(Box::new(CommandPlan::GrantRoutine(value)))
+            }
+            Statement::GrantTable(value) => Self::Command(Box::new(CommandPlan::GrantTable(value))),
+            Statement::GrantSequence(value) => {
+                Self::Command(Box::new(CommandPlan::GrantSequence(value)))
+            }
+            Statement::GrantDatabase(value) => {
+                Self::Command(Box::new(CommandPlan::GrantDatabase(value)))
+            }
+            Statement::GrantSchema(value) => {
+                Self::Command(Box::new(CommandPlan::GrantSchema(value)))
+            }
+            Statement::GrantRole(value) => Self::Command(Box::new(CommandPlan::GrantRole(value))),
+            Statement::CreateRole(value) => Self::Command(Box::new(CommandPlan::CreateRole(value))),
+            Statement::AlterRole(value) => Self::Command(Box::new(CommandPlan::AlterRole(value))),
+            Statement::DropRole(value) => Self::Command(Box::new(CommandPlan::DropRole(value))),
+            Statement::CreateTrigger(value) => {
+                Self::Command(Box::new(CommandPlan::CreateTrigger(value)))
+            }
+            Statement::DropTrigger(value) => {
+                Self::Command(Box::new(CommandPlan::DropTrigger(value)))
+            }
+            Statement::CreateRule(value) => Self::Command(Box::new(CommandPlan::CreateRule(value))),
+            Statement::DropRule(value) => Self::Command(Box::new(CommandPlan::DropRule(value))),
+            Statement::DoBlock { language, body } => {
+                Self::Command(Box::new(CommandPlan::DoBlock { language, body }))
+            }
+            Statement::Call { name, args } => Self::Command(Box::new(CommandPlan::Call {
+                name,
+                args: args
+                    .into_iter()
+                    .map(|expr| ExpressionPlan::lower_with(expr, aggregates))
+                    .collect(),
+            })),
+        }
+    }
+
+    #[must_use]
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Query(_) => "Query",
+            Self::Command(command) => command.name(),
+        }
+    }
+
+    /// Rewrite every physical scalar slot owned by this plan, including
+    /// CTEs, scalar subqueries, mutation sources, prepared/explained bodies,
+    /// and routine-call arguments.  This is the plan-native binding hook used
+    /// by SQL-language routines; callers never need to reconstruct an AST to
+    /// specialize a stored plan.
+    pub fn rewrite_scalar_expressions(&mut self, rewrite: &mut dyn FnMut(&mut ScalarExpr)) {
+        match self {
+            Self::Query(query) => rewrite_query_scalars(query, rewrite),
+            Self::Command(command) => rewrite_command_scalars(command, rewrite),
+        }
+    }
+}
+
+impl CommandPlan {
+    #[must_use]
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::CreateTable(_) => "CreateTable",
+            Self::CreateTableIfNotExists(_) => "CreateTableIfNotExists",
+            Self::CreateIndex(_) => "CreateIndex",
+            Self::Insert(_) => "Insert",
+            Self::Update(_) => "Update",
+            Self::Delete(_) => "Delete",
+            Self::Drop(_) => "Drop",
+            Self::AlterTable(_) => "AlterTable",
+            Self::AlterView(_) => "AlterView",
+            Self::CreateView { .. } => "CreateView",
+            Self::CreateMaterializedView { .. } => "CreateMaterializedView",
+            Self::RefreshMaterializedView { .. } => "RefreshMaterializedView",
+            Self::CreateSchema { .. } => "CreateSchema",
+            Self::AlterSchemaOwner { .. } => "AlterSchemaOwner",
+            Self::Notify { .. } => "Notify",
+            Self::Listen { .. } => "Listen",
+            Self::Unlisten { .. } => "Unlisten",
+            Self::SetVariable { .. } => "SetVariable",
+            Self::ResetVariable { .. } => "ResetVariable",
+            Self::ResetAllVariables => "ResetAllVariables",
+            Self::SetConstraints { .. } => "SetConstraints",
+            Self::ShowVariable { .. } => "ShowVariable",
+            Self::Discard { .. } => "Discard",
+            Self::Load { .. } => "Load",
+            Self::Explain { .. } => "Explain",
+            Self::Analyze { .. } => "Analyze",
+            Self::Vacuum(_) => "Vacuum",
+            Self::Truncate { .. } => "Truncate",
+            Self::Transaction(_) => "Transaction",
+            Self::DeclareCursor { .. } => "DeclareCursor",
+            Self::FetchCursor(_) => "FetchCursor",
+            Self::CloseCursor { .. } => "CloseCursor",
+            Self::CreateSequence(_) => "CreateSequence",
+            Self::CreateDomain(_) => "CreateDomain",
+            Self::AlterSequence(_) => "AlterSequence",
+            Self::CreateTableAs { .. } => "CreateTableAs",
+            Self::Prepare { .. } => "Prepare",
+            Self::Execute { .. } => "Execute",
+            Self::Deallocate { .. } => "Deallocate",
+            Self::CreateForeignServer(_) => "CreateForeignServer",
+            Self::CreateForeignTable(_) => "CreateForeignTable",
+            Self::CreateForeignTableIfNotExists(_) => "CreateForeignTableIfNotExists",
+            Self::AlterForeignTable(_) => "AlterForeignTable",
+            Self::Merge(_) => "Merge",
+            Self::CreateFunction(_) => "CreateFunction",
+            Self::DropFunction(_) => "DropFunction",
+            Self::AlterRoutine(_) => "AlterRoutine",
+            Self::AlterRoutineOwner(_) => "AlterRoutineOwner",
+            Self::RenameRoutine(_) => "RenameRoutine",
+            Self::GrantRoutine(_) => "GrantRoutine",
+            Self::GrantTable(_) => "GrantTable",
+            Self::GrantSequence(_) => "GrantSequence",
+            Self::GrantDatabase(_) => "GrantDatabase",
+            Self::GrantSchema(_) => "GrantSchema",
+            Self::GrantRole(_) => "GrantRole",
+            Self::CreateRole(_) => "CreateRole",
+            Self::AlterRole(_) => "AlterRole",
+            Self::DropRole(_) => "DropRole",
+            Self::CreateTrigger(_) => "CreateTrigger",
+            Self::DropTrigger(_) => "DropTrigger",
+            Self::CreateRule(_) => "CreateRule",
+            Self::DropRule(_) => "DropRule",
+            Self::DoBlock { .. } => "DoBlock",
+            Self::Call { .. } => "Call",
+        }
+    }
+}

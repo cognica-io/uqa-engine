@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Added a versioned pre-commit hook that validates staged crate dependencies and transitive ownership boundaries, with the same policy enforced in CI.
+
 - Added cost-based custom/generic prepared-plan selection and `plan_cache_mode`, with typed parameter specialization, five initial custom plans, planning-cost-aware reuse, and per-session usage counters.
 - Added ordered prepared-parameter inference, preparation-time schema and expression validation, fixed result-descriptor checks during replanning, and session-local `pg_prepared_statements` metadata retaining the original SQL text.
 - Added an unpublished PostgreSQL TCP server crate with independent authenticated-role sessions, explicit trust policy, Simple Query results, cancellation, notifications, and protocol 3.0/3.2 negotiation.
@@ -18,6 +20,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 
 - Opened compressed SQLite lock sidecars with read-only access for read-only connections, preserving cross-process lock coordination without requiring write permissions or creating lock paths.
+- Moved SQL models, static schemas, type and routine analysis, prepared parameter inference, catalog definitions, and query binding into `uqa-sql`, with narrow engine adapters and execution-owned row buffers. Low-level physical schema operations now use `uqa_execution::RowSchemaExecution`.
 
 - Preserved `SET LOCAL` and `SET ... DEFAULT` through compilation and execution. Local values restore at transaction completion and follow savepoint rollback; default assignments retain the PostgreSQL SET command tag.
 - Corrected rare-value selectivity using the probability left after common values and NULLs, without overriding known frequencies with an entropy floor. Domain parameters retain their identities and integer widths in custom and generic plans, and domain errors use catalog-visible type names.

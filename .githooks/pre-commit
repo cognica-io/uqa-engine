@@ -1,0 +1,7 @@
+#!/bin/sh
+# Unified Query Algebra
+# Copyright (c) 2023-2026 Cognica, Inc.
+set -eu
+
+root=$(git rev-parse --show-toplevel)
+exec python3 "$root/scripts/check-workspace-dependencies.py" --staged

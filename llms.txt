@@ -50,11 +50,11 @@ When generating SQL:
 
 ## Optional
 
-- [Internal architecture](docs/manual/internals/README.md): Crate ownership and subsystem navigation.
+- [Internal architecture](docs/manual/internals/README.md): SQL analysis ownership, runtime adapters, crate dependency direction, and subsystem navigation.
 - [Planning and execution](docs/manual/internals/02-planning-and-execution.md): Unified plans, operator joins, optimization, and execution.
 - [Analyzer internals](docs/manual/internals/04-analyzer-pipeline.md): Analyzer representation and index/search phases.
 - [Search internals](docs/manual/internals/05-search-and-ranking.md): Physical retrieval, scoring, and fusion.
-- [Verification](docs/manual/internals/09-verification.md): Test suites, benchmarks, and compatibility fixtures.
+- [Verification](docs/manual/internals/09-verification.md): Test suites, benchmarks, compatibility fixtures, and the staged dependency check installed with `bash scripts/install-git-hooks.sh`.
 
 ## Release upgrades
 

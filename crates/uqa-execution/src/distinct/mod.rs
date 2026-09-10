@@ -11,6 +11,7 @@
 //! bucketed on-disk set. Disk probes compare the complete encoded key, so a
 //! hash collision can never turn a new row into a duplicate. Output remains
 
+use crate::RowSchemaExecution;
 mod encoding;
 mod memory;
 mod spill;

@@ -132,6 +132,7 @@ impl ProjectedPredicate {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::RowSchemaExecution;
     use crate::{eval_scalar, ScalarEvalContext};
     use uqa_sql::ast::ColumnType;
     use uqa_sql::expr::truthy;

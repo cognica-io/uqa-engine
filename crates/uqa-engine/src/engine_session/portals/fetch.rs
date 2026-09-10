@@ -10,6 +10,7 @@ use super::{
     CursorDirection, Engine, SQLError, SQLResult, SessionPortalData, SessionPortalMaterialization,
     SessionPortalPosition, SessionPortalState, Value,
 };
+use uqa_execution::RowSchemaExecution;
 
 pub(super) fn uses_directional_query_execution(state: &SessionPortalState) -> bool {
     state.scrollable

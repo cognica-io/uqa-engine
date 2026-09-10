@@ -6,6 +6,7 @@
 
 //! Bounded hash aggregation with mergeable partial-state spill.
 
+use crate::RowSchemaExecution;
 use std::collections::BTreeMap;
 
 use super::{

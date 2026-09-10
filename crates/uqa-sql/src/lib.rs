@@ -4,8 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! SQL parser and compiler: `PostgreSQL` grammar via `libpg_query`, UQA
-//! function registry, expression evaluator, FTS query mini-language.
+//! SQL syntax, shared plan and scalar models, static schema and type binding, catalog definitions, routine signatures, value expressions, and the FTS query language. The parser uses the imported `PostgreSQL` grammar through `libpg_query`; analysis has no engine or physical execution dependency.
 
 #![allow(
     clippy::useless_format,
@@ -30,16 +29,24 @@
 
 pub mod ast;
 mod async_sql_engine;
+pub mod binding;
+pub mod catalog;
 pub mod compiler;
 pub mod copy;
 pub mod error;
 pub mod expr;
 pub mod fts_query;
+pub mod ir;
 pub mod params;
+pub mod plan;
 pub mod plpgsql;
 pub mod registry;
 pub mod render;
 pub mod result;
+pub mod routines;
+pub mod schema;
+pub mod semantics;
+pub mod type_resolution;
 
 pub use ast::{ColumnType, Statement};
 pub use async_sql_engine::AsyncSQLEngine;
@@ -53,3 +60,12 @@ pub use fts_query::{parse_query_string as parse_fts_query_string, tokenize as ft
 pub use fts_query::{FTSNode, FTSParser, FTSToken, FTSTokenType};
 pub use params::SQLParam;
 pub use result::{ResultRow, SQLResult, SQLResultKind};
+
+pub use ir::{
+    scalar_call_argument, scalar_call_arguments, ScalarExpr, ScalarFrameBound, ScalarOrder,
+    ScalarWindowFrame, ScalarWindowSpec, SubqueryId,
+};
+pub use schema::{ColumnIdentity, RowSchema};
+
+pub use type_resolution::*;
+pub use uqa_core::RelationIdentity;

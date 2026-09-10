@@ -31,6 +31,12 @@ pub enum ExecError {
     SQL(#[from] uqa_sql::SQLError),
 }
 
+impl From<uqa_sql::schema::SchemaLayoutError> for ExecError {
+    fn from(error: uqa_sql::schema::SchemaLayoutError) -> Self {
+        Self::Other(error.to_string())
+    }
+}
+
 pub type ExecResult<T> = std::result::Result<T, ExecError>;
 
 /// Direction requested by a scrollable query consumer.

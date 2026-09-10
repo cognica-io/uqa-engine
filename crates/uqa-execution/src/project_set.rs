@@ -235,6 +235,7 @@ mod tests {
     use super::*;
     use crate::physical::run_to_rows;
     use crate::scan::TableScan;
+    use crate::RowSchemaExecution;
     use crate::{RowLockOrigin, RowProjectionValue};
     use uqa_core::Value;
 

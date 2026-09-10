@@ -6,7 +6,9 @@
 
 use super::*;
 use std::collections::BTreeMap;
+use std::collections::HashSet;
 use std::sync::Arc;
+use uqa_sql::ColumnType;
 
 #[test]
 #[cfg(target_pointer_width = "64")]

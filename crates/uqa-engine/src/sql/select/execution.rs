@@ -16,6 +16,7 @@ use super::{
     RelationalPlan, SQLError, SQLParam, SQLResult, ScopedEngineHook, SetOpKind,
     SetOperationRowConsumer, SharedExpressionEvaluator, SmallVec, Value,
 };
+use uqa_execution::RowSchemaExecution;
 
 pub(in crate::sql) fn execute_query_plan_with_ctes(
     engine: &Engine,

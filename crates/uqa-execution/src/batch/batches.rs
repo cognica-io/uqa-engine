@@ -4,7 +4,10 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{OwnedPhysicalRow, PhysicalRow, ResultRow, RowFragment, RowSchema, DEFAULT_BATCH_SIZE};
+use super::{
+    OwnedPhysicalRow, PhysicalRow, ResultRow, RowFragment, RowMaterializer, RowSchema,
+    DEFAULT_BATCH_SIZE,
+};
 
 /// A schema and bounded vector of physical rows flowing between operators.
 #[derive(Debug, Clone, PartialEq)]
@@ -47,14 +50,14 @@ impl Batch {
 
     pub fn into_result_rows(self) -> Vec<ResultRow> {
         let schema = self.schema;
-        if schema.index.cold.identity_layout {
+        if schema.is_identity_layout() {
             return self
                 .rows
                 .into_iter()
-                .map(|row| schema.materialize_identity_result_row(row))
+                .map(|row| RowMaterializer::new(&schema).materialize_identity_result_row(row))
                 .collect();
         }
-        schema.materialize_remapped_result_rows(self.rows)
+        RowMaterializer::new(&schema).materialize_remapped_result_rows(self.rows)
     }
 
     /// Consume a batch without materializing named maps.

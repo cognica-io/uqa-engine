@@ -15,6 +15,7 @@
 
 use crate::batch::{Batch, PhysicalRow, RowSchema, DEFAULT_BATCH_SIZE};
 use crate::physical::{BackwardScanSupport, ExecResult, PhysicalOperator, PhysicalOrder};
+use crate::RowSchemaExecution;
 use uqa_sql::ast::ColumnType;
 use uqa_sql::ResultRow;
 

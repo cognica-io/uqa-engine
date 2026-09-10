@@ -163,5 +163,35 @@
       "uqa-sql",
       "uqa-storage"
     ]
+  },
+  "transitive_dependency_boundaries": {
+    "uqa-core": [],
+    "uqa-pg-query": [],
+    "uqa-sql": [
+      "uqa-core",
+      "uqa-pg-query"
+    ],
+    "uqa-execution": [
+      "uqa-core",
+      "uqa-pg-query",
+      "uqa-sql"
+    ],
+    "uqa-storage": [
+      "uqa-analysis",
+      "uqa-core"
+    ],
+    "uqa-planner": [
+      "uqa-analysis",
+      "uqa-core",
+      "uqa-execution",
+      "uqa-fusion",
+      "uqa-graph",
+      "uqa-joins",
+      "uqa-operators",
+      "uqa-pg-query",
+      "uqa-scoring",
+      "uqa-sql",
+      "uqa-storage"
+    ]
   }
 }

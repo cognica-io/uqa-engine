@@ -6,6 +6,7 @@
 
 //! Byte-bounded physical SQL set operations.
 
+use crate::RowSchemaExecution;
 use std::cmp::Ordering;
 use std::sync::Arc;
 
@@ -742,6 +743,7 @@ mod tests {
     use super::*;
     use crate::physical::run_to_rows;
     use crate::scan::TableScan;
+    use crate::RowSchemaExecution;
 
     fn row(value: i64) -> ResultRow {
         [("v".into(), Value::Int(value))].into_iter().collect()

@@ -21,18 +21,6 @@ pub(crate) use resolution::{
     RoutineResolution,
 };
 pub(crate) use uqa_execution::canonical_routine_type_name;
-use uqa_planner::UnifiedPlan;
-use uqa_sql::{ast::CreateFunction, SQLError};
-
-pub(crate) fn is_routine_namespace_lookup_error(error: &SQLError) -> bool {
-    matches!(
-        error,
-        SQLError::Routine { sqlstate, message }
-            if sqlstate == "3F000"
-                || (sqlstate == "42501"
-                    && message.starts_with("permission denied for schema "))
-    )
-}
 
 pub(crate) fn builtin_routine_support_oid(name: &str) -> Option<i64> {
     Some(match name.strip_prefix("pg_catalog.").unwrap_or(name) {
@@ -47,19 +35,6 @@ pub(crate) fn builtin_routine_support_oid(name: &str) -> Option<i64> {
     })
 }
 
-/// A registered routine: the persistable definition plus its
-/// pre-compiled body.
-#[derive(Clone)]
-pub(crate) struct SQLUserFunction {
-    pub def: CreateFunction,
-    pub compiled: CompiledFunctionBody,
-}
-
-/// Executable form of a routine body.
-// The project naming convention spells the acronym as `SQL`.
-#[allow(clippy::upper_case_acronyms)]
-#[derive(Clone)]
-pub(crate) enum CompiledFunctionBody {
-    PLpgSQL(uqa_sql::plpgsql::PLpgSQLFunction),
-    SQL(Vec<UnifiedPlan>),
-}
+pub(crate) use uqa_sql::routines::{
+    is_routine_namespace_lookup_error, CompiledFunctionBody, SQLUserFunction,
+};

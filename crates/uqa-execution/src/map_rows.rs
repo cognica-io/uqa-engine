@@ -6,6 +6,7 @@
 
 //! Streaming whole-row mapping adapter.
 
+use crate::RowSchemaExecution;
 use std::sync::Arc;
 
 use uqa_sql::ResultRow;

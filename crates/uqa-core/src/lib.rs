@@ -17,6 +17,7 @@ pub mod posting_list;
 pub mod predicate;
 pub mod ranked_view;
 pub mod relation;
+mod relation_identity;
 pub mod types;
 
 pub use cancel::{CancellationToken, QueryCancelled, SQLSTATE_QUERY_CANCELED};
@@ -26,6 +27,7 @@ pub use posting_list::{GeneralizedPostingList, PostingList};
 pub use predicate::Predicate;
 pub use ranked_view::RankedView;
 pub use relation::{LogSemiring, Relation, RelationEntry, Semiring};
+pub use relation_identity::RelationIdentity;
 pub use types::{
     jsonb_equality_key, ArrayValue, DecimalValue, DocId, Edge, EdgeId, FieldName,
     GeneralizedPayload, GeneralizedPostingEntry, IndexStats, PathExpr, PathSegment, Payload,

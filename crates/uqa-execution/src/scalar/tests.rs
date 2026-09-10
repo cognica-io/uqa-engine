@@ -7,6 +7,7 @@
 use super::{
     eval_call_arguments, eval_scalar, scalar_call_arguments, ScalarEvalContext, ScalarExpr,
 };
+use crate::RowSchemaExecution;
 use crate::{ColumnIdentity, PhysicalRow, RowSchema};
 use uqa_core::Value;
 use uqa_sql::ast::{BinaryOp, ColumnType, FunctionBinding, FunctionDispatch};

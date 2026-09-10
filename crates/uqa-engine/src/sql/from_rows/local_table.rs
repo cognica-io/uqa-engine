@@ -22,6 +22,7 @@ use super::{
     ScopedEngineHook, ScoredDocumentSource, ScoredInput, ScoredSourceAttributes, SourceEvalContext,
     SourcePlan, TableFunctionCall, TableFunctionTypeRequest, Value, TABLE_OID_COLUMN, XMIN_COLUMN,
 };
+use uqa_execution::RowSchemaExecution;
 
 use crate::sql::select::{
     alias_query_output_to_shared, apply_propagated_view_lock, bind_source_plan_schema,

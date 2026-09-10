@@ -30,8 +30,8 @@ use super::volatility::{expr_contains_volatile_function, query_contains_volatile
 use super::{
     contains_aggregate, doc_id_value, engine_func_intercept, execute_function,
     execute_function_with_top_k, execute_mixed_where, expect_column_name, has_aggregate,
-    has_window, optimize_engine_plan, prepare_window_plan, projection_label_at, BTreeMap, BTreeSet,
-    BinaryOp, ColumnPrune, ColumnType, Engine, PhysicalAggregateExecutor, PhysicalWindowExecutor,
+    has_window, optimize_engine_plan, prepare_window_plan, BTreeMap, BTreeSet, BinaryOp,
+    ColumnPrune, ColumnType, Engine, PhysicalAggregateExecutor, PhysicalWindowExecutor,
     QualifierFilters, ResultRow, SQLError, SQLParam, SQLResult, ScoredEntry, SetOpKind, Value,
     DOC_ID_COLUMN, SCORE_COLUMN, TABLE_OID_COLUMN, XMIN_COLUMN,
 };

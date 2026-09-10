@@ -23,9 +23,17 @@ struct ResultMaterializationEntry {
     take: bool,
 }
 
-impl RowSchema {
+pub(super) struct RowMaterializer<'a> {
+    schema: &'a RowSchema,
+}
+
+impl<'a> RowMaterializer<'a> {
+    pub(super) fn new(schema: &'a RowSchema) -> Self {
+        Self { schema }
+    }
+
     pub(super) fn materialize_result_row(&self, row: PhysicalRow) -> ResultRow {
-        if self.index.cold.identity_layout {
+        if self.schema.is_identity_layout() {
             return self.materialize_identity_result_row(row);
         }
         self.materialize_remapped_result_row(row)
@@ -47,16 +55,16 @@ impl RowSchema {
     }
 
     fn result_materialization_plan(&self) -> ResultMaterializationPlan {
-        let columns = self.columns();
+        let columns = self.schema.columns();
         let mut last_logical_by_label = HashMap::<&str, usize>::with_capacity(columns.len());
         for (logical, column) in columns.iter().enumerate() {
             last_logical_by_label.insert(column, logical);
         }
         let mut logical_order = last_logical_by_label.into_values().collect::<Vec<_>>();
         logical_order.sort_unstable_by(|left, right| columns[*left].cmp(&columns[*right]));
-        let mut remaining_reads = vec![0usize; self.physical_width()];
+        let mut remaining_reads = vec![0usize; self.schema.physical_width()];
         for logical in &logical_order {
-            let slot = self.index.slots[*logical];
+            let slot = self.schema.layout_slots()[*logical];
             if slot != NULL_SLOT {
                 remaining_reads[slot] += 1;
             }
@@ -64,7 +72,7 @@ impl RowSchema {
         let take = logical_order
             .iter()
             .map(|logical| {
-                let slot = self.index.slots[*logical];
+                let slot = self.schema.layout_slots()[*logical];
                 if slot == NULL_SLOT {
                     return false;
                 }
@@ -97,12 +105,12 @@ impl RowSchema {
         }
         let mut fragments = row.into_value_fragments();
         debug_assert_eq!(
-            self.physical_width(),
+            self.schema.physical_width(),
             fragments.iter().map(Vec::len).sum::<usize>()
         );
         let mut result = ResultRow::new();
         for entry in &plan.entries {
-            let slot = self.index.slots[entry.logical];
+            let slot = self.schema.layout_slots()[entry.logical];
             let value = if slot == NULL_SLOT {
                 Value::Null
             } else {
@@ -118,10 +126,10 @@ impl RowSchema {
         fragment: &RowFragment,
         plan: &ResultMaterializationPlan,
     ) -> ResultRow {
-        debug_assert_eq!(self.physical_width(), fragment.len());
+        debug_assert_eq!(self.schema.physical_width(), fragment.len());
         let mut result = ResultRow::new();
         for entry in &plan.entries {
-            let slot = self.index.slots[entry.logical];
+            let slot = self.schema.layout_slots()[entry.logical];
             let value = if slot == NULL_SLOT {
                 Value::Null
             } else {
@@ -134,10 +142,10 @@ impl RowSchema {
 
     pub(super) fn materialize_identity_result_row(&self, row: PhysicalRow) -> ResultRow {
         debug_assert_eq!(
-            self.len(),
+            self.schema.len(),
             row.fragments.iter().map(RowFragment::len).sum::<usize>()
         );
-        let mut columns = self.columns().iter();
+        let mut columns = self.schema.columns().iter();
         let mut result = ResultRow::new();
         for fragment in row.fragments {
             fragment.materialize_into(&mut columns, &mut result);

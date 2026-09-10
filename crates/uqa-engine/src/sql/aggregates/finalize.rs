@@ -8,8 +8,7 @@
 
 use super::{
     cast_value, core_value_to_json, distinct_key, value_as_f64, value_to_json_text,
-    AggregateAccumulator, AggregateValueBuffer, DecimalValue, ProjectionPlan, SQLError, ScalarExpr,
-    Value,
+    AggregateAccumulator, AggregateValueBuffer, DecimalValue, SQLError, ScalarExpr, Value,
 };
 use uqa_core::ArrayValue;
 
@@ -429,20 +428,4 @@ pub(in crate::sql) fn mode_value(values: &AggregateValueBuffer) -> Result<Value,
         best_value = current_value;
     }
     Ok(best_value)
-}
-
-/// Compute a projection's `PostgreSQL` output column name. Standalone expressions use `?column?`; repeated labels remain repeated until the final named-map compatibility boundary.
-pub(in crate::sql) fn projection_label_at(proj: &ProjectionPlan) -> String {
-    if let Some(a) = &proj.alias {
-        return a.clone();
-    }
-    match &proj.expr {
-        ScalarExpr::Column(c) => c.clone(),
-        ScalarExpr::QualifiedColumn { column, .. } => column.clone(),
-        ScalarExpr::Star | ScalarExpr::QualifiedStar(_) => "*".into(),
-        ScalarExpr::Func { name, .. } => uqa_sql::parse_regobject_name(name)
-            .and_then(|mut names| names.pop())
-            .unwrap_or_else(|| name.clone()),
-        _ => "?column?".into(),
-    }
 }

@@ -41,8 +41,7 @@ pub(crate) use retrieval::{
     run_multi_field_match_public,
 };
 pub(super) use validation::{
-    is_semantic_field_argument, validate_expr_text_match_fields,
-    validate_joined_expr_text_match_fields,
+    validate_expr_text_match_fields, validate_joined_expr_text_match_fields,
 };
 
 use arguments::{

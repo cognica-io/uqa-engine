@@ -7,6 +7,7 @@
 //! Scalar-subquery cache values and correlation keys.
 
 use std::sync::Arc;
+use uqa_execution::RowSchemaExecution;
 
 use uqa_core::Value;
 use uqa_execution::ScalarExpr;

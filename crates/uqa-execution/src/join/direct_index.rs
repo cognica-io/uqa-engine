@@ -6,6 +6,7 @@
 
 //! Allocation-free direct index for simple positional equality keys.
 
+use crate::RowSchemaExecution;
 use std::collections::HashMap;
 use std::hash::BuildHasher;
 
