@@ -28,12 +28,14 @@ mod command;
 mod implicit_fusion;
 mod join_reorder;
 mod scalar;
+mod source_constants;
+mod subqueries;
 mod traversal;
 
 pub use access_path::contains_retrieval;
 pub use api::{
     optimize, optimize_with_aggregates, optimize_with_aggregates_and_statistics,
-    optimize_with_statistics, OptimizerConfig, SourceStatistics,
+    optimize_with_statistics, OptimizerConfig, OptimizerError, OptimizerResult, SourceStatistics,
 };
 pub use implicit_fusion::query_contains_implicit_hybrid_fusion;
 

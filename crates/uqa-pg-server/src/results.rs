@@ -96,5 +96,10 @@ pub(crate) fn send_notices(transport: &mut Transport, engine: &Engine) -> Result
 }
 
 pub(crate) fn sql_error(error: &SQLError) -> ErrorOrNotice {
-    ErrorOrNotice::error(error.sqlstate().unwrap_or("XX000"), error.to_string())
+    let mut response = ErrorOrNotice::error(error.sqlstate().unwrap_or("XX000"), error.to_string());
+    if let SQLError::Diagnostic { detail, hint, .. } = error {
+        response.detail.clone_from(detail);
+        response.hint.clone_from(hint);
+    }
+    response
 }

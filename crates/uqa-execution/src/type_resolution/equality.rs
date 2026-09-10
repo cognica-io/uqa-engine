@@ -24,7 +24,7 @@ pub fn equality_operand_type(
         return Err(undefined_equality_operator(left, right));
     }
     if matches!(left, ColumnType::Array(_)) || matches!(right, ColumnType::Array(_)) {
-        if left == right {
+        if super::common::same_operator_type(left, right) {
             return Ok(left.clone());
         }
         return Err(undefined_equality_operator(left, right));

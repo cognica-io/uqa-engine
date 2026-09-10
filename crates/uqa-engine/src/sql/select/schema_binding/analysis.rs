@@ -7,7 +7,10 @@
 //! Catalog and name analysis for execution-free query schema binding.
 
 mod functions;
+mod query_sources;
 mod references;
+
+pub(super) use query_sources::{with_projected_open_columns, with_query_source_columns};
 
 use super::{QueryBlockPlan, QueryPlan, SQLError, SQLParam, ScalarExpr, SchemaScope};
 use crate::engine_user_functions::RoutineResolution;
@@ -233,7 +236,7 @@ impl SchemaScope {
         } = request;
         let resolver = self.query_function_type_resolver_for_subqueries(
             engine,
-            args.iter().any(super::expr_contains_subquery),
+            args,
             input,
             subqueries,
             params,

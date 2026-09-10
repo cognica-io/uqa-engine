@@ -13,6 +13,9 @@ use uqa_sql::{ColumnType, SQLError, SQLParam};
 pub(super) struct ExpressionType {
     pub(super) ty: Option<ColumnType>,
     occurrence: Option<usize>,
+    // SQL unknown literals and parameters accept context coercion. Native
+    // callbacks with no declared result type stay unresolved until execution.
+    coercible_unknown: bool,
 }
 
 impl ExpressionType {
@@ -20,7 +23,20 @@ impl ExpressionType {
         Self {
             ty,
             occurrence: None,
+            coercible_unknown: false,
         }
+    }
+
+    pub(super) fn unknown() -> Self {
+        Self {
+            ty: None,
+            occurrence: None,
+            coercible_unknown: true,
+        }
+    }
+
+    pub(super) fn is_deferred(&self) -> bool {
+        self.ty.is_none() && !self.coercible_unknown
     }
 }
 
@@ -48,6 +64,7 @@ impl ParameterTypes {
         Ok(ExpressionType {
             ty,
             occurrence: Some(occurrence),
+            coercible_unknown: true,
         })
     }
 
@@ -56,7 +73,7 @@ impl ParameterTypes {
         expression: &mut ExpressionType,
         target: &ColumnType,
     ) -> Result<(), SQLError> {
-        if expression.ty.is_some() {
+        if expression.ty.is_some() || !expression.coercible_unknown {
             return Ok(());
         }
         let target = target.without_type_modifiers();

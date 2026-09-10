@@ -480,6 +480,7 @@ impl Engine {
     ) -> Result<(), SQLError> {
         let columns = table.columns.read().clone();
         let constraints = uqa_sql::ast::TableConstraintSet {
+            columns_declared: Some(*table.columns_declared.read()),
             checks: table.table_checks.read().clone(),
             foreign_keys: table.foreign_keys.read().clone(),
             key_constraints: table.key_constraints.read().clone(),
@@ -870,6 +871,7 @@ impl Engine {
         }
         let columns = table.columns.read().clone();
         let constraints = uqa_sql::ast::TableConstraintSet {
+            columns_declared: Some(*table.columns_declared.read()),
             checks: table.table_checks.read().clone(),
             foreign_keys: table.foreign_keys.read().clone(),
             key_constraints: table.key_constraints.read().clone(),

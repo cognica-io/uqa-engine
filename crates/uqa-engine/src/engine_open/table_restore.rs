@@ -422,6 +422,9 @@ impl Engine {
             inverted_index: RwLock::new(inv),
             vector_indexes: RwLock::new(vectors),
             fts_fields: crate::engine_state::CatalogCell::new(schema.fts_fields),
+            columns_declared: crate::engine_state::CatalogCell::new(
+                constraints.columns_declared.unwrap_or(!columns.is_empty()),
+            ),
             columns: crate::engine_state::CatalogCell::new(columns),
             next_id: parking_lot::Mutex::new(next_id),
             analyzer: crate::engine_state::CatalogCell::new(analyzer),

@@ -52,14 +52,20 @@ struct Preparation<'a> {
 struct QueryOutput {
     columns: Vec<String>,
     types: Vec<ExpressionType>,
+    open: bool,
 }
 
 impl QueryOutput {
     fn schema(&self) -> RowSchema {
-        RowSchema::with_types(
+        let schema = RowSchema::with_types(
             self.columns.clone(),
             self.types.iter().map(|value| value.ty.clone()).collect(),
-        )
+        );
+        if self.open {
+            RowSchema::with_open_columns(&schema, None)
+        } else {
+            schema
+        }
     }
 }
 
@@ -96,7 +102,9 @@ impl Preparation<'_> {
         let mut observed = self.expression(expression, input, subqueries)?;
         self.parameters
             .coerce_unknown(&mut observed, &ColumnType::Boolean)?;
-        let mut ty = observed.ty.as_ref().expect("coerced boolean context");
+        let Some(mut ty) = observed.ty.as_ref() else {
+            return Ok(());
+        };
         while let ColumnType::Domain { base, .. } = ty {
             ty = base;
         }

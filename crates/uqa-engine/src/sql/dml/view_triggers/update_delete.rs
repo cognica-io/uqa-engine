@@ -524,6 +524,11 @@ pub(in crate::sql::dml) fn run_view_update_inner(
                 &stmt.subqueries,
             ),
         )?;
+        let affected = if outer_outcome.sets_command_tag {
+            outer_outcome.affected_rows
+        } else {
+            outcome.affected_rows
+        };
         if outcome.returning.is_some() && outer_outcome.returning.is_some() {
             return Err(SQLError::Routine {
                 sqlstate: "0A000".into(),
@@ -570,7 +575,7 @@ pub(in crate::sql::dml) fn run_view_update_inner(
                     .map(uqa_execution::SharedSpill::row_schema),
             },
             Vec::new(),
-            0,
+            affected,
         );
     }
     let rule_returning = rule_batch.execute_actions(

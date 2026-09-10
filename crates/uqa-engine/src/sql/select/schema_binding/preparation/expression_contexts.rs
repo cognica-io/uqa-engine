@@ -25,9 +25,21 @@ impl Preparation<'_> {
         {
             let mut items = items
                 .iter()
-                .map(|item| self.expression(item, input, subqueries))
+                .map(|item| {
+                    if matches!(item, ScalarExpr::Array(_)) {
+                        self.cast_expression(item, ty, input, subqueries)
+                            .map(|ty| ExpressionType::resolved(Some(ty)))
+                    } else {
+                        self.expression(item, input, subqueries)
+                    }
+                })
                 .collect::<Result<Vec<_>, _>>()?;
             for item in &mut items {
+                let element = if matches!(item.ty, Some(ColumnType::Array(_))) {
+                    &target
+                } else {
+                    element.as_ref()
+                };
                 self.parameters.coerce_unknown(item, element)?;
                 if let Some(source) = &item.ty {
                     if !uqa_execution::type_resolution::explicit_type_compatible(source, element) {
@@ -69,7 +81,7 @@ impl Preparation<'_> {
         else_branch: Option<&ScalarExpr>,
         input: &RowSchema,
         subqueries: &[QueryPlan],
-    ) -> Result<ColumnType, SQLError> {
+    ) -> Result<Option<ColumnType>, SQLError> {
         let mut base = base
             .map(|base| self.expression(base, input, subqueries))
             .transpose()?;

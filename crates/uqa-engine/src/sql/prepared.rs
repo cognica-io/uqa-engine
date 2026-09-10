@@ -55,7 +55,10 @@ pub(super) fn analyze_command_parameters(
 ) -> Result<(), SQLError> {
     let schema = uqa_execution::RowSchema::default();
     let declared = (1..=params.len())
-        .map(|index| uqa_execution::scalar_type(&ScalarExpr::Param(index), &schema, params))
+        .map(|index| match &params[index - 1] {
+            SQLParam::Scalar(Value::Str(_) | Value::Null) => Ok(None),
+            _ => uqa_execution::scalar_type(&ScalarExpr::Param(index), &schema, params),
+        })
         .collect::<Result<Vec<_>, _>>()?;
     select::infer_prepared_parameter_types(
         engine,
@@ -118,6 +121,11 @@ pub(super) fn bind_execute_parameters(
     let types = engine
         .prepared_parameter_types(name)
         .ok_or_else(|| statement_error("26000", name, "does not exist"))?;
+    // SQL EXECUTE does not analyze or evaluate an argument list when the
+    // prepared definition has no parameters. Protocol Bind has its own arity check.
+    if types.is_empty() {
+        return Ok(Vec::new());
+    }
     if arguments.len() != types.len() {
         return Err(error(
             "42601",

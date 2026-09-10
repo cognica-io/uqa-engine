@@ -91,6 +91,7 @@ impl Engine {
             self.bind_table_schema_routine_identities(&table_name, &mut columns, &mut [])?;
         }
         let mut constraints = uqa_sql::ast::TableConstraintSet {
+            columns_declared: Some(true),
             persistence: t.persistence,
             on_commit: t.on_commit,
             checks: t.table_checks.read().clone(),
@@ -105,6 +106,7 @@ impl Engine {
         if self.is_persistent() {
             self.try_save_table_schema_with_components(&table_name, &t, &columns, &constraints)?;
         }
+        *t.columns_declared.write() = true;
         *t.columns.write() = columns;
         *t.table_checks.write() = constraints.checks;
         *t.foreign_keys.write() = constraints.foreign_keys;

@@ -25,6 +25,7 @@ use crate::physical::{ExecError, ExecResult};
 mod batches;
 mod materialization;
 mod name_binding;
+mod open_columns;
 mod outer_scope;
 mod owned_row;
 mod physical_row;
@@ -137,6 +138,8 @@ struct SchemaColdMetadata {
     /// Static name-binding identities with no runtime slot. Unlike aliases,
     /// these are never part of qualified wildcard expansion or spill layout.
     binding_only: HashMap<ColumnIdentity, Option<ColumnType>>,
+    /// Names supplied only when a document or native-function source opens.
+    open_qualifiers: HashSet<Option<Box<str>>>,
     identity_layout: bool,
 }
 
@@ -149,6 +152,7 @@ struct SchemaBuildMetadata {
     score_sources: Vec<ScoreSource>,
     wildcard_hidden: HashSet<usize>,
     binding_only: HashMap<ColumnIdentity, Option<ColumnType>>,
+    open_qualifiers: HashSet<Option<Box<str>>>,
     exact_unqualified_precedence: bool,
     extra_ambiguous_unqualified: HashSet<Box<str>>,
     extra_ambiguous_qualified: HashSet<ColumnIdentity>,

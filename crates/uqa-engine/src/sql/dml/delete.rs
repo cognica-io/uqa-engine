@@ -18,6 +18,9 @@ use super::{
     PreparedMutationAction, ReturningProjectionRow, SQLError, SQLParam, SQLResult,
 };
 
+mod qualification;
+use qualification::{count_delete_source_qualifications, delete_qualification_references_target};
+
 pub(in crate::sql) fn run_delete(
     engine: &Engine,
     mut stmt: DeletePlan,
@@ -459,12 +462,12 @@ fn run_delete_inner_with_ctes(
                 base_rule_suppressed[global_index] = rule_batch.suppresses(local_index);
             }
         }
-        let view_rule_returning =
-            view_rule_batches.execute_actions(engine, stmt.view_rule_returning.as_ref())?;
-        let rule_returning = rule_batch
+        let view_rule_outcome = view_rule_batches
+            .execute_actions_with_affected(engine, stmt.view_rule_returning.as_ref())?;
+        let rule_outcome = rule_batch
             .as_ref()
             .map(|rule_batch| {
-                rule_batch.execute_actions(
+                rule_batch.execute_actions_with_affected(
                     engine,
                     crate::sql::rules::RuleReturningRequest::from_plan(
                         &stmt.returning,
@@ -473,8 +476,18 @@ fn run_delete_inner_with_ctes(
                     ),
                 )
             })
-            .transpose()?
-            .flatten();
+            .transpose()?;
+        if !delete_original_query {
+            affected = if view_rule_outcome.sets_command_tag {
+                view_rule_outcome.affected_rows
+            } else {
+                rule_outcome
+                    .as_ref()
+                    .map_or(0, |outcome| outcome.affected_rows)
+            };
+        }
+        let view_rule_returning = view_rule_outcome.returning;
+        let rule_returning = rule_outcome.and_then(|outcome| outcome.returning);
         if view_rule_returning.is_some() && rule_returning.is_some() {
             return Err(SQLError::Routine {
                 sqlstate: "0A000".into(),
@@ -778,66 +791,6 @@ fn qualified_delete_candidate(
             })
         }
     }
-}
-
-fn delete_qualification_references_target(
-    engine: &Engine,
-    stmt: &DeletePlan,
-    predicate: Option<&uqa_execution::ScalarExpr>,
-) -> Result<bool, SQLError> {
-    let Some(predicate) = predicate else {
-        return Ok(false);
-    };
-    if crate::sql::select::expr_contains_subquery(predicate) {
-        return Ok(true);
-    }
-    let qualifiers = crate::sql::select::expr_qualifiers(predicate);
-    if qualifiers.iter().any(|qualifier| {
-        qualifier.eq_ignore_ascii_case(&stmt.target_qualifier)
-            || qualifier.eq_ignore_ascii_case(&stmt.table)
-    }) {
-        return Ok(true);
-    }
-    if !crate::sql::select::expr_has_unqualified_column(predicate) {
-        return Ok(false);
-    }
-    let mut columns = BTreeSet::new();
-    if !predicate.collect_columns(&mut columns) {
-        return Ok(true);
-    }
-    let target_columns = engine
-        .try_query_table_columns(&stmt.table)
-        .map_err(|error| SQLError::Internal(format!("read DELETE target columns: {error}")))?
-        .into_iter()
-        .chain([
-            super::DOC_ID_COLUMN.to_string(),
-            super::TABLE_OID_COLUMN.to_string(),
-            super::XMIN_COLUMN.to_string(),
-        ])
-        .collect::<BTreeSet<_>>();
-    Ok(!columns.is_disjoint(&target_columns))
-}
-
-fn count_delete_source_qualifications(
-    engine: &Engine,
-    stmt: &DeletePlan,
-    ctes: &CteScope,
-    using_rows: &uqa_execution::SharedSpill,
-    params: &[SQLParam],
-) -> Result<usize, SQLError> {
-    let mut count = 0;
-    for source in using_rows
-        .read_rows()
-        .map_err(crate::sql::select::physical_exec_error)?
-    {
-        let source = source.map_err(crate::sql::select::physical_exec_error)?;
-        let qualifies = stmt.predicate.as_ref().map_or(Ok(true), |predicate| {
-            eval_mutation_expr(engine, ctes, predicate, Some(&source), params)
-                .map(|value| uqa_sql::expr::truthy(&value))
-        })?;
-        count += usize::from(qualifies);
-    }
-    Ok(count)
 }
 
 pub(in crate::sql) fn prepare_document_delete(

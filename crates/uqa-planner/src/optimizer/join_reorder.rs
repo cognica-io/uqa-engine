@@ -76,6 +76,10 @@ fn reorder_cte_joins(
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "traverses each command kind and its owned children"
+)]
 fn reorder_command_joins(
     command: &mut CommandPlan,
     statistics: &dyn SourceStatistics,
@@ -113,19 +117,20 @@ fn reorder_command_joins(
                 reorder_query_joins(subquery, statistics)?;
             }
         }
-        CommandPlan::CreateView { query, .. }
-        | CommandPlan::CreateMaterializedView { query, .. }
-        | CommandPlan::CreateTableAs { query, .. }
-        | CommandPlan::DeclareCursor { query, .. } => {
+        CommandPlan::DeclareCursor { query, .. } => {
             reorder_query_joins(query, statistics)?;
         }
         CommandPlan::Explain { body, .. } => {
             reorder_unified_plan_joins(body, statistics)?;
         }
-        CommandPlan::Execute { params, .. } | CommandPlan::Call { args: params, .. } => {
+        CommandPlan::Call { args: params, .. } => {
             reorder_expression_subquery_joins(params, statistics)?;
         }
-        CommandPlan::Prepare { .. }
+        CommandPlan::CreateTableAs { .. }
+        | CommandPlan::CreateMaterializedView { .. }
+        | CommandPlan::CreateView { .. }
+        | CommandPlan::Execute { .. }
+        | CommandPlan::Prepare { .. }
         | CommandPlan::CreateTable(_)
         | CommandPlan::CreateTableIfNotExists(_)
         | CommandPlan::CreateIndex(_)

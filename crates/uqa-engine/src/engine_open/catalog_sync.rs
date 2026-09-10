@@ -26,6 +26,7 @@ impl Engine {
             .map(|(field, index)| (field.clone(), index.dimensions()))
             .collect::<BTreeMap<_, _>>();
         let constraints = uqa_sql::ast::TableConstraintSet {
+            columns_declared: Some(*table.columns_declared.read()),
             checks: table.table_checks.read().clone(),
             foreign_keys: table.foreign_keys.read().clone(),
             key_constraints: table.key_constraints.read().clone(),

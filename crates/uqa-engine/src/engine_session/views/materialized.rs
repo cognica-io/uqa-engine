@@ -98,7 +98,8 @@ impl Engine {
             let materialized_rows = if with_no_data {
                 Vec::new()
             } else {
-                let result = crate::sql::execute_query_plan(engine, &plan, params)?;
+                let executable = crate::sql::optimize_engine_query(engine, &plan)?;
+                let result = crate::sql::execute_query_plan(engine, &executable, params)?;
                 materialized_rows(&result, &output_columns)?
             };
             let affected_rows = u64::try_from(materialized_rows.len()).map_err(|_| {

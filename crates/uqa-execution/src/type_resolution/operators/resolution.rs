@@ -37,17 +37,27 @@ pub fn binary_operator_types(
             _ => "anymultirange",
         };
         for &(operator, lhs, rhs, result) in SIGNATURES {
-            let consistent = left.zip(right).is_none_or(|(left, right)| {
-                base_type(left).without_type_modifiers()
-                    == base_type(right).without_type_modifiers()
-            });
+            let consistent = left
+                .zip(right)
+                .is_none_or(|(left, right)| super::super::common::same_operator_type(left, right));
             if operator == name && lhs == polymorphic && rhs == polymorphic && consistent {
                 let result = if result == polymorphic {
                     concrete.clone()
                 } else {
                     catalog_type(result).expect("concrete polymorphic operator result")
                 };
-                candidates.push(overload(name, concrete.clone(), concrete.clone(), result));
+                candidates.push(overload(
+                    name,
+                    left.map_or_else(
+                        || concrete.clone(),
+                        |ty| base_type(ty).without_type_modifiers(),
+                    ),
+                    right.map_or_else(
+                        || concrete.clone(),
+                        |ty| base_type(ty).without_type_modifiers(),
+                    ),
+                    result,
+                ));
             }
         }
     }

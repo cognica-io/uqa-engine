@@ -59,6 +59,7 @@ impl RowSchema {
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden,
                 binding_only: input.index.cold.binding_only.clone(),
+                open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 ..SchemaBuildMetadata::default()
             },
         )
@@ -82,6 +83,7 @@ impl RowSchema {
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
+                open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 ..SchemaBuildMetadata::default()
             },
         )
@@ -114,6 +116,7 @@ impl RowSchema {
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
+                open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 ..SchemaBuildMetadata::default()
             },
         )
@@ -138,6 +141,7 @@ impl RowSchema {
         let mut internal_types = left.index.cold.executor_attribute_types.clone();
         let mut score_sources = left.index.cold.score_sources.clone();
         let mut wildcard_hidden = left.index.cold.wildcard_hidden.clone();
+        let open_qualifiers = &left.index.cold.open_qualifiers | &right.index.cold.open_qualifiers;
         let mut binding_only = left.index.cold.binding_only.clone();
         aliases.extend(right.index.aliases.iter().map(|(name, slot)| {
             (
@@ -222,6 +226,7 @@ impl RowSchema {
                 score_sources,
                 wildcard_hidden,
                 binding_only,
+                open_qualifiers,
                 ..SchemaBuildMetadata::default()
             },
         )

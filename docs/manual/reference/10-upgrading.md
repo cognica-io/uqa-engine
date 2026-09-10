@@ -37,6 +37,8 @@ Automatic collection samples at most 4,096 hierarchy rows. Both automatic and ex
 
 SQLite tracks transactional cache revisions so data-only or statistics-only commits reuse unchanged definitions and physical handles. `Engine::new_session()` shares immutable committed catalog and statistics allocations while retaining independent transactions and storage handles. Custom providers may implement `CatalogFacade::cache_revisions()` with the same snapshot and rollback guarantees or return `None` for conservative refresh; an empty revision map must not stand in for unsupported tracking. See [cross-session cache refresh](04-storage-and-security.md#cross-session-cache-refresh).
 
+The development branch releases unwritten rollback-journal readers before waiting for writer ownership or snapshot publication. This prevents automatic statistics publication from retaining a SQLite read lock while an application COMMIT waits for readers to finish. The logical transaction, savepoints, and detached repeatable-read snapshot remain intact.
+
 ## Cypher expression validation
 
 Deeply nested Cypher and long operator or indexing chains now fail with a parse error instead of exhausting the process stack. The parser limits recursive expression parsing and constructed expression trees to 64 levels; flat lists and independent projection items remain supported. Rust code that exhaustively matches `uqa_graph::cypher::ParseError` must handle `ExpressionTooDeep { limit, position }`. See the [Cypher contract](../sql/07-graph.md#cypher-table-function).
@@ -44,6 +46,10 @@ Deeply nested Cypher and long operator or indexing chains now fail with a parse 
 ## Prepared statement analysis in development
 
 The development branch analyzes `PREPARE` before execution and infers omitted parameter types in PostgreSQL occurrence order. Statements with missing references or incompatible types can now fail when prepared. Replanning a statement whose result columns, types, or modifiers changed reports `0A000`; deallocate and prepare the updated query to adopt its new result contract. The session metadata view retains the original client SQL string. Register native SQL callbacks before preparing statements that refer to them; later callback registration invalidates cached plans and preserves the original result contract. Two-argument `round` calls require a numeric first argument, so cast floating-point expressions explicitly before supplying a precision. See [prepared statements](../sql/08-transactions-and-routines.md#prepared-statements).
+
+The development optimizer returns `OptimizerResult<T>` with either `OptimizerError::Expression(SQLError)` or `OptimizerError::JoinGraph(JoinGraphError)`. Update exhaustive error matches and preserve the SQL error instead of converting every planning failure into an internal error. Immutable constant failures can now occur before execution; unused rule inputs are removed first, and EXECUTE binds arguments before planning the prepared body. Stored routines and views are optimized only when execution needs their definitions.
+
+`SQLError::Diagnostic` carries separate SQLSTATE, primary message, detail, and hint fields. Exhaustive error matches must handle this variant; the PostgreSQL server sends detail and hint in their protocol fields. `TableConstraintSet::columns_declared` records whether an empty relation has a declared SQL schema. Engine-managed SQL declarations set it to `Some(true)`; custom catalogs must preserve this field, while missing legacy metadata infers declaration from existing columns. Native document tables and table functions can retain deferred descriptors without making declared SQL tables accept missing columns.
 
 ## SQL AST and CHECK catalog updates
 

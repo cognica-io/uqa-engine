@@ -34,7 +34,7 @@ pub(crate) use protocol::{
 };
 use view_rules::{prepare_view_rule_batches, ViewRuleBatchRequest};
 
-fn prune_unused_query_outputs(
+pub(in crate::sql) fn prune_unused_query_outputs(
     query: &mut QueryPlan,
     required_positions: &BTreeSet<usize>,
     expected_width: usize,
@@ -709,7 +709,13 @@ fn validate_mutation_columns<'a>(
     // supplies definitions, and those targets must reject misspelled or
     // repeated mutation columns instead of persisting arbitrary fields.
     if definitions.is_empty() {
-        return Ok(());
+        let declared = engine
+            .try_table(table)
+            .map_err(|error| dml_storage_error(action, error))?
+            .is_some_and(|table| *table.columns_declared.read());
+        if !declared {
+            return Ok(());
+        }
     }
     let known: BTreeSet<&str> = definitions
         .iter()

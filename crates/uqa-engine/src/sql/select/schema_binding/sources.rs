@@ -116,3 +116,31 @@ pub(in crate::sql) fn bind_source_plan_schema_for_execution(
         outer,
     )
 }
+
+impl SchemaScope {
+    pub(super) fn bind_source(
+        &mut self,
+        routines: &dyn RoutineResolution,
+        source: &SourcePlan,
+        subqueries: &[QueryPlan],
+        params: &[SQLParam],
+        outer: Option<&RowSchema>,
+    ) -> Result<RowSchema, SQLError> {
+        let bound = matches!(
+            source,
+            SourcePlan::Table {
+                bound_columns: Some(_),
+                ..
+            }
+        );
+        let previous = bound.then(|| {
+            self.resolution
+                .set_lookup_mode(crate::engine_capabilities::RelationLookupMode::Bound)
+        });
+        let result = self.bind_source_inner(routines, source, subqueries, params, outer);
+        if let Some(previous) = previous {
+            self.resolution.set_lookup_mode(previous);
+        }
+        result
+    }
+}

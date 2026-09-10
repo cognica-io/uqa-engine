@@ -18,7 +18,8 @@ pub(crate) use rule_binding::{
     first_rule_row_reference_in_select, rule_action_has_set_operation,
     rule_condition_plan_references_whole_row, rule_condition_plan_row_columns,
     rule_expr_references_row, rule_expr_references_whole_row, rule_expr_row_columns,
-    rule_statement_references_row, rule_statement_references_whole_row, rule_statement_row_columns,
+    rule_new_row_columns, rule_statement_references_row, rule_statement_references_whole_row,
+    rule_statement_row_columns,
 };
 pub(crate) use rule_condition_binding::RuleConditionBinding;
 pub(crate) use rule_dependencies::{

@@ -722,6 +722,7 @@ struct EngineDataSnapshot {
 }
 
 #[derive(Clone)]
+#[expect(clippy::struct_excessive_bools, reason = "independent snapshot flags")]
 struct TableDataSnapshot {
     state: Arc<TableState>,
     security: engine_state::TableSecurity,
@@ -732,6 +733,7 @@ struct TableDataSnapshot {
     value_indexes: BTreeMap<uqa_storage::ValueIndexKey, value_index::ColumnValueIndex>,
     fts_fields: Vec<FieldName>,
     columns: Vec<uqa_sql::ast::ColumnDef>,
+    columns_declared: bool,
     /// One-past-the-last allocated document id. `u128` is intentional: it
     /// represents `u64::MAX + 1`, so exhaustion is distinguishable from an
     /// available final id and can never wrap or issue a duplicate.
@@ -761,13 +763,10 @@ pub(crate) struct TableState {
     inverted_index: RwLock<Box<dyn InvertedIndex>>,
     vector_indexes: RwLock<BTreeMap<FieldName, Box<dyn VectorIndex>>>,
     fts_fields: engine_state::CatalogCell<Vec<FieldName>>,
-    /// Column schema captured at CREATE TABLE / ALTER TABLE time.
-    /// Drives auto-id allocation and ALTER COLUMN bookkeeping.
+    /// Column schema captured at CREATE TABLE / ALTER TABLE time, driving auto-id allocation and ALTER COLUMN bookkeeping.
     columns: engine_state::CatalogCell<Vec<uqa_sql::ast::ColumnDef>>,
-    /// Monotonic id watermark for SERIAL/BIGSERIAL columns. The first
-    /// allocated value is `1`; the watermark grows past
-    /// `max(existing_doc_id, allocated)` so reopened catalogs do not
-    /// collide with existing rows.
+    columns_declared: engine_state::CatalogCell<bool>,
+    /// Monotonic id watermark for SERIAL/BIGSERIAL columns. The first allocated value is `1`; the watermark grows past `max(existing_doc_id, allocated)` so reopened catalogs do not collide with existing rows.
     next_id: parking_lot::Mutex<u128>,
     analyzer: engine_state::CatalogCell<Analyzer>,
     /// Per-column statistics refreshed by `ANALYZE table_name` or lazily

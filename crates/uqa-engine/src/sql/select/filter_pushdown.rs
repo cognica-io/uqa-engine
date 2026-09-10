@@ -86,7 +86,7 @@ pub(in crate::sql) fn qualifier_filters_for_stmt(
 /// turn a non-result into a result. Keep predicates on these qualifiers above
 /// the outer join unless a separate rewrite has first reduced it to an inner
 /// join.
-fn outer_join_nullable_qualifiers(from: &SourcePlan) -> BTreeSet<String> {
+pub(in crate::sql) fn outer_join_nullable_qualifiers(from: &SourcePlan) -> BTreeSet<String> {
     let SourcePlan::Join {
         left,
         right,

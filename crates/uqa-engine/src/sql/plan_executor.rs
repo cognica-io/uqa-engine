@@ -369,12 +369,12 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         name: &str,
         params: &[ExpressionPlan],
     ) -> Result<SQLResult, SQLError> {
+        let bound =
+            super::prepared::bind_execute_parameters(self.engine, name, params, self.params)?;
         let plan = self
             .engine
             .prepared_plan_for_execution(name)?
             .ok_or_else(|| super::prepared::statement_error("26000", name, "does not exist"))?;
-        let bound =
-            super::prepared::bind_execute_parameters(self.engine, name, params, self.params)?;
         UnifiedPlanExecutor::new_nested(self.engine, &bound).execute(&plan)
     }
 

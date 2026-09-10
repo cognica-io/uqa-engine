@@ -88,12 +88,18 @@ fn run_create_table_as_inner(
     if execution.persistence != uqa_sql::ast::RelationPersistence::Temporary {
         engine.ensure_relation_creation_privilege(&preliminary_name)?;
     }
+    let executable = if execution.with_no_data {
+        None
+    } else {
+        Some(crate::sql::optimize_engine_query(engine, execution.query)?)
+    };
+    let executable = executable.as_ref().unwrap_or(execution.query);
     // A locking source must acquire and recheck every tuple before this session promotes its deferred backend transaction. Promoting first would invert the global writer and tuple-lock order against a concurrent updater. The target is checked again after promotion so a concurrent relation create still wins atomically.
     let locking_result =
-        if !execution.with_no_data && crate::sql::select::query_has_row_locks(execution.query) {
+        if !execution.with_no_data && crate::sql::select::query_has_row_locks(executable) {
             Some(crate::sql::select::execute_query_plan(
                 engine,
-                execution.query,
+                executable,
                 execution.params,
             )?)
         } else {
@@ -116,7 +122,7 @@ fn run_create_table_as_inner(
     } else {
         Some(crate::sql::select::execute_query_plan(
             engine,
-            execution.query,
+            executable,
             execution.params,
         )?)
     };

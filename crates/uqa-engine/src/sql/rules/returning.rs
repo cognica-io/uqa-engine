@@ -363,12 +363,16 @@ pub(in crate::sql) fn validate_rule_returning_contract(
     let relation = RelationIdentity::from_legacy_name(&table)
         .map_err(|error| SQLError::Internal(format!("decode rule relation `{table}`: {error}")))?;
     let event = rule_event_name(event);
-    Err(SQLError::Routine {
+    Err(SQLError::Diagnostic {
         sqlstate: "0A000".into(),
         message: format!(
-            "cannot perform {event} RETURNING on relation \"{}\"\nHINT: You need an unconditional ON {event} DO INSTEAD rule with a RETURNING clause.",
+            "cannot perform {event} RETURNING on relation \"{}\"",
             relation.name
         ),
+        detail: None,
+        hint: Some(format!(
+            "You need an unconditional ON {event} DO INSTEAD rule with a RETURNING clause."
+        )),
     })
 }
 

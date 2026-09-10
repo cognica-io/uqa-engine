@@ -7,10 +7,9 @@
 //! Persistent exact routine identity binding for catalog-owned query plans.
 
 use super::{
-    cte_references_own_name, expr_contains_subquery, extend_cte_generated_schema,
-    extend_recursive_cte_binding_schema, operator_join_relation_schemas, overlay_outer_schema,
-    rename_schema, ColumnType, CteScope, QueryPlan, RelationalPlan, RowSchema, SQLError, SQLParam,
-    ScalarExpr, SchemaScope, SourcePlan,
+    cte_references_own_name, extend_cte_generated_schema, extend_recursive_cte_binding_schema,
+    operator_join_relation_schemas, overlay_outer_schema, rename_schema, ColumnType, CteScope,
+    QueryPlan, RelationalPlan, RowSchema, SQLError, SQLParam, ScalarExpr, SchemaScope, SourcePlan,
 };
 use crate::engine_user_functions::RoutineResolution;
 use uqa_execution::{ColumnIdentity, FunctionTypeResolver};
@@ -642,12 +641,7 @@ impl SchemaScope {
         outer: Option<&RowSchema>,
     ) -> Result<(), SQLError> {
         let resolver = self.query_function_type_resolver_for_subqueries(
-            engine,
-            args.iter().any(expr_contains_subquery),
-            schema,
-            subqueries,
-            params,
-            outer,
+            engine, args, schema, subqueries, params, outer,
         )?;
         let (argument_names, argument_types, explicit_variadic) =
             uqa_execution::function_call_argument_signature(args, schema, params, Some(&resolver))?;

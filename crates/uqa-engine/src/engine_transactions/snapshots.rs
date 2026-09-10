@@ -56,6 +56,7 @@ impl Engine {
                         .collect(),
                     fts_fields: table.fts_fields.read().clone(),
                     columns: table.columns.read().clone(),
+                    columns_declared: *table.columns_declared.read(),
                     next_id: *table.next_id.lock(),
                     analyzer: table.analyzer.read().clone(),
                     column_stats: table.column_stats.read().clone(),
@@ -136,6 +137,7 @@ impl Engine {
                 .write()
                 .clone_from(&table_snapshot.fts_fields);
             table.columns.write().clone_from(&table_snapshot.columns);
+            *table.columns_declared.write() = table_snapshot.columns_declared;
             *table.next_id.lock() = table_snapshot.next_id;
             *table.analyzer.write() = table_snapshot.analyzer.clone();
             *table.column_stats.write() = table_snapshot.column_stats.clone();

@@ -34,6 +34,7 @@ impl Engine {
         columns: &[uqa_sql::ast::ColumnDef],
     ) -> StorageBackendResult<()> {
         let constraints = uqa_sql::ast::TableConstraintSet {
+            columns_declared: Some(*table.columns_declared.read()),
             checks: table.table_checks.read().clone(),
             foreign_keys: table.foreign_keys.read().clone(),
             key_constraints: table.key_constraints.read().clone(),
@@ -209,6 +210,7 @@ impl Engine {
             vector_indexes: RwLock::new(BTreeMap::new()),
             fts_fields: crate::engine_state::CatalogCell::new(fts_fields),
             columns: crate::engine_state::CatalogCell::new(Vec::new()),
+            columns_declared: crate::engine_state::CatalogCell::new(false),
             next_id: parking_lot::Mutex::new(1),
             analyzer: crate::engine_state::CatalogCell::new(analyzer),
             column_stats: crate::engine_state::CatalogCell::new(BTreeMap::new()),

@@ -29,13 +29,19 @@ pub(super) fn validate_unqualified_column(
     if schema.column_is_ambiguous(column) {
         return Err(SQLError::AmbiguousColumn(column.to_string()));
     }
-    if is_pseudo_column(column) && pseudo_column_qualifiers(schema, column).len() > 1 {
+    if is_pseudo_column(column)
+        && !schema.has_unqualified_column(column)
+        && pseudo_column_qualifiers(schema, column).len() > 1
+    {
         return Err(SQLError::AmbiguousColumn(column.to_string()));
     }
     if schema.has_unqualified_column(column) {
         return Ok(());
     }
     if schema.has_qualifier(column) {
+        return Ok(());
+    }
+    if schema.columns_are_open(None) {
         return Ok(());
     }
     if let Some(fallback) = fallback {
@@ -46,6 +52,9 @@ pub(super) fn validate_unqualified_column(
             return Ok(());
         }
         if fallback.has_qualifier(column) {
+            return Ok(());
+        }
+        if fallback.columns_are_open(None) {
             return Ok(());
         }
     }
@@ -65,7 +74,9 @@ pub(super) fn validate_qualified_column(
         if candidate.qualified_column_is_ambiguous(qualifier, column) {
             return Err(SQLError::AmbiguousColumn(format!("{qualifier}.{column}")));
         }
-        if candidate.has_qualified_column(qualifier, column) {
+        if candidate.has_qualified_column(qualifier, column)
+            || candidate.columns_are_open(Some(qualifier))
+        {
             return Ok(());
         }
         return Err(SQLError::unknown_qualified_column(qualifier, column));
@@ -313,20 +324,19 @@ pub(super) fn validate_table_function(
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<Option<crate::sql::from_rows::ResolvedUserTableFunction>, SQLError> {
+    if let Some(resolved) = crate::sql::from_rows::resolve_user_table_function(
+        routines, name, binding, args, input, params, resolver,
+    )? {
+        return Ok(Some(resolved));
+    }
     let identity = name.to_ascii_lowercase();
     let lower = crate::sql::builtin_function_dispatch_name(&identity);
-    let selected_user = binding.is_some_and(|binding| !binding.builtin);
-    if !selected_user
+    if binding.is_none_or(|binding| binding.builtin)
         && (crate::sql::from_rows::is_builtin_table_function(&lower)
             || crate::operator_tree_bridge::is_operator_join_table_function(&lower)
             || routines.has_registered_table_function(&identity))
     {
         return Ok(None);
-    }
-    if let Some(resolved) = crate::sql::from_rows::resolve_user_table_function(
-        routines, name, binding, args, input, params, resolver,
-    )? {
-        return Ok(Some(resolved));
     }
     Err(undefined_function(name, args, input, params, resolver))
 }

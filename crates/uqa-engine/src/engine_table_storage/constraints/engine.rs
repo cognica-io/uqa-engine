@@ -37,6 +37,12 @@ impl Engine {
         let state = self
             .try_table(&table_name)?
             .ok_or_else(|| table_not_found(&table_name))?;
+        constraints.columns_declared = Some(
+            constraints
+                .columns_declared
+                .unwrap_or(*state.columns_declared.read())
+                || !columns.is_empty(),
+        );
         for column in &mut columns {
             if let Some(reference) = &mut column.references {
                 reference.table = self.canonical_foreign_key_target(&reference.table)?;
@@ -61,6 +67,8 @@ impl Engine {
                 &constraints,
             )?;
         }
+        *state.columns_declared.write() =
+            constraints.columns_declared.unwrap_or(false) || !columns.is_empty();
         *state.columns.write() = columns;
         *state.table_checks.write() = constraints.checks;
         *state.foreign_keys.write() = constraints.foreign_keys;
@@ -190,6 +198,7 @@ impl Engine {
             col.not_null_name = None;
         }
         let mut constraints = uqa_sql::ast::TableConstraintSet {
+            columns_declared: Some(*t.columns_declared.read()),
             persistence: t.persistence,
             on_commit: t.on_commit,
             checks: t.table_checks.read().clone(),
@@ -284,6 +293,7 @@ impl Engine {
             foreign_key.ref_table = self.canonical_foreign_key_target(&foreign_key.ref_table)?;
         }
         let mut constraints = uqa_sql::ast::TableConstraintSet {
+            columns_declared: Some(*t.columns_declared.read()),
             persistence: t.persistence,
             on_commit: t.on_commit,
             checks,
@@ -340,6 +350,7 @@ impl Engine {
             foreign_key.ref_table = self.canonical_foreign_key_target(&foreign_key.ref_table)?;
         }
         let mut constraints = uqa_sql::ast::TableConstraintSet {
+            columns_declared: Some(*state.columns_declared.read()),
             persistence: state.persistence,
             on_commit: state.on_commit,
             checks,
@@ -363,6 +374,8 @@ impl Engine {
                 &constraints,
             )?;
         }
+        *state.columns_declared.write() =
+            constraints.columns_declared.unwrap_or(false) || !columns.is_empty();
         *state.columns.write() = columns;
         *state.table_checks.write() = constraints.checks;
         *state.foreign_keys.write() = constraints.foreign_keys;
@@ -502,6 +515,7 @@ impl Engine {
             }
         }
         let mut constraints = uqa_sql::ast::TableConstraintSet {
+            columns_declared: Some(*t.columns_declared.read()),
             persistence: t.persistence,
             on_commit: t.on_commit,
             checks: t.table_checks.read().clone(),
@@ -592,7 +606,9 @@ impl Engine {
         let foreign_keys = t.foreign_keys.read().clone();
         let key_constraints = t.key_constraints.read().clone();
         let hierarchy = t.hierarchy.read().clone();
+        let columns_declared = *t.columns_declared.read();
         Ok(uqa_sql::ast::TableConstraintSet {
+            columns_declared: Some(columns_declared),
             persistence: t.persistence,
             on_commit: t.on_commit,
             checks,

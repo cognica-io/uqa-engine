@@ -13,7 +13,10 @@ use uqa_core::Value;
 use uqa_sql::ast::{BinaryOp, FunctionBinding};
 
 impl Preparation<'_> {
-    pub(super) fn common(&mut self, values: &mut [ExpressionType]) -> Result<ColumnType, SQLError> {
+    pub(super) fn common(
+        &mut self,
+        values: &mut [ExpressionType],
+    ) -> Result<Option<ColumnType>, SQLError> {
         let mut common = None;
         for value in values.iter() {
             if let Some(ty) = &value.ty {
@@ -23,11 +26,14 @@ impl Preparation<'_> {
                 });
             }
         }
+        if common.is_none() && values.iter().any(ExpressionType::is_deferred) {
+            return Ok(None);
+        }
         let common = common.unwrap_or(ColumnType::Text);
         for value in values {
             self.parameters.coerce_unknown(value, &common)?;
         }
-        Ok(common)
+        Ok(Some(common))
     }
 
     pub(super) fn binary(
@@ -55,7 +61,9 @@ impl Preparation<'_> {
     ) -> Result<ExpressionType, SQLError> {
         let ty = match expression {
             ScalarExpr::Param(index) => return self.parameters.reference(*index),
-            ScalarExpr::Literal(Value::Null | Value::Str(_)) => None,
+            ScalarExpr::Literal(Value::Null | Value::Str(_)) => {
+                return Ok(ExpressionType::unknown());
+            }
             ScalarExpr::Cast { expr, ty } => {
                 Some(self.cast_expression(expr, ty, input, subqueries)?)
             }
@@ -95,7 +103,8 @@ impl Preparation<'_> {
                     .iter()
                     .map(|item| self.expression(item, input, subqueries))
                     .collect::<Result<Vec<_>, _>>()?;
-                Some(ColumnType::Array(Box::new(self.common(&mut items)?)))
+                self.common(&mut items)?
+                    .map(|element| ColumnType::Array(Box::new(element)))
             }
             ScalarExpr::Row(items) => {
                 for item in items {
@@ -153,13 +162,13 @@ impl Preparation<'_> {
                 base,
                 when,
                 else_branch,
-            } => Some(self.case_expression(
+            } => self.case_expression(
                 base.as_deref(),
                 when,
                 else_branch.as_deref(),
                 input,
                 subqueries,
-            )?),
+            )?,
             ScalarExpr::ScalarSubquery(index)
             | ScalarExpr::Exists {
                 subquery: index, ..

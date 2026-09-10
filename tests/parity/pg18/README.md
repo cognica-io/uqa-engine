@@ -402,3 +402,7 @@ Reproduce each transcript by passing its JSON to `capture_command_completion_ora
 ```sh
 cargo test -p uqa-engine --test integration sql_prepared
 ```
+
+`constant_planning_oracle.expected.json` contains 62 PostgreSQL 18.4 cases for constant arithmetic, typed results, CASE and Boolean evaluation order, COALESCE, relation and column error precedence, deferred view planning, zero-parameter EXECUTE, and distinct scalar-subquery namespaces in ON CONFLICT and RETURNING. `prepared_plan_error_order_oracle.expected.json` adds 16 cases for argument errors preceding body planning and for plan-use counters after planning failures. The engine integration target runs both fixtures through the existing prepared-statement oracle helper, and the PostgreSQL server target compares them over a real TCP connection.
+
+`rule_input_planning_oracle.expected.json` contains 66 PostgreSQL 18.4 cases for suppressed commands, unused NEW inputs, rule RETURNING diagnostics, and command tags from same-kind versus different-kind INSTEAD actions, ALSO actions, multiple actions, UPDATE FROM, and automatic views. The engine target runs this fixture on memory and SQLite, and the server target runs it over TCP; a separate wire assertion verifies primary-message and hint fields.

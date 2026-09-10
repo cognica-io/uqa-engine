@@ -146,7 +146,6 @@ impl Engine {
                     engine.has_registered_aggregate_function(aggregate)
                 }),
             ));
-            let plan = crate::sql::optimize_engine_plan(engine, plan)?;
             let uqa_planner::UnifiedPlan::Query(plan) = plan else {
                 return Err(SQLError::Internal(
                     "view lowering produced a non-query plan".into(),

@@ -5,7 +5,7 @@
 //
 
 use super::{
-    is_transaction_control, lower_statement, optimize_engine_plan, query_has_row_locks,
+    is_transaction_control, lower_statement, plan_for_execution, query_has_row_locks,
     query_may_mutate_engine, query_requires_statement_transaction, Arc, Engine, SQLError, SQLParam,
     SQLResult, UnifiedPlanExecutor,
 };
@@ -328,7 +328,7 @@ fn execute_uncached_or_snapshot_scoped(
                         );
                     }
                 }
-                let optimized = match optimize_engine_plan(engine, plan) {
+                let optimized = match plan_for_execution(engine, plan, params) {
                     Ok(plan) => plan,
                     Err(error) => {
                         return Err(engine.abort_sql_transaction_after_error(error));
@@ -452,7 +452,7 @@ fn execute_uncached_or_snapshot_scoped(
                         Err(error) => return rollback_after_statement_error(engine, error),
                     }
                 }
-                let optimized = match optimize_engine_plan(engine, plan) {
+                let optimized = match plan_for_execution(engine, plan, params) {
                     Ok(plan) => plan,
                     Err(error) => return rollback_after_statement_error(engine, error),
                 };
@@ -481,8 +481,11 @@ fn execute_uncached_or_snapshot_scoped(
                 let optimized = if let Some(plan) = cached_optimized_plan {
                     plan
                 } else {
-                    let plan =
-                        Arc::new(optimize_engine_plan(engine, initial_plan.as_ref().clone())?);
+                    let plan = Arc::new(plan_for_execution(
+                        engine,
+                        initial_plan.as_ref().clone(),
+                        params,
+                    )?);
                     if is_single_statement {
                         engine.cache_optimized_sql_plan(sql, Arc::clone(&plan));
                     }

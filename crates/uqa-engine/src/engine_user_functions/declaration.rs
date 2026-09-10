@@ -617,11 +617,9 @@ fn compile_sql_routine_plans(
                     *expression = ScalarExpr::Param(position + 1);
                 }
             });
-            if persisted_definition {
-                crate::sql::optimize_loaded_catalog_plan(engine, plan)
-            } else {
-                crate::sql::optimize_engine_plan(engine, plan)
-            }
+            // Stored definitions retain their analyzed logical expressions;
+            // immutable evaluation belongs to invocation planning.
+            Ok(plan)
         })
         .collect()
 }

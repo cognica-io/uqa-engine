@@ -124,6 +124,7 @@ impl RowSchema {
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
+                open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 extra_ambiguous_unqualified: outer_ambiguous,
                 extra_ambiguous_qualified: ambiguous_qualified,
                 ..SchemaBuildMetadata::default()
@@ -261,6 +262,20 @@ impl RowSchema {
         }
         let mut score_sources = input.index.cold.score_sources.clone();
         score_sources.extend(outer.index.cold.score_sources.iter().cloned());
+        let mut open_qualifiers = input.index.cold.open_qualifiers.clone();
+        open_qualifiers.extend(
+            outer
+                .index
+                .cold
+                .open_qualifiers
+                .iter()
+                .filter(|qualifier| {
+                    qualifier
+                        .as_deref()
+                        .is_none_or(|qualifier| !input.has_qualifier(qualifier))
+                })
+                .cloned(),
+        );
 
         let schema = Self::from_typed_parts_with_aliases_and_exact_precedence(
             input.columns().to_vec(),
@@ -276,6 +291,7 @@ impl RowSchema {
                 score_sources,
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
+                open_qualifiers,
                 extra_ambiguous_unqualified: ambiguous_unqualified,
                 extra_ambiguous_qualified: ambiguous_qualified,
                 ..SchemaBuildMetadata::default()

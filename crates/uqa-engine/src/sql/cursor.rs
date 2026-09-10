@@ -16,7 +16,7 @@ use super::driver::{
     abort_explicit_statement_error, rollback_after_statement_error, rollback_implicit_statement,
 };
 use super::{
-    lower_statement, optimize_engine_plan, query_has_row_locks, query_may_mutate_engine,
+    lower_statement, plan_for_execution, query_has_row_locks, query_may_mutate_engine,
     query_requires_statement_transaction, Engine, UnifiedPlanExecutor,
 };
 
@@ -184,7 +184,7 @@ fn execute_uncached_or_snapshot_scoped(
                 Arc::new(plan.clone()),
             );
         }
-        let optimized = optimize_engine_plan(engine, plan)
+        let optimized = plan_for_execution(engine, plan, params)
             .map_err(|error| engine.abort_sql_transaction_after_error(error))?;
         let executor = UnifiedPlanExecutor::new(engine, params);
         return execute_spilled(&executor, &optimized)
@@ -200,7 +200,11 @@ fn execute_uncached_or_snapshot_scoped(
         let optimized = if let Some(plan) = cached_optimized {
             plan
         } else {
-            let plan = Arc::new(optimize_engine_plan(engine, initial_plan.as_ref().clone())?);
+            let plan = Arc::new(plan_for_execution(
+                engine,
+                initial_plan.as_ref().clone(),
+                params,
+            )?);
             engine.cache_optimized_sql_plan(sql, Arc::clone(&plan));
             plan
         };
@@ -262,7 +266,7 @@ fn execute_uncached_or_snapshot_scoped(
             Err(error) => return rollback_after_statement_error(engine, error),
         }
     }
-    let optimized = match optimize_engine_plan(engine, plan) {
+    let optimized = match plan_for_execution(engine, plan, params) {
         Ok(plan) => plan,
         Err(error) => return rollback_after_statement_error(engine, error),
     };

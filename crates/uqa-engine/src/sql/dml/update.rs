@@ -495,12 +495,12 @@ fn run_update_inner_with_ctes(
                 base_rule_suppressed[global_index] = rule_batch.suppresses(local_index);
             }
         }
-        let view_rule_returning =
-            view_rule_batches.execute_actions(engine, stmt.view_rule_returning.as_ref())?;
-        let rule_returning = rule_batch
+        let view_rule_outcome = view_rule_batches
+            .execute_actions_with_affected(engine, stmt.view_rule_returning.as_ref())?;
+        let rule_outcome = rule_batch
             .as_ref()
             .map(|rule_batch| {
-                rule_batch.execute_actions(
+                rule_batch.execute_actions_with_affected(
                     engine,
                     crate::sql::rules::RuleReturningRequest::from_plan(
                         &stmt.returning,
@@ -509,8 +509,18 @@ fn run_update_inner_with_ctes(
                     ),
                 )
             })
-            .transpose()?
-            .flatten();
+            .transpose()?;
+        if !update_original_query {
+            affected = if view_rule_outcome.sets_command_tag {
+                view_rule_outcome.affected_rows
+            } else {
+                rule_outcome
+                    .as_ref()
+                    .map_or(0, |outcome| outcome.affected_rows)
+            };
+        }
+        let view_rule_returning = view_rule_outcome.returning;
+        let rule_returning = rule_outcome.and_then(|outcome| outcome.returning);
         if view_rule_returning.is_some() && rule_returning.is_some() {
             return Err(SQLError::Routine {
                 sqlstate: "0A000".into(),

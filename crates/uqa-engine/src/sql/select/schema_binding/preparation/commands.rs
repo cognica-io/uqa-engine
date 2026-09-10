@@ -11,9 +11,15 @@ use uqa_planner::{AssignmentPlan, CommandPlan, ConflictActionPlan, MergeWhenPlan
 
 impl Preparation<'_> {
     pub(super) fn command(&mut self, command: &CommandPlan) -> Result<Option<RowSchema>, SQLError> {
-        let previous = self.ctes(command.ctes(), None)?;
-        let result = self.command_inner(command);
-        self.scope.restore_cte_schemas(previous);
+        let lookup = self.scope.resolution.lookup_mode();
+        self.scope.set_command_lookup_mode(command);
+        let result = (|| {
+            let previous = self.ctes(command.ctes(), None)?;
+            let result = self.command_inner(command);
+            self.scope.restore_cte_schemas(previous);
+            result
+        })();
+        self.scope.resolution.set_lookup_mode(lookup);
         result
     }
 
@@ -48,13 +54,18 @@ impl Preparation<'_> {
                         self.expression(expression, &input, subqueries)?;
                     }
                     if let Some(predicate) = &conflict.predicate {
-                        self.require_boolean(predicate, &input, subqueries, "WHERE")?;
+                        self.expression(predicate, &input, subqueries)?;
                     }
                     if let ConflictActionPlan::Update {
                         assignments,
                         predicate,
                     } = &conflict.action
                     {
+                        validate_target_columns(
+                            &insert.table,
+                            assignments.iter().map(|assignment| &assignment.column),
+                            &target,
+                        )?;
                         let excluded = RowSchema::with_qualified_types(
                             "excluded",
                             target.columns().to_vec(),
@@ -111,7 +122,25 @@ impl Preparation<'_> {
         if let Some(predicate) = &merge.target_predicate {
             self.require_boolean(predicate, input, subqueries, "WHERE")?;
         }
+        let target_qualifier = merge
+            .target_alias
+            .as_deref()
+            .unwrap_or(&merge.target_qualifier);
+        let target_input = RowSchema::with_qualified_types(
+            target_qualifier,
+            target.columns().to_vec(),
+            target.column_types().to_vec(),
+        );
+        let source_input = self.source(&merge.source, subqueries, None)?;
         for clause in &merge.when_clauses {
+            let input = match clause {
+                MergeWhenPlan::UpdateNotMatchedBySource { .. }
+                | MergeWhenPlan::DeleteNotMatchedBySource { .. }
+                | MergeWhenPlan::NothingNotMatchedBySource { .. } => &target_input,
+                MergeWhenPlan::InsertNotMatched { .. }
+                | MergeWhenPlan::NothingNotMatched { .. } => &source_input,
+                _ => input,
+            };
             let condition = match clause {
                 MergeWhenPlan::UpdateMatched { condition, .. }
                 | MergeWhenPlan::UpdateNotMatchedBySource { condition, .. }
@@ -128,11 +157,19 @@ impl Preparation<'_> {
             match clause {
                 MergeWhenPlan::UpdateMatched { assignments, .. }
                 | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => {
+                    validate_target_columns(
+                        &merge.target,
+                        assignments.iter().map(|assignment| &assignment.column),
+                        target,
+                    )?;
                     self.assignments(assignments, target, input, subqueries)?;
                 }
                 MergeWhenPlan::InsertNotMatched {
                     columns, values, ..
-                } => self.insert_row(values, columns, target, input, subqueries)?,
+                } => {
+                    validate_target_columns(&merge.target, columns.iter(), target)?;
+                    self.insert_row(values, columns, target, input, subqueries)?;
+                }
                 _ => {}
             }
         }
@@ -206,6 +243,9 @@ impl Preparation<'_> {
         column: &str,
         target: &RowSchema,
     ) -> Result<(), SQLError> {
+        if target.columns_are_open(None) && target.unqualified_position(column).is_none() {
+            return Ok(());
+        }
         let index = target
             .columns()
             .iter()
@@ -236,6 +276,9 @@ fn validate_target_columns<'a>(
     columns: impl Iterator<Item = &'a String>,
     target: &RowSchema,
 ) -> Result<(), SQLError> {
+    if target.columns_are_open(None) {
+        return Ok(());
+    }
     for column in columns {
         if !target.columns().contains(column) {
             let identity =

@@ -187,12 +187,12 @@ fn sql_commit_and_rollback_without_begin_warn_instead_of_erroring() {
 fn side_effecting_selects_use_statement_rollback_in_memory() {
     let eng = Engine::new();
 
-    // The inner graph function must run before the selected CASE branch
-    // divides by zero. The failed SELECT must still remove the graph it created.
+    // The inner graph function determines the zero denominator before
+    // the division fails. The failed SELECT must still remove the graph it created.
     let graph_error = eng
         .sql(
-            "SELECT CASE WHEN graph_create('transient_graph')
-                    THEN 1 / 0 ELSE 0 END",
+            "SELECT 1 / CASE WHEN graph_create('transient_graph')
+                    THEN 0 ELSE 1 END",
             &[],
         )
         .unwrap_err();
@@ -231,7 +231,7 @@ fn side_effecting_selects_use_statement_rollback_in_memory() {
                 SELECT changed
                 FROM (SELECT graph_create('nested_graph') AS changed) AS child
              )
-             SELECT CASE WHEN changed THEN 1 / 0 ELSE 0 END FROM nested",
+             SELECT 1 / CASE WHEN changed THEN 0 ELSE 1 END FROM nested",
             &[],
         )
         .unwrap_err();
@@ -239,7 +239,7 @@ fn side_effecting_selects_use_statement_rollback_in_memory() {
     assert!(!eng.has_graph("nested_graph").unwrap());
 
     // A registered routine can hide DML behind an ordinary Func node. The
-    // outer type error happens after the INSERT and must roll it back.
+    // outer division error happens after the INSERT and must roll it back.
     eng.sql(
         "CREATE FUNCTION mutate_then_return() RETURNS INTEGER AS $$
          BEGIN
@@ -251,7 +251,7 @@ fn side_effecting_selects_use_statement_rollback_in_memory() {
     )
     .unwrap();
     eng.sql(
-        "SELECT CASE WHEN mutate_then_return() = 1 THEN 1 / 0 ELSE 0 END",
+        "SELECT 1 / CASE WHEN mutate_then_return() = 1 THEN 0 ELSE 1 END",
         &[],
     )
     .unwrap_err();
@@ -292,7 +292,7 @@ fn assert_failed_random_draws_remain_consumed(eng: &Engine) {
     baseline.sql("SELECT random()", &[]).unwrap();
     let expected = baseline.sql("SELECT random() AS value", &[]).unwrap();
     eng.sql("SELECT setseed(0.25)", &[]).unwrap();
-    eng.sql("SELECT CASE WHEN random() >= 0 THEN 1 / 0 ELSE 0 END", &[])
+    eng.sql("SELECT 1 / (random() * 0)::integer", &[])
         .unwrap_err();
     let actual = eng.sql("SELECT random() AS value", &[]).unwrap();
     assert_eq!(actual.rows[0]["value"], expected.rows[0]["value"]);
@@ -304,11 +304,8 @@ fn assert_failed_random_draws_remain_consumed(eng: &Engine) {
         .unwrap();
     let expected = baseline.sql("SELECT random() AS value", &[]).unwrap();
     eng.sql("SELECT setseed(0.25)", &[]).unwrap();
-    eng.sql(
-        "SELECT CASE WHEN random(-10::bigint, 10::bigint) >= -10 THEN 1 / 0 ELSE 0 END",
-        &[],
-    )
-    .unwrap_err();
+    eng.sql("SELECT 1 / (random(-10::bigint, 10::bigint) * 0)", &[])
+        .unwrap_err();
     let actual = eng.sql("SELECT random() AS value", &[]).unwrap();
     assert_eq!(actual.rows[0]["value"], expected.rows[0]["value"]);
 }
@@ -321,8 +318,8 @@ fn side_effecting_select_rollback_matches_memory_and_catalog_after_reopen() {
     {
         let eng = Engine::open(&path).unwrap();
         eng.sql(
-            "SELECT CASE WHEN graph_create('transient_graph')
-                    THEN 1 / 0 ELSE 0 END",
+            "SELECT 1 / CASE WHEN graph_create('transient_graph')
+                    THEN 0 ELSE 1 END",
             &[],
         )
         .unwrap_err();

@@ -74,6 +74,46 @@ fn result_fields_and_text_match_postgresql_over_tcp() {
 }
 
 #[test]
+fn constant_and_rule_planning_match_postgresql_over_tcp() {
+    for fixture in [
+        include_str!("../../../../tests/parity/pg18/constant_planning_oracle.expected.json"),
+        include_str!(
+            "../../../../tests/parity/pg18/prepared_plan_error_order_oracle.expected.json"
+        ),
+        include_str!("../../../../tests/parity/pg18/rule_input_planning_oracle.expected.json"),
+    ] {
+        compare_reference(fixture);
+    }
+}
+
+#[test]
+fn rule_returning_error_preserves_primary_message_and_hint_fields() {
+    let fixture = Fixture::new();
+    fixture
+        .engine
+        .sql(
+            "CREATE TABLE wire_rule_base(id integer); \
+         CREATE VIEW wire_rule_view AS SELECT id FROM wire_rule_base; \
+         CREATE RULE discard AS ON INSERT TO wire_rule_view DO INSTEAD NOTHING",
+            &[],
+        )
+        .unwrap();
+    let response = fixture
+        .connect()
+        .query("INSERT INTO wire_rule_view VALUES(1/0) RETURNING id");
+    let error = fields(&response.iter().find(|message| message.0 == b'E').unwrap().1);
+    assert_eq!(error.get(&b'C').unwrap(), "0A000");
+    assert_eq!(
+        error.get(&b'M').unwrap(),
+        "cannot perform INSERT RETURNING on relation \"wire_rule_view\""
+    );
+    assert_eq!(
+        error.get(&b'H').unwrap(),
+        "You need an unconditional ON INSERT DO INSTEAD rule with a RETURNING clause."
+    );
+}
+
+#[test]
 fn empty_descriptors_differ_from_command_only_results() {
     let fixture = Fixture::new();
     let mut client = fixture.connect();

@@ -29,9 +29,19 @@ impl Preparation<'_> {
         outer: Option<&RowSchema>,
         preserve_unknown: bool,
     ) -> Result<QueryOutput, SQLError> {
-        let previous = self.ctes(&plan.ctes, outer)?;
-        let result = self.root(&plan.root, outer, preserve_unknown);
-        self.scope.restore_cte_schemas(previous);
+        let mode = if plan.relations_bound {
+            crate::engine_capabilities::RelationLookupMode::Bound
+        } else {
+            crate::engine_capabilities::RelationLookupMode::Dynamic
+        };
+        let lookup = self.scope.resolution.set_lookup_mode(mode);
+        let result = (|| {
+            let previous = self.ctes(&plan.ctes, outer)?;
+            let result = self.root(&plan.root, outer, preserve_unknown);
+            self.scope.restore_cte_schemas(previous);
+            result
+        })();
+        self.scope.resolution.set_lookup_mode(lookup);
         result
     }
 
@@ -91,8 +101,8 @@ impl Preparation<'_> {
         for (left, right) in left.types.iter_mut().zip(&mut right.types) {
             let mut values = [left.clone(), right.clone()];
             let ty = self.common(&mut values)?;
-            *left = ExpressionType::resolved(Some(ty.clone()));
-            *right = ExpressionType::resolved(Some(ty));
+            *left = ExpressionType::resolved(ty.clone());
+            *right = ExpressionType::resolved(ty);
         }
         super::super::type_resolution::set_operation_output_schema(
             &left.schema(),
@@ -115,7 +125,7 @@ impl Preparation<'_> {
             .map(|source| self.source(source, &block.subqueries, outer))
             .transpose()?
             .unwrap_or_default();
-        let source = analysis::with_unqualified_table_pseudo_columns(&source);
+        let source = analysis::with_query_source_columns(&source, block);
         let input = overlay_outer_schema(&source, outer);
         let mut output =
             self.projections(&block.projections, &source, &input, &block.subqueries)?;
@@ -161,6 +171,7 @@ impl Preparation<'_> {
         let mut output = QueryOutput {
             columns: Vec::new(),
             types: Vec::new(),
+            open: false,
         };
         for (projection, label) in projections.iter().zip(labels) {
             let expansion = if matches!(projection.expr, ScalarExpr::QualifiedStar(_)) {
@@ -169,6 +180,12 @@ impl Preparation<'_> {
                 source
             };
             if let Some(columns) = projection_star_columns(&projection.expr, expansion)? {
+                output.open |= match &projection.expr {
+                    ScalarExpr::QualifiedStar(qualifier) => {
+                        expansion.columns_are_open(Some(qualifier))
+                    }
+                    _ => expansion.columns_are_open(None),
+                };
                 for (column, ty) in columns {
                     output.columns.push(column);
                     output.types.push(ExpressionType::resolved(ty));
@@ -213,12 +230,10 @@ impl Preparation<'_> {
         }
         let types = columns
             .iter_mut()
-            .map(|column| {
-                self.common(column)
-                    .map(|ty| ExpressionType::resolved(Some(ty)))
-            })
+            .map(|column| self.common(column).map(ExpressionType::resolved))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(QueryOutput {
+            open: false,
             columns: (1..=width)
                 .map(|position| format!("column{position}"))
                 .collect(),

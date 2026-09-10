@@ -48,6 +48,12 @@ fn format_array(
     element: &ColumnType,
     engine: Option<&dyn EngineHook>,
 ) -> Result<String, SQLError> {
+    // SQL array type identity does not constrain value dimensions. Nested
+    // declarations still name the scalar element formatter at every depth.
+    let mut element = element;
+    while let ColumnType::Array(inner) = element {
+        element = inner;
+    }
     let (values, prefix) = match value {
         Value::Array(array) => {
             let mut prefix = String::new();

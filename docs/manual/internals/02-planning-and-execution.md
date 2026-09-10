@@ -1,6 +1,6 @@
 # Planning and Execution
 
-Every compiled statement follows one top-level path: SQL statement, unified lowering, plan-native optimization, and `UnifiedPlanExecutor`. There is no separate top-level row dispatcher that bypasses the unified executor.
+Every compiled statement follows one top-level path: SQL statement, unified lowering, semantic analysis, plan-native optimization, and `UnifiedPlanExecutor`. There is no separate top-level row dispatcher that bypasses the unified executor.
 
 ## End-to-end pipeline
 
@@ -94,7 +94,14 @@ Tuple-producing operator joins are SQL table-function sources. `text_similarity_
 
 ## Plan-native optimization
 
-Optimization recursively visits query blocks, CTEs, set-operation branches, scalar subqueries, mutations, prepared bodies, and explained bodies. Important passes include predicate handling, access selection, join order, ordering propagation, score top-K selection, and specialized `OperatorTree` rewrites.
+Optimization recursively visits executable query blocks, CTEs, set-operation branches, scalar subqueries, mutations, and explained bodies. PREPARE and stored view or routine definitions retain logical plans until execution; CTAS and materialized-view creation optimize the populated query after their target checks. Important passes include predicate handling, access selection, join order, ordering propagation, score top-K selection, and specialized `OperatorTree` rewrites.
+
+Constant folding preserves declared SQL types and propagates arithmetic and conversion errors through `OptimizerError::Expression`; join-graph errors use `OptimizerError::JoinGraph`. CASE, Boolean expressions, and COALESCE retain their type-analysis requirements while respecting value-evaluation order. Runtime COALESCE evaluates arguments only until the first non-NULL value.
+
+Before constant planning, rule-input analysis follows automatic-view column mappings and retains only NEW inputs needed by surviving actions. Commands suppressed by unconditional INSTEAD NOTHING can discard their unused source, predicates, and CTEs; scalar-subquery arenas are compacted with surviving references remapped. Command completion uses the original command's row count when it survives, otherwise the last unconditional INSTEAD action of the same command kind.
+
+Schema analysis distinguishes declared zero-column SQL tables from document sources and registered native table functions whose fields become available at execution. Open descriptor metadata defers only names in those source namespaces; closed sources still reject missing or ambiguous columns before evaluation. The declared-column distinction survives transaction rollback, catalog refresh, and durable reopen.
+
 
 `OperatorTree` runs through `QueryOptimizer`, then `PlanExecutor`, then the engine driver. The driver match is exhaustive; an unknown opaque operator fails explicitly.
 

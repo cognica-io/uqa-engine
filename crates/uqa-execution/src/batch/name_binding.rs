@@ -39,6 +39,11 @@ impl RowSchema {
                 internal: input.index.executor_attributes.clone(),
                 internal_types: input.index.cold.executor_attribute_types.clone(),
                 score_sources,
+                open_qualifiers: input
+                    .columns_are_open(None)
+                    .then(|| Some(Box::<str>::from(qualifier)))
+                    .into_iter()
+                    .collect(),
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 ..SchemaBuildMetadata::default()
             },
@@ -54,6 +59,7 @@ impl RowSchema {
             .chain(self.index.aliases.keys())
             .chain(self.index.cold.binding_only.keys())
             .any(|identity| identity.qualifier() == Some(qualifier))
+            || self.columns_are_open(Some(qualifier))
     }
 
     /// Whether a visible, aliased, or static binding-only identity contains this exact unqualified column, independently of its declared type.
@@ -184,6 +190,7 @@ impl RowSchema {
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
+                open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 extra_ambiguous_unqualified: input.index.ambiguous_unqualified.clone(),
                 extra_ambiguous_qualified: input.index.ambiguous_qualified.clone(),
                 ..SchemaBuildMetadata::default()
@@ -222,6 +229,7 @@ impl RowSchema {
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
+                open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 ..SchemaBuildMetadata::default()
             },
         )
@@ -256,6 +264,7 @@ impl RowSchema {
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
+                open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 extra_ambiguous_unqualified: input.index.ambiguous_unqualified.clone(),
                 extra_ambiguous_qualified: input.index.ambiguous_qualified.clone(),
                 ..SchemaBuildMetadata::default()
@@ -306,6 +315,7 @@ impl RowSchema {
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
+                open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 extra_ambiguous_unqualified: input.index.ambiguous_unqualified.clone(),
                 extra_ambiguous_qualified: input.index.ambiguous_qualified.clone(),
                 ..SchemaBuildMetadata::default()
@@ -335,6 +345,7 @@ impl RowSchema {
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden,
                 binding_only: input.index.cold.binding_only.clone(),
+                open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 ..SchemaBuildMetadata::default()
             },
         )
@@ -400,6 +411,7 @@ impl RowSchema {
                 score_sources,
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
+                open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 ..SchemaBuildMetadata::default()
             },
         )
@@ -431,6 +443,7 @@ impl RowSchema {
                 score_sources,
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only: input.index.cold.binding_only.clone(),
+                open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 ..SchemaBuildMetadata::default()
             },
         )
@@ -504,6 +517,7 @@ impl RowSchema {
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only,
+                open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 extra_ambiguous_unqualified: input.index.ambiguous_unqualified.clone(),
                 extra_ambiguous_qualified: input.index.ambiguous_qualified.clone(),
                 ..SchemaBuildMetadata::default()
@@ -548,6 +562,7 @@ impl RowSchema {
                 score_sources: input.index.cold.score_sources.clone(),
                 wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
                 binding_only,
+                open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 extra_ambiguous_unqualified: ambiguous_unqualified,
                 extra_ambiguous_qualified: ambiguous_qualified,
                 ..SchemaBuildMetadata::default()

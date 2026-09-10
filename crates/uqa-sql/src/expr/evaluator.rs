@@ -107,6 +107,17 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             args,
             ..
         } => {
+            if name.eq_ignore_ascii_case("coalesce")
+                && binding.as_ref().is_none_or(|binding| binding.builtin)
+            {
+                for argument in args {
+                    let value = eval(argument, ctx)?;
+                    if !matches!(value, Value::Null) {
+                        return Ok(value);
+                    }
+                }
+                return Ok(Value::Null);
+            }
             let call_args = evaluate_call_args(args, ctx)?;
             if let Some(binding) = binding {
                 if let Some(FunctionResolutionError::UndefinedFunction { signature }) =

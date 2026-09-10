@@ -566,6 +566,10 @@ impl Engine {
         )
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "rebuilds pinned table metadata and physical state together"
+    )]
     fn detached_query_table_from_documents(
         data: &std::sync::Arc<TableState>,
         metadata: &std::sync::Arc<TableState>,
@@ -637,6 +641,9 @@ impl Engine {
             vector_indexes: parking_lot::RwLock::new(vector_indexes),
             fts_fields: crate::engine_state::CatalogCell::new(fts_fields),
             columns: crate::engine_state::CatalogCell::new(metadata_columns),
+            columns_declared: crate::engine_state::CatalogCell::from_snapshot(
+                metadata.columns_declared.snapshot(),
+            ),
             next_id: parking_lot::Mutex::new(*metadata.next_id.lock()),
             analyzer: crate::engine_state::CatalogCell::new(analyzer),
             column_stats: crate::engine_state::CatalogCell::from_snapshot(

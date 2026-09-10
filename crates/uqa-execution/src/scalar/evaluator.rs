@@ -74,6 +74,17 @@ pub fn eval_scalar(
             args,
             ..
         } => {
+            if name.eq_ignore_ascii_case("coalesce")
+                && binding.as_ref().is_none_or(|binding| binding.builtin)
+            {
+                for argument in args {
+                    let value = eval_scalar(argument, context)?;
+                    if !matches!(value, Value::Null) {
+                        return Ok(value);
+                    }
+                }
+                return Ok(Value::Null);
+            }
             let arguments = eval_call_arguments(args, context)?;
             if let Some(binding) = binding {
                 if let Some(uqa_sql::ast::FunctionResolutionError::UndefinedFunction {

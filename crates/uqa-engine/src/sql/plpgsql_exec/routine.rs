@@ -329,7 +329,8 @@ fn execute_sql_language(
                 )
         )
         .then(|| DirectRoutineCommandGuard::enter(engine));
-        last = UnifiedPlanExecutor::new_nested(engine, &params).execute(plan)?;
+        let plan = super::super::plan_for_execution(engine, plan.clone(), &params)?;
+        last = UnifiedPlanExecutor::new_nested(engine, &params).execute(&plan)?;
     }
     let out_params = def.output_params();
     let returns_anonymous_record = routine_returns_anonymous_record(def);

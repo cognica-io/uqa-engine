@@ -16,6 +16,7 @@ mod catalog_sources;
 mod commands;
 mod cte_controls;
 mod ctes;
+mod merge_scopes;
 mod preparation;
 mod projection;
 mod routine_binding;
@@ -282,7 +283,7 @@ impl SchemaScope {
             |source| self.bind_source(routines, source, &block.subqueries, params, outer),
         )?;
         let source = if self.validate_references {
-            analysis::with_unqualified_table_pseudo_columns(&source)
+            analysis::with_query_source_columns(&source, block)
         } else {
             source
         };
@@ -322,6 +323,7 @@ impl SchemaScope {
             );
         }
         let output = RowSchema::with_types(columns, types);
+        let output = analysis::with_projected_open_columns(&output, &block.projections, &source);
         if self.validate_references {
             self.validate_query_block_clauses(
                 routines,
@@ -440,7 +442,7 @@ impl SchemaScope {
         clippy::too_many_lines,
         reason = "preserves SELECT schema and row identity"
     )]
-    fn bind_source(
+    fn bind_source_inner(
         &mut self,
         routines: &dyn RoutineResolution,
         source: &SourcePlan,
@@ -557,6 +559,11 @@ impl SchemaScope {
                         bound_columns.as_deref(),
                     )?;
                     let schema = alias_table_schema(&schema, qualifier, column_aliases)?;
+                    let schema = if table.columns.is_empty() && !table.columns_declared {
+                        RowSchema::with_open_columns(&schema, Some(qualifier))
+                    } else {
+                        schema
+                    };
                     return Ok(analysis::with_table_pseudo_columns(&schema, qualifier));
                 }
                 let foreign_table = self
@@ -653,7 +660,7 @@ impl SchemaScope {
                 let input = outer.cloned().unwrap_or_default();
                 let type_resolver = self.query_function_type_resolver_for_subqueries(
                     routines,
-                    args.iter().any(expr_contains_subquery),
+                    args,
                     &input,
                     subqueries,
                     params,
@@ -756,7 +763,17 @@ impl SchemaScope {
                     &type_resolver,
                 );
                 let qualifier = alias.as_deref().unwrap_or(output_name);
-                Ok(RowSchema::with_qualified_types(qualifier, columns, types))
+                let schema = RowSchema::with_qualified_types(qualifier, columns, types);
+                Ok(
+                    if user_function.is_none()
+                        && column_types.is_empty()
+                        && routines.has_registered_table_function(name)
+                    {
+                        RowSchema::with_open_columns(&schema, Some(qualifier))
+                    } else {
+                        schema
+                    },
+                )
             }
             SourcePlan::FunctionGroup {
                 functions,
@@ -769,9 +786,11 @@ impl SchemaScope {
                     .ok_or_else(|| SQLError::Internal("ROWS FROM group has no functions".into()))?;
                 let mut columns = Vec::new();
                 let mut types = Vec::new();
+                let mut open = false;
                 for function in functions {
                     let member = table_function_member_source(function);
                     let schema = self.bind_source(routines, &member, subqueries, params, outer)?;
+                    open |= schema.columns_are_open(None);
                     columns.extend(schema.iter().enumerate().map(|(position, column)| {
                         schema.public_name(position).unwrap_or(column).to_string()
                     }));
@@ -790,7 +809,12 @@ impl SchemaScope {
                 for (column, alias) in columns.iter_mut().zip(column_aliases) {
                     column.clone_from(alias);
                 }
-                Ok(RowSchema::with_qualified_types(qualifier, columns, types))
+                let schema = RowSchema::with_qualified_types(qualifier, columns, types);
+                Ok(if open {
+                    RowSchema::with_open_columns(&schema, Some(qualifier))
+                } else {
+                    schema
+                })
             }
             SourcePlan::Subquery {
                 body,
@@ -914,7 +938,7 @@ impl SchemaScope {
                 let input = outer.cloned().unwrap_or_default();
                 let resolver = self.query_function_type_resolver_for_subqueries(
                     routines,
-                    args.iter().any(expr_contains_subquery),
+                    args,
                     &input,
                     subqueries,
                     params,

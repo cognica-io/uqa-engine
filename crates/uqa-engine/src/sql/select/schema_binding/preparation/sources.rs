@@ -25,8 +25,18 @@ impl Preparation<'_> {
                 rows,
                 alias,
                 column_aliases,
+                internal_relation,
                 ..
             } => {
+                if internal_relation.is_some() {
+                    return self.scope.bind_source(
+                        self.routines,
+                        source,
+                        subqueries,
+                        &self.parameters.values(),
+                        outer,
+                    );
+                }
                 let output = self.values(rows, subqueries, outer)?;
                 return Ok(rename_schema(
                     &output.schema(),

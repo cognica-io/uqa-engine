@@ -216,7 +216,11 @@ fn boolean_type_is_enforced_and_survives_reopen() {
             "CREATE TABLE flags (id INTEGER PRIMARY KEY, enabled BOOLEAN)",
         );
         exec(&engine, "INSERT INTO flags VALUES (1, true), (2, 'false')");
-        assert_err_contains(&engine, "INSERT INTO flags VALUES (3, 1)", "to boolean");
+        assert_err_contains(
+            &engine,
+            "INSERT INTO flags VALUES (3, 1)",
+            "column \"enabled\" is of type boolean but expression is of type integer",
+        );
     }
 
     let reopened = Engine::open(&path).unwrap();

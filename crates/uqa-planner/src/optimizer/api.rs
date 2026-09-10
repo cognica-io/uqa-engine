@@ -7,10 +7,21 @@
 //! Optimizer configuration, statistics seam, and public entry points.
 
 use super::{
-    optimize_unified_plan, reorder_unified_plan_joins, AggregateClassifier, JoinGraphResult,
+    optimize_unified_plan, reorder_unified_plan_joins, AggregateClassifier, JoinGraphError,
     RelationStats, ScalarExpr, SourcePlan, UnifiedPlan,
 };
 use crate::LocalAccessEstimate;
+
+/// Errors raised while simplifying expressions or choosing a physical join order.
+#[derive(Debug, thiserror::Error)]
+pub enum OptimizerError {
+    #[error(transparent)]
+    Expression(#[from] uqa_sql::SQLError),
+    #[error(transparent)]
+    JoinGraph(#[from] JoinGraphError),
+}
+
+pub type OptimizerResult<T> = Result<T, OptimizerError>;
 
 #[derive(Debug, Clone)]
 pub struct OptimizerConfig {
@@ -81,7 +92,7 @@ impl AggregateClassifier for NoRegisteredAggregates {
 }
 
 /// Optimize a fully lowered plan using the built-in aggregate catalogue.
-pub fn optimize(plan: UnifiedPlan, config: &OptimizerConfig) -> JoinGraphResult<UnifiedPlan> {
+pub fn optimize(plan: UnifiedPlan, config: &OptimizerConfig) -> OptimizerResult<UnifiedPlan> {
     optimize_with_aggregates_and_statistics(
         plan,
         config,
@@ -95,7 +106,7 @@ pub fn optimize_with_aggregates(
     plan: UnifiedPlan,
     config: &OptimizerConfig,
     aggregates: &dyn AggregateClassifier,
-) -> JoinGraphResult<UnifiedPlan> {
+) -> OptimizerResult<UnifiedPlan> {
     optimize_with_aggregates_and_statistics(plan, config, aggregates, &NoSourceStatistics)
 }
 
@@ -104,7 +115,7 @@ pub fn optimize_with_statistics(
     plan: UnifiedPlan,
     config: &OptimizerConfig,
     statistics: &dyn SourceStatistics,
-) -> JoinGraphResult<UnifiedPlan> {
+) -> OptimizerResult<UnifiedPlan> {
     optimize_with_aggregates_and_statistics(plan, config, &NoRegisteredAggregates, statistics)
 }
 
@@ -115,8 +126,8 @@ pub fn optimize_with_aggregates_and_statistics(
     config: &OptimizerConfig,
     aggregates: &dyn AggregateClassifier,
     statistics: &dyn SourceStatistics,
-) -> JoinGraphResult<UnifiedPlan> {
-    optimize_unified_plan(&mut plan, config, aggregates);
+) -> OptimizerResult<UnifiedPlan> {
+    optimize_unified_plan(&mut plan, config, aggregates)?;
     if config.enable_join_reordering {
         reorder_unified_plan_joins(&mut plan, statistics)?;
     }

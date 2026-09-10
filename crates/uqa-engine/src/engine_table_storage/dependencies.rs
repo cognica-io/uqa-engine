@@ -314,6 +314,7 @@ impl Engine {
         hierarchy: &uqa_sql::ast::TableHierarchy,
     ) -> StorageBackendResult<()> {
         let constraints = uqa_sql::ast::TableConstraintSet {
+            columns_declared: Some(*table.columns_declared.read()),
             persistence: table.persistence,
             on_commit: table.on_commit,
             checks: checks.to_vec(),

@@ -250,6 +250,7 @@ fn create_table_after_preflight(
             &c.name,
             registered_columns,
             uqa_sql::ast::TableConstraintSet {
+                columns_declared: Some(true),
                 persistence: c.persistence,
                 on_commit: c.on_commit,
                 checks: c.checks.clone(),

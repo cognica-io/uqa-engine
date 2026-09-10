@@ -368,3 +368,21 @@ pub(super) fn numeric_rank(ty: &ColumnType) -> Option<u8> {
         _ => None,
     }
 }
+
+/// Array dimensions belong to values; `PostgreSQL` operator signatures identify an array by its scalar element type, including an element domain's identity.
+pub(super) fn same_operator_type(left: &ColumnType, right: &ColumnType) -> bool {
+    fn element(mut ty: &ColumnType) -> &ColumnType {
+        while let ColumnType::Array(inner) = ty {
+            ty = inner;
+        }
+        ty
+    }
+    let left = base_type(left);
+    let right = base_type(right);
+    match (left, right) {
+        (ColumnType::Array(left), ColumnType::Array(right)) => {
+            element(left).without_type_modifiers() == element(right).without_type_modifiers()
+        }
+        _ => left.without_type_modifiers() == right.without_type_modifiers(),
+    }
+}

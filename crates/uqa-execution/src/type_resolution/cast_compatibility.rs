@@ -18,7 +18,7 @@ use super::common::base_type;
 pub fn explicit_type_compatible(source: &ColumnType, target: &ColumnType) -> bool {
     let source = base_type(source).without_type_modifiers();
     let target = base_type(target).without_type_modifiers();
-    if source == target {
+    if source == target || embedding_input_compatible(&source, &target) {
         return true;
     }
     if catalog::context(&cast_catalog_name(&source), &cast_catalog_name(&target)).is_some() {
@@ -32,7 +32,7 @@ pub fn explicit_type_compatible(source: &ColumnType, target: &ColumnType) -> boo
             _ => None,
         };
         if let Some(source) = source {
-            return explicit_type_compatible(source, target);
+            return explicit_type_compatible(array_element(source), array_element(target));
         }
     }
     is_string_io_type(&source) || is_string_io_type(&target)
@@ -64,11 +64,14 @@ pub(super) fn validate_explicit_cast(
 pub fn assignment_type_compatible(source: &ColumnType, target: &ColumnType) -> bool {
     let source = base_type(source).without_type_modifiers();
     let target = base_type(target).without_type_modifiers();
-    if source == target || is_string_io_type(&target) {
+    if source == target
+        || is_string_io_type(&target)
+        || embedding_input_compatible(&source, &target)
+    {
         return true;
     }
     if let (ColumnType::Array(source), ColumnType::Array(target)) = (&source, &target) {
-        return assignment_type_compatible(source, target);
+        return assignment_type_compatible(array_element(source), array_element(target));
     }
     let source = super::canonical_column_type_name(&source);
     let target = super::canonical_column_type_name(&target);
@@ -96,6 +99,33 @@ pub fn assignment_type_compatible(source: &ColumnType, target: &ColumnType) -> b
                     "int4" | "int8"
                 )
         )
+}
+
+fn array_element(mut ty: &ColumnType) -> &ColumnType {
+    while let ColumnType::Array(element) = ty {
+        ty = element;
+    }
+    ty
+}
+
+fn embedding_input_compatible(source: &ColumnType, target: &ColumnType) -> bool {
+    let element = match (source, target) {
+        (ColumnType::Array(element), ColumnType::Vector(_)) => element.as_ref(),
+        (ColumnType::Array(rows), ColumnType::Tensor(_)) => match rows.as_ref() {
+            ColumnType::Array(element) => element.as_ref(),
+            _ => return false,
+        },
+        _ => return false,
+    };
+    matches!(
+        base_type(element),
+        ColumnType::SmallInteger
+            | ColumnType::Integer
+            | ColumnType::BigInteger
+            | ColumnType::Real
+            | ColumnType::DoublePrecision
+            | ColumnType::Numeric { .. }
+    )
 }
 
 fn is_string_io_type(ty: &ColumnType) -> bool {

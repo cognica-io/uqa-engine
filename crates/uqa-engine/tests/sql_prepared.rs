@@ -10,6 +10,8 @@
 mod analysis;
 #[path = "sql_prepared/parameters.rs"]
 mod parameters;
+#[path = "sql_prepared/planning.rs"]
+mod planning;
 
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLResult};

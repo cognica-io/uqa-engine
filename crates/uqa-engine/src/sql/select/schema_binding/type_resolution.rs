@@ -12,7 +12,7 @@ use uqa_sql::{SQLError, SQLParam};
 
 use crate::engine_user_functions::RoutineResolution;
 
-use super::{expr_contains_subquery, scope::merge_types, QueryPlan, ScalarExpr, SchemaScope};
+use super::{scope::merge_types, QueryPlan, ScalarExpr, SchemaScope};
 
 pub(super) fn set_operation_output_schema(
     left: &RowSchema,
@@ -52,7 +52,7 @@ impl SchemaScope {
     ) -> Result<QueryFunctionTypeResolver<'a>, SQLError> {
         self.query_function_type_resolver_for_subqueries(
             routines,
-            expr_contains_subquery(expression),
+            std::slice::from_ref(expression),
             schema,
             subqueries,
             params,
@@ -63,13 +63,17 @@ impl SchemaScope {
     pub(super) fn query_function_type_resolver_for_subqueries<'a>(
         &mut self,
         routines: &'a dyn RoutineResolution,
-        contains_subquery: bool,
+        expressions: &[ScalarExpr],
         schema: &RowSchema,
         subqueries: &[QueryPlan],
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<QueryFunctionTypeResolver<'a>, SQLError> {
-        if subqueries.is_empty() || !contains_subquery {
+        let mut referenced = std::collections::BTreeSet::new();
+        for expression in expressions {
+            crate::sql::select::collect_subquery_ids(expression, &mut referenced);
+        }
+        if referenced.is_empty() {
             return Ok(QueryFunctionTypeResolver {
                 routines,
                 scalar_subquery_types: None,
@@ -77,13 +81,16 @@ impl SchemaScope {
             });
         }
         let subquery_outer = self.validate_references.then_some(schema).or(outer);
-        let scalar_subquery_types = subqueries
-            .iter()
-            .map(|plan| {
-                self.bind_query(routines, plan, params, subquery_outer)
-                    .map(|output| output.column_type(0).cloned())
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut scalar_subquery_types = vec![None; subqueries.len()];
+        for index in referenced {
+            let plan = subqueries.get(index).ok_or_else(|| {
+                SQLError::Internal(format!("scalar subquery slot {index} is out of bounds"))
+            })?;
+            scalar_subquery_types[index] = self
+                .bind_query(routines, plan, params, subquery_outer)?
+                .column_type(0)
+                .cloned();
+        }
         Ok(QueryFunctionTypeResolver {
             routines,
             scalar_subquery_types: Some(scalar_subquery_types),

@@ -16,6 +16,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Released unwritten compressed SQLite readers before waiting for writer ownership or snapshot publication. Automatic statistics publication no longer deadlocks an application COMMIT, and catalog writer fences retain savepoint behavior while refreshing committed data.
+- Removed unused rewrite-rule inputs before constant planning and preserved PostgreSQL completion counts from the last unconditional INSTEAD action of the original command kind. Rule RETURNING errors retain separate primary and hint fields over TCP.
+- Preserved declared empty SQL schemas through column deletion, rollback, catalog refresh, and reopen while deferring native document and table-function fields until their runtime descriptors are available.
+- Propagated immutable constant-expression errors from planning with their original SQLSTATEs and declared result types. Semantic analysis precedes folding, prepared arguments bind before body planning, and zero-parameter SQL EXECUTE ignores supplied argument expressions. Runtime COALESCE stops after its first non-NULL value; stored views and routines retain logical definitions until execution.
 - Deferred prepared-body optimization until execution and resolved binary operators through PostgreSQL catalog signatures. Invalid typed NULL casts and operator combinations fail during preparation; quoted `"char"` retains its internal single-byte type identity.
 - Fixed stored SQL-standard routine source aliases shifting or invalidating catalog refresh after an unread column is deleted. Table input columns, nested join aliases, and expanded projections retain their creation-time shape through added columns, old-name reuse, renames, rollback, refresh, and reopen. Sequence regclass constants in generated columns bind the original object, and sequence cascades remove dependent readers while preserving unrelated routines and aliases; legacy definitions migrate during initial open.
 - Fixed column renames leaving SQL-standard function and procedure bodies bound to old column names and breaking subsequent SQLite catalog refresh. Renames now retain query and DML bindings, aliases, CTE and result names, unrelated parameters, and exact column identity after old-name reuse, including rollback, sibling-engine refresh, and reopen. Missing and duplicate rename targets report PostgreSQL column SQLSTATEs.
@@ -38,6 +42,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Added structured `SQLError::Diagnostic` fields and persisted `TableConstraintSet::columns_declared` metadata for declared SQL schemas.
+- Unified optimizer APIs now return `OptimizerResult` with `OptimizerError::Expression` and `OptimizerError::JoinGraph`, preserving the distinction between SQL expression failures and join-graph failures.
 - Rust `Statement::Prepare` and `CommandPlan::Prepare` now retain `parameter_types`; existing serialized declarations without this field remain readable.
 - `REGTYPE` values, including `pg_typeof`, now retain catalog OIDs in the integer carrier so comparisons and catalog lookups use type identity. Cast to text or use `sql::format_postgres_text` for the visible type name. `SQLResult::kind` distinguishes row descriptors from commands, including zero-column queries.
 - Rust AST CTEs now expose `body: CteBody` instead of the SELECT-only `query` field, and planner CTEs expose `CtePlanBody`. Match the query or command variant when traversing WITH definitions. The SELECT-only serialized `query` representation remains readable in existing catalogs.

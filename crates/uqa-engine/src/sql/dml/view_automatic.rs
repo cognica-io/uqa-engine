@@ -28,6 +28,7 @@ mod returning;
 mod rewrite_insert;
 mod rewrite_merge;
 mod rewrite_update_delete;
+mod rule_inputs;
 mod validation;
 
 use correlation::{
@@ -48,6 +49,7 @@ use returning::{
 pub(super) use rewrite_insert::rewrite_insert_to_base;
 pub(super) use rewrite_merge::rewrite_merge_to_base;
 pub(super) use rewrite_update_delete::{rewrite_delete_to_base, rewrite_update_to_base};
+pub(in crate::sql) use rule_inputs::rule_input_requirements;
 use validation::{
     duplicate_assignment, duplicate_insert_column, layer_column, merge_action_capability_error,
     validate_direct_view_rule_path, validate_insert_targets, validate_mapped_columns,

@@ -40,6 +40,14 @@ pub enum SQLError {
     /// `SQLERRM` report the same code `PostgreSQL` would.
     #[error("{message}")]
     Routine { sqlstate: String, message: String },
+    /// A primary SQL error with separate `PostgreSQL` diagnostic fields. `SQLERRM` and `Display` expose only the primary message; protocol clients receive detail and hint independently.
+    #[error("{message}")]
+    Diagnostic {
+        sqlstate: String,
+        message: String,
+        detail: Option<String>,
+        hint: Option<String>,
+    },
     #[error("internal error: {0}")]
     Internal(String),
 }
@@ -68,7 +76,9 @@ impl SQLError {
             SQLError::BadArity { .. } => Some("42883"), // undefined_function (PG)
             SQLError::MissingParam(_) => Some("S1002"), // ERRCODE_INVALID_PARAMETER_VALUE
             SQLError::VectorDimMismatch { .. } => Some("22023"), // invalid_parameter_value
-            SQLError::Routine { sqlstate, .. } => Some(sqlstate),
+            SQLError::Routine { sqlstate, .. } | SQLError::Diagnostic { sqlstate, .. } => {
+                Some(sqlstate)
+            }
             SQLError::Internal(_) => Some("XX000"), // internal_error
         }
     }

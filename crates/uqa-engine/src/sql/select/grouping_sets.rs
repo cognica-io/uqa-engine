@@ -260,6 +260,11 @@ fn normalize_expression(
             let expression = normalize_expression(engine, *expr, schema, params)?;
             if source_type.as_ref() == Some(&target_type) {
                 expression
+            } else if let ScalarExpr::Literal(Value::Null) = expression {
+                ScalarExpr::TypedLiteral {
+                    value: Value::Null,
+                    ty: target_type.sql_name(),
+                }
             } else {
                 ScalarExpr::Cast {
                     expr: Box::new(expression),
@@ -276,13 +281,24 @@ fn normalize_expression(
             subquery,
             negated,
         },
+        ScalarExpr::TypedLiteral { value, ty } => {
+            let literal = ScalarExpr::Literal(value.clone());
+            let declared = ColumnType::from_sql_name(&ty)?;
+            if expression_type(engine, &literal, schema, params)?.as_ref() == Some(&declared) {
+                literal
+            } else {
+                ScalarExpr::TypedLiteral {
+                    value,
+                    ty: declared.sql_name(),
+                }
+            }
+        }
         expression @ (ScalarExpr::Star
         | ScalarExpr::QualifiedStar(_)
         | ScalarExpr::Default
         | ScalarExpr::Position(_)
         | ScalarExpr::InternalColumn(_)
         | ScalarExpr::Literal(_)
-        | ScalarExpr::TypedLiteral { .. }
         | ScalarExpr::Param(_)
         | ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. }) => expression,

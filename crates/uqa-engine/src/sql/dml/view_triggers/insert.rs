@@ -304,10 +304,10 @@ pub(in crate::sql::dml) fn run_view_insert_inner(
     if let Some(outer_returning) = outer_rule_outcome.returning {
         return outer_returning.project(engine, params, &ctes, None);
     }
-    if !original_query_survives && rule_outcome.executed_action {
+    if !original_query_survives && rule_outcome.sets_command_tag {
         result.affected_rows = rule_outcome.affected_rows;
     }
-    if !original_query_survives && outer_rule_outcome.executed_action {
+    if !original_query_survives && outer_rule_outcome.sets_command_tag {
         result.affected_rows = outer_rule_outcome.affected_rows;
     }
     Ok(result)

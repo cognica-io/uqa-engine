@@ -271,6 +271,9 @@ pub(super) fn scalar_type_inner(
             Ok(target)
         }
         ScalarExpr::Array(items) => {
+            if items.is_empty() {
+                return Ok(None);
+            }
             let mut element = None;
             for item in items {
                 element = common::merge_optional_types(
@@ -278,7 +281,9 @@ pub(super) fn scalar_type_inner(
                     common::common_context_expression_type(item, schema, params, resolver)?,
                 )?;
             }
-            Ok(element.map(|element| ColumnType::Array(Box::new(element))))
+            Ok(Some(ColumnType::Array(Box::new(
+                element.unwrap_or(ColumnType::Text),
+            ))))
         }
         ScalarExpr::Row(items) => {
             for item in items {

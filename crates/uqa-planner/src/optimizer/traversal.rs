@@ -6,6 +6,8 @@
 
 //! Recursive query/source plan traversal and compute classification.
 
+use uqa_sql::SQLError;
+
 use super::{
     choose_access_path, optimize_command, optimize_scalar_slot, prioritize_access_predicates,
     rewrite_implicit_hybrid_fusion, source_allows_unqualified_signals, AggregateClassifier,
@@ -17,34 +19,37 @@ pub(super) fn optimize_unified_plan(
     plan: &mut UnifiedPlan,
     config: &OptimizerConfig,
     aggregates: &dyn AggregateClassifier,
-) {
+) -> Result<(), SQLError> {
     match plan {
-        UnifiedPlan::Query(query) => optimize_query(query, config, aggregates),
-        UnifiedPlan::Command(command) => optimize_command(command, config, aggregates),
+        UnifiedPlan::Query(query) => optimize_query(query, config, aggregates)?,
+        UnifiedPlan::Command(command) => optimize_command(command, config, aggregates)?,
     }
+    Ok(())
 }
 
 pub(super) fn optimize_cte(
     body: &mut crate::CtePlanBody,
     config: &OptimizerConfig,
     aggregates: &dyn AggregateClassifier,
-) {
+) -> Result<(), SQLError> {
     match body {
-        crate::CtePlanBody::Query(query) => optimize_query(query, config, aggregates),
-        crate::CtePlanBody::Command(command) => optimize_command(command, config, aggregates),
+        crate::CtePlanBody::Query(query) => optimize_query(query, config, aggregates)?,
+        crate::CtePlanBody::Command(command) => optimize_command(command, config, aggregates)?,
     }
+    Ok(())
 }
 
 pub(super) fn optimize_query(
     query: &mut QueryPlan,
     config: &OptimizerConfig,
     aggregates: &dyn AggregateClassifier,
-) {
+) -> Result<(), SQLError> {
+    super::subqueries::prune_query(query);
     for cte in &mut query.ctes {
-        optimize_cte(&mut cte.body, config, aggregates);
+        optimize_cte(&mut cte.body, config, aggregates)?;
     }
     match &mut query.root {
-        RelationalPlan::QueryBlock(block) => optimize_query_block(block, config, aggregates),
+        RelationalPlan::QueryBlock(block) => optimize_query_block(block, config, aggregates)?,
         RelationalPlan::SetOp {
             left,
             right,
@@ -54,50 +59,52 @@ pub(super) fn optimize_query(
             subqueries,
             ..
         } => {
-            optimize_query(left, config, aggregates);
-            optimize_query(right, config, aggregates);
+            optimize_query(left, config, aggregates)?;
+            optimize_query(right, config, aggregates)?;
             for order in order_by {
-                optimize_scalar_slot(&mut order.expr, config);
+                optimize_scalar_slot(&mut order.expr, config)?;
             }
             if let Some(limit) = limit {
-                optimize_scalar_slot(limit, config);
+                optimize_scalar_slot(limit, config)?;
             }
             if let Some(offset) = offset {
-                optimize_scalar_slot(offset, config);
+                optimize_scalar_slot(offset, config)?;
             }
             for subquery in subqueries {
-                optimize_query(subquery, config, aggregates);
+                optimize_query(subquery, config, aggregates)?;
             }
         }
         RelationalPlan::Values { rows, subqueries } => {
             for row in rows {
                 for expression in row {
-                    optimize_scalar_slot(expression, config);
+                    optimize_scalar_slot(expression, config)?;
                 }
             }
             for subquery in subqueries {
-                optimize_query(subquery, config, aggregates);
+                optimize_query(subquery, config, aggregates)?;
             }
         }
     }
+    Ok(())
 }
 
 pub(super) fn optimize_query_block(
     block: &mut QueryBlockPlan,
     config: &OptimizerConfig,
     aggregates: &dyn AggregateClassifier,
-) {
+) -> Result<(), SQLError> {
     if let Some(source) = &mut block.from {
-        optimize_source(source, config, aggregates);
+        optimize_source(source, config, aggregates)?;
     }
+    super::source_constants::propagate_source_constants(block);
     for subquery in &mut block.subqueries {
-        optimize_query(subquery, config, aggregates);
+        optimize_query(subquery, config, aggregates)?;
     }
     for projection in &mut block.projections {
-        optimize_scalar_slot(&mut projection.expr, config);
+        optimize_scalar_slot(&mut projection.expr, config)?;
     }
     if let Some(predicate) = &mut block.r#where {
-        optimize_scalar_slot(predicate, config);
+        optimize_scalar_slot(predicate, config)?;
         let allow_unqualified_signals = source_allows_unqualified_signals(block.from.as_ref());
         rewrite_implicit_hybrid_fusion(predicate, allow_unqualified_signals);
         if config.enable_filter_pushdown {
@@ -105,27 +112,27 @@ pub(super) fn optimize_query_block(
         }
     }
     for expression in &mut block.group_by {
-        optimize_scalar_slot(expression, config);
+        optimize_scalar_slot(expression, config)?;
     }
     for set in &mut block.grouping_sets {
         for expression in set {
-            optimize_scalar_slot(expression, config);
+            optimize_scalar_slot(expression, config)?;
         }
     }
     if let Some(having) = &mut block.having {
-        optimize_scalar_slot(having, config);
+        optimize_scalar_slot(having, config)?;
     }
     for order in &mut block.order_by {
-        optimize_scalar_slot(&mut order.expr, config);
+        optimize_scalar_slot(&mut order.expr, config)?;
     }
     if let Some(limit) = &mut block.limit {
-        optimize_scalar_slot(limit, config);
+        optimize_scalar_slot(limit, config)?;
     }
     if let Some(offset) = &mut block.offset {
-        optimize_scalar_slot(offset, config);
+        optimize_scalar_slot(offset, config)?;
     }
     for expression in &mut block.distinct_on {
-        optimize_scalar_slot(expression, config);
+        optimize_scalar_slot(expression, config)?;
     }
 
     let is_aggregate = |name: &str| {
@@ -150,21 +157,22 @@ pub(super) fn optimize_query_block(
         ComputePlan::Project
     };
     block.access = choose_access_path(block);
+    Ok(())
 }
 
 pub(super) fn optimize_source(
     source: &mut SourcePlan,
     config: &OptimizerConfig,
     aggregates: &dyn AggregateClassifier,
-) {
+) -> Result<(), SQLError> {
     match source {
         SourcePlan::Join {
             left, right, on, ..
         } => {
-            optimize_source(left, config, aggregates);
-            optimize_source(right, config, aggregates);
+            optimize_source(left, config, aggregates)?;
+            optimize_source(right, config, aggregates)?;
             if let Some(on) = on {
-                optimize_scalar_slot(on, config);
+                optimize_scalar_slot(on, config)?;
                 if config.enable_filter_pushdown {
                     prioritize_access_predicates(on);
                 }
@@ -173,23 +181,24 @@ pub(super) fn optimize_source(
         SourcePlan::Values { rows, .. } => {
             for row in rows {
                 for expression in row {
-                    optimize_scalar_slot(expression, config);
+                    optimize_scalar_slot(expression, config)?;
                 }
             }
         }
         SourcePlan::Function { args, .. } => {
             for expression in args {
-                optimize_scalar_slot(expression, config);
+                optimize_scalar_slot(expression, config)?;
             }
         }
         SourcePlan::FunctionGroup { functions, .. } => {
             for function in functions {
                 for expression in &mut function.args {
-                    optimize_scalar_slot(expression, config);
+                    optimize_scalar_slot(expression, config)?;
                 }
             }
         }
-        SourcePlan::Subquery { body, .. } => optimize_query(body, config, aggregates),
+        SourcePlan::Subquery { body, .. } => optimize_query(body, config, aggregates)?,
         SourcePlan::Table { .. } => {}
     }
+    Ok(())
 }

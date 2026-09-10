@@ -19,6 +19,8 @@ A connection owns an independent engine session, including its search path, conf
 
 Complete-message parsing and implicit transaction segments follow the [Simple Query engine contract](02-rust-engine-api.md#simple-query-messages). Disconnecting rolls back an open transaction. A cancellation request must present that connection's process identifier and secret; it cancels active work without authorizing queries. `LISTEN` and `NOTIFY` messages are delivered on the owning connection.
 
+Structured SQL diagnostics preserve separate primary-message, detail, and hint protocol fields. Rewrite-rule completion reports the original command count when it survives; otherwise only a same-kind unconditional INSTEAD action can supply that count.
+
 Result descriptions include PostgreSQL type OIDs, lengths, and modifiers. Scalar domains use their base type in the wire descriptor; domain arrays retain the array type identity. Text output follows the result's declared type, including Boolean output, character padding, temporal precision, interval field restrictions, arrays, and catalog aliases such as `regtype`.
 
 The listener negotiates protocol versions 3.0 and 3.2. Extended Query execution, COPY streaming, binary result formats, source-table and source-column identities in row descriptions, password authentication, TLS, and multiple SQL databases remain unfinished. Extended Query messages currently report `0A000` and are discarded until `Sync`; clients must use Simple Query messages for this endpoint.

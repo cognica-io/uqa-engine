@@ -60,7 +60,9 @@ impl SQLScalarFunction for ObserveValue {
 }
 
 fn exec(engine: &Engine, sql: &str) -> SQLResult {
-    engine.sql(sql, &[]).unwrap()
+    engine
+        .sql(sql, &[])
+        .unwrap_or_else(|error| panic!("{sql}: {error}"))
 }
 
 fn engine() -> Engine {

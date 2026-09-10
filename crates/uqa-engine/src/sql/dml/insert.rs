@@ -834,7 +834,7 @@ fn run_insert_inner_with_ctes(
         conflict_update_columns.as_deref(),
         &events,
     )?;
-    let (rule_returning, rule_affected, rule_executed) =
+    let (rule_returning, rule_affected, rule_sets_command_tag) =
         if let Some(rule_batch) = rule_batch.as_ref() {
             let outcome = rule_batch.execute_actions_with_affected(
                 engine,
@@ -847,7 +847,7 @@ fn run_insert_inner_with_ctes(
             (
                 outcome.returning,
                 outcome.affected_rows,
-                outcome.executed_action,
+                outcome.sets_command_tag,
             )
         } else {
             (None, 0, false)
@@ -879,9 +879,9 @@ fn run_insert_inner_with_ctes(
         }
         return dml_returning_result(engine, shape, returning_rows, affected);
     }
-    let rule_affected = if view_rule_outcome.executed_action {
+    let rule_affected = if view_rule_outcome.sets_command_tag {
         view_rule_outcome.affected_rows
-    } else if rule_executed {
+    } else if rule_sets_command_tag {
         rule_affected
     } else {
         0

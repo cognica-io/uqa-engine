@@ -322,7 +322,7 @@ pub(in crate::sql::dml) fn run_view_delete_inner(
             &[],
         )?;
     }
-    let result = finish_view_dml(
+    let mut result = finish_view_dml(
         engine,
         DmlReturningShape {
             table: &target.canonical_name,
@@ -363,6 +363,13 @@ pub(in crate::sql::dml) fn run_view_delete_inner(
                 .as_ref()
                 .map(uqa_execution::SharedSpill::row_schema),
         );
+    }
+    if !original_query_survives {
+        result.affected_rows = if outer_rule_outcome.sets_command_tag {
+            outer_rule_outcome.affected_rows
+        } else {
+            rule_outcome.affected_rows
+        };
     }
     Ok(result)
 }

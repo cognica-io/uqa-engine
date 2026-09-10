@@ -38,7 +38,9 @@ pub(super) fn resolve_operator_type(
     let compatible = match (&left, &right) {
         (Some(left), Some(right)) => match (base_type(left), base_type(right)) {
             (ColumnType::JsonB, ColumnType::JsonB) => true,
-            (ColumnType::Array(left), ColumnType::Array(right)) => left == right,
+            (left @ ColumnType::Array(_), right @ ColumnType::Array(_)) => {
+                super::common::same_operator_type(left, right)
+            }
             (
                 ColumnType::Range(left) | ColumnType::Multirange(left),
                 ColumnType::Range(right) | ColumnType::Multirange(right),

@@ -31,7 +31,7 @@ pub(super) struct ViewRuleReturningCapture {
 pub(super) struct ViewRuleExecutionOutcome {
     pub(super) returning: Option<ViewRuleReturningCapture>,
     pub(super) affected_rows: u64,
-    pub(super) executed_action: bool,
+    pub(super) sets_command_tag: bool,
 }
 
 impl ViewRuleReturningCapture {
@@ -85,16 +85,6 @@ impl PreparedViewRuleBatches {
         }
     }
 
-    pub(super) fn execute_actions(
-        &self,
-        engine: &Engine,
-        returning: Option<&ViewRuleReturningPlan>,
-    ) -> Result<Option<ViewRuleReturningCapture>, SQLError> {
-        Ok(self
-            .execute_actions_with_affected(engine, returning)?
-            .returning)
-    }
-
     pub(super) fn execute_actions_with_affected(
         &self,
         engine: &Engine,
@@ -102,7 +92,7 @@ impl PreparedViewRuleBatches {
     ) -> Result<ViewRuleExecutionOutcome, SQLError> {
         let mut captured = None;
         let mut affected_rows = 0_u64;
-        let mut executed_action = false;
+        let mut sets_command_tag = false;
         let layers = if self.event == uqa_sql::ast::RuleEvent::Insert {
             self.layers.iter().rev().collect::<Vec<_>>()
         } else {
@@ -119,9 +109,9 @@ impl PreparedViewRuleBatches {
                     )
                 });
             let outcome = layer.batch.execute_actions_with_affected(engine, request)?;
-            if outcome.executed_action {
+            if outcome.sets_command_tag {
                 affected_rows = outcome.affected_rows;
-                executed_action = true;
+                sets_command_tag = true;
             }
             let Some(result) = outcome.returning else {
                 continue;
@@ -145,7 +135,7 @@ impl PreparedViewRuleBatches {
         Ok(ViewRuleExecutionOutcome {
             returning: captured,
             affected_rows,
-            executed_action,
+            sets_command_tag,
         })
     }
 }
