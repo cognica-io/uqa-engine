@@ -107,3 +107,31 @@ impl RelationResolution {
         }
     }
 }
+
+/// Bind rename-source diagnostics without losing the distinction between missing schemas and relations.
+pub fn resolve_relation_rename_source(
+    resolution: RelationResolution,
+    name: &str,
+    if_exists: bool,
+    notice: &mut dyn FnMut(&str),
+) -> Result<Option<(String, &'static str)>, crate::SQLError> {
+    match resolution {
+        RelationResolution::Found(canonical, kind) => Ok(Some((canonical, kind))),
+        RelationResolution::MissingSchema(_) | RelationResolution::MissingRelation if if_exists => {
+            let (_, local_name) = uqa_core::RelationIdentity::parse_reference(name)
+                .map_err(crate::SQLError::Internal)?;
+            notice(&format!(
+                "relation \"{local_name}\" does not exist, skipping"
+            ));
+            Ok(None)
+        }
+        RelationResolution::MissingSchema(schema) => Err(crate::SQLError::Routine {
+            sqlstate: "3F000".into(),
+            message: format!("schema \"{schema}\" does not exist"),
+        }),
+        RelationResolution::MissingRelation => Err(crate::SQLError::Routine {
+            sqlstate: "42P01".into(),
+            message: format!("relation \"{name}\" does not exist"),
+        }),
+    }
+}

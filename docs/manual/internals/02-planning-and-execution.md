@@ -45,6 +45,8 @@ DROP INDEX name and dependency analysis is implemented in [`uqa-sql/src/schema/i
 
 [`uqa-sql/src/schema/removal.rs`](../../../crates/uqa-sql/src/schema/removal.rs) binds DROP relation targets and analyzes AGE label protection and foreign-table dependencies. [`uqa-execution/src/schema/removal.rs`](../../../crates/uqa-execution/src/schema/removal.rs) orders hierarchy locks, transaction entry, authority and pending-event checks, and dependent-object removal. Engine supplies fresh catalog inputs at the transaction boundary and binds the existing registry publication services. Schema and domain lifecycle entry uses its separate namespace path.
 
+ALTER TABLE transaction restrictions and table-syntax binding for sequences, views, and foreign tables are implemented in [`schema/table_alteration/syntax.rs`](../../../crates/uqa-sql/src/schema/table_alteration/syntax.rs). Rename-source diagnostics use [`catalog/resolution.rs`](../../../crates/uqa-sql/src/catalog/resolution.rs). Both consume statement or catalog data without holding session or storage state.
+
 ## Statement capability boundaries
 
 ```mermaid

@@ -12,23 +12,10 @@ pub(in crate::sql) fn run_alter_table(
     engine: &Engine,
     mut stmt: AlterTableStmt,
 ) -> Result<SQLResult, SQLError> {
-    if engine.in_transaction_block()
-        && stmt.actions.iter().any(|action| {
-            matches!(
-                action,
-                AlterTableAction::DetachPartition {
-                    concurrently: true,
-                    ..
-                }
-            )
-        })
-    {
-        return Err(SQLError::Routine {
-            sqlstate: "25001".into(),
-            message: "ALTER TABLE ... DETACH CONCURRENTLY cannot run inside a transaction block"
-                .into(),
-        });
-    }
+    uqa_sql::schema::table_alteration::syntax::validate_alter_table_transaction(
+        &stmt,
+        engine.in_transaction_block(),
+    )?;
     let resolution = if matches!(
         stmt.actions.as_slice(),
         [AlterTableAction::RenameTable { .. }]
@@ -45,13 +32,13 @@ pub(in crate::sql) fn run_alter_table(
     match resolution {
         Some((canonical, "table")) => stmt.table = canonical,
         Some((canonical, "sequence")) => {
-            return run_alter_sequence_with_table_syntax(engine, canonical, &stmt);
+            return run_alter_sequence_with_table_syntax(engine, &canonical, &stmt);
         }
         Some((canonical, "foreign table")) => {
-            return run_alter_foreign_table_with_table_syntax(engine, canonical, &stmt);
+            return run_alter_foreign_table_with_table_syntax(engine, &canonical, &stmt);
         }
         Some((canonical, kind @ ("view" | "materialized view"))) => {
-            return run_alter_view_with_table_syntax(engine, canonical, kind, &stmt);
+            return run_alter_view_with_table_syntax(engine, &canonical, kind, &stmt);
         }
         Some((canonical, kind)) => {
             return Err(SQLError::Routine {
@@ -87,134 +74,69 @@ pub(in crate::sql) fn run_alter_table(
 
 fn run_alter_view_with_table_syntax(
     engine: &Engine,
-    canonical: String,
+    canonical: &str,
     kind: &str,
     stmt: &AlterTableStmt,
 ) -> Result<SQLResult, SQLError> {
-    if let [AlterTableAction::RenameTable { to }] = stmt.actions.as_slice() {
-        engine.alter_view(&uqa_sql::ast::AlterViewStmt {
-            name: canonical,
-            kind: if kind == "view" {
-                uqa_sql::ast::AlterViewKind::View
-            } else {
-                uqa_sql::ast::AlterViewKind::MaterializedView
-            },
-            if_exists: stmt.if_exists,
-            action: uqa_sql::ast::AlterViewAction::RenameTo(to.clone()),
-        })?;
+    if let Some(change) = uqa_sql::schema::table_alteration::syntax::alter_view_from_table_syntax(
+        canonical, kind, stmt,
+    )? {
+        engine.alter_view(&change)?;
         return Ok(SQLResult::empty());
     }
-    if kind == "view"
-        && stmt.actions.iter().all(|action| {
-            matches!(
-                action,
-                AlterTableAction::RenameRule { .. } | AlterTableAction::RenameTrigger { .. }
-            )
-        })
-    {
-        return engine.with_implicit_transaction(|engine| {
-            for action in &stmt.actions {
-                match action {
-                    AlterTableAction::RenameRule { from, to } => {
-                        engine.rename_rule(&canonical, from, to)?;
-                    }
-                    AlterTableAction::RenameTrigger { from, to } => {
-                        engine.rename_trigger(&canonical, from, to)?;
-                    }
-                    _ => unreachable!("view ALTER was restricted to event lifecycle actions"),
+    engine.with_implicit_transaction(|engine| {
+        for action in &stmt.actions {
+            match action {
+                AlterTableAction::RenameRule { from, to } => {
+                    engine.rename_rule(canonical, from, to)?;
                 }
+                AlterTableAction::RenameTrigger { from, to } => {
+                    engine.rename_trigger(canonical, from, to)?;
+                }
+                _ => unreachable!("view ALTER was restricted to event lifecycle actions"),
             }
-            Ok(SQLResult::empty())
-        });
-    }
-    Err(SQLError::Routine {
-        sqlstate: "42809".into(),
-        message: format!("ALTER TABLE: relation `{canonical}` is a {kind}, not a table"),
+        }
+        Ok(SQLResult::empty())
     })
 }
 
 fn run_alter_foreign_table_with_table_syntax(
     engine: &Engine,
-    canonical: String,
+    canonical: &str,
     stmt: &AlterTableStmt,
 ) -> Result<SQLResult, SQLError> {
-    if stmt.actions.iter().all(|action| {
-        matches!(
-            action,
-            AlterTableAction::RenameTrigger { .. } | AlterTableAction::SetTriggerEnableMode { .. }
-        )
-    }) {
+    let Some(change) =
+        uqa_sql::schema::table_alteration::syntax::alter_foreign_table_from_table_syntax(
+            canonical, stmt,
+        )?
+    else {
         return engine.with_implicit_transaction(|engine| {
-            engine.ensure_foreign_table_owner(&canonical)?;
+            engine.ensure_foreign_table_owner(canonical)?;
             for action in &stmt.actions {
                 match action {
                     AlterTableAction::RenameTrigger { from, to } => {
-                        engine.rename_trigger(&canonical, from, to)?;
+                        engine.rename_trigger(canonical, from, to)?;
                     }
                     AlterTableAction::SetTriggerEnableMode { name, mode, .. } => {
-                        engine.set_trigger_enable_mode(&canonical, name.as_deref(), *mode)?;
+                        engine.set_trigger_enable_mode(canonical, name.as_deref(), *mode)?;
                     }
                     _ => unreachable!("foreign-table trigger actions were checked above"),
                 }
             }
             Ok(SQLResult::empty())
         });
-    }
-    let action = match stmt.actions.as_slice() {
-        [AlterTableAction::ChangeOwner { owner }] => {
-            uqa_sql::ast::AlterForeignTableAction::OwnerTo(owner.clone())
-        }
-        [AlterTableAction::RenameTable { to }] => {
-            uqa_sql::ast::AlterForeignTableAction::RenameTo(to.clone())
-        }
-        _ => {
-            return Err(SQLError::Routine {
-                sqlstate: "42809".into(),
-                message: format!(
-                    "ALTER TABLE: relation `{canonical}` is a foreign table, not a table"
-                ),
-            });
-        }
     };
-    engine.alter_foreign_table(&uqa_sql::ast::AlterForeignTableStmt {
-        name: canonical,
-        if_exists: stmt.if_exists,
-        action,
-    })?;
+    engine.alter_foreign_table(&change)?;
     Ok(SQLResult::empty())
 }
 
 fn run_alter_sequence_with_table_syntax(
     engine: &Engine,
-    canonical: String,
+    canonical: &str,
     stmt: &AlterTableStmt,
 ) -> Result<SQLResult, SQLError> {
-    let mut alter = uqa_sql::ast::AlterSequence {
-        name: canonical.clone(),
-        if_exists: stmt.if_exists,
-        ..uqa_sql::ast::AlterSequence::default()
-    };
-    match stmt.actions.as_slice() {
-        [AlterTableAction::SetPersistence { persistence }] => {
-            alter.persistence = Some(*persistence);
-        }
-        [AlterTableAction::RenameTable { to }] => {
-            alter.lifecycle = uqa_sql::ast::SequenceLifecycle::RenameTo { name: to.clone() };
-        }
-        [AlterTableAction::SetSchema { schema }] => {
-            alter.lifecycle = uqa_sql::ast::SequenceLifecycle::SetSchema {
-                schema: schema.clone(),
-            };
-        }
-        [AlterTableAction::ChangeOwner { owner }] => {
-            alter.role_owner = Some(owner.clone());
-        }
-        _ => {
-            return Err(SQLError::Routine {
-                sqlstate: "42809".into(),
-                message: format!("ALTER TABLE: relation `{canonical}` is a sequence, not a table"),
-            });
-        }
-    }
+    let alter = uqa_sql::schema::table_alteration::syntax::alter_sequence_from_table_syntax(
+        canonical, stmt,
+    )?;
     super::run_alter_sequence(engine, alter)
 }
