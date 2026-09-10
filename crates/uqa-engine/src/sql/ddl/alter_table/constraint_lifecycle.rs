@@ -11,7 +11,7 @@ use super::foreign_key::{
 };
 use super::{
     ddl_storage_error, resolve_foreign_key_parent, validate_temporal_foreign_key, ColumnType,
-    Engine, ForeignKey, SQLError, Value,
+    Engine, ForeignKey, SQLError,
 };
 
 pub(super) fn validate_altered_constraint_column_types(
@@ -529,67 +529,24 @@ pub(super) fn validate_not_null_rows(
     table: &str,
     column: &str,
 ) -> Result<(), SQLError> {
-    let relation = crate::RelationIdentity::from_legacy_name(table)
-        .map_err(|error| SQLError::Internal(format!("resolve NOT NULL relation: {error}")))?;
-    for doc_id in engine.live_table_doc_ids(table)? {
-        let Some(document) = engine.get_document(table, doc_id)? else {
-            continue;
-        };
-        if matches!(document.get(column), None | Some(Value::Null)) {
-            return Err(constraint_error(
-                "23502",
-                format!(
-                    "column \"{column}\" of relation \"{}\" contains null values",
-                    relation.name
-                ),
-            ));
-        }
-    }
-    Ok(())
+    uqa_execution::schema::validation::validate_not_null_rows(engine, table, column)
 }
-
 fn validate_check_rows(
     engine: &Engine,
     table: &str,
     name: &str,
     expression: &uqa_sql::ast::Expr,
 ) -> Result<(), SQLError> {
-    let definitions = engine
-        .try_describe_table(table)
-        .map_err(|error| ddl_storage_error("VALIDATE CHECK", error))?
-        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-    let schema = uqa_execution::RowSchema::with_types(
-        definitions
-            .iter()
-            .map(|column| column.name.clone())
-            .collect(),
-        definitions
-            .iter()
-            .map(|column| Some(column.ty.clone()))
-            .collect(),
-    );
-    for doc_id in engine.live_table_doc_ids(table)? {
-        let Some(mut document) = engine.get_document(table, doc_id)? else {
-            continue;
-        };
-        crate::generated::materialize_virtual_generated_columns(&definitions, &mut document)?;
-        let value = crate::sql::scalar::eval_lowered_expression_with_schema(
-            engine,
-            expression,
-            &document,
-            &schema,
-            &[],
-        )?;
-        if !matches!(value, Value::Null) && !uqa_sql::expr::truthy(&value) {
-            return Err(constraint_error(
-                "23514",
-                format!(
-                    "check constraint \"{name}\" of relation \"{table}\" is violated by some row"
-                ),
-            ));
-        }
-    }
-    Ok(())
+    uqa_execution::schema::validation::validate_check_rows(
+        &uqa_execution::schema::validation::CheckValidationContext {
+            columns: engine,
+            reads: engine,
+            expressions: engine,
+        },
+        table,
+        name,
+        expression,
+    )
 }
 
 #[expect(

@@ -9,30 +9,8 @@
 pub(crate) use index_adapters::{index_key_values, index_predicate_accepts};
 mod index_adapters;
 
-use super::{
-    DocId, Document, Engine, ForeignKey, PhysicalDocumentIdentity, SQLError, SQLParam, Value,
-};
+use super::{DocId, Document, Engine, SQLError, SQLParam};
 use uqa_sql::ast::TableKeyConstraint;
-
-pub(in crate::sql) fn period_foreign_key_coverage(
-    engine: &Engine,
-    foreign_key: &ForeignKey,
-    local_values: &[Value],
-    excluded_parents: &[PhysicalDocumentIdentity],
-    replacement_parent: Option<(&PhysicalDocumentIdentity, &Document)>,
-) -> Result<(bool, Vec<PhysicalDocumentIdentity>), SQLError> {
-    uqa_execution::mutation::constraints::period::period_foreign_key_coverage(
-        engine.constraint_execution_context(),
-        foreign_key,
-        local_values,
-        excluded_parents,
-        replacement_parent,
-    )
-}
-
-pub(in crate::sql) use uqa_sql::semantics::foreign_keys::foreign_key_relation_name;
-
-pub(in crate::sql) use uqa_sql::semantics::foreign_keys::ForeignKeyLookup;
 
 pub(in crate::sql) fn validate_document_constraints(
     engine: &Engine,
@@ -75,27 +53,6 @@ pub(in crate::sql) fn without_overlaps_conflict(
         constraint,
         document,
         ignored_doc_id,
-    )
-}
-
-pub(in crate::sql) fn foreign_key_lookup_values(
-    engine: &Engine,
-    table: &str,
-    fk: &ForeignKey,
-    document: &Document,
-) -> Result<Option<ForeignKeyLookup>, SQLError> {
-    uqa_sql::semantics::foreign_keys::foreign_key_lookup_values(engine, table, fk, document)
-}
-
-pub(in crate::sql) fn find_foreign_key_parent(
-    engine: &Engine,
-    fk: &ForeignKey,
-    lookup: &ForeignKeyLookup,
-) -> Result<Option<PhysicalDocumentIdentity>, SQLError> {
-    uqa_execution::mutation::constraints::find_foreign_key_parent(
-        engine.constraint_execution_context(),
-        fk,
-        lookup,
     )
 }
 

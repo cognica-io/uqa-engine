@@ -312,3 +312,5 @@ fn validate_partition_keys(
     }
     Ok(())
 }
+
+pub mod alter;

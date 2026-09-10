@@ -68,3 +68,50 @@ impl uqa_execution::schema::indexes::IndexBuildCatalog for Engine {
         self.hierarchy_scan_tables(table, true)
     }
 }
+
+impl Engine {
+    pub(crate) fn foreign_key_definition_context(
+        &self,
+    ) -> uqa_sql::schema::foreign_keys::ForeignKeyDefinitionContext<'_> {
+        uqa_sql::schema::foreign_keys::ForeignKeyDefinitionContext {
+            catalog: self,
+            columns: self,
+        }
+    }
+}
+impl uqa_sql::schema::foreign_keys::ForeignKeyDefinitionCatalog for Engine {
+    fn resolve_table_reference(&self, name: &str) -> Result<String, SQLError> {
+        self.resolve_visible_table_reference(name)
+    }
+    fn bound_table_name(&self, name: &str) -> Result<Option<String>, SQLError> {
+        self.try_resolve_bound_table_name(name)
+    }
+    fn referenceable_keys(
+        &self,
+        table: &str,
+    ) -> Result<
+        Vec<uqa_sql::ast::TableKeyConstraint>,
+        uqa_sql::assignment::columns::ColumnCatalogError,
+    > {
+        Engine::referenceable_keys(self, table).map_err(|error| Box::new(error) as _)
+    }
+    fn ensure_reference_privilege(&self, table: &str, column: &str) -> Result<(), SQLError> {
+        self.ensure_column_privilege(
+            table,
+            column,
+            crate::table_security::TableAclPrivilege::References,
+        )
+    }
+}
+
+impl uqa_execution::schema::columns::ColumnRewritePublication for Engine {
+    fn update_fields(
+        &self,
+        table: &str,
+        id: uqa_core::DocId,
+        values: std::collections::BTreeMap<String, uqa_core::Value>,
+        vectors: uqa_execution::mutation::publication::DocumentVectors,
+    ) -> Result<bool, SQLError> {
+        self.update_document_fields_with_vector_values(table, id, values, vectors)
+    }
+}

@@ -191,3 +191,5 @@ pub mod check_inheritance;
 pub mod table_creation;
 
 pub mod inheritance;
+
+pub mod foreign_keys;

@@ -31,7 +31,7 @@ use std::sync::Arc;
 use uqa_core::{DocId, Value};
 use uqa_sql::ast::{
     AlterTableAction, AlterTableStmt, ColumnType, CreateIndex, CreateTable, DropKind, DropStmt,
-    ForeignKey, Statement,
+    Statement,
 };
 #[cfg(test)]
 use uqa_sql::compile;

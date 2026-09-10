@@ -6,7 +6,7 @@
 
 //! SQL DML execution, constraints, referential actions, and RETURNING rows.
 
-use super::{CteScope, DocId, Document, Engine, ForeignKey, SQLError, SQLParam, SQLResult, Value};
+use super::{CteScope, DocId, Document, Engine, SQLError, SQLParam, SQLResult};
 use uqa_planner::{DeletePlan, InsertPlan, MergePlan, UpdatePlan};
 
 mod protocol;
