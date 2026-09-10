@@ -484,3 +484,5 @@ mod tests {
         assert_eq!(permissive[1], vec![Some("a ".into()), Some("b".into())]);
     }
 }
+
+pub mod stream;

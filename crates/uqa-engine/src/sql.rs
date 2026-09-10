@@ -43,7 +43,6 @@ pub(crate) use catalog::{rename_view_column_query, view_query_references_column}
 mod api;
 mod catalog_statement_routines;
 mod completion;
-mod copy;
 mod correlation;
 mod cte_validation;
 mod cursor;

@@ -938,3 +938,5 @@ pub struct RobustHybridSearchParams<'a> {
 #[cfg(test)]
 #[path = "lib_tests.rs"]
 mod tests;
+
+mod copy;

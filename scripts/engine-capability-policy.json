@@ -22,6 +22,7 @@
         "crates/uqa-engine/src/capabilities/column_rewrites.rs",
         "crates/uqa-engine/src/capabilities/constraint_changes.rs",
         "crates/uqa-engine/src/capabilities/constraints.rs",
+        "crates/uqa-engine/src/capabilities/copy.rs",
         "crates/uqa-engine/src/capabilities/hierarchy.rs",
         "crates/uqa-engine/src/capabilities/index_creation.rs",
         "crates/uqa-engine/src/capabilities/insert_consumers.rs",

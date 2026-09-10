@@ -604,3 +604,5 @@ mod physical_retrieval;
 mod table_alteration;
 
 mod column_removal;
+
+mod copy;

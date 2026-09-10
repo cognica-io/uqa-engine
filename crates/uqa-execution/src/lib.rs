@@ -169,3 +169,5 @@ pub mod mutation;
 pub mod routines;
 
 pub mod schema;
+
+pub mod copy;
