@@ -46,7 +46,7 @@ fn run_insert_inner_with_ctes(
     inherited_ctes: Option<&CteScope>,
 ) -> Result<SQLResult, SQLError> {
     uqa_execution::mutation::dispatch::run_insert(
-        &engine.statement_execution_context(),
+        &engine.mutation_statement_context(),
         uqa_execution::mutation::insert::table::InsertPlanning {
             inference: engine.inference_context(),
             returning: engine.returning_analysis_context(),

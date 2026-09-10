@@ -28,7 +28,7 @@ pub(in crate::sql) fn run_merge(
     stmt.target = super::resolve_dml_target_name(engine, &stmt.target, false)?;
     super::run_mutation_command(engine, move |engine| {
         uqa_execution::mutation::dispatch::run_merge(
-            &engine.statement_execution_context(),
+            &engine.mutation_statement_context(),
             uqa_planner::mutation_outputs::prune_unused_query_outputs,
             &stmt,
             params,
@@ -46,7 +46,7 @@ pub(in crate::sql) fn run_merge_with_ctes(
     stmt.target = super::resolve_dml_target_name(engine, &stmt.target, false)?;
     super::run_mutation_command(engine, move |engine| {
         uqa_execution::mutation::dispatch::run_merge(
-            &engine.statement_execution_context(),
+            &engine.mutation_statement_context(),
             uqa_planner::mutation_outputs::prune_unused_query_outputs,
             &stmt,
             params,

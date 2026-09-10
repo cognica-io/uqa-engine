@@ -49,7 +49,7 @@ fn run_delete_inner_with_ctes(
     inherited_ctes: Option<&CteScope>,
 ) -> Result<SQLResult, SQLError> {
     uqa_execution::mutation::dispatch::run_delete(
-        &engine.statement_execution_context(),
+        &engine.mutation_statement_context(),
         uqa_planner::mutation_outputs::prune_unused_query_outputs,
         stmt,
         params,

@@ -6,6 +6,7 @@
 
 //! MERGE pairing and INSTEAD OF trigger execution for view targets.
 use super::codec::{merge_source_index_value, MergePairKind};
+use crate::mutation::statement::context::{with_mutation_snapshot, MutationStatementContext};
 use crate::mutation::{
     assignment::MutationAssignmentContext,
     expressions::eval_mutation_expr,
@@ -14,11 +15,7 @@ use crate::mutation::{
     triggers::context::TriggerContext,
     views::commands::{materialize_view_rows, target_row, SourceOutputPruning},
 };
-use crate::query::{
-    sources::build_join_spill_with_ctes,
-    statement::context::{with_statement_snapshot, StatementContext},
-    CteScope,
-};
+use crate::query::{sources::build_join_spill_with_ctes, CteScope};
 use crate::{OwnedPhysicalRow, PhysicalRow, RowSchema};
 use uqa_core::Value;
 use uqa_sql::{
@@ -560,7 +557,7 @@ fn execute_view_merge_pairs<S: Clone + 'static>(
 }
 
 pub fn run_view_merge<S: Clone + Send + Sync + 'static>(
-    context: &StatementContext<'_, S>,
+    context: &MutationStatementContext<'_, S>,
     prune: SourceOutputPruning,
     plan: &MergePlan,
     params: &[SQLParam],
@@ -584,85 +581,85 @@ pub fn run_view_merge<S: Clone + Send + Sync + 'static>(
         inherited_ctes,
     )?;
     events.fire_before(triggers, &target.canonical_name)?;
-    let execute_read = |read_context: &StatementContext<'_, S>| -> Result<SQLResult, SQLError> {
-        let mut ctes = read_context
-            .mutation
-            .scopes
-            .command_scope(plan.statement_privilege_subject.as_deref(), false)?;
-        if let Some(parent) = inherited_ctes {
-            ctes.inherit_cte_bindings(parent);
-        }
-        ctes.set_command_cte_snapshot(statement_snapshot.clone());
-        crate::query::cte::materialize_plan_ctes(
-            context.source.ctes,
-            &plan.ctes,
-            params,
-            &mut ctes,
-        )?;
-        ctes.scalar_subqueries.clone_from(&plan.subqueries);
-        let source_privilege_expressions =
-            uqa_sql::semantics::view_privileges::merge_privilege_expressions(plan);
-        crate::query::privileges::ensure_select_privileges_for_source_expressions(
-            &plan.source,
-            &source_privilege_expressions,
-            &ctes,
-        )?;
-        let source_rows =
-            build_join_spill_with_ctes(&read_context.source, &plan.source, params, &mut ctes)?;
-        let mut target_scope = ctes.returning_statement_snapshot_scope();
-        let candidates = materialize_view_rows(
-            read_context,
-            prune,
-            &target,
-            None,
-            params,
-            &mut target_scope,
-        )?;
-        let snapshot = ctes.returning_statement_snapshot_scope();
-        let pairings = build_view_merge_pairings(PairingInput {
-            expressions: read_context
-                .mutation
-                .preparation
-                .referential
-                .assignment
-                .expressions,
-            runtime: read_context.source.relational.runtime,
-            target: &target,
-            plan,
-            candidates: &candidates,
-            source_rows: &source_rows,
-            params,
-            ctes: &snapshot,
-        })?;
-        let source_relation = uqa_sql::ast::InternalRelationId::allocate();
-        let action_context = ViewMergeActionContext {
-            assignment,
-            triggers,
-            returning,
-            target: &target,
-            plan,
-            source_schema: source_rows.row_schema(),
-            source_relation,
-            params,
-            ctes: &snapshot,
-        };
-        let (affected, returning_rows) = execute_view_merge_pairs(&action_context, &pairings)?;
-        events.fire_after(triggers, &target.canonical_name)?;
-        super::returning::finish_view_merge_returning(
-            returning,
-            super::returning::ViewMergeReturningResult {
-                stmt: plan,
+    let execute_read =
+        |read_context: &MutationStatementContext<'_, S>| -> Result<SQLResult, SQLError> {
+            let read_mutation = &read_context.mutation;
+            let mut ctes = read_mutation
+                .scopes
+                .command_scope(plan.statement_privilege_subject.as_deref(), false)?;
+            if let Some(parent) = inherited_ctes {
+                ctes.inherit_cte_bindings(parent);
+            }
+            ctes.set_command_cte_snapshot(statement_snapshot.clone());
+            crate::query::cte::materialize_plan_ctes(
+                context.query.source.ctes,
+                &plan.ctes,
+                params,
+                &mut ctes,
+            )?;
+            ctes.scalar_subqueries.clone_from(&plan.subqueries);
+            let source_privilege_expressions =
+                uqa_sql::semantics::view_privileges::merge_privilege_expressions(plan);
+            crate::query::privileges::ensure_select_privileges_for_source_expressions(
+                &plan.source,
+                &source_privilege_expressions,
+                &ctes,
+            )?;
+            let source_rows = build_join_spill_with_ctes(
+                &read_context.query.source,
+                &plan.source,
+                params,
+                &mut ctes,
+            )?;
+            let mut target_scope = ctes.returning_statement_snapshot_scope();
+            let candidates = materialize_view_rows(
+                &read_context.query,
+                prune,
+                &target,
+                None,
+                params,
+                &mut target_scope,
+            )?;
+            let snapshot = ctes.returning_statement_snapshot_scope();
+            let pairings = build_view_merge_pairings(PairingInput {
+                expressions: read_mutation.preparation.referential.assignment.expressions,
+                runtime: read_context.query.source.relational.runtime,
+                target: &target,
+                plan,
+                candidates: &candidates,
+                source_rows: &source_rows,
+                params,
+                ctes: &snapshot,
+            })?;
+            let source_relation = uqa_sql::ast::InternalRelationId::allocate();
+            let action_context = ViewMergeActionContext {
+                assignment,
+                triggers,
+                returning,
+                target: &target,
+                plan,
                 source_schema: source_rows.row_schema(),
                 source_relation,
                 params,
-                ctes: &ctes,
-                rows: returning_rows,
-                affected,
-            },
-        )
-    };
+                ctes: &snapshot,
+            };
+            let (affected, returning_rows) = execute_view_merge_pairs(&action_context, &pairings)?;
+            events.fire_after(triggers, &target.canonical_name)?;
+            super::returning::finish_view_merge_returning(
+                returning,
+                super::returning::ViewMergeReturningResult {
+                    stmt: plan,
+                    source_schema: source_rows.row_schema(),
+                    source_relation,
+                    params,
+                    ctes: &ctes,
+                    rows: returning_rows,
+                    affected,
+                },
+            )
+        };
     match statement_snapshot.as_deref() {
-        Some(snapshot) => with_statement_snapshot(context.snapshots, snapshot, execute_read),
+        Some(snapshot) => with_mutation_snapshot(context.snapshots, snapshot, execute_read),
         None => execute_read(context),
     }
 }
@@ -676,7 +673,7 @@ fn prepare_view_merge<S: Clone + 'static>(
     rewrite: uqa_sql::semantics::view_rewrite::context::ViewRewriteContext<'_>,
     scopes: &dyn crate::mutation::command_scope::CommandScopeSource<S>,
     triggers: &TriggerContext<'_>,
-    snapshots: &dyn crate::query::statement::context::StatementSnapshots<S>,
+    snapshots: &dyn crate::query::statement::context::SnapshotSource<S>,
     plan: &MergePlan,
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,

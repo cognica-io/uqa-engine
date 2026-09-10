@@ -47,9 +47,11 @@ pub(crate) fn execute_query_plan(
     execute_query_plan_with_ctes(engine, plan, params, &mut ctes)
 }
 
-pub(super) type QueryOutputMode = uqa_execution::query::statement::consumer::QueryOutputMode<
-    crate::session::StatementReadSnapshot,
->;
+pub(super) type QueryOutputMode<'consumer> =
+    uqa_execution::query::statement::consumer::QueryOutputMode<
+        'consumer,
+        crate::session::StatementReadSnapshot,
+    >;
 pub(in crate::sql) use uqa_execution::query::consumer::QueryConsumerControl;
 pub(in crate::sql) use uqa_execution::query::output::{QueryOutput, QueryRows};
 

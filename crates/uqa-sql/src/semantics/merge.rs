@@ -378,3 +378,33 @@ pub fn merge_command_returning_schema(
     validate_merge_action_scopes(routines, stmt, &target, &source, params, bindings)?;
     merge_returning_schema(routines, catalog, stmt, params, &source, bindings)
 }
+
+pub fn validate_merge_target_columns(
+    catalog: &dyn crate::assignment::columns::AssignmentColumnCatalog,
+    stmt: &MergePlan,
+) -> Result<(), SQLError> {
+    use crate::assignment::columns::validate_mutation_columns;
+    for clause in &stmt.when_clauses {
+        match clause {
+            MergeWhenPlan::UpdateMatched { assignments, .. }
+            | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => {
+                validate_mutation_columns(
+                    catalog,
+                    &stmt.target,
+                    assignments
+                        .iter()
+                        .map(|assignment| assignment.column.as_str()),
+                    "MERGE UPDATE",
+                )?;
+            }
+            MergeWhenPlan::InsertNotMatched { columns, .. } => validate_mutation_columns(
+                catalog,
+                &stmt.target,
+                columns.iter().map(String::as_str),
+                "MERGE INSERT",
+            )?,
+            _ => {}
+        }
+    }
+    Ok(())
+}

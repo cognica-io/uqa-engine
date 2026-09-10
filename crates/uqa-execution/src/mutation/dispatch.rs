@@ -6,7 +6,8 @@
 
 //! Resolve mutation execution paths using SQL view rewriting and execution-owned command loops.
 use super::{insert::table::InsertPlanning, views::commands::SourceOutputPruning};
-use crate::query::{statement::context::StatementContext, CteScope};
+use crate::mutation::statement::context::MutationStatementContext;
+use crate::query::CteScope;
 use uqa_sql::{
     plan::{DeletePlan, InsertPlan, MergePlan, UpdatePlan},
     semantics::{view_privileges, view_rewrite},
@@ -14,7 +15,7 @@ use uqa_sql::{
 };
 
 pub fn run_insert<S: Clone + Send + Sync + 'static>(
-    context: &StatementContext<'_, S>,
+    context: &MutationStatementContext<'_, S>,
     planning: InsertPlanning<'_>,
     stmt: &InsertPlan,
     params: &[SQLParam],
@@ -67,7 +68,7 @@ pub fn run_insert<S: Clone + Send + Sync + 'static>(
 }
 
 pub fn run_update<S: Clone + Send + Sync + 'static>(
-    context: &StatementContext<'_, S>,
+    context: &MutationStatementContext<'_, S>,
     prune: SourceOutputPruning,
     stmt: &UpdatePlan,
     params: &[SQLParam],
@@ -114,7 +115,7 @@ pub fn run_update<S: Clone + Send + Sync + 'static>(
 }
 
 pub fn run_delete<S: Clone + Send + Sync + 'static>(
-    context: &StatementContext<'_, S>,
+    context: &MutationStatementContext<'_, S>,
     prune: SourceOutputPruning,
     stmt: &DeletePlan,
     params: &[SQLParam],
@@ -161,7 +162,7 @@ pub fn run_delete<S: Clone + Send + Sync + 'static>(
 }
 
 pub fn run_merge<S: Clone + Send + Sync + 'static>(
-    context: &StatementContext<'_, S>,
+    context: &MutationStatementContext<'_, S>,
     prune: SourceOutputPruning,
     stmt: &MergePlan,
     params: &[SQLParam],

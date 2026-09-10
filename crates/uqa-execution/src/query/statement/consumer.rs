@@ -4,61 +4,29 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Generation-aware row delivery for streaming query consumers.
-use super::context::StatementContext;
+//! Bind output sinks to an opaque read generation before physical row delivery.
+use crate::query::consumer as physical;
+pub use physical::QueryConsumerControl;
 use std::{cell::Cell, rc::Rc};
 use uqa_core::Value;
 use uqa_sql::{type_resolution::coerce_common_context_value, SQLError};
 
-pub trait QueryRowConsumer<S: Clone + 'static> {
-    fn begin(
-        &self,
-        context: &StatementContext<'_, S>,
-        columns: &[String],
-        schema: &crate::RowSchema,
-    ) -> Result<(), SQLError>;
-
-    fn consume(
-        &self,
-        context: &StatementContext<'_, S>,
-        row: crate::OwnedPhysicalRow,
-    ) -> Result<QueryConsumerControl, SQLError>;
-
+/// A row sink chooses its own services for the selected generation; query execution supplies no writable context.
+pub trait QueryConsumerFactory<'consumer, S: Clone + 'static> {
+    fn bind(
+        self: Rc<Self>,
+        generation: Option<&S>,
+    ) -> Result<Rc<dyn physical::QueryRowConsumer + 'consumer>, SQLError>;
     fn uses_directional_scan(&self) -> bool {
         false
     }
-
-    fn directional_scan_prepared(
-        &self,
-        _context: &StatementContext<'_, S>,
-        _support: crate::BackwardScanSupport,
-    ) -> Result<(), SQLError> {
-        Ok(())
-    }
-
-    fn scan_direction(&self) -> crate::PhysicalScanDirection {
-        crate::PhysicalScanDirection::Forward
-    }
-
-    fn direction_exhausted(
-        &self,
-        _context: &StatementContext<'_, S>,
-    ) -> Result<QueryConsumerControl, SQLError> {
-        Ok(QueryConsumerControl::Stop)
-    }
-
-    fn rewound(
-        &self,
-        _context: &StatementContext<'_, S>,
-    ) -> Result<QueryConsumerControl, SQLError> {
-        Ok(QueryConsumerControl::Continue)
-    }
 }
 
-pub use crate::query::consumer::QueryConsumerControl;
-
-pub(super) struct SetOperationRowConsumer<S: Clone + 'static> {
-    downstream: Rc<dyn QueryRowConsumer<S>>,
+pub(super) struct SetOperationConsumerFactory<'consumer, S: Clone + 'static> {
+    downstream: Rc<dyn QueryConsumerFactory<'consumer, S> + 'consumer>,
+    state: Rc<SetOperationState>,
+}
+struct SetOperationState {
     columns: Vec<String>,
     schema: crate::RowSchema,
     offset: Cell<u64>,
@@ -66,70 +34,84 @@ pub(super) struct SetOperationRowConsumer<S: Clone + 'static> {
     begun: Cell<bool>,
     stopped: Cell<bool>,
 }
-
-impl<S: Clone + 'static> SetOperationRowConsumer<S> {
+impl<'consumer, S: Clone + 'static> SetOperationConsumerFactory<'consumer, S> {
     pub(super) fn new(
-        downstream: Rc<dyn QueryRowConsumer<S>>,
+        downstream: Rc<dyn QueryConsumerFactory<'consumer, S> + 'consumer>,
         schema: crate::RowSchema,
         offset: u64,
         limit: Option<u64>,
     ) -> Self {
         Self {
-            columns: schema.columns().to_vec(),
             downstream,
-            schema,
-            offset: Cell::new(offset),
-            remaining: Cell::new(limit),
-            begun: Cell::new(false),
-            stopped: Cell::new(limit == Some(0)),
+            state: Rc::new(SetOperationState {
+                columns: schema.columns().to_vec(),
+                schema,
+                offset: Cell::new(offset),
+                remaining: Cell::new(limit),
+                begun: Cell::new(false),
+                stopped: Cell::new(limit == Some(0)),
+            }),
         }
     }
-
     pub(super) fn stopped(&self) -> bool {
-        self.stopped.get()
+        self.state.stopped.get()
     }
 }
-
-impl<S: Clone + 'static> QueryRowConsumer<S> for SetOperationRowConsumer<S> {
-    fn begin(
-        &self,
-        context: &StatementContext<'_, S>,
-        columns: &[String],
-        _schema: &crate::RowSchema,
-    ) -> Result<(), SQLError> {
-        if columns.len() != self.columns.len() {
+impl<'consumer, S: Clone + 'static> QueryConsumerFactory<'consumer, S>
+    for SetOperationConsumerFactory<'consumer, S>
+{
+    fn bind(
+        self: Rc<Self>,
+        generation: Option<&S>,
+    ) -> Result<Rc<dyn physical::QueryRowConsumer + 'consumer>, SQLError> {
+        Ok(Rc::new(SetOperationRowConsumer {
+            downstream: Rc::clone(&self.downstream).bind(generation)?,
+            state: Rc::clone(&self.state),
+        }))
+    }
+}
+struct SetOperationRowConsumer<'consumer> {
+    downstream: Rc<dyn physical::QueryRowConsumer + 'consumer>,
+    state: Rc<SetOperationState>,
+}
+impl SetOperationRowConsumer<'_> {
+    fn stopped(&self) -> bool {
+        self.state.stopped.get()
+    }
+}
+impl physical::QueryRowConsumer for SetOperationRowConsumer<'_> {
+    fn begin(&self, columns: &[String], _schema: &crate::RowSchema) -> Result<(), SQLError> {
+        if columns.len() != self.state.columns.len() {
             return Err(SQLError::TypeMismatch(format!(
                 "set-operation input width {} does not match output width {}",
                 columns.len(),
-                self.columns.len()
+                self.state.columns.len()
             )));
         }
-        if self.begun.replace(true) {
+        if self.state.begun.replace(true) {
             Ok(())
         } else {
-            self.downstream.begin(context, &self.columns, &self.schema)
+            self.downstream
+                .begin(&self.state.columns, &self.state.schema)
         }
     }
 
-    fn consume(
-        &self,
-        context: &StatementContext<'_, S>,
-        row: crate::OwnedPhysicalRow,
-    ) -> Result<QueryConsumerControl, SQLError> {
+    fn consume(&self, row: crate::OwnedPhysicalRow) -> Result<QueryConsumerControl, SQLError> {
         if self.stopped() {
             return Ok(QueryConsumerControl::Stop);
         }
-        if self.offset.get() > 0 {
-            self.offset.set(self.offset.get() - 1);
+        if self.state.offset.get() > 0 {
+            self.state.offset.set(self.state.offset.get() - 1);
             return Ok(QueryConsumerControl::Continue);
         }
-        if self.remaining.get() == Some(0) {
-            self.stopped.set(true);
+        if self.state.remaining.get() == Some(0) {
+            self.state.stopped.set(true);
             return Ok(QueryConsumerControl::Stop);
         }
         let projections = {
             let view = row.view();
-            self.schema
+            self.state
+                .schema
                 .column_types()
                 .iter()
                 .enumerate()
@@ -154,19 +136,16 @@ impl<S: Clone + 'static> QueryRowConsumer<S> for SetOperationRowConsumer<S> {
                 })
                 .collect::<Result<Vec<_>, SQLError>>()?
         };
-        let control = self.downstream.consume(
-            context,
-            crate::OwnedPhysicalRow::new(
-                self.schema.clone(),
-                row.row
-                    .project_with_values(projections)
-                    .without_lock_origins(),
-            ),
-        )?;
+        let control = self.downstream.consume(crate::OwnedPhysicalRow::new(
+            self.state.schema.clone(),
+            row.row
+                .project_with_values(projections)
+                .without_lock_origins(),
+        ))?;
         match control {
             QueryConsumerControl::Continue => {}
             QueryConsumerControl::Stop => {
-                self.stopped.set(true);
+                self.state.stopped.set(true);
                 return Ok(control);
             }
             QueryConsumerControl::Rewind => {
@@ -175,11 +154,11 @@ impl<S: Clone + 'static> QueryRowConsumer<S> for SetOperationRowConsumer<S> {
                 ));
             }
         }
-        if let Some(remaining) = self.remaining.get() {
+        if let Some(remaining) = self.state.remaining.get() {
             let remaining = remaining - 1;
-            self.remaining.set(Some(remaining));
+            self.state.remaining.set(Some(remaining));
             if remaining == 0 {
-                self.stopped.set(true);
+                self.state.stopped.set(true);
                 return Ok(QueryConsumerControl::Stop);
             }
         }
@@ -188,58 +167,28 @@ impl<S: Clone + 'static> QueryRowConsumer<S> for SetOperationRowConsumer<S> {
 }
 
 #[derive(Clone)]
-pub enum QueryOutputMode<S: Clone + 'static> {
+pub enum QueryOutputMode<'consumer, S: Clone + 'static> {
     Rows,
     SharedSpill,
     ExistsKeySet,
-    RowConsumer(Rc<dyn QueryRowConsumer<S>>),
+    RowConsumer(Rc<dyn QueryConsumerFactory<'consumer, S> + 'consumer>),
 }
-
-impl<S: Clone + 'static> QueryOutputMode<S> {
-    pub fn physical_consumer(consumer: Rc<dyn crate::query::consumer::QueryRowConsumer>) -> Self {
+impl<'consumer, S: Clone + 'static> QueryOutputMode<'consumer, S> {
+    pub fn physical_consumer(consumer: Rc<dyn physical::QueryRowConsumer + 'consumer>) -> Self {
         Self::RowConsumer(Rc::new(PhysicalConsumer(consumer)))
     }
 }
-struct PhysicalConsumer(Rc<dyn crate::query::consumer::QueryRowConsumer>);
-impl<S: Clone + 'static> QueryRowConsumer<S> for PhysicalConsumer {
-    fn begin(
-        &self,
-        _context: &StatementContext<'_, S>,
-        columns: &[String],
-        schema: &crate::RowSchema,
-    ) -> Result<(), SQLError> {
-        self.0.begin(columns, schema)
-    }
-    fn consume(
-        &self,
-        _context: &StatementContext<'_, S>,
-        row: crate::OwnedPhysicalRow,
-    ) -> Result<QueryConsumerControl, SQLError> {
-        self.0.consume(row)
+struct PhysicalConsumer<'consumer>(Rc<dyn physical::QueryRowConsumer + 'consumer>);
+impl<'consumer, S: Clone + 'static> QueryConsumerFactory<'consumer, S>
+    for PhysicalConsumer<'consumer>
+{
+    fn bind(
+        self: Rc<Self>,
+        _generation: Option<&S>,
+    ) -> Result<Rc<dyn physical::QueryRowConsumer + 'consumer>, SQLError> {
+        Ok(Rc::clone(&self.0))
     }
     fn uses_directional_scan(&self) -> bool {
         self.0.uses_directional_scan()
-    }
-    fn directional_scan_prepared(
-        &self,
-        _context: &StatementContext<'_, S>,
-        support: crate::BackwardScanSupport,
-    ) -> Result<(), SQLError> {
-        self.0.directional_scan_prepared(support)
-    }
-    fn scan_direction(&self) -> crate::PhysicalScanDirection {
-        self.0.scan_direction()
-    }
-    fn direction_exhausted(
-        &self,
-        _context: &StatementContext<'_, S>,
-    ) -> Result<QueryConsumerControl, SQLError> {
-        self.0.direction_exhausted()
-    }
-    fn rewound(
-        &self,
-        _context: &StatementContext<'_, S>,
-    ) -> Result<QueryConsumerControl, SQLError> {
-        self.0.rewound()
     }
 }

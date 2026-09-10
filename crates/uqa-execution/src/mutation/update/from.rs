@@ -5,6 +5,7 @@
 //
 
 //! Joined UPDATE execution using independent read and write statement generations.
+use crate::mutation::statement::context::MutationStatementContext;
 use crate::mutation::{
     assignment::{validate_view_checks, MutationAssignmentTarget, ViewCheckContext},
     candidate::{MutationRewriteCandidate, PhysicalDocumentIdentity, PhysicalMutationLockTarget},
@@ -15,7 +16,7 @@ use crate::mutation::{
     row_images::{MutationRowImage, MutationRowImages},
     rows::join_rows as dml_join_rows,
 };
-use crate::query::{statement::context::StatementContext, CteScope};
+use crate::query::CteScope;
 use uqa_sql::{
     plan::{SourcePlan, UpdatePlan},
     semantics::returning::validate_returning_alias_relations,
@@ -24,15 +25,15 @@ use uqa_sql::{
 
 #[expect(clippy::too_many_lines, reason = "preserves DML lock and event order")]
 pub fn run_update_from<S: Clone + Send + Sync + 'static>(
-    context: &StatementContext<'_, S>,
-    read_context: &StatementContext<'_, S>,
+    context: &MutationStatementContext<'_, S>,
+    read_context: &MutationStatementContext<'_, S>,
     stmt: &UpdatePlan,
     from_clause: &SourcePlan,
     params: &[SQLParam],
     ctes: &mut CteScope<S>,
 ) -> Result<SQLResult, SQLError> {
     let from_rows = crate::query::sources::build_join_spill_with_ctes(
-        &read_context.source,
+        &read_context.query.source,
         from_clause,
         params,
         ctes,
@@ -42,7 +43,7 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
         &stmt.returning_aliases,
         Some(from_rows.row_schema()),
     )?;
-    let cancel = context.source.relational.runtime.cancellation_token();
+    let cancel = context.query.source.relational.runtime.cancellation_token();
     let mut affected = 0u64;
     let mut returning_rows = Vec::new();
     let target = stmt.table.clone();
@@ -117,7 +118,18 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
     let mut update_qualification_count = if qualification_references_target {
         0
     } else {
-        count_source_qualifications(read_context, stmt, &snapshot_ctes, &from_rows, params)?
+        count_source_qualifications(
+            read_context
+                .mutation
+                .preparation
+                .referential
+                .assignment
+                .expressions,
+            stmt,
+            &snapshot_ctes,
+            &from_rows,
+            params,
+        )?
     };
     let overlay = MutationOverlayScope::new(context.mutation.state);
     let mut pending_updates = Vec::new();
@@ -148,7 +160,12 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
             &candidate,
         )?;
         let candidate_sources = matching_update_sources(
-            read_context,
+            read_context
+                .mutation
+                .preparation
+                .referential
+                .assignment
+                .expressions,
             stmt,
             &snapshot_ctes,
             &from_rows,
@@ -211,7 +228,12 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
         )?;
         let source_context = if recheck {
             update_join_qualifies(
-                read_context,
+                read_context
+                    .mutation
+                    .preparation
+                    .referential
+                    .assignment
+                    .expressions,
                 stmt,
                 &snapshot_ctes,
                 &target_row,
@@ -586,7 +608,7 @@ struct MatchingUpdateSources {
 }
 
 fn matching_update_sources<S: Clone + Send + Sync + 'static>(
-    context: &StatementContext<'_, S>,
+    expressions: crate::mutation::rows::context::MutationExpressionContext<'_, S>,
     stmt: &UpdatePlan,
     ctes: &CteScope<S>,
     from_rows: &crate::SharedSpill,
@@ -600,7 +622,7 @@ fn matching_update_sources<S: Clone + Send + Sync + 'static>(
     let mut qualification_count = 0;
     for from_row in from_reader {
         let source_context = from_row.map_err(crate::query::projection::physical_exec_error)?;
-        if update_join_qualifies(context, stmt, ctes, target_row, &source_context, params)? {
+        if update_join_qualifies(expressions, stmt, ctes, target_row, &source_context, params)? {
             qualification_count += 1;
             if first.is_none() {
                 first = Some(source_context);
@@ -614,7 +636,7 @@ fn matching_update_sources<S: Clone + Send + Sync + 'static>(
 }
 
 fn count_source_qualifications<S: Clone + Send + Sync + 'static>(
-    context: &StatementContext<'_, S>,
+    expressions: crate::mutation::rows::context::MutationExpressionContext<'_, S>,
     stmt: &UpdatePlan,
     ctes: &CteScope<S>,
     from_rows: &crate::SharedSpill,
@@ -628,12 +650,7 @@ fn count_source_qualifications<S: Clone + Send + Sync + 'static>(
         let source = source.map_err(crate::query::projection::physical_exec_error)?;
         let qualifies = stmt.predicate.as_ref().map_or(Ok(true), |predicate| {
             crate::mutation::expressions::eval_mutation_expr(
-                context
-                    .mutation
-                    .preparation
-                    .referential
-                    .assignment
-                    .expressions,
+                expressions,
                 ctes,
                 predicate,
                 Some(&source),
@@ -647,7 +664,7 @@ fn count_source_qualifications<S: Clone + Send + Sync + 'static>(
 }
 
 fn update_join_qualifies<S: Clone + Send + Sync + 'static>(
-    context: &StatementContext<'_, S>,
+    expressions: crate::mutation::rows::context::MutationExpressionContext<'_, S>,
     stmt: &UpdatePlan,
     ctes: &CteScope<S>,
     target_row: &crate::OwnedPhysicalRow,
@@ -657,12 +674,7 @@ fn update_join_qualifies<S: Clone + Send + Sync + 'static>(
     let joined = dml_join_rows(target_row, source_context);
     stmt.predicate.as_ref().map_or(Ok(true), |filter| {
         crate::mutation::expressions::eval_mutation_expr(
-            context
-                .mutation
-                .preparation
-                .referential
-                .assignment
-                .expressions,
+            expressions,
             ctes,
             filter,
             Some(&joined),

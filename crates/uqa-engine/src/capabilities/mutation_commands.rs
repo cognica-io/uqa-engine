@@ -55,6 +55,7 @@ impl Engine {
     ) -> uqa_execution::mutation::statement::MutationExecutionContext<'_, StatementReadSnapshot>
     {
         uqa_execution::mutation::statement::MutationExecutionContext {
+            insert_consumers: self,
             preparation: self.mutation_preparation_context(),
             identities: self.insert_identity_context(),
             rules: self.view_rule_execution_context(),
@@ -96,5 +97,36 @@ impl uqa_sql::semantics::mutation_privileges::MutationPrivilegeCatalog for Engin
         privilege: uqa_sql::catalog::security::table::TableAclPrivilege,
     ) -> Result<(), SQLError> {
         Engine::ensure_any_column_privilege_for(self, table, subject, privilege)
+    }
+}
+
+impl Engine {
+    pub(crate) fn mutation_statement_context(
+        &self,
+    ) -> uqa_execution::mutation::statement::context::MutationStatementContext<
+        '_,
+        StatementReadSnapshot,
+    > {
+        uqa_execution::mutation::statement::context::MutationStatementContext {
+            query: self.query_execution_context(),
+            mutation: self.mutation_execution_context(),
+            snapshots: self,
+        }
+    }
+}
+impl uqa_execution::mutation::statement::context::MutationSnapshots<StatementReadSnapshot>
+    for Engine
+{
+    fn with_snapshot(
+        &self,
+        snapshot: &StatementReadSnapshot,
+        operation: &mut dyn uqa_execution::mutation::statement::context::ScopedMutationOperation<
+            StatementReadSnapshot,
+        >,
+    ) -> Result<(), SQLError> {
+        let selected = self.statement_read_snapshot_engine(snapshot);
+        let mut context = selected.mutation_statement_context();
+        context.query.generation = Some(snapshot);
+        operation.run(&context)
     }
 }

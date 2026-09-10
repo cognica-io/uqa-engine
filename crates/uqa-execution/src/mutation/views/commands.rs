@@ -5,6 +5,7 @@
 //
 
 //! Execute view mutation rows, rewrite rules, and INSTEAD OF triggers.
+use crate::mutation::statement::context::{with_mutation_snapshot, MutationStatementContext};
 use crate::mutation::{
     assignment::MutationAssignmentContext,
     expressions::eval_mutation_expr,
@@ -14,11 +15,7 @@ use crate::mutation::{
     },
     rows::join_rows as dml_join_rows,
 };
-use crate::query::{
-    sources::build_join_spill_with_ctes,
-    statement::context::{with_statement_snapshot, StatementContext},
-    CteScope,
-};
+use crate::query::{sources::build_join_spill_with_ctes, CteScope};
 use crate::{OwnedPhysicalRow, PhysicalRow, RowSchema};
 use std::collections::BTreeSet;
 use uqa_core::Value;
@@ -46,7 +43,7 @@ pub use insert::run_view_insert_inner;
 pub use update_delete::{run_view_delete_inner, run_view_update_inner};
 
 pub fn materialize_view_rows<S: Clone + Send + Sync + 'static>(
-    context: &StatementContext<'_, S>,
+    context: &crate::query::statement::context::QueryContext<'_, S>,
     prune_source_outputs: SourceOutputPruning,
     target: &ViewDmlTarget,
     required_columns: Option<&BTreeSet<String>>,
@@ -245,7 +242,8 @@ fn evaluate_insert_rule_columns<S: Clone + Send + Sync + 'static>(
     reason = "preserves view qualifier and row identity"
 )]
 fn run_suppressed_view_insert_rules<S: Clone + Send + Sync + 'static>(
-    context: &StatementContext<'_, S>,
+    rules: crate::mutation::rules::RuleContext<'_>,
+    returning_context: &crate::mutation::returning::ReturningExecutionContext<'_, S>,
     read_assignment: &MutationAssignmentContext<'_, S>,
     stmt: &InsertPlan,
     target: &ViewDmlTarget,
@@ -285,7 +283,7 @@ fn run_suppressed_view_insert_rules<S: Clone + Send + Sync + 'static>(
         })
         .collect::<Result<Vec<_>, SQLError>>()?;
     let mut rule_batch = crate::mutation::rules::prepare_rule_batch_with_projection(
-        context.mutation.rules.rules,
+        rules,
         &target.canonical_name,
         uqa_sql::ast::RuleEvent::Insert,
         rule_rows,
@@ -345,7 +343,7 @@ fn run_suppressed_view_insert_rules<S: Clone + Send + Sync + 'static>(
             .collect::<Result<Vec<_>, SQLError>>()?,
     )?;
     let outcome = rule_batch.execute_actions_with_affected(
-        context.mutation.rules.rules,
+        rules,
         crate::mutation::rules::RuleReturningRequest::from_plan(
             &stmt.returning,
             &stmt.returning_aliases,
@@ -354,7 +352,7 @@ fn run_suppressed_view_insert_rules<S: Clone + Send + Sync + 'static>(
     )?;
     if let Some(returning) = outcome.returning {
         return returning.project(
-            context.mutation.preparation.returning,
+            *returning_context,
             DmlReturningShape {
                 table: &target.canonical_name,
                 target_qualifier: &stmt.target_qualifier,
@@ -367,7 +365,7 @@ fn run_suppressed_view_insert_rules<S: Clone + Send + Sync + 'static>(
         );
     }
     finish_view_dml(
-        &context.mutation.preparation.returning,
+        returning_context,
         DmlReturningShape {
             table: &target.canonical_name,
             target_qualifier: &stmt.target_qualifier,

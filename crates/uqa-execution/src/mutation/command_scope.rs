@@ -38,7 +38,7 @@ impl Drop for MutationOverlayScope<'_> {
 
 /// Retain the command's original read generation when CTE writes or BEFORE statement triggers can change visible rows.
 pub fn capture_command_read_snapshot<S: Clone + 'static>(
-    snapshots: &dyn crate::query::statement::context::StatementSnapshots<S>,
+    snapshots: &dyn crate::query::statement::context::SnapshotSource<S>,
     inherited: Option<&CteScope<S>>,
     before_statement_trigger: bool,
     ctes: &[uqa_sql::plan::CtePlan],
