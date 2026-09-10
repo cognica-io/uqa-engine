@@ -101,6 +101,22 @@ The type list is optional. An omitted type or an explicit `unknown` is inferred 
 
 Preparation binds relation and column references, validates expression types, and records the result schema without executing the statement. Query optimization is deferred until execution. After catalog invalidation, replanning must preserve the result column names, type identities, and type modifiers; a changed result descriptor reports `0A000` with `cached plan must not change result type`.
 
+`plan_cache_mode` controls planning at execution time. Its default `auto` uses custom plans for the first five parameterized executions, then compares the generic execution cost with the average custom cost, including planning work. Statistics and available index access influence this comparison: a selective parameter can keep using custom plans after the fifth execution. `force_generic_plan` reuses a parameter-independent plan; `force_custom_plan` plans for the current bound values. Statements with no parameters use generic plans in every mode. Parameter specialization preserves declared types, including typed NULLs and domain identities.
+
+`generic_plans` and `custom_plans` count plans selected for execution, including executions that later fail. Argument or planning failures do not increment them. Changing `plan_cache_mode` takes effect on the next EXECUTE without preparing the statement again.
+
+```sql execute
+SET plan_cache_mode = force_custom_plan;
+PREPARE manual_custom_plan(integer) AS SELECT $1 + 1 AS result;
+EXECUTE manual_custom_plan(4);
+SET plan_cache_mode = force_generic_plan;
+EXECUTE manual_custom_plan(9);
+SELECT generic_plans, custom_plans
+FROM pg_prepared_statements WHERE name = 'manual_custom_plan';
+DEALLOCATE manual_custom_plan;
+RESET plan_cache_mode;
+```
+
 Prepared definitions belong to the session and survive transaction and savepoint rollback. `DEALLOCATE` remains effective after rollback, and `DISCARD PLANS` invalidates executable plans while retaining definitions and parameter types. Catalog refresh invalidates cached plans; the next execution replans the affected statement. A statement whose dependency disappeared can fail without preventing unrelated queries or cleanup.
 
 Duplicate prepared names report `42P05`; missing names report `26000`. An incorrect argument count reports `42601`, and an incompatible typed argument reports `42804`. Input conversion and domain constraints retain their specific SQLSTATEs. Subqueries, aggregates, and window functions are rejected as `EXECUTE` arguments before executable argument effects. For statements with parameters, names, types, constant inputs, and constant-expression failures are checked before volatile executable arguments, preserving sequence effects and domain conversion order. Argument binding finishes before the prepared body is planned: an argument error takes precedence over an immutable error such as division by zero in the body. A failed body plan does not increment its plan-use counter.
@@ -127,6 +143,8 @@ The [compatibility ledger](09-compatibility.md) tracks the remaining preparation
 
 ## SET and SHOW
 
+`SET [SESSION] name TO value` changes a session value; transaction rollback undoes it. `SET LOCAL name TO value` applies through the current transaction and restores the preceding session value at its end. Savepoint rollback restores both the active value and any pending local restoration. A later session SET supersedes a preceding local assignment. `SET name TO DEFAULT` restores the default while reporting a SET completion tag; RESET reports RESET. The current-transaction settings `transaction_isolation`, `transaction_read_only`, and `transaction_deferrable` cannot be reset and report `0A000`. `plan_cache_mode` accepts case-insensitive complete enum values, rejects other values with `22023`, and exposes its current value, source, allowed values, and default through `pg_settings`.
+
 Known settings include:
 
 | Setting | Default or behavior |
@@ -138,6 +156,7 @@ Known settings include:
 | `datestyle` | Mutable, default `ISO, MDY` |
 | `timezone` | Mutable, default `UTC` |
 | `work_mem` | Mutable, default `64MB` |
+| `plan_cache_mode` | `auto`, `force_generic_plan`, or `force_custom_plan`; default `auto` |
 | `default_transaction_isolation` | Mutable transaction default, `read committed` |
 | `default_transaction_read_only` | Mutable transaction default, `off` |
 | `default_transaction_deferrable` | Mutable transaction default, `off` |

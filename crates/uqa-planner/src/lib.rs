@@ -57,6 +57,7 @@ pub mod join_graph;
 pub mod join_order;
 pub mod optimizer;
 pub mod parallel;
+pub mod plan_cost;
 pub mod query_optimizer;
 pub mod text_top_k;
 pub mod unified_plan;

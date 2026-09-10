@@ -1,0 +1,79 @@
+{
+  "cases": [
+    {
+      "sql": "SELECT version()"
+    },
+    {
+      "sql": "CREATE SCHEMA prepared_plan_types"
+    },
+    {
+      "sql": "CREATE DOMAIN prepared_plan_types.positive_small AS smallint CHECK (VALUE > 0)"
+    },
+    {
+      "sql": "PREPARE typed_domain(prepared_plan_types.positive_small) AS SELECT $1 AS value, pg_typeof($1)::text AS declared, $1 + 0::smallint AS sum, pg_typeof($1 + 0::smallint)::text AS sum_type"
+    },
+    {
+      "sql": "EXECUTE typed_domain(7)"
+    },
+    {
+      "sql": "EXECUTE typed_domain(NULL)"
+    },
+    {
+      "sql": "EXECUTE typed_domain(-1)"
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='typed_domain'"
+    },
+    {
+      "sql": "PREPARE typed_conditional(prepared_plan_types.positive_small,boolean) AS SELECT CASE WHEN $2 THEN $1 ELSE $1 END AS result, pg_typeof(CASE WHEN $2 THEN $1 ELSE $1 END)::text AS result_type"
+    },
+    {
+      "sql": "EXECUTE typed_conditional(5,true)"
+    },
+    {
+      "sql": "EXECUTE typed_conditional(NULL,false)"
+    },
+    {
+      "sql": "PREPARE typed_overflow(prepared_plan_types.positive_small) AS SELECT $1 + 1::smallint"
+    },
+    {
+      "sql": "EXECUTE typed_overflow(32767)"
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='typed_overflow'"
+    },
+    {
+      "sql": "SET plan_cache_mode=force_generic_plan"
+    },
+    {
+      "sql": "EXECUTE typed_domain(8)"
+    },
+    {
+      "sql": "EXECUTE typed_conditional(6,false)"
+    },
+    {
+      "sql": "EXECUTE typed_overflow(32767)"
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='typed_overflow'"
+    },
+    {
+      "sql": "RESET plan_cache_mode"
+    },
+    {
+      "sql": "PREPARE typed_values(smallint,bigint,real,integer[]) AS SELECT $1 AS small, $2 AS big, $3 AS real_value, $4 AS array_value, pg_typeof($1)::text AS small_type, pg_typeof($2)::text AS big_type, pg_typeof($3)::text AS real_type, pg_typeof($4)::text AS array_type"
+    },
+    {
+      "sql": "EXECUTE typed_values(2,3,1.25,ARRAY[1,2])"
+    },
+    {
+      "sql": "EXECUTE typed_values(NULL,NULL,NULL,NULL)"
+    },
+    {
+      "sql": "DEALLOCATE ALL"
+    },
+    {
+      "sql": "DROP SCHEMA prepared_plan_types CASCADE"
+    }
+  ]
+}

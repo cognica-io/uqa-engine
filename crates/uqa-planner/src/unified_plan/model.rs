@@ -559,6 +559,10 @@ pub enum CommandPlan {
     SetVariable {
         name: String,
         value: String,
+        #[serde(default)]
+        local: bool,
+        #[serde(default)]
+        is_default: bool,
     },
     ResetVariable {
         name: String,

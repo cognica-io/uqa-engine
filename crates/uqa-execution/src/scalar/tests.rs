@@ -30,6 +30,8 @@ fn nested_real_arithmetic_retains_width_without_a_row_schema() {
     let real = |value| ScalarExpr::TypedLiteral {
         value: Value::Float(value),
         ty: "real".into(),
+        bound_type: None,
+        parameter_index: None,
     };
     let expression = ScalarExpr::Binary {
         op: BinaryOp::Add,

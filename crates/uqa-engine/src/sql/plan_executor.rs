@@ -373,7 +373,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             super::prepared::bind_execute_parameters(self.engine, name, params, self.params)?;
         let plan = self
             .engine
-            .prepared_plan_for_execution(name)?
+            .prepared_plan_for_execution(name, &bound)?
             .ok_or_else(|| super::prepared::statement_error("26000", name, "does not exist"))?;
         UnifiedPlanExecutor::new_nested(self.engine, &bound).execute(&plan)
     }
@@ -664,20 +664,21 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 self.engine.unlisten(channel.as_deref())?;
                 Ok(SQLResult::empty())
             }
-            CommandPlan::SetVariable { name, value } => {
-                if name.eq_ignore_ascii_case("role") {
-                    self.engine.set_role(value)?;
-                } else {
-                    self.engine.set_variable(name, value)?;
-                }
+            CommandPlan::SetVariable {
+                name,
+                value,
+                local,
+                is_default,
+            } => {
+                self.engine.set_runtime_parameter(
+                    name,
+                    (!is_default).then_some(value.as_str()),
+                    *local,
+                )?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::ResetVariable { name } => {
-                if name.eq_ignore_ascii_case("role") {
-                    self.engine.set_role("default")?;
-                } else {
-                    self.engine.reset_variable(name)?;
-                }
+                self.engine.set_runtime_parameter(name, None, false)?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::ResetAllVariables => {

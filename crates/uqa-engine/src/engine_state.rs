@@ -447,6 +447,16 @@ pub(super) struct SessionContext {
     pub(crate) statistics_client: AtomicBool,
 }
 
+#[derive(Clone)]
+pub(super) enum RuntimeParameterValue {
+    Setting(Option<String>),
+    SearchPath {
+        setting: Option<String>,
+        path: Vec<String>,
+    },
+    Role(String),
+}
+
 impl SessionContext {
     pub(super) fn new(random_state: super::SessionRandomState) -> Self {
         let state = super::SessionStateSnapshot {
@@ -454,6 +464,7 @@ impl SessionContext {
             search_path: vec!["public".to_string()],
             temporary_namespace_allocated: false,
             session_vars: BTreeMap::new(),
+            local_parameter_restore: BTreeMap::new(),
             sequence_currvals: BTreeMap::new(),
             last_sequence: None,
             sequence_discard_generation: 0,

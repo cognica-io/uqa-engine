@@ -205,7 +205,7 @@ Distinct, aggregate, window, facet, volatile-limit, and residual-filter shapes d
 
 The exact SQL statement cache retains parsed and lowered plans. In-memory read-only calls can reuse optimized plans while relevant epochs remain unchanged. Persistent execution pins the current storage snapshot before using or optimizing a plan.
 
-Prepared statements and stored views retain plans but are rebound or invalidated after relevant catalog and function registry changes. A cache hit is never authority to ignore a changed schema, index, routine, model, or analyzer.
+Prepared statements retain the analyzed definition, a reusable generic plan, accumulated custom-plan costs, and usage counters. Custom planning substitutes already-coerced parameters while retaining resolved domain identities and bare-parameter provenance. The first five parameterized executions use custom plans in auto mode; subsequent selections compare generic execution cost with average custom execution plus planning cost. Relational costing uses shared operator coefficients, live row counts, MCV statistics, and eligible index access. A newly built generic plan is costed before deciding whether to execute it. Catalog invalidation discards executable plans while retaining cost history and counters; replanning checks the original result descriptor. Stored views remain logical until invocation. A cache hit is never authority to ignore a changed schema, index, routine, model, or analyzer.
 
 ## Result boundaries
 

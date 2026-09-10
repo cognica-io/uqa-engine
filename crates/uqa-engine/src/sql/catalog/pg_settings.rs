@@ -21,6 +21,7 @@ pub(super) fn build_pg_settings(
         ("DateStyle", "Locale and formatting"),
         ("TimeZone", "Locale and formatting"),
         ("work_mem", "Resource usage"),
+        ("plan_cache_mode", "Query Tuning / Other Planner Options"),
         ("session_replication_role", "Replication"),
         ("plpgsql.check_asserts", "Customized Options"),
         ("search_path", "Client connection defaults"),
@@ -44,21 +45,36 @@ pub(super) fn build_pg_settings(
         .into_iter()
         .map(|(name, category)| {
             let setting = session.show_variable(name)?;
-            build_pg_setting_row(name, category, &setting)
+            build_pg_setting_row(
+                name,
+                category,
+                &setting,
+                session.runtime_parameter_source(name),
+            )
         })
         .collect()
 }
 
-fn build_pg_setting_row(name: &str, category: &str, setting: &str) -> Result<ResultRow, SQLError> {
+fn build_pg_setting_row(
+    name: &str,
+    category: &str,
+    setting: &str,
+    source: &str,
+) -> Result<ResultRow, SQLError> {
     let replication_role = name == "session_replication_role";
+    let plan_cache_mode = name == "plan_cache_mode";
     let check_asserts = name == "plpgsql.check_asserts";
-    let enumvals = if replication_role {
+    let enumvals = if replication_role || plan_cache_mode {
         catalog_array(
-            ["origin", "replica", "local"]
-                .into_iter()
-                .map(str_value)
-                .collect(),
-            "session_replication_role enum values",
+            if plan_cache_mode {
+                ["auto", "force_generic_plan", "force_custom_plan"]
+            } else {
+                ["origin", "replica", "local"]
+            }
+            .into_iter()
+            .map(str_value)
+            .collect(),
+            "runtime parameter enum values",
         )?
     } else {
         Value::Null
@@ -70,13 +86,22 @@ fn build_pg_setting_row(name: &str, category: &str, setting: &str) -> Result<Res
         ("category", str_value(category)),
         (
             "short_desc",
-            str_value(if check_asserts {
+            str_value(if plan_cache_mode {
+                "Controls the planner's selection of custom or generic plan."
+            } else if check_asserts {
                 "Perform checks given in ASSERT statements."
             } else {
                 name
             }),
         ),
-        ("extra_desc", Value::Null),
+        (
+            "extra_desc",
+            if plan_cache_mode {
+                str_value("Prepared statements can have custom and generic plans, and the planner will attempt to choose which is better.  This can be set to override the default behavior.")
+            } else {
+                Value::Null
+            },
+        ),
         (
             "context",
             str_value(if replication_role {
@@ -87,7 +112,7 @@ fn build_pg_setting_row(name: &str, category: &str, setting: &str) -> Result<Res
         ),
         (
             "vartype",
-            str_value(if replication_role {
+            str_value(if replication_role || plan_cache_mode {
                 "enum"
             } else if check_asserts {
                 "bool"
@@ -95,13 +120,15 @@ fn build_pg_setting_row(name: &str, category: &str, setting: &str) -> Result<Res
                 "string"
             }),
         ),
-        ("source", str_value("default")),
+        ("source", str_value(source)),
         ("min_val", Value::Null),
         ("max_val", Value::Null),
         ("enumvals", enumvals),
         (
             "boot_val",
-            str_value(if replication_role {
+            str_value(if plan_cache_mode {
+                "auto"
+            } else if replication_role {
                 "origin"
             } else if check_asserts {
                 "on"
@@ -111,7 +138,9 @@ fn build_pg_setting_row(name: &str, category: &str, setting: &str) -> Result<Res
         ),
         (
             "reset_val",
-            str_value(if replication_role {
+            str_value(if plan_cache_mode {
+                "auto"
+            } else if replication_role {
                 "origin"
             } else if check_asserts {
                 "on"

@@ -406,3 +406,11 @@ cargo test -p uqa-engine --test integration sql_prepared
 `constant_planning_oracle.expected.json` contains 62 PostgreSQL 18.4 cases for constant arithmetic, typed results, CASE and Boolean evaluation order, COALESCE, relation and column error precedence, deferred view planning, zero-parameter EXECUTE, and distinct scalar-subquery namespaces in ON CONFLICT and RETURNING. `prepared_plan_error_order_oracle.expected.json` adds 16 cases for argument errors preceding body planning and for plan-use counters after planning failures. The engine integration target runs both fixtures through the existing prepared-statement oracle helper, and the PostgreSQL server target compares them over a real TCP connection.
 
 `rule_input_planning_oracle.expected.json` contains 66 PostgreSQL 18.4 cases for suppressed commands, unused NEW inputs, rule RETURNING diagnostics, and command tags from same-kind versus different-kind INSTEAD actions, ALSO actions, multiple actions, UPDATE FROM, and automatic views. The engine target runs this fixture on memory and SQLite, and the server target runs it over TCP; a separate wire assertion verifies primary-message and hint fields.
+
+
+`prepared_plan_selection_oracle.expected.json` contains 84 PostgreSQL 18.4 cases for automatic and forced custom/generic selection, plan-use counters, argument errors, planning errors, and invalidation. `prepared_plan_cost_oracle.expected.json` contains 60 cases over a 10,000-row indexed relation with a 9,999:1 distribution: rare keys retain custom plans while common keys switch to generic plans. `prepared_plan_settings_oracle.expected.json` contains 53 cases for enum metadata, exact invalid-value errors, SET DEFAULT completion, and local/session changes across savepoints, commit, rollback, and RESET ALL. `prepared_plan_types_oracle.expected.json` contains 25 cases for scalar and array types, domain identity, typed NULLs, constraint diagnostics, and smallint overflow in both plan modes. The existing engine integration target and server TCP target run these fixtures; selection and skewed-data fixtures also run against SQLite.
+
+```sh
+cargo test -p uqa-engine prepared
+cargo test -p uqa-pg-server --test integration prepared_plan_selection
+```

@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Added cost-based custom/generic prepared-plan selection and `plan_cache_mode`, with typed parameter specialization, five initial custom plans, planning-cost-aware reuse, and per-session usage counters.
 - Added ordered prepared-parameter inference, preparation-time schema and expression validation, fixed result-descriptor checks during replanning, and session-local `pg_prepared_statements` metadata retaining the original SQL text.
 - Added an unpublished PostgreSQL TCP server crate with independent authenticated-role sessions, explicit trust policy, Simple Query results, cancellation, notifications, and protocol 3.0/3.2 negotiation.
 - Added data-modifying CTEs for INSERT, UPDATE, DELETE, and MERGE, with typed RETURNING results, statement snapshot sharing, and execution of unreferenced commands. PostgreSQL 18 differential fixtures cover command results, state changes, and diagnostics on memory and SQLite engines.
@@ -16,6 +17,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserved `SET LOCAL` and `SET ... DEFAULT` through compilation and execution. Local values restore at transaction completion and follow savepoint rollback; default assignments retain the PostgreSQL SET command tag.
+- Corrected rare-value selectivity using the probability left after common values and NULLs, without overriding known frequencies with an entropy floor. Domain parameters retain their identities and integer widths in custom and generic plans, and domain errors use catalog-visible type names.
 - Released unwritten compressed SQLite readers before waiting for writer ownership or snapshot publication. Automatic statistics publication no longer deadlocks an application COMMIT, and catalog writer fences retain savepoint behavior while refreshing committed data.
 - Removed unused rewrite-rule inputs before constant planning and preserved PostgreSQL completion counts from the last unconditional INSTEAD action of the original command kind. Rule RETURNING errors retain separate primary and hint fields over TCP.
 - Preserved declared empty SQL schemas through column deletion, rollback, catalog refresh, and reopen while deferring native document and table-function fields until their runtime descriptors are available.
@@ -42,6 +45,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- `ScalarExpr::TypedLiteral` retains optional resolved type and parameter-origin metadata; `Statement::SetVariable` and `CommandPlan::SetVariable` retain local and default flags. Older serialized plans remain readable.
 - Added structured `SQLError::Diagnostic` fields and persisted `TableConstraintSet::columns_declared` metadata for declared SQL schemas.
 - Unified optimizer APIs now return `OptimizerResult` with `OptimizerError::Expression` and `OptimizerError::JoinGraph`, preserving the distinction between SQL expression failures and join-graph failures.
 - Rust `Statement::Prepare` and `CommandPlan::Prepare` now retain `parameter_types`; existing serialized declarations without this field remain readable.

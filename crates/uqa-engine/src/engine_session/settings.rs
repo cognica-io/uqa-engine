@@ -168,6 +168,25 @@ impl Engine {
             return Ok(());
         }
         let mut value = Self::validate_default_transaction_parameter(name, value)?;
+        if name.eq_ignore_ascii_case("plan_cache_mode") {
+            let normalized = value.to_ascii_lowercase();
+            if !matches!(
+                normalized.as_str(),
+                "auto" | "force_generic_plan" | "force_custom_plan"
+            ) {
+                return Err(SQLError::Diagnostic {
+                    sqlstate: "22023".into(),
+                    message: format!(
+                        "invalid value for parameter \"plan_cache_mode\": \"{value}\""
+                    ),
+                    detail: None,
+                    hint: Some(
+                        "Available values: auto, force_generic_plan, force_custom_plan.".into(),
+                    ),
+                });
+            }
+            value = normalized;
+        }
         if name.eq_ignore_ascii_case("plpgsql.check_asserts") {
             value = if crate::engine_capabilities::parse_boolean_runtime_parameter(name, &value)? {
                 "on".into()
@@ -190,11 +209,13 @@ impl Engine {
             session.sql_statement_cache.clear();
             return Ok(());
         }
-        self.session
-            .state
-            .write()
+        let mut session = self.session.state.write();
+        session
             .session_vars
-            .insert(name.to_string(), value);
+            .retain(|key, _| !key.eq_ignore_ascii_case(name));
+        session
+            .session_vars
+            .insert(name.to_ascii_lowercase(), value);
         Ok(())
     }
 
@@ -242,6 +263,9 @@ impl Engine {
     pub fn reset_all_variables(&self) {
         let mut session = self.session.state.write();
         session.session_vars.clear();
+        session
+            .local_parameter_restore
+            .retain(|name, _| name == "role");
         session.search_path = vec!["public".into()];
         session.sql_statement_cache.clear();
     }
@@ -253,6 +277,63 @@ impl Engine {
     /// errors rather than successful empty strings.
     pub fn show_variable(&self, name: &str) -> Result<String, SQLError> {
         self.session_execution_view().show_variable(name)
+    }
+
+    pub(crate) fn set_runtime_parameter(
+        &self,
+        name: &str,
+        value: Option<&str>,
+        local: bool,
+    ) -> Result<(), SQLError> {
+        use crate::engine_state::RuntimeParameterValue;
+        let name = name.to_ascii_lowercase();
+        let before = {
+            let state = self.session.state.read();
+            let setting = state
+                .session_vars
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case(&name))
+                .map(|(_, value)| value.clone());
+            match name.as_str() {
+                "search_path" => RuntimeParameterValue::SearchPath {
+                    setting,
+                    path: state.search_path.clone(),
+                },
+                "role" => RuntimeParameterValue::Role(state.current_user.clone()),
+                _ => RuntimeParameterValue::Setting(setting),
+            }
+        };
+        if name == "role" {
+            self.set_role(value.unwrap_or("default"))?;
+        } else if let Some(value) = value {
+            self.set_variable(&name, value)?;
+        } else {
+            self.reset_variable(&name)?;
+        }
+        let in_transaction = self.transaction_depth() != 0;
+        let mut state = self.session.state.write();
+        if local {
+            if in_transaction {
+                state.local_parameter_restore.entry(name).or_insert(before);
+            } else {
+                restore_runtime_parameter(&mut state, &name, before);
+                self.push_sql_notice(
+                    "WARNING",
+                    "SET LOCAL can only be used in transaction blocks",
+                );
+            }
+        } else {
+            state.local_parameter_restore.remove(&name);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn restore_local_runtime_parameters(&self) {
+        let mut state = self.session.state.write();
+        let saved = std::mem::take(&mut state.local_parameter_restore);
+        for (name, value) in saved {
+            restore_runtime_parameter(&mut state, &name, value);
+        }
     }
 
     pub(crate) fn work_mem_bytes(&self) -> Result<usize, SQLError> {
@@ -403,5 +484,32 @@ impl Engine {
             self.note_table_catalog_changed();
         }
         self.note_catalog_registry_changed();
+    }
+}
+
+fn restore_runtime_parameter(
+    state: &mut crate::SessionStateSnapshot,
+    name: &str,
+    value: crate::engine_state::RuntimeParameterValue,
+) {
+    use crate::engine_state::RuntimeParameterValue;
+    let setting = match value {
+        RuntimeParameterValue::Setting(value) => value,
+        RuntimeParameterValue::SearchPath { setting, path } => {
+            state.search_path = path;
+            state.sql_statement_cache.clear();
+            setting
+        }
+        RuntimeParameterValue::Role(role) => {
+            state.current_user = role;
+            state.sql_statement_cache.clear();
+            return;
+        }
+    };
+    state
+        .session_vars
+        .retain(|key, _| !key.eq_ignore_ascii_case(name));
+    if let Some(value) = setting {
+        state.session_vars.insert(name.into(), value);
     }
 }

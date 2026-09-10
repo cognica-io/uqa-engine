@@ -82,6 +82,7 @@ impl Engine {
             .ok_or_else(|| SQLError::Internal("COMMIT lost its transaction frame".into()))?;
         if storage_savepoint.is_none() {
             self.session.state.write().graph_overlay = None;
+            self.restore_local_runtime_parameters();
             let publication_result = self.row_locks.publish_row_changes(
                 self.session_id,
                 committed.row_changes.iter().map(|change| change.pending),

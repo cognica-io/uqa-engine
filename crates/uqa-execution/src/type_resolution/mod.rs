@@ -236,6 +236,10 @@ pub(super) fn scalar_type_inner(
             qualified_column::resolve(schema, qualifier, column)
         }
         ScalarExpr::Literal(value) => Ok(common::value_type(value)),
+        ScalarExpr::TypedLiteral {
+            bound_type: Some(ty),
+            ..
+        } => Ok(Some(ty.clone())),
         ScalarExpr::TypedLiteral { ty, .. } => {
             let target = match ColumnType::from_sql_name(ty) {
                 Ok(ty) => Ok(Some(ty)),

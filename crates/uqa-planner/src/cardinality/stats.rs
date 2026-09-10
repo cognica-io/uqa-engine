@@ -125,11 +125,38 @@ pub struct ColumnStats {
 impl ColumnStats {
     /// Default selectivity of an equality predicate over this column.
     pub fn equality_selectivity(&self) -> f64 {
-        if self.distinct_count == 0 {
+        self.non_null_fraction() / self.distinct_count.max(1) as f64
+    }
+
+    pub fn non_null_fraction(&self) -> f64 {
+        if self.row_count == 0 {
             1.0
         } else {
-            1.0 / self.distinct_count as f64
+            (1.0 - self.null_count as f64 / self.row_count as f64).clamp(0.0, 1.0)
         }
+    }
+
+    /// An equality constant outside the MCV list shares only its remaining probability mass.
+    pub fn equality_selectivity_for(&self, value: &Value) -> f64 {
+        if matches!(value, Value::Null) {
+            return 0.0;
+        }
+        if let Some(frequency) = self.matches_mcv(value) {
+            return frequency.clamp(0.0, 1.0);
+        }
+        let remaining =
+            (self.non_null_fraction() - self.mcv_frequencies.iter().sum::<f64>()).max(0.0);
+        let distinct = self
+            .distinct_count
+            .saturating_sub(self.mcv_values.len() as u64)
+            .max(1);
+        let selectivity = remaining / distinct as f64;
+        self.mcv_frequencies
+            .iter()
+            .copied()
+            .reduce(f64::min)
+            .map_or(selectivity, |least_common| selectivity.min(least_common))
+            .clamp(0.0, 1.0)
     }
 
     pub fn matches_mcv(&self, value: &Value) -> Option<f64> {

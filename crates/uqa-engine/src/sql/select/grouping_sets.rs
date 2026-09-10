@@ -264,6 +264,8 @@ fn normalize_expression(
                 ScalarExpr::TypedLiteral {
                     value: Value::Null,
                     ty: target_type.sql_name(),
+                    bound_type: Some(target_type),
+                    parameter_index: None,
                 }
             } else {
                 ScalarExpr::Cast {
@@ -281,15 +283,27 @@ fn normalize_expression(
             subquery,
             negated,
         },
-        ScalarExpr::TypedLiteral { value, ty } => {
+        ScalarExpr::TypedLiteral {
+            value,
+            ty,
+            bound_type,
+            parameter_index,
+        } => {
             let literal = ScalarExpr::Literal(value.clone());
-            let declared = ColumnType::from_sql_name(&ty)?;
-            if expression_type(engine, &literal, schema, params)?.as_ref() == Some(&declared) {
+            let declared = match bound_type {
+                Some(ty) => ty,
+                None => crate::sql::resolve_declared_column_type(engine, &ColumnType::Named(ty))?,
+            };
+            if parameter_index.is_none()
+                && expression_type(engine, &literal, schema, params)?.as_ref() == Some(&declared)
+            {
                 literal
             } else {
                 ScalarExpr::TypedLiteral {
                     value,
                     ty: declared.sql_name(),
+                    bound_type: Some(declared),
+                    parameter_index,
                 }
             }
         }

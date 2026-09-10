@@ -1,0 +1,256 @@
+{
+  "cases": [
+    {
+      "sql": "SELECT version()"
+    },
+    {
+      "sql": "SHOW plan_cache_mode"
+    },
+    {
+      "sql": "SET plan_cache_mode = 'invalid'"
+    },
+    {
+      "sql": "SET plan_cache_mode = auto"
+    },
+    {
+      "sql": "PREPARE cache_plain AS SELECT 1 AS result"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_plain'"
+    },
+    {
+      "sql": "EXECUTE cache_plain"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_plain'"
+    },
+    {
+      "sql": "EXECUTE cache_plain"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_plain'"
+    },
+    {
+      "sql": "PREPARE cache_parameter AS SELECT $1::integer + 1 AS result"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'"
+    },
+    {
+      "sql": "EXECUTE cache_parameter(1)"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'"
+    },
+    {
+      "sql": "EXECUTE cache_parameter(2)"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'"
+    },
+    {
+      "sql": "EXECUTE cache_parameter(3)"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'"
+    },
+    {
+      "sql": "EXECUTE cache_parameter(4)"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'"
+    },
+    {
+      "sql": "EXECUTE cache_parameter(5)"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'"
+    },
+    {
+      "sql": "EXECUTE cache_parameter(6)"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'"
+    },
+    {
+      "sql": "EXECUTE cache_parameter(7)"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'"
+    },
+    {
+      "sql": "EXECUTE cache_parameter(8)"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'"
+    },
+    {
+      "sql": "EXECUTE cache_parameter"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'"
+    },
+    {
+      "sql": "EXECUTE cache_parameter('bad')"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'"
+    },
+    {
+      "sql": "EXECUTE cache_parameter(true)"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'"
+    },
+    {
+      "sql": "SET plan_cache_mode = force_custom_plan"
+    },
+    {
+      "sql": "EXECUTE cache_parameter(9)"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'"
+    },
+    {
+      "sql": "EXECUTE cache_plain"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_plain'"
+    },
+    {
+      "sql": "SET plan_cache_mode = force_generic_plan"
+    },
+    {
+      "sql": "EXECUTE cache_parameter(10)"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'"
+    },
+    {
+      "sql": "DISCARD PLANS"
+    },
+    {
+      "sql": "EXECUTE cache_parameter(11)"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'"
+    },
+    {
+      "sql": "RESET plan_cache_mode"
+    },
+    {
+      "sql": "BEGIN"
+    },
+    {
+      "sql": "EXECUTE cache_parameter(12)"
+    },
+    {
+      "sql": "ROLLBACK"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'"
+    },
+    {
+      "sql": "PREPARE cache_division AS SELECT 10 / $1 AS result"
+    },
+    {
+      "sql": "EXECUTE cache_division(0)"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_division'"
+    },
+    {
+      "sql": "EXECUTE cache_division(2)"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_division'"
+    },
+    {
+      "sql": "SET plan_cache_mode = force_generic_plan"
+    },
+    {
+      "sql": "EXECUTE cache_division(0)"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_division'"
+    },
+    {
+      "sql": "SET plan_cache_mode = force_custom_plan"
+    },
+    {
+      "sql": "EXECUTE cache_division(0)"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_division'"
+    },
+    {
+      "sql": "EXECUTE cache_division(NULL)"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_division'"
+    },
+    {
+      "sql": "PREPARE cache_constant AS SELECT 1 / 0 AS result"
+    },
+    {
+      "sql": "EXECUTE cache_constant(1)"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_constant'"
+    },
+    {
+      "sql": "EXECUTE cache_constant"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_constant'"
+    },
+    {
+      "sql": "PREPARE cache_conditional AS SELECT CASE WHEN $1 THEN 1 ELSE 1 / 0 END AS result"
+    },
+    {
+      "sql": "EXECUTE cache_conditional(true)"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_conditional'"
+    },
+    {
+      "sql": "EXECUTE cache_conditional(false)"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_conditional'"
+    },
+    {
+      "sql": "SET plan_cache_mode = force_generic_plan"
+    },
+    {
+      "sql": "EXECUTE cache_conditional(true)"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_conditional'"
+    },
+    {
+      "sql": "RESET plan_cache_mode"
+    },
+    {
+      "sql": "CREATE SEQUENCE cache_argument_sequence"
+    },
+    {
+      "sql": "PREPARE cache_argument AS SELECT 1 / 0 + $1 AS result"
+    },
+    {
+      "sql": "EXECUTE cache_argument(nextval('cache_argument_sequence')::integer)"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM cache_argument_sequence"
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_argument'"
+    },
+    {
+      "sql": "DROP SEQUENCE cache_argument_sequence"
+    },
+    {
+      "sql": "DEALLOCATE ALL"
+    }
+  ]
+}

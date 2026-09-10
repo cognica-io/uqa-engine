@@ -250,7 +250,12 @@ fn coerce_bool(value: Value) -> Result<Value, SQLError> {
 fn is_valid_parameter_expr(expr: &ScalarExpr) -> bool {
     matches!(
         expr,
-        ScalarExpr::Param(_) | ScalarExpr::Literal(Value::Null)
+        ScalarExpr::Param(_)
+            | ScalarExpr::Literal(Value::Null)
+            | ScalarExpr::TypedLiteral {
+                parameter_index: Some(_),
+                ..
+            }
     )
 }
 

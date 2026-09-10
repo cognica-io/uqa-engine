@@ -555,6 +555,7 @@ struct SessionStateSnapshot {
     search_path: Vec<String>,
     temporary_namespace_allocated: bool,
     session_vars: BTreeMap<String, String>,
+    local_parameter_restore: BTreeMap<String, engine_state::RuntimeParameterValue>,
     sequence_currvals: BTreeMap<RelationIdentity, SessionSequenceValue>,
     last_sequence: Option<SessionLastSequenceReference>,
     sequence_discard_generation: u64,

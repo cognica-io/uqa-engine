@@ -1,0 +1,163 @@
+{
+  "cases": [
+    {
+      "sql": "SELECT version()"
+    },
+    {
+      "sql": "SELECT name, setting, unit, category, short_desc, extra_desc, context, vartype, source, min_val, max_val, enumvals::text, boot_val, reset_val, sourcefile, sourceline, pending_restart FROM pg_settings WHERE name='plan_cache_mode'"
+    },
+    {
+      "sql": "SET plan_cache_mode='FORCE_CUSTOM_PLAN'"
+    },
+    {
+      "sql": "SHOW plan_cache_mode"
+    },
+    {
+      "sql": "SELECT setting,source,boot_val,reset_val FROM pg_settings WHERE name='plan_cache_mode'"
+    },
+    {
+      "sql": "SET plan_cache_mode='force'"
+    },
+    {
+      "sql": "SET plan_cache_mode=' auto '"
+    },
+    {
+      "sql": "SET plan_cache_mode=DEFAULT"
+    },
+    {
+      "sql": "SELECT setting,source,boot_val,reset_val FROM pg_settings WHERE name='plan_cache_mode'"
+    },
+    {
+      "sql": "SET plan_cache_mode=auto"
+    },
+    {
+      "sql": "SELECT setting,source,boot_val,reset_val FROM pg_settings WHERE name='plan_cache_mode'"
+    },
+    {
+      "sql": "RESET plan_cache_mode"
+    },
+    {
+      "sql": "SET LOCAL plan_cache_mode=force_generic_plan"
+    },
+    {
+      "sql": "SHOW plan_cache_mode"
+    },
+    {
+      "sql": "BEGIN"
+    },
+    {
+      "sql": "SET plan_cache_mode=force_custom_plan"
+    },
+    {
+      "sql": "SET LOCAL plan_cache_mode=force_generic_plan"
+    },
+    {
+      "sql": "SAVEPOINT settings_before_session_set"
+    },
+    {
+      "sql": "SET plan_cache_mode=auto"
+    },
+    {
+      "sql": "SET LOCAL plan_cache_mode=force_custom_plan"
+    },
+    {
+      "sql": "SHOW plan_cache_mode"
+    },
+    {
+      "sql": "ROLLBACK TO settings_before_session_set"
+    },
+    {
+      "sql": "SHOW plan_cache_mode"
+    },
+    {
+      "sql": "COMMIT"
+    },
+    {
+      "sql": "SHOW plan_cache_mode"
+    },
+    {
+      "sql": "BEGIN"
+    },
+    {
+      "sql": "SET LOCAL plan_cache_mode=force_generic_plan"
+    },
+    {
+      "sql": "SET plan_cache_mode=auto"
+    },
+    {
+      "sql": "COMMIT"
+    },
+    {
+      "sql": "SHOW plan_cache_mode"
+    },
+    {
+      "sql": "BEGIN"
+    },
+    {
+      "sql": "SET LOCAL plan_cache_mode=force_generic_plan"
+    },
+    {
+      "sql": "SET LOCAL plan_cache_mode=DEFAULT"
+    },
+    {
+      "sql": "SHOW plan_cache_mode"
+    },
+    {
+      "sql": "COMMIT"
+    },
+    {
+      "sql": "SHOW plan_cache_mode"
+    },
+    {
+      "sql": "BEGIN"
+    },
+    {
+      "sql": "SET LOCAL plan_cache_mode=force_generic_plan"
+    },
+    {
+      "sql": "RESET ALL"
+    },
+    {
+      "sql": "COMMIT"
+    },
+    {
+      "sql": "SHOW plan_cache_mode"
+    },
+    {
+      "sql": "RESET plan_cache_mode"
+    },
+    {
+      "sql": "SET transaction_read_only=DEFAULT"
+    },
+    {
+      "sql": "RESET transaction_read_only"
+    },
+    {
+      "sql": "SET transaction_isolation=DEFAULT"
+    },
+    {
+      "sql": "RESET transaction_isolation"
+    },
+    {
+      "sql": "SET transaction_deferrable=DEFAULT"
+    },
+    {
+      "sql": "RESET transaction_deferrable"
+    },
+    {
+      "sql": "BEGIN"
+    },
+    {
+      "sql": "SET LOCAL transaction_read_only=DEFAULT"
+    },
+    {
+      "sql": "SET LOCAL transaction_isolation=DEFAULT"
+    },
+    {
+      "sql": "SET LOCAL transaction_deferrable=DEFAULT"
+    },
+    {
+      "sql": "ROLLBACK"
+    }
+  ]
+}

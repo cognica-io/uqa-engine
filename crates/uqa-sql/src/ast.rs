@@ -585,6 +585,10 @@ pub enum Statement {
     SetVariable {
         name: String,
         value: String,
+        #[serde(default)]
+        local: bool,
+        #[serde(default)]
+        is_default: bool,
     },
     /// `RESET <name>` restores one runtime parameter to its session default.
     ResetVariable {

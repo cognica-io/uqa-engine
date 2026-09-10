@@ -178,6 +178,21 @@ impl SessionExecutionView<'_> {
             })
     }
 
+    pub(crate) fn runtime_parameter_source(&self, name: &str) -> &'static str {
+        if self
+            .session
+            .state
+            .read()
+            .session_vars
+            .keys()
+            .any(|key| key.eq_ignore_ascii_case(name))
+        {
+            "session"
+        } else {
+            "default"
+        }
+    }
+
     fn transaction_parameter_value(&self, name: &str) -> Option<String> {
         let current = self.session.transactions.lock().last().map_or_else(
             || default_transaction_characteristics(self.session),
@@ -504,6 +519,9 @@ pub(super) fn default_runtime_parameter(name: &str) -> Option<&'static str> {
     if name.eq_ignore_ascii_case("work_mem") {
         return Some("64MB");
     }
+    if name.eq_ignore_ascii_case("plan_cache_mode") {
+        return Some("auto");
+    }
     if name.eq_ignore_ascii_case("session_replication_role") {
         return Some("origin");
     }
@@ -536,6 +554,7 @@ pub(super) fn is_mutable_runtime_parameter(name: &str) -> bool {
         || name.eq_ignore_ascii_case("datestyle")
         || name.eq_ignore_ascii_case("timezone")
         || name.eq_ignore_ascii_case("work_mem")
+        || name.eq_ignore_ascii_case("plan_cache_mode")
         || name.eq_ignore_ascii_case("session_replication_role")
         || name.eq_ignore_ascii_case("plpgsql.check_asserts")
         || name.eq_ignore_ascii_case("default_transaction_isolation")

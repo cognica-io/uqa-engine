@@ -87,6 +87,18 @@ fn constant_and_rule_planning_match_postgresql_over_tcp() {
 }
 
 #[test]
+fn prepared_plan_selection_matches_postgresql_over_tcp() {
+    for fixture in [
+        include_str!("../../../../tests/parity/pg18/prepared_plan_selection_oracle.expected.json"),
+        include_str!("../../../../tests/parity/pg18/prepared_plan_cost_oracle.expected.json"),
+        include_str!("../../../../tests/parity/pg18/prepared_plan_settings_oracle.expected.json"),
+        include_str!("../../../../tests/parity/pg18/prepared_plan_types_oracle.expected.json"),
+    ] {
+        compare_reference(fixture);
+    }
+}
+
+#[test]
 fn rule_returning_error_preserves_primary_message_and_hint_fields() {
     let fixture = Fixture::new();
     fixture

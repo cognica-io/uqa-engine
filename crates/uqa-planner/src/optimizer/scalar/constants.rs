@@ -52,7 +52,9 @@ fn immutable_cast_type(ty: &ColumnType) -> bool {
 fn is_constant(expression: &ScalarExpr) -> bool {
     match expression {
         ScalarExpr::Literal(_) => true,
-        ScalarExpr::TypedLiteral { ty, .. } => ColumnType::from_sql_name(ty).is_ok(),
+        ScalarExpr::TypedLiteral { ty, bound_type, .. } => {
+            bound_type.is_some() || ColumnType::from_sql_name(ty).is_ok()
+        }
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)
         | ScalarExpr::And(items)
@@ -107,6 +109,8 @@ pub(super) fn fold_literal_expression(expression: ScalarExpr) -> Result<ScalarEx
         Some(ty) => ScalarExpr::TypedLiteral {
             value,
             ty: ty.sql_name(),
+            bound_type: Some(ty),
+            parameter_index: None,
         },
         None => literal,
     })

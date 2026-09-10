@@ -74,10 +74,7 @@ impl CardinalityEstimator {
         match op {
             BinaryOp::Equal => {
                 if let (Some(stats), Some(v)) = (col_stats, value) {
-                    if let Some(freq) = stats.matches_mcv(v) {
-                        return Selectivity(freq).clamp();
-                    }
-                    return Selectivity(stats.equality_selectivity()).clamp();
+                    return Selectivity(stats.equality_selectivity_for(v)).clamp();
                 }
                 Selectivity(self.default_selectivity).clamp()
             }
@@ -148,6 +145,15 @@ impl CardinalityEstimator {
             ScalarExpr::Binary { op, lhs, rhs } => {
                 self.scalar_binary_selectivity(*op, lhs, rhs, stats)
             }
+            ScalarExpr::Literal(Value::Bool(value))
+            | ScalarExpr::TypedLiteral {
+                value: Value::Bool(value),
+                ..
+            } => Selectivity(f64::from(*value)),
+            ScalarExpr::Literal(Value::Null)
+            | ScalarExpr::TypedLiteral {
+                value: Value::Null, ..
+            } => Selectivity(0.0),
             ScalarExpr::InList {
                 expr,
                 list,
@@ -157,11 +163,11 @@ impl CardinalityEstimator {
                     .and_then(|column| stats.column(column))
                     .map_or(self.default_selectivity * list.len() as f64, |column| {
                         list.iter()
-                            .filter_map(scalar_literal)
-                            .map(|value| {
-                                column
-                                    .matches_mcv(&value)
-                                    .unwrap_or_else(|| column.equality_selectivity())
+                            .map(|item| {
+                                scalar_literal(item).map_or_else(
+                                    || column.equality_selectivity(),
+                                    |value| column.equality_selectivity_for(&value),
+                                )
                             })
                             .sum()
                     })
@@ -180,7 +186,6 @@ impl CardinalityEstimator {
             ScalarExpr::Func { name, args, .. } => {
                 self.scalar_function_selectivity(name, args, stats)
             }
-            ScalarExpr::Literal(Value::Bool(value)) => Selectivity(if *value { 1.0 } else { 0.0 }),
             _ => Selectivity(self.default_selectivity).clamp(),
         }
     }
@@ -228,14 +233,16 @@ impl CardinalityEstimator {
         let column = scalar_column(lhs).or_else(|| scalar_column(rhs));
         let value = scalar_literal(rhs).or_else(|| scalar_literal(lhs));
         let column_stats = column.and_then(|column| stats.column(column));
+        if matches!(value, Some(Value::Null)) {
+            return Selectivity(0.0);
+        }
         match op {
             BinaryOp::Equal => {
-                if let (Some(column), Some(value)) = (column_stats, value.as_ref()) {
-                    return Selectivity(
-                        column
-                            .matches_mcv(value)
-                            .unwrap_or_else(|| column.equality_selectivity()),
-                    )
+                if let Some(column) = column_stats {
+                    return Selectivity(value.as_ref().map_or_else(
+                        || column.equality_selectivity(),
+                        |value| column.equality_selectivity_for(value),
+                    ))
                     .clamp();
                 }
                 Selectivity(self.default_selectivity).clamp()
@@ -244,7 +251,8 @@ impl CardinalityEstimator {
                 let equal = self
                     .scalar_binary_selectivity(BinaryOp::Equal, lhs, rhs, stats)
                     .raw();
-                Selectivity(1.0 - equal).clamp()
+                Selectivity(column_stats.map_or(1.0, super::ColumnStats::non_null_fraction) - equal)
+                    .clamp()
             }
             BinaryOp::Less | BinaryOp::LessEqual | BinaryOp::Greater | BinaryOp::GreaterEqual => {
                 if let (Some(column), Some(value)) = (column_stats, value.as_ref()) {
@@ -292,7 +300,7 @@ fn scalar_column(expression: &ScalarExpr) -> Option<&str> {
 
 fn scalar_literal(expression: &ScalarExpr) -> Option<Value> {
     match expression {
-        ScalarExpr::Literal(value) => Some(value.clone()),
+        ScalarExpr::Literal(value) | ScalarExpr::TypedLiteral { value, .. } => Some(value.clone()),
         ScalarExpr::Cast { expr, ty } => {
             let value = scalar_literal(expr)?;
             uqa_sql::expr::cast_value(&value, ty).ok()

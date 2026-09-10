@@ -6,7 +6,9 @@
 
 use super::{volatility, Engine, SQLError, SQLParam, SQLResult, Statement, UnifiedPlanExecutor};
 
+mod plan_cost;
 mod rule_inputs;
+pub(crate) use plan_cost::estimate_engine_plan;
 
 #[cfg(test)]
 use super::{compile, Arc};
@@ -68,10 +70,10 @@ impl uqa_planner::SourceStatistics for EngineSourceStatistics<'_> {
         else {
             return None;
         };
-        if args
-            .iter()
-            .any(uqa_execution::ScalarExpr::contains_parameter)
-        {
+        if args.iter().any(|argument| {
+            argument.contains_parameter()
+                || volatility::expr_contains_volatile_function(self.engine, argument)
+        }) {
             return None;
         }
         let identity = name.to_ascii_lowercase();
@@ -99,8 +101,17 @@ impl uqa_planner::SourceStatistics for EngineSourceStatistics<'_> {
         table: &str,
         predicate: &uqa_execution::ScalarExpr,
     ) -> Option<uqa_planner::LocalAccessEstimate> {
-        if predicate.contains_parameter() {
+        if volatility::expr_contains_volatile_function(self.engine, predicate) {
             return None;
+        }
+        if predicate.contains_parameter() {
+            return match plan_cost::parameterized_access(self, table, predicate) {
+                Ok(estimate) => estimate,
+                Err(error) => {
+                    self.record_error(error);
+                    None
+                }
+            };
         }
         match self.engine.try_table(table) {
             Ok(Some(_)) => {}

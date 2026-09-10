@@ -102,8 +102,9 @@ use mutability::{
 use planning::compile_logical_plans;
 use planning::lower_statement;
 pub(super) use planning::{
-    execute_compiled_statement, execute_compiled_statement_with_privilege_subject,
-    optimize_engine_plan, optimize_engine_query, plan_for_execution,
+    estimate_engine_plan, execute_compiled_statement,
+    execute_compiled_statement_with_privilege_subject, optimize_engine_plan, optimize_engine_query,
+    plan_for_execution,
 };
 pub(crate) use plpgsql_exec::{call_bound_user_scalar_function, call_user_scalar_function};
 use select::query_has_row_locks;

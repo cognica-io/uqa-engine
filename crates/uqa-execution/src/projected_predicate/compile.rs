@@ -42,7 +42,7 @@ pub(super) fn compile(
         }
         ScalarExpr::Param(index) => ProjectedExpr::Literal(parameter(*index, params)?),
         ScalarExpr::Binary { op, lhs, rhs } => {
-            let integer_width = scalar_integer_binary_width(lhs, rhs);
+            let integer_width = scalar_integer_binary_width(lhs, rhs, schema, params);
             let real_arithmetic = matches!(
                 crate::scalar_type(expression, schema, params)?,
                 Some(uqa_sql::ast::ColumnType::Real)

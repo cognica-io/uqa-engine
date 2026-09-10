@@ -1,0 +1,879 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name, setting, unit, category, short_desc, extra_desc, context, vartype, source, min_val, max_val, enumvals::text, boot_val, reset_val, sourcefile, sourceline, pending_restart FROM pg_settings WHERE name='plan_cache_mode'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "setting",
+            "unit",
+            "category",
+            "short_desc",
+            "extra_desc",
+            "context",
+            "vartype",
+            "source",
+            "min_val",
+            "max_val",
+            "enumvals",
+            "boot_val",
+            "reset_val",
+            "sourcefile",
+            "sourceline",
+            "pending_restart"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            23,
+            16
+          ],
+          "rows": [
+            [
+              "plan_cache_mode",
+              "auto",
+              null,
+              "Query Tuning / Other Planner Options",
+              "Controls the planner's selection of custom or generic plan.",
+              "Prepared statements can have custom and generic plans, and the planner will attempt to choose which is better.  This can be set to override the default behavior.",
+              "user",
+              "enum",
+              "default",
+              null,
+              null,
+              "{auto,force_generic_plan,force_custom_plan}",
+              "auto",
+              "auto",
+              null,
+              null,
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SET plan_cache_mode='FORCE_CUSTOM_PLAN'",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SHOW plan_cache_mode",
+      "command_tags": [
+        "SHOW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "plan_cache_mode"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "force_custom_plan"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT setting,source,boot_val,reset_val FROM pg_settings WHERE name='plan_cache_mode'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setting",
+            "source",
+            "boot_val",
+            "reset_val"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "force_custom_plan",
+              "session",
+              "auto",
+              "auto"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SET plan_cache_mode='force'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "invalid value for parameter \"plan_cache_mode\": \"force\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SET plan_cache_mode=' auto '",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "invalid value for parameter \"plan_cache_mode\": \" auto \""
+      },
+      "results": []
+    },
+    {
+      "sql": "SET plan_cache_mode=DEFAULT",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT setting,source,boot_val,reset_val FROM pg_settings WHERE name='plan_cache_mode'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setting",
+            "source",
+            "boot_val",
+            "reset_val"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "auto",
+              "default",
+              "auto",
+              "auto"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SET plan_cache_mode=auto",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT setting,source,boot_val,reset_val FROM pg_settings WHERE name='plan_cache_mode'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "setting",
+            "source",
+            "boot_val",
+            "reset_val"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "auto",
+              "session",
+              "auto",
+              "auto"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "RESET plan_cache_mode",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET LOCAL plan_cache_mode=force_generic_plan",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SHOW plan_cache_mode",
+      "command_tags": [
+        "SHOW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "plan_cache_mode"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "auto"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET plan_cache_mode=force_custom_plan",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET LOCAL plan_cache_mode=force_generic_plan",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SAVEPOINT settings_before_session_set",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET plan_cache_mode=auto",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET LOCAL plan_cache_mode=force_custom_plan",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SHOW plan_cache_mode",
+      "command_tags": [
+        "SHOW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "plan_cache_mode"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "force_custom_plan"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK TO settings_before_session_set",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SHOW plan_cache_mode",
+      "command_tags": [
+        "SHOW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "plan_cache_mode"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "force_generic_plan"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "COMMIT",
+      "command_tags": [
+        "COMMIT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SHOW plan_cache_mode",
+      "command_tags": [
+        "SHOW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "plan_cache_mode"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "force_custom_plan"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET LOCAL plan_cache_mode=force_generic_plan",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET plan_cache_mode=auto",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "COMMIT",
+      "command_tags": [
+        "COMMIT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SHOW plan_cache_mode",
+      "command_tags": [
+        "SHOW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "plan_cache_mode"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "auto"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET LOCAL plan_cache_mode=force_generic_plan",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET LOCAL plan_cache_mode=DEFAULT",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SHOW plan_cache_mode",
+      "command_tags": [
+        "SHOW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "plan_cache_mode"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "auto"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "COMMIT",
+      "command_tags": [
+        "COMMIT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SHOW plan_cache_mode",
+      "command_tags": [
+        "SHOW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "plan_cache_mode"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "auto"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET LOCAL plan_cache_mode=force_generic_plan",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "RESET ALL",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "COMMIT",
+      "command_tags": [
+        "COMMIT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SHOW plan_cache_mode",
+      "command_tags": [
+        "SHOW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "plan_cache_mode"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "auto"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "RESET plan_cache_mode",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET transaction_read_only=DEFAULT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "parameter \"transaction_read_only\" cannot be reset"
+      },
+      "results": []
+    },
+    {
+      "sql": "RESET transaction_read_only",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "parameter \"transaction_read_only\" cannot be reset"
+      },
+      "results": []
+    },
+    {
+      "sql": "SET transaction_isolation=DEFAULT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "parameter \"transaction_isolation\" cannot be reset"
+      },
+      "results": []
+    },
+    {
+      "sql": "RESET transaction_isolation",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "parameter \"transaction_isolation\" cannot be reset"
+      },
+      "results": []
+    },
+    {
+      "sql": "SET transaction_deferrable=DEFAULT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "parameter \"transaction_deferrable\" cannot be reset"
+      },
+      "results": []
+    },
+    {
+      "sql": "RESET transaction_deferrable",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "parameter \"transaction_deferrable\" cannot be reset"
+      },
+      "results": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET LOCAL transaction_read_only=DEFAULT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "parameter \"transaction_read_only\" cannot be reset"
+      },
+      "results": []
+    },
+    {
+      "sql": "SET LOCAL transaction_isolation=DEFAULT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "25P02",
+        "message": "current transaction is aborted, commands ignored until end of transaction block"
+      },
+      "results": []
+    },
+    {
+      "sql": "SET LOCAL transaction_deferrable=DEFAULT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "25P02",
+        "message": "current transaction is aborted, commands ignored until end of transaction block"
+      },
+      "results": []
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    }
+  ]
+}

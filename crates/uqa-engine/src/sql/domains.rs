@@ -275,7 +275,10 @@ fn convert_domain_value(
     {
         return Err(domain_error(
             "23502",
-            format!("domain {} does not allow null values", domain.identity.name),
+            format!(
+                "domain {} does not allow null values",
+                domain_display_name(engine, domain.oid)?
+            ),
         ));
     }
     let row = ResultRow::from([("value".into(), value.clone())]);
@@ -300,13 +303,19 @@ fn convert_domain_value(
                 "23514",
                 format!(
                     "value for domain {} violates check constraint \"{}\"",
-                    domain.identity.name,
+                    domain_display_name(engine, domain.oid)?,
                     check.name.as_deref().expect("bound domain constraint")
                 ),
             ));
         }
     }
     Ok(Some(value))
+}
+
+fn domain_display_name(engine: &Engine, oid: u32) -> Result<String, SQLError> {
+    super::catalog::resolve_regtype_output(engine, &ColumnType::Regtype, i64::from(oid))
+        .map_err(SQLError::Internal)?
+        .ok_or_else(|| SQLError::Internal("domain type has no catalog display name".into()))
 }
 
 fn domain_error(sqlstate: &str, message: impl Into<String>) -> SQLError {

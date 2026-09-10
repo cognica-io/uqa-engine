@@ -13,7 +13,9 @@ mod subquery;
 mod traversal;
 
 use uqa_core::Value;
-use uqa_sql::ast::{BinaryOp, FrameMode, FunctionBinding, InternalColumnRef, NullsOrder};
+use uqa_sql::ast::{
+    BinaryOp, ColumnType, FrameMode, FunctionBinding, InternalColumnRef, NullsOrder,
+};
 
 /// Index into the query children owned by the enclosing expression plan.
 pub type SubqueryId = usize;
@@ -37,6 +39,12 @@ pub enum ScalarExpr {
     TypedLiteral {
         value: Value,
         ty: String,
+        /// Resolved identity of an already-bound datum, including domain OIDs and type modifiers.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bound_type: Option<ColumnType>,
+        /// Original SQL parameter slot when specialization replaces a bare parameter.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parameter_index: Option<usize>,
     },
     Param(usize),
     Func {

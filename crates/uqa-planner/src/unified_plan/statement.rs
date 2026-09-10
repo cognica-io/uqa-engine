@@ -280,9 +280,17 @@ impl UnifiedPlan {
             Statement::Unlisten { channel } => {
                 Self::Command(Box::new(CommandPlan::Unlisten { channel }))
             }
-            Statement::SetVariable { name, value } => {
-                Self::Command(Box::new(CommandPlan::SetVariable { name, value }))
-            }
+            Statement::SetVariable {
+                name,
+                value,
+                local,
+                is_default,
+            } => Self::Command(Box::new(CommandPlan::SetVariable {
+                name,
+                value,
+                local,
+                is_default,
+            })),
             Statement::ResetVariable { name } => {
                 Self::Command(Box::new(CommandPlan::ResetVariable { name }))
             }

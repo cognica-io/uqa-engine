@@ -57,6 +57,8 @@ pub(super) fn optimize_boolean(
         kept.push(ScalarExpr::TypedLiteral {
             value: Value::Null,
             ty: "boolean".into(),
+            bound_type: None,
+            parameter_index: None,
         });
     }
     if config.enable_boolean_simplify {

@@ -39,6 +39,8 @@ pub(super) struct PreparedStatementPlan {
     pub(crate) from_sql: bool,
     pub(crate) generic_plans: i64,
     pub(crate) custom_plans: i64,
+    pub(super) generic_cost: Option<f64>,
+    pub(super) total_custom_cost: f64,
 }
 
 /// Session catalog data without executable plans or planner ownership.
