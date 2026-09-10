@@ -28,20 +28,3 @@ pub(crate) fn validate_default_expression(
         target,
     )
 }
-
-pub(crate) fn bind_stored_schema_expression_routines(
-    engine: &Engine,
-    expression: &mut Expr,
-    typed_expression: Expr,
-) -> Result<bool, SQLError> {
-    let scope = crate::capabilities::query_scope::new_for_catalog_binding(engine);
-    let binding = uqa_execution::query::binding::binding_context(&scope)?;
-    uqa_sql::schema::defaults::bind_stored_schema_expression_routines(
-        &uqa_sql::schema::SchemaBindingContext {
-            catalog: engine,
-            binding: &binding,
-        },
-        expression,
-        typed_expression,
-    )
-}

@@ -116,17 +116,16 @@ pub(crate) use catalog::{
     resolve_regtype_oid, resolve_regtype_output, runtime_constraints, schema_object_oid,
     sequence_relation_oid, view_relation_oid,
 };
-pub(crate) use ddl::{
-    bind_stored_check_expression_routines, bind_stored_schema_expression_routines,
-    convert_value_to_column_type, drop_column_cascade, drop_constraint_dependency,
-    drop_index_dependency, validate_check_expression, validate_default_expression,
-    validate_postgres_column_name, validate_postgres_relation_column_type,
-    validate_vector_dimensions,
-};
 use ddl::{
     column_type_name, json_table_arg, json_table_value_to_text, json_to_core_value,
     run_alter_sequence, run_alter_table, run_create_index, run_create_sequence, run_create_table,
     run_create_table_as, run_create_table_if_not_exists, run_drop, CreateTableAsExecution,
+};
+pub(crate) use ddl::{
+    convert_value_to_column_type, drop_column_cascade, drop_constraint_dependency,
+    drop_index_dependency, validate_check_expression, validate_default_expression,
+    validate_postgres_column_name, validate_postgres_relation_column_type,
+    validate_vector_dimensions,
 };
 use dml::{index_vectors_for_type, run_delete, run_insert, run_merge, run_update};
 use from_rows::engine_func_intercept;

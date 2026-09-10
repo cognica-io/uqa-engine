@@ -115,3 +115,40 @@ impl uqa_execution::schema::columns::ColumnRewritePublication for Engine {
         self.update_document_fields_with_vector_values(table, id, values, vectors)
     }
 }
+
+impl Engine {
+    pub(crate) fn schema_dependency_binding_context(
+        &self,
+    ) -> uqa_sql::schema::dependencies::registration::SchemaDependencyBindingContext<'_> {
+        uqa_sql::schema::dependencies::registration::SchemaDependencyBindingContext {
+            references: self,
+            schema: self,
+            bindings: self,
+        }
+    }
+}
+impl uqa_sql::schema::dependencies::regclass::SchemaReferenceCatalog for Engine {
+    fn loaded_relation_name(&self, reference: &str) -> Result<Option<String>, String> {
+        self.resolve_loaded_visible_relation_kind(reference)
+            .map(|resolution| resolution.into_found().map(|(canonical, _)| canonical))
+            .map_err(|error| error.to_string())
+    }
+    fn bound_relation_oid(&self, canonical: &str) -> Result<Option<i64>, String> {
+        uqa_execution::catalog::projection::resolve_bound_regclass_oid(
+            &self.catalog_execution(),
+            canonical,
+        )
+        .map_err(|error| error.to_string())
+    }
+    fn visible_relation_oid(&self, reference: &str) -> Result<Option<i64>, String> {
+        uqa_execution::catalog::projection::resolve_regclass_oid(
+            &self.catalog_execution(),
+            reference,
+        )
+        .map_err(|error| error.to_string())
+    }
+    fn sequence_for_binding(&self, reference: &str) -> Result<String, String> {
+        self.resolve_sequence_reference_for_binding(reference)
+            .map_err(|error| error.to_string())
+    }
+}

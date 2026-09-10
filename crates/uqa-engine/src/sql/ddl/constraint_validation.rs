@@ -33,27 +33,6 @@ pub(crate) fn validate_check_expression(
     )
 }
 
-pub(crate) fn bind_stored_check_expression_routines(
-    engine: &Engine,
-    table: &str,
-    qualifier: &str,
-    columns: &[ColumnDef],
-    expression: &mut Expr,
-) -> Result<bool, SQLError> {
-    let scope = crate::capabilities::query_scope::new_for_catalog_binding(engine);
-    let binding = uqa_execution::query::binding::binding_context(&scope)?;
-    uqa_sql::schema::constraints::bind_stored_check_expression_routines(
-        &uqa_sql::schema::SchemaBindingContext {
-            catalog: engine,
-            binding: &binding,
-        },
-        table,
-        qualifier,
-        columns,
-        expression,
-    )
-}
-
 use uqa_sql::ast::TableKeyConstraint;
 pub(super) use uqa_sql::schema::constraints::validate_foreign_key_definition;
 

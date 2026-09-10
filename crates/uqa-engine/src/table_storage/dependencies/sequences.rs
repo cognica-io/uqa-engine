@@ -145,12 +145,8 @@ impl Engine {
         &self,
         expression: &mut uqa_sql::ast::Expr,
     ) -> StorageBackendResult<()> {
-        rewrite_sequence_function_references(expression, &mut |reference| {
-            *reference = self.resolve_sequence_reference_for_binding(reference)?;
-            Ok(())
-        })?;
-        self.bind_schema_regclass_constants(expression, false)?;
-        Ok(())
+        uqa_sql::schema::dependencies::regclass::bind_sequence_references_in_expr(self, expression)
+            .map_err(StorageBackendError::Other)
     }
 
     pub(in crate::table_storage) fn resolve_stored_sequence_references_in_expr(
