@@ -16,6 +16,9 @@ use uqa_sql::{
     SQLError, SQLParam, SQLResult,
 };
 use uqa_storage::document_store::Document;
+
+pub mod entry;
+
 /// Optimize and execute at the call boundary so writer promotion cannot leave a stale query generation.
 pub trait TableAsQuerySource {
     fn optimize(&self, plan: &QueryPlan) -> Result<QueryPlan, SQLError>;

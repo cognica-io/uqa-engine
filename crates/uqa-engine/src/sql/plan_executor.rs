@@ -7,6 +7,7 @@
 //! Exhaustive physical executor for the unified SQL plan.
 
 use uqa_core::Value;
+use uqa_execution::schema::ctas::CreateTableAsExecution;
 use uqa_planner::{
     CommandPlan, DeletePlan, ExpressionPlan, InsertPlan, MergePlan, QueryPlan, UnifiedPlan,
     UpdatePlan,
@@ -20,11 +21,7 @@ use crate::session::{MaterializedViewRegistration, ViewRegistration};
 use super::scalar::{
     analyze_physical_call_arguments, eval_physical_call_arguments, PhysicalEvalContext,
 };
-use super::{
-    plpgsql_exec, run_alter_sequence, run_alter_table, run_create_index, run_create_sequence,
-    run_create_table, run_create_table_as, run_create_table_if_not_exists, run_drop, run_explain,
-    select, CreateTableAsExecution, Engine,
-};
+use super::{plpgsql_exec, run_drop, run_explain, select, Engine};
 
 fn call_output_schema(
     engine: &Engine,
@@ -534,12 +531,23 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         }
         match command {
             CommandPlan::CreateTable(statement) => {
-                run_create_table(self.engine, statement.as_ref().clone())
+                uqa_execution::schema::table_creation::entry::run_create_table(
+                    self.engine,
+                    statement.as_ref().clone(),
+                )
             }
             CommandPlan::CreateTableIfNotExists(statement) => {
-                run_create_table_if_not_exists(self.engine, statement.clone())
+                uqa_execution::schema::table_creation::entry::run_create_table_if_not_exists(
+                    self.engine,
+                    statement.clone(),
+                )
             }
-            CommandPlan::CreateIndex(statement) => run_create_index(self.engine, statement.clone()),
+            CommandPlan::CreateIndex(statement) => {
+                uqa_execution::schema::indexes::creation::run_create_index(
+                    &self.engine.index_creation_context(),
+                    statement.clone(),
+                )
+            }
             CommandPlan::Insert(plan) => self.execute_insert(plan),
             CommandPlan::Update(plan) => self.execute_update(plan),
             CommandPlan::Delete(plan) => self.execute_delete(plan),
@@ -605,7 +613,10 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 Ok(SQLResult::empty())
             }
             CommandPlan::AlterTable(statement) => {
-                run_alter_table(self.engine, (**statement).clone())
+                uqa_execution::schema::table_alteration::entry::run_alter_table(
+                    &self.engine.table_alter_entry_context(),
+                    (**statement).clone(),
+                )
             }
             CommandPlan::AlterForeignTable(statement) => {
                 self.engine.alter_foreign_table(statement)?;
@@ -796,14 +807,22 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 Ok(SQLResult::empty())
             }
             CommandPlan::CreateSequence(statement) => {
-                run_create_sequence(self.engine, statement.clone())
+                uqa_execution::schema::sequences::entry::run_create_sequence(
+                    self.engine,
+                    self.runtime.notices,
+                    statement,
+                )
             }
             CommandPlan::CreateDomain(statement) => {
                 super::domains::create_domain(self.engine, statement.clone())?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::AlterSequence(statement) => {
-                run_alter_sequence(self.engine, statement.clone())
+                uqa_execution::schema::sequences::entry::run_alter_sequence(
+                    self.engine,
+                    self.runtime.notices,
+                    statement,
+                )
             }
             CommandPlan::CreateTableAs {
                 name,
@@ -813,7 +832,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 persistence,
                 on_commit,
                 query,
-            } => run_create_table_as(
+            } => uqa_execution::schema::ctas::entry::run_create_table_as(
                 self.engine,
                 CreateTableAsExecution {
                     name,

@@ -362,6 +362,22 @@ impl Engine {
         }
     }
 }
+impl uqa_execution::schema::sequences::entry::SequenceCreationTransactions for Engine {
+    fn with_sequence_creation(
+        &self,
+        write: uqa_execution::schema::sequences::entry::SequenceCreationWrite<'_>,
+    ) -> Result<bool, SQLError> {
+        self.with_implicit_transaction(|engine| write(&engine.sequence_creation_context()))
+    }
+}
+impl uqa_execution::schema::sequences::entry::SequenceAlterTransactions for Engine {
+    fn with_sequence_write(
+        &self,
+        write: uqa_execution::schema::sequences::entry::SequenceAlterWrite<'_>,
+    ) -> Result<bool, SQLError> {
+        self.with_implicit_transaction(|engine| write(&engine.sequence_alter_context()))
+    }
+}
 impl uqa_execution::schema::sequences::lifecycle::SequenceStateRename for Engine {
     fn move_state(
         &self,

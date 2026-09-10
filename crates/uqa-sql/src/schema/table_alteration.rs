@@ -105,3 +105,4 @@ pub fn materialize_recursive_action_names(
 }
 
 pub mod syntax;
+pub mod targets;

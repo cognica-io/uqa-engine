@@ -28,7 +28,7 @@
 use std::sync::Arc;
 
 use uqa_core::Value;
-use uqa_sql::ast::{AlterTableAction, AlterTableStmt, DropKind, DropStmt, Statement};
+use uqa_sql::ast::{DropKind, DropStmt, Statement};
 #[cfg(test)]
 use uqa_sql::compile;
 use uqa_sql::{SQLError, SQLParam, SQLResult};
@@ -109,9 +109,7 @@ pub(crate) use catalog::{
     sequence_relation_oid, view_relation_oid,
 };
 use ddl::{
-    column_type_name, json_table_arg, json_table_value_to_text, json_to_core_value,
-    run_alter_sequence, run_alter_table, run_create_index, run_create_sequence, run_create_table,
-    run_create_table_as, run_create_table_if_not_exists, run_drop, CreateTableAsExecution,
+    column_type_name, json_table_arg, json_table_value_to_text, json_to_core_value, run_drop,
 };
 pub(crate) use ddl::{
     convert_value_to_column_type, validate_postgres_column_name,
