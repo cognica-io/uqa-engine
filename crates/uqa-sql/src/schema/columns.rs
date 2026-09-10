@@ -78,3 +78,5 @@ pub mod publication;
 pub mod alteration;
 
 pub mod removal;
+
+pub mod removal_metadata;

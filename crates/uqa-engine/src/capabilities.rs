@@ -602,3 +602,5 @@ mod retrieval_execution;
 mod physical_retrieval;
 
 mod table_alteration;
+
+mod column_removal;

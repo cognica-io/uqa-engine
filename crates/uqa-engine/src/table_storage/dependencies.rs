@@ -38,7 +38,7 @@ impl Engine {
         )
     }
 
-    pub(super) fn resolve_table_ddl_target(
+    pub(crate) fn resolve_table_ddl_target(
         &self,
         name: &str,
         action: &str,
@@ -62,17 +62,7 @@ impl Engine {
         row: &CatalogIndexRow,
         column: &str,
     ) -> StorageBackendResult<bool> {
-        Ok(Self::catalog_index_columns(row)?
-            .iter()
-            .any(|candidate| schema_expr_references_column(&candidate.expression(), column))
-            || crate::catalog_indexes::index_definition(row)?
-                .included_columns
-                .iter()
-                .any(|name| name == column)
-            || crate::catalog_indexes::index_definition(row)?
-                .predicate
-                .as_deref()
-                .is_some_and(|predicate| schema_expr_references_column(predicate, column)))
+        uqa_execution::catalog::index::index_references_column(row, column)
     }
 
     pub(super) fn catalog_index_with_renamed_column(
@@ -113,33 +103,6 @@ impl Engine {
         }
         row.definition_json = Some(serde_json::to_string(&definition)?);
         Ok(row)
-    }
-
-    pub(super) fn remove_catalog_indexes_for_column(
-        &self,
-        table: &str,
-        column: &str,
-    ) -> StorageBackendResult<()> {
-        let mut rows = self.durable.catalog_indexes.write();
-        let mut removals = Vec::new();
-        for (name, row) in rows.iter() {
-            if row.table_name == table && Self::catalog_index_references_column(row, column)? {
-                removals.push(name.clone());
-            }
-        }
-        for name in removals {
-            if let Some(catalog) = self.storage.catalog.as_ref() {
-                catalog.drop_catalog_index(&name)?;
-            }
-            if let Some(table) = self.try_table(table)? {
-                table
-                    .value_indexes
-                    .write()
-                    .remove(&uqa_storage::ValueIndexKey::Index(name.qualified_name()));
-            }
-            rows.remove(&name);
-        }
-        Ok(())
     }
 
     pub(super) fn rename_catalog_index_table_refs(&self, from: &str, to: &str) {
@@ -488,90 +451,6 @@ impl Engine {
         }
         owner.column = to.to_string();
         true
-    }
-
-    pub(super) fn preflight_drop_column_dependencies(
-        &self,
-        table_name: &str,
-        column: &str,
-    ) -> StorageBackendResult<()> {
-        let views = self.views_depending_on_column(table_name, column)?;
-        if !views.is_empty() {
-            return Err(StorageBackendError::Other(format!(
-                "ALTER TABLE DROP COLUMN `{table_name}`.`{column}` rejected: dependent view(s) {}",
-                views.join(", ")
-            )));
-        }
-        let target = Self::resolved_relation_identity(table_name)?;
-        let entries = self.table_entries();
-        let target_state = entries
-            .iter()
-            .find(|(name, _)| name == table_name)
-            .map(|(_, state)| state)
-            .ok_or_else(|| table_not_found(table_name))?;
-
-        for candidate in target_state.columns.read().iter() {
-            if candidate.name == column {
-                continue;
-            }
-            if candidate
-                .default
-                .as_ref()
-                .is_some_and(|expr| schema_expr_references_column(expr, column))
-                || candidate.generated.as_ref().is_some_and(|generated| {
-                    schema_expr_references_column(&generated.expression, column)
-                })
-            {
-                return Err(StorageBackendError::Other(format!(
-                    "ALTER TABLE DROP COLUMN `{table_name}`.`{column}` rejected: column `{}` has a dependent DEFAULT/generation expression",
-                    candidate.name
-                )));
-            }
-        }
-
-        let mut inbound = Vec::new();
-        for (candidate_name, table) in &entries {
-            for foreign_key in table.foreign_keys.read().iter() {
-                let local_dependency = candidate_name == table_name
-                    && (foreign_key.local_columns.iter().any(|name| name == column)
-                        || foreign_key
-                            .on_delete_set_columns
-                            .iter()
-                            .any(|name| name == column));
-                let referenced_dependency = Self::foreign_key_targets(foreign_key, &target)
-                    && foreign_key.ref_columns.iter().any(|name| name == column);
-                if referenced_dependency && !local_dependency {
-                    inbound.push(candidate_name.clone());
-                }
-            }
-            for candidate in table.columns.read().iter() {
-                if candidate_name == table_name && candidate.name == column {
-                    continue;
-                }
-                if candidate.references.as_ref().is_some_and(|reference| {
-                    stored_relation_reference_matches(&reference.table, &target)
-                        && reference.column.as_deref() == Some(column)
-                }) {
-                    inbound.push(candidate_name.clone());
-                }
-            }
-        }
-        inbound.sort_unstable();
-        inbound.dedup();
-        if !inbound.is_empty() {
-            return Err(StorageBackendError::Other(format!(
-                "ALTER TABLE DROP COLUMN `{table_name}`.`{column}` rejected: referenced by foreign key(s) on `{}`",
-                inbound.join("`, `")
-            )));
-        }
-        // Parse every owned index before any mutation so malformed catalog
-        // metadata cannot turn a failed drop into a partial in-memory change.
-        for row in self.durable.catalog_indexes.read().values() {
-            if row.table_name == table_name {
-                let _ = Self::catalog_index_references_column(row, column)?;
-            }
-        }
-        Ok(())
     }
 
     pub(super) fn vector_index_spec_for_column(

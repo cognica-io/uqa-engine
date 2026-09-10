@@ -7,7 +7,6 @@
 //! Durable row-trigger and rewrite-rule registries with PostgreSQL-compatible lifecycle.
 
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_sql::SQLError;
 
@@ -34,10 +33,7 @@ pub(crate) use uqa_sql::catalog::events::{
     RuleColumnDependency, RuleDependencies, RuleRoutineDependency, StoredRule, StoredTrigger,
 };
 
-pub(crate) struct PreparedRuleColumnDrop {
-    rules: BTreeMap<crate::RelationIdentity, BTreeMap<String, StoredRule>>,
-    rebind: BTreeSet<(crate::RelationIdentity, String)>,
-}
+pub(crate) use uqa_sql::catalog::events::PreparedRuleColumnDrop;
 
 use uqa_sql::catalog::events::synchronize_rule_sql_text;
 

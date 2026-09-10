@@ -7,8 +7,8 @@
 //! Column registration, index rebuild, and table or column rename.
 
 use super::{
-    schema_expr_references_column, table_next_id_metadata_key, table_not_found, Engine,
-    RelationIdentity, StorageBackendError, StorageBackendResult,
+    table_next_id_metadata_key, table_not_found, Engine, RelationIdentity, StorageBackendError,
+    StorageBackendResult,
 };
 use crate::VectorIndexSpec;
 
@@ -107,122 +107,12 @@ impl Engine {
         column: &str,
         cascade: bool,
     ) -> StorageBackendResult<bool> {
-        let Some(table_name) = self.resolve_table_ddl_target(table, "ALTER TABLE DROP COLUMN")?
-        else {
-            return Ok(false);
-        };
-        let Some(t) = self.try_table(table)? else {
-            return Ok(false);
-        };
-        if !t
-            .columns
-            .read()
-            .iter()
-            .any(|candidate| candidate.name == column)
-        {
-            return Ok(false);
-        }
-        let column_object_id = t
-            .columns
-            .read()
-            .iter()
-            .find(|candidate| candidate.name == column)
-            .and_then(|candidate| candidate.object_id)
-            .ok_or_else(|| {
-                StorageBackendError::Other(format!(
-                    "column `{table_name}`.`{column}` has no object identity"
-                ))
-            })?;
-        let owned_sequences =
-            self.sequence_names_owned_by_column(t.object_id(), column_object_id)?;
-        self.preflight_drop_column_dependencies(&table_name, column)?;
-        let prepared_rule_drop = self.prepare_rule_column_drop(&table_name, column)?;
-        Self::value_indexes_clear(&t);
-        {
-            let mut cols = t.columns.write();
-            for definition in cols.iter_mut() {
-                if definition
-                    .check
-                    .as_ref()
-                    .is_some_and(|expression| schema_expr_references_column(expression, column))
-                {
-                    definition.check = None;
-                    definition.check_name = None;
-                    definition.check_object_id = None;
-                    definition.check_is_local = true;
-                    definition.check_enforced = true;
-                    definition.check_validated = true;
-                    definition.check_no_inherit = false;
-                }
-            }
-            cols.retain(|c| c.name != column);
-        }
-        t.table_checks
-            .write()
-            .retain(|constraint| !schema_expr_references_column(&constraint.expr, column));
-        t.key_constraints
-            .write()
-            .retain(|constraint| !constraint.columns.iter().any(|name| name == column));
-        t.foreign_keys.write().retain(|foreign_key| {
-            !foreign_key.local_columns.iter().any(|name| name == column)
-                && !foreign_key
-                    .on_delete_set_columns
-                    .iter()
-                    .any(|name| name == column)
-        });
-        t.security.write().column_acls.remove(column);
-        // Remove from FTS field list if present.
-        {
-            let mut fts = t.fts_fields.write();
-            fts.retain(|f| f != column);
-        }
-        // Drop the vector index for this field if it exists.
-        {
-            let mut vs = t.vector_indexes.write();
-            if let Some(mut idx) = vs.remove(column) {
-                idx.clear()?;
-            }
-        }
-        self.remove_catalog_indexes_for_column(&table_name, column)?;
-        self.durable
-            .table_field_analyzers
-            .write()
-            .retain(|(table, field), _| !(table == &table_name && field == column));
-        let ids = t.document_store.read().doc_ids()?;
-        for doc_id in ids {
-            let Some(mut doc) = t.document_store.read().get(doc_id)? else {
-                continue;
-            };
-            if doc.remove(column).is_some() {
-                self.rewrite_document_for_schema_change(&table_name, doc_id, doc)
-                    .map_err(|err| StorageBackendError::Other(err.to_string()))?;
-            }
-        }
-        self.persist_dropped_column(&table_name, column, &t)?;
-        self.finish_rule_column_drop(prepared_rule_drop)?;
-        for sequence in owned_sequences {
-            self.drop_owned_sequence(&sequence, cascade)?;
-        }
-        self.mark_column_stats_dirty(&table_name, &t)?;
-        self.refresh_value_indexes_for_table(&table_name)?;
-        self.prune_constraint_modes()
-            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-        Ok(true)
-    }
-
-    fn persist_dropped_column(
-        &self,
-        table_name: &str,
-        column: &str,
-        table: &super::TableState,
-    ) -> StorageBackendResult<()> {
-        if !self.is_persistent() {
-            return Ok(());
-        }
-        if let Some(catalog) = self.storage.catalog.as_ref() {
-            catalog.drop_column_data(table_name, column)?;
-        }
-        self.try_save_table_schema(table_name, table)
+        uqa_execution::schema::publication::removal::drop_column(
+            &self.column_drop_publication_context(),
+            table,
+            column,
+            cascade,
+        )
     }
 
     pub(crate) fn try_drop_vector_indexes_for_column(

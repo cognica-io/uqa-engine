@@ -127,3 +127,9 @@ pub fn synchronize_rule_sql_text(definition: &mut CreateRule) -> Result<(), SQLE
         .collect::<Result<Vec<_>, _>>()?;
     Ok(())
 }
+
+/// Surviving rule definitions prepared before column metadata changes, plus the rules to rebind afterward.
+pub struct PreparedRuleColumnDrop {
+    pub rules: RuleCatalog,
+    pub rebind: BTreeSet<(uqa_core::RelationIdentity, String)>,
+}

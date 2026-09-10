@@ -211,3 +211,5 @@ pub mod keys;
 pub mod columns;
 
 pub mod dependencies;
+
+pub mod removal;

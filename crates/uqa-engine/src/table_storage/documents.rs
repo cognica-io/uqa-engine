@@ -794,7 +794,7 @@ impl Engine {
     /// lifecycle code drops or renames the durable postings afterward.
     /// Maintaining them against the half-updated schema here would replace a
     /// renamed field with NULL before its metadata has moved.
-    pub(super) fn rewrite_document_for_schema_change(
+    pub(crate) fn rewrite_document_for_schema_change(
         &self,
         table: &str,
         doc_id: DocId,
