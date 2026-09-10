@@ -38,8 +38,6 @@ pub(crate) use uqa_sql::assignment::conversion::{
     convert_value_to_column_type, validate_vector_dimensions,
 };
 
-use drop::ddl_storage_error;
-
 pub(crate) use uqa_sql::schema::columns::{
     validate_postgres_column_name, validate_postgres_relation_column_type,
 };

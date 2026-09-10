@@ -4,22 +4,22 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `PostgreSQL` inheritance recursion for `ALTER TABLE` actions.
-
-use super::{run_alter_table_action, AlterTableAction, AlterTableStmt, Engine, SQLError};
-use crate::sql::ddl::ddl_storage_error;
+//! Execute inheritance recursion while preserving child validation and CHECK propagation order.
+use super::{
+    ddl_storage_error, run_alter_table_action, AlterTableAction, AlterTableStmt, SQLError,
+    TableAlterContext,
+};
 use std::collections::BTreeSet;
-
-pub(super) fn run_recursive_alter_action(
-    engine: &Engine,
+pub(super) fn run_recursive_alter_action<S: Clone + 'static>(
+    context: &TableAlterContext<'_, S>,
     stmt: AlterTableStmt,
     action: AlterTableAction,
 ) -> Result<(), SQLError> {
-    run_alter_action_branch(engine, stmt, action, false, None, &mut BTreeSet::new())
+    run_alter_action_branch(context, stmt, action, false, None, &mut BTreeSet::new())
 }
 
-fn run_alter_action_branch(
-    engine: &Engine,
+fn run_alter_action_branch<S: Clone + 'static>(
+    context: &TableAlterContext<'_, S>,
     stmt: AlterTableStmt,
     mut action: AlterTableAction,
     recursing: bool,
@@ -32,39 +32,27 @@ fn run_alter_action_branch(
             "table inheritance cycle reaches `{table}`"
         )));
     }
-    engine.ensure_table_owner(&table)?;
+    context.constraints.access.ensure_table_owner(&table)?;
     if recursing {
-        if let AlterTableAction::AddColumn { column, .. } = &mut action {
-            column.not_null_is_local = !column.not_null;
-            column.check_is_local = column.check.is_none();
-            column.check_object_id = None;
-            if column.check_no_inherit {
-                column.check = None;
-                column.check_name = None;
-                column.check_is_local = true;
-                column.check_no_inherit = false;
-            }
-        }
-        if let AlterTableAction::AddCheckConstraint { constraint } = &mut action {
-            constraint.is_local = false;
-            constraint.object_id = None;
-        }
+        uqa_sql::schema::table_alteration::normalize_inherited_action(&mut action);
     }
-    if recursing && merge_existing_recursive_action(engine, &table, &action)? {
+    if recursing && merge_existing_recursive_action(context, &table, &action)? {
         visiting.remove(&table);
         return Ok(());
     }
-    let children = recursive_alter_children(engine, &table, stmt.recurse, &action)?;
+    let children = recursive_alter_children(context, &table, stmt.recurse, &action)?;
     let if_exists = stmt.if_exists;
     run_alter_table_action(
-        engine,
+        context,
         stmt,
         action.clone(),
         recursing,
         inherited_not_null_name,
     )?;
     let child_not_null_name = if let AlterTableAction::SetNotNull { name } = &action {
-        engine
+        context
+            .hierarchy
+            .catalog
             .try_describe_table(&table)
             .map_err(|error| ddl_storage_error("ALTER TABLE SET NOT NULL", error))?
             .and_then(|columns| columns.into_iter().find(|column| column.name == *name))
@@ -73,13 +61,13 @@ fn run_alter_action_branch(
         None
     };
     for child in children {
-        let qualifier = crate::RelationIdentity::from_legacy_name(&child)
+        let qualifier = uqa_core::RelationIdentity::from_legacy_name(&child)
             .map_err(|error| {
                 SQLError::Internal(format!("resolve recursive ALTER target: {error}"))
             })?
             .name;
         run_alter_action_branch(
-            engine,
+            context,
             AlterTableStmt {
                 table: child,
                 qualifier,
@@ -97,8 +85,8 @@ fn run_alter_action_branch(
     Ok(())
 }
 
-fn recursive_alter_children(
-    engine: &Engine,
+fn recursive_alter_children<S: Clone + 'static>(
+    context: &TableAlterContext<'_, S>,
     table: &str,
     recurse: bool,
     action: &AlterTableAction,
@@ -117,16 +105,22 @@ fn recursive_alter_children(
         return Ok(Vec::new());
     }
     let unchanged = match action {
-        AlterTableAction::AddColumn { column, .. } => engine
-            .try_table_has_column(table, &column.name)
+        AlterTableAction::AddColumn { column, .. } => context
+            .addition
+            .state
+            .has_column(table, &column.name)
             .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN", error))?,
-        AlterTableAction::AddCheckConstraint { constraint } => engine
+        AlterTableAction::AddCheckConstraint { constraint } => context
+            .hierarchy
+            .catalog
             .try_check_constraint_definitions(table)
             .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?
             .iter()
             .any(|check| check.name.is_some() && check.name == constraint.name),
         AlterTableAction::AddNotNullConstraint { column, .. }
-        | AlterTableAction::SetNotNull { name: column } => engine
+        | AlterTableAction::SetNotNull { name: column } => context
+            .hierarchy
+            .catalog
             .try_describe_table(table)
             .map_err(|error| ddl_storage_error("ALTER TABLE SET NOT NULL", error))?
             .and_then(|columns| {
@@ -141,7 +135,11 @@ fn recursive_alter_children(
         return Ok(Vec::new());
     }
     if recurse {
-        return engine.direct_hierarchy_children(table);
+        return context
+            .hierarchy
+            .partitions
+            .catalog
+            .direct_hierarchy_children(table);
     }
     let requires_children = matches!(
         action,
@@ -149,7 +147,14 @@ fn recursive_alter_children(
             | AlterTableAction::AddCheckConstraint { .. }
             | AlterTableAction::AddNotNullConstraint { .. }
     );
-    if requires_children && !engine.direct_hierarchy_children(table)?.is_empty() {
+    if requires_children
+        && !context
+            .hierarchy
+            .partitions
+            .catalog
+            .direct_hierarchy_children(table)?
+            .is_empty()
+    {
         let object = if matches!(action, AlterTableAction::AddColumn { .. }) {
             "column"
         } else {
@@ -163,90 +168,55 @@ fn recursive_alter_children(
     Ok(Vec::new())
 }
 
-pub(super) fn materialize_recursive_action_names(
-    engine: &Engine,
+pub(super) fn materialize_recursive_action_names<S: Clone + 'static>(
+    context: &TableAlterContext<'_, S>,
     table: &str,
     recurse: bool,
     action: &mut AlterTableAction,
 ) -> Result<(), SQLError> {
-    if !recurse || engine.direct_hierarchy_children(table)?.is_empty() {
+    if !recurse
+        || context
+            .hierarchy
+            .partitions
+            .catalog
+            .direct_hierarchy_children(table)?
+            .is_empty()
+    {
         return Ok(());
     }
-    let mut columns = engine
+    let mut columns = context
+        .hierarchy
+        .catalog
         .try_describe_table(table)
         .map_err(|error| ddl_storage_error("ALTER TABLE recursive name binding", error))?
         .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-    let mut constraints = engine
+    let mut constraints = context
+        .hierarchy
+        .catalog
         .try_declared_table_constraints(table)
         .map_err(|error| ddl_storage_error("ALTER TABLE recursive name binding", error))?;
-    let relation = crate::RelationIdentity::from_legacy_name(table)
+    let relation = uqa_core::RelationIdentity::from_legacy_name(table)
         .map_err(|error| SQLError::Internal(format!("resolve ALTER TABLE relation: {error}")))?;
-    match action {
-        AlterTableAction::AddColumn { column, .. } => {
-            columns.push(column.clone());
-            crate::table_storage::materialize_constraint_metadata(
-                &relation,
-                &mut columns,
-                &mut constraints,
-            )
-            .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN", error))?;
-            *column = columns
-                .pop()
-                .ok_or_else(|| SQLError::Internal("new column disappeared".into()))?;
-        }
-        AlterTableAction::AddCheckConstraint { constraint }
-            if !constraint.no_inherit && constraint.name.is_none() =>
-        {
-            constraints.checks.push(constraint.clone());
-            crate::table_storage::materialize_constraint_metadata(
-                &relation,
-                &mut columns,
-                &mut constraints,
-            )
-            .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
-            *constraint = constraints
-                .checks
-                .pop()
-                .ok_or_else(|| SQLError::Internal("new CHECK constraint disappeared".into()))?;
-        }
-        AlterTableAction::AddNotNullConstraint {
-            name,
-            column,
-            validated,
-            no_inherit: false,
-        } if name.is_none() => {
-            if let Some(definition) = columns
-                .iter_mut()
-                .find(|definition| definition.name == *column && !definition.not_null)
-            {
-                definition.not_null = true;
-                definition.not_null_explicit = true;
-                definition.not_null_validated = *validated;
-                crate::table_storage::materialize_constraint_metadata(
-                    &relation,
-                    &mut columns,
-                    &mut constraints,
-                )
-                .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
-                *name = columns
-                    .iter()
-                    .find(|definition| definition.name == *column)
-                    .and_then(|definition| definition.not_null_name.clone());
-            }
-        }
-        _ => {}
-    }
-    Ok(())
+    let mut allocate = context.hierarchy.publication.allocate_identity;
+    uqa_sql::schema::table_alteration::materialize_recursive_action_names(
+        &relation,
+        &mut columns,
+        &mut constraints,
+        action,
+        &mut allocate,
+    )
 }
 
-pub(super) fn merge_existing_recursive_action(
-    engine: &Engine,
+pub(super) fn merge_existing_recursive_action<S: Clone + 'static>(
+    context: &TableAlterContext<'_, S>,
     table: &str,
     action: &AlterTableAction,
 ) -> Result<bool, SQLError> {
     match action {
         AlterTableAction::AddColumn { column, .. } => {
-            let Some(mut columns) = engine
+            let Some(mut columns) = context
+                .hierarchy
+                .catalog
                 .try_describe_table(table)
                 .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN", error))?
             else {
@@ -275,30 +245,45 @@ pub(super) fn merge_existing_recursive_action(
                 merged.not_null_no_inherit = no_inherit;
             }
             columns[index] = merged;
-            let constraints = engine
+            let constraints = context
+                .hierarchy
+                .catalog
                 .try_declared_table_constraints(table)
                 .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN", error))?;
-            engine
-                .replace_table_hierarchy_components(
-                    table,
+            crate::schema::publication::hierarchy::replace_hierarchy_components(
+                &context.hierarchy.publication,
+                context.hierarchy.catalog,
+                table,
+                crate::schema::publication::hierarchy::HierarchySchemaChange {
                     columns,
-                    constraints.checks,
-                    constraints.foreign_keys,
-                    constraints.key_constraints,
-                    constraints.hierarchy,
-                )
-                .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN", error))?;
+                    checks: constraints.checks,
+                    foreign_keys: constraints.foreign_keys,
+                    key_constraints: constraints.key_constraints,
+                    hierarchy: constraints.hierarchy,
+                },
+            )
+            .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN", error))?;
             if needs_not_null_validation {
-                super::constraint_lifecycle::validate_not_null_rows(engine, table, &column.name)?;
+                crate::schema::constraints::validate_not_null_rows(
+                    &context.constraints,
+                    table,
+                    &column.name,
+                )?;
             }
             Ok(true)
         }
         AlterTableAction::AddCheckConstraint { constraint } => {
-            super::checks::merge_added_check(engine, table, constraint.clone())
+            crate::schema::constraints::checks::merge_added_check(
+                &context.constraints,
+                table,
+                constraint.clone(),
+            )
         }
         AlterTableAction::AddNotNullConstraint { column, .. }
         | AlterTableAction::SetNotNull { name: column } => {
-            let definition = engine
+            let definition = context
+                .hierarchy
+                .catalog
                 .try_describe_table(table)
                 .map_err(|error| ddl_storage_error("ALTER TABLE SET NOT NULL", error))?
                 .and_then(|columns| {
@@ -314,7 +299,11 @@ pub(super) fn merge_existing_recursive_action(
             } else {
                 "55000"
             };
-            super::constraint_lifecycle::ensure_not_null_inheritable(table, &definition, sqlstate)?;
+            uqa_sql::schema::constraint_changes::ensure_not_null_inheritable(
+                table,
+                &definition,
+                sqlstate,
+            )?;
             // An inherited merge preserves the existing child's validation state.
             Ok(true)
         }

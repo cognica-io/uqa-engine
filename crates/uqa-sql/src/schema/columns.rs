@@ -76,3 +76,5 @@ pub mod addition;
 pub mod publication;
 
 pub mod alteration;
+
+pub mod removal;

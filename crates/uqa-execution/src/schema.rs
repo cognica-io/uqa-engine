@@ -23,3 +23,5 @@ pub mod keys;
 pub mod constraints;
 
 pub mod events;
+
+pub mod table_alteration;

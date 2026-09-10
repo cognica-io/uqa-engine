@@ -115,30 +115,6 @@ impl Engine {
         )
     }
 
-    /// Bind hierarchy publication to the current table generation and catalog state.
-    pub(crate) fn replace_table_hierarchy_components(
-        &self,
-        table: &str,
-        columns: Vec<uqa_sql::ast::ColumnDef>,
-        checks: Vec<uqa_sql::ast::TableCheck>,
-        foreign_keys: Vec<uqa_sql::ast::ForeignKey>,
-        key_constraints: Vec<uqa_sql::ast::TableKeyConstraint>,
-        hierarchy: uqa_sql::ast::TableHierarchy,
-    ) -> StorageBackendResult<()> {
-        uqa_execution::schema::publication::hierarchy::replace_hierarchy_components(
-            &self.schema_publication_context(),
-            self,
-            table,
-            uqa_execution::schema::publication::hierarchy::HierarchySchemaChange {
-                columns,
-                checks,
-                foreign_keys,
-                key_constraints,
-                hierarchy,
-            },
-        )
-    }
-
     /// Snapshot of every CHECK constraint that applies to `table`, merging the
     /// column-level CHECKs into the table-level list. Returns `(name, expr)`
     /// pairs for backward API compatibility; use

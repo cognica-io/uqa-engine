@@ -109,3 +109,5 @@ pub mod generated;
 pub mod addition;
 
 pub mod alteration;
+
+pub mod removal;

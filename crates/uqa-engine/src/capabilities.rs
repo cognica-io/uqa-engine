@@ -600,3 +600,5 @@ mod constraint_changes;
 mod retrieval_execution;
 
 mod physical_retrieval;
+
+mod table_alteration;
