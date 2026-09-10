@@ -6,10 +6,8 @@
 
 //! SQL DDL execution and declared-value conversion.
 
-use super::scalar::eval_lowered_expression;
 use super::{
-    index_vectors_for_type, AlterTableAction, AlterTableStmt, BTreeMap, ColumnType, Document,
-    DropKind, DropStmt, Engine, RowUpdateVectors, SQLError, SQLResult, Value,
+    AlterTableAction, AlterTableStmt, ColumnType, DropKind, DropStmt, Engine, SQLError, SQLResult,
 };
 use crate::CatalogIndexRow;
 
@@ -36,8 +34,8 @@ pub(super) use sequence_ctas::{
     run_alter_sequence, run_create_sequence, run_create_table_as, CreateTableAsExecution,
 };
 pub(super) use value_conversion::{
-    coerce_assignment_value, coerce_to_column_type, column_type_name, json_table_arg,
-    json_table_value_to_text, json_to_core_value,
+    coerce_assignment_value, column_type_name, json_table_arg, json_table_value_to_text,
+    json_to_core_value,
 };
 pub(crate) use value_conversion::{
     convert_value_to_column_type, convert_value_to_column_type_with_engine,

@@ -57,3 +57,18 @@ pub fn append_registered_column(
     columns.push(column);
     Ok(())
 }
+
+pub fn reject_default_change_on_generated_column(
+    catalog: &dyn crate::assignment::columns::AssignmentColumnCatalog,
+    table: &str,
+    column: &str,
+) -> Result<(), SQLError> {
+    if crate::assignment::columns::generated_column_kind(catalog, table, column)?.is_some() {
+        return Err(SQLError::TypeMismatch(format!(
+            "column `{column}` of relation `{table}` is a generated column; use SET EXPRESSION or DROP EXPRESSION"
+        )));
+    }
+    Ok(())
+}
+
+pub mod addition;

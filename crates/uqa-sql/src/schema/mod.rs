@@ -197,3 +197,5 @@ pub mod foreign_keys;
 pub mod sequences;
 
 pub mod constraint_metadata;
+
+pub mod keys;

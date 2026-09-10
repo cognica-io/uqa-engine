@@ -25,15 +25,13 @@
     clippy::unnested_or_patterns
 )]
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use uqa_core::{DocId, Value};
+use uqa_core::Value;
 use uqa_sql::ast::{AlterTableAction, AlterTableStmt, ColumnType, DropKind, DropStmt, Statement};
 #[cfg(test)]
 use uqa_sql::compile;
 use uqa_sql::{SQLError, SQLParam, SQLResult};
-use uqa_storage::document_store::Document;
 
 use crate::Engine;
 
@@ -124,7 +122,7 @@ pub(crate) use ddl::{
     validate_postgres_column_name, validate_postgres_relation_column_type,
     validate_vector_dimensions,
 };
-use dml::{index_vectors_for_type, run_delete, run_insert, run_merge, run_update};
+use dml::{run_delete, run_insert, run_merge, run_update};
 use from_rows::engine_func_intercept;
 pub(crate) use generated::{prepare_generated_columns, refresh_stored_generated_columns};
 use plan_executor::UnifiedPlanExecutor;
@@ -189,8 +187,6 @@ use select::run_explain;
 pub(crate) use select::CteScope;
 pub(crate) use session_portal_worker::start_session_portal_worker;
 pub(crate) use uqa_sql::semantics::expr_is_null_free as expr_is_null_free_public;
-
-type RowUpdateVectors = BTreeMap<String, Vec<Vec<f32>>>;
 
 /// Analyze the declared RETURNING row type of a rewrite-rule action without
 /// executing the action.

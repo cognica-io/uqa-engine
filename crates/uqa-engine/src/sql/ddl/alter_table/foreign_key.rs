@@ -7,10 +7,7 @@
 //! Bind foreign-key declaration analysis and row validation to the active catalog and generation.
 use crate::Engine;
 pub(in crate::sql::ddl) use uqa_sql::schema::foreign_keys::column_foreign_key;
-use uqa_sql::{
-    ast::{ColumnDef, ForeignKey, TableKeyConstraint},
-    SQLError,
-};
+use uqa_sql::{ast::ForeignKey, SQLError};
 pub(super) fn validate_foreign_key_definition(
     engine: &Engine,
     table: &str,
@@ -19,21 +16,6 @@ pub(super) fn validate_foreign_key_definition(
     uqa_sql::schema::foreign_keys::validate_foreign_key_definition(
         &engine.foreign_key_definition_context(),
         table,
-        foreign_key,
-    )
-}
-pub(in crate::sql::ddl) fn validate_foreign_key_definition_with_local_state(
-    engine: &Engine,
-    table: &str,
-    columns: Option<&[ColumnDef]>,
-    keys: Option<&[TableKeyConstraint]>,
-    foreign_key: &mut ForeignKey,
-) -> Result<(), SQLError> {
-    uqa_sql::schema::foreign_keys::validate_foreign_key_definition_with_local_state(
-        &engine.foreign_key_definition_context(),
-        table,
-        columns,
-        keys,
         foreign_key,
     )
 }

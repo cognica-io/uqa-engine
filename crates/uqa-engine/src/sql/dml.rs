@@ -6,7 +6,7 @@
 
 //! SQL DML execution, constraints, referential actions, and RETURNING rows.
 
-use super::{CteScope, DocId, Document, Engine, SQLError, SQLParam, SQLResult};
+use super::{CteScope, Engine, SQLError, SQLParam, SQLResult};
 use uqa_planner::{DeletePlan, InsertPlan, MergePlan, UpdatePlan};
 
 mod protocol;
@@ -42,7 +42,6 @@ mod delete;
 mod insert;
 mod merge;
 mod update;
-mod vectors;
 pub(in crate::sql) mod view_automatic;
 
 pub(in crate::sql) use conflict::*;
@@ -51,7 +50,6 @@ pub(in crate::sql) use delete::*;
 pub(in crate::sql) use insert::*;
 pub(in crate::sql) use merge::*;
 pub(in crate::sql) use update::*;
-pub(in crate::sql) use vectors::*;
 
 pub(in crate::sql) fn execute_cte_command(
     engine: &Engine,

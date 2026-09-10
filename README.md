@@ -239,7 +239,7 @@ Install the versioned commit hook once per clone:
 bash scripts/install-git-hooks.sh
 ```
 
-SQL owns mutation analysis, view rewriting, table declarations, and stored schema binding; the planner owns source-output pruning. Execution owns INSERT, UPDATE, DELETE, and MERGE loops, CREATE TABLE, CREATE INDEX, CREATE SEQUENCE, and partition lifecycle scheduling, and schema publication through retained table state handles. Every commit checks the staged crate dependency graph, including build and platform-specific edges and transitive ownership boundaries. See [crate ownership](docs/manual/internals/01-architecture.md) and the [SQL boundary design](docs/design/sql-crate-boundaries.md).
+SQL owns mutation analysis, view rewriting, table declarations, and stored schema binding; the planner owns source-output pruning. Execution owns INSERT, UPDATE, DELETE, and MERGE loops, CREATE TABLE, CREATE INDEX, CREATE SEQUENCE, ADD COLUMN, and partition lifecycle scheduling, and schema publication through retained table state handles. Every commit checks the staged crate dependency graph, including build and platform-specific edges and transitive ownership boundaries. See [crate ownership](docs/manual/internals/01-architecture.md) and the [SQL boundary design](docs/design/sql-crate-boundaries.md).
 
 Build the complete workspace:
 
