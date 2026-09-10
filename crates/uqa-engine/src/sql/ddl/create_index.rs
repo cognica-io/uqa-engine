@@ -11,6 +11,7 @@ use super::{
     SQLResult, VectorIndexSpec,
 };
 
+use uqa_sql::schema::indexes::names::allocate_default_index_name;
 mod expressions;
 mod unique;
 
@@ -184,60 +185,6 @@ fn create_vector_index(
         }
     }
     Ok(())
-}
-
-fn allocate_default_index_name(
-    engine: &Engine,
-    table: &crate::RelationIdentity,
-    columns: &[uqa_sql::ast::IndexKey],
-) -> Result<String, SQLError> {
-    fn component(raw: &str) -> String {
-        let mut out = String::with_capacity(raw.len());
-        let mut previous_was_separator = false;
-        for ch in raw.chars() {
-            if ch.is_alphanumeric() || ch == '_' {
-                out.extend(ch.to_lowercase());
-                previous_was_separator = false;
-            } else if !previous_was_separator && !out.is_empty() {
-                out.push('_');
-                previous_was_separator = true;
-            }
-        }
-        while out.ends_with('_') {
-            out.pop();
-        }
-        out
-    }
-
-    let mut parts = std::iter::once(component(&table.name))
-        .chain(
-            expressions::key_names(columns)
-                .iter()
-                .map(|column| component(column)),
-        )
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    if parts.is_empty() {
-        parts.push("index".to_string());
-    }
-    let base = format!("{}_idx", parts.join("_"));
-    let available = |name: &str| -> Result<bool, SQLError> {
-        let candidate = crate::RelationIdentity::new(&table.schema, name).qualified_name();
-        Ok(matches!(
-            engine.resolve_bound_relation_kind(&candidate)?,
-            crate::capabilities::RelationResolution::MissingRelation
-        ))
-    };
-    if available(&base)? {
-        return Ok(base);
-    }
-    for suffix in 1_u64.. {
-        let candidate = format!("{base}{suffix}");
-        if available(&candidate)? {
-            return Ok(candidate);
-        }
-    }
-    unreachable!("u64 index-name suffix space is non-empty")
 }
 
 fn parse_ivf_index_params(options: &[(String, String)]) -> Result<IVFIndexParams, SQLError> {

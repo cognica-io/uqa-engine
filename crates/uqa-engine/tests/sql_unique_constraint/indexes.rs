@@ -480,3 +480,47 @@ fn inference_analysis_distinguishes_unknown_columns_and_non_index_constraints() 
         "0A000",
     );
 }
+
+#[test]
+fn unique_index_build_preserves_expression_predicate_and_null_keys_across_spill() {
+    for work_mem in ["64kB", "64MB"] {
+        let engine = Engine::new();
+        exec(&engine, &format!("SET work_mem TO '{work_mem}'"));
+        exec(
+            &engine,
+            "CREATE TABLE build_keys(id int, label text, category int, active boolean)",
+        );
+        exec(&engine, "INSERT INTO build_keys SELECT g,repeat('x',1024)||g::text,1,true FROM generate_series(1,200) AS g");
+        exec(&engine, "INSERT INTO build_keys VALUES(201,'Alpha',1,true),(202,'Alpha',2,true),(203,'alpha',1,false),(204,NULL,1,true),(205,NULL,1,true),(206,'ALPHA',1,true)");
+        error(
+            &engine,
+            "CREATE UNIQUE INDEX rejected_build ON build_keys(lower(label),category) WHERE active",
+            "23505",
+        );
+        assert_eq!(
+            engine
+                .sql("SELECT to_regclass('rejected_build') AS name", &[])
+                .unwrap()
+                .rows[0]["name"],
+            Value::Null
+        );
+        exec(&engine, "DELETE FROM build_keys WHERE id=206; CREATE UNIQUE INDEX accepted_build ON build_keys(lower(label),category) WHERE active");
+        error(&engine, "CREATE UNIQUE INDEX rejected_nulls ON build_keys(lower(label),category) NULLS NOT DISTINCT WHERE active", "23505");
+        assert_eq!(
+            engine
+                .sql("SELECT to_regclass('rejected_nulls') AS name", &[])
+                .unwrap()
+                .rows[0]["name"],
+            Value::Null
+        );
+        error(
+            &engine,
+            "INSERT INTO build_keys VALUES(207,'aLPHa',1,true)",
+            "23505",
+        );
+        exec(
+            &engine,
+            "INSERT INTO build_keys VALUES(208,'aLPHa',1,false)",
+        );
+    }
+}

@@ -1,0 +1,314 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! CREATE TABLE inheritance and partition row-type preparation.
+
+use crate::semantics::partition::{
+    validate_hash_partition_spec, validate_new_partition_bound, PartitionContext,
+};
+use crate::{
+    ast::{CreateTable, TableCheck, TableConstraintSet},
+    SQLError,
+};
+/// Parent lookup and constraint declarations used while assembling a new row type.
+pub trait InheritanceCatalog {
+    fn resolve_parent(&self, name: &str) -> Result<String, SQLError>;
+    fn declared_constraints(&self, table: &str) -> Result<TableConstraintSet, String>;
+    fn check_definitions(&self, table: &str) -> Result<Vec<TableCheck>, String>;
+}
+pub struct InheritanceContext<'a> {
+    pub catalog: &'a dyn InheritanceCatalog,
+    pub partitions: PartitionContext<'a>,
+    pub roles: &'a dyn crate::expr::EngineHook,
+}
+use std::collections::BTreeSet;
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves DDL dependency and action order"
+)]
+pub fn prepare_create_table_hierarchy(
+    context: &InheritanceContext<'_>,
+    table: &mut CreateTable,
+) -> Result<(), SQLError> {
+    table.hierarchy.local_columns = table
+        .columns
+        .iter()
+        .map(|column| column.name.clone())
+        .collect();
+    if table.hierarchy.parents.is_empty() {
+        if table.hierarchy.partition_bound.is_some() {
+            return Err(SQLError::Internal(
+                "partition bound has no parent relation".into(),
+            ));
+        }
+        validate_partition_keys(context, table)?;
+        return Ok(());
+    }
+    let is_partition = table.hierarchy.partition_bound.is_some();
+    if is_partition && table.hierarchy.parents.len() != 1 {
+        return Err(SQLError::Internal(
+            "a partition must have exactly one parent".into(),
+        ));
+    }
+    let mut canonical_parents = Vec::with_capacity(table.hierarchy.parents.len());
+    let mut inherited_columns = Vec::new();
+    let mut inherited_checks = Vec::new();
+    let mut inherited_foreign_keys = Vec::new();
+    let mut inherited_keys = Vec::new();
+    for requested_parent in &table.hierarchy.parents {
+        let parent = context.catalog.resolve_parent(requested_parent)?;
+        if parent == table.name {
+            return Err(SQLError::Routine {
+                sqlstate: "42P17".into(),
+                message: "circular inheritance not allowed".into(),
+            });
+        }
+        let parent_hierarchy = context
+            .partitions
+            .catalog
+            .try_table_hierarchy(&parent)
+            .map_err(|error| SQLError::Internal(format!("read parent hierarchy: {error}")))?;
+        if is_partition {
+            let Some(parent_spec) = parent_hierarchy.partition_spec.as_ref() else {
+                return Err(SQLError::Routine {
+                    sqlstate: "42809".into(),
+                    message: format!("relation \"{requested_parent}\" is not partitioned"),
+                });
+            };
+            validate_partition_bound_strategy(
+                parent_spec.strategy,
+                table.hierarchy.partition_bound.as_ref().ok_or_else(|| {
+                    SQLError::Internal("partition lost its bound during validation".into())
+                })?,
+            )?;
+        } else if parent_hierarchy.partition_spec.is_some() {
+            return Err(SQLError::Routine {
+                sqlstate: "42809".into(),
+                message: format!("cannot inherit from partitioned table \"{requested_parent}\""),
+            });
+        }
+        let mut columns = context
+            .partitions
+            .catalog
+            .try_describe_table(&parent)
+            .map_err(|error| SQLError::Internal(format!("read inherited row type: {error}")))?
+            .ok_or_else(|| SQLError::UnknownTable(parent.clone()))?;
+        for column in &mut columns {
+            if column.not_null_no_inherit {
+                column.not_null = false;
+                column.not_null_explicit = false;
+                column.not_null_name = None;
+                column.not_null_no_inherit = false;
+                column.not_null_validated = true;
+            }
+            column.not_null_is_local = !column.not_null;
+            // CHECKs inherit as named constraints independently of the merged column's origin.
+            column.check = None;
+            column.check_name = None;
+            column.check_object_id = None;
+            column.check_is_local = true;
+            column.check_enforced = true;
+            column.check_validated = true;
+            column.check_no_inherit = false;
+        }
+        if !is_partition {
+            // PostgreSQL inherits the NOT NULL property of an identity column, but not its identity generation attribute or owned sequence. SERIAL is different: its nextval default is ordinary inherited metadata and therefore keeps pointing at the parent's sequence.
+            for column in &mut columns {
+                if column
+                    .auto_increment
+                    .as_ref()
+                    .is_some_and(crate::ast::AutoIncrement::is_identity)
+                {
+                    column.auto_increment = None;
+                }
+            }
+        }
+        merge_columns(&mut inherited_columns, columns)?;
+        let constraints = context
+            .catalog
+            .declared_constraints(&parent)
+            .map_err(|error| SQLError::Internal(format!("read inherited constraints: {error}")))?;
+        for mut check in context
+            .catalog
+            .check_definitions(&parent)
+            .map_err(|error| SQLError::Internal(format!("read inherited CHECKs: {error}")))?
+            .into_iter()
+            .filter(|check| !check.no_inherit)
+        {
+            super::check_inheritance::bind_parent_check_columns(&parent, &mut check.expr)?;
+            check.is_local = false;
+            check.object_id = None;
+            check.validated = check.enforced;
+            inherited_checks.push(check);
+        }
+        if is_partition {
+            inherited_foreign_keys.extend(constraints.foreign_keys);
+            inherited_keys.extend(constraints.key_constraints.into_iter().map(|mut key| {
+                key.name = None;
+                key
+            }));
+        }
+        canonical_parents.push(parent);
+    }
+    merge_columns(&mut inherited_columns, std::mem::take(&mut table.columns))?;
+    table.columns = inherited_columns;
+    inherited_checks.append(&mut table.checks);
+    table.checks = inherited_checks;
+    if is_partition {
+        inherited_foreign_keys.append(&mut table.foreign_keys);
+        inherited_keys.append(&mut table.key_constraints);
+        table.foreign_keys = inherited_foreign_keys;
+        table.key_constraints = inherited_keys;
+    }
+    table.hierarchy.parents = canonical_parents;
+    validate_partition_keys(context, table)?;
+    if let (Some(parent), Some(bound)) = (
+        table.hierarchy.parents.first(),
+        table.hierarchy.partition_bound.as_ref(),
+    ) {
+        validate_new_partition_bound(&context.partitions, parent, bound)?;
+    }
+    Ok(())
+}
+
+fn validate_partition_bound_strategy(
+    strategy: crate::ast::PartitionStrategy,
+    bound: &crate::ast::PartitionBound,
+) -> Result<(), SQLError> {
+    use crate::ast::{PartitionBound, PartitionStrategy};
+    if matches!(
+        (strategy, bound),
+        (PartitionStrategy::Hash, PartitionBound::Default)
+    ) {
+        return Err(SQLError::Routine {
+            sqlstate: "42P16".into(),
+            message: "a hash-partitioned table may not have a default partition".into(),
+        });
+    }
+    let matches = matches!(bound, PartitionBound::Default)
+        || matches!(
+            (strategy, bound),
+            (PartitionStrategy::List, PartitionBound::List(_))
+                | (PartitionStrategy::Range, PartitionBound::Range { .. })
+                | (PartitionStrategy::Hash, PartitionBound::Hash { .. })
+        );
+    if matches {
+        Ok(())
+    } else {
+        Err(SQLError::Internal(
+            "partition bound strategy differs from its parent".into(),
+        ))
+    }
+}
+
+fn merge_columns(
+    merged: &mut Vec<crate::ast::ColumnDef>,
+    incoming: Vec<crate::ast::ColumnDef>,
+) -> Result<(), SQLError> {
+    for column in incoming {
+        if let Some(existing) = merged.iter_mut().find(|item| item.name == column.name) {
+            merge_same_column(existing, column)?;
+        } else {
+            merged.push(column);
+        }
+    }
+    Ok(())
+}
+
+pub fn merge_same_column(
+    inherited: &mut crate::ast::ColumnDef,
+    declared: crate::ast::ColumnDef,
+) -> Result<(), SQLError> {
+    if inherited.ty != declared.ty {
+        return Err(SQLError::Routine {
+            sqlstate: "42804".into(),
+            message: format!(
+                "inherited column \"{}\" has a type conflict",
+                inherited.name
+            ),
+        });
+    }
+    if inherited.generated.is_some() != declared.generated.is_some() {
+        return Err(SQLError::Routine {
+            sqlstate: "42P17".into(),
+            message: format!(
+                "inherited column \"{}\" has a generation conflict",
+                inherited.name
+            ),
+        });
+    }
+    let not_null_is_local = (inherited.not_null && inherited.not_null_is_local)
+        || (declared.not_null && declared.not_null_is_local);
+    if declared.not_null && (!inherited.not_null || declared.not_null_is_local) {
+        inherited.not_null_name.clone_from(&declared.not_null_name);
+        inherited.not_null_validated = declared.not_null_validated;
+        inherited.not_null_no_inherit = declared.not_null_no_inherit;
+    }
+    inherited.not_null |= declared.not_null;
+    inherited.not_null_is_local = !inherited.not_null || not_null_is_local;
+    inherited.not_null_explicit |= declared.not_null_explicit;
+    inherited.primary_key |= declared.primary_key;
+    inherited.unique |= declared.unique;
+    if declared.auto_increment.is_some() {
+        inherited.auto_increment = declared.auto_increment;
+    }
+    if declared.default.is_some() {
+        inherited.default = declared.default;
+    }
+    if declared.generated.is_some() {
+        inherited.generated = declared.generated;
+    }
+    if declared.check.is_some() {
+        inherited.check = declared.check;
+        inherited.check_name = declared.check_name;
+        inherited.check_enforced = declared.check_enforced;
+        inherited.check_validated = declared.check_validated;
+        inherited.check_no_inherit = declared.check_no_inherit;
+        inherited.check_is_local = declared.check_is_local;
+        inherited.check_object_id = declared.check_object_id;
+    }
+    if declared.references.is_some() {
+        inherited.references = declared.references;
+    }
+    Ok(())
+}
+
+fn validate_partition_keys(
+    context: &InheritanceContext<'_>,
+    table: &CreateTable,
+) -> Result<(), SQLError> {
+    let Some(spec) = table.hierarchy.partition_spec.as_ref() else {
+        return Ok(());
+    };
+    let column_names = table
+        .columns
+        .iter()
+        .map(|column| column.name.as_str())
+        .collect::<BTreeSet<_>>();
+    for key in &spec.keys {
+        let scalar = crate::plan::ExpressionPlan::lower(key.clone()).scalar;
+        let mut referenced_columns = BTreeSet::new();
+        scalar.collect_columns(&mut referenced_columns);
+        for column in referenced_columns {
+            if !column_names.contains(column.as_str()) {
+                return Err(SQLError::Routine {
+                    sqlstate: "42703".into(),
+                    message: format!("column \"{column}\" named in partition key does not exist"),
+                });
+            }
+        }
+    }
+    validate_hash_partition_spec(&context.partitions, spec, &table.columns)?;
+    for key in &spec.keys {
+        crate::catalog::regrole_dependencies::reject_stored_regrole_constants(
+            context.roles,
+            key,
+            None,
+        )?;
+    }
+    Ok(())
+}

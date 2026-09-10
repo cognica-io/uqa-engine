@@ -185,3 +185,9 @@ pub mod defaults;
 pub mod domains;
 
 pub mod dependencies;
+
+pub mod check_inheritance;
+
+pub mod table_creation;
+
+pub mod inheritance;

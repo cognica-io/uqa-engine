@@ -133,8 +133,7 @@ use dml::{index_vectors_for_type, run_delete, run_insert, run_merge, run_update}
 use from_rows::engine_func_intercept;
 pub(crate) use generated::{prepare_generated_columns, refresh_stored_generated_columns};
 pub(in crate::sql) use hierarchy::{
-    prospective_partition_bound_accepts_document, validate_hash_partition_spec,
-    validate_new_partition_bound,
+    prospective_partition_bound_accepts_document, validate_new_partition_bound,
 };
 use plan_executor::UnifiedPlanExecutor;
 pub(crate) use regrole_dependencies::{

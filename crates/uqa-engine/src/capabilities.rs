@@ -538,7 +538,7 @@ mod query_semantics;
 
 mod query_operators;
 
-mod schema_expressions;
+mod schema_analysis;
 
 mod statement_effects;
 

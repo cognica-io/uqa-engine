@@ -268,7 +268,7 @@ pub(super) fn merge_existing_recursive_action(
                 )
             });
             let mut merged = column.clone();
-            super::super::hierarchy::merge_same_column(&mut merged, local)?;
+            uqa_sql::schema::inheritance::merge_same_column(&mut merged, local)?;
             if let Some((name, validated, no_inherit)) = existing_not_null {
                 merged.not_null_name = name;
                 merged.not_null_validated = validated;

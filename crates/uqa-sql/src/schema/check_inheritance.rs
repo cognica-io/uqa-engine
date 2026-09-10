@@ -6,27 +6,28 @@
 
 //! CHECK definition merging at CREATE and ALTER inheritance boundaries.
 
-use super::{CreateTable, SQLError};
+use crate::ast::{ColumnDef, ColumnType, Expr, TableCheck};
+use crate::ScalarExpr;
+use crate::{ast::CreateTable, SQLError};
 use uqa_core::Value;
-use uqa_execution::ScalarExpr;
-use uqa_sql::ast::{ColumnDef, ColumnType, Expr, TableCheck};
 
-pub(super) fn bind_parent_check_columns(parent: &str, expr: &mut Expr) -> Result<(), SQLError> {
-    let relation = crate::RelationIdentity::from_legacy_name(parent).map_err(SQLError::Internal)?;
-    crate::sql::generated::bind_schema_column_references(expr, parent);
-    crate::sql::generated::bind_schema_column_references(expr, &relation.name);
+pub fn bind_parent_check_columns(parent: &str, expr: &mut Expr) -> Result<(), SQLError> {
+    let relation =
+        uqa_core::RelationIdentity::from_legacy_name(parent).map_err(SQLError::Internal)?;
+    crate::schema::generated::bind_schema_column_references(expr, parent);
+    crate::schema::generated::bind_schema_column_references(expr, &relation.name);
     Ok(())
 }
 
-pub(super) fn same_check_expression(
+pub fn same_check_expression(
     left: &Expr,
     right: &Expr,
     columns: &[ColumnDef],
 ) -> Result<bool, SQLError> {
     fn canonical(expression: &Expr, columns: &[ColumnDef]) -> Result<ScalarExpr, SQLError> {
-        let mut scalar = uqa_planner::ExpressionPlan::lower(expression.clone()).scalar;
+        let mut scalar = crate::plan::ExpressionPlan::lower(expression.clone()).scalar;
         let mut failure = None;
-        uqa_planner::rewrite_scalar_expression(&mut scalar, &mut |node| {
+        crate::plan::rewrite_scalar_expression(&mut scalar, &mut |node| {
             let ScalarExpr::Cast { expr, ty } = node else {
                 return;
             };
@@ -43,7 +44,7 @@ pub(super) fn same_check_expression(
             } else if let ScalarExpr::Literal(value @ Value::Str(_)) = expr.as_ref() {
                 // PostgreSQL resolves an unknown string to an integer constant during analysis. Keep wider and narrower integer coercions distinct from the ordinary int4 literal.
                 if target == ColumnType::Integer {
-                    match uqa_sql::expr::cast_value(value, ty) {
+                    match crate::expr::cast_value(value, ty) {
                         Ok(value) => *node = ScalarExpr::Literal(value),
                         Err(error) => failure = Some(error),
                     }
@@ -58,7 +59,7 @@ pub(super) fn same_check_expression(
     Ok(canonical(left, columns)? == canonical(right, columns)?)
 }
 
-pub(super) fn duplicate_check(table: &str, name: &str) -> SQLError {
+pub fn duplicate_check(table: &str, name: &str) -> SQLError {
     error(
         "42710",
         format!("constraint \"{name}\" for relation \"{table}\" already exists"),
@@ -73,7 +74,7 @@ fn error(sqlstate: &str, message: String) -> SQLError {
 }
 
 /// The caller decides whether a local or inherited duplicate is eligible to merge. Existing validation and enforcement states follow `PostgreSQL`'s directional merge rules.
-pub(super) fn validate_check_merge(
+pub fn validate_check_merge(
     table: &str,
     existing: &TableCheck,
     incoming: &TableCheck,
@@ -103,9 +104,9 @@ pub(super) fn validate_check_merge(
 }
 
 /// Merge bound CHECK expressions after the complete CREATE row type has been validated. Anonymous local constraints remain independent and receive names at publication.
-pub(super) fn merge_create_checks(table: &mut CreateTable) -> Result<(), SQLError> {
+pub fn merge_create_checks(table: &mut CreateTable) -> Result<(), SQLError> {
     let relation =
-        crate::RelationIdentity::from_legacy_name(&table.name).map_err(SQLError::Internal)?;
+        uqa_core::RelationIdentity::from_legacy_name(&table.name).map_err(SQLError::Internal)?;
     let mut local_names = std::collections::BTreeSet::new();
     for name in table
         .columns

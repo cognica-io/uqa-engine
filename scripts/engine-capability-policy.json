@@ -38,7 +38,7 @@
         "crates/uqa-engine/src/capabilities/routine_execution.rs",
         "crates/uqa-engine/src/capabilities/rule_targets.rs",
         "crates/uqa-engine/src/capabilities/rules.rs",
-        "crates/uqa-engine/src/capabilities/schema_expressions.rs",
+        "crates/uqa-engine/src/capabilities/schema_analysis.rs",
         "crates/uqa-engine/src/capabilities/statement_effects.rs",
         "crates/uqa-engine/src/capabilities/table_reads.rs",
         "crates/uqa-engine/src/capabilities/table_reads/query_tests.rs",

@@ -9,18 +9,6 @@
 use crate::Engine;
 use uqa_sql::{ResultRow as Document, SQLError};
 
-pub(in crate::sql) fn validate_hash_partition_spec(
-    engine: &Engine,
-    spec: &uqa_sql::ast::PartitionSpec,
-    columns: &[uqa_sql::ast::ColumnDef],
-) -> Result<(), SQLError> {
-    uqa_sql::semantics::partition::validate_hash_partition_spec(
-        &engine.partition_context(),
-        spec,
-        columns,
-    )
-}
-
 pub(in crate::sql) fn validate_new_partition_bound(
     engine: &Engine,
     parent: &str,

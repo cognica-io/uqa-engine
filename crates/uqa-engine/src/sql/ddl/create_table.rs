@@ -15,6 +15,7 @@ use super::{
     SQLResult,
 };
 use crate::sql::generated::prepare_generated_columns;
+use uqa_sql::schema::table_creation::validate_create_table_columns;
 
 // -------------------------------------------------------------------------
 
@@ -40,14 +41,6 @@ pub(in crate::sql) fn run_create_table_if_not_exists(
         table.name = name;
         create_table_after_preflight(engine, table)
     })
-}
-
-fn validate_create_table_columns(table: &CreateTable) -> Result<(), SQLError> {
-    for column in &table.columns {
-        super::validate_postgres_column_name(&column.name)?;
-        super::validate_postgres_relation_column_type(&column.name, &column.ty)?;
-    }
-    Ok(())
 }
 
 fn preflight_create_table_target(

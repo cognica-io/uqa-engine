@@ -15,8 +15,8 @@ use super::{
 use crate::CatalogIndexRow;
 
 mod alter_table;
-mod check_inheritance;
-mod constraint_indexes;
+use uqa_sql::schema::check_inheritance;
+use uqa_sql::schema::indexes::names as constraint_indexes;
 mod constraint_validation;
 mod create_index;
 mod create_table;

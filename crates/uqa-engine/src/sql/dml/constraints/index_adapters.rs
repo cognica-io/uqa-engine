@@ -17,7 +17,7 @@ pub(crate) fn index_predicate_accepts(
     document: &Document,
 ) -> Result<bool, SQLError> {
     uqa_execution::mutation::constraints::index_keys::index_predicate_accepts(
-        engine.constraint_execution_context(),
+        engine.constraint_execution_context().index_expressions(),
         table,
         predicate,
         document,
@@ -31,7 +31,7 @@ pub(crate) fn index_key_values(
     document: &Document,
 ) -> Result<Vec<Value>, SQLError> {
     uqa_execution::mutation::constraints::index_keys::index_key_values(
-        engine.constraint_execution_context(),
+        engine.constraint_execution_context().index_expressions(),
         table,
         keys,
         document,

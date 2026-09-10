@@ -6,7 +6,7 @@
 
 //! Sequence DDL and CREATE TABLE AS execution.
 
-use std::collections::BTreeSet;
+use uqa_sql::schema::table_creation::create_table_as_columns;
 
 use super::{ddl_storage_error, ColumnType, Document, Engine, SQLError, SQLParam, SQLResult};
 
@@ -244,73 +244,4 @@ fn materialize_create_table_as_rows(
     }
     u64::try_from(result.rows.len())
         .map_err(|_| SQLError::Internal("CREATE TABLE AS row count overflow".into()))
-}
-
-fn create_table_as_columns(
-    query_schema: &uqa_execution::RowSchema,
-    column_names: &[String],
-) -> Result<Vec<uqa_sql::ast::ColumnDef>, SQLError> {
-    if column_names.len() > query_schema.len() {
-        return Err(SQLError::Routine {
-            sqlstate: "42601".into(),
-            message: "too many column names were specified".into(),
-        });
-    }
-    let names = query_schema
-        .columns()
-        .iter()
-        .enumerate()
-        .map(|(position, name)| {
-            column_names
-                .get(position)
-                .cloned()
-                .unwrap_or_else(|| name.clone())
-        })
-        .collect::<Vec<_>>();
-    let mut seen = BTreeSet::new();
-    for name in &names {
-        super::validate_postgres_column_name(name)?;
-        if !seen.insert(name) {
-            return Err(SQLError::Routine {
-                sqlstate: "42701".into(),
-                message: format!("column \"{name}\" specified more than once"),
-            });
-        }
-    }
-    let columns = names
-        .into_iter()
-        .enumerate()
-        .map(|(position, name)| uqa_sql::ast::ColumnDef {
-            name,
-            ty: query_schema
-                .column_type(position)
-                .cloned()
-                .unwrap_or(ColumnType::Text),
-            object_id: None,
-            missing_value: None,
-            primary_key: false,
-            not_null: false,
-            not_null_explicit: false,
-            not_null_name: None,
-            not_null_validated: true,
-            not_null_no_inherit: false,
-            not_null_is_local: true,
-            auto_increment: None,
-            unique: false,
-            default: None,
-            generated: None,
-            check: None,
-            check_name: None,
-            check_enforced: true,
-            check_validated: true,
-            check_no_inherit: false,
-            check_is_local: true,
-            check_object_id: None,
-            references: None,
-        })
-        .collect::<Vec<_>>();
-    for column in &columns {
-        super::validate_postgres_relation_column_type(&column.name, &column.ty)?;
-    }
-    Ok(columns)
 }
