@@ -8,6 +8,9 @@ use uqa_sql::ast::SequenceDataType;
 use uqa_storage::SequenceOwner;
 
 mod decode;
+mod definition;
+
+pub use definition::altered_sequence_state;
 
 /// Mutable state of a single SQL sequence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]

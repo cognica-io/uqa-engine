@@ -193,3 +193,5 @@ pub mod table_creation;
 pub mod inheritance;
 
 pub mod foreign_keys;
+
+pub mod sequences;

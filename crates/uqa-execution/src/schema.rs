@@ -9,3 +9,5 @@ pub mod columns;
 pub mod ctas;
 pub mod indexes;
 pub mod validation;
+
+pub mod sequences;

@@ -273,7 +273,11 @@ impl Engine {
                 row.relation.qualified_name()
             )));
         }
-        Self::validate_sequence_definition(state, false).map_err(|error| {
+        uqa_sql::schema::sequences::definition::validate_sequence_definition(
+            &state.definition(),
+            None,
+        )
+        .map_err(|error| {
             StorageBackendError::Other(format!(
                 "corrupt sequence `{}` definition: {error}",
                 row.relation.qualified_name()
