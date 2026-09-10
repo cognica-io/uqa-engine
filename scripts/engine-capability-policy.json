@@ -38,6 +38,7 @@
         "crates/uqa-engine/src/capabilities/query_sources.rs",
         "crates/uqa-engine/src/capabilities/referential.rs",
         "crates/uqa-engine/src/capabilities/retrieval_catalog.rs",
+        "crates/uqa-engine/src/capabilities/retrieval_execution.rs",
         "crates/uqa-engine/src/capabilities/returning.rs",
         "crates/uqa-engine/src/capabilities/routine_execution.rs",
         "crates/uqa-engine/src/capabilities/rule_targets.rs",

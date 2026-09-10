@@ -313,22 +313,6 @@ pub(crate) fn expect_posting_output(
     }
 }
 
-/// Combine the corpus priors reported by fusion signals into the single
-/// fusion-level prior: the mean of their logits. Every signal estimates
-/// the same corpus-level P(relevant), so averaging in log-odds space
-/// yields one prior no matter how many signals report it.
-pub(crate) fn combine_signal_priors(priors: &[f64]) -> Option<f64> {
-    if priors.is_empty() {
-        return None;
-    }
-    let mean_logit = priors
-        .iter()
-        .map(|rate| uqa_scoring::logit(*rate))
-        .sum::<f64>()
-        / priors.len() as f64;
-    Some(uqa_scoring::sigmoid(mean_logit))
-}
-
 #[cfg(test)]
 #[path = "transaction_boundary_tests.rs"]
 mod transaction_boundary_tests;

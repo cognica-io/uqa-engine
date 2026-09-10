@@ -139,11 +139,6 @@ use row_functions::{
     run_age_graph_exists_with_evaluator, run_graph_create_with_evaluator,
     run_graph_drop_with_evaluator,
 };
-pub(crate) use row_functions::{
-    run_bayesian_match_with_prior_in_execution, run_bayesian_match_with_prior_public,
-    run_calibrated_vector_match_public, run_multi_field_match_in_execution,
-    run_multi_field_match_public,
-};
 use vacuum::run_vacuum;
 
 pub(crate) fn map_physical_exec_error(error: uqa_execution::ExecError) -> SQLError {

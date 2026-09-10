@@ -10,7 +10,7 @@ use super::{
     collect_graph_names, combine_signal_priors, deep_runtime_gating, fuse_signal_batches_with,
     fuse_signals_with, lower_deep_batch_norm, lower_deep_conv, lower_deep_dense,
     lower_deep_dropout, lower_deep_pool, operator_execution_error, scored_term_count,
-    scored_to_posting_list, sql, static_operator, BTreeSet, BayesianEvidenceFusionOperator, DocId,
+    scored_to_posting_list, static_operator, BTreeSet, BayesianEvidenceFusionOperator, DocId,
     DriverExecution, DriverResult, EngineDriver, ExternalPriorMode, GatingSpec,
     GraphNeighborAccess, MultiStageCutoff, MultiStageEntry, OperatorTree, Payload,
     PositiveEvidencePoolExecution, PostingEntry, PostingList, RobustPositiveEvidencePoolOperator,
@@ -19,6 +19,17 @@ use super::{
 };
 
 impl EngineDriver<'_> {
+    fn text_retrieval_session(&self) -> crate::capabilities::TextRetrievalSession<'_> {
+        match self.execution {
+            DriverExecution::Public => {
+                crate::capabilities::TextRetrievalSession::Public(self.engine)
+            }
+            DriverExecution::InExecution => {
+                crate::capabilities::TextRetrievalSession::InExecution(self.engine)
+            }
+        }
+    }
+
     pub(super) fn execute_facet_vector(
         &self,
         vector_op: &OperatorTree,
@@ -103,11 +114,13 @@ impl EngineDriver<'_> {
                     .map(|weight| ScalarExpr::Literal(Value::Float(*weight))),
             );
         }
-        let run = match self.execution {
-            DriverExecution::Public => sql::run_multi_field_match_public,
-            DriverExecution::InExecution => sql::run_multi_field_match_in_execution,
-        };
-        run(self.engine, self.table, &args, self.params).map(|rows| scored_to_posting_list(&rows))
+        uqa_execution::query::retrieval::run_multi_field_match(
+            &self.text_retrieval_session().context(),
+            self.table,
+            &args,
+            self.params,
+        )
+        .map(|rows| scored_to_posting_list(&rows))
     }
 
     pub(super) fn execute_bayesian_match_with_prior(
@@ -129,11 +142,14 @@ impl EngineDriver<'_> {
                 .to_string(),
             )),
         ];
-        let run = match self.execution {
-            DriverExecution::Public => sql::run_bayesian_match_with_prior_public,
-            DriverExecution::InExecution => sql::run_bayesian_match_with_prior_in_execution,
-        };
-        run(self.engine, self.table, &args, self.params).map(|rows| scored_to_posting_list(&rows))
+        uqa_execution::query::retrieval::run_bayesian_match_with_prior(
+            self.engine,
+            &self.text_retrieval_session().context(),
+            self.table,
+            &args,
+            self.params,
+        )
+        .map(|rows| scored_to_posting_list(&rows))
     }
 
     pub(super) fn execute_calibrated_vector_match(
@@ -159,8 +175,14 @@ impl EngineDriver<'_> {
         if let Some(threshold) = threshold {
             args.push(ScalarExpr::Literal(Value::Float(threshold)));
         }
-        sql::run_calibrated_vector_match_public(self.engine, self.table, &args, self.params)
-            .map(|rows| scored_to_posting_list(&rows))
+        uqa_execution::query::retrieval::run_calibrated_vector_match(
+            self.engine,
+            self.engine,
+            self.table,
+            &args,
+            self.params,
+        )
+        .map(|rows| scored_to_posting_list(&rows))
     }
 
     pub(super) fn execute_deep_predict(&self, model: &str) -> DriverResult<PostingList> {

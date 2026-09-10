@@ -230,3 +230,5 @@ A uniquely owned in-memory cursor can move batches without cloning. Shared CTE r
 ## Failure invariant
 
 Parsing, lowering, planning, storage, filter, callback, spill, and physical execution errors must propagate. Returning empty support for an internal failure is a semantic corruption because it makes an error indistinguishable from a correct no-match result.
+
+Retrieval argument binding and multi-field weight normalization live in `uqa-sql`; `uqa-execution::query::retrieval` owns multi-field score composition, sparse padding, corpus and document prior combination, and calibrated-vector result filtering and ordering. Its contracts expose only text search, candidate documents, vector candidate pools, metadata and scalar evaluation. Engine adapters preserve the distinction between public API transactions and already-active statements. `uqa_scoring::ScoringMode` is the canonical configuration and remains available as `uqa_engine::ScoringMode`.

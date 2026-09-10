@@ -55,7 +55,6 @@ use uqa_sql::ast::{BinaryOp, ColumnType};
 use uqa_sql::SQLParam;
 use uqa_storage::StorageBackendError;
 
-use crate::sql;
 use crate::{Engine, ScoredEntry};
 use uqa_sql::SQLError;
 
@@ -916,7 +915,9 @@ pub(crate) use uqa_execution::query::table_sources::retrieval::DirectVectorRetri
 mod execution;
 pub use execution::run_optimised;
 pub(crate) use execution::{
-    combine_signal_priors, direct_vector_retrieval, execute_operator_tree_in_execution,
+    direct_vector_retrieval, execute_operator_tree_in_execution,
     execute_relation_operator_tree_in_execution, execute_scored_tree, expect_posting_output,
     run_accelerated,
 };
+
+use uqa_execution::query::retrieval::combine_signal_priors;

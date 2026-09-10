@@ -83,6 +83,7 @@ pub mod privileges;
 
 pub mod view_privileges;
 
+pub mod retrieval;
 pub mod text_indexes;
 
 pub mod mutation_qualifiers;

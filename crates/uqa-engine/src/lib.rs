@@ -242,18 +242,7 @@ pub struct FtsIndexStat {
     pub total_field_length: u64,
 }
 
-/// Scoring strategy passed to [`Engine::search`].
-#[derive(Debug, Clone)]
-pub enum ScoringMode {
-    BM25(BM25Params),
-    BayesianBM25(BayesianBM25Params),
-}
-
-impl Default for ScoringMode {
-    fn default() -> Self {
-        Self::BM25(BM25Params::default())
-    }
-}
+pub use uqa_scoring::ScoringMode;
 
 type TableFieldAnalyzerRegistry = BTreeMap<(String, String), (String, String)>;
 type SessionPortalTableSnapshots = Arc<BTreeMap<RelationIdentity, Arc<TableState>>>;

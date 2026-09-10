@@ -116,41 +116,6 @@ fn plan_bound_text_top_k(
     engine.plan_text_top_k_tree(table, &field, &query, scoring, top_k)
 }
 
-#[derive(Clone, Copy)]
-pub(super) enum RetrievalExecution {
-    Public,
-    InExecution,
-}
-
-impl RetrievalExecution {
-    pub(super) fn bayesian_params(
-        self,
-        engine: &Engine,
-        table: &str,
-        field: &str,
-    ) -> Result<uqa_scoring::BayesianBM25Params, SQLError> {
-        match self {
-            Self::Public => engine.bayesian_params_for(table, field),
-            Self::InExecution => engine.bayesian_params_for_in_execution(table, field),
-        }
-    }
-
-    pub(super) fn search(
-        self,
-        engine: &Engine,
-        table: &str,
-        field: &str,
-        query: &str,
-        mode: &crate::ScoringMode,
-        top_k: usize,
-    ) -> Result<Vec<ScoredEntry>, SQLError> {
-        match self {
-            Self::Public => engine.search(table, field, query, mode, top_k),
-            Self::InExecution => engine.search_leaf(table, field, query, mode, top_k, None),
-        }
-    }
-}
-
 impl uqa_execution::query::block::context::RelationRetrieval for Engine {
     fn accelerated(
         &self,

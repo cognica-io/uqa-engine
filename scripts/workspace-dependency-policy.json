@@ -74,8 +74,10 @@
     "uqa-execution": [
       "uqa-core",
       "uqa-fdw",
+      "uqa-fusion",
       "uqa-graph",
       "uqa-operators",
+      "uqa-scoring",
       "uqa-sql",
       "uqa-storage"
     ],
