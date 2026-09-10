@@ -81,3 +81,5 @@ pub fn validate_unique_index(
 }
 
 pub mod creation;
+
+pub mod removal;

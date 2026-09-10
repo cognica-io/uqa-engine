@@ -608,3 +608,5 @@ mod column_removal;
 mod copy;
 
 mod maintenance;
+
+mod index_removal;

@@ -186,7 +186,8 @@ Responsibility roots remain facades over semantic children rather than line-coun
 | Engine capability adapters | [`crates/uqa-engine/src/capabilities.rs`](../../../crates/uqa-engine/src/capabilities.rs) |
 | Statement catalog adapter | [`crates/uqa-engine/src/capabilities/catalog_execution.rs`](../../../crates/uqa-engine/src/capabilities/catalog_execution.rs) |
 | Unified plan dispatcher | [`crates/uqa-engine/src/sql/plan_executor.rs`](../../../crates/uqa-engine/src/sql/plan_executor.rs) |
-| Shared mutation protocol | [`crates/uqa-engine/src/sql/dml/protocol.rs`](../../../crates/uqa-engine/src/sql/dml/protocol.rs) |
+| Mutation command entry | [`crates/uqa-execution/src/mutation/entry.rs`](../../../crates/uqa-execution/src/mutation/entry.rs) |
+| Shared mutation state and snapshots | [`crates/uqa-execution/src/mutation/command_scope.rs`](../../../crates/uqa-execution/src/mutation/command_scope.rs) |
 | Session portal workflow | [`crates/uqa-engine/src/sql/session_portal_worker.rs`](../../../crates/uqa-engine/src/sql/session_portal_worker.rs) |
 | Catalog projection | [`crates/uqa-execution/src/catalog/projection.rs`](../../../crates/uqa-execution/src/catalog/projection.rs) |
 | Catalog relation families | [`crates/uqa-execution/src/catalog/projection/pg_catalog.rs`](../../../crates/uqa-execution/src/catalog/projection/pg_catalog.rs) |
@@ -199,7 +200,7 @@ Responsibility roots remain facades over semantic children rather than line-coun
 | Row-lock leaf validation | [`crates/uqa-execution/src/query/locking/leaf_validation.rs`](../../../crates/uqa-execution/src/query/locking/leaf_validation.rs) |
 | Physical query construction | [`crates/uqa-engine/src/sql/select/physical_plan.rs`](../../../crates/uqa-engine/src/sql/select/physical_plan.rs) |
 | Constraint rewrite and referencing policy | [`crates/uqa-execution/src/mutation/constraints/`](../../../crates/uqa-execution/src/mutation/constraints) |
-| MERGE action execution | [`crates/uqa-engine/src/sql/dml/merge/execution.rs`](../../../crates/uqa-engine/src/sql/dml/merge/execution.rs) |
+| MERGE action execution | [`crates/uqa-execution/src/mutation/merge/actions.rs`](../../../crates/uqa-execution/src/mutation/merge/actions.rs) |
 | Trigger transition tables | [`crates/uqa-execution/src/mutation/triggers/transitions.rs`](../../../crates/uqa-execution/src/mutation/triggers/transitions.rs) |
 | Indexed spill storage | [`crates/uqa-execution/src/spill/indexed/`](../../../crates/uqa-execution/src/spill/indexed) |
 | Storage contracts | [`crates/uqa-storage/src/lib.rs`](../../../crates/uqa-storage/src/lib.rs) |

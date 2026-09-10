@@ -408,7 +408,7 @@ impl Engine {
 
     fn drop_domain_schema_dependents(&self, dependents: &DomainDependents) -> Result<(), SQLError> {
         for index in &dependents.indexes {
-            crate::sql::drop_index_dependency(self, index)?;
+            self.drop_index_dependency(index)?;
         }
         let mut tables = BTreeSet::new();
         tables.extend(dependents.columns.iter().map(|(table, _, _)| table));

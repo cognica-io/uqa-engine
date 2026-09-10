@@ -28,7 +28,7 @@
 use std::sync::Arc;
 
 use uqa_core::Value;
-use uqa_sql::ast::{AlterTableAction, AlterTableStmt, ColumnType, DropKind, DropStmt, Statement};
+use uqa_sql::ast::{AlterTableAction, AlterTableStmt, DropKind, DropStmt, Statement};
 #[cfg(test)]
 use uqa_sql::compile;
 use uqa_sql::{SQLError, SQLParam, SQLResult};
@@ -115,9 +115,8 @@ use ddl::{
 };
 pub(crate) use ddl::{
     convert_value_to_column_type, drop_column_cascade, drop_constraint_dependency,
-    drop_index_dependency, validate_check_expression, validate_default_expression,
-    validate_postgres_column_name, validate_postgres_relation_column_type,
-    validate_vector_dimensions,
+    validate_check_expression, validate_default_expression, validate_postgres_column_name,
+    validate_postgres_relation_column_type, validate_vector_dimensions,
 };
 use from_rows::engine_func_intercept;
 pub(crate) use generated::{prepare_generated_columns, refresh_stored_generated_columns};

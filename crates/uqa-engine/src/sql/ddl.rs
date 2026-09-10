@@ -6,10 +6,7 @@
 
 //! SQL DDL execution and declared-value conversion.
 
-use super::{
-    AlterTableAction, AlterTableStmt, ColumnType, DropKind, DropStmt, Engine, SQLError, SQLResult,
-};
-use crate::CatalogIndexRow;
+use super::{AlterTableAction, AlterTableStmt, DropKind, DropStmt, Engine, SQLError, SQLResult};
 
 mod alter_table;
 mod constraint_validation;
@@ -25,7 +22,6 @@ pub(crate) use constraint_validation::validate_check_expression;
 pub(super) use create_index::run_create_index;
 pub(super) use create_table::{run_create_table, run_create_table_if_not_exists};
 pub(crate) use defaults::validate_default_expression;
-pub(crate) use drop::drop_index_dependency;
 pub(super) use drop::run_drop;
 pub(super) use sequence_ctas::{
     run_alter_sequence, run_create_sequence, run_create_table_as, CreateTableAsExecution,

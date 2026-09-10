@@ -41,6 +41,8 @@ Each AST CTE owns a `CteBody` and each lowered CTE owns a `CtePlanBody`, so visi
 
 `uqa_sql::ir::ScalarExpr` is the shared scalar IR. Scalar subqueries point to owned query-plan slots and execute inside the current physical scope; the executor does not reconstruct a parser statement at runtime.
 
+DROP INDEX name and dependency analysis is implemented in [`uqa-sql/src/schema/indexes/removal.rs`](../../../crates/uqa-sql/src/schema/indexes/removal.rs). [`uqa-execution/src/schema/indexes/removal.rs`](../../../crates/uqa-execution/src/schema/indexes/removal.rs) retains bound index rows, acquires relation locks, removes dependent constraints, and publishes physical field and catalog changes inside the original transaction boundaries. SQL checks remaining GIN references before execution removes a shared text field, and validates vector column metadata before physical index removal.
+
 ## Statement capability boundaries
 
 ```mermaid

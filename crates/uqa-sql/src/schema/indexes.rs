@@ -137,3 +137,5 @@ pub mod unique;
 
 pub mod options;
 pub mod vectors;
+
+pub mod removal;
