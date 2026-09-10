@@ -42,7 +42,7 @@ CRATE_ROLES = {
     "uqa-graph": "named graphs, Cypher, regular path queries, and graph algorithms",
     "uqa-joins": "relational and cross-paradigm join algorithms",
     "uqa-planner": "cardinality, cost, DPccp join enumeration, and unified-plan optimization",
-    "uqa-execution": "physical operators, batches, spill, sorting, and joins",
+    "uqa-execution": "statement execution, mutation and schema scheduling, physical retrieval, batches, spill, sorting, and joins",
     "uqa-sql": "PostgreSQL 18 SQL parsing, shared plans, static schema binding, type resolution, and value expressions",
     "uqa-pg-wire": "network-independent PostgreSQL v3 message parsing and encoding",
     "uqa-fdw": "foreign-table contracts and DuckDB, Arrow, and memory handlers",
