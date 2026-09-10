@@ -853,9 +853,13 @@ fn relation_if_not_exists_defers_definition_analysis_until_execution() {
     assert!(table
         .definition_sql
         .starts_with("CREATE UNLOGGED TABLE IF NOT EXISTS"));
-    let error = resolve_deferred_create_table(&table)
-        .expect_err("an absent target must analyze the deferred definition");
-    assert!(error.to_string().contains("missing_type"));
+    let resolved = resolve_deferred_create_table(&table)
+        .expect("catalog-owned type names remain available for engine binding");
+    assert_eq!(
+        resolved.columns[0].ty,
+        ColumnType::Named("\"missing_type\"".into())
+    );
+    assert_eq!(resolved.checks.len(), 1);
 
     let Statement::CreateTableIfNotExists(table) =
         first("CREATE TABLE IF NOT EXISTS fresh_items (id integer)")

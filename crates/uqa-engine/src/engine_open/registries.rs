@@ -22,6 +22,7 @@ impl Engine {
         mode: super::CatalogRestoreMode,
     ) -> StorageBackendResult<()> {
         self.restore_sequences_from_catalog(catalog)?;
+        self.restore_domains_from_catalog(catalog)?;
         self.restore_roles_from_metadata(catalog)?;
         self.restore_database_security_from_metadata(catalog)?;
         // Install definition-only routine placeholders before any stored expression is rebound. Final compilation waits until every row-producing relation registry is present, which also permits views and routines to bind each other without recursive catalog synchronization.

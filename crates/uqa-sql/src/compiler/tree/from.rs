@@ -182,6 +182,7 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
                 qualifier: r.relname.clone(),
                 alias,
                 column_aliases,
+                bound_columns: None,
                 include_descendants: r.inh,
             })
         }
@@ -393,6 +394,9 @@ pub(in crate::compiler) fn compile_column_definitions(
                                     ))
                                 })?
                                 .to_ascii_lowercase();
+                            if type_name == "interval" {
+                                return Ok((col.colname.clone(), column_type.sql_name()));
+                            }
                             if !type_node.typmods.is_empty() {
                                 let rendered = column_type.sql_name();
                                 if let Some(modifier) = rendered.find('(') {

@@ -6,7 +6,19 @@
 
 //! Durable catalog AST binding and dependency traversal.
 
+mod ctes;
+mod expressions;
+mod merge;
 mod routines;
+mod sources;
+mod types;
+use ctes::{collect_cte_relation_dependencies, collect_cte_source_routine_dependencies};
+pub(crate) use expressions::{visit_stored_expression, visit_stored_statement_expressions};
+pub(crate) use merge::visit_stored_statement_merges;
+pub(crate) use sources::{copy_stored_source_column_shapes, visit_stored_statement_sources};
+pub(crate) use types::{
+    stored_expression_type_names, stored_statement_relation_names, stored_statement_type_names,
+};
 
 use std::collections::BTreeSet;
 
@@ -25,9 +37,18 @@ pub(crate) use routines::{
     rewrite_statement_routine_identity, statement_references_routine_identity,
 };
 
+type MergeCallback<'a> = &'a mut dyn FnMut(&mut uqa_sql::ast::MergeStmt) -> Result<(), SQLError>;
+
+type ExpressionCallback<'a> = &'a mut dyn FnMut(&mut Expr) -> Result<(), SQLError>;
+type SourceCallback<'a> = &'a mut dyn FnMut(&mut FromClause) -> Result<(), SQLError>;
+
 struct StoredAstVisitor<'a, R, F> {
-    visit_relation: &'a mut R,
-    visit_routine: &'a mut F,
+    source: Option<SourceCallback<'a>>,
+    merge: Option<MergeCallback<'a>>,
+    expression: Option<ExpressionCallback<'a>>,
+    ty: Option<&'a mut dyn FnMut(&mut String)>,
+    relation: &'a mut R,
+    routine: &'a mut F,
 }
 
 impl<R, F> StoredAstVisitor<'_, R, F>
@@ -64,7 +85,7 @@ where
         insert: &mut uqa_sql::ast::InsertStmt,
         inherited: &BTreeSet<String>,
     ) -> Result<(), SQLError> {
-        (self.visit_relation)(&mut insert.table)?;
+        (self.relation)(&mut insert.table)?;
         let visible = self.bind_ctes(&mut insert.with, inherited)?;
         if let Some(source) = insert.select_source.as_deref_mut() {
             self.bind_select(source, &visible)?;
@@ -103,7 +124,7 @@ where
         update: &mut uqa_sql::ast::UpdateStmt,
         inherited: &BTreeSet<String>,
     ) -> Result<(), SQLError> {
-        (self.visit_relation)(&mut update.table)?;
+        (self.relation)(&mut update.table)?;
         let visible = self.bind_ctes(&mut update.with, inherited)?;
         if let Some(source) = &mut update.from {
             self.bind_from(source, &visible)?;
@@ -125,7 +146,7 @@ where
         delete: &mut uqa_sql::ast::DeleteStmt,
         inherited: &BTreeSet<String>,
     ) -> Result<(), SQLError> {
-        (self.visit_relation)(&mut delete.table)?;
+        (self.relation)(&mut delete.table)?;
         let visible = self.bind_ctes(&mut delete.with, inherited)?;
         if let Some(source) = &mut delete.using {
             self.bind_from(source, &visible)?;
@@ -135,58 +156,6 @@ where
         }
         for projection in &mut delete.returning {
             self.bind_expr(&mut projection.expr, &visible)?;
-        }
-        Ok(())
-    }
-
-    fn bind_merge(
-        &mut self,
-        merge: &mut uqa_sql::ast::MergeStmt,
-        ctes: &BTreeSet<String>,
-    ) -> Result<(), SQLError> {
-        (self.visit_relation)(&mut merge.target)?;
-        self.bind_from(&mut merge.source, ctes)?;
-        self.bind_expr(&mut merge.join_condition, ctes)?;
-        for clause in &mut merge.when_clauses {
-            match clause {
-                uqa_sql::ast::MergeWhen::UpdateMatched {
-                    condition,
-                    assignments,
-                }
-                | uqa_sql::ast::MergeWhen::UpdateNotMatchedBySource {
-                    condition,
-                    assignments,
-                } => {
-                    if let Some(condition) = condition {
-                        self.bind_expr(condition, ctes)?;
-                    }
-                    for (_, expression) in assignments {
-                        self.bind_expr(expression, ctes)?;
-                    }
-                }
-                uqa_sql::ast::MergeWhen::InsertNotMatched {
-                    condition, values, ..
-                } => {
-                    if let Some(condition) = condition {
-                        self.bind_expr(condition, ctes)?;
-                    }
-                    for expression in values {
-                        self.bind_expr(expression, ctes)?;
-                    }
-                }
-                uqa_sql::ast::MergeWhen::DeleteMatched { condition }
-                | uqa_sql::ast::MergeWhen::DeleteNotMatchedBySource { condition }
-                | uqa_sql::ast::MergeWhen::NothingMatched { condition }
-                | uqa_sql::ast::MergeWhen::NothingNotMatched { condition }
-                | uqa_sql::ast::MergeWhen::NothingNotMatchedBySource { condition } => {
-                    if let Some(condition) = condition {
-                        self.bind_expr(condition, ctes)?;
-                    }
-                }
-            }
-        }
-        for projection in &mut merge.returning {
-            self.bind_expr(&mut projection.expr, ctes)?;
         }
         Ok(())
     }
@@ -207,7 +176,13 @@ where
                 || visible.clone(),
                 |recursive| inherited.union(recursive).cloned().collect(),
             );
-            self.bind_select(&mut cte.query, &body_scope)?;
+            match &mut cte.body {
+                uqa_sql::ast::CteBody::Query(query) => self.bind_select(query, &body_scope)?,
+                uqa_sql::ast::CteBody::Insert(plan) => self.bind_insert(plan, &body_scope)?,
+                uqa_sql::ast::CteBody::Update(plan) => self.bind_update(plan, &body_scope)?,
+                uqa_sql::ast::CteBody::Delete(plan) => self.bind_delete(plan, &body_scope)?,
+                uqa_sql::ast::CteBody::Merge(plan) => self.bind_merge(plan, &body_scope)?,
+            }
             if let Some(cycle) = &mut cte.cycle {
                 self.bind_expr(&mut cycle.mark_value, &body_scope)?;
                 self.bind_expr(&mut cycle.mark_default, &body_scope)?;
@@ -279,14 +254,23 @@ where
         source: &mut FromClause,
         visible_ctes: &BTreeSet<String>,
     ) -> Result<(), SQLError> {
+        if let FromClause::Table { name, .. } = source {
+            let is_cte =
+                RelationIdentity::parse_reference(name)
+                    .ok()
+                    .is_some_and(|(schema, relation)| {
+                        schema.is_none() && visible_ctes.contains(&relation)
+                    });
+            if is_cte {
+                return Ok(());
+            }
+        }
+        if let Some(visit) = self.source.as_mut() {
+            visit(source)?;
+        }
         match source {
             FromClause::Table { name, .. } => {
-                let is_cte = RelationIdentity::parse_reference(name).ok().is_some_and(
-                    |(schema, relation)| schema.is_none() && visible_ctes.contains(&relation),
-                );
-                if !is_cte {
-                    (self.visit_relation)(name)?;
-                }
+                (self.relation)(name)?;
             }
             FromClause::Join {
                 left, right, on, ..
@@ -309,10 +293,10 @@ where
                 args,
                 ..
             } => {
-                (self.visit_routine)(name, Some(binding))?;
+                (self.routine)(name, Some(binding))?;
                 if let Some(relations) = relations {
-                    (self.visit_relation)(&mut relations.left)?;
-                    (self.visit_relation)(&mut relations.right)?;
+                    (self.relation)(&mut relations.left)?;
+                    (self.relation)(&mut relations.right)?;
                 }
                 for expression in args {
                     self.bind_expr(expression, visible_ctes)?;
@@ -320,10 +304,10 @@ where
             }
             FromClause::FunctionGroup { functions, .. } => {
                 for function in functions {
-                    (self.visit_routine)(&mut function.name, Some(&mut function.binding))?;
+                    (self.routine)(&mut function.name, Some(&mut function.binding))?;
                     if let Some(relations) = &mut function.relations {
-                        (self.visit_relation)(&mut relations.left)?;
-                        (self.visit_relation)(&mut relations.right)?;
+                        (self.relation)(&mut relations.left)?;
+                        (self.relation)(&mut relations.right)?;
                     }
                     for expression in &mut function.args {
                         self.bind_expr(expression, visible_ctes)?;
@@ -335,11 +319,24 @@ where
         Ok(())
     }
 
+    fn bind_expression_type(&mut self, expression: &mut Expr) -> Result<(), SQLError> {
+        if let Some(visit) = self.expression.as_mut() {
+            visit(expression)?;
+        }
+        if let (Some(visit), Expr::Cast { ty, .. } | Expr::TypedLiteral { ty, .. }) =
+            (self.ty.as_mut(), expression)
+        {
+            visit(ty);
+        }
+        Ok(())
+    }
+
     fn bind_expr(
         &mut self,
         expression: &mut Expr,
         visible_ctes: &BTreeSet<String>,
     ) -> Result<(), SQLError> {
+        self.bind_expression_type(expression)?;
         match expression {
             Expr::Func {
                 name,
@@ -358,7 +355,7 @@ where
                 if let Some(filter) = filter {
                     self.bind_expr(filter, visible_ctes)?;
                 }
-                (self.visit_routine)(name, Some(binding))?;
+                (self.routine)(name, Some(binding))?;
             }
             Expr::Array(items) | Expr::Row(items) | Expr::And(items) | Expr::Or(items) => {
                 for item in items {
@@ -401,7 +398,7 @@ where
                         }
                     }
                 }
-                (self.visit_routine)(name, None)?;
+                (self.routine)(name, None)?;
             }
             Expr::Case {
                 base,
@@ -433,6 +430,7 @@ where
             | Expr::QualifiedColumn { .. }
             | Expr::InternalColumn(_)
             | Expr::Literal(_)
+            | Expr::TypedLiteral { .. }
             | Expr::Param(_) => {}
         }
         Ok(())
@@ -523,8 +521,12 @@ impl Engine {
                                   _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
          -> Result<(), SQLError> { Ok(()) };
         StoredAstVisitor {
-            visit_relation: &mut bind,
-            visit_routine: &mut ignore_routine,
+            source: None,
+            merge: None,
+            expression: None,
+            ty: None,
+            relation: &mut bind,
+            routine: &mut ignore_routine,
         }
         .bind_statement(statement)?;
         Ok(RuleDependencies {
@@ -553,8 +555,12 @@ impl Engine {
                                   _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
          -> Result<(), SQLError> { Ok(()) };
         StoredAstVisitor {
-            visit_relation: &mut bind,
-            visit_routine: &mut ignore_routine,
+            source: None,
+            merge: None,
+            expression: None,
+            ty: None,
+            relation: &mut bind,
+            routine: &mut ignore_routine,
         }
         .bind_expr(expression, &BTreeSet::new())?;
         Ok(RuleDependencies {
@@ -589,8 +595,12 @@ impl Engine {
                                   _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
          -> Result<(), SQLError> { Ok(()) };
         StoredAstVisitor {
-            visit_relation: &mut bind,
-            visit_routine: &mut ignore_routine,
+            source: None,
+            merge: None,
+            expression: None,
+            ty: None,
+            relation: &mut bind,
+            routine: &mut ignore_routine,
         }
         .bind_statement(statement)?;
         match statement {
@@ -612,7 +622,7 @@ impl Engine {
     }
 }
 
-pub(super) fn rewrite_rule_statement_relation(
+pub(crate) fn rewrite_stored_statement_relation(
     statement: &mut Statement,
     from: &RelationIdentity,
     to: &RelationIdentity,
@@ -631,8 +641,12 @@ pub(super) fn rewrite_rule_statement_relation(
                               _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
      -> Result<(), SQLError> { Ok(()) };
     StoredAstVisitor {
-        visit_relation: &mut rewrite,
-        visit_routine: &mut ignore_routine,
+        source: None,
+        merge: None,
+        expression: None,
+        ty: None,
+        relation: &mut rewrite,
+        routine: &mut ignore_routine,
     }
     .bind_statement(statement)?;
     Ok(changed)
@@ -667,7 +681,7 @@ pub(super) fn rewrite_stored_rule_relation(
         changed = true;
     }
     for action in &mut rule.definition.actions {
-        changed |= rewrite_rule_statement_relation(action, from, to)?;
+        changed |= rewrite_stored_statement_relation(action, from, to)?;
     }
     if let Some(condition) = &mut rule.definition.condition {
         let from_name = from.qualified_name();
@@ -683,8 +697,12 @@ pub(super) fn rewrite_stored_rule_relation(
                                   _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
          -> Result<(), SQLError> { Ok(()) };
         StoredAstVisitor {
-            visit_relation: &mut rewrite,
-            visit_routine: &mut ignore_routine,
+            source: None,
+            merge: None,
+            expression: None,
+            ty: None,
+            relation: &mut rewrite,
+            routine: &mut ignore_routine,
         }
         .bind_expr(condition, &BTreeSet::new())?;
     }
@@ -732,7 +750,7 @@ pub(super) fn collect_query_relation_dependencies(
             || visible_ctes.clone(),
             |recursive| inherited_ctes.union(recursive).cloned().collect(),
         );
-        collect_query_relation_dependencies(&cte.query, dependencies, &body_scope)?;
+        collect_cte_relation_dependencies(&cte.body, dependencies, &body_scope)?;
         visible_ctes.insert(cte.name.clone());
     }
     match &query.root {
@@ -799,7 +817,7 @@ pub(super) fn collect_query_routine_dependencies(
         }
     });
     for cte in &query.ctes {
-        collect_query_source_routine_dependencies(&cte.query, dependencies);
+        collect_cte_source_routine_dependencies(&cte.body, dependencies);
     }
     collect_relational_source_routine_dependencies(&query.root, dependencies);
 }
@@ -809,7 +827,7 @@ fn collect_query_source_routine_dependencies(
     dependencies: &mut RuleDependencies,
 ) {
     for cte in &query.ctes {
-        collect_query_source_routine_dependencies(&cte.query, dependencies);
+        collect_cte_source_routine_dependencies(&cte.body, dependencies);
     }
     collect_relational_source_routine_dependencies(&query.root, dependencies);
 }

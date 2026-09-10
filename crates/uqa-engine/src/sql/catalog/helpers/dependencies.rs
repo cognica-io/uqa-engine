@@ -123,6 +123,7 @@ fn collect_expression_columns(expression: &Expr, output: &mut Vec<String>) {
         | Expr::QualifiedStar(_)
         | Expr::InternalColumn(_)
         | Expr::Literal(_)
+        | Expr::TypedLiteral { .. }
         | Expr::Param(_)
         | Expr::ScalarSubquery(_)
         | Expr::Exists { .. } => {}

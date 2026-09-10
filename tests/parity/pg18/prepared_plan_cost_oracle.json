@@ -1,0 +1,184 @@
+{
+  "cases": [
+    {
+      "sql": "SELECT version()"
+    },
+    {
+      "sql": "SET plan_cache_mode = auto"
+    },
+    {
+      "sql": "CREATE TEMP TABLE prepared_plan_cost (bucket integer)"
+    },
+    {
+      "sql": "INSERT INTO prepared_plan_cost SELECT CASE WHEN n = 10000 THEN 2 ELSE 1 END FROM generate_series(1,10000) AS g(n)"
+    },
+    {
+      "sql": "CREATE INDEX prepared_plan_cost_bucket_idx ON prepared_plan_cost (bucket)"
+    },
+    {
+      "sql": "ANALYZE prepared_plan_cost"
+    },
+    {
+      "sql": "PREPARE cost_rare(integer) AS SELECT count(*) AS matching_rows FROM prepared_plan_cost WHERE bucket = $1"
+    },
+    {
+      "sql": "EXECUTE cost_rare(2)"
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cost_rare'"
+    },
+    {
+      "sql": "EXECUTE cost_rare(2)"
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cost_rare'"
+    },
+    {
+      "sql": "EXECUTE cost_rare(2)"
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cost_rare'"
+    },
+    {
+      "sql": "EXECUTE cost_rare(2)"
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cost_rare'"
+    },
+    {
+      "sql": "EXECUTE cost_rare(2)"
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cost_rare'"
+    },
+    {
+      "sql": "EXECUTE cost_rare(2)"
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cost_rare'"
+    },
+    {
+      "sql": "EXECUTE cost_rare(2)"
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cost_rare'"
+    },
+    {
+      "sql": "PREPARE cost_common(integer) AS SELECT count(*) AS matching_rows FROM prepared_plan_cost WHERE bucket = $1"
+    },
+    {
+      "sql": "EXECUTE cost_common(1)"
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cost_common'"
+    },
+    {
+      "sql": "EXECUTE cost_common(1)"
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cost_common'"
+    },
+    {
+      "sql": "EXECUTE cost_common(1)"
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cost_common'"
+    },
+    {
+      "sql": "EXECUTE cost_common(1)"
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cost_common'"
+    },
+    {
+      "sql": "EXECUTE cost_common(1)"
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cost_common'"
+    },
+    {
+      "sql": "EXECUTE cost_common(1)"
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cost_common'"
+    },
+    {
+      "sql": "EXECUTE cost_common(1)"
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cost_common'"
+    },
+    {
+      "sql": "BEGIN"
+    },
+    {
+      "sql": "SET LOCAL plan_cache_mode = force_generic_plan"
+    },
+    {
+      "sql": "SHOW plan_cache_mode"
+    },
+    {
+      "sql": "EXECUTE cost_rare(2)"
+    },
+    {
+      "sql": "SAVEPOINT mode_savepoint"
+    },
+    {
+      "sql": "SET LOCAL plan_cache_mode = force_custom_plan"
+    },
+    {
+      "sql": "SHOW plan_cache_mode"
+    },
+    {
+      "sql": "EXECUTE cost_common(1)"
+    },
+    {
+      "sql": "ROLLBACK TO mode_savepoint"
+    },
+    {
+      "sql": "SHOW plan_cache_mode"
+    },
+    {
+      "sql": "EXECUTE cost_common(2)"
+    },
+    {
+      "sql": "COMMIT"
+    },
+    {
+      "sql": "SHOW plan_cache_mode"
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name IN ('cost_rare','cost_common') ORDER BY name"
+    },
+    {
+      "sql": "SET plan_cache_mode = force_custom_plan"
+    },
+    {
+      "sql": "BEGIN"
+    },
+    {
+      "sql": "SET LOCAL plan_cache_mode = force_generic_plan"
+    },
+    {
+      "sql": "SHOW plan_cache_mode"
+    },
+    {
+      "sql": "ROLLBACK"
+    },
+    {
+      "sql": "SHOW plan_cache_mode"
+    },
+    {
+      "sql": "RESET plan_cache_mode"
+    },
+    {
+      "sql": "SHOW plan_cache_mode"
+    },
+    {
+      "sql": "DEALLOCATE ALL"
+    },
+    {
+      "sql": "DROP TABLE prepared_plan_cost"
+    }
+  ]
+}

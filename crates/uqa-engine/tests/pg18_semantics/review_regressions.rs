@@ -396,7 +396,7 @@ fn common_type_selection_coerces_runtime_values_before_aggregation() {
         .rows;
 
     assert_eq!(rows.len(), 2);
-    assert_eq!(rows[0]["sum_type"], Value::Str("double precision".into()));
+    assert_eq!(rows[0]["sum_type"], Value::Int(701));
     assert_eq!(rows[0]["coalesced"], Value::Float(3.75));
     assert_eq!(rows[0]["conditional"], Value::Float(3.75));
     assert_eq!(rows[1]["coalesced"], Value::Float(4.5));

@@ -92,10 +92,12 @@ pub(super) fn prepare_referenced_key_update_actions(
                         )?;
                         continue;
                     }
+                    let ref_display = super::foreign_key_relation_name(&ref_table);
                     return Err(SQLError::Routine {
                         sqlstate: "23503".into(),
                         message: format!(
-                            "update on table \"{table}\" violates foreign key constraint \"{}\" on table \"{ref_table}\"",
+                            "update on table \"{}\" violates foreign key constraint \"{}\" on table \"{ref_display}\"",
+                            super::foreign_key_relation_name(table),
                             fk.name.as_deref().unwrap_or("<unnamed>")
                         ),
                     });
@@ -141,10 +143,12 @@ pub(super) fn prepare_referenced_key_update_actions(
                     )?;
                 }
                 ForeignKeyAction::NoAction | ForeignKeyAction::Restrict => {
+                    let ref_display = super::foreign_key_relation_name(&ref_table);
                     return Err(SQLError::Routine {
                         sqlstate: "23503".into(),
                         message: format!(
-                            "update or delete on table \"{table}\" violates foreign key constraint \"{}\" on table \"{ref_table}\"",
+                            "update or delete on table \"{}\" violates foreign key constraint \"{}\" on table \"{ref_display}\"",
+                            super::foreign_key_relation_name(table),
                             fk.name.as_deref().unwrap_or("<unnamed>")
                         ),
                     });
@@ -317,10 +321,12 @@ pub(in crate::sql) fn prepare_referenced_key_delete_actions(
                         )?;
                         continue;
                     }
+                    let ref_display = super::foreign_key_relation_name(&ref_table);
                     return Err(SQLError::Routine {
                         sqlstate: "23503".into(),
                         message: format!(
-                            "delete on table \"{parent_table}\" violates foreign key constraint \"{}\" on table \"{ref_table}\"",
+                            "delete on table \"{}\" violates foreign key constraint \"{}\" on table \"{ref_display}\"",
+                            super::foreign_key_relation_name(parent_table),
                             fk.name.as_deref().unwrap_or("<unnamed>")
                         ),
                     });
@@ -377,10 +383,12 @@ pub(in crate::sql) fn prepare_referenced_key_delete_actions(
                     )?;
                 }
                 ForeignKeyAction::NoAction | ForeignKeyAction::Restrict => {
+                    let ref_display = super::foreign_key_relation_name(&ref_table);
                     return Err(SQLError::Routine {
                         sqlstate: "23503".into(),
                         message: format!(
-                            "update or delete on table \"{parent_table}\" violates foreign key constraint \"{}\" on table \"{ref_table}\"",
+                            "update or delete on table \"{}\" violates foreign key constraint \"{}\" on table \"{ref_display}\"",
+                            super::foreign_key_relation_name(parent_table),
                             fk.name.as_deref().unwrap_or("<unnamed>")
                         ),
                     });

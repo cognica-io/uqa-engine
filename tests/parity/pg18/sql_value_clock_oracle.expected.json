@@ -1,0 +1,2579 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "version",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SET TIME ZONE 'UTC'",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CURRENT_DATE WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "current_date"
+          ],
+          "type_oids": [
+            1082
+          ],
+          "rows": [],
+          "fields": [
+            {
+              "name": "current_date",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1082,
+              "type_size": 4,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_typeof(CURRENT_DATE)::text AS type_name",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "type_name"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "date"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "type_name",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CURRENT_TIME WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "current_time"
+          ],
+          "type_oids": [
+            1266
+          ],
+          "rows": [],
+          "fields": [
+            {
+              "name": "current_time",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1266,
+              "type_size": 12,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_typeof(CURRENT_TIME)::text AS type_name",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "type_name"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "time with time zone"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "type_name",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CURRENT_TIME(0) WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "current_time"
+          ],
+          "type_oids": [
+            1266
+          ],
+          "rows": [],
+          "fields": [
+            {
+              "name": "current_time",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1266,
+              "type_size": 12,
+              "type_modifier": 0,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_typeof(CURRENT_TIME(0))::text AS type_name",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "type_name"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "time with time zone"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "type_name",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CURRENT_TIME(3) WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "current_time"
+          ],
+          "type_oids": [
+            1266
+          ],
+          "rows": [],
+          "fields": [
+            {
+              "name": "current_time",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1266,
+              "type_size": 12,
+              "type_modifier": 3,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_typeof(CURRENT_TIME(3))::text AS type_name",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "type_name"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "time with time zone"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "type_name",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CURRENT_TIME(6) WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "current_time"
+          ],
+          "type_oids": [
+            1266
+          ],
+          "rows": [],
+          "fields": [
+            {
+              "name": "current_time",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1266,
+              "type_size": 12,
+              "type_modifier": 6,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_typeof(CURRENT_TIME(6))::text AS type_name",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "type_name"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "time with time zone"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "type_name",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CURRENT_TIMESTAMP WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "current_timestamp"
+          ],
+          "type_oids": [
+            1184
+          ],
+          "rows": [],
+          "fields": [
+            {
+              "name": "current_timestamp",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1184,
+              "type_size": 8,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_typeof(CURRENT_TIMESTAMP)::text AS type_name",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "type_name"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "timestamp with time zone"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "type_name",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CURRENT_TIMESTAMP(0) WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "current_timestamp"
+          ],
+          "type_oids": [
+            1184
+          ],
+          "rows": [],
+          "fields": [
+            {
+              "name": "current_timestamp",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1184,
+              "type_size": 8,
+              "type_modifier": 0,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_typeof(CURRENT_TIMESTAMP(0))::text AS type_name",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "type_name"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "timestamp with time zone"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "type_name",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CURRENT_TIMESTAMP(3) WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "current_timestamp"
+          ],
+          "type_oids": [
+            1184
+          ],
+          "rows": [],
+          "fields": [
+            {
+              "name": "current_timestamp",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1184,
+              "type_size": 8,
+              "type_modifier": 3,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_typeof(CURRENT_TIMESTAMP(3))::text AS type_name",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "type_name"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "timestamp with time zone"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "type_name",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT LOCALTIME WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "localtime"
+          ],
+          "type_oids": [
+            1083
+          ],
+          "rows": [],
+          "fields": [
+            {
+              "name": "localtime",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1083,
+              "type_size": 8,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_typeof(LOCALTIME)::text AS type_name",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "type_name"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "time without time zone"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "type_name",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT LOCALTIME(0) WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "localtime"
+          ],
+          "type_oids": [
+            1083
+          ],
+          "rows": [],
+          "fields": [
+            {
+              "name": "localtime",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1083,
+              "type_size": 8,
+              "type_modifier": 0,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_typeof(LOCALTIME(0))::text AS type_name",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "type_name"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "time without time zone"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "type_name",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT LOCALTIME(3) WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "localtime"
+          ],
+          "type_oids": [
+            1083
+          ],
+          "rows": [],
+          "fields": [
+            {
+              "name": "localtime",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1083,
+              "type_size": 8,
+              "type_modifier": 3,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_typeof(LOCALTIME(3))::text AS type_name",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "type_name"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "time without time zone"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "type_name",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT LOCALTIMESTAMP WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "localtimestamp"
+          ],
+          "type_oids": [
+            1114
+          ],
+          "rows": [],
+          "fields": [
+            {
+              "name": "localtimestamp",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1114,
+              "type_size": 8,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_typeof(LOCALTIMESTAMP)::text AS type_name",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "type_name"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "timestamp without time zone"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "type_name",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT LOCALTIMESTAMP(0) WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "localtimestamp"
+          ],
+          "type_oids": [
+            1114
+          ],
+          "rows": [],
+          "fields": [
+            {
+              "name": "localtimestamp",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1114,
+              "type_size": 8,
+              "type_modifier": 0,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_typeof(LOCALTIMESTAMP(0))::text AS type_name",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "type_name"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "timestamp without time zone"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "type_name",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT LOCALTIMESTAMP(3) WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "localtimestamp"
+          ],
+          "type_oids": [
+            1114
+          ],
+          "rows": [],
+          "fields": [
+            {
+              "name": "localtimestamp",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1114,
+              "type_size": 8,
+              "type_modifier": 3,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_typeof(LOCALTIMESTAMP(3))::text AS type_name",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "type_name"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "timestamp without time zone"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "type_name",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CURRENT_TIME(7) WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "current_time"
+          ],
+          "type_oids": [
+            1266
+          ],
+          "rows": [],
+          "fields": [
+            {
+              "name": "current_time",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1266,
+              "type_size": 12,
+              "type_modifier": 6,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CURRENT_TIME(2147483647) WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "current_time"
+          ],
+          "type_oids": [
+            1266
+          ],
+          "rows": [],
+          "fields": [
+            {
+              "name": "current_time",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1266,
+              "type_size": 12,
+              "type_modifier": 6,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CURRENT_TIMESTAMP(7) WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "current_timestamp"
+          ],
+          "type_oids": [
+            1184
+          ],
+          "rows": [],
+          "fields": [
+            {
+              "name": "current_timestamp",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1184,
+              "type_size": 8,
+              "type_modifier": 6,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CURRENT_TIMESTAMP(2147483647) WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "current_timestamp"
+          ],
+          "type_oids": [
+            1184
+          ],
+          "rows": [],
+          "fields": [
+            {
+              "name": "current_timestamp",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1184,
+              "type_size": 8,
+              "type_modifier": 6,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT LOCALTIME(7) WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "localtime"
+          ],
+          "type_oids": [
+            1083
+          ],
+          "rows": [],
+          "fields": [
+            {
+              "name": "localtime",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1083,
+              "type_size": 8,
+              "type_modifier": 6,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT LOCALTIME(2147483647) WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "localtime"
+          ],
+          "type_oids": [
+            1083
+          ],
+          "rows": [],
+          "fields": [
+            {
+              "name": "localtime",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1083,
+              "type_size": 8,
+              "type_modifier": 6,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT LOCALTIMESTAMP(7) WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "localtimestamp"
+          ],
+          "type_oids": [
+            1114
+          ],
+          "rows": [],
+          "fields": [
+            {
+              "name": "localtimestamp",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1114,
+              "type_size": 8,
+              "type_modifier": 6,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT LOCALTIMESTAMP(2147483647) WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "localtimestamp"
+          ],
+          "type_oids": [
+            1114
+          ],
+          "rows": [],
+          "fields": [
+            {
+              "name": "localtimestamp",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1114,
+              "type_size": 8,
+              "type_modifier": 6,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CURRENT_DATE = CURRENT_TIMESTAMP::date AS same_date",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "same_date"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "same_date",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 16,
+              "type_size": 1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CURRENT_TIME = CURRENT_TIMESTAMP::timetz AS same_time",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "same_time"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "same_time",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 16,
+              "type_size": 1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT LOCALTIME = CURRENT_TIMESTAMP::time AS same_local_time",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "same_local_time"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "same_local_time",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 16,
+              "type_size": 1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT LOCALTIMESTAMP = CURRENT_TIMESTAMP::timestamp AS same_local_timestamp",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "same_local_timestamp"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "same_local_timestamp",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 16,
+              "type_size": 1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CURRENT_TIME(3) = CURRENT_TIMESTAMP::timetz(3) AS same_precision",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "same_precision"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "same_precision",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 16,
+              "type_size": 1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CURRENT_TIMESTAMP(0) = CURRENT_TIMESTAMP::timestamptz(0) AS same_precision",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "same_precision"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "same_precision",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 16,
+              "type_size": 1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT LOCALTIME(3) = CURRENT_TIMESTAMP::time(3) AS same_precision",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "same_precision"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "same_precision",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 16,
+              "type_size": 1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT LOCALTIMESTAMP(3) = CURRENT_TIMESTAMP::timestamp(3) AS same_precision",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "same_precision"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "same_precision",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 16,
+              "type_size": 1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT now() = CURRENT_TIMESTAMP AS same_transaction_clock",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "same_transaction_clock"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "same_transaction_clock",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 16,
+              "type_size": 1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT transaction_timestamp() = CURRENT_TIMESTAMP AS same_transaction_clock",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "same_transaction_clock"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "same_transaction_clock",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 16,
+              "type_size": 1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT statement_timestamp() = CURRENT_TIMESTAMP AS initial_statement_clock",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "initial_statement_clock"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "initial_statement_clock",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 16,
+              "type_size": 1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TEMP TABLE clock_samples (tx timestamptz, stmt timestamptz)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO clock_samples SELECT now(), statement_timestamp()",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT tx = now() AS same_transaction, stmt < statement_timestamp() AS later_statement FROM clock_samples",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "same_transaction",
+            "later_statement"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "same_transaction",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 16,
+              "type_size": 1,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "later_statement",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 16,
+              "type_size": 1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SAVEPOINT clock_savepoint",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT tx = CURRENT_TIMESTAMP AS same_transaction FROM clock_samples",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "same_transaction"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "same_transaction",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 16,
+              "type_size": 1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK TO SAVEPOINT clock_savepoint",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT tx = CURRENT_TIMESTAMP AS same_transaction FROM clock_samples",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "same_transaction"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "same_transaction",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 16,
+              "type_size": 1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DECLARE clock_cursor CURSOR FOR SELECT tx = now() AS same_transaction, stmt < statement_timestamp() AS later_statement FROM clock_samples",
+      "command_tags": [
+        "DECLARE CURSOR"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "FETCH ALL FROM clock_cursor",
+      "command_tags": [
+        "FETCH 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "same_transaction",
+            "later_statement"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "same_transaction",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 16,
+              "type_size": 1,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "later_statement",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 16,
+              "type_size": 1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CLOSE clock_cursor",
+      "command_tags": [
+        "CLOSE CURSOR"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "COMMIT",
+      "command_tags": [
+        "COMMIT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT tx < now() AS later_transaction FROM clock_samples",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "later_transaction"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "later_transaction",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 16,
+              "type_size": 1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "TRUNCATE clock_samples",
+      "command_tags": [
+        "TRUNCATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO clock_samples SELECT now(), statement_timestamp(); SELECT tx = now() AS same_transaction, stmt = statement_timestamp() AS same_message FROM clock_samples",
+      "command_tags": [
+        "INSERT 0 1",
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        },
+        {
+          "columns": [
+            "same_transaction",
+            "same_message"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "same_transaction",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 16,
+              "type_size": 1,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "same_message",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 16,
+              "type_size": 1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT statement_timestamp() <= clock_timestamp() AS wall_clock_is_later",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "wall_clock_is_later"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "wall_clock_is_later",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 16,
+              "type_size": 1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE clock_samples",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT age(CURRENT_DATE::timestamp) AS today, age(CURRENT_DATE::timestamp - INTERVAL '1 day') AS yesterday, age(CURRENT_DATE::timestamp + INTERVAL '1 day') AS tomorrow",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "today",
+            "yesterday",
+            "tomorrow"
+          ],
+          "type_oids": [
+            1186,
+            1186,
+            1186
+          ],
+          "rows": [
+            [
+              "00:00:00",
+              "1 day",
+              "-1 days"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "today",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1186,
+              "type_size": 16,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "yesterday",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1186,
+              "type_size": 16,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "tomorrow",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1186,
+              "type_size": 16,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT age(NULL::timestamp) AS null_age",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "null_age"
+          ],
+          "type_oids": [
+            1186
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ],
+          "fields": [
+            {
+              "name": "null_age",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1186,
+              "type_size": 16,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CURRENT_USER, CURRENT_ROLE, SESSION_USER, USER, CURRENT_CATALOG, CURRENT_SCHEMA WHERE false",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "current_user",
+            "current_role",
+            "session_user",
+            "user",
+            "current_catalog",
+            "current_schema"
+          ],
+          "type_oids": [
+            19,
+            19,
+            19,
+            19,
+            19,
+            19
+          ],
+          "rows": [],
+          "fields": [
+            {
+              "name": "current_user",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 19,
+              "type_size": 64,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "current_role",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 19,
+              "type_size": 64,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "session_user",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 19,
+              "type_size": 64,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "user",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 19,
+              "type_size": 64,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "current_catalog",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 19,
+              "type_size": 64,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "current_schema",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 19,
+              "type_size": 64,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SCHEMA clock_shadow",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION clock_shadow.\"current_timestamp\"() RETURNS text LANGUAGE SQL AS $$ SELECT 'shadow'::text $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION clock_shadow.\"current_time\"() RETURNS text LANGUAGE SQL AS $$ SELECT 'shadow'::text $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION clock_shadow.\"localtime\"() RETURNS text LANGUAGE SQL AS $$ SELECT 'shadow'::text $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION clock_shadow.\"localtimestamp\"() RETURNS text LANGUAGE SQL AS $$ SELECT 'shadow'::text $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "SET search_path TO clock_shadow, pg_catalog, public",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_typeof(CURRENT_TIMESTAMP)::text AS keyword_type, clock_shadow.\"current_timestamp\"() AS routine_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "keyword_type",
+            "routine_value"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "timestamp with time zone",
+              "shadow"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "keyword_type",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "routine_value",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_typeof(CURRENT_TIME)::text AS keyword_type, clock_shadow.\"current_time\"() AS routine_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "keyword_type",
+            "routine_value"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "time with time zone",
+              "shadow"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "keyword_type",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "routine_value",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_typeof(LOCALTIME)::text AS keyword_type, clock_shadow.\"localtime\"() AS routine_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "keyword_type",
+            "routine_value"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "time without time zone",
+              "shadow"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "keyword_type",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "routine_value",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_typeof(LOCALTIMESTAMP)::text AS keyword_type, clock_shadow.\"localtimestamp\"() AS routine_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "keyword_type",
+            "routine_value"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "timestamp without time zone",
+              "shadow"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "keyword_type",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "routine_value",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION clock_shadow.tx_clock() RETURNS timestamptz LANGUAGE SQL AS $$ SELECT now() $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION clock_shadow.stmt_clock() RETURNS timestamptz LANGUAGE SQL AS $$ SELECT statement_timestamp() $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT clock_shadow.tx_clock() = now() AS nested_transaction, clock_shadow.stmt_clock() = statement_timestamp() AS nested_statement",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "nested_transaction",
+            "nested_statement"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "nested_transaction",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 16,
+              "type_size": 1,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "nested_statement",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 16,
+              "type_size": 1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION clock_shadow.tx_clock()",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION clock_shadow.stmt_clock()",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "RESET search_path",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION clock_shadow.\"current_timestamp\"()",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION clock_shadow.\"current_time\"()",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION clock_shadow.\"localtime\"()",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION clock_shadow.\"localtimestamp\"()",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA clock_shadow",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    }
+  ]
+}

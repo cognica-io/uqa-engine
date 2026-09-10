@@ -305,6 +305,59 @@ fn function_output_columns(function: &uqa_sql::ast::TableFunction) -> Vec<String
     }
 }
 
+pub(super) fn cte_output_columns(
+    body: &uqa_sql::ast::CteBody,
+    context: &RuleBindingContext<'_>,
+) -> Result<Vec<String>, SQLError> {
+    use uqa_sql::ast::CteBody;
+    let (table, qualifier, aliases, returning, from, ctes) = match body {
+        CteBody::Query(query) => return select_output_columns(query, context),
+        CteBody::Insert(plan) => (
+            &plan.table,
+            &plan.target_qualifier,
+            &plan.returning_aliases,
+            &plan.returning,
+            None,
+            &plan.with,
+        ),
+        CteBody::Update(plan) => (
+            &plan.table,
+            &plan.target_qualifier,
+            &plan.returning_aliases,
+            &plan.returning,
+            plan.from.as_ref(),
+            &plan.with,
+        ),
+        CteBody::Delete(plan) => (
+            &plan.table,
+            &plan.target_qualifier,
+            &plan.returning_aliases,
+            &plan.returning,
+            plan.using.as_ref(),
+            &plan.with,
+        ),
+        CteBody::Merge(plan) => (
+            &plan.target,
+            &plan.target_qualifier,
+            &plan.returning_aliases,
+            &plan.returning,
+            Some(&plan.source),
+            &plan.with,
+        ),
+    };
+    let context = context.with_ctes(ctes)?;
+    let columns = context.relation_columns(table)?;
+    let mut source = from
+        .map(|from| source_names(from, &context))
+        .transpose()?
+        .unwrap_or_default();
+    source.columns.clone_from(&columns);
+    source.insert_qualifier(qualifier, &columns);
+    source.insert_qualifier(&aliases.old, &columns);
+    source.insert_qualifier(&aliases.new, &columns);
+    Ok(projection_output_columns(returning, &source))
+}
+
 pub(super) fn select_output_columns(
     select: &SelectStmt,
     context: &RuleBindingContext<'_>,
@@ -324,8 +377,15 @@ pub(super) fn select_output_columns(
         .map(|source| source_names(source, &context))
         .transpose()?
         .unwrap_or_default();
+    Ok(projection_output_columns(&select.projections, &source))
+}
+
+fn projection_output_columns(
+    projections: &[uqa_sql::ast::Projection],
+    source: &RuleSourceNames,
+) -> Vec<String> {
     let mut columns = Vec::new();
-    for projection in &select.projections {
+    for projection in projections {
         if let Some(alias) = &projection.alias {
             columns.push(alias.clone());
             continue;
@@ -348,7 +408,7 @@ pub(super) fn select_output_columns(
             _ => columns.push("?column?".into()),
         }
     }
-    Ok(columns)
+    columns
 }
 
 pub(super) fn apply_positional_aliases(columns: &mut Vec<String>, aliases: &[String]) {

@@ -51,6 +51,8 @@ impl Engine {
         mut column: uqa_sql::ast::ColumnDef,
         check_columns: Option<&[uqa_sql::ast::ColumnDef]>,
     ) -> StorageBackendResult<()> {
+        column.ty = crate::sql::resolve_declared_column_type(self, &column.ty)
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         let legacy_auto_increment = column
             .auto_increment
             .as_ref()
@@ -89,6 +91,7 @@ impl Engine {
             self.bind_table_schema_routine_identities(&table_name, &mut columns, &mut [])?;
         }
         let mut constraints = uqa_sql::ast::TableConstraintSet {
+            columns_declared: Some(true),
             persistence: t.persistence,
             on_commit: t.on_commit,
             checks: t.table_checks.read().clone(),
@@ -103,6 +106,7 @@ impl Engine {
         if self.is_persistent() {
             self.try_save_table_schema_with_components(&table_name, &t, &columns, &constraints)?;
         }
+        *t.columns_declared.write() = true;
         *t.columns.write() = columns;
         *t.table_checks.write() = constraints.checks;
         *t.foreign_keys.write() = constraints.foreign_keys;
@@ -115,7 +119,34 @@ impl Engine {
     }
 
     pub fn drop_column(&self, table: &str, column: &str) -> StorageBackendResult<bool> {
-        self.try_drop_column(table, column)
+        self.with_implicit_storage_transaction(|engine| {
+            let mut rewritten = Vec::new();
+            if let Some(canonical) =
+                engine.resolve_table_ddl_target(table, "ALTER TABLE DROP COLUMN")?
+            {
+                if engine.try_table_has_column(&canonical, column)? {
+                    engine
+                        .drop_column_routine_dependents(&canonical, column, false)
+                        .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+                    rewritten = engine
+                        .prepare_routine_column_alias_drop(
+                            std::collections::BTreeSet::from([(canonical, column.to_string())]),
+                            &[],
+                        )
+                        .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+                }
+            }
+            let dropped = engine.try_drop_column_inner(table, column)?;
+            if dropped {
+                engine
+                    .publish_stored_routine_body_rewrites(rewritten)
+                    .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+                engine
+                    .refresh_stored_merge_target_plans()
+                    .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+            }
+            Ok(dropped)
+        })
     }
 
     pub(crate) fn try_drop_column(&self, table: &str, column: &str) -> StorageBackendResult<bool> {
@@ -357,6 +388,20 @@ impl Engine {
         }
     }
 
+    fn rename_column_analyzer_assignments(&self, table_name: &str, from: &str, to: &str) {
+        let mut analyzers = self.durable.table_field_analyzers.write();
+        let mut moved = Vec::new();
+        analyzers.retain(|(table, field), value| {
+            if table == table_name && field == from {
+                moved.push(((table_name.to_string(), to.to_string()), value.clone()));
+                false
+            } else {
+                true
+            }
+        });
+        analyzers.extend(moved);
+    }
+
     pub(super) fn try_rename_column_inner(
         &self,
         table: &str,
@@ -430,19 +475,7 @@ impl Engine {
             self.create_vector_field(&table_name, to, dimensions)?;
         }
         self.rename_catalog_index_column_refs(&table_name, from, to)?;
-        {
-            let mut analyzers = self.durable.table_field_analyzers.write();
-            let mut moved = Vec::new();
-            analyzers.retain(|(table, field), value| {
-                if table == &table_name && field == from {
-                    moved.push(((table_name.clone(), to.to_string()), value.clone()));
-                    false
-                } else {
-                    true
-                }
-            });
-            analyzers.extend(moved);
-        }
+        self.rename_column_analyzer_assignments(&table_name, from, to);
         if self.is_persistent() {
             if let Some(catalog) = self.storage.catalog.as_ref() {
                 catalog.rename_column_data(&table_name, from, to)?;
@@ -458,6 +491,11 @@ impl Engine {
             }
             self.try_save_table_schema(&table_name, &t)?;
         }
+        let relation = Self::resolved_relation_identity(&table_name)?;
+        self.rewrite_routine_column_references(&relation, from, to)
+            .map_err(|error| {
+                StorageBackendError::Other(format!("rewrite routine column references: {error}"))
+            })?;
         self.rename_event_column_inner(&table_name, from, to)?;
         self.mark_column_stats_dirty(&table_name, &t)?;
         self.refresh_value_indexes_for_table(&table_name)?;

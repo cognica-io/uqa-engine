@@ -114,9 +114,7 @@ impl Engine {
         if previous.as_ref() != Some(&current) {
             self.clear_sql_statement_cache();
             self.clear_bayesian_params_cache();
-            self.rebind_prepared_plans().map_err(|error| {
-                StorageBackendError::Other(format!("re-optimize changed snapshot: {error}"))
-            })?;
+            self.invalidate_prepared_plans();
         }
         *self.epochs.storage_cache_revisions.lock() = Some(current);
         Ok(true)

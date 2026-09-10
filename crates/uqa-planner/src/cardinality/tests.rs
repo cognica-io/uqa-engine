@@ -37,6 +37,36 @@ fn equality_uses_distinct_count() {
 }
 
 #[test]
+fn rare_equality_uses_probability_left_after_common_and_null_values() {
+    let column = ColumnStats {
+        row_count: 10_000,
+        distinct_count: 2,
+        null_count: 100,
+        mcv_values: vec![Value::Int(1)],
+        mcv_frequencies: vec![0.9899],
+        ..ColumnStats::default()
+    };
+    let statistics = RelationStats::new(10_000).with_column("bucket", column.clone());
+    let estimator = CardinalityEstimator::new().with_column_stats(statistics.columns.clone());
+    let expected = 0.0001;
+    assert!((estimator.selectivity(&eq("bucket", 2), &statistics).raw() - expected).abs() < 1e-12);
+    assert!(
+        (estimator.filter_selectivity("bucket", &Predicate::Equals(Value::Int(2)), 10_000.0)
+            - expected)
+            .abs()
+            < 1e-12
+    );
+    assert_eq!(column.equality_selectivity_for(&Value::Null), 0.0);
+    assert!((column.equality_selectivity() - 0.495).abs() < 1e-12);
+    let parameter = uqa_execution::ScalarExpr::Binary {
+        op: BinaryOp::Equal,
+        lhs: Box::new(uqa_execution::ScalarExpr::Column("bucket".into())),
+        rhs: Box::new(uqa_execution::ScalarExpr::Param(1)),
+    };
+    assert!((estimator.scalar_selectivity(&parameter, &statistics).raw() - 0.495).abs() < 1e-12);
+}
+
+#[test]
 fn and_selectivity_multiplies() {
     let stats = RelationStats::new(1000).with_column(
         "uid",

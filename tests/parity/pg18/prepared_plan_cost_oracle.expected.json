@@ -1,0 +1,1260 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SET plan_cache_mode = auto",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TEMP TABLE prepared_plan_cost (bucket integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO prepared_plan_cost SELECT CASE WHEN n = 10000 THEN 2 ELSE 1 END FROM generate_series(1,10000) AS g(n)",
+      "command_tags": [
+        "INSERT 0 10000"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE INDEX prepared_plan_cost_bucket_idx ON prepared_plan_cost (bucket)",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ANALYZE prepared_plan_cost",
+      "command_tags": [
+        "ANALYZE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE cost_rare(integer) AS SELECT count(*) AS matching_rows FROM prepared_plan_cost WHERE bucket = $1",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cost_rare(2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "matching_rows"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cost_rare'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cost_rare",
+              "0",
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cost_rare(2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "matching_rows"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cost_rare'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cost_rare",
+              "0",
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cost_rare(2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "matching_rows"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cost_rare'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cost_rare",
+              "0",
+              "3"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cost_rare(2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "matching_rows"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cost_rare'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cost_rare",
+              "0",
+              "4"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cost_rare(2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "matching_rows"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cost_rare'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cost_rare",
+              "0",
+              "5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cost_rare(2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "matching_rows"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cost_rare'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cost_rare",
+              "0",
+              "6"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cost_rare(2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "matching_rows"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cost_rare'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cost_rare",
+              "0",
+              "7"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE cost_common(integer) AS SELECT count(*) AS matching_rows FROM prepared_plan_cost WHERE bucket = $1",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cost_common(1)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "matching_rows"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "9999"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cost_common'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cost_common",
+              "0",
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cost_common(1)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "matching_rows"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "9999"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cost_common'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cost_common",
+              "0",
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cost_common(1)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "matching_rows"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "9999"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cost_common'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cost_common",
+              "0",
+              "3"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cost_common(1)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "matching_rows"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "9999"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cost_common'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cost_common",
+              "0",
+              "4"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cost_common(1)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "matching_rows"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "9999"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cost_common'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cost_common",
+              "0",
+              "5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cost_common(1)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "matching_rows"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "9999"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cost_common'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cost_common",
+              "1",
+              "5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cost_common(1)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "matching_rows"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "9999"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cost_common'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cost_common",
+              "2",
+              "5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET LOCAL plan_cache_mode = force_generic_plan",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SHOW plan_cache_mode",
+      "command_tags": [
+        "SHOW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "plan_cache_mode"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "force_generic_plan"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cost_rare(2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "matching_rows"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SAVEPOINT mode_savepoint",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET LOCAL plan_cache_mode = force_custom_plan",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SHOW plan_cache_mode",
+      "command_tags": [
+        "SHOW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "plan_cache_mode"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "force_custom_plan"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cost_common(1)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "matching_rows"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "9999"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK TO mode_savepoint",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SHOW plan_cache_mode",
+      "command_tags": [
+        "SHOW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "plan_cache_mode"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "force_generic_plan"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cost_common(2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "matching_rows"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "COMMIT",
+      "command_tags": [
+        "COMMIT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SHOW plan_cache_mode",
+      "command_tags": [
+        "SHOW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "plan_cache_mode"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "auto"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name IN ('cost_rare','cost_common') ORDER BY name",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cost_common",
+              "3",
+              "6"
+            ],
+            [
+              "cost_rare",
+              "1",
+              "7"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SET plan_cache_mode = force_custom_plan",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET LOCAL plan_cache_mode = force_generic_plan",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SHOW plan_cache_mode",
+      "command_tags": [
+        "SHOW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "plan_cache_mode"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "force_generic_plan"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SHOW plan_cache_mode",
+      "command_tags": [
+        "SHOW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "plan_cache_mode"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "force_custom_plan"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "RESET plan_cache_mode",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SHOW plan_cache_mode",
+      "command_tags": [
+        "SHOW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "plan_cache_mode"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "auto"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DEALLOCATE ALL",
+      "command_tags": [
+        "DEALLOCATE ALL"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE prepared_plan_cost",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    }
+  ]
+}

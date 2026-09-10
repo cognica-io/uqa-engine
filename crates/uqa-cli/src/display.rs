@@ -97,7 +97,11 @@ pub(super) fn optional_value_to_display_value(value: Option<&Value>) -> Value {
 }
 
 pub(super) fn sql_type_name(ty: &ColumnType) -> String {
+    if ty != ty.without_temporal_modifiers() {
+        return ty.sql_name();
+    }
     match ty {
+        ColumnType::Named(name) => name.clone(),
         ColumnType::SmallInteger => "smallint".into(),
         ColumnType::Integer => "integer".into(),
         ColumnType::BigInteger => "bigint".into(),
@@ -138,11 +142,13 @@ pub(super) fn sql_type_name(ty: &ColumnType) -> String {
         ColumnType::Array(element) => format!("{}[]", sql_type_name(element)),
         ColumnType::Record => "record".into(),
         ColumnType::Date => "date".into(),
-        ColumnType::Time => "time".into(),
-        ColumnType::TimeTz => "time with time zone".into(),
-        ColumnType::Timestamp => "timestamp".into(),
-        ColumnType::TimestampTz => "timestamp with time zone".into(),
-        ColumnType::Interval => "interval".into(),
+        ColumnType::Time | ColumnType::TimePrecision(_) => "time".into(),
+        ColumnType::TimeTz | ColumnType::TimeTzPrecision(_) => "time with time zone".into(),
+        ColumnType::Timestamp | ColumnType::TimestampPrecision(_) => "timestamp".into(),
+        ColumnType::TimestampTz | ColumnType::TimestampTzPrecision(_) => {
+            "timestamp with time zone".into()
+        }
+        ColumnType::Interval | ColumnType::IntervalWithFields { .. } => "interval".into(),
         ColumnType::Range(subtype) => subtype.range_name().into(),
         ColumnType::Multirange(subtype) => subtype.multirange_name().into(),
         ColumnType::Vector(dim) => format!("vector({dim})"),

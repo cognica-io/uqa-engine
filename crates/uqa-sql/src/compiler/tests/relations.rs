@@ -74,7 +74,7 @@ fn table_function_column_definitions_preserve_type_modifiers() {
 }
 
 #[test]
-fn table_function_temporal_column_definitions_do_not_require_stored_typmods() {
+fn table_function_temporal_column_definitions_preserve_type_modifiers() {
     let Statement::Select(select) = first(
         "SELECT * FROM f() AS (created_at timestamp(3) with time zone, local_time time(3), elapsed interval hour to minute)",
     ) else {
@@ -83,7 +83,10 @@ fn table_function_temporal_column_definitions_do_not_require_stored_typmods() {
     let Some(FromClause::Function { column_types, .. }) = select.from else {
         panic!("expected function source");
     };
-    assert_eq!(column_types, ["timestamptz", "time", "interval"]);
+    assert_eq!(
+        column_types,
+        ["timestamptz(3)", "time(3)", "interval hour to minute"]
+    );
 }
 
 #[test]
@@ -431,8 +434,8 @@ fn cte_values_body_is_preserved() {
     };
     let cte = &select.with[0];
     assert_eq!(cte.columns, ["id", "label"]);
-    assert_eq!(cte.query.values.len(), 2);
-    assert!(cte.query.projections.is_empty());
+    assert_eq!(cte.body.query().unwrap().values.len(), 2);
+    assert!(cte.body.query().unwrap().projections.is_empty());
 }
 
 #[test]

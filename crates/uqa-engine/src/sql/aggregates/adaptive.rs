@@ -85,7 +85,8 @@ impl AdaptiveAggregateSet {
                 )
             })
             .collect::<Vec<_>>();
-        let accumulator_templates = aggregate_accumulator_templates(engine, &aggregate_targets);
+        let accumulator_templates =
+            aggregate_accumulator_templates(engine, &aggregate_targets, input_schema, params)?;
         let output_plan = super::output::AggregateOutputPlan::compile(
             engine,
             &statement,
@@ -527,7 +528,7 @@ fn aggregate_target_has_variable_state(
         AggregateStatePlan::Count | AggregateStatePlan::BoolAnd | AggregateStatePlan::BoolOr => {
             Ok(false)
         }
-        AggregateStatePlan::Sum => {
+        AggregateStatePlan::Sum | AggregateStatePlan::SumReal => {
             let Some(argument) = args.first() else {
                 return Ok(true);
             };

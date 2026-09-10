@@ -268,6 +268,9 @@ impl UnifiedPlan {
                 name,
                 if_not_exists,
             })),
+            Statement::AlterSchemaOwner { name, new_owner } => {
+                Self::Command(Box::new(CommandPlan::AlterSchemaOwner { name, new_owner }))
+            }
             Statement::Notify { channel, payload } => {
                 Self::Command(Box::new(CommandPlan::Notify { channel, payload }))
             }
@@ -277,9 +280,17 @@ impl UnifiedPlan {
             Statement::Unlisten { channel } => {
                 Self::Command(Box::new(CommandPlan::Unlisten { channel }))
             }
-            Statement::SetVariable { name, value } => {
-                Self::Command(Box::new(CommandPlan::SetVariable { name, value }))
-            }
+            Statement::SetVariable {
+                name,
+                value,
+                local,
+                is_default,
+            } => Self::Command(Box::new(CommandPlan::SetVariable {
+                name,
+                value,
+                local,
+                is_default,
+            })),
             Statement::ResetVariable { name } => {
                 Self::Command(Box::new(CommandPlan::ResetVariable { name }))
             }
@@ -341,6 +352,9 @@ impl UnifiedPlan {
             Statement::CreateSequence(value) => {
                 Self::Command(Box::new(CommandPlan::CreateSequence(value)))
             }
+            Statement::CreateDomain(value) => {
+                Self::Command(Box::new(CommandPlan::CreateDomain(value)))
+            }
             Statement::AlterSequence(value) => {
                 Self::Command(Box::new(CommandPlan::AlterSequence(value)))
             }
@@ -361,9 +375,17 @@ impl UnifiedPlan {
                 on_commit,
                 query: Box::new(QueryPlan::lower_with(*body, aggregates)),
             })),
-            Statement::Prepare { name, body } => {
+            Statement::Prepare {
+                name,
+                parameter_types,
+                body,
+            } => {
                 let body = Box::new(Self::lower_with(*body, aggregates));
-                Self::Command(Box::new(CommandPlan::Prepare { name, body }))
+                Self::Command(Box::new(CommandPlan::Prepare {
+                    name,
+                    parameter_types,
+                    body,
+                }))
             }
             Statement::Execute { name, params } => Self::Command(Box::new(CommandPlan::Execute {
                 name,
@@ -402,6 +424,7 @@ impl UnifiedPlan {
                     })
                     .collect();
                 Self::Command(Box::new(CommandPlan::Merge(Box::new(MergePlan {
+                    ctes: lower_ctes(&statement.with, aggregates),
                     target: statement.target,
                     statement_privilege_subject: None,
                     target_privilege_subject: None,
@@ -509,6 +532,7 @@ impl CommandPlan {
             Self::CreateMaterializedView { .. } => "CreateMaterializedView",
             Self::RefreshMaterializedView { .. } => "RefreshMaterializedView",
             Self::CreateSchema { .. } => "CreateSchema",
+            Self::AlterSchemaOwner { .. } => "AlterSchemaOwner",
             Self::Notify { .. } => "Notify",
             Self::Listen { .. } => "Listen",
             Self::Unlisten { .. } => "Unlisten",
@@ -528,6 +552,7 @@ impl CommandPlan {
             Self::FetchCursor(_) => "FetchCursor",
             Self::CloseCursor { .. } => "CloseCursor",
             Self::CreateSequence(_) => "CreateSequence",
+            Self::CreateDomain(_) => "CreateDomain",
             Self::AlterSequence(_) => "AlterSequence",
             Self::CreateTableAs { .. } => "CreateTableAs",
             Self::Prepare { .. } => "Prepare",

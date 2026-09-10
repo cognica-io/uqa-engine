@@ -34,7 +34,8 @@
         "crates/uqa-engine/src/sql/catalog/pg_catalog/sequences.rs",
         "crates/uqa-engine/src/sql/catalog/pg_catalog/types.rs",
         "crates/uqa-engine/src/sql/catalog/pg_namespace.rs",
-        "crates/uqa-engine/src/sql/catalog/pg_settings.rs"
+        "crates/uqa-engine/src/sql/catalog/pg_settings.rs",
+        "crates/uqa-engine/src/sql/catalog/plpgsql.rs"
       ],
       "engine_allowlist": []
     },
@@ -125,7 +126,9 @@
         "crates/uqa-engine/src/sql/select/schema_binding/analysis/functions.rs",
         "crates/uqa-engine/src/sql/select/schema_binding/analysis/references.rs",
         "crates/uqa-engine/src/sql/select/schema_binding/catalog_sources.rs",
+        "crates/uqa-engine/src/sql/select/schema_binding/commands.rs",
         "crates/uqa-engine/src/sql/select/schema_binding/cte_controls.rs",
+        "crates/uqa-engine/src/sql/select/schema_binding/ctes.rs",
         "crates/uqa-engine/src/sql/select/schema_binding/projection.rs",
         "crates/uqa-engine/src/sql/select/schema_binding/routine_binding.rs",
         "crates/uqa-engine/src/sql/select/schema_binding/scope.rs",
@@ -210,6 +213,7 @@
         "crates/uqa-engine/src/sql/dml/insert/staging.rs",
         "crates/uqa-engine/src/sql/dml/merge.rs",
         "crates/uqa-engine/src/sql/dml/merge/returning.rs",
+        "crates/uqa-engine/src/sql/dml/merge/statement_events.rs",
         "crates/uqa-engine/src/sql/dml/update.rs",
         "crates/uqa-engine/src/sql/dml/update_from.rs",
         "crates/uqa-engine/src/sql/dml/vectors.rs",
@@ -240,6 +244,7 @@
         "crates/uqa-engine/src/sql/dml/insert/staging.rs",
         "crates/uqa-engine/src/sql/dml/merge.rs",
         "crates/uqa-engine/src/sql/dml/merge/returning.rs",
+        "crates/uqa-engine/src/sql/dml/merge/statement_events.rs",
         "crates/uqa-engine/src/sql/dml/update.rs",
         "crates/uqa-engine/src/sql/dml/update_from.rs",
         "crates/uqa-engine/src/sql/dml/vectors.rs",

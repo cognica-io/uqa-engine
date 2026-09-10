@@ -263,10 +263,12 @@ pub(in crate::sql) fn aggregate_input_values(
 pub(in crate::sql) fn new_aggregate_accumulators_with_budget(
     engine: &Engine,
     aggregate_targets: &[ScalarExpr],
+    input_schema: &uqa_execution::RowSchema,
+    params: &[uqa_sql::SQLParam],
     budget_bytes: usize,
 ) -> Result<Vec<AggregateAccumulator>, SQLError> {
     Ok(instantiate_aggregate_accumulators(
-        &aggregate_accumulator_templates(engine, aggregate_targets),
+        &aggregate_accumulator_templates(engine, aggregate_targets, input_schema, params)?,
         budget_bytes,
     ))
 }
@@ -274,17 +276,34 @@ pub(in crate::sql) fn new_aggregate_accumulators_with_budget(
 pub(in crate::sql) fn aggregate_accumulator_templates(
     engine: &Engine,
     aggregate_targets: &[ScalarExpr],
-) -> Vec<AggregateAccumulatorTemplate> {
+    input_schema: &uqa_execution::RowSchema,
+    params: &[uqa_sql::SQLParam],
+) -> Result<Vec<AggregateAccumulatorTemplate>, SQLError> {
     aggregate_targets
         .iter()
         .map(|expression| match expression {
-            ScalarExpr::Func { name, .. } => {
-                engine.registered_aggregate_function(name).map_or_else(
-                    || AggregateAccumulatorTemplate::builtin(name),
-                    AggregateAccumulatorTemplate::registered,
-                )
+            ScalarExpr::Func { name, args, .. } => {
+                if let Some(function) = engine.registered_aggregate_function(name) {
+                    return Ok(AggregateAccumulatorTemplate::registered(function));
+                }
+                let input_type = args
+                    .first()
+                    .map(|argument| {
+                        uqa_execution::scalar_type_with_resolver(
+                            argument,
+                            input_schema,
+                            params,
+                            engine,
+                        )
+                    })
+                    .transpose()?
+                    .flatten();
+                Ok(AggregateAccumulatorTemplate::builtin(
+                    name,
+                    input_type.as_ref(),
+                ))
             }
-            _ => AggregateAccumulatorTemplate::generic(),
+            _ => Ok(AggregateAccumulatorTemplate::generic()),
         })
         .collect()
 }

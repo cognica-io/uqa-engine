@@ -39,6 +39,7 @@ impl CatalogTableSnapshot {
                 column_acls: BTreeMap::new(),
             }),
             columns: Arc::new(columns),
+            columns_declared: true,
             checks: Arc::new(Vec::new()),
             foreign_keys: Arc::new(Vec::new()),
             keys: Arc::new(Vec::new()),
@@ -541,6 +542,10 @@ impl CatalogReadView {
             .values()
             .flat_map(|rules| rules.values().cloned())
             .collect()
+    }
+
+    pub(crate) fn domains(&self) -> impl Iterator<Item = &crate::engine_domains::StoredDomain> {
+        self.snapshot.durable.domains.values()
     }
 
     pub(crate) fn sql_functions(

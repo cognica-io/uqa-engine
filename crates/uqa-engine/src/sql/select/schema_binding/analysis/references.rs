@@ -166,9 +166,11 @@ pub(super) fn validate_expression(
                 .resolve_scalar_subquery_type(*subquery, schema, params)
                 .map(drop)
         }
-        ScalarExpr::Star | ScalarExpr::Default | ScalarExpr::Literal(_) | ScalarExpr::Param(_) => {
-            Ok(())
-        }
+        ScalarExpr::Star
+        | ScalarExpr::Default
+        | ScalarExpr::Literal(_)
+        | ScalarExpr::TypedLiteral { .. }
+        | ScalarExpr::Param(_) => Ok(()),
     }
 }
 

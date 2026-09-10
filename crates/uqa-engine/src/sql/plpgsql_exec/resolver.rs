@@ -10,7 +10,7 @@ use super::{DatumResolver, PLpgSQLDatum, ResolvedVariable, SQLError, Value, Vari
 use uqa_sql::ast::ColumnType;
 
 impl DatumResolver<'_> {
-    fn lookup(&self, name: &str) -> Option<usize> {
+    pub(super) fn lookup(&self, name: &str) -> Option<usize> {
         if let Some(stack) = self.bindings.get(name) {
             return stack.last().copied();
         }
@@ -23,21 +23,39 @@ impl DatumResolver<'_> {
         None
     }
 
-    fn resolved_datum(&self, index: usize) -> ResolvedVariable {
-        let value = self.values[index].clone();
-        let declared_type = match &self.datums[index] {
+    pub(super) fn datum_type(&self, index: usize) -> Option<ColumnType> {
+        match &self.datums[index] {
             PLpgSQLDatum::Var(variable) => {
                 crate::sql::resolve_catalog_column_type(self.engine, &variable.type_name)
                     .filter(|ty| !matches!(ty, ColumnType::AnyArray | ColumnType::Record))
-                    .map(|_| variable.type_name.clone())
             }
-            PLpgSQLDatum::Rec { .. } | PLpgSQLDatum::RecField { .. } | PLpgSQLDatum::Row { .. } => {
-                None
-            }
+            PLpgSQLDatum::RecField { parent, field } => self.record_field_type(*parent, field),
+            PLpgSQLDatum::Rec { .. } | PLpgSQLDatum::Row { .. } => None,
+        }
+    }
+
+    fn record_field_type(&self, parent: usize, field: &str) -> Option<ColumnType> {
+        let Value::Record(fields) = &self.values[parent] else {
+            return None;
+        };
+        let index = fields.iter().position(|(name, _)| name == field)?;
+        self.record_types.get(&parent)?.get(index)?.clone()
+    }
+
+    fn resolved_datum(&self, index: usize) -> ResolvedVariable {
+        let value = match &self.datums[index] {
+            PLpgSQLDatum::RecField { parent, field } => match &self.values[*parent] {
+                Value::Record(fields) => fields
+                    .iter()
+                    .find(|(name, _)| name == field)
+                    .map_or(Value::Null, |(_, value)| value.clone()),
+                _ => Value::Null,
+            },
+            _ => self.values[index].clone(),
         };
         ResolvedVariable {
             value,
-            declared_type,
+            declared_type: self.datum_type(index).map(|ty| ty.sql_name()),
         }
     }
 }
@@ -77,7 +95,12 @@ impl VariableResolver for DatumResolver<'_> {
                         .find(|(name, _)| name == column)
                         .map(|(_, value)| value.clone());
                     match value {
-                        Some(value) => Ok(Some(ResolvedVariable::untyped(value))),
+                        Some(value) => Ok(Some(ResolvedVariable {
+                            value,
+                            declared_type: self
+                                .record_field_type(idx, column)
+                                .map(|ty| ty.sql_name()),
+                        })),
                         None => Err(SQLError::Routine {
                             sqlstate: "42703".into(),
                             message: format!("record \"{name}\" has no field \"{column}\""),

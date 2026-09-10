@@ -59,15 +59,13 @@ impl TemporalValue {
     }
 
     pub fn parse_time(input: &str) -> Option<Self> {
-        parse_naive_time(input.trim()).map(|time| Self::Time {
-            micros: time_to_micros(time),
-        })
+        parse_time_micros(input.trim()).map(|micros| Self::Time { micros })
     }
 
     pub fn parse_time_tz(input: &str) -> Option<Self> {
         let (time, offset_minutes) = split_offset_suffix(input.trim())?;
-        parse_naive_time(time.trim()).map(|time| Self::TimeTz {
-            micros: time_to_micros(time),
+        parse_time_micros(time.trim()).map(|micros| Self::TimeTz {
+            micros,
             offset_minutes,
         })
     }
@@ -226,6 +224,15 @@ fn parse_naive_time(input: &str) -> Option<NaiveTime> {
     None
 }
 
+fn parse_time_micros(input: &str) -> Option<i64> {
+    if let Some(suffix) = input.strip_prefix("24:") {
+        let time = parse_naive_time(&format!("00:{suffix}"))?;
+        return (time.num_seconds_from_midnight() == 0 && time.nanosecond() == 0)
+            .then_some(MICROS_PER_DAY);
+    }
+    parse_naive_time(input).map(time_to_micros)
+}
+
 fn parse_naive_datetime(input: &str) -> Option<NaiveDateTime> {
     for fmt in [
         "%Y-%m-%d %H:%M:%S%.f",
@@ -270,6 +277,8 @@ fn parse_offset_minutes(offset: &str) -> Option<i32> {
     let body = &offset[1..];
     let (hours, minutes) = if let Some((h, m)) = body.split_once(':') {
         (h.parse::<i32>().ok()?, m.parse::<i32>().ok()?)
+    } else if matches!(body.len(), 1 | 2) {
+        (body.parse::<i32>().ok()?, 0)
     } else if body.len() == 4 {
         (
             body[..2].parse::<i32>().ok()?,
@@ -285,6 +294,9 @@ fn parse_offset_minutes(offset: &str) -> Option<i32> {
 }
 
 fn format_time_micros(micros: i64) -> String {
+    if micros == MICROS_PER_DAY {
+        return "24:00:00".into();
+    }
     let normalized = micros.rem_euclid(MICROS_PER_DAY);
     let seconds = normalized / MICROS_PER_SECOND;
     let micros = normalized % MICROS_PER_SECOND;
@@ -314,7 +326,11 @@ fn format_time_micros(micros: i64) -> String {
 fn format_offset(offset_minutes: i32) -> String {
     let sign = if offset_minutes < 0 { '-' } else { '+' };
     let abs = offset_minutes.abs();
-    format!("{sign}{:02}:{:02}", abs / 60, abs % 60)
+    if abs % 60 == 0 {
+        format!("{sign}{:02}", abs / 60)
+    } else {
+        format!("{sign}{:02}:{:02}", abs / 60, abs % 60)
+    }
 }
 
 fn format_timestamp_micros(micros: i64, utc: bool) -> String {

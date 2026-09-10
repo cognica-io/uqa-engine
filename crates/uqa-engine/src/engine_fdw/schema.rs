@@ -277,6 +277,8 @@ impl Engine {
         expression: &mut uqa_sql::ast::Expr,
         stored: bool,
     ) -> Result<(), SQLError> {
+        self.bind_schema_regclass_constants(expression, stored)
+            .map_err(|error| SQLError::Internal(error.to_string()))?;
         let result = if stored {
             self.resolve_loaded_sequence_references_in_expr(expression)
         } else {
@@ -379,6 +381,14 @@ impl Engine {
         table_name: &str,
         column_name: &str,
     ) -> StorageBackendResult<Option<bool>> {
+        self.drop_foreign_table_column_dependency(table_name, column_name)
+    }
+
+    pub(crate) fn drop_foreign_table_column_dependency(
+        &self,
+        table_name: &str,
+        column_name: &str,
+    ) -> StorageBackendResult<Option<bool>> {
         let relation =
             RelationIdentity::from_legacy_name(table_name).map_err(StorageBackendError::Other)?;
         let Some(mut table) = self.durable.foreign_tables.read().get(&relation).cloned() else {
@@ -387,11 +397,11 @@ impl Engine {
         let Some(column_index) = table
             .columns
             .iter()
-            .position(|column| column.name == column_name && column.generated.is_some())
+            .position(|column| column.name == column_name)
         else {
             return Ok(Some(false));
         };
-        let dependent_views = self.views_depending_on_relation(table_name)?;
+        let dependent_views = self.views_depending_on_column(table_name, column_name)?;
         if !dependent_views.is_empty() {
             return Err(StorageBackendError::Other(format!(
                 "cannot drop generated column `{table_name}`.`{column_name}` while dependent view(s) `{}` remain",

@@ -7,7 +7,10 @@
 //! Catalog-backed `reg*` input/output and type-name resolution.
 
 mod format_type;
+mod relation_oid;
 pub(in crate::sql) use format_type::format_type_value;
+use relation_oid::lookup_regclass_oid;
+pub(crate) use relation_oid::resolve_bound_regclass_oid;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -26,7 +29,7 @@ use super::relation_catalog::build_pg_class;
 
 mod type_names;
 
-pub(crate) use type_names::resolve_catalog_column_type;
+pub(crate) use type_names::{resolve_catalog_column_type, resolve_catalog_domain_type_by_oid};
 
 fn cross_database_reference(name: &str) -> SQLError {
     SQLError::Unsupported(format!(
@@ -63,91 +66,6 @@ fn numeric_regobject_oid(input: &str) -> NumericRegobjectOid {
             NumericRegobjectOid::InvalidSyntax
         }
         Err(_) => NumericRegobjectOid::OutOfRange,
-    }
-}
-
-fn lookup_regclass_oid(engine: &Engine, name: &str) -> Result<Option<i64>, SQLError> {
-    match numeric_regobject_oid(name) {
-        NumericRegobjectOid::Valid(oid) => return Ok(Some(oid)),
-        NumericRegobjectOid::InvalidSyntax | NumericRegobjectOid::OutOfRange => return Ok(None),
-        NumericRegobjectOid::NotNumeric => {}
-    }
-    let Some(names) = uqa_sql::parse_regobject_name(name) else {
-        return Ok(None);
-    };
-    let (schema, local) = relation_name(&names)?;
-    if let Some((oid, _, _)) = resolve_virtual_regclass(engine, schema, local)? {
-        return Ok(Some(oid));
-    }
-    let reference = schema.map_or_else(
-        || uqa_sql::expr::quote_ident(local),
-        |schema| qualified_name(schema, local),
-    );
-    let Some((canonical, kind)) = engine.try_resolve_visible_relation_kind(&reference)? else {
-        return Ok(None);
-    };
-    if kind == "sequence" {
-        let object_id = engine
-            .sequence_object_id(&canonical)
-            .map_err(|error| SQLError::Internal(error.to_string()))?
-            .ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "resolved sequence `{canonical}` has no object identity"
-                ))
-            })?;
-        return Ok(Some(super::sequence_relation_oid(object_id)));
-    }
-    if kind == "index" {
-        let relation =
-            crate::RelationIdentity::from_legacy_name(&canonical).map_err(SQLError::Internal)?;
-        let catalog = engine.catalog_read_view();
-        let mut resolution = engine.session_execution_view().relation_name_resolution();
-        resolution.set_lookup_mode(crate::engine_capabilities::RelationLookupMode::Bound);
-        let index = catalog_index_relations(&catalog, &resolution)?
-            .into_iter()
-            .find(|index| index.relation == relation)
-            .ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "resolved index `{canonical}` has no catalog relation"
-                ))
-            })?;
-        return Ok(Some(index.oid()));
-    }
-    if kind == "table" {
-        return super::table_relation_oid(engine, &canonical)
-            .map(Some)
-            .map_err(|error| SQLError::Internal(error.to_string()));
-    }
-    let relation =
-        crate::RelationIdentity::from_legacy_name(&canonical).map_err(SQLError::Internal)?;
-    match kind {
-        "view" | "materialized view" => engine
-            .durable
-            .views
-            .read()
-            .get(&relation)
-            .map(super::view_relation_oid)
-            .ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "resolved view `{canonical}` has no catalog definition"
-                ))
-            })
-            .map(Some),
-        "foreign table" => engine
-            .durable
-            .foreign_tables
-            .read()
-            .get(&relation)
-            .map(super::foreign_table_relation_oid)
-            .ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "resolved foreign table `{canonical}` has no catalog definition"
-                ))
-            })
-            .map(Some),
-        other => Err(SQLError::Internal(format!(
-            "unknown relation kind `{other}` for `{canonical}`"
-        ))),
     }
 }
 
@@ -249,6 +167,17 @@ fn parsed_regtype_oid(
 ) -> Result<Option<i64>, SQLError> {
     let (schema, local) = object_name(&parsed.names)?;
     if let Some(schema) = schema {
+        if engine.schema_security_for_privilege(schema).is_none() {
+            return Err(SQLError::Routine {
+                sqlstate: "3F000".into(),
+                message: format!("schema \"{schema}\" does not exist"),
+            });
+        }
+        engine.require_schema_privilege(
+            schema,
+            &engine.current_user_name(),
+            crate::engine_schema_security::SchemaAclPrivilege::Usage,
+        )?;
         return Ok(type_oid_in_schema(
             catalog,
             schema,
@@ -428,7 +357,7 @@ pub(crate) fn resolve_regnamespace_oid(
         })
 }
 
-fn lookup_regtype_oid(engine: &Engine, name: &str) -> Result<Option<i64>, SQLError> {
+pub(crate) fn resolve_regtype_oid(engine: &Engine, name: &str) -> Result<Option<i64>, SQLError> {
     match numeric_regobject_oid(name) {
         NumericRegobjectOid::Valid(oid) => return Ok(Some(oid)),
         NumericRegobjectOid::InvalidSyntax | NumericRegobjectOid::OutOfRange => return Ok(None),
@@ -511,7 +440,10 @@ pub(crate) fn resolve_regobject_oid(
         ColumnType::Regclass => lookup_regclass_oid(engine, name),
         ColumnType::Regnamespace => lookup_regnamespace_oid(engine, name),
         ColumnType::Regrole => lookup_regrole_oid(engine, name),
-        ColumnType::Regtype => lookup_regtype_oid(engine, name),
+        ColumnType::Regtype => match resolve_regtype_oid(engine, name) {
+            Err(SQLError::Routine { sqlstate, .. }) if sqlstate == "3F000" => Ok(None),
+            result => result,
+        },
         _ => Err(SQLError::Internal(format!(
             "unsupported regobject lookup type `{}`",
             ty.sql_name()
@@ -541,6 +473,7 @@ const VIRTUAL_REGCLASSES: &[(&str, &str, i64)] = &[
     ("pg_catalog", "pg_roles", 12000),
     ("pg_catalog", "pg_user", 12014),
     ("pg_catalog", "pg_settings", 12104),
+    ("pg_catalog", "pg_prepared_statements", 12095),
     ("pg_catalog", "pg_description", 2609),
     ("pg_catalog", "pg_matviews", 12038),
     ("pg_catalog", "pg_sequences", 12048),
@@ -702,7 +635,7 @@ impl RegtypeOutputCatalog {
                 .is_some_and(|count| *count > 1);
         }
 
-        let types = build_pg_type()
+        let types = build_pg_type(&catalog)
             .into_iter()
             .filter_map(|row| {
                 Some((
@@ -932,6 +865,14 @@ fn format_regtype(
     let Some(entry) = catalog.types.get(&oid) else {
         return Ok(None);
     };
+    if catalog
+        .types
+        .get(&entry.element_oid)
+        .is_some_and(|element| element.array_oid == oid)
+    {
+        return format_regtype(engine, catalog, entry.element_oid)
+            .map(|element| element.map(|name| format!("{name}[]")));
+    }
     let Some(schema) = namespace_name(catalog, entry.namespace_oid) else {
         return Ok(None);
     };

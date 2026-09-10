@@ -1,0 +1,3124 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '16777217'::real AS value, ('16777217'::real)::double precision AS widened, ('16777217'::real)::text AS text_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "text_value"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "1.6777216e+07",
+              "16777216",
+              "1.6777216e+07"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '-16777217'::real AS value, ('-16777217'::real)::double precision AS widened, ('-16777217'::real)::text AS text_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "text_value"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "-1.6777216e+07",
+              "-16777216",
+              "-1.6777216e+07"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '7.038531e-26'::real AS value, ('7.038531e-26'::real)::double precision AS widened, ('7.038531e-26'::real)::text AS text_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "text_value"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "7.038531e-26",
+              "7.038530691851209e-26",
+              "7.038531e-26"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '0.1'::real AS value, ('0.1'::real)::double precision AS widened, ('0.1'::real)::text AS text_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "text_value"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "0.1",
+              "0.10000000149011612",
+              "0.1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '1e-45'::real AS value, ('1e-45'::real)::double precision AS widened, ('1e-45'::real)::text AS text_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "text_value"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "1e-45",
+              "1.401298464324817e-45",
+              "1e-45"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '3.4028235e38'::real AS value, ('3.4028235e38'::real)::double precision AS widened, ('3.4028235e38'::real)::text AS text_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "text_value"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "3.4028235e+38",
+              "3.4028234663852886e+38",
+              "3.4028235e+38"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '-0'::real AS value, ('-0'::real)::double precision AS widened, ('-0'::real)::text AS text_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "text_value"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "-0",
+              "-0",
+              "-0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'Infinity'::real AS value, ('Infinity'::real)::double precision AS widened, ('Infinity'::real)::text AS text_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "text_value"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "Infinity",
+              "Infinity",
+              "Infinity"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '-Infinity'::real AS value, ('-Infinity'::real)::double precision AS widened, ('-Infinity'::real)::text AS text_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "text_value"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "-Infinity",
+              "-Infinity",
+              "-Infinity"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'NaN'::real AS value, ('NaN'::real)::double precision AS widened, ('NaN'::real)::text AS text_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "text_value"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "NaN",
+              "NaN",
+              "NaN"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '  0.1  '::real AS value, ('  0.1  '::real)::double precision AS widened, ('  0.1  '::real)::text AS text_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "text_value"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "0.1",
+              "0.10000000149011612",
+              "0.1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (16777217)::real AS value, ((16777217)::real)::double precision AS widened",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened"
+          ],
+          "type_oids": [
+            700,
+            701
+          ],
+          "rows": [
+            [
+              "1.6777216e+07",
+              "16777216"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (16777217::bigint)::real AS value, ((16777217::bigint)::real)::double precision AS widened",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened"
+          ],
+          "type_oids": [
+            700,
+            701
+          ],
+          "rows": [
+            [
+              "1.6777216e+07",
+              "16777216"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (7.038531e-26::numeric)::real AS value, ((7.038531e-26::numeric)::real)::double precision AS widened",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened"
+          ],
+          "type_oids": [
+            700,
+            701
+          ],
+          "rows": [
+            [
+              "7.038531e-26",
+              "7.038530691851209e-26"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (0.1::numeric)::real AS value, ((0.1::numeric)::real)::double precision AS widened",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened"
+          ],
+          "type_oids": [
+            700,
+            701
+          ],
+          "rows": [
+            [
+              "0.1",
+              "0.10000000149011612"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (0.1::double precision)::real AS value, ((0.1::double precision)::real)::double precision AS widened",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened"
+          ],
+          "type_oids": [
+            700,
+            701
+          ],
+          "rows": [
+            [
+              "0.1",
+              "0.10000000149011612"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (1e-45::double precision)::real AS value, ((1e-45::double precision)::real)::double precision AS widened",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened"
+          ],
+          "type_oids": [
+            700,
+            701
+          ],
+          "rows": [
+            [
+              "1e-45",
+              "1.401298464324817e-45"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (NULL)::real AS value, ((NULL)::real)::double precision AS widened",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened"
+          ],
+          "type_oids": [
+            700,
+            701
+          ],
+          "rows": [
+            [
+              null,
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ''::real",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type real: \"\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 'abc'::real",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type real: \"abc\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT '1.2.3'::real",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type real: \"1.2.3\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT '1e40'::real",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "\"1e40\" is out of range for type real"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT '-1e40'::real",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "\"-1e40\" is out of range for type real"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT '1e-50'::real",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "\"1e-50\" is out of range for type real"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT '-1e-50'::real",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "\"-1e-50\" is out of range for type real"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT ' 1e40 '::real",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "\"1e40\" is out of range for type real"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT '0e-9999'::real",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "float4"
+          ],
+          "type_oids": [
+            700
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '-0e9999'::real",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "float4"
+          ],
+          "type_oids": [
+            700
+          ],
+          "rows": [
+            [
+              "-0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (1e40::double precision)::real",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "value out of range: overflow"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT (1e-50::double precision)::real",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "value out of range: underflow"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT (1e40::numeric)::real",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "\"10000000000000000000000000000000000000000\" is out of range for type real"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT (1e-50::numeric)::real",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "\"0.00000000000000000000000000000000000000000000000001\" is out of range for type real"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT (16777216::real + 1::real) AS value, (16777216::real + 1::real)::double precision AS widened, pg_typeof((16777216::real + 1::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "1.6777216e+07",
+              "16777216",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (16777216::real - 1::real) AS value, (16777216::real - 1::real)::double precision AS widened, pg_typeof((16777216::real - 1::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "1.6777215e+07",
+              "16777215",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (16777216::real * 1::real) AS value, (16777216::real * 1::real)::double precision AS widened, pg_typeof((16777216::real * 1::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "1.6777216e+07",
+              "16777216",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (16777216::real / 1::real) AS value, (16777216::real / 1::real)::double precision AS widened, pg_typeof((16777216::real / 1::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "1.6777216e+07",
+              "16777216",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (16777216::real + 1) AS value, (16777216::real + 1)::double precision AS widened, pg_typeof((16777216::real + 1))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            701,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "16777217",
+              "16777217",
+              "double precision"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (16777216::real - 1) AS value, (16777216::real - 1)::double precision AS widened, pg_typeof((16777216::real - 1))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            701,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "16777215",
+              "16777215",
+              "double precision"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (16777216::real * 1) AS value, (16777216::real * 1)::double precision AS widened, pg_typeof((16777216::real * 1))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            701,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "16777216",
+              "16777216",
+              "double precision"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (16777216::real / 1) AS value, (16777216::real / 1)::double precision AS widened, pg_typeof((16777216::real / 1))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            701,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "16777216",
+              "16777216",
+              "double precision"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (16777216::real + 1::numeric) AS value, (16777216::real + 1::numeric)::double precision AS widened, pg_typeof((16777216::real + 1::numeric))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            701,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "16777217",
+              "16777217",
+              "double precision"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (16777216::real - 1::numeric) AS value, (16777216::real - 1::numeric)::double precision AS widened, pg_typeof((16777216::real - 1::numeric))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            701,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "16777215",
+              "16777215",
+              "double precision"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (16777216::real * 1::numeric) AS value, (16777216::real * 1::numeric)::double precision AS widened, pg_typeof((16777216::real * 1::numeric))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            701,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "16777216",
+              "16777216",
+              "double precision"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (16777216::real / 1::numeric) AS value, (16777216::real / 1::numeric)::double precision AS widened, pg_typeof((16777216::real / 1::numeric))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            701,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "16777216",
+              "16777216",
+              "double precision"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (16777216::real + 1::double precision) AS value, (16777216::real + 1::double precision)::double precision AS widened, pg_typeof((16777216::real + 1::double precision))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            701,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "16777217",
+              "16777217",
+              "double precision"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (16777216::real - 1::double precision) AS value, (16777216::real - 1::double precision)::double precision AS widened, pg_typeof((16777216::real - 1::double precision))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            701,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "16777215",
+              "16777215",
+              "double precision"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (16777216::real * 1::double precision) AS value, (16777216::real * 1::double precision)::double precision AS widened, pg_typeof((16777216::real * 1::double precision))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            701,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "16777216",
+              "16777216",
+              "double precision"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (16777216::real / 1::double precision) AS value, (16777216::real / 1::double precision)::double precision AS widened, pg_typeof((16777216::real / 1::double precision))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            701,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "16777216",
+              "16777216",
+              "double precision"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (0.1::real + 0.2::real) AS value, (0.1::real + 0.2::real)::double precision AS widened, pg_typeof((0.1::real + 0.2::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "0.3",
+              "0.30000001192092896",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (0.1::real - 0.2::real) AS value, (0.1::real - 0.2::real)::double precision AS widened, pg_typeof((0.1::real - 0.2::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "-0.1",
+              "-0.10000000149011612",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (0.1::real * 0.2::real) AS value, (0.1::real * 0.2::real)::double precision AS widened, pg_typeof((0.1::real * 0.2::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "0.020000001",
+              "0.020000001415610313",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (0.1::real / 0.2::real) AS value, (0.1::real / 0.2::real)::double precision AS widened, pg_typeof((0.1::real / 0.2::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "0.5",
+              "0.5",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (1::real + 3::real) AS value, (1::real + 3::real)::double precision AS widened, pg_typeof((1::real + 3::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "4",
+              "4",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (1::real - 3::real) AS value, (1::real - 3::real)::double precision AS widened, pg_typeof((1::real - 3::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "-2",
+              "-2",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (1::real * 3::real) AS value, (1::real * 3::real)::double precision AS widened, pg_typeof((1::real * 3::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "3",
+              "3",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (1::real / 3::real) AS value, (1::real / 3::real)::double precision AS widened, pg_typeof((1::real / 3::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "0.33333334",
+              "0.3333333432674408",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ('3e38'::real + 2::real) AS value, ('3e38'::real + 2::real)::double precision AS widened, pg_typeof(('3e38'::real + 2::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "3e+38",
+              "3.0000000054977558e+38",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ('3e38'::real - 2::real) AS value, ('3e38'::real - 2::real)::double precision AS widened, pg_typeof(('3e38'::real - 2::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "3e+38",
+              "3.0000000054977558e+38",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ('3e38'::real * 2::real) AS value, ('3e38'::real * 2::real)::double precision AS widened, pg_typeof(('3e38'::real * 2::real))::text AS type",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "value out of range: overflow"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT ('3e38'::real / 2::real) AS value, ('3e38'::real / 2::real)::double precision AS widened, pg_typeof(('3e38'::real / 2::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "1.5e+38",
+              "1.5000000027488779e+38",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ('1e-45'::real + 2::real) AS value, ('1e-45'::real + 2::real)::double precision AS widened, pg_typeof(('1e-45'::real + 2::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "2",
+              "2",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ('1e-45'::real - 2::real) AS value, ('1e-45'::real - 2::real)::double precision AS widened, pg_typeof(('1e-45'::real - 2::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "-2",
+              "-2",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ('1e-45'::real * 2::real) AS value, ('1e-45'::real * 2::real)::double precision AS widened, pg_typeof(('1e-45'::real * 2::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "3e-45",
+              "2.802596928649634e-45",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ('1e-45'::real / 2::real) AS value, ('1e-45'::real / 2::real)::double precision AS widened, pg_typeof(('1e-45'::real / 2::real))::text AS type",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "value out of range: underflow"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT ('1e-30'::real + '1e-30'::real) AS value, ('1e-30'::real + '1e-30'::real)::double precision AS widened, pg_typeof(('1e-30'::real + '1e-30'::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "2e-30",
+              "2.0000000063421537e-30",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ('1e-30'::real - '1e-30'::real) AS value, ('1e-30'::real - '1e-30'::real)::double precision AS widened, pg_typeof(('1e-30'::real - '1e-30'::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "0",
+              "0",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ('1e-30'::real * '1e-30'::real) AS value, ('1e-30'::real * '1e-30'::real)::double precision AS widened, pg_typeof(('1e-30'::real * '1e-30'::real))::text AS type",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "value out of range: underflow"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT ('1e-30'::real / '1e-30'::real) AS value, ('1e-30'::real / '1e-30'::real)::double precision AS widened, pg_typeof(('1e-30'::real / '1e-30'::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "1",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ('Infinity'::real + 0::real) AS value, ('Infinity'::real + 0::real)::double precision AS widened, pg_typeof(('Infinity'::real + 0::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "Infinity",
+              "Infinity",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ('Infinity'::real - 0::real) AS value, ('Infinity'::real - 0::real)::double precision AS widened, pg_typeof(('Infinity'::real - 0::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "Infinity",
+              "Infinity",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ('Infinity'::real * 0::real) AS value, ('Infinity'::real * 0::real)::double precision AS widened, pg_typeof(('Infinity'::real * 0::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "NaN",
+              "NaN",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ('Infinity'::real / 0::real) AS value, ('Infinity'::real / 0::real)::double precision AS widened, pg_typeof(('Infinity'::real / 0::real))::text AS type",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT ('NaN'::real + 0::real) AS value, ('NaN'::real + 0::real)::double precision AS widened, pg_typeof(('NaN'::real + 0::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "NaN",
+              "NaN",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ('NaN'::real - 0::real) AS value, ('NaN'::real - 0::real)::double precision AS widened, pg_typeof(('NaN'::real - 0::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "NaN",
+              "NaN",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ('NaN'::real * 0::real) AS value, ('NaN'::real * 0::real)::double precision AS widened, pg_typeof(('NaN'::real * 0::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "NaN",
+              "NaN",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ('NaN'::real / 0::real) AS value, ('NaN'::real / 0::real)::double precision AS widened, pg_typeof(('NaN'::real / 0::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "NaN",
+              "NaN",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (0::real + 0::real) AS value, (0::real + 0::real)::double precision AS widened, pg_typeof((0::real + 0::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "0",
+              "0",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (0::real - 0::real) AS value, (0::real - 0::real)::double precision AS widened, pg_typeof((0::real - 0::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "0",
+              "0",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (0::real * 0::real) AS value, (0::real * 0::real)::double precision AS widened, pg_typeof((0::real * 0::real))::text AS type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "type"
+          ],
+          "type_oids": [
+            700,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "0",
+              "0",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (0::real / 0::real) AS value, (0::real / 0::real)::double precision AS widened, pg_typeof((0::real / 0::real))::text AS type",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT '1e308'::float8 * 2::float8 AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "value out of range: overflow"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT '1e-300'::float8 * '1e-300'::float8 AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "value out of range: underflow"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 'NaN'::float8 / 0::float8 AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            701
+          ],
+          "rows": [
+            [
+              "NaN"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 1::real / 'Infinity'::real AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            700
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE float_width_values (id integer, a real, b real)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO float_width_values VALUES (1,16777217,1), (2,0.1,0.2), (3,NULL,1)",
+      "command_tags": [
+        "INSERT 0 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id, a, a::float8 AS widened, (a+b)::float8 AS sum, pg_typeof(a+b)::text AS type FROM float_width_values ORDER BY id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "a",
+            "widened",
+            "sum",
+            "type"
+          ],
+          "type_oids": [
+            23,
+            700,
+            701,
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "1.6777216e+07",
+              "16777216",
+              "16777216",
+              "real"
+            ],
+            [
+              "2",
+              "0.1",
+              "0.10000000149011612",
+              "0.30000001192092896",
+              "real"
+            ],
+            [
+              "3",
+              null,
+              null,
+              null,
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id FROM float_width_values WHERE a+b=a ORDER BY id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "UPDATE float_width_values SET a=a+b WHERE id=1 RETURNING a, a::float8 AS widened",
+      "command_tags": [
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "widened"
+          ],
+          "type_oids": [
+            700,
+            701
+          ],
+          "rows": [
+            [
+              "1.6777216e+07",
+              "16777216"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE float_width_parameter (real) AS SELECT $1 AS value, $1::float8 AS widened, ($1+1::real)::float8 AS sum",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE float_width_parameter(16777217)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "sum"
+          ],
+          "type_oids": [
+            700,
+            701,
+            701
+          ],
+          "rows": [
+            [
+              "1.6777216e+07",
+              "16777216",
+              "16777216"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE float_width_parameter('0.1')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "sum"
+          ],
+          "type_oids": [
+            700,
+            701,
+            701
+          ],
+          "rows": [
+            [
+              "0.1",
+              "0.10000000149011612",
+              "1.100000023841858"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE float_width_parameter(NULL)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened",
+            "sum"
+          ],
+          "type_oids": [
+            700,
+            701,
+            701
+          ],
+          "rows": [
+            [
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE float_width_parameter('1e40')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "\"1e40\" is out of range for type real"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT ARRAY['0.1'::real,'16777217'::real] AS values, ARRAY['0.1'::real,'16777217'::real]::float8[] AS widened",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "values",
+            "widened"
+          ],
+          "type_oids": [
+            1021,
+            1022
+          ],
+          "rows": [
+            [
+              "{0.1,1.6777216e+07}",
+              "{0.10000000149011612,16777216}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '{0.1,16777217}'::real[] AS values, ('{0.1,16777217}'::real[])::float8[] AS widened",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "values",
+            "widened"
+          ],
+          "type_oids": [
+            1021,
+            1022
+          ],
+          "rows": [
+            [
+              "{0.1,1.6777216e+07}",
+              "{0.10000000149011612,16777216}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN float_width_domain AS real CHECK (VALUE < 16777217::float8)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 16777217::float_width_domain AS value, 16777217::float_width_domain::float8 AS widened",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "widened"
+          ],
+          "type_oids": [
+            700,
+            701
+          ],
+          "rows": [
+            [
+              "1.6777216e+07",
+              "16777216"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (CASE WHEN true THEN 16777217::real ELSE 0::real END + 1::real)::float8 AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            701
+          ],
+          "rows": [
+            [
+              "16777216"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (coalesce(NULL::real,16777217::real) + 1::real)::float8 AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            701
+          ],
+          "rows": [
+            [
+              "16777216"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (sum(a)+1::real)::float8 AS sum, pg_typeof(sum(a))::text AS type FROM float_width_values",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "sum",
+            "type"
+          ],
+          "type_oids": [
+            701,
+            25
+          ],
+          "rows": [
+            [
+              "16777216",
+              "real"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT sum(value)::float8 AS sum, avg(value) AS average FROM (VALUES (16777216::real), (1::real), (1::real), (-16777216::real)) AS t(value)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "sum",
+            "average"
+          ],
+          "type_oids": [
+            701,
+            701
+          ],
+          "rows": [
+            [
+              "0",
+              "0.5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE float_width_sums (id integer, value real)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO float_width_sums VALUES (1,16777216), (2,1), (3,1), (4,-16777216)",
+      "command_tags": [
+        "INSERT 0 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT sum(value)::float8 AS sum, sum(value ORDER BY id)::float8 AS forward, sum(value ORDER BY id DESC)::float8 AS backward FROM float_width_sums",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "sum",
+            "forward",
+            "backward"
+          ],
+          "type_oids": [
+            701,
+            701,
+            701
+          ],
+          "rows": [
+            [
+              "0",
+              "0",
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id, sum(value) OVER (ORDER BY id ROWS UNBOUNDED PRECEDING)::float8 AS prefix, sum(value) OVER ()::float8 AS total FROM float_width_sums ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "prefix",
+            "total"
+          ],
+          "type_oids": [
+            23,
+            701,
+            701
+          ],
+          "rows": [
+            [
+              "1",
+              "16777216",
+              "0"
+            ],
+            [
+              "2",
+              "16777216",
+              "0"
+            ],
+            [
+              "3",
+              "16777216",
+              "0"
+            ],
+            [
+              "4",
+              "0",
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id, sum(value) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)::float8 AS moving FROM float_width_sums ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "moving"
+          ],
+          "type_oids": [
+            23,
+            701
+          ],
+          "rows": [
+            [
+              "1",
+              "16777216"
+            ],
+            [
+              "2",
+              "16777216"
+            ],
+            [
+              "3",
+              "2"
+            ],
+            [
+              "4",
+              "-16777215"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT sum(value)::text AS sum FROM (VALUES ('-0'::real)) AS t(value)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "sum"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "-0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT sum(value)::float8 AS sum FROM (VALUES ('3e38'::real),('3e38'::real)) AS t(value)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "value out of range: overflow"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT sum(value)::float8 AS sum FROM (VALUES ('Infinity'::real),('-Infinity'::real)) AS t(value)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "sum"
+          ],
+          "type_oids": [
+            701
+          ],
+          "rows": [
+            [
+              "NaN"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT sum(value)::float8 AS sum FROM (VALUES ('NaN'::real),(1::real)) AS t(value)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "sum"
+          ],
+          "type_oids": [
+            701
+          ],
+          "rows": [
+            [
+              "NaN"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '0'::real, 0::real, 0::numeric, 0::float8, (1+1)::real, CAST(0 AS real)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "float4",
+            "float4",
+            "numeric",
+            "float8",
+            "float4",
+            "float4"
+          ],
+          "type_oids": [
+            700,
+            700,
+            1700,
+            701,
+            700,
+            700
+          ],
+          "rows": [
+            [
+              "0",
+              "0",
+              "0",
+              "0",
+              "2",
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 1::int, '1'::int, 0::smallint, NULL::real, (0::real)::float8",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "int4",
+            "int4",
+            "int2",
+            "float4",
+            "float8"
+          ],
+          "type_oids": [
+            23,
+            23,
+            21,
+            700,
+            701
+          ],
+          "rows": [
+            [
+              "1",
+              "1",
+              "0",
+              null,
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT a::real, (1+a)::real, coalesce(NULL,1)::real, CASE WHEN true THEN 1 END::real FROM (VALUES (1)) AS t(a)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "float4",
+            "coalesce",
+            "float4"
+          ],
+          "type_oids": [
+            700,
+            700,
+            700,
+            700
+          ],
+          "rows": [
+            [
+              "1",
+              "2",
+              "1",
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ('0.1'::real)::varchar AS varying, ('0.1'::real)::char(8) AS fixed",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "varying",
+            "fixed"
+          ],
+          "type_oids": [
+            1043,
+            1042
+          ],
+          "rows": [
+            [
+              "0.1",
+              "0.1     "
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (a+b)::float8 AS sum FROM float_width_values WHERE a+b=a ORDER BY id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "sum"
+          ],
+          "type_oids": [
+            701
+          ],
+          "rows": [
+            [
+              "16777216"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT a::text AS text FROM float_width_values WHERE id=2",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "0.1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '1e400'::float8 AS double_value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "\"1e400\" is out of range for type double precision"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT '1e-400'::float8 AS double_value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "\"1e-400\" is out of range for type double precision"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT '0e-9999'::float8 AS double_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "double_value"
+          ],
+          "type_oids": [
+            701
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '-0e9999'::float8 AS double_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "double_value"
+          ],
+          "type_oids": [
+            701
+          ],
+          "rows": [
+            [
+              "-0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '+NaN'::float8 AS double_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "double_value"
+          ],
+          "type_oids": [
+            701
+          ],
+          "rows": [
+            [
+              "NaN"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '-NaN'::float8 AS double_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "double_value"
+          ],
+          "type_oids": [
+            701
+          ],
+          "rows": [
+            [
+              "NaN"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ('x'||'y')::text, concat('x','y')::text, (CASE WHEN true THEN 1 ELSE coalesce(NULL,2) END)::real, (ARRAY[1,2])[1]::real, (1%2)::real",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text",
+            "concat",
+            "coalesce",
+            "array",
+            "float4"
+          ],
+          "type_oids": [
+            25,
+            25,
+            700,
+            700,
+            700
+          ],
+          "rows": [
+            [
+              "xy",
+              "xy",
+              "1",
+              "1",
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT (a::real)::float8, a::real, coalesce(a,1)::real FROM (VALUES (1)) AS t(a)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "a",
+            "coalesce"
+          ],
+          "type_oids": [
+            701,
+            700,
+            700
+          ],
+          "rows": [
+            [
+              "1",
+              "1",
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ('1e-5'::float8)::text AS text_value, ('1e-5'::float8)::varchar AS varying",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text_value",
+            "varying"
+          ],
+          "type_oids": [
+            25,
+            1043
+          ],
+          "rows": [
+            [
+              "1e-05",
+              "1e-05"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ('1e15'::float8)::text AS text_value, ('1e15'::float8)::varchar AS varying",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text_value",
+            "varying"
+          ],
+          "type_oids": [
+            25,
+            1043
+          ],
+          "rows": [
+            [
+              "1e+15",
+              "1e+15"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ('Infinity'::float8)::text AS text_value, ('Infinity'::float8)::varchar AS varying",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text_value",
+            "varying"
+          ],
+          "type_oids": [
+            25,
+            1043
+          ],
+          "rows": [
+            [
+              "Infinity",
+              "Infinity"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ('-Infinity'::float8)::text AS text_value, ('-Infinity'::float8)::varchar AS varying",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text_value",
+            "varying"
+          ],
+          "type_oids": [
+            25,
+            1043
+          ],
+          "rows": [
+            [
+              "-Infinity",
+              "-Infinity"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ('NaN'::float8)::text AS text_value, ('NaN'::float8)::varchar AS varying",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text_value",
+            "varying"
+          ],
+          "type_oids": [
+            25,
+            1043
+          ],
+          "rows": [
+            [
+              "NaN",
+              "NaN"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ('-0'::float8)::text AS text_value, ('-0'::float8)::varchar AS varying",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text_value",
+            "varying"
+          ],
+          "type_oids": [
+            25,
+            1043
+          ],
+          "rows": [
+            [
+              "-0",
+              "-0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CURRENT_DATE::text, CURRENT_TIME::text, CURRENT_TIMESTAMP::text, LOCALTIME::text, LOCALTIMESTAMP::text, CURRENT_ROLE::text, CURRENT_USER::text, USER::text, SESSION_USER::text, CURRENT_CATALOG::text, CURRENT_SCHEMA::text WHERE FALSE",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "current_date",
+            "current_time",
+            "current_timestamp",
+            "localtime",
+            "localtimestamp",
+            "current_role",
+            "current_user",
+            "user",
+            "session_user",
+            "current_catalog",
+            "current_schema"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": []
+        }
+      ]
+    }
+  ]
+}

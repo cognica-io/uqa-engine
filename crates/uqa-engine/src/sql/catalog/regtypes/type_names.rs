@@ -12,13 +12,32 @@ use uqa_sql::ast::ColumnType;
 
 use crate::Engine;
 
+use super::super::helpers::type_metadata::{pg_type_array_oid, pg_type_oid};
 use super::super::schema;
 
-static CATALOG_DOMAIN_TYPES: LazyLock<Vec<ColumnType>> = LazyLock::new(|| {
+static CATALOG_NAMED_TYPES: LazyLock<Vec<ColumnType>> = LazyLock::new(|| {
     let mut domains = schema::information_schema_domains();
     domains.extend(schema::ag_catalog_domains());
+    domains.extend([schema::age_graphid(), schema::age_agtype()]);
     domains
 });
+
+pub(crate) fn resolve_catalog_domain_type_by_oid(engine: &Engine, oid: u32) -> Option<ColumnType> {
+    let catalog = engine.catalog_read_view();
+    for domain in catalog
+        .domains()
+        .map(crate::engine_domains::StoredDomain::column_type)
+        .chain(CATALOG_NAMED_TYPES.iter().cloned())
+    {
+        if pg_type_oid(&domain) == i64::from(oid) {
+            return Some(domain);
+        }
+        if pg_type_array_oid(&domain) == i64::from(oid) {
+            return Some(ColumnType::Array(Box::new(domain)));
+        }
+    }
+    None
+}
 
 pub(crate) fn resolve_catalog_column_type(engine: &Engine, type_name: &str) -> Option<ColumnType> {
     if let Ok(ty) = ColumnType::from_sql_name(type_name) {
@@ -36,23 +55,25 @@ pub(crate) fn resolve_catalog_column_type(engine: &Engine, type_name: &str) -> O
             (Some(schema.trim_matches('"')), local_name)
         });
     let local_name = local_name.trim_matches('"');
-    let mut resolved = CATALOG_DOMAIN_TYPES
-        .iter()
-        .find(|domain| match domain {
-            ColumnType::Domain {
-                schema: domain_schema,
-                name: domain_name,
-                ..
-            } => {
-                domain_name == local_name
-                    && schema.map_or_else(
-                        || engine.search_path_contains(domain_schema),
-                        |schema| domain_schema == schema,
-                    )
-            }
-            _ => false,
-        })
-        .cloned();
+    let mut resolved = engine.resolve_domain_type(base_name).or_else(|| {
+        CATALOG_NAMED_TYPES
+            .iter()
+            .find(|domain| match domain {
+                ColumnType::Domain {
+                    schema: domain_schema,
+                    name: domain_name,
+                    ..
+                } => {
+                    domain_name == local_name
+                        && schema.map_or_else(
+                            || engine.search_path_contains(domain_schema),
+                            |schema| domain_schema == schema,
+                        )
+                }
+                _ => false,
+            })
+            .cloned()
+    });
     if let Some(ty) = resolved.as_mut() {
         for _ in 0..array_dimensions {
             *ty = ColumnType::Array(Box::new(ty.clone()));

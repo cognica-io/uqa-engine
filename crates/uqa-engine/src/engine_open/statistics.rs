@@ -21,11 +21,6 @@ impl Engine {
         for schema in &schemas {
             Self::validate_schema_name(&schema.name)?;
         }
-        if !schemas.iter().any(|schema| schema.name == "public") {
-            return Err(StorageBackendError::Other(
-                "catalog is missing required schema `public`".to_string(),
-            ));
-        }
         *self.durable.schemas.write() = schemas
             .into_iter()
             .map(crate::engine_state::SchemaSecurity::from_row)

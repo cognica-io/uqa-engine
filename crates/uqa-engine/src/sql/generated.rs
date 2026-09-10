@@ -252,7 +252,7 @@ fn validate_generation_expression(
         Expr::ScalarSubquery(_) | Expr::Exists { .. } | Expr::InSubquery { .. } => Err(
             SQLError::TypeMismatch("cannot use subquery in column generation expression".into()),
         ),
-        Expr::Literal(_) => Ok(()),
+        Expr::Literal(_) | Expr::TypedLiteral { .. } => Ok(()),
     }
 }
 
@@ -333,6 +333,7 @@ pub(crate) fn bind_schema_column_references(expression: &mut Expr, qualifier: &s
         | Expr::QualifiedColumn { .. }
         | Expr::InternalColumn(_)
         | Expr::Literal(_)
+        | Expr::TypedLiteral { .. }
         | Expr::Param(_)
         | Expr::WindowCall { .. }
         | Expr::ScalarSubquery(_)

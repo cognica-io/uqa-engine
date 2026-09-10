@@ -88,12 +88,9 @@ fn lateral_subqueries_preserve_outer_and_output_type_identity() {
                     pg_typeof(l.score) AS score_type
          ) AS s",
     );
-    assert_eq!(outer_types.rows[0]["v_type"], Value::Str("smallint".into()));
-    assert_eq!(
-        outer_types.rows[0]["label_type"],
-        Value::Str("character varying".into())
-    );
-    assert_eq!(outer_types.rows[0]["score_type"], Value::Str("real".into()));
+    assert_eq!(outer_types.rows[0]["v_type"], Value::Int(21));
+    assert_eq!(outer_types.rows[0]["label_type"], Value::Int(1043));
+    assert_eq!(outer_types.rows[0]["score_type"], Value::Int(700));
 
     let output_types = query(
         &engine,
@@ -125,7 +122,7 @@ fn empty_cte_lateral_source_keeps_its_declared_type() {
          FROM (VALUES (1)) AS seed(n)
          LEFT JOIN LATERAL (SELECT v FROM c) AS s ON true",
     );
-    assert_eq!(result.rows[0]["ty"], Value::Str("smallint".into()));
+    assert_eq!(result.rows[0]["ty"], Value::Int(21));
     assert_eq!(result.rows[0]["v"], Value::Null);
     assert_eq!(
         result.column_types,

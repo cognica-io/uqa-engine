@@ -6,10 +6,12 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::RangeSubtype;
+use super::{IntervalFields, RangeSubtype};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ColumnType {
+    /// A declaration awaiting catalog type resolution. This variant is never a stored column type.
+    Named(String),
     SmallInteger,
     Integer,
     BigInteger,
@@ -74,15 +76,28 @@ pub enum ColumnType {
     Date,
     /// `TIME` columns store microseconds since midnight.
     Time,
+    /// `TIME(p)` with an explicit fractional-second precision.
+    TimePrecision(u32),
     /// `TIME WITH TIME ZONE` columns store local time plus offset.
     TimeTz,
+    /// `TIME(p) WITH TIME ZONE` with an explicit fractional-second precision.
+    TimeTzPrecision(u32),
     /// `TIMESTAMP WITHOUT TIME ZONE` columns store naive microseconds
     /// since 1970-01-01 00:00:00.
     Timestamp,
+    /// `TIMESTAMP(p)` with an explicit fractional-second precision.
+    TimestampPrecision(u32),
     /// `TIMESTAMP WITH TIME ZONE` columns store UTC microseconds since
     /// 1970-01-01 00:00:00Z.
     TimestampTz,
+    /// `TIMESTAMP(p) WITH TIME ZONE` with an explicit fractional-second precision.
+    TimestampTzPrecision(u32),
     Interval,
+    /// An interval retaining its stored-field restriction and fractional-second precision.
+    IntervalWithFields {
+        fields: IntervalFields,
+        precision: Option<u32>,
+    },
     /// One of `PostgreSQL`'s six built-in range identities. Values use a
     /// canonical textual carrier so bounds remain durable across every
     /// storage backend while the declared subtype stays in row metadata.
@@ -159,6 +174,92 @@ pub(crate) fn builtin_array_element_name(type_name: &str) -> Option<&'static str
 }
 
 impl ColumnType {
+    /// Retain the SQL type identity without a declaration's length, scale, or temporal precision.
+    #[must_use]
+    pub fn without_type_modifiers(&self) -> Self {
+        match self {
+            Self::Varchar(_) => Self::Varchar(None),
+            Self::Character(_) => Self::Bpchar,
+            Self::Numeric { .. } => Self::Numeric {
+                precision: None,
+                scale: None,
+            },
+            Self::Array(element) => Self::Array(Box::new(element.without_type_modifiers())),
+            other => other.without_temporal_modifiers().clone(),
+        }
+    }
+
+    #[must_use]
+    pub const fn temporal_precision(&self) -> Option<u32> {
+        match self {
+            Self::IntervalWithFields { precision, .. } => *precision,
+            Self::TimePrecision(p)
+            | Self::TimeTzPrecision(p)
+            | Self::TimestampPrecision(p)
+            | Self::TimestampTzPrecision(p) => Some(*p),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn without_temporal_modifiers(&self) -> &Self {
+        match self {
+            Self::IntervalWithFields { .. } => &Self::Interval,
+            Self::TimePrecision(_) => &Self::Time,
+            Self::TimeTzPrecision(_) => &Self::TimeTz,
+            Self::TimestampPrecision(_) => &Self::Timestamp,
+            Self::TimestampTzPrecision(_) => &Self::TimestampTz,
+            other => other,
+        }
+    }
+
+    pub(crate) fn with_temporal_precision(
+        self,
+        precision: Option<i64>,
+    ) -> Result<Self, crate::SQLError> {
+        let Some(precision) = precision else {
+            return Ok(self);
+        };
+        if precision < 0 {
+            return Err(crate::SQLError::Routine {
+                sqlstate: "22023".into(),
+                message: format!(
+                    "{} precision must not be negative",
+                    self.regtype_name().to_uppercase()
+                ),
+            });
+        }
+        let precision = u32::try_from(precision.min(6)).expect("bounded temporal precision");
+        Ok(match self {
+            Self::Time => Self::TimePrecision(precision),
+            Self::TimeTz => Self::TimeTzPrecision(precision),
+            Self::Timestamp => Self::TimestampPrecision(precision),
+            Self::TimestampTz => Self::TimestampTzPrecision(precision),
+            other => other,
+        })
+    }
+
+    pub(crate) fn with_interval_modifiers(
+        fields: IntervalFields,
+        precision: Option<i64>,
+    ) -> Result<Self, crate::SQLError> {
+        let precision = precision
+            .map(|precision| {
+                if precision < 0 {
+                    return Err(crate::SQLError::Routine {
+                        sqlstate: "22023".into(),
+                        message: "INTERVAL precision must not be negative".into(),
+                    });
+                }
+                Ok(u32::try_from(precision.min(6)).expect("bounded interval precision"))
+            })
+            .transpose()?;
+        if fields == IntervalFields::All && precision.is_none() {
+            return Ok(Self::Interval);
+        }
+        Ok(Self::IntervalWithFields { fields, precision })
+    }
+
     #[must_use]
     pub fn is_integer(&self) -> bool {
         match self {
@@ -206,13 +307,19 @@ impl ColumnType {
             }
             return Ok(Self::Array(Box::new(element_type)));
         }
-        let (base, modifier) = normalized
-            .strip_suffix(')')
-            .and_then(|prefix| prefix.rsplit_once('('))
-            .map_or((normalized.as_str(), None), |(base, modifier)| {
-                (base.trim(), Some(modifier.trim()))
-            });
-        let base = base.strip_prefix("pg_catalog.").unwrap_or(base);
+        let (base, modifier) = split_type_modifier(&normalized);
+        let base = base.strip_prefix("pg_catalog.").unwrap_or(&base);
+        let temporal_precision = || {
+            modifier
+                .map(|value| {
+                    value.trim().parse::<i64>().map_err(|_| {
+                        crate::SQLError::TypeMismatch(format!(
+                            "invalid temporal precision: {value}"
+                        ))
+                    })
+                })
+                .transpose()
+        };
         let character_length = || -> Result<Option<u32>, crate::SQLError> {
             modifier
                 .map(|value| {
@@ -229,9 +336,9 @@ impl ColumnType {
                 .transpose()
         };
         match base {
-            "smallint" | "int2" | "smallserial" | "serial2" => Ok(Self::SmallInteger),
-            "integer" | "int" | "int4" | "serial" | "serial4" => Ok(Self::Integer),
-            "bigint" | "int8" | "bigserial" | "serial8" => Ok(Self::BigInteger),
+            "smallint" | "int2" => Ok(Self::SmallInteger),
+            "integer" | "int" | "int4" => Ok(Self::Integer),
+            "bigint" | "int8" => Ok(Self::BigInteger),
             "oid" => Ok(Self::Oid),
             "xid" => Ok(Self::Xid),
             "boolean" | "bool" => Ok(Self::Boolean),
@@ -295,11 +402,25 @@ impl ColumnType {
             "anyarray" => Ok(Self::AnyArray),
             "record" => Ok(Self::Record),
             "date" => Ok(Self::Date),
-            "time" | "time without time zone" => Ok(Self::Time),
-            "timetz" | "time with time zone" => Ok(Self::TimeTz),
-            "timestamp" | "datetime" | "timestamp without time zone" => Ok(Self::Timestamp),
-            "timestamptz" | "timestamp with time zone" => Ok(Self::TimestampTz),
-            "interval" => Ok(Self::Interval),
+            "time" | "time without time zone" => {
+                Self::Time.with_temporal_precision(temporal_precision()?)
+            }
+            "timetz" | "time with time zone" => {
+                Self::TimeTz.with_temporal_precision(temporal_precision()?)
+            }
+            "timestamp" | "datetime" | "timestamp without time zone" => {
+                Self::Timestamp.with_temporal_precision(temporal_precision()?)
+            }
+            "timestamptz" | "timestamp with time zone" => {
+                Self::TimestampTz.with_temporal_precision(temporal_precision()?)
+            }
+            "interval" => Self::with_interval_modifiers(IntervalFields::All, temporal_precision()?),
+            other if other.starts_with("interval ") => {
+                let fields = IntervalFields::from_sql_suffix(&other[9..]).ok_or_else(|| {
+                    crate::SQLError::TypeMismatch(format!("invalid interval fields: {other}"))
+                })?;
+                Self::with_interval_modifiers(fields, temporal_precision()?)
+            }
             "int4range" => Ok(Self::Range(RangeSubtype::Integer)),
             "int8range" => Ok(Self::Range(RangeSubtype::BigInteger)),
             "numrange" => Ok(Self::Range(RangeSubtype::Numeric)),
@@ -331,6 +452,7 @@ impl ColumnType {
     #[must_use]
     pub fn sql_name(&self) -> String {
         match self {
+            Self::Named(name) => name.clone(),
             Self::SmallInteger => "smallint".into(),
             Self::Integer => "integer".into(),
             Self::BigInteger => "bigint".into(),
@@ -372,15 +494,28 @@ impl ColumnType {
             Self::Array(element) => format!("{}[]", element.sql_name()),
             Self::Date => "date".into(),
             Self::Time => "time without time zone".into(),
+            Self::TimePrecision(p) => format!("time({p}) without time zone"),
             Self::TimeTz => "time with time zone".into(),
+            Self::TimeTzPrecision(p) => format!("time({p}) with time zone"),
             Self::Timestamp => "timestamp without time zone".into(),
+            Self::TimestampPrecision(p) => format!("timestamp({p}) without time zone"),
             Self::TimestampTz => "timestamp with time zone".into(),
+            Self::TimestampTzPrecision(p) => format!("timestamp({p}) with time zone"),
             Self::Interval => "interval".into(),
+            Self::IntervalWithFields { fields, precision } => {
+                let precision =
+                    precision.map_or_else(String::new, |precision| format!("({precision})"));
+                format!("interval{}{precision}", fields.sql_suffix())
+            }
             Self::Range(subtype) => subtype.range_name().into(),
             Self::Multirange(subtype) => subtype.multirange_name().into(),
             Self::Vector(dimension) => format!("vector({dimension})"),
             Self::Tensor(dimension) => format!("tensor({dimension})"),
-            Self::Domain { schema, name, .. } => format!("{schema}.{name}"),
+            Self::Domain { schema, name, .. } => format!(
+                "{}.{}",
+                crate::compiler::render_relation_component(schema),
+                crate::compiler::render_relation_component(name)
+            ),
         }
     }
 
@@ -388,15 +523,39 @@ impl ColumnType {
     /// `pg_typeof(...)`.
     #[must_use]
     pub fn regtype_name(&self) -> String {
+        if matches!(self, Self::IntervalWithFields { .. }) {
+            return "interval".into();
+        }
+        if self.temporal_precision().is_some() {
+            return self.without_temporal_modifiers().regtype_name();
+        }
         match self {
             Self::Varchar(_) => "character varying".into(),
             Self::Bpchar | Self::Character(_) => "character".into(),
             Self::Numeric { .. } => "numeric".into(),
             Self::Vector(_) => "vector".into(),
             Self::Tensor(_) => "tensor".into(),
-            Self::Domain { schema, name, .. } => format!("{schema}.{name}"),
+            Self::Domain { .. } => self.sql_name(),
             Self::Array(element) => format!("{}[]", element.regtype_name()),
             other => other.sql_name(),
         }
+    }
+}
+
+/// Split a SQL type modifier while retaining qualifiers after its parentheses.
+pub(crate) fn split_type_modifier(ty: &str) -> (std::borrow::Cow<'_, str>, Option<&str>) {
+    use std::borrow::Cow;
+    match (ty.find('('), ty.rfind(')')) {
+        (Some(open), Some(close)) if close > open => {
+            let prefix = ty[..open].trim_end();
+            let suffix = ty[close + 1..].trim();
+            let base = if suffix.is_empty() {
+                Cow::Borrowed(prefix)
+            } else {
+                Cow::Owned(format!("{prefix} {suffix}"))
+            };
+            (base, Some(ty[open + 1..close].trim()))
+        }
+        _ => (Cow::Borrowed(ty), None),
     }
 }

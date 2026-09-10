@@ -16,7 +16,10 @@ pub(super) fn rewrite_query_scalars(
     rewrite: &mut dyn FnMut(&mut ScalarExpr),
 ) {
     for cte in &mut query.ctes {
-        rewrite_query_scalars(&mut cte.query, rewrite);
+        match &mut cte.body {
+            super::CtePlanBody::Query(query) => rewrite_query_scalars(query, rewrite),
+            super::CtePlanBody::Command(command) => rewrite_command_scalars(command, rewrite),
+        }
     }
     match &mut query.root {
         RelationalPlan::QueryBlock(block) => {
@@ -128,7 +131,12 @@ pub(super) fn rewrite_command_scalars(
     match command {
         CommandPlan::Insert(plan) => {
             for cte in &mut plan.ctes {
-                rewrite_query_scalars(&mut cte.query, rewrite);
+                match &mut cte.body {
+                    super::CtePlanBody::Query(query) => rewrite_query_scalars(query, rewrite),
+                    super::CtePlanBody::Command(command) => {
+                        rewrite_command_scalars(command, rewrite);
+                    }
+                }
             }
             for row in &mut plan.rows {
                 for expression in row {
@@ -164,7 +172,12 @@ pub(super) fn rewrite_command_scalars(
         }
         CommandPlan::Update(plan) => {
             for cte in &mut plan.ctes {
-                rewrite_query_scalars(&mut cte.query, rewrite);
+                match &mut cte.body {
+                    super::CtePlanBody::Query(query) => rewrite_query_scalars(query, rewrite),
+                    super::CtePlanBody::Command(command) => {
+                        rewrite_command_scalars(command, rewrite);
+                    }
+                }
             }
             if let Some(source) = &mut plan.source {
                 rewrite_source_scalars(source, rewrite);
@@ -179,7 +192,12 @@ pub(super) fn rewrite_command_scalars(
         }
         CommandPlan::Delete(plan) => {
             for cte in &mut plan.ctes {
-                rewrite_query_scalars(&mut cte.query, rewrite);
+                match &mut cte.body {
+                    super::CtePlanBody::Query(query) => rewrite_query_scalars(query, rewrite),
+                    super::CtePlanBody::Command(command) => {
+                        rewrite_command_scalars(command, rewrite);
+                    }
+                }
             }
             if let Some(source) = &mut plan.source {
                 rewrite_source_scalars(source, rewrite);
@@ -189,6 +207,14 @@ pub(super) fn rewrite_command_scalars(
             rewrite_subqueries(&mut plan.subqueries, rewrite);
         }
         CommandPlan::Merge(plan) => {
+            for cte in &mut plan.ctes {
+                match &mut cte.body {
+                    super::CtePlanBody::Query(query) => rewrite_query_scalars(query, rewrite),
+                    super::CtePlanBody::Command(command) => {
+                        rewrite_command_scalars(command, rewrite);
+                    }
+                }
+            }
             rewrite_source_scalars(&mut plan.source, rewrite);
             rewrite_optional_scalar(&mut plan.target_predicate, rewrite);
             rewrite_scalar(&mut plan.join_condition, rewrite);
@@ -252,6 +278,7 @@ pub(super) fn rewrite_command_scalars(
         | CommandPlan::AlterView(_)
         | CommandPlan::RefreshMaterializedView { .. }
         | CommandPlan::CreateSchema { .. }
+        | CommandPlan::AlterSchemaOwner { .. }
         | CommandPlan::Notify { .. }
         | CommandPlan::Listen { .. }
         | CommandPlan::Unlisten { .. }
@@ -269,6 +296,7 @@ pub(super) fn rewrite_command_scalars(
         | CommandPlan::FetchCursor(_)
         | CommandPlan::CloseCursor { .. }
         | CommandPlan::CreateSequence(_)
+        | CommandPlan::CreateDomain(_)
         | CommandPlan::AlterSequence(_)
         | CommandPlan::Deallocate { .. }
         | CommandPlan::CreateForeignServer(_)
@@ -426,6 +454,7 @@ pub(super) fn rewrite_scalar(
         | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
+        | ScalarExpr::TypedLiteral { .. }
         | ScalarExpr::Param(_)
         | ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. } => {}

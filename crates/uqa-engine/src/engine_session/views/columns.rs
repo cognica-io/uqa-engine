@@ -12,6 +12,28 @@ use super::{
 };
 
 impl Engine {
+    pub(crate) fn views_depending_on_column(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> StorageBackendResult<Vec<String>> {
+        let candidates = self.views_depending_on_relation(table)?;
+        let views = self.durable.views.read().clone();
+        let mut dependent = Vec::new();
+        for name in candidates {
+            let identity =
+                RelationIdentity::from_legacy_name(&name).map_err(StorageBackendError::Other)?;
+            if let Some(view) = views.get(&identity) {
+                if crate::sql::view_query_references_column(self, &view.query, table, column)
+                    .map_err(|error| StorageBackendError::Other(error.to_string()))?
+                {
+                    dependent.push(name);
+                }
+            }
+        }
+        Ok(dependent)
+    }
+
     pub(crate) fn rewrite_view_column_references(
         &self,
         table: &str,

@@ -30,7 +30,10 @@ fn reorder_query_joins(
     statistics: &dyn SourceStatistics,
 ) -> JoinGraphResult<()> {
     for cte in &mut query.ctes {
-        reorder_query_joins(&mut cte.query, statistics)?;
+        match &mut cte.body {
+            crate::CtePlanBody::Query(query) => reorder_query_joins(query, statistics)?,
+            crate::CtePlanBody::Command(command) => reorder_command_joins(command, statistics)?,
+        }
     }
     match &mut query.root {
         RelationalPlan::QueryBlock(block) => {
@@ -63,6 +66,20 @@ fn reorder_query_joins(
     Ok(())
 }
 
+fn reorder_cte_joins(
+    cte: &mut crate::CtePlan,
+    statistics: &dyn SourceStatistics,
+) -> JoinGraphResult<()> {
+    match &mut cte.body {
+        crate::CtePlanBody::Query(query) => reorder_query_joins(query, statistics),
+        crate::CtePlanBody::Command(command) => reorder_command_joins(command, statistics),
+    }
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "traverses each command kind and its owned children"
+)]
 fn reorder_command_joins(
     command: &mut CommandPlan,
     statistics: &dyn SourceStatistics,
@@ -71,7 +88,7 @@ fn reorder_command_joins(
         CommandPlan::Insert(plan) => reorder_insert_joins(plan, statistics)?,
         CommandPlan::Update(plan) => {
             for cte in &mut plan.ctes {
-                reorder_query_joins(&mut cte.query, statistics)?;
+                reorder_cte_joins(cte, statistics)?;
             }
             if let Some(source) = &mut plan.source {
                 reorder_source_joins(source, &[], statistics)?;
@@ -82,7 +99,7 @@ fn reorder_command_joins(
         }
         CommandPlan::Delete(plan) => {
             for cte in &mut plan.ctes {
-                reorder_query_joins(&mut cte.query, statistics)?;
+                reorder_cte_joins(cte, statistics)?;
             }
             if let Some(source) = &mut plan.source {
                 reorder_source_joins(source, &[], statistics)?;
@@ -92,24 +109,29 @@ fn reorder_command_joins(
             }
         }
         CommandPlan::Merge(plan) => {
+            for cte in &mut plan.ctes {
+                reorder_cte_joins(cte, statistics)?;
+            }
             reorder_source_joins(&mut plan.source, &[], statistics)?;
             for subquery in &mut plan.subqueries {
                 reorder_query_joins(subquery, statistics)?;
             }
         }
-        CommandPlan::CreateView { query, .. }
-        | CommandPlan::CreateMaterializedView { query, .. }
-        | CommandPlan::CreateTableAs { query, .. }
-        | CommandPlan::DeclareCursor { query, .. } => {
+        CommandPlan::DeclareCursor { query, .. } => {
             reorder_query_joins(query, statistics)?;
         }
-        CommandPlan::Explain { body, .. } | CommandPlan::Prepare { body, .. } => {
+        CommandPlan::Explain { body, .. } => {
             reorder_unified_plan_joins(body, statistics)?;
         }
-        CommandPlan::Execute { params, .. } | CommandPlan::Call { args: params, .. } => {
+        CommandPlan::Call { args: params, .. } => {
             reorder_expression_subquery_joins(params, statistics)?;
         }
-        CommandPlan::CreateTable(_)
+        CommandPlan::CreateTableAs { .. }
+        | CommandPlan::CreateMaterializedView { .. }
+        | CommandPlan::CreateView { .. }
+        | CommandPlan::Execute { .. }
+        | CommandPlan::Prepare { .. }
+        | CommandPlan::CreateTable(_)
         | CommandPlan::CreateTableIfNotExists(_)
         | CommandPlan::CreateIndex(_)
         | CommandPlan::Drop(_)
@@ -118,6 +140,7 @@ fn reorder_command_joins(
         | CommandPlan::AlterForeignTable(_)
         | CommandPlan::AlterView(_)
         | CommandPlan::CreateSchema { .. }
+        | CommandPlan::AlterSchemaOwner { .. }
         | CommandPlan::Notify { .. }
         | CommandPlan::Listen { .. }
         | CommandPlan::Unlisten { .. }
@@ -135,6 +158,7 @@ fn reorder_command_joins(
         | CommandPlan::FetchCursor(_)
         | CommandPlan::CloseCursor { .. }
         | CommandPlan::CreateSequence(_)
+        | CommandPlan::CreateDomain(_)
         | CommandPlan::AlterSequence(_)
         | CommandPlan::Deallocate { .. }
         | CommandPlan::CreateForeignServer(_)
@@ -168,7 +192,10 @@ fn reorder_insert_joins(
     statistics: &dyn SourceStatistics,
 ) -> JoinGraphResult<()> {
     for cte in &mut plan.ctes {
-        reorder_query_joins(&mut cte.query, statistics)?;
+        match &mut cte.body {
+            crate::CtePlanBody::Query(query) => reorder_query_joins(query, statistics)?,
+            crate::CtePlanBody::Command(command) => reorder_command_joins(command, statistics)?,
+        }
     }
     if let Some(source) = &mut plan.source {
         reorder_query_joins(source, statistics)?;
@@ -515,7 +542,7 @@ fn collect_resolved_aliases(
             output.insert(qualifier.clone());
             true
         }
-        ScalarExpr::Literal(_) | ScalarExpr::Param(_) => true,
+        ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. } | ScalarExpr::Param(_) => true,
         ScalarExpr::Func {
             args,
             order_by,
@@ -868,6 +895,7 @@ fn collect_scalar_qualifiers(expression: &ScalarExpr, output: &mut BTreeSet<Stri
         | ScalarExpr::Position(_)
         | ScalarExpr::InternalColumn(_)
         | ScalarExpr::Literal(_)
+        | ScalarExpr::TypedLiteral { .. }
         | ScalarExpr::Param(_)
         | ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. } => {}

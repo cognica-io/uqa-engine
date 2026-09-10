@@ -51,6 +51,7 @@ impl Engine {
         {
             return Ok(());
         }
+        self.release_backend_reader_before_lock_wait(&mut stack)?;
         let snapshot_gate = self
             .row_locks
             .begin_change_snapshot(&self.runtime.cancellation)?;
@@ -83,7 +84,7 @@ impl Engine {
                 let snapshot = self.capture_detached_fixed_transaction_snapshot()?;
                 let graph_snapshot =
                     self.detach_graph_storage_snapshot(&self.visible_graph_handles())?;
-                self.restart_backend_after_detached_snapshot(&mut stack)?;
+                self.restart_unwritten_backend_reader(&mut stack)?;
                 (FixedTransactionSnapshot::Detached(snapshot), graph_snapshot)
             };
             self.install_fixed_graph_snapshot(&graph_snapshot)?;
@@ -126,16 +127,25 @@ impl Engine {
         Ok(())
     }
 
-    /// A detached fixed snapshot no longer needs the backend read transaction that produced it. Restart a bare deferred transaction without pinning or reloading caches so rollback-journal backends release their read lock while the logical transaction stays open.
-    fn restart_backend_after_detached_snapshot(
+    /// Restart an unwritten backend transaction without pinning or reloading caches. The logical transaction and its detached snapshot stay open while rollback-journal storage releases its reader lock.
+    fn restart_unwritten_backend_reader(
         &self,
         stack: &mut Vec<TransactionFrame>,
     ) -> Result<(), SQLError> {
         let backend = self.storage.backend.as_ref().ok_or_else(|| {
-            SQLError::Internal("detached fixed snapshot requires persistent storage".into())
+            SQLError::Internal("restarting a backend reader requires persistent storage".into())
         })?;
+        if stack.is_empty()
+            || backend
+                .transaction_has_written()
+                .map_err(|error| Self::storage_tx_error("inspect backend reader", &error))?
+        {
+            return Err(SQLError::Internal(
+                "restarting a backend reader requires an open transaction without writes".into(),
+            ));
+        }
         if let Err(error) = backend.rollback_transaction() {
-            let failure = Self::storage_tx_error("release detached fixed snapshot reader", &error);
+            let failure = Self::storage_tx_error("release backend reader", &error);
             return Err(self.abort_failed_backend_transaction_replacement(
                 stack,
                 backend.as_ref(),
@@ -143,8 +153,7 @@ impl Engine {
             ));
         }
         if let Err(error) = backend.begin_read_transaction() {
-            let failure =
-                Self::storage_tx_error("restart detached fixed snapshot transaction", &error);
+            let failure = Self::storage_tx_error("restart backend reader transaction", &error);
             return Err(self.abort_failed_backend_transaction_replacement(
                 stack,
                 backend.as_ref(),
@@ -155,24 +164,30 @@ impl Engine {
         Ok(())
     }
 
+    fn release_backend_reader_before_lock_wait(
+        &self,
+        stack: &mut Vec<TransactionFrame>,
+    ) -> Result<(), SQLError> {
+        if self
+            .storage
+            .backend
+            .as_ref()
+            .is_some_and(|backend| !backend.supports_concurrent_pinned_read_and_write())
+        {
+            // A committing writer can own the logical lock while waiting for
+            // SQLite readers. Never retain our reader while waiting for it.
+            self.restart_unwritten_backend_reader(stack)?;
+        }
+        Ok(())
+    }
+
     /// Release an unwritten backend reader before an autonomous maintenance write. The replacement is a bare deferred transaction, so the SQL transaction remains open without retaining a rollback-journal read lock.
     pub(crate) fn release_backend_reader_for_independent_maintenance(
         &self,
     ) -> Result<(), SQLError> {
         let _statement = self.runtime.statement_gate.lock();
         let mut stack = self.session.transactions.lock();
-        let backend = self.storage.backend.as_ref().ok_or_else(|| {
-            SQLError::Internal("independent maintenance requires persistent storage".into())
-        })?;
-        if backend
-            .transaction_has_written()
-            .map_err(|error| Self::storage_tx_error("inspect maintenance reader", &error))?
-        {
-            return Err(SQLError::Internal(
-                "cannot release a backend transaction that already contains writes".into(),
-            ));
-        }
-        self.restart_backend_after_detached_snapshot(&mut stack)
+        self.restart_unwritten_backend_reader(&mut stack)
     }
 
     pub(crate) fn open_independent_pinned_read_snapshot(&self) -> Result<Box<Engine>, SQLError> {
@@ -250,6 +265,7 @@ impl Engine {
         }
         let (keep_mark, fence_mark) = {
             let mut stack = self.session.transactions.lock();
+            self.release_backend_reader_before_lock_wait(&mut stack)?;
             let frame = stack.last_mut().ok_or_else(|| {
                 SQLError::Internal("catalog writer fence requires an open transaction".into())
             })?;
@@ -290,6 +306,7 @@ impl Engine {
         }
         // The physical writer lives until the outer transaction ends, so its logical registration must survive ROLLBACK TO SAVEPOINT and an error rollback that releases the current savepoint's lock mark.
         let mark = stack.first().map_or(0, |frame| frame.begin_lock_mark);
+        self.release_backend_reader_before_lock_wait(stack)?;
         self.acquire_backend_writer_lock(mark)?;
         if self.storage.backend.is_none() {
             if let Some(frame) = stack.first_mut() {

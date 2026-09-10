@@ -8,9 +8,9 @@
 
 use super::super::{
     build_join_spill_with_ctes, dml_join_rows, eval_mutation_expr, merge_source_index_value,
-    validate_returning_alias_relations, BTreeSet, CteScope, Engine, MergePairKind, MergePlan,
-    MergeWhenPlan, OwnedPhysicalRow, PhysicalRow, RowSchema, SQLError, SQLParam, SQLResult,
-    ScalarExpr, Value, ViewCheckPlan,
+    validate_returning_alias_relations, CteScope, Engine, MergePairKind, MergePlan, MergeWhenPlan,
+    OwnedPhysicalRow, PhysicalRow, RowSchema, SQLError, SQLParam, SQLResult, ScalarExpr, Value,
+    ViewCheckPlan,
 };
 use super::{
     coerce_view_value, materialize_view_rows, resolve_view_target, target_columns, target_row,
@@ -20,124 +20,6 @@ use super::{
 mod codec;
 
 use codec::{decode_view_merge_pair, push_view_merge_pair, view_merge_pair_schema, ViewMergePair};
-
-struct ViewMergeEvents {
-    insert: bool,
-    update: bool,
-    delete: bool,
-    updated_columns: Vec<String>,
-}
-
-impl ViewMergeEvents {
-    fn from_plan(plan: &MergePlan) -> Self {
-        let insert = plan
-            .when_clauses
-            .iter()
-            .any(|clause| matches!(clause, MergeWhenPlan::InsertNotMatched { .. }));
-        let update = plan.when_clauses.iter().any(|clause| {
-            matches!(
-                clause,
-                MergeWhenPlan::UpdateMatched { .. }
-                    | MergeWhenPlan::UpdateNotMatchedBySource { .. }
-            )
-        });
-        let delete = plan.when_clauses.iter().any(|clause| {
-            matches!(
-                clause,
-                MergeWhenPlan::DeleteMatched { .. }
-                    | MergeWhenPlan::DeleteNotMatchedBySource { .. }
-            )
-        });
-        let updated_columns = plan
-            .when_clauses
-            .iter()
-            .filter_map(|clause| match clause {
-                MergeWhenPlan::UpdateMatched { assignments, .. }
-                | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => Some(assignments),
-                _ => None,
-            })
-            .flatten()
-            .map(|assignment| assignment.column.clone())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect();
-        Self {
-            insert,
-            update,
-            delete,
-            updated_columns,
-        }
-    }
-
-    fn has_before_statement_trigger(&self, engine: &Engine, view: &str) -> Result<bool, SQLError> {
-        for (enabled, event, columns) in self.before_order() {
-            if enabled
-                && !engine
-                    .triggers_for(
-                        view,
-                        uqa_sql::ast::TriggerTiming::Before,
-                        event,
-                        false,
-                        columns,
-                    )?
-                    .is_empty()
-            {
-                return Ok(true);
-            }
-        }
-        Ok(false)
-    }
-
-    fn fire_before(&self, engine: &Engine, view: &str) -> Result<(), SQLError> {
-        for (enabled, event, columns) in self.before_order() {
-            if enabled {
-                crate::sql::triggers::fire_statement_triggers(
-                    engine,
-                    view,
-                    uqa_sql::ast::TriggerTiming::Before,
-                    event,
-                    columns,
-                )?;
-            }
-        }
-        Ok(())
-    }
-
-    fn fire_after(&self, engine: &Engine, view: &str) -> Result<(), SQLError> {
-        for (enabled, event, columns) in [
-            (self.delete, uqa_sql::ast::TriggerEvent::Delete, &[][..]),
-            (
-                self.update,
-                uqa_sql::ast::TriggerEvent::Update,
-                self.updated_columns.as_slice(),
-            ),
-            (self.insert, uqa_sql::ast::TriggerEvent::Insert, &[][..]),
-        ] {
-            if enabled {
-                crate::sql::triggers::fire_statement_triggers(
-                    engine,
-                    view,
-                    uqa_sql::ast::TriggerTiming::After,
-                    event,
-                    columns,
-                )?;
-            }
-        }
-        Ok(())
-    }
-
-    fn before_order(&self) -> [(bool, uqa_sql::ast::TriggerEvent, &[String]); 3] {
-        [
-            (self.insert, uqa_sql::ast::TriggerEvent::Insert, &[][..]),
-            (
-                self.update,
-                uqa_sql::ast::TriggerEvent::Update,
-                self.updated_columns.as_slice(),
-            ),
-            (self.delete, uqa_sql::ast::TriggerEvent::Delete, &[][..]),
-        ]
-    }
-}
 
 fn validate_view_merge_targets(target: &ViewDmlTarget, plan: &MergePlan) -> Result<(), SQLError> {
     for clause in &plan.when_clauses {
@@ -687,15 +569,22 @@ fn execute_view_merge_pairs(
     Ok((affected, returning))
 }
 
-pub(in crate::sql) fn run_view_merge_inner(
+fn validate_view_merge_scope(
     engine: &Engine,
+    target: &ViewDmlTarget,
     plan: &MergePlan,
     params: &[SQLParam],
-) -> Result<SQLResult, SQLError> {
-    let target = resolve_view_target(engine, &plan.target)?;
-    validate_view_merge_targets(&target, plan)?;
+    inherited_ctes: Option<&CteScope>,
+) -> Result<(), SQLError> {
+    validate_view_merge_targets(target, plan)?;
     let mut analysis_scope =
         CteScope::new_for_statement(engine, plan.statement_privilege_subject.as_deref());
+    if let Some(parent) = inherited_ctes {
+        analysis_scope.inherit_cte_bindings(parent);
+    }
+    for cte in &plan.ctes {
+        analysis_scope.insert_deferred(cte.clone());
+    }
     analysis_scope
         .scalar_subqueries
         .clone_from(&plan.subqueries);
@@ -714,7 +603,7 @@ pub(in crate::sql) fn run_view_merge_inner(
         Some(&source_schema),
     )?;
     let null_target = target_row(
-        &target,
+        target,
         &plan.target_qualifier,
         &vec![Value::Null; target.columns.len()],
     )?;
@@ -724,16 +613,45 @@ pub(in crate::sql) fn run_view_merge_inner(
         &null_target.schema,
         &source_schema,
         params,
+        &analysis_scope,
     )?;
-    let events = ViewMergeEvents::from_plan(plan);
-    let statement_snapshot = events
-        .has_before_statement_trigger(engine, &target.canonical_name)?
-        .then(|| engine.capture_statement_snapshot_engine())
-        .transpose()?;
+    Ok(())
+}
+
+pub(in crate::sql) fn run_view_merge_inner(
+    engine: &Engine,
+    plan: &MergePlan,
+    params: &[SQLParam],
+    inherited_ctes: Option<&CteScope>,
+) -> Result<SQLResult, SQLError> {
+    let target = resolve_view_target(engine, &plan.target)?;
+    validate_view_merge_scope(engine, &target, plan, params, inherited_ctes)?;
+    let events = super::super::merge::statement_events::MergeStatementEvents::from_plan(plan);
+    let has_before_statement_trigger =
+        events.has_before_statement_trigger(engine, &target.canonical_name)?;
+    let statement_snapshot = match inherited_ctes.and_then(CteScope::command_cte_snapshot) {
+        Some(snapshot) => Some(snapshot),
+        None if has_before_statement_trigger
+            || plan.ctes.iter().any(|cte| cte.body.modifies_data()) =>
+        {
+            Some(std::sync::Arc::new(
+                engine.capture_statement_read_snapshot()?,
+            ))
+        }
+        None => None,
+    };
     events.fire_before(engine, &target.canonical_name)?;
-    let read_engine = statement_snapshot.as_ref().unwrap_or(engine);
+    let snapshot_engine = statement_snapshot
+        .as_deref()
+        .map(|snapshot| engine.statement_read_snapshot_engine(snapshot));
+    let read_engine = snapshot_engine.as_ref().unwrap_or(engine);
     let mut ctes =
         CteScope::new_for_statement(read_engine, plan.statement_privilege_subject.as_deref());
+    if let Some(parent) = inherited_ctes {
+        ctes.inherit_cte_bindings(parent);
+    }
+    ctes.set_command_cte_snapshot(statement_snapshot.clone());
+    crate::sql::select::materialize_plan_ctes(engine, &plan.ctes, params, &mut ctes)?;
     ctes.scalar_subqueries.clone_from(&plan.subqueries);
     let source_privilege_expressions = super::super::merge::merge_privilege_expressions(plan);
     crate::sql::select::ensure_select_privileges_for_source_expressions(

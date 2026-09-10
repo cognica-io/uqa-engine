@@ -137,6 +137,8 @@ impl Engine {
         to: &RelationIdentity,
     ) -> StorageBackendResult<()> {
         self.rewrite_view_relation_references(&BTreeMap::from([(from.clone(), to.clone())]))?;
+        self.rewrite_routine_relation_references(from, to)
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         self.rename_relation_events_inner(from, to)
     }
 

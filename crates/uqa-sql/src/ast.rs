@@ -13,11 +13,13 @@ use serde::{Deserialize, Serialize};
 
 mod constraints;
 mod cte;
+mod domains;
 mod events;
 mod expressions;
 mod from;
 mod function_binding;
 mod indexes;
+mod interval;
 mod locking;
 mod ranges;
 mod relation_hierarchy;
@@ -29,11 +31,13 @@ mod types;
 
 pub use constraints::*;
 pub use cte::*;
+pub use domains::*;
 pub use events::*;
 pub use expressions::*;
 pub use from::*;
 pub use function_binding::*;
 pub use indexes::*;
+pub use interval::*;
 pub use locking::*;
 pub use ranges::*;
 pub use relation_hierarchy::*;
@@ -113,6 +117,7 @@ pub enum DropKind {
     MaterializedView,
     Schema,
     Sequence,
+    Domain,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -251,7 +256,7 @@ pub enum AlterTableAction {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InsertStmt {
     pub table: String,
     /// Whether `table` is a stored catalog identity rather than a name to resolve in the executing session.
@@ -419,7 +424,7 @@ pub enum DiscardTarget {
     Temp,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UpdateStmt {
     pub table: String,
     /// Whether `table` is a stored catalog identity rather than a name to resolve in the executing session.
@@ -440,7 +445,7 @@ pub struct UpdateStmt {
     pub returning_aliases: ReturningAliases,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DeleteStmt {
     pub table: String,
     /// Whether `table` is a stored catalog identity rather than a name to resolve in the executing session.
@@ -503,6 +508,7 @@ pub struct VacuumStmt {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Statement {
+    CreateDomain(CreateDomain),
     CreateTable(CreateTable),
     CreateTableIfNotExists(DeferredCreateTable),
     CreateIndex(CreateIndex),
@@ -556,6 +562,10 @@ pub enum Statement {
         name: String,
         if_not_exists: bool,
     },
+    AlterSchemaOwner {
+        name: String,
+        new_owner: String,
+    },
     /// `NOTIFY channel [, 'payload']` queues one asynchronous notification for delivery when the outer transaction commits.
     Notify {
         channel: String,
@@ -575,6 +585,10 @@ pub enum Statement {
     SetVariable {
         name: String,
         value: String,
+        #[serde(default)]
+        local: bool,
+        #[serde(default)]
+        is_default: bool,
     },
     /// `RESET <name>` restores one runtime parameter to its session default.
     ResetVariable {
@@ -659,6 +673,8 @@ pub enum Statement {
     /// `PREPARE name AS <inner>`.
     Prepare {
         name: String,
+        #[serde(default)]
+        parameter_types: Vec<ColumnType>,
         body: Box<Statement>,
     },
     /// `EXECUTE name (param1, param2, ...)`.
@@ -730,11 +746,24 @@ pub struct TruncateTarget {
     pub include_descendants: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MergeTargetColumnBinding {
+    pub object_id: [u8; 16],
+    /// Domain identities used by non-DEFAULT assignment coercions, including after target deletion.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub domain_dependencies: std::collections::BTreeSet<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MergeStmt {
+    #[serde(default)]
+    pub with: Vec<CTE>,
     pub target: String,
     pub target_qualifier: String,
     pub target_alias: Option<String>,
+    /// Creation-bound write targets in a stored body. Removed identities retain their expressions and dependencies but receive no writes.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub target_column_bindings: std::collections::BTreeMap<String, MergeTargetColumnBinding>,
     #[serde(default = "default_include_descendants")]
     pub include_descendants: bool,
     pub source: FromClause,
@@ -745,7 +774,7 @@ pub struct MergeStmt {
     pub returning_aliases: ReturningAliases,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MergeWhen {
     /// `WHEN MATCHED [AND <cond>] THEN UPDATE SET ...`.
     UpdateMatched {

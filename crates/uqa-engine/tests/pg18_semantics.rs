@@ -31,7 +31,23 @@ fn scalar_err(engine: &Engine, sql: &str) -> String {
 }
 
 fn text(engine: &Engine, sql: &str) -> String {
-    match scalar(engine, sql) {
+    let result = engine
+        .sql(sql, &[])
+        .unwrap_or_else(|error| panic!("{sql}: {error}"));
+    if result.column_types.first() == Some(&Some(uqa_sql::ColumnType::Regtype)) {
+        let value = &result.rows[0][&result.columns[0]];
+        return uqa_engine::sql::format_postgres_text(
+            value,
+            &uqa_sql::ColumnType::Regtype,
+            Some(engine),
+        )
+        .unwrap();
+    }
+    match result.rows[0]
+        .get(&result.columns[0])
+        .cloned()
+        .unwrap_or(Value::Null)
+    {
         Value::Str(s) => s,
         Value::Temporal(t) => t.to_sql_string(),
         Value::Decimal(d) => d.to_sql_string(),
@@ -61,6 +77,8 @@ mod array_transforms;
 mod checksums;
 #[path = "pg18_semantics/comparisons_and_arrays.rs"]
 mod comparisons_and_arrays;
+#[path = "pg18_semantics/floating_point_width.rs"]
+mod floating_point_width;
 #[path = "pg18_semantics/gamma_functions.rs"]
 mod gamma_functions;
 #[path = "pg18_semantics/json_strip_nulls.rs"]
@@ -79,6 +97,8 @@ mod pg18_additions;
 mod reverse_overloads;
 #[path = "pg18_semantics/review_regressions.rs"]
 mod review_regressions;
+#[path = "pg18_semantics/sql_value_clock.rs"]
+mod sql_value_clock;
 #[path = "pg18_semantics/string_binary_lengths.rs"]
 mod string_binary_lengths;
 #[path = "pg18_semantics/strings_and_bytea.rs"]
@@ -89,3 +109,21 @@ mod temporal;
 mod three_valued_logic;
 #[path = "pg18_semantics/to_reg_lookups.rs"]
 mod to_reg_lookups;
+
+#[path = "pg18_semantics/schema_drop.rs"]
+mod schema_drop;
+
+#[path = "pg18_semantics/stored_relation_drop.rs"]
+mod stored_relation_drop;
+
+#[path = "pg18_semantics/domain_drop.rs"]
+mod domain_drop;
+
+#[path = "pg18_semantics/stored_column_rename.rs"]
+mod stored_column_rename;
+
+#[path = "pg18_semantics/stored_column_drop.rs"]
+mod stored_column_drop;
+
+#[path = "pg18_semantics/stored_column_alias_drop.rs"]
+mod stored_column_alias_drop;

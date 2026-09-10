@@ -298,10 +298,11 @@ fn composite_primary_key_is_unique_and_every_member_is_not_null() {
             &[],
         )
         .unwrap_err();
-    assert!(duplicate
-        .to_string()
-        .to_ascii_lowercase()
-        .contains("primary key"));
+    assert_eq!(duplicate.sqlstate(), Some("23505"));
+    assert_eq!(
+        duplicate.to_string(),
+        "duplicate key value violates unique constraint \"ledger_pkey\""
+    );
 
     for sql in [
         "INSERT INTO ledger (tenant, entry, value) VALUES (NULL, 3, 'bad')",
@@ -447,12 +448,11 @@ fn typed_dml_rejects_unknown_and_duplicate_target_columns() {
          ON CONFLICT (id) DO UPDATE SET misspelled = EXCLUDED.payload",
     ] {
         let error = eng.sql(sql, &[]).unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .to_ascii_lowercase()
-                .contains("unknown column"),
-            "unexpected error for {sql}: {error}"
+        assert_eq!(error.sqlstate(), Some("42703"), "{sql}: {error}");
+        assert_eq!(
+            error.to_string(),
+            "column \"misspelled\" of relation \"typed_rows\" does not exist",
+            "{sql}"
         );
     }
 

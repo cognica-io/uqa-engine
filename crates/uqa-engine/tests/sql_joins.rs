@@ -658,7 +658,7 @@ fn join_using_resolves_postgresql_common_types_before_execution() {
          FROM (VALUES (1::smallint)) AS l(id)
          FULL JOIN (VALUES (1::bigint)) AS r(id) USING (id)",
     );
-    assert_eq!(result.rows[0]["ty"], Value::Str("bigint".into()));
+    assert_eq!(result.rows[0]["ty"], Value::Int(20));
     assert_eq!(result.rows[0]["id"], Value::Int(1));
 
     let varchar_left = query(
@@ -667,10 +667,7 @@ fn join_using_resolves_postgresql_common_types_before_execution() {
          FROM (VALUES ('x'::varchar)) AS l(id)
          FULL JOIN (VALUES ('x'::text)) AS r(id) USING (id)",
     );
-    assert_eq!(
-        varchar_left.rows[0]["ty"],
-        Value::Str("character varying".into())
-    );
+    assert_eq!(varchar_left.rows[0]["ty"], Value::Int(1043));
 
     let text_left = query(
         &engine,
@@ -678,7 +675,7 @@ fn join_using_resolves_postgresql_common_types_before_execution() {
          FROM (VALUES ('x'::text)) AS l(id)
          FULL JOIN (VALUES ('x'::varchar)) AS r(id) USING (id)",
     );
-    assert_eq!(text_left.rows[0]["ty"], Value::Str("text".into()));
+    assert_eq!(text_left.rows[0]["ty"], Value::Int(25));
 
     let temporal = query(
         &engine,
@@ -686,10 +683,7 @@ fn join_using_resolves_postgresql_common_types_before_execution() {
          FROM (VALUES ('2020-01-01'::date)) AS l(id)
          FULL JOIN (VALUES ('2020-01-01 00:00:00'::timestamp)) AS r(id) USING (id)",
     );
-    assert_eq!(
-        temporal.rows[0]["ty"],
-        Value::Str("timestamp without time zone".into())
-    );
+    assert_eq!(temporal.rows[0]["ty"], Value::Int(1114));
     assert_eq!(
         temporal.rows[0]["value"],
         Value::Str("2020-01-01 00:00:00".into())
@@ -700,7 +694,7 @@ fn join_using_resolves_postgresql_common_types_before_execution() {
         "SELECT pg_typeof(id) AS ty, id FROM (VALUES (1::bigint)) AS l(id) FULL JOIN (VALUES (1::oid)) AS r(id) USING (id)",
     ] {
         let oid = query(&engine, sql);
-        assert_eq!(oid.rows[0]["ty"], Value::Str("oid".into()), "{sql}");
+        assert_eq!(oid.rows[0]["ty"], Value::Int(26), "{sql}");
         assert_eq!(oid.rows[0]["id"], Value::Int(1), "{sql}");
     }
 }
@@ -722,7 +716,7 @@ fn join_using_preserves_types_through_tables_subqueries_and_cte_spill() {
          SELECT pg_typeof(id) AS ty FROM l FULL JOIN r USING (id)",
     ] {
         let result = query(&engine, sql);
-        assert_eq!(result.rows[0]["ty"], Value::Str("bigint".into()), "{sql}");
+        assert_eq!(result.rows[0]["ty"], Value::Int(20), "{sql}");
     }
 }
 
@@ -735,7 +729,7 @@ fn join_using_resolves_static_table_function_types() {
          FROM (VALUES (1::smallint)) AS l(id)
          JOIN generate_series(1::bigint, 1::bigint) AS r(id) USING (id)",
     );
-    assert_eq!(result.rows[0]["ty"], Value::Str("bigint".into()));
+    assert_eq!(result.rows[0]["ty"], Value::Int(20));
     assert_eq!(result.rows[0]["id"], Value::Int(1));
 
     let json = query(
@@ -743,8 +737,8 @@ fn join_using_resolves_static_table_function_types() {
         "SELECT pg_typeof(key) AS key_type, pg_typeof(value) AS value_type
          FROM json_each('{\"a\": 1}'::json)",
     );
-    assert_eq!(json.rows[0]["key_type"], Value::Str("text".into()));
-    assert_eq!(json.rows[0]["value_type"], Value::Str("json".into()));
+    assert_eq!(json.rows[0]["key_type"], Value::Int(25));
+    assert_eq!(json.rows[0]["value_type"], Value::Int(114));
 }
 
 #[test]

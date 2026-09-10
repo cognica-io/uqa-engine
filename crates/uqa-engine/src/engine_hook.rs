@@ -12,6 +12,30 @@ use uqa_sql::SQLError;
 use super::Engine;
 
 impl uqa_sql::expr::EngineHook for Engine {
+    fn transaction_timestamp_micros(&self) -> Option<i64> {
+        Some(Engine::transaction_timestamp_micros(self))
+    }
+
+    fn statement_timestamp_micros(&self) -> Option<i64> {
+        Some(Engine::statement_timestamp_micros(self))
+    }
+
+    fn resolve_regtype_input(&self, name: &str) -> Result<Option<i64>, SQLError> {
+        crate::sql::resolve_regtype_oid(self, name)?
+            .map(Some)
+            .ok_or_else(|| SQLError::Routine {
+                sqlstate: "42704".into(),
+                message: format!("type \"{name}\" does not exist"),
+            })
+    }
+    fn cast_domain(
+        &self,
+        value: &Value,
+        source: Option<&str>,
+        target: &uqa_sql::ast::ColumnType,
+    ) -> Result<Option<Value>, SQLError> {
+        crate::sql::cast_domain_value(self, value, source, target)
+    }
     fn resolve_type_name(
         &self,
         name: &str,

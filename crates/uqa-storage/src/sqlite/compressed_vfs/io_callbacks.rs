@@ -7,8 +7,8 @@
 //! `SQLite` file-method callbacks and locking protocol.
 
 use super::{
-    c_int, c_void, ffi, fs, ptr, CompressedSQLiteFile, FileExt, FileHandle, DEFAULT_PAGE_SIZE,
-    SQLITE_LOCK_NONE, SQLITE_LOCK_RESERVED, SQLITE_LOCK_SHARED,
+    c_int, c_void, ffi, ptr, CompressedSQLiteFile, FileHandle, DEFAULT_PAGE_SIZE,
+    SQLITE_LOCK_EXCLUSIVE, SQLITE_LOCK_NONE,
 };
 
 unsafe fn file_from_sqlite<'a>(file: *mut ffi::sqlite3_file) -> Option<&'a mut FileHandle> {
@@ -54,16 +54,14 @@ unsafe extern "C" fn file_close(file: *mut ffi::sqlite3_file) -> c_int {
     }
     let mut handle = unsafe { Box::from_raw(handle) };
     let flush = handle.file.flush();
-    let unlock = FileExt::unlock(&handle.lock_file);
-    let delete = if handle.delete_on_close {
-        match fs::remove_file(handle.file.path()) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(error),
-        }
-    } else {
-        Ok(())
-    };
+    let unlock = handle.locks.unlock(SQLITE_LOCK_NONE);
+    let delete_path = handle
+        .delete_on_close
+        .then(|| handle.file.path().to_owned());
+    drop(handle);
+    let delete = delete_path.map_or(Ok(false), |path| {
+        super::vfs_callbacks::remove_file_and_locks(&path)
+    });
     unsafe {
         (*compressed).base.pMethods = ptr::null();
     }
@@ -177,40 +175,16 @@ unsafe extern "C" fn file_lock(file: *mut ffi::sqlite3_file, lock: c_int) -> c_i
     let Some(handle) = (unsafe { file_from_sqlite(file) }) else {
         return ffi::SQLITE_IOERR_LOCK;
     };
-    if lock <= handle.lock_state {
-        return ffi::SQLITE_OK;
-    }
-    if handle.lock_state >= SQLITE_LOCK_RESERVED && lock >= SQLITE_LOCK_RESERVED {
-        handle.lock_state = lock;
-        return ffi::SQLITE_OK;
-    }
-    let previous_lock = handle.lock_state;
-    let lock_ok = if lock >= SQLITE_LOCK_RESERVED {
-        if handle.lock_state != SQLITE_LOCK_NONE && FileExt::unlock(&handle.lock_file).is_err() {
-            return ffi::SQLITE_IOERR_UNLOCK;
-        }
-        match FileExt::try_lock_exclusive(&handle.lock_file) {
-            Ok(()) => true,
-            Err(_) if previous_lock != SQLITE_LOCK_NONE => {
-                if FileExt::try_lock_shared(&handle.lock_file).is_err() {
-                    handle.lock_state = SQLITE_LOCK_NONE;
-                    return ffi::SQLITE_IOERR_LOCK;
-                }
-                false
-            }
-            Err(_) => false,
-        }
-    } else {
-        FileExt::try_lock_shared(&handle.lock_file).is_ok()
-    };
-    if !lock_ok {
-        return ffi::SQLITE_BUSY;
+    let previous_lock = handle.locks.level();
+    match handle.locks.lock(lock) {
+        Ok(false) => return ffi::SQLITE_BUSY,
+        Err(_) => return ffi::SQLITE_IOERR_LOCK,
+        Ok(true) => {}
     }
     if previous_lock == SQLITE_LOCK_NONE && handle.file.refresh_committed_state().is_err() {
-        let _ = FileExt::unlock(&handle.lock_file);
+        let _ = handle.locks.unlock(SQLITE_LOCK_NONE);
         return ffi::SQLITE_IOERR_LOCK;
     }
-    handle.lock_state = handle.lock_state.max(lock);
     ffi::SQLITE_OK
 }
 
@@ -218,39 +192,37 @@ unsafe extern "C" fn file_unlock(file: *mut ffi::sqlite3_file, lock: c_int) -> c
     let Some(handle) = (unsafe { file_from_sqlite(file) }) else {
         return ffi::SQLITE_IOERR_UNLOCK;
     };
-    if lock <= SQLITE_LOCK_NONE {
-        // SQLite may truncate the main database after its final xSync (notably during VACUUM), so publish every remaining logical-file mutation while the exclusive lock is still held.
-        if handle.file.flush().is_err() {
-            return ffi::SQLITE_IOERR_UNLOCK;
-        }
-        if FileExt::unlock(&handle.lock_file).is_err() {
-            return ffi::SQLITE_IOERR_UNLOCK;
-        }
-        handle.lock_state = SQLITE_LOCK_NONE;
-        return ffi::SQLITE_OK;
-    }
-    if lock == SQLITE_LOCK_SHARED
-        && handle.lock_state > SQLITE_LOCK_SHARED
-        && (FileExt::unlock(&handle.lock_file).is_err()
-            || FileExt::try_lock_shared(&handle.lock_file).is_err())
-    {
+    // SQLite may truncate the main database after its final xSync during VACUUM. Publish the remaining mutation before releasing the exclusive lock.
+    let releasing_exclusive =
+        handle.locks.level() == SQLITE_LOCK_EXCLUSIVE && lock < SQLITE_LOCK_EXCLUSIVE;
+    if (lock == SQLITE_LOCK_NONE || releasing_exclusive) && handle.file.flush().is_err() {
         return ffi::SQLITE_IOERR_UNLOCK;
     }
-    handle.lock_state = lock;
-    ffi::SQLITE_OK
+    match handle.locks.unlock(lock) {
+        Ok(()) => ffi::SQLITE_OK,
+        Err(_) => ffi::SQLITE_IOERR_UNLOCK,
+    }
 }
 
 unsafe extern "C" fn file_check_reserved_lock(
     file: *mut ffi::sqlite3_file,
     out: *mut c_int,
 ) -> c_int {
+    if out.is_null() {
+        return ffi::SQLITE_IOERR_CHECKRESERVEDLOCK;
+    }
     let Some(handle) = (unsafe { file_from_sqlite(file) }) else {
         return ffi::SQLITE_IOERR_CHECKRESERVEDLOCK;
     };
-    unsafe {
-        *out = i32::from(handle.lock_state >= SQLITE_LOCK_RESERVED);
+    match handle.locks.check_reserved() {
+        Ok(reserved) => {
+            unsafe {
+                *out = i32::from(reserved);
+            }
+            ffi::SQLITE_OK
+        }
+        Err(_) => ffi::SQLITE_IOERR_CHECKRESERVEDLOCK,
     }
-    ffi::SQLITE_OK
 }
 
 unsafe extern "C" fn file_control(

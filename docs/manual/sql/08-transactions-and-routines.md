@@ -95,9 +95,55 @@ EXECUTE find_task('open');
 DEALLOCATE find_task;
 ```
 
-Prepared plans are session-local. Catalog or function registry changes trigger the engine's plan cache invalidation and rebind rules. Applications must still handle a prepare or execute error when an incompatible change makes a plan invalid.
+`PREPARE name (type, ...) AS statement` declares positional value parameters. `EXECUTE name (expression, ...)` requires the statement's parameter count when the statement has parameters and applies SQL assignment conversions to declared types. For a statement with no parameters, SQL EXECUTE ignores any supplied argument expressions without analyzing or evaluating them. Those types survive every execution, including `NULL` values, and determine overload selection and result metadata. Declaration modifiers are validated but do not impose parameter length, precision, or scale limits; domain declarations retain their own constraints. Scalar and array domain conversions preserve PostgreSQL's distinction between input conversion and runtime constraint checks.
+
+The type list is optional. An omitted type or an explicit `unknown` is inferred from the parameter's expression or assignment context, including casts, operators, routine arguments, Boolean predicates, arrays, CTEs, set operations, and DML target columns. A bare output parameter defaults to `text`. Inference follows occurrence order: `SELECT $1::integer, $1` determines an integer parameter, while `SELECT $1, $1::integer` reports `42P08` because the earlier unresolved output occurrence conflicts with the later integer deduction. Unresolved parameter slots report `42P18`.
+
+Preparation binds relation and column references, validates expression types, and records the result schema without executing the statement. Query optimization is deferred until execution. After catalog invalidation, replanning must preserve the result column names, type identities, and type modifiers; a changed result descriptor reports `0A000` with `cached plan must not change result type`.
+
+`plan_cache_mode` controls planning at execution time. Its default `auto` uses custom plans for the first five parameterized executions, then compares the generic execution cost with the average custom cost, including planning work. Statistics and available index access influence this comparison: a selective parameter can keep using custom plans after the fifth execution. `force_generic_plan` reuses a parameter-independent plan; `force_custom_plan` plans for the current bound values. Statements with no parameters use generic plans in every mode. Parameter specialization preserves declared types, including typed NULLs and domain identities.
+
+`generic_plans` and `custom_plans` count plans selected for execution, including executions that later fail. Argument or planning failures do not increment them. Changing `plan_cache_mode` takes effect on the next EXECUTE without preparing the statement again.
+
+```sql execute
+SET plan_cache_mode = force_custom_plan;
+PREPARE manual_custom_plan(integer) AS SELECT $1 + 1 AS result;
+EXECUTE manual_custom_plan(4);
+SET plan_cache_mode = force_generic_plan;
+EXECUTE manual_custom_plan(9);
+SELECT generic_plans, custom_plans
+FROM pg_prepared_statements WHERE name = 'manual_custom_plan';
+DEALLOCATE manual_custom_plan;
+RESET plan_cache_mode;
+```
+
+Prepared definitions belong to the session and survive transaction and savepoint rollback. `DEALLOCATE` remains effective after rollback, and `DISCARD PLANS` invalidates executable plans while retaining definitions and parameter types. Catalog refresh invalidates cached plans; the next execution replans the affected statement. A statement whose dependency disappeared can fail without preventing unrelated queries or cleanup.
+
+Duplicate prepared names report `42P05`; missing names report `26000`. An incorrect argument count reports `42601`, and an incompatible typed argument reports `42804`. Input conversion and domain constraints retain their specific SQLSTATEs. Subqueries, aggregates, and window functions are rejected as `EXECUTE` arguments before executable argument effects. For statements with parameters, names, types, constant inputs, and constant-expression failures are checked before volatile executable arguments, preserving sequence effects and domain conversion order. Argument binding finishes before the prepared body is planned: an argument error takes precedence over an immutable error such as division by zero in the body. A failed body plan does not increment its plan-use counter.
+
+```sql execute
+PREPARE manual_typed_parameter (bigint) AS
+SELECT pg_typeof($1)::text AS parameter_type, $1 AS value;
+EXECUTE manual_typed_parameter(7);
+EXECUTE manual_typed_parameter(NULL);
+DEALLOCATE manual_typed_parameter;
+```
+
+`pg_catalog.pg_prepared_statements` exposes the current session's named definitions. Its columns are `name text`, `statement text`, `prepare_time timestamptz`, `parameter_types regtype[]`, `result_types regtype[]`, `from_sql boolean`, `generic_plans bigint`, and `custom_plans bigint`. SQL-created entries retain the exact client query string, including the complete message when several statements are submitted together. A command without a result descriptor has a NULL `result_types`; a zero-column query has an empty array. Deallocation immediately removes the row, and another session cannot see it. The view is read-only: INSERT, UPDATE, DELETE, and mutating MERGE actions fail with SQLSTATE `55000`, including during PREPARE and inside data-modifying CTEs, after expression and parameter validation.
+
+```sql execute
+PREPARE manual_inferred_parameter AS SELECT $1 + 1 AS incremented;
+SELECT parameter_types::text, result_types::text, from_sql
+FROM pg_prepared_statements WHERE name = 'manual_inferred_parameter';
+EXECUTE manual_inferred_parameter(41);
+DEALLOCATE manual_inferred_parameter;
+```
+
+The [compatibility ledger](09-compatibility.md) tracks the remaining preparation and function-signature matrix, plan-selection behavior, and Extended Query execution work.
 
 ## SET and SHOW
+
+`SET [SESSION] name TO value` changes a session value; transaction rollback undoes it. `SET LOCAL name TO value` applies through the current transaction and restores the preceding session value at its end. Savepoint rollback restores both the active value and any pending local restoration. A later session SET supersedes a preceding local assignment. `SET name TO DEFAULT` restores the default while reporting a SET completion tag; RESET reports RESET. The current-transaction settings `transaction_isolation`, `transaction_read_only`, and `transaction_deferrable` cannot be reset and report `0A000`. `plan_cache_mode` accepts case-insensitive complete enum values, rejects other values with `22023`, and exposes its current value, source, allowed values, and default through `pg_settings`.
 
 Known settings include:
 
@@ -110,6 +156,7 @@ Known settings include:
 | `datestyle` | Mutable, default `ISO, MDY` |
 | `timezone` | Mutable, default `UTC` |
 | `work_mem` | Mutable, default `64MB` |
+| `plan_cache_mode` | `auto`, `force_generic_plan`, or `force_custom_plan`; default `auto` |
 | `default_transaction_isolation` | Mutable transaction default, `read committed` |
 | `default_transaction_read_only` | Mutable transaction default, `off` |
 | `default_transaction_deferrable` | Mutable transaction default, `off` |
@@ -126,7 +173,7 @@ SHOW timezone;
 
 `SET ROLE name` changes `current_user` for the session while preserving `session_user`; `RESET ROLE`, `SET ROLE NONE`, and `SET ROLE DEFAULT` restore the session identity. The embedded connection starts as the durable bootstrap superuser role `uqa`, so it may assume any defined role. A non-superuser session may assume a directly or transitively granted role only through membership edges whose `SET` option is true. A successful `SET ROLE` executed by a `SECURITY INVOKER` routine remains visible to the session, while an error restores the prior identity and any `SET ROLE` attempted inside a `SECURITY DEFINER` context fails with `42501`, including through a nested invoker.
 
-`DISCARD ALL`, `DISCARD PLANS`, and `DISCARD SEQUENCES` reset their implemented session state. `DISCARD TEMP` removes the session's temporary tables, views, sequences, and sequence state. PostgreSQL and UQA Engine reject `DISCARD` after an explicit `BEGIN`, while permitting it in the implicit transaction segment that encloses a multi-statement simple-query message.
+`DISCARD ALL` resets the implemented session state and is rejected after an explicit `BEGIN` with `25001`. `DISCARD PLANS`, `DISCARD SEQUENCES`, and `DISCARD TEMP` also work inside explicit transactions. `PLANS` preserves prepared definitions while invalidating their executable plans. `SEQUENCES` clears reserved values, `currval()`, and `lastval()` state; rollback does not restore the discarded session values. `TEMP` removes the session's temporary relations and associated sequence state, with relation removal subject to transaction rollback.
 
 `LOAD 'age'` (also `age.so`, `$libdir/age`, and `$libdir/age.so`) succeeds without side effects because the Apache AGE surface is embedded; any other library name fails as `could not access file "$libdir/name": No such file or directory` (`58P01`). See [Graph SQL and Cypher](07-graph.md) for the AGE session bootstrap.
 
@@ -180,6 +227,8 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 ```
 
 The implemented PL/pgSQL surface includes declarations, assignment, `IF` and `CASE`, basic loops, `WHILE`, integer, static-query, dynamic-query, and bound-cursor `FOR`, array `FOREACH`, labeled blocks and exits, `RETURN`, `RETURN NEXT`, `RETURN QUERY`, `PERFORM`, static SQL, dynamic `EXECUTE`, nested blocks, recursive calls with a depth limit, diagnostics, exception handlers, assertions, procedural transaction control, and cursors covered by the routine tests.
+
+Scalar domain declarations retain their type identity in routine parameters, local variables, and return values. A local variable without an initializer starts with NULL; a domain default does not supply its initial value, and a NOT NULL domain rejects that initialization. Converting a base value checks domain constraints, while passing, assigning, or returning an already typed value preserves it without repeating those checks. Constraint functions that change stored state participate in the statement transaction, including implicit parameter, local-variable, and return coercions.
 
 ### Query FOR loops
 
@@ -286,6 +335,8 @@ Creation, replacement, rename, enable state, and removal update the durable trig
 Every user-routine call in a `WHEN` condition binds its exact overload when the trigger definition is published. Replacing the trigger atomically replaces that dependency set, routine rename rewrites the stored condition without changing its object identity, and recreating the old routine name cannot retarget the condition. `DROP FUNCTION ... RESTRICT` reports `2BP01` while either the trigger execution target or its `WHEN` condition depends on the routine; `CASCADE` removes the trigger while retaining its relation and any unrelated execution function. Committed bindings survive reopen, initial-open migration upgrades legacy conditions transactionally, and ordinary catalog reloads validate without repairing them.
 
 Creating or replacing a table, view, or foreign-table trigger requires the target relation's `TRIGGER` privilege and the trigger function's `EXECUTE` privilege. PostgreSQL's error order is preserved: the target relation privilege is checked before trigger-function lookup, function `EXECUTE` is checked before return-type and duplicate-trigger validation, and a qualified function name remains qualified in its permission error. Function authorization is a creation-time check; revoking `EXECUTE` later does not disable an already-defined trigger. DROP and ALTER authority is derived from the target relation's current owner rather than stored on the trigger, including inherited ownership, owner transfer, rollback, cross-session catalog refresh, and reopen. `DROP TRIGGER` checks ownership only after finding the named trigger, so `IF EXISTS` and an actually missing trigger do not require relation ownership.
+
+Row-trigger records retain each field's declared SQL type. Assigning to a domain field checks its constraints at the assignment, so a surrounding PL/pgSQL exception block can handle a violation. Reading or returning an already typed domain value does not repeat those checks. A returned record is matched to the triggering table by position, including domain identity and required type modifiers; incompatible row structures report `42804`, and record field labels need not match the table's column names.
 
 Foreign tables accept durable ordinary `BEFORE` and `AFTER` row and statement definitions for `INSERT`, `UPDATE`, `DELETE`, and `TRUNCATE`, including `UPDATE OF`, `WHEN`, replacement, rename, enable modes, and removal. PostgreSQL rejects constraint triggers, transition relations, and `INSTEAD OF` timing on a foreign table with `42809`; UQA preserves those boundaries, exposes the definitions through `pg_trigger`, projects `pg_class.relhastriggers`, retains function dependencies, and removes the definitions atomically with `DROP FOREIGN TABLE`. Because the built-in foreign wrappers currently expose only read-only scans, writable foreign-table DML and execution of these triggers remain unimplemented.
 
@@ -496,9 +547,17 @@ DROP PROCEDURE record_message(TEXT);
 
 Signatures disambiguate overloads. `DROP FUNCTION` uses RESTRICT behavior: an unrelated overload may be dropped, but an exact user-function signature referenced by a stored scalar expression, table-function source, `ROWS FROM` member, nested query, ordinary- or foreign-table column default, column- or table-level CHECK constraint, generated column, trigger execution target or `WHEN` condition, SQL-standard routine query or mutation-command body, or parameter default is retained and reports `2BP01` with its dependents. Column defaults, CHECK constraints, and trigger `WHEN` conditions bind exact routine calls whenever their owning schema state is published. SQL-standard query bodies and `INSERT`, `UPDATE`, `DELETE`, and `MERGE` bodies bind exact routine calls and canonical relation references when the routine is created, while parameter defaults bind exact routine identities for every supported routine body form and use the creation-time search path. String-literal SQL and PL/pgSQL bodies retain PostgreSQL's dynamic dependency behavior, but their parameter defaults remain creation-bound. Multi-target drops preflight the whole set, so an internal dependency is satisfied when both routines are explicit targets, and replacing a default, CHECK constraint, trigger, view, or routine atomically replaces the prior dependency set.
 
-For the implemented CASCADE graph, `DROP FUNCTION signature CASCADE` removes the exact routine, dependent ordinary- and foreign-table column defaults and CHECK constraints, triggers whose execution target or `WHEN` condition binds it, generated columns and stored views bound to it, transitive stored views, and transitive functions or procedures whose SQL-standard query bodies, supported mutation-command bodies, or parameter defaults bind the target while retaining unrelated overloads and objects. A default or CHECK cascade retains its column and table, a generated-column cascade retains its ordinary or foreign table, and a trigger-condition cascade retains the relation and unrelated trigger execution function. A single dependent emits PostgreSQL's relation-kind-aware `drop cascades to ...` notice and multiple dependents emit the object-count notice. Rename rewrites the same exact bindings without retargeting them if the old name is recreated, wrong-kind, missing, and RESTRICT failures are atomic, initial-open migration binds legacy ordinary- and foreign-table schema and trigger-condition expressions transactionally while ordinary reloads only validate them, and committed dependency bindings survive reopen. PostgreSQL dependency-object kinds outside routines, triggers, defaults, CHECK constraints, generated columns, and stored views, exact catalog deletion order, and complete diagnostic detail remain compatibility gaps.
+For the implemented CASCADE graph, `DROP FUNCTION signature CASCADE` removes the exact routine, dependent ordinary- and foreign-table column defaults and CHECK constraints, triggers whose execution target or `WHEN` condition binds it, generated columns and stored views bound to it, transitive stored views, and transitive functions or procedures whose SQL-standard query bodies, supported mutation-command bodies, or parameter defaults bind the target while retaining unrelated overloads and objects. A default or CHECK cascade retains its column and table, a generated-column cascade retains its ordinary or foreign table, and a trigger-condition cascade retains the relation and unrelated trigger execution function. A single dependent emits PostgreSQL's relation-kind-aware `drop cascades to ...` notice and multiple dependents emit the object-count notice. Rename rewrites the same exact bindings without retargeting them if the old name is recreated, wrong-kind, missing, and RESTRICT failures are atomic, initial-open migration binds legacy ordinary- and foreign-table schema and trigger-condition expressions transactionally while ordinary reloads only validate them, and committed dependency bindings survive reopen. The complete PostgreSQL dependency catalog, additional dependency-object kinds, exact deletion order, and complete diagnostic details remain required implementation work.
 
-Durable SQL and PL/pgSQL routine definitions are restored with the catalog. Restoration installs routine definitions before rebinding stored views and compiles routine bodies after every row-producing relation is present, so a stored view may call a routine while another SQL-standard routine reads that view. Rust, Python, Node.js, and browser WASM runtime callbacks are not durable and must be registered after process start.
+Relation and sequence deletion follows [stored relation and routine dependencies](02-ddl.md#stored-relation-and-routine-dependencies), including function/view cycles, indirect domain and generated-column dependencies, and creation-bound `regclass` constants and parameter defaults. [Domain deletion](02-ddl.md#domain-declarations-and-deletion) also follows direct column references in SQL-standard query and mutation-command bodies, preserving routines that use only unrelated columns.
+
+[Column renames](02-ddl.md#alter-table) rewrite and recompile SQL-standard query and mutation-command bodies against the same column identity. Stored projections retain their output names, unrelated routine parameters and CTE bindings retain their names, and later reuse of the old column name does not redirect the routine.
+
+[Column deletion](02-ddl.md#alter-table) rejects stored routine dependents with RESTRICT and removes their transitive dependency closure with CASCADE, preserving routines that use only unrelated columns. Retained MERGE routines skip a deleted write-only destination without evaluating its value expression, yet keep the expression's stored routine and sequence dependencies and the domain identities used by non-DEFAULT assignment coercions. The destination retains its original column identity across old-name reuse; restored catalogs validate the complete stored expressions separately from the executable writes.
+
+SQL-standard table sources retain their creation-time input columns and positional aliases through column additions, deletion of unread columns, and old-name reuse, including nested join aliases and expanded projections. Column and generated-column cascades adjust surviving source aliases before the rewritten definitions are published; sequence regclass constants retain their original object through rename and schema refresh. Initial open migrates legacy source metadata and schema constants transactionally, and later reload validates the persisted definitions.
+
+Durable SQL and PL/pgSQL routine definitions are restored with the catalog. Restoration installs routine definitions before rebinding stored views and compiles routine bodies after every row-producing relation is present, so a stored view may call a routine while another SQL-standard routine reads that view. Restoration retains logical query plans without evaluating constants or requesting execution statistics. Routine invocation performs optimization against the current execution context, so a body such as `SELECT 1 / 0` can be stored and reports its planning error when invoked. Rust, Python, Node.js, and browser WASM runtime callbacks are not durable and must be registered after process start.
 
 ## Cancellation and failure
 

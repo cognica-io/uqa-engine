@@ -42,7 +42,9 @@ pub(in crate::sql) fn run_do_block(
             message: format!("language \"{language}\" does not exist"),
         });
     }
-    let parsed = uqa_sql::plpgsql::parse_do_block(body)?;
+    let catalog = crate::sql::catalog::plpgsql_catalog(engine)?;
+    let mut parsed = uqa_sql::plpgsql::parse_do_block_with_catalog(body, &catalog)?;
+    crate::engine_user_functions::resolve_plpgsql_datum_types(engine, &mut parsed)?;
     let def = CreateFunction {
         object_id: None,
         name: "inline_code_block".into(),
@@ -159,6 +161,8 @@ pub(in crate::sql) fn run_call(
         row.insert(column.clone(), value.clone());
     }
     Ok(SQLResult {
+        kind: uqa_sql::SQLResultKind::Rows,
+        command_tag: None,
         column_types,
         columns,
         rows: vec![row],
@@ -478,7 +482,7 @@ fn validate_anonymous_record_column_types(
     Ok(())
 }
 
-fn runtime_record_column_type(value: &Value) -> Option<uqa_sql::ast::ColumnType> {
+pub(super) fn runtime_record_column_type(value: &Value) -> Option<uqa_sql::ast::ColumnType> {
     if matches!(value, Value::Null) {
         return None;
     }

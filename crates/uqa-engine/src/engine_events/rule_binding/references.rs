@@ -26,10 +26,22 @@ struct RuleRowReferenceDetector {
 #[derive(Default)]
 struct RuleRowColumnCollector {
     columns: BTreeSet<String>,
+    qualifier: Option<&'static str>,
+    whole_row: bool,
+}
+
+impl RuleRowColumnCollector {
+    fn accepts(&self, qualifier: &str) -> bool {
+        self.qualifier.map_or_else(
+            || qualifier.eq_ignore_ascii_case("old") || qualifier.eq_ignore_ascii_case("new"),
+            |selected| selected.eq_ignore_ascii_case(qualifier),
+        )
+    }
 }
 
 impl VariableResolver for RuleRowColumnCollector {
-    fn resolve_name(&mut self, _name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
+    fn resolve_name(&mut self, name: &str) -> Result<Option<ResolvedVariable>, SQLError> {
+        self.whole_row |= self.accepts(name);
         Ok(None)
     }
 
@@ -38,13 +50,18 @@ impl VariableResolver for RuleRowColumnCollector {
         qualifier: &str,
         column: &str,
     ) -> Result<Option<ResolvedVariable>, SQLError> {
-        if qualifier.eq_ignore_ascii_case("old") || qualifier.eq_ignore_ascii_case("new") {
+        if self.accepts(qualifier) {
             self.columns.insert(column.to_string());
         }
         Ok(None)
     }
 
     fn resolve_param(&mut self, _index: usize) -> Result<Option<ResolvedVariable>, SQLError> {
+        Ok(None)
+    }
+
+    fn rewrite_qualified_whole_row(&mut self, qualifier: &str) -> Result<Option<Expr>, SQLError> {
+        self.whole_row |= self.accepts(qualifier);
         Ok(None)
     }
 }
@@ -124,6 +141,29 @@ pub(crate) fn rule_expr_references_whole_row(expr: &Expr) -> bool {
     let mut detector = RuleRowReferenceDetector::default();
     let _ = bind_rule_expr_scoped(expr, &mut detector, &BTreeSet::new());
     detector.whole_row
+}
+
+pub(crate) fn first_rule_row_reference_in_statement(
+    engine: &crate::Engine,
+    statement: &Statement,
+) -> Result<Option<String>, SQLError> {
+    let target = match statement {
+        Statement::Insert(plan) => Some(plan.table.as_str()),
+        Statement::Update(plan) => Some(plan.table.as_str()),
+        Statement::Delete(plan) => Some(plan.table.as_str()),
+        Statement::Merge(plan) => Some(plan.target.as_str()),
+        _ => None,
+    };
+    let columns = target
+        .map(|table| crate::sql::query_source_column_names(engine, table, false))
+        .transpose()?
+        .flatten()
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    let mut detector = RuleRowReferenceDetector::default();
+    let _ = bind_rule_action(engine, statement, &columns, &mut detector)?;
+    Ok(detector.qualifier)
 }
 
 pub(crate) fn rule_statement_references_row(
@@ -212,4 +252,23 @@ pub(crate) fn rule_statement_row_columns(
     let mut collector = RuleRowColumnCollector::default();
     let _ = bind_rule_action(engine, statement, action_columns, &mut collector)?;
     Ok(collector.columns)
+}
+
+/// Input assignments contribute only NEW fields; OLD references require source rows but never the corresponding new assignment expression.
+pub(crate) fn rule_new_row_columns(
+    engine: &crate::Engine,
+    rule: &crate::engine_events::StoredRule,
+) -> Result<Option<BTreeSet<String>>, SQLError> {
+    let mut collector = RuleRowColumnCollector {
+        qualifier: Some("new"),
+        ..RuleRowColumnCollector::default()
+    };
+    if let Some(condition) = &rule.definition.condition {
+        bind_rule_expr_scoped(condition, &mut collector, &BTreeSet::new())?;
+    }
+    for action in &rule.definition.actions {
+        let columns = engine.rule_action_target_columns(action)?;
+        bind_rule_action(engine, action, &columns, &mut collector)?;
+    }
+    Ok((!collector.whole_row).then_some(collector.columns))
 }

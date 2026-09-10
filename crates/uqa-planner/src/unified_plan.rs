@@ -24,6 +24,7 @@ use uqa_sql::ast::{
     Statement, WindowSpec, CTE,
 };
 
+mod command_children;
 mod model;
 mod query;
 mod rewrite;

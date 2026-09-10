@@ -233,6 +233,48 @@ fn registered_table_function_source_makes_a_view_volatile() {
 
 struct StreamingRows;
 
+#[test]
+fn dynamic_table_function_analysis_preserves_closed_namespaces_and_defers_callbacks() {
+    let engine = Engine::new();
+    let calls = Arc::new(AtomicUsize::new(0));
+    engine
+        .register_table_function(
+            "rust_counting_rows",
+            CountingRows {
+                calls: calls.clone(),
+            },
+        )
+        .unwrap();
+    engine
+        .sql("CREATE TABLE closed_rows (id integer)", &[])
+        .unwrap();
+    engine
+        .sql(
+            "PREPARE dynamic_rows AS SELECT marker FROM rust_counting_rows()",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    let error = engine
+        .sql(
+            "SELECT c.missing FROM rust_counting_rows() AS dynamic CROSS JOIN closed_rows AS c",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42703"), "{error}");
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    let result = engine.sql("EXECUTE dynamic_rows", &[]).unwrap();
+    assert_eq!(result.rows[0]["marker"], Value::Int(1));
+    let result = engine
+        .sql(
+            "SELECT projected.marker FROM (SELECT * FROM rust_counting_rows()) AS projected",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.rows[0]["marker"], Value::Int(2));
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
 impl SQLTableFunction for StreamingRows {
     fn call_stream(&self, args: &[Value]) -> Result<SQLTableFunctionStream, SQLError> {
         let [Value::Int(count)] = args else {
@@ -422,11 +464,30 @@ fn prepared_plan_rebinds_when_aggregate_registry_changes() {
     eng.sql("CREATE TABLE samples (val INTEGER)", &[]).unwrap();
     eng.sql("INSERT INTO samples (val) VALUES (1), (2)", &[])
         .unwrap();
+    let missing = eng
+        .sql(
+            "PREPARE totals AS SELECT rust_sum_squares(val) AS total FROM samples",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(missing.sqlstate(), Some("42883"));
+    eng.register_scalar_function("rust_sum_squares", |args: &[Value]| {
+        let [Value::Int(value)] = args else {
+            return Err(SQLError::TypeMismatch("integer argument required".into()));
+        };
+        Ok(Value::Int(value * value))
+    })
+    .unwrap();
     eng.sql(
         "PREPARE totals AS SELECT rust_sum_squares(val) AS total FROM samples",
         &[],
     )
     .unwrap();
+
+    let scalar = eng.sql("EXECUTE totals", &[]).unwrap();
+    assert_eq!(scalar.rows.len(), 2);
+    assert_eq!(scalar.rows[0]["total"], Value::Int(1));
+    assert_eq!(scalar.rows[1]["total"], Value::Int(4));
 
     eng.register_aggregate_function("rust_sum_squares", SumSquares::default)
         .unwrap();

@@ -7,10 +7,9 @@
 //! Persistent exact routine identity binding for catalog-owned query plans.
 
 use super::{
-    cte_references_own_name, expr_contains_subquery, extend_cte_generated_schema,
-    extend_recursive_cte_binding_schema, operator_join_relation_schemas, ordered_plan_ctes,
-    overlay_outer_schema, rename_schema, ColumnType, CteScope, QueryPlan, RelationalPlan,
-    RowSchema, SQLError, SQLParam, ScalarExpr, SchemaScope, SourcePlan,
+    cte_references_own_name, extend_cte_generated_schema, extend_recursive_cte_binding_schema,
+    operator_join_relation_schemas, overlay_outer_schema, rename_schema, ColumnType, CteScope,
+    QueryPlan, RelationalPlan, RowSchema, SQLError, SQLParam, ScalarExpr, SchemaScope, SourcePlan,
 };
 use crate::engine_user_functions::RoutineResolution;
 use uqa_execution::{ColumnIdentity, FunctionTypeResolver};
@@ -81,26 +80,70 @@ impl SchemaScope {
         });
     }
 
-    fn bind_query_routines_for_storage(
+    fn bind_cte_routines_for_storage(
         &mut self,
         routines: &dyn RoutineResolution,
-        plan: &mut QueryPlan,
+        body: &mut uqa_planner::CtePlanBody,
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<RowSchema, SQLError> {
-        let ordered_names = ordered_plan_ctes(plan)?
+        let uqa_planner::CtePlanBody::Command(command) = body else {
+            return self.bind_query_routines_for_storage(
+                routines,
+                body.query_mut().expect("query CTE body"),
+                params,
+                outer,
+            );
+        };
+        let previous = match command.ctes_mut() {
+            Some(ctes) => self.bind_cte_routine_schemas(routines, ctes, params, None)?,
+            None => Vec::new(),
+        };
+        let result = (|| {
+            let (_, expression) = self.command_expression_schema(routines, command, params)?;
+            let subqueries = command.scalar_subqueries().to_vec();
+            if let Some(source) = command.source_input_mut() {
+                self.bind_source_routines_for_storage(routines, source, &subqueries, params, None)?;
+            }
+            for query in command.query_inputs_mut() {
+                self.bind_query_routines_for_storage(routines, query, params, Some(&expression))?;
+            }
+            let subqueries = command.scalar_subqueries().to_vec();
+            for scalar in command.expressions_mut() {
+                self.bind_scalar_routines_for_storage(
+                    routines,
+                    scalar,
+                    &expression,
+                    &subqueries,
+                    params,
+                    None,
+                )?;
+            }
+            self.bind_command_returning(routines, command, params)
+        })();
+        self.restore_cte_schemas(previous);
+        result
+    }
+
+    fn bind_cte_routine_schemas(
+        &mut self,
+        routines: &dyn RoutineResolution,
+        ctes: &mut [uqa_planner::CtePlan],
+        params: &[SQLParam],
+        outer: Option<&RowSchema>,
+    ) -> Result<Vec<(String, bool, Option<RowSchema>)>, SQLError> {
+        let ordered_names = super::super::cte_execution::ordered_cte_plans(ctes)?
             .into_iter()
             .map(|cte| cte.name.clone())
             .collect::<Vec<_>>();
         let mut previous = Vec::with_capacity(ordered_names.len());
         for name in ordered_names {
-            let position = plan
-                .ctes
+            let position = ctes
                 .iter()
                 .position(|cte| cte.name == name)
                 .ok_or_else(|| SQLError::Internal(format!("ordered CTE `{name}` disappeared")))?;
-            let self_recursive = cte_references_own_name(&plan.ctes[position]);
-            if let Some(cycle) = plan.ctes[position].cycle.as_mut() {
+            let self_recursive = cte_references_own_name(&ctes[position]);
+            if let Some(cycle) = ctes[position].cycle.as_mut() {
                 let schema = RowSchema::default();
                 self.bind_scalar_routines_for_storage(
                     routines,
@@ -120,53 +163,69 @@ impl SchemaScope {
                 )?;
             }
             let provisional = if self_recursive {
-                self.bind_recursive_seed(routines, &plan.ctes[position].query, params, outer)?
-            } else {
-                self.bind_query_routines_for_storage(
+                self.bind_recursive_seed(
                     routines,
-                    &mut plan.ctes[position].query,
+                    ctes[position]
+                        .body
+                        .query()
+                        .ok_or_else(|| SQLError::Routine {
+                            sqlstate: "42P19".into(),
+                            message: format!(
+                                "recursive query \"{}\" must not contain data-modifying statements",
+                                ctes[position].name
+                            ),
+                        })?,
+                    params,
+                    outer,
+                )?
+            } else {
+                self.bind_cte_routines_for_storage(
+                    routines,
+                    &mut ctes[position].body,
                     params,
                     outer,
                 )?
             };
-            let columns = plan.ctes[position].columns.clone();
+            let columns = ctes[position].columns.clone();
             let provisional = rename_schema(&provisional, &columns, None);
             let provisional = if self_recursive {
-                extend_recursive_cte_binding_schema(
-                    routines,
-                    &plan.ctes[position],
-                    provisional,
-                    params,
-                )?
+                extend_recursive_cte_binding_schema(routines, &ctes[position], provisional, params)?
             } else {
-                extend_cte_generated_schema(routines, &plan.ctes[position], provisional, params)?
+                extend_cte_generated_schema(routines, &ctes[position], provisional, params)?
             };
-            previous.push((name.clone(), self.ctes.insert(name.clone(), provisional)));
+            previous.push((
+                name.clone(),
+                self.set_cte_returning(&ctes[position]),
+                self.ctes.insert(name.clone(), provisional),
+            ));
             if self_recursive {
-                let complete = self.bind_query_routines_for_storage(
+                let complete = self.bind_cte_routines_for_storage(
                     routines,
-                    &mut plan.ctes[position].query,
+                    &mut ctes[position].body,
                     params,
                     outer,
                 )?;
                 let complete = rename_schema(&complete, &columns, None);
                 let complete =
-                    extend_cte_generated_schema(routines, &plan.ctes[position], complete, params)?;
+                    extend_cte_generated_schema(routines, &ctes[position], complete, params)?;
                 self.ctes.insert(name, complete);
             }
         }
 
+        Ok(previous)
+    }
+
+    fn bind_query_routines_for_storage(
+        &mut self,
+        routines: &dyn RoutineResolution,
+        plan: &mut QueryPlan,
+        params: &[SQLParam],
+        outer: Option<&RowSchema>,
+    ) -> Result<RowSchema, SQLError> {
+        let previous = self.bind_cte_routine_schemas(routines, &mut plan.ctes, params, outer)?;
+
         let result = self.bind_root_routines_for_storage(routines, &mut plan.root, params, outer);
-        for (name, schema) in previous.into_iter().rev() {
-            match schema {
-                Some(schema) => {
-                    self.ctes.insert(name, schema);
-                }
-                None => {
-                    self.ctes.remove(&name);
-                }
-            }
-        }
+        self.restore_cte_schemas(previous);
         result
     }
 
@@ -582,12 +641,7 @@ impl SchemaScope {
         outer: Option<&RowSchema>,
     ) -> Result<(), SQLError> {
         let resolver = self.query_function_type_resolver_for_subqueries(
-            engine,
-            args.iter().any(expr_contains_subquery),
-            schema,
-            subqueries,
-            params,
-            outer,
+            engine, args, schema, subqueries, params, outer,
         )?;
         let (argument_names, argument_types, explicit_variadic) =
             uqa_execution::function_call_argument_signature(args, schema, params, Some(&resolver))?;

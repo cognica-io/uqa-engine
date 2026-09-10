@@ -35,11 +35,32 @@ pub(in crate::sql) fn run_update(
     })
 }
 
-#[expect(clippy::too_many_lines, reason = "preserves DML lock and event order")]
+pub(in crate::sql) fn run_update_with_ctes(
+    engine: &Engine,
+    mut stmt: UpdatePlan,
+    params: &[SQLParam],
+    ctes: &CteScope,
+) -> Result<SQLResult, SQLError> {
+    stmt.table = super::resolve_dml_target_name(engine, &stmt.table, stmt.target_relation_bound)?;
+    super::run_mutation_command(engine, move |engine| {
+        run_update_inner_with_ctes(engine, &stmt, params, Some(ctes))
+    })
+}
+
 pub(in crate::sql) fn run_update_inner(
     engine: &Engine,
     stmt: &UpdatePlan,
     params: &[SQLParam],
+) -> Result<SQLResult, SQLError> {
+    run_update_inner_with_ctes(engine, stmt, params, None)
+}
+
+#[expect(clippy::too_many_lines, reason = "preserves DML lock and event order")]
+fn run_update_inner_with_ctes(
+    engine: &Engine,
+    stmt: &UpdatePlan,
+    params: &[SQLParam],
+    inherited_ctes: Option<&CteScope>,
 ) -> Result<SQLResult, SQLError> {
     if let Some(kind) = super::view_triggers::target_view_kind(engine, &stmt.table)? {
         if kind == crate::StoredViewKind::Materialized {
@@ -61,10 +82,16 @@ pub(in crate::sql) fn run_update_inner(
             uqa_sql::ast::RuleEvent::Update,
         )? {
             let _ = super::view_privileges::ensure_update(engine, stmt)?;
-            return super::view_triggers::run_view_update_inner(engine, stmt, params);
+            return super::view_triggers::run_view_update_inner(
+                engine,
+                stmt,
+                params,
+                inherited_ctes,
+            );
         }
-        let rewritten = super::view_automatic::rewrite_update_to_base(engine, stmt, params)?;
-        return run_update_inner(engine, &rewritten, params);
+        let rewritten =
+            super::view_automatic::rewrite_update_to_base(engine, stmt, params, inherited_ctes)?;
+        return run_update_inner_with_ctes(engine, &rewritten, params, inherited_ctes);
     }
     let _transition_capture_scope = crate::sql::triggers::TransitionCaptureScope::enter();
     engine.lock_relation(
@@ -136,9 +163,17 @@ pub(in crate::sql) fn run_update_inner(
                 &assigned_columns,
             )?
             .is_empty();
-    let statement_snapshot = has_before_statement_trigger
-        .then(|| engine.capture_statement_snapshot_engine())
-        .transpose()?;
+    let statement_snapshot = match inherited_ctes.and_then(CteScope::command_cte_snapshot) {
+        Some(snapshot) => Some(snapshot),
+        None if has_before_statement_trigger
+            || stmt.ctes.iter().any(|cte| cte.body.modifies_data()) =>
+        {
+            Some(std::sync::Arc::new(
+                engine.capture_statement_read_snapshot()?,
+            ))
+        }
+        None => None,
+    };
     if update_original_query && !has_any_update_rules {
         crate::sql::triggers::fire_statement_triggers(
             engine,
@@ -148,13 +183,20 @@ pub(in crate::sql) fn run_update_inner(
             &assigned_columns,
         )?;
     }
-    let read_engine = statement_snapshot.as_ref().unwrap_or(engine);
+    let snapshot_engine = statement_snapshot
+        .as_deref()
+        .map(|snapshot| engine.statement_read_snapshot_engine(snapshot));
+    let read_engine = snapshot_engine.as_ref().unwrap_or(engine);
     let mut ctes = CteScope::new_for_command(
         read_engine,
         stmt.statement_privilege_subject.as_deref(),
         stmt.relations_bound,
     )?;
-    crate::sql::select::materialize_plan_ctes(read_engine, &stmt.ctes, params, &mut ctes)?;
+    if let Some(parent) = inherited_ctes {
+        ctes.inherit_cte_bindings(parent);
+    }
+    ctes.set_command_cte_snapshot(statement_snapshot.clone());
+    crate::sql::select::materialize_plan_ctes(engine, &stmt.ctes, params, &mut ctes)?;
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
 
     privileges::ensure_update_source_privileges(stmt, &privilege_expressions, &ctes)?;
@@ -453,12 +495,12 @@ pub(in crate::sql) fn run_update_inner(
                 base_rule_suppressed[global_index] = rule_batch.suppresses(local_index);
             }
         }
-        let view_rule_returning =
-            view_rule_batches.execute_actions(engine, stmt.view_rule_returning.as_ref())?;
-        let rule_returning = rule_batch
+        let view_rule_outcome = view_rule_batches
+            .execute_actions_with_affected(engine, stmt.view_rule_returning.as_ref())?;
+        let rule_outcome = rule_batch
             .as_ref()
             .map(|rule_batch| {
-                rule_batch.execute_actions(
+                rule_batch.execute_actions_with_affected(
                     engine,
                     crate::sql::rules::RuleReturningRequest::from_plan(
                         &stmt.returning,
@@ -467,8 +509,18 @@ pub(in crate::sql) fn run_update_inner(
                     ),
                 )
             })
-            .transpose()?
-            .flatten();
+            .transpose()?;
+        if !update_original_query {
+            affected = if view_rule_outcome.sets_command_tag {
+                view_rule_outcome.affected_rows
+            } else {
+                rule_outcome
+                    .as_ref()
+                    .map_or(0, |outcome| outcome.affected_rows)
+            };
+        }
+        let view_rule_returning = view_rule_outcome.returning;
+        let rule_returning = rule_outcome.and_then(|outcome| outcome.returning);
         if view_rule_returning.is_some() && rule_returning.is_some() {
             return Err(SQLError::Routine {
                 sqlstate: "0A000".into(),
@@ -877,7 +929,7 @@ pub(in crate::sql) fn row_independent_update_values(
 
 pub(in crate::sql) fn expr_is_row_independent(expr: &ScalarExpr) -> bool {
     match expr {
-        ScalarExpr::Literal(_) | ScalarExpr::Param(_) => true,
+        ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. } | ScalarExpr::Param(_) => true,
         ScalarExpr::Array(items)
         | ScalarExpr::Row(items)
         | ScalarExpr::And(items)

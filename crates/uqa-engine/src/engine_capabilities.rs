@@ -52,6 +52,7 @@ pub(crate) struct CatalogTableSnapshot {
     pub(crate) object_id: [u8; 16],
     pub(crate) security: Arc<super::engine_state::TableSecurity>,
     pub(crate) columns: Arc<Vec<uqa_sql::ast::ColumnDef>>,
+    pub(crate) columns_declared: bool,
     pub(crate) checks: Arc<Vec<uqa_sql::ast::TableCheck>>,
     pub(crate) foreign_keys: Arc<Vec<uqa_sql::ast::ForeignKey>>,
     pub(crate) keys: Arc<Vec<uqa_sql::ast::TableKeyConstraint>>,
@@ -111,6 +112,18 @@ pub(crate) struct SessionExecutionView<'a> {
 }
 
 impl SessionExecutionView<'_> {
+    pub(crate) fn prepared_statements(
+        &self,
+    ) -> Vec<super::engine_statement_cache::PreparedStatementMetadata> {
+        self.session
+            .prepared
+            .read()
+            .iter()
+            .filter(|(name, _)| !name.is_empty())
+            .map(|(name, entry)| entry.metadata(name))
+            .collect()
+    }
+
     pub(crate) fn search_path(&self) -> Vec<String> {
         self.session.state.read().search_path.clone()
     }
@@ -163,6 +176,21 @@ impl SessionExecutionView<'_> {
                 sqlstate: "42704".into(),
                 message: format!("unrecognized configuration parameter \"{name}\""),
             })
+    }
+
+    pub(crate) fn runtime_parameter_source(&self, name: &str) -> &'static str {
+        if self
+            .session
+            .state
+            .read()
+            .session_vars
+            .keys()
+            .any(|key| key.eq_ignore_ascii_case(name))
+        {
+            "session"
+        } else {
+            "default"
+        }
     }
 
     fn transaction_parameter_value(&self, name: &str) -> Option<String> {
@@ -421,6 +449,7 @@ impl Engine {
                     object_id: table.object_id(),
                     security: table.security.snapshot(),
                     columns: table.columns.snapshot(),
+                    columns_declared: *table.columns_declared.read(),
                     checks: table.table_checks.snapshot(),
                     foreign_keys: table.foreign_keys.snapshot(),
                     keys: table.key_constraints.snapshot(),
@@ -463,6 +492,17 @@ impl Engine {
 }
 
 pub(super) fn default_runtime_parameter(name: &str) -> Option<&'static str> {
+    if name.eq_ignore_ascii_case("application_name") {
+        return Some("");
+    }
+    if name.eq_ignore_ascii_case("standard_conforming_strings")
+        || name.eq_ignore_ascii_case("integer_datetimes")
+    {
+        return Some("on");
+    }
+    if name.eq_ignore_ascii_case("server_version_num") {
+        return Some("180000");
+    }
     if name.eq_ignore_ascii_case("server_version") {
         return Some("18.0-uqa");
     }
@@ -478,6 +518,9 @@ pub(super) fn default_runtime_parameter(name: &str) -> Option<&'static str> {
     }
     if name.eq_ignore_ascii_case("work_mem") {
         return Some("64MB");
+    }
+    if name.eq_ignore_ascii_case("plan_cache_mode") {
+        return Some("auto");
     }
     if name.eq_ignore_ascii_case("session_replication_role") {
         return Some("origin");
@@ -505,11 +548,13 @@ pub(super) fn is_known_runtime_parameter(name: &str) -> bool {
 }
 
 pub(super) fn is_mutable_runtime_parameter(name: &str) -> bool {
-    name.eq_ignore_ascii_case("search_path")
+    name.eq_ignore_ascii_case("application_name")
+        || name.eq_ignore_ascii_case("search_path")
         || name.eq_ignore_ascii_case("client_encoding")
         || name.eq_ignore_ascii_case("datestyle")
         || name.eq_ignore_ascii_case("timezone")
         || name.eq_ignore_ascii_case("work_mem")
+        || name.eq_ignore_ascii_case("plan_cache_mode")
         || name.eq_ignore_ascii_case("session_replication_role")
         || name.eq_ignore_ascii_case("plpgsql.check_asserts")
         || name.eq_ignore_ascii_case("default_transaction_isolation")

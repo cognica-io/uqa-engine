@@ -31,8 +31,15 @@ pub(in crate::sql) fn materialize_recursive_cte(
     ctes: &mut CteScope,
     output_filter: Option<&(String, ScalarExpr)>,
 ) -> Result<uqa_execution::SharedSpill, SQLError> {
-    if !cte.query.ctes.is_empty() {
-        materialize_plan_ctes(engine, &cte.query.ctes, params, ctes)?;
+    let query = cte.body.query().ok_or_else(|| SQLError::Routine {
+        sqlstate: "42P19".into(),
+        message: format!(
+            "recursive query \"{}\" must not contain data-modifying statements",
+            cte.name
+        ),
+    })?;
+    if !query.ctes.is_empty() {
+        materialize_plan_ctes(engine, &query.ctes, params, ctes)?;
     }
 
     let RelationalPlan::SetOp {
@@ -44,7 +51,7 @@ pub(in crate::sql) fn materialize_recursive_cte(
         limit,
         offset,
         ..
-    } = &cte.query.root
+    } = &query.root
     else {
         return Err(SQLError::Unsupported(
             "recursive CTE requires a UNION query".into(),

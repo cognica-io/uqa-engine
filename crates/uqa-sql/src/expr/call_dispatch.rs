@@ -53,6 +53,10 @@ fn eval_function_call_inner(
     let lower = lower.as_ref();
     let evaluated: Vec<Value> = call_args.iter().map(|(_, value)| value.clone()).collect();
 
+    if let Some(result) = super::current_time::eval_current_time(lower, &evaluated, Some(ctx)) {
+        return result;
+    }
+
     if let Some(result) = random::eval_random_function(lower, &call_args, ctx) {
         return result;
     }

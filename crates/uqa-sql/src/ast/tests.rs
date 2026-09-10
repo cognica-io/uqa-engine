@@ -281,6 +281,7 @@ fn routine_invocation_binding_round_trips_and_legacy_bindings_default_to_none() 
         invocation: Some(Box::new(RoutineInvocationBinding {
             argument_positions: vec![0, 1],
             argument_targets: vec!["integer".into(), "integer[]".into()],
+            argument_sources: vec![Some("integer".into()), Some("integer[]".into())],
             parameter_types: vec!["integer".into(), "integer[]".into()],
             return_type: Some("integer".into()),
             variadic_mode: RoutineVariadicMode::Explicit { parameter_index: 1 },

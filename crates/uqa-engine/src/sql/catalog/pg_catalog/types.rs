@@ -10,6 +10,8 @@ use uqa_core::Value;
 use uqa_sql::ast::{ColumnType, RangeSubtype};
 use uqa_sql::ResultRow;
 
+use crate::engine_capabilities::CatalogReadView;
+
 use super::super::helpers::oids::{current_user_oid, schema_oid};
 use super::super::helpers::rows::{bool_value, int_value, row, str_value};
 use super::super::helpers::type_metadata::{
@@ -22,7 +24,7 @@ use super::super::helpers::type_metadata::{
     clippy::too_many_lines,
     reason = "preserves catalog column and OID order"
 )]
-pub(in crate::sql::catalog) fn build_pg_type() -> Vec<ResultRow> {
+pub(in crate::sql::catalog) fn build_pg_type(catalog: &CatalogReadView) -> Vec<ResultRow> {
     let catalog_types = [
         (ColumnType::Boolean, "B", true, "b"),
         (ColumnType::Bytea, "U", false, "b"),
@@ -207,7 +209,7 @@ pub(in crate::sql::catalog) fn build_pg_type() -> Vec<ResultRow> {
             category: "P",
             preferred: false,
             relation_oid: 0,
-            subscript: "-",
+            subscript: 0,
             element_oid: 0,
             array_oid: 2287,
             routines: PgTypeRoutineOids {
@@ -226,6 +228,34 @@ pub(in crate::sql::catalog) fn build_pg_type() -> Vec<ResultRow> {
             collation_oid: 0,
         }),
         special_pg_type_catalog_row(PgTypeCatalogMetadata {
+            oid: 705,
+            name: "unknown".into(),
+            namespace_oid: schema_oid("pg_catalog"),
+            len: -2,
+            by_value: false,
+            kind: "p",
+            category: "X",
+            preferred: false,
+            relation_oid: 0,
+            subscript: 0,
+            element_oid: 0,
+            array_oid: 0,
+            routines: PgTypeRoutineOids {
+                input: 109,
+                output: 110,
+                receive: 2416,
+                send: 2417,
+                modifier_input: 0,
+                modifier_output: 0,
+                analyze: 0,
+            },
+            align: "c",
+            storage: "p",
+            base_oid: 0,
+            type_modifier: -1,
+            collation_oid: 0,
+        }),
+        special_pg_type_catalog_row(PgTypeCatalogMetadata {
             oid: 2278,
             name: "void".into(),
             namespace_oid: schema_oid("pg_catalog"),
@@ -235,7 +265,7 @@ pub(in crate::sql::catalog) fn build_pg_type() -> Vec<ResultRow> {
             category: "P",
             preferred: false,
             relation_oid: 0,
-            subscript: "-",
+            subscript: 0,
             element_oid: 0,
             array_oid: 0,
             routines: PgTypeRoutineOids {
@@ -263,7 +293,7 @@ pub(in crate::sql::catalog) fn build_pg_type() -> Vec<ResultRow> {
             category: "P",
             preferred: false,
             relation_oid: 0,
-            subscript: "array_subscript_handler",
+            subscript: 6179,
             element_oid: 2249,
             array_oid: 0,
             routines: PgTypeRoutineOids {
@@ -291,7 +321,7 @@ pub(in crate::sql::catalog) fn build_pg_type() -> Vec<ResultRow> {
             category: "A",
             preferred: false,
             relation_oid: 0,
-            subscript: "array_subscript_handler",
+            subscript: 6179,
             element_oid: 13_315,
             array_oid: 0,
             routines: PgTypeRoutineOids {
@@ -319,7 +349,7 @@ pub(in crate::sql::catalog) fn build_pg_type() -> Vec<ResultRow> {
             category: "C",
             preferred: false,
             relation_oid: 13_313,
-            subscript: "-",
+            subscript: 0,
             element_oid: 0,
             array_oid: 13_314,
             routines: PgTypeRoutineOids {
@@ -338,6 +368,55 @@ pub(in crate::sql::catalog) fn build_pg_type() -> Vec<ResultRow> {
             collation_oid: 0,
         }),
     ]);
+    for domain in catalog.domains() {
+        let ty = domain.column_type();
+        let owner = catalog
+            .roles()
+            .find(|role| role.name == domain.owner)
+            .map_or_else(current_user_oid, |role| role.oid);
+        let base = &domain.definition.base;
+        let mut scalar = base;
+        while let ColumnType::Domain { base, .. } = scalar {
+            scalar = base;
+        }
+        let category = types
+            .iter()
+            .find(|entry| entry.get("oid") == Some(&int_value(pg_type_oid(scalar))))
+            .and_then(|entry| entry.get("typcategory"))
+            .cloned()
+            .unwrap_or_else(|| str_value("U"));
+        let mut entry = pg_type_catalog_row(
+            &ty,
+            schema_oid(&domain.identity.schema),
+            "d",
+            "U",
+            false,
+            pg_type_oid(base),
+            super::super::helpers::type_metadata::pg_type_modifier(base),
+        );
+        entry.insert("typcategory".into(), category);
+        entry.insert("typowner".into(), int_value(owner));
+        entry.insert(
+            "typnotnull".into(),
+            bool_value(domain.definition.not_null.is_some()),
+        );
+        entry.insert(
+            "typdefault".into(),
+            super::super::expression_text::default_expr_text(domain.definition.default.as_ref()),
+        );
+        types.push(entry);
+        let mut array = pg_type_catalog_row(
+            &ColumnType::Array(Box::new(ty)),
+            schema_oid(&domain.identity.schema),
+            "b",
+            "A",
+            false,
+            0,
+            -1,
+        );
+        array.insert("typowner".into(), int_value(owner));
+        types.push(array);
+    }
     types.sort_by_key(|entry| match entry.get("oid") {
         Some(Value::Int(oid)) => *oid,
         _ => i64::MAX,
@@ -385,7 +464,7 @@ struct PgTypeCatalogMetadata<'a> {
     category: &'a str,
     preferred: bool,
     relation_oid: i64,
-    subscript: &'a str,
+    subscript: i64,
     element_oid: i64,
     array_oid: i64,
     routines: PgTypeRoutineOids,
@@ -441,7 +520,7 @@ fn special_pg_type_catalog_row(metadata: PgTypeCatalogMetadata<'_>) -> ResultRow
         ("typisdefined", bool_value(true)),
         ("typdelim", str_value(",")),
         ("typrelid", int_value(metadata.relation_oid)),
-        ("typsubscript", str_value(metadata.subscript)),
+        ("typsubscript", int_value(metadata.subscript)),
         ("typelem", int_value(metadata.element_oid)),
         ("typarray", int_value(metadata.array_oid)),
         ("typinput", int_value(metadata.routines.input)),

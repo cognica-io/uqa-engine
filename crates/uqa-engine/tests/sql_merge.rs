@@ -256,12 +256,11 @@ fn merge_rejects_unknown_target_columns_before_executing_a_branch() {
          WHEN NOT MATCHED THEN INSERT (id, misspelled) VALUES (d.id, d.change)",
     ] {
         let error = eng.sql(sql, &[]).unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .to_ascii_lowercase()
-                .contains("unknown column"),
-            "unexpected error for {sql}: {error}"
+        assert_eq!(error.sqlstate(), Some("42703"), "{sql}: {error}");
+        assert_eq!(
+            error.to_string(),
+            "column \"misspelled\" of relation \"inventory\" does not exist",
+            "{sql}"
         );
     }
 

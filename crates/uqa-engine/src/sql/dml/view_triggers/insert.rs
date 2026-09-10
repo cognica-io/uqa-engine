@@ -22,6 +22,7 @@ pub(in crate::sql::dml) fn run_view_insert_inner(
     engine: &Engine,
     stmt: &InsertPlan,
     params: &[SQLParam],
+    inherited_ctes: Option<&CteScope>,
 ) -> Result<SQLResult, SQLError> {
     let target = resolve_view_target(engine, &stmt.table)?;
     if stmt.on_conflict.is_some() {
@@ -58,9 +59,17 @@ pub(in crate::sql::dml) fn run_view_insert_inner(
                 &[],
             )?
             .is_empty();
-    let statement_snapshot = has_before_statement_trigger
-        .then(|| engine.capture_statement_snapshot_engine())
-        .transpose()?;
+    let statement_snapshot = match inherited_ctes.and_then(CteScope::command_cte_snapshot) {
+        Some(snapshot) => Some(snapshot),
+        None if has_before_statement_trigger
+            || stmt.ctes.iter().any(|cte| cte.body.modifies_data()) =>
+        {
+            Some(std::sync::Arc::new(
+                engine.capture_statement_read_snapshot()?,
+            ))
+        }
+        None => None,
+    };
     if original_query_survives {
         crate::sql::triggers::fire_statement_triggers(
             engine,
@@ -70,10 +79,20 @@ pub(in crate::sql::dml) fn run_view_insert_inner(
             &[],
         )?;
     }
-    let read_engine = statement_snapshot.as_ref().unwrap_or(engine);
-    let mut ctes =
-        CteScope::new_for_statement(read_engine, stmt.statement_privilege_subject.as_deref());
-    crate::sql::select::materialize_plan_ctes(read_engine, &stmt.ctes, params, &mut ctes)?;
+    let snapshot_engine = statement_snapshot
+        .as_deref()
+        .map(|snapshot| engine.statement_read_snapshot_engine(snapshot));
+    let read_engine = snapshot_engine.as_ref().unwrap_or(engine);
+    let mut ctes = CteScope::new_for_command(
+        read_engine,
+        stmt.statement_privilege_subject.as_deref(),
+        stmt.relations_bound,
+    )?;
+    if let Some(parent) = inherited_ctes {
+        ctes.inherit_cte_bindings(parent);
+    }
+    ctes.set_command_cte_snapshot(statement_snapshot.clone());
+    crate::sql::select::materialize_plan_ctes(engine, &stmt.ctes, params, &mut ctes)?;
     ctes.scalar_subqueries.clone_from(&stmt.subqueries);
     let suppressed_source_is_unused = stmt.source.is_some()
         && !crate::sql::rules::relation_rules_require_event_rows(
@@ -285,10 +304,10 @@ pub(in crate::sql::dml) fn run_view_insert_inner(
     if let Some(outer_returning) = outer_rule_outcome.returning {
         return outer_returning.project(engine, params, &ctes, None);
     }
-    if !original_query_survives && rule_outcome.executed_action {
+    if !original_query_survives && rule_outcome.sets_command_tag {
         result.affected_rows = rule_outcome.affected_rows;
     }
-    if !original_query_survives && outer_rule_outcome.executed_action {
+    if !original_query_survives && outer_rule_outcome.sets_command_tag {
         result.affected_rows = outer_rule_outcome.affected_rows;
     }
     Ok(result)

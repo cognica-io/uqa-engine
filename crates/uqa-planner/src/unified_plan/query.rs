@@ -67,7 +67,10 @@ pub(super) fn lower_ctes(ctes: &[CTE], aggregates: &dyn AggregateClassifier) -> 
                 ),
                 path_column: cycle.path_column.clone(),
             }),
-            query: Box::new(QueryPlan::lower_with((*cte.query).clone(), aggregates)),
+            body: super::CtePlanBody::from(super::UnifiedPlan::lower_with(
+                cte.body.clone().into_statement(),
+                aggregates,
+            )),
         })
         .collect()
 }
@@ -372,12 +375,14 @@ impl SourcePlan {
                 qualifier,
                 alias,
                 column_aliases,
+                bound_columns,
                 include_descendants,
             } => Self::Table {
                 name,
                 qualifier,
                 alias,
                 column_aliases,
+                bound_columns,
                 include_descendants,
             },
             FromClause::Join {

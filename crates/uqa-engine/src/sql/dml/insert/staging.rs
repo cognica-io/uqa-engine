@@ -392,7 +392,7 @@ pub(in crate::sql) fn apply_missing_column_defaults(
             continue;
         }
         if let Some(default_expr) = engine
-            .try_column_default_expr(table, &col)
+            .try_column_insert_default_expr(table, &col)
             .map_err(|err| dml_storage_error("INSERT defaults", err))?
         {
             let value = coerce_to_column_type(

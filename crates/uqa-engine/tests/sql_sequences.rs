@@ -26,10 +26,20 @@ mod persistence;
 #[path = "sql_sequences/security.rs"]
 mod security;
 
-fn regclass_reference(expression: &Expr) -> Option<&str> {
+fn regclass_reference(engine: &Engine, expression: &Expr) -> Option<String> {
     match expression {
-        Expr::Literal(Value::Str(reference)) => Some(reference),
-        Expr::Cast { expr, ty } if ty.ends_with("regclass") => regclass_reference(expr),
+        Expr::Literal(Value::Str(reference)) => Some(reference.clone()),
+        Expr::Cast { expr, ty } if ty.ends_with("regclass") => regclass_reference(engine, expr),
+        Expr::TypedLiteral {
+            value: Value::Int(oid),
+            ty,
+        } if ty == "regclass" => {
+            let result = engine.sql(&format!("SELECT n.nspname || '.' || c.relname AS name FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.oid={oid}"), &[]).unwrap();
+            let Value::Str(name) = &result.rows.first()?["name"] else {
+                return None;
+            };
+            Some(name.clone())
+        }
         _ => None,
     }
 }
@@ -42,7 +52,10 @@ fn default_sequence_reference(engine: &Engine, table: &str, column: &str) -> Str
     let Expr::Func { args, .. } = expression else {
         panic!("expected sequence function default, got {expression:?}");
     };
-    let Some(reference) = args.first().and_then(regclass_reference) else {
+    let Some(reference) = args
+        .first()
+        .and_then(|argument| regclass_reference(engine, argument))
+    else {
         panic!("expected literal sequence reference, got {args:?}");
     };
     reference.to_string()

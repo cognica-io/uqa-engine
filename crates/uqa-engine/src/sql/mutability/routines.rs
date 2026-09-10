@@ -510,6 +510,15 @@ pub(super) fn plpgsql_function_may_mutate_engine(
         let uqa_sql::plpgsql::PLpgSQLDatum::Var(variable) = datum else {
             continue;
         };
+        if super::domains::named_type_coercion_may_mutate(
+            engine,
+            &variable.type_name,
+            visiting_views,
+            visiting_routines,
+            classification,
+        )? {
+            return Ok(true);
+        }
         if let Some(expression) = &variable.default {
             if plpgsql_expression_may_mutate_engine(
                 engine,

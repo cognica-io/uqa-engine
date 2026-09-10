@@ -46,44 +46,31 @@ impl Engine {
     /// path: a durable schema, a virtual system schema such as `ag_catalog`,
     /// or a graph namespace.
     pub fn current_schema_name(&self) -> StorageBackendResult<Option<String>> {
-        self.synchronize_catalog_registries()?;
-        let session = self.session.state.read();
-        let schemas = self.durable.schemas.read();
-        let graphs = self.durable.graphs.read();
-        Ok(session
-            .search_path
-            .iter()
-            .find(|name| {
-                schemas.contains_key(name.as_str())
-                    || super::schemas::is_virtual_system_schema(name)
-                    || graphs.contains_key(name.as_str())
-            })
-            .cloned())
+        Ok(self.current_schema_names(false)?.into_iter().next())
     }
 
-    /// Existing schemas visible through this logical session's search path.
-    /// `PostgreSQL` implicitly searches `pg_catalog` unless it is already named
-    /// explicitly; the flag controls whether that implicit entry is returned.
+    /// Existing schemas with USAGE privilege in this logical session's search path.
+    /// `PostgreSQL` implicitly searches `pg_catalog` unless it is already named explicitly.
     pub fn current_schema_names(
         &self,
         include_implicit: bool,
     ) -> StorageBackendResult<Vec<String>> {
         self.synchronize_catalog_registries()?;
-        let session = self.session.state.read();
-        let schemas = self.durable.schemas.read();
-        let graphs = self.durable.graphs.read();
-        let path = &session.search_path;
+        let path = self.session.state.read().search_path.clone();
+        let user = self.current_user_name();
         let mut out = Vec::new();
         if include_implicit && !path.iter().any(|name| name == "pg_catalog") {
             out.push("pg_catalog".to_string());
         }
         for name in path {
-            if (schemas.contains_key(name.as_str())
-                || super::schemas::is_virtual_system_schema(name)
-                || graphs.contains_key(name.as_str()))
-                && !out.contains(name)
+            if !out.contains(&name)
+                && self.schema_has_privilege_for_role(
+                    &name,
+                    &user,
+                    crate::engine_schema_security::SchemaAclPrivilege::Usage,
+                )
             {
-                out.push(name.clone());
+                out.push(name);
             }
         }
         Ok(out)
@@ -181,6 +168,25 @@ impl Engine {
             return Ok(());
         }
         let mut value = Self::validate_default_transaction_parameter(name, value)?;
+        if name.eq_ignore_ascii_case("plan_cache_mode") {
+            let normalized = value.to_ascii_lowercase();
+            if !matches!(
+                normalized.as_str(),
+                "auto" | "force_generic_plan" | "force_custom_plan"
+            ) {
+                return Err(SQLError::Diagnostic {
+                    sqlstate: "22023".into(),
+                    message: format!(
+                        "invalid value for parameter \"plan_cache_mode\": \"{value}\""
+                    ),
+                    detail: None,
+                    hint: Some(
+                        "Available values: auto, force_generic_plan, force_custom_plan.".into(),
+                    ),
+                });
+            }
+            value = normalized;
+        }
         if name.eq_ignore_ascii_case("plpgsql.check_asserts") {
             value = if crate::engine_capabilities::parse_boolean_runtime_parameter(name, &value)? {
                 "on".into()
@@ -203,11 +209,13 @@ impl Engine {
             session.sql_statement_cache.clear();
             return Ok(());
         }
-        self.session
-            .state
-            .write()
+        let mut session = self.session.state.write();
+        session
             .session_vars
-            .insert(name.to_string(), value);
+            .retain(|key, _| !key.eq_ignore_ascii_case(name));
+        session
+            .session_vars
+            .insert(name.to_ascii_lowercase(), value);
         Ok(())
     }
 
@@ -255,6 +263,9 @@ impl Engine {
     pub fn reset_all_variables(&self) {
         let mut session = self.session.state.write();
         session.session_vars.clear();
+        session
+            .local_parameter_restore
+            .retain(|name, _| name == "role");
         session.search_path = vec!["public".into()];
         session.sql_statement_cache.clear();
     }
@@ -266,6 +277,63 @@ impl Engine {
     /// errors rather than successful empty strings.
     pub fn show_variable(&self, name: &str) -> Result<String, SQLError> {
         self.session_execution_view().show_variable(name)
+    }
+
+    pub(crate) fn set_runtime_parameter(
+        &self,
+        name: &str,
+        value: Option<&str>,
+        local: bool,
+    ) -> Result<(), SQLError> {
+        use crate::engine_state::RuntimeParameterValue;
+        let name = name.to_ascii_lowercase();
+        let before = {
+            let state = self.session.state.read();
+            let setting = state
+                .session_vars
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case(&name))
+                .map(|(_, value)| value.clone());
+            match name.as_str() {
+                "search_path" => RuntimeParameterValue::SearchPath {
+                    setting,
+                    path: state.search_path.clone(),
+                },
+                "role" => RuntimeParameterValue::Role(state.current_user.clone()),
+                _ => RuntimeParameterValue::Setting(setting),
+            }
+        };
+        if name == "role" {
+            self.set_role(value.unwrap_or("default"))?;
+        } else if let Some(value) = value {
+            self.set_variable(&name, value)?;
+        } else {
+            self.reset_variable(&name)?;
+        }
+        let in_transaction = self.transaction_depth() != 0;
+        let mut state = self.session.state.write();
+        if local {
+            if in_transaction {
+                state.local_parameter_restore.entry(name).or_insert(before);
+            } else {
+                restore_runtime_parameter(&mut state, &name, before);
+                self.push_sql_notice(
+                    "WARNING",
+                    "SET LOCAL can only be used in transaction blocks",
+                );
+            }
+        } else {
+            state.local_parameter_restore.remove(&name);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn restore_local_runtime_parameters(&self) {
+        let mut state = self.session.state.write();
+        let saved = std::mem::take(&mut state.local_parameter_restore);
+        for (name, value) in saved {
+            restore_runtime_parameter(&mut state, &name, value);
+        }
     }
 
     pub(crate) fn work_mem_bytes(&self) -> Result<usize, SQLError> {
@@ -298,17 +366,17 @@ impl Engine {
     pub fn discard(&self, target: uqa_sql::ast::DiscardTarget) -> Result<(), SQLError> {
         use uqa_sql::ast::DiscardTarget;
         let _statement = self.runtime.statement_gate.lock();
-        if self.in_explicit_transaction_block() {
+        if target == DiscardTarget::All && self.in_explicit_transaction_block() {
             return Err(SQLError::Routine {
                 sqlstate: "25001".into(),
-                message: "DISCARD cannot run inside a transaction block".into(),
+                message: "DISCARD ALL cannot run inside a transaction block".into(),
             });
         }
         if matches!(target, DiscardTarget::All | DiscardTarget::Temp) {
             self.discard_temporary_relations();
         }
         if matches!(target, DiscardTarget::All | DiscardTarget::Sequences) {
-            self.session.sequence_caches.lock().clear();
+            self.discard_sequence_session_values();
         }
         if target == DiscardTarget::All {
             if self.transaction_depth() == 0 {
@@ -321,9 +389,7 @@ impl Engine {
         match target {
             DiscardTarget::All => {
                 session.session_vars.clear();
-                session.prepared.clear();
-                session.sequence_currvals.clear();
-                session.last_sequence = None;
+                self.session.prepared.write().clear();
                 session.sql_statement_cache.clear();
                 session.search_path = vec!["public".to_string()];
                 let session_user = session.session_user.clone();
@@ -333,14 +399,10 @@ impl Engine {
                 return Ok(());
             }
             DiscardTarget::Plans => {
-                session.prepared.clear();
+                self.invalidate_prepared_plans();
                 session.sql_statement_cache.clear();
             }
-            DiscardTarget::Sequences => {
-                session.sequence_currvals.clear();
-                session.last_sequence = None;
-            }
-            DiscardTarget::Temp => {}
+            DiscardTarget::Sequences | DiscardTarget::Temp => {}
         }
         Ok(())
     }
@@ -422,5 +484,32 @@ impl Engine {
             self.note_table_catalog_changed();
         }
         self.note_catalog_registry_changed();
+    }
+}
+
+fn restore_runtime_parameter(
+    state: &mut crate::SessionStateSnapshot,
+    name: &str,
+    value: crate::engine_state::RuntimeParameterValue,
+) {
+    use crate::engine_state::RuntimeParameterValue;
+    let setting = match value {
+        RuntimeParameterValue::Setting(value) => value,
+        RuntimeParameterValue::SearchPath { setting, path } => {
+            state.search_path = path;
+            state.sql_statement_cache.clear();
+            setting
+        }
+        RuntimeParameterValue::Role(role) => {
+            state.current_user = role;
+            state.sql_statement_cache.clear();
+            return;
+        }
+    };
+    state
+        .session_vars
+        .retain(|key, _| !key.eq_ignore_ascii_case(name));
+    if let Some(value) = setting {
+        state.session_vars.insert(name.into(), value);
     }
 }

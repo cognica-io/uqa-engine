@@ -417,23 +417,16 @@ fn new_session_does_not_repeat_open_time_catalog_migrations() {
 }
 
 #[test]
-fn pinned_reload_reports_a_missing_public_schema_without_repairing_it() {
+fn pinned_reload_preserves_a_dropped_public_schema_without_repairing_it() {
     let directory = tempfile::tempdir().unwrap();
     let engine = Engine::open(&directory.path().join("missing-public.db")).unwrap();
     let catalog = engine.storage.catalog.as_ref().expect("persistent catalog");
     catalog.drop_schema("public").unwrap();
     let before = sqlite_data_version(&engine);
 
-    let error = engine
-        .begin_implicit_statement_transaction(true)
-        .unwrap_err();
+    engine.begin_implicit_statement_transaction(true).unwrap();
+    engine.rollback().unwrap();
 
-    assert!(
-        error
-            .to_string()
-            .contains("missing required schema `public`"),
-        "unexpected error: {error}"
-    );
     assert_eq!(sqlite_data_version(&engine), before);
     assert!(!catalog
         .load_schemas()

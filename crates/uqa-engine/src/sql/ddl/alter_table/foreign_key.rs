@@ -238,6 +238,7 @@ pub(super) fn validate_foreign_key_rows(
 }
 
 fn foreign_key_violation(table: &str, name: &str) -> SQLError {
+    let table = crate::sql::dml::foreign_key_relation_name(table);
     constraint_error(
         "23503",
         format!("insert or update on table \"{table}\" violates foreign key constraint \"{name}\""),

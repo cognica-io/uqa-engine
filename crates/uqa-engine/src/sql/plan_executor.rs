@@ -18,8 +18,7 @@ use crate::engine_capabilities::{MutationCoordinator, QueryRuntimeView, SessionE
 use crate::engine_session::{MaterializedViewRegistration, ViewRegistration};
 
 use super::scalar::{
-    analyze_physical_call_arguments, eval_physical, eval_physical_call_arguments,
-    PhysicalEvalContext,
+    analyze_physical_call_arguments, eval_physical_call_arguments, PhysicalEvalContext,
 };
 use super::{
     plpgsql_exec, run_alter_sequence, run_alter_table, run_create_index, run_create_sequence,
@@ -152,6 +151,7 @@ pub(super) struct UnifiedPlanExecutor<'engine, 'params> {
     params: &'params [SQLParam],
     nested_statement: bool,
     privilege_subject: Option<String>,
+    source_sql: Option<String>,
 }
 
 impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
@@ -176,6 +176,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             params,
             nested_statement,
             privilege_subject: None,
+            source_sql: None,
         }
     }
 
@@ -184,13 +185,22 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         self
     }
 
+    pub(super) fn with_source_sql(mut self, sql: &str) -> Self {
+        self.source_sql = Some(sql.to_string());
+        self
+    }
+
     pub(super) fn execute(&mut self, plan: &UnifiedPlan) -> Result<SQLResult, SQLError> {
         self.runtime.check_cancelled()?;
+        super::cte_validation::validate_plan(self.engine, plan)?;
         super::read_only::validate_transaction_plan(self.engine, plan)?;
-        match plan {
+        let transaction_failed = self.engine.transaction_failed();
+        let mut result = match plan {
             UnifiedPlan::Query(query) => self.execute_query(query),
             UnifiedPlan::Command(command) => self.execute_command(command),
-        }
+        }?;
+        super::completion::set_command_completion(plan, &mut result, transaction_failed);
+        Ok(result)
     }
 
     fn execute_query(&self, query: &QueryPlan) -> Result<SQLResult, SQLError> {
@@ -207,6 +217,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         plan: &UnifiedPlan,
     ) -> Result<select::QueryOutput, SQLError> {
         self.runtime.check_cancelled()?;
+        super::cte_validation::validate_plan(self.engine, plan)?;
         super::read_only::validate_transaction_plan(self.engine, plan)?;
         let UnifiedPlan::Query(query) = plan else {
             return Err(SQLError::Unsupported(
@@ -294,6 +305,8 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             Value::Str(self.session.show_variable(name)?),
         );
         Ok(SQLResult {
+            kind: uqa_sql::SQLResultKind::Rows,
+            command_tag: None,
             columns: vec![name.to_string()],
             column_types: vec![Some(uqa_sql::ColumnType::Text)],
             rows: vec![row],
@@ -329,14 +342,25 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         run_explain(body, verbose, format, analysis.as_ref())
     }
 
-    fn execute_prepare(&self, name: &str, body: &UnifiedPlan) -> Result<SQLResult, SQLError> {
+    fn execute_prepare(
+        &self,
+        name: &str,
+        parameter_types: &[uqa_sql::ast::ColumnType],
+        body: &UnifiedPlan,
+    ) -> Result<SQLResult, SQLError> {
         if self.engine.lookup_prepared(name).is_some() {
-            return Err(SQLError::Unsupported(format!(
-                "Prepared statement `{name}` already exists"
-            )));
+            return Err(super::prepared::statement_error(
+                "42P05",
+                name,
+                "already exists",
+            ));
         }
-        self.engine
-            .register_prepared_plan(name.to_string(), body.clone())?;
+        self.engine.register_prepared_plan_with_types(
+            name.to_string(),
+            body.clone(),
+            parameter_types,
+            self.source_sql.as_deref(),
+        )?;
         Ok(SQLResult::empty())
     }
 
@@ -345,27 +369,23 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         name: &str,
         params: &[ExpressionPlan],
     ) -> Result<SQLResult, SQLError> {
-        let plan = self.engine.lookup_prepared(name).ok_or_else(|| {
-            SQLError::Unsupported(format!("Prepared statement `{name}` does not exist"))
-        })?;
-        let scope = select::CteScope::new_for_current_routine(self.engine);
-        let hook = select::ScopedEngineHook::new(self.engine, &scope);
-        let context = PhysicalEvalContext::new(None, self.params)
-            .with_function_hook(&hook)
-            .with_subquery_runner(&hook);
-        let bound: Vec<SQLParam> = params
-            .iter()
-            .map(|expression| eval_physical(expression, &context).map(SQLParam::Scalar))
-            .collect::<Result<_, _>>()?;
+        let bound =
+            super::prepared::bind_execute_parameters(self.engine, name, params, self.params)?;
+        let plan = self
+            .engine
+            .prepared_plan_for_execution(name, &bound)?
+            .ok_or_else(|| super::prepared::statement_error("26000", name, "does not exist"))?;
         UnifiedPlanExecutor::new_nested(self.engine, &bound).execute(&plan)
     }
 
     fn execute_deallocate(&self, name: Option<&str>) -> Result<SQLResult, SQLError> {
         if let Some(name) = name {
             if self.engine.lookup_prepared(name).is_none() {
-                return Err(SQLError::Unsupported(format!(
-                    "Prepared statement `{name}` does not exist"
-                )));
+                return Err(super::prepared::statement_error(
+                    "26000",
+                    name,
+                    "does not exist",
+                ));
             }
         }
         self.engine.deallocate_prepared(name);
@@ -480,6 +500,15 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         reason = "preserves SELECT schema and row identity"
     )]
     fn execute_command(&self, command: &CommandPlan) -> Result<SQLResult, SQLError> {
+        if let Some(error) = super::catalog::virtual_relation_mutation_error(
+            &self.session.relation_name_resolution(),
+            command,
+        ) {
+            // Semantic errors precede the view's rewrite-time mutation rejection.
+            let ctes = select::CteScope::new_for_current_routine(self.engine);
+            super::prepared::analyze_command_parameters(self.engine, command, self.params, &ctes)?;
+            return Err(error);
+        }
         match command {
             CommandPlan::CreateTable(statement) => {
                 run_create_table(self.engine, statement.as_ref().clone())
@@ -586,17 +615,23 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 options,
                 query,
             } => {
-                self.engine
-                    .register_materialized_view_plan(MaterializedViewRegistration {
-                        name,
-                        column_names,
-                        plan: (**query).clone(),
-                        if_not_exists: *if_not_exists,
-                        with_no_data: *with_no_data,
-                        options,
-                        params: self.params,
-                    })?;
-                Ok(SQLResult::empty())
+                let populated_rows =
+                    self.engine
+                        .register_materialized_view_plan(MaterializedViewRegistration {
+                            name,
+                            column_names,
+                            plan: (**query).clone(),
+                            if_not_exists: *if_not_exists,
+                            with_no_data: *with_no_data,
+                            options,
+                            params: self.params,
+                        })?;
+                let completion = populated_rows.map_or_else(
+                    || "CREATE MATERIALIZED VIEW".to_string(),
+                    |rows| format!("SELECT {rows}"),
+                );
+                Ok(SQLResult::from_affected(populated_rows.unwrap_or(0))
+                    .with_command_tag(completion))
             }
             CommandPlan::RefreshMaterializedView {
                 name,
@@ -611,6 +646,12 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 name,
                 if_not_exists,
             } => self.execute_create_schema(name, *if_not_exists),
+            CommandPlan::AlterSchemaOwner { name, new_owner } => {
+                self.engine.with_implicit_transaction(|engine| {
+                    engine.alter_schema_owner(name, new_owner)?;
+                    Ok(SQLResult::empty())
+                })
+            }
             CommandPlan::Notify { channel, payload } => {
                 self.engine.notify(channel, payload)?;
                 Ok(SQLResult::empty())
@@ -623,20 +664,21 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 self.engine.unlisten(channel.as_deref())?;
                 Ok(SQLResult::empty())
             }
-            CommandPlan::SetVariable { name, value } => {
-                if name.eq_ignore_ascii_case("role") {
-                    self.engine.set_role(value)?;
-                } else {
-                    self.engine.set_variable(name, value)?;
-                }
+            CommandPlan::SetVariable {
+                name,
+                value,
+                local,
+                is_default,
+            } => {
+                self.engine.set_runtime_parameter(
+                    name,
+                    (!is_default).then_some(value.as_str()),
+                    *local,
+                )?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::ResetVariable { name } => {
-                if name.eq_ignore_ascii_case("role") {
-                    self.engine.set_role("default")?;
-                } else {
-                    self.engine.reset_variable(name)?;
-                }
+                self.engine.set_runtime_parameter(name, None, false)?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::ResetAllVariables => {
@@ -730,6 +772,10 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             CommandPlan::CreateSequence(statement) => {
                 run_create_sequence(self.engine, statement.clone())
             }
+            CommandPlan::CreateDomain(statement) => {
+                super::domains::create_domain(self.engine, statement.clone())?;
+                Ok(SQLResult::empty())
+            }
             CommandPlan::AlterSequence(statement) => {
                 run_alter_sequence(self.engine, statement.clone())
             }
@@ -754,7 +800,11 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                     params: self.params,
                 },
             ),
-            CommandPlan::Prepare { name, body } => self.execute_prepare(name, body),
+            CommandPlan::Prepare {
+                name,
+                parameter_types,
+                body,
+            } => self.execute_prepare(name, parameter_types, body),
             CommandPlan::Execute { name, params } => self.execute_prepared(name, params),
             CommandPlan::Deallocate { name } => self.execute_deallocate(name.as_deref()),
             CommandPlan::CreateForeignServer(statement) => {

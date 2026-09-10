@@ -199,12 +199,7 @@ fn resolve_routine_type_name_with_reference(
             }
             return Ok(canonical);
         }
-        ColumnType::from_sql_name(base).map_err(|error| match error {
-            SQLError::Unsupported(_) => {
-                SQLError::Unsupported(format!("routine type `{type_name}` is not implemented"))
-            }
-            other => other,
-        })?
+        crate::sql::resolve_catalog_column_type_name(engine, base)?
     };
     let mut resolved = resolved;
     for _ in 0..array_dimensions {
@@ -213,7 +208,7 @@ fn resolve_routine_type_name_with_reference(
     Ok(resolved.sql_name())
 }
 
-fn resolve_plpgsql_datum_types(
+pub(crate) fn resolve_plpgsql_datum_types(
     engine: &Engine,
     function: &mut uqa_sql::plpgsql::PLpgSQLFunction,
 ) -> Result<(), SQLError> {
@@ -221,6 +216,15 @@ fn resolve_plpgsql_datum_types(
         let uqa_sql::plpgsql::PLpgSQLDatum::Var(variable) = datum else {
             continue;
         };
+        if variable.type_reference.is_none() {
+            if let Some(ty) = variable
+                .type_oid
+                .and_then(|oid| crate::sql::resolve_catalog_domain_type_by_oid(engine, oid))
+            {
+                variable.type_name = ty.sql_name();
+                continue;
+            }
+        }
         variable.type_name = resolve_routine_type_name_with_reference(
             engine,
             &variable.type_name,
@@ -446,20 +450,28 @@ pub(super) fn compile_function_body(
     engine: &Engine,
     def: &CreateFunction,
 ) -> Result<CompiledFunctionBody, SQLError> {
-    compile_function_body_inner(engine, def, false)
+    compile_function_body_inner(engine, def, false, false)
 }
 
 pub(super) fn compile_persisted_function_body(
     engine: &Engine,
     def: &CreateFunction,
 ) -> Result<CompiledFunctionBody, SQLError> {
-    compile_function_body_inner(engine, def, true)
+    compile_function_body_inner(engine, def, true, false)
+}
+
+pub(super) fn compile_persisted_function_dependencies(
+    engine: &Engine,
+    def: &CreateFunction,
+) -> Result<CompiledFunctionBody, SQLError> {
+    compile_function_body_inner(engine, def, true, true)
 }
 
 fn compile_function_body_inner(
     engine: &Engine,
     def: &CreateFunction,
     persisted_definition: bool,
+    preserve_target_expressions: bool,
 ) -> Result<CompiledFunctionBody, SQLError> {
     if !matches!(def.language.as_str(), "plpgsql" | "sql") {
         return Err(SQLError::Routine {
@@ -478,7 +490,8 @@ fn compile_function_body_inner(
     match def.language.as_str() {
         "plpgsql" => {
             stored_regrole_constants.reject(engine)?;
-            let mut function = uqa_sql::plpgsql::parse_function(def)?;
+            let catalog = crate::sql::plpgsql_catalog(engine)?;
+            let mut function = uqa_sql::plpgsql::parse_function_with_catalog(def, &catalog)?;
             resolve_plpgsql_datum_types(engine, &mut function)?;
             Ok(CompiledFunctionBody::PLpgSQL(function))
         }
@@ -496,6 +509,7 @@ fn compile_function_body_inner(
                 statements,
                 bind_catalog_dependencies,
                 persisted_definition && matches!(def.body, FunctionBody::Statements(_)),
+                preserve_target_expressions,
             )?;
             if bind_catalog_dependencies {
                 for plan in &mut plans {
@@ -515,6 +529,7 @@ fn compile_sql_routine_plans(
     statements: Vec<Statement>,
     bind_catalog_dependencies: bool,
     persisted_definition: bool,
+    preserve_target_expressions: bool,
 ) -> Result<Vec<UnifiedPlan>, SQLError> {
     let local_name = routine_local_name(&def.name)?;
     let signature_params = def.signature_params();
@@ -545,7 +560,10 @@ fn compile_sql_routine_plans(
     );
     statements
         .into_iter()
-        .map(|statement| {
+        .map(|mut statement| {
+            if bind_catalog_dependencies && !preserve_target_expressions {
+                engine.normalize_stored_merge_target_columns(&mut statement)?;
+            }
             let mut plan = UnifiedPlan::lower_with(statement, &|name: &str| {
                 engine.has_registered_aggregate_function(name)
             });
@@ -599,7 +617,9 @@ fn compile_sql_routine_plans(
                     *expression = ScalarExpr::Param(position + 1);
                 }
             });
-            crate::sql::optimize_engine_plan(engine, plan)
+            // Stored definitions retain their analyzed logical expressions;
+            // immutable evaluation belongs to invocation planning.
+            Ok(plan)
         })
         .collect()
 }

@@ -157,7 +157,8 @@ fn table_lineage(
             .map(|rows| rows.row_schema().columns().to_vec())
             .or_else(|| {
                 ctes.deferred_reference(name)
-                    .and_then(|cte| super::query_plan_output_columns(&cte.query))
+                    .and_then(|cte| cte.body.query())
+                    .and_then(super::query_plan_output_columns)
             })
             .unwrap_or_default();
         let mut output = opaque_lineage(columns, Some(alias.unwrap_or(qualifier).to_string()));
@@ -697,13 +698,9 @@ fn analyze_query_plan(
                     definition_ctes.insert_deferred(local.clone());
                 }
             }
-            analyze_query_plan(
-                &cte.query,
-                &definition_ctes,
-                outer_scopes,
-                universe,
-                required,
-            )?;
+            if let Some(query) = cte.body.query() {
+                analyze_query_plan(query, &definition_ctes, outer_scopes, universe, required)?;
+            }
         }
         preceding_ctes.insert_deferred(cte.clone());
     }

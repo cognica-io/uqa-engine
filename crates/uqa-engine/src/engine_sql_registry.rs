@@ -44,26 +44,12 @@ impl Engine {
     {
         Self::validate_sql_function_options(options)?;
         let name = Self::normalize_sql_function_name(name)?;
-        let previous = self.extensions.scalar_functions.write().insert(
+        self.extensions.scalar_functions.write().insert(
             name.clone(),
             RegisteredSQLFunction::new(Arc::new(function), options),
         );
         self.clear_sql_statement_cache();
-        if let Err(error) = self.rebind_prepared_plans() {
-            let mut scalars = self.extensions.scalar_functions.write();
-            scalars.remove(&name);
-            if let Some(previous) = previous {
-                scalars.insert(name, previous);
-            }
-            drop(scalars);
-            self.clear_sql_statement_cache();
-            if let Err(cleanup) = self.rebind_prepared_plans() {
-                return Err(SQLError::Internal(format!(
-                    "{error}; restoring prepared plans after scalar registration failure also failed: {cleanup}"
-                )));
-            }
-            return Err(error);
-        }
+        self.invalidate_prepared_plans();
         Ok(())
     }
 
@@ -91,26 +77,12 @@ impl Engine {
     {
         Self::validate_sql_function_options(options)?;
         let name = Self::normalize_sql_function_name(name)?;
-        let previous = self.extensions.table_functions.write().insert(
+        self.extensions.table_functions.write().insert(
             name.clone(),
             RegisteredSQLFunction::new(Arc::new(function), options),
         );
         self.clear_sql_statement_cache();
-        if let Err(error) = self.rebind_prepared_plans() {
-            let mut tables = self.extensions.table_functions.write();
-            tables.remove(&name);
-            if let Some(previous) = previous {
-                tables.insert(name, previous);
-            }
-            drop(tables);
-            self.clear_sql_statement_cache();
-            if let Err(cleanup) = self.rebind_prepared_plans() {
-                return Err(SQLError::Internal(format!(
-                    "{error}; restoring prepared plans after table-function registration failure also failed: {cleanup}"
-                )));
-            }
-            return Err(error);
-        }
+        self.invalidate_prepared_plans();
         Ok(())
     }
 
@@ -138,28 +110,14 @@ impl Engine {
     {
         Self::validate_sql_function_options(options)?;
         let name = Self::normalize_sql_function_name(name)?;
-        let previous = self.extensions.aggregate_functions.write().insert(
+        self.extensions.aggregate_functions.write().insert(
             name.clone(),
             RegisteredSQLFunction::new(Arc::new(function), options),
         );
         // Aggregate-vs-projection is a structural choice in `QueryPlan`.
         // Cached plans compiled before this registration must be rebound.
         self.clear_sql_statement_cache();
-        if let Err(error) = self.rebind_prepared_plans() {
-            let mut aggregates = self.extensions.aggregate_functions.write();
-            aggregates.remove(&name);
-            if let Some(previous) = previous {
-                aggregates.insert(name, previous);
-            }
-            drop(aggregates);
-            self.clear_sql_statement_cache();
-            if let Err(cleanup) = self.rebind_prepared_plans() {
-                return Err(SQLError::Internal(format!(
-                    "{error}; restoring prepared plans after aggregate registration failure also failed: {cleanup}"
-                )));
-            }
-            return Err(error);
-        }
+        self.invalidate_prepared_plans();
         Ok(())
     }
 

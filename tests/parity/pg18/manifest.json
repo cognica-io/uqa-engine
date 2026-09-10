@@ -37,14 +37,25 @@
     "sequence_introspection": "tests/parity/pg18/sequence_introspection_oracle.expected.txt",
     "transaction_catalog_visibility": "tests/parity/pg18/transaction_catalog_visibility_oracle.expected.txt",
     "tpch_fixture": "benchmarks/tpch/expected/pg18.json",
-    "stateful_indexes": "tests/parity/pg18/indexes_stateful.expected.json"
+    "stateful_indexes": "tests/parity/pg18/indexes_stateful.expected.json",
+    "domain_semantics": "tests/parity/pg18/domains_oracle.expected.json",
+    "wire_result_descriptors": "tests/parity/pg18/wire_result_oracle.expected.json",
+    "domain_drop": "tests/parity/pg18/domain_drop_oracle.expected.json",
+    "stored_column_rename": "tests/parity/pg18/stored_column_rename_oracle.expected.json",
+    "constant_planning": "tests/parity/pg18/constant_planning_oracle.expected.json",
+    "prepared_plan_error_order": "tests/parity/pg18/prepared_plan_error_order_oracle.expected.json",
+    "rule_input_planning": "tests/parity/pg18/rule_input_planning_oracle.expected.json",
+    "prepared_plan_selection": "tests/parity/pg18/prepared_plan_selection_oracle.expected.json",
+    "prepared_plan_cost": "tests/parity/pg18/prepared_plan_cost_oracle.expected.json",
+    "prepared_plan_settings": "tests/parity/pg18/prepared_plan_settings_oracle.expected.json",
+    "prepared_plan_types": "tests/parity/pg18/prepared_plan_types_oracle.expected.json"
   },
   "parser_chain": {
     "crate": "crates/uqa-pg-query",
     "wrapper_repository": "https://github.com/jaepil/pg_query.rs",
-    "wrapper_revision": "516b3a03fed42e606ce01bc8b5a864a1698c210d",
+    "wrapper_revision": "50329932e504c8ad96208a3bbafdec7d9fdaf81d",
     "library_repository": "https://github.com/jaepil/libpg_query",
-    "library_revision": "898cd71c96375d6d4219916996701571dbe2b239"
+    "library_revision": "a5356d05a1269f2982b906611d7e545c550bb369"
   },
   "milestones": {
     "M0": {
@@ -136,7 +147,14 @@
       "routines.alter-volatility-null-input-lifecycle",
       "routines.function-procedure-drop-cascade",
       "routines.function-procedure-drop-cascade-extended",
-      "ddl.check-constraint-inheritance"
+      "ddl.check-constraint-inheritance",
+      "types.domain-declarations-and-coercion",
+      "execution.prepared-parameter-contracts",
+      "types.floating-point-width",
+      "execution.sql-value-clocks",
+      "ddl.schema-drop-cascade",
+      "ddl.stored-relation-routine-dependencies",
+      "ddl.domain-drop-cascade"
     ],
     "M4": [
       "dml.returning-row-images-extended",
@@ -165,11 +183,13 @@
       "ddl.rewrite-rules",
       "graph.age-default-label-drop",
       "graph.age-cypher-complete-matrix",
-      "regression.core-and-isolation"
+      "regression.core-and-isolation",
+      "query.data-modifying-ctes"
     ],
     "M5": [
       "protocol.frontend-backend-3.2-extended",
-      "clients.driver-and-operations-matrix"
+      "clients.driver-and-operations-matrix",
+      "protocol.simple-query-command-completion"
     ],
     "M6": [
       "compatibility.complete-zero-exemption-audit"
@@ -839,6 +859,78 @@
       "supported_version": "No complete PostgreSQL 18 compatibility claim",
       "status": "not_audited",
       "open_issue": "The final current-state audit must verify every manifest item, M0 through M5 exit gate, PostgreSQL 18.4 oracle result, client and protocol matrix, persistent reopen behavior, and manual claim with zero semantic exemptions."
+    },
+    {
+      "id": "query.data-modifying-ctes",
+      "postgresql_reference": "tests/parity/pg18/cte_commands_oracle.expected.json; tests/parity/pg18/cte_command_composition_oracle.expected.json; https://www.postgresql.org/docs/18/queries-with.html#QUERIES-WITH-MODIFYING",
+      "uqa_test": "crates/uqa-engine/tests/engine_queries/sql_cte_commands.rs",
+      "supported_version": "PostgreSQL 18.4",
+      "status": "partial",
+      "open_issue": "The 98-statement PostgreSQL 18.4 oracle passes on memory and SQLite for typed RETURNING, unreferenced and exactly-once execution, sibling snapshot visibility, recursive query inputs, automatic and trigger-driven views, rewrite-rule restrictions, rollback, and SQL-standard routine dependencies. A further 56-statement composition oracle verifies MERGE view and privilege scopes, statement-trigger timing and snapshots, validation before effects, stored routine binding, quoted rule columns, and qualified function output labels. Separate SQLite tests verify UPDATE and MERGE routine binding across reopen and relation rename. Complete the unmodified upstream WITH and MERGE corpus and remaining dependency combinations before closing this item."
+    },
+    {
+      "id": "protocol.simple-query-command-completion",
+      "postgresql_reference": "tests/parity/pg18/command_completion_oracle.expected.json; https://www.postgresql.org/docs/18/protocol-flow.html#PROTOCOL-FLOW-SIMPLE-QUERY; tests/parity/pg18/wire_result_oracle.expected.json",
+      "uqa_test": "crates/uqa-engine/tests/engine_queries/sql_simple_query.rs; cargo test -p uqa-pg-server --test integration",
+      "supported_version": "PostgreSQL 18.4 embedded command completion and TCP Simple Query sessions with explicit trust policy, role authorization, protocol negotiation, typed text results, cancellation, notifications, and disconnect rollback",
+      "status": "partial",
+      "open_issue": "The 105-message embedded command-completion oracle and 21-case wire result fixture pass. Run the unmodified upstream corpus and complete client matrix against the real server; Extended Query execution, COPY streaming, binary output, result origin identities, credential authentication, TLS, and multiple databases still require implementation and verification."
+    },
+    {
+      "id": "types.domain-declarations-and-coercion",
+      "postgresql_reference": "tests/parity/pg18/domains_oracle.expected.json; PostgreSQL 18.4 CREATE DOMAIN, type conversion, PL/pgSQL declarations, and trigger semantics",
+      "uqa_test": "cargo test -p uqa-engine --test integration engine_queries::sql_domains; cargo test -p uqa-engine --test integration sql_temporal_types",
+      "supported_version": "145 PostgreSQL 18.4 comparisons on memory and SQLite covering domain declarations, defaults, nested constraints, arrays, catalog identities and owners, assignment and cast semantics, quoted names, typed routine arguments and locals, record fields, trigger returns, implicit coercion effects, transactions, and persistence; temporal precision and interval modifiers retain their declared metadata",
+      "status": "partial",
+      "open_issue": "Complete domain lifecycle DDL, privileges, dependencies, constraint and catalog metadata, collation support, and the unmodified upstream domain matrix still require implementation and verification."
+    },
+    {
+      "id": "execution.prepared-parameter-contracts",
+      "postgresql_reference": "PostgreSQL 18.4 live results, type OIDs, SQLSTATEs, diagnostics, and sequence effects in tests/parity/pg18/prepared_parameters_oracle.expected.json, prepared_analysis_oracle.expected.json, ordered_parameter_inference_oracle.expected.json, static_cast_analysis_oracle.expected.json, static_operator_analysis_oracle.expected.json, and prepared_signatures_metadata_oracle.expected.json; PostgreSQL REL_18_4 parse_param.c and pg_cast/pg_operator catalogs; https://www.postgresql.org/docs/18/sql-prepare.html; https://www.postgresql.org/docs/18/sql-execute.html; https://www.postgresql.org/docs/18/view-pg-prepared-statements.html; https://www.postgresql.org/docs/18/sql-discard.html; constant_planning_oracle.expected.json, prepared_plan_error_order_oracle.expected.json, and rule_input_planning_oracle.expected.json; https://www.postgresql.org/docs/18/functions-conditional.html; prepared_plan_selection_oracle.expected.json, prepared_plan_cost_oracle.expected.json, prepared_plan_settings_oracle.expected.json, and prepared_plan_types_oracle.expected.json; PostgreSQL REL_18_4 plancache.c",
+      "uqa_test": "cargo test -p uqa-engine --test integration prepared_parameters_match_postgresql; cargo test -p uqa-engine --test integration sql_prepared; cargo test -p uqa-engine --test integration sql_show_discard; cargo test -p uqa-engine --test integration transaction_lifecycle; cargo test -p uqa-pg-server --test integration constant_and_rule_planning; cargo test -p uqa-pg-server --test integration rule_returning_error; cargo test -p uqa-pg-server --test integration prepared_plan_selection",
+      "supported_version": "PostgreSQL 18.4 declared scalar, array, domain, and unknown PREPARE parameter types; ordered inference across expression, query, CTE, and mutation contexts; typed NULLs, assignment conversions, execution-free schema validation, deferred optimization, fixed result names/OIDs/typmods after invalidation, connection-owned definitions, session metadata with original message text, and transactional DISCARD behavior. Fixtures contain 125 execution cases, 53 preparation and descriptor cases, 178 ordered-inference cases, 2917 static cast cases, 4207 static binary-operator cases, and 40 signature and metadata cases; preparation and descriptor cases also run with SQLite and forced spill. Additional fixtures contain 62 constant-planning cases, 16 argument/body error-order cases, and 66 rule-input/completion cases, with TCP verification and memory/SQLite rule execution. Typed constant errors follow semantic validation, runtime COALESCE is lazy, stored definitions remain logical until execution, and declared empty SQL schemas remain closed across rollback, refresh, and reopen. Additional 222 cases cover automatic and forced plan selection, rare/common indexed keys, enum metadata, SET LOCAL/SESSION and default restoration, bound domain identities, and overflow in both plan modes.",
+      "status": "partial",
+      "open_issue": "Complete preparation and rewrite analysis, all function and operator signatures and supported types, full cast/input coverage, the full PostgreSQL plan-cost and invalidation matrix, and real Extended Query Parse/Bind/Describe/Execute with binary codecs and session portals still require implementation and verification against unmodified clients and the upstream regression suite."
+    },
+    {
+      "id": "types.floating-point-width",
+      "postgresql_reference": "PostgreSQL 18.4 live rows, result labels and type OIDs, SQLSTATEs, and diagnostics in tests/parity/pg18/floating_point_width_oracle.expected.json; https://www.postgresql.org/docs/18/datatype-numeric.html; PostgreSQL REL_18_STABLE float.c, float.h, and parse_target.c",
+      "uqa_test": "cargo test -p uqa-engine --test integration floating_point_width; cargo test -p uqa-engine --lib sql::aggregates; cargo test -p uqa-sql; cargo test -p uqa-execution",
+      "supported_version": "133 PostgreSQL 18.4 cases on memory, SQLite, and forced-spill execution: direct real input rounding, numeric and float conversion boundaries, float4 arithmetic, mixed numeric promotion to float8, range and division errors, NaN, infinity, signed zero, subnormals, declared-width character output, typed storage predicates, array and domain conversion, PREPARE binding, cast projection labels, and real SUM transitions including ordered aggregates, windows, and partial states",
+      "status": "partial",
+      "open_issue": "The full unmodified float4/float8 schedules, alternate floating input forms, every floating function and I/O entry point, and all associated catalog cast and overload rows require further implementation and differential verification."
+    },
+    {
+      "id": "execution.sql-value-clocks",
+      "postgresql_reference": "PostgreSQL 18.4 live rows and complete result field descriptors in tests/parity/pg18/sql_value_clock_oracle.expected.json; https://www.postgresql.org/docs/18/functions-datetime.html#FUNCTIONS-DATETIME-CURRENT",
+      "uqa_test": "cargo test -p uqa-engine --test integration sql_value_clock; cargo test -p uqa-engine --test integration sql_datetime_functions; cargo test -p uqa-sql; cargo test -p uqa-execution",
+      "supported_version": "90 PostgreSQL 18.4 UTC cases on memory, SQLite, and forced-spill execution: SQL current date/time types, precision modifiers and result labels, grammar-owned built-in identity despite search-path shadowing, transaction and message clock relationships, savepoint rollback, cursor fetch, nested SQL routines, and one-argument age direction and NULL handling",
+      "status": "partial",
+      "open_issue": "Session TimeZone conversion and display, precision-reduction warnings, complete pg_proc signatures and overload errors, and the full upstream current-time, date, and timestamp regression matrix require further implementation and differential verification."
+    },
+    {
+      "id": "ddl.schema-drop-cascade",
+      "postgresql_reference": "PostgreSQL 18.4 live command tags, result rows and type OIDs, SQLSTATEs and diagnostics in tests/parity/pg18/schema_drop_oracle.expected.json; https://www.postgresql.org/docs/18/sql-dropschema.html",
+      "uqa_test": "cargo test -p uqa-engine --test integration schema_drop; cargo test -p uqa-engine --test integration sql_ddl_dependencies; cargo test -p uqa-engine --lib engine_open",
+      "supported_version": "162 PostgreSQL 18.4 cases on memory, SQLite, and forced-spill engines: Schema ownership and RESTRICT errors, multi-target atomicity, duplicate and missing names, quoted identifiers, table/view/materialized-view/sequence/routine/domain cascades across schemas, typed columns and generated dependents, default and CHECK removal, SQL-standard routine bodies, transaction rollback, and durable public-schema deletion",
+      "status": "partial",
+      "open_issue": "Full pg_depend catalog identity coverage, precise complete cascade notice details, virtual catalog schema lifecycle, every supported dependency kind and indirect path, and the full upstream object-dependency and isolation schedules remain implementation and verification work."
+    },
+    {
+      "id": "ddl.stored-relation-routine-dependencies",
+      "postgresql_reference": "PostgreSQL 18.4 live command tags, result rows, type OIDs, SQLSTATEs and diagnostics in tests/parity/pg18/stored_relation_drop_oracle.expected.json; https://www.postgresql.org/docs/18/sql-dropfunction.html; https://www.postgresql.org/docs/18/ddl-depend.html; tests/parity/pg18/stored_column_rename_oracle.expected.json; https://www.postgresql.org/docs/18/sql-altertable.html; tests/parity/pg18/stored_column_drop_oracle.expected.json; tests/parity/pg18/stored_column_alias_drop_oracle.expected.json",
+      "uqa_test": "cargo test -p uqa-engine --test integration stored_relation_drop; cargo test -p uqa-engine --test integration schema_drop; cargo test -p uqa-engine --test integration sql_routine_identity; cargo test -p uqa-engine --test integration stored_column_rename; cargo test -p uqa-engine --test integration stored_column_drop; cargo test -p uqa-engine --test integration stored_column_alias_drop",
+      "supported_version": "Unreleased: SQL-standard routine dependencies on tables, foreign tables, views, materialized views, owned sequences, and constant regclass references; RESTRICT, multi-target atomicity, function/view cycles, domain and generated-column chains, preserved late-bound bodies, creation-bound sequence/default identity through rename, and rollback/refresh/reopen lifecycle. PostgreSQL 18.4 differential transcript covers 205 cases on memory, SQLite, and forced-spill engines. A separate 109-case PostgreSQL 18.4 transcript verifies column rename in stored query and INSERT/UPDATE/DELETE/MERGE function/procedure bodies, aliases, CTEs, joins, parameters and output names, late-bound bodies, old-name reuse, table-owner authority across inaccessible schemas, and exact missing/duplicate errors. SQLite lifecycle coverage verifies savepoint rollback, cross-engine refresh, and reopen. A 196-case PostgreSQL 18.4 transcript verifies DROP COLUMN routine dependencies and transitive cascades, retained MERGE write-only targets with skipped evaluation and preserved expression dependencies, implicit targets and command CTEs, non-DEFAULT domain coercion identities retained after column removal, ownership, errors, and rollback. Additional lifecycle tests cover the direct Rust API, legacy target identity migration, sibling-engine refresh, and reopen. A 186-case PostgreSQL 18.4 transcript verifies durable table input shapes and positional aliases through unread-column deletion, nested joins, added columns, old-name reuse, expanded projections, query/DML routines, and domain/function/schema/sequence cascades. Sequence regclass constants in stored and virtual generated expressions, defaults, and CHECK constraints retain original identities through rename and old-name recreation. Four SQLite lifecycle tests cover direct Rust deletion, rollback, observer refresh, legacy source/regclass migration, and reopen.",
+      "status": "partial",
+      "open_issue": "Complete pg_depend projection and deletion ordering, full notice and error detail fields, additional stored type and constant coercion paths, temporary-object lifetimes, and the complete upstream dependency and isolation matrix still require implementation and differential verification."
+    },
+    {
+      "id": "ddl.domain-drop-cascade",
+      "postgresql_reference": "PostgreSQL 18.4 live command tags, result rows, type OIDs, SQLSTATEs and diagnostics in tests/parity/pg18/domain_drop_oracle.expected.json; https://www.postgresql.org/docs/18/sql-dropdomain.html",
+      "uqa_test": "cargo test -p uqa-engine --test integration domain_drop; cargo test -p uqa-engine --test integration stored_relation_drop; cargo test -p uqa-engine --test integration schema_drop",
+      "supported_version": "Unreleased: 208 PostgreSQL 18.4 cases on memory, SQLite, and forced-spill engines cover DROP DOMAIN and schema ownership transfer; domain/schema-owner authority, namespace USAGE and type lookup, exact missing/wrong-kind/RESTRICT errors, multi-target atomicity, derived domains, typed/generated columns, index expressions and predicates, defaults/CHECKs, direct and transitive query and INSERT/UPDATE/DELETE/MERGE routine dependencies, and read-only/savepoint behavior. A SQLite lifecycle test checks rollback, stable type identity, cross-engine refresh, ownership transfer, and reopen.",
+      "status": "partial",
+      "open_issue": "Complete pg_depend and pg_shdepend catalog rows, deletion ordering and notice/detail fields, virtual catalog domains and namespace lifetimes, and the complete upstream type-deletion and isolation matrix remain required implementation work."
     }
   ]
 }

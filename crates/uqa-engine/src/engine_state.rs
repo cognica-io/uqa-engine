@@ -8,7 +8,7 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use parking_lot::{Mutex, ReentrantMutex, RwLock};
@@ -243,6 +243,7 @@ impl StoredView {
 }
 
 pub(super) struct DurableCatalogState {
+    pub(super) domains: CatalogCell<BTreeMap<String, super::engine_domains::StoredDomain>>,
     pub(super) graphs: CatalogCell<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
     pub(super) models: CatalogCell<BTreeMap<String, DeepModel>>,
     pub(super) scoring_params: CatalogCell<BTreeMap<String, String>>,
@@ -282,6 +283,7 @@ pub(super) struct DurableCatalogState {
 
 #[derive(Clone)]
 pub(super) struct DurableCatalogSnapshot {
+    pub(super) domains: Arc<BTreeMap<String, super::engine_domains::StoredDomain>>,
     pub(super) graphs: Arc<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
     pub(super) models: Arc<BTreeMap<String, DeepModel>>,
     pub(super) scoring_params: Arc<BTreeMap<String, String>>,
@@ -320,6 +322,7 @@ pub(super) struct DurableCatalogSnapshot {
 impl DurableCatalogState {
     pub(super) fn new() -> Self {
         Self {
+            domains: CatalogCell::new(BTreeMap::new()),
             graphs: CatalogCell::new(BTreeMap::new()),
             models: CatalogCell::new(BTreeMap::new()),
             scoring_params: CatalogCell::new(BTreeMap::new()),
@@ -354,6 +357,7 @@ impl DurableCatalogState {
     /// Capture durable registries in the transaction coordinator's canonical lock order.
     pub(super) fn snapshot(&self) -> DurableCatalogSnapshot {
         DurableCatalogSnapshot {
+            domains: self.domains.snapshot(),
             graphs: self.graphs.snapshot(),
             models: self.models.snapshot(),
             scoring_params: self.scoring_params.snapshot(),
@@ -404,6 +408,7 @@ impl DurableCatalogState {
             .restore(&snapshot.foreign_table_security);
         self.sql_user_functions
             .restore(&snapshot.sql_user_functions);
+        self.domains.restore(&snapshot.domains);
         self.roles.restore(&snapshot.roles);
         self.role_memberships.restore(&snapshot.role_memberships);
         self.triggers.restore(&snapshot.triggers);
@@ -412,13 +417,18 @@ impl DurableCatalogState {
 }
 
 pub(super) struct SessionContext {
+    /// Start of the outer SQL message, shared with nested execution and portal workers.
+    pub(super) statement_started_at_micros: AtomicI64,
     /// Positive process identifier exposed by `pg_backend_pid()` and asynchronous notification responses. Portal workers share the owning session context and therefore retain the same identifier.
     pub(super) backend_process_id: AtomicI32,
     pub(super) backend_process_id_is_local: AtomicBool,
     /// Transactional session values share one lock so snapshots and restores
     /// cannot observe a mixture of old and new search-path, sequence,
-    /// prepared-plan, or statement-cache state.
+    /// or statement-cache state.
     pub(super) state: RwLock<super::SessionStateSnapshot>,
+    /// Prepared definitions belong to the connection and survive transaction or
+    /// savepoint rollback, including definitions created or removed after a boundary.
+    pub(super) prepared: RwLock<BTreeMap<String, super::PreparedStatementPlan>>,
     /// `PostgreSQL` sequence reservations are session-local and nontransactional. They are intentionally kept outside `SessionStateSnapshot` so rollback never rewinds consumption or restores blocks discarded by `ALTER SEQUENCE`.
     pub(super) sequence_caches:
         Mutex<BTreeMap<super::RelationIdentity, super::SessionSequenceCache>>,
@@ -437,6 +447,16 @@ pub(super) struct SessionContext {
     pub(crate) statistics_client: AtomicBool,
 }
 
+#[derive(Clone)]
+pub(super) enum RuntimeParameterValue {
+    Setting(Option<String>),
+    SearchPath {
+        setting: Option<String>,
+        path: Vec<String>,
+    },
+    Role(String),
+}
+
 impl SessionContext {
     pub(super) fn new(random_state: super::SessionRandomState) -> Self {
         let state = super::SessionStateSnapshot {
@@ -444,9 +464,10 @@ impl SessionContext {
             search_path: vec!["public".to_string()],
             temporary_namespace_allocated: false,
             session_vars: BTreeMap::new(),
+            local_parameter_restore: BTreeMap::new(),
             sequence_currvals: BTreeMap::new(),
             last_sequence: None,
-            prepared: BTreeMap::new(),
+            sequence_discard_generation: 0,
             sql_statement_cache: SQLStatementCache::default(),
             portal_names: BTreeSet::new(),
             listened_channels: Vec::new(),
@@ -454,11 +475,13 @@ impl SessionContext {
             session_user: "uqa".to_string(),
         };
         Self {
+            statement_started_at_micros: AtomicI64::new(0),
             backend_process_id: AtomicI32::new(
                 crate::engine_notifications::allocate_backend_process_id(),
             ),
             backend_process_id_is_local: AtomicBool::new(true),
             state: RwLock::new(state),
+            prepared: RwLock::new(BTreeMap::new()),
             sequence_caches: Mutex::new(BTreeMap::new()),
             random_state: Mutex::new(random_state),
             transactions: Mutex::new(Vec::new()),

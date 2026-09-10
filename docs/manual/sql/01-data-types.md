@@ -10,18 +10,20 @@ UQA Engine has PostgreSQL 18-compatible type names mapped to the value carriers 
 | `INT2`, `INT4`, `INT8`, `INT` | PostgreSQL aliases preserving the corresponding declared width |
 | `SMALLSERIAL`, `SERIAL2`, `SERIAL`, `SERIAL4`, `BIGSERIAL`, `SERIAL8` | Width-preserving integer column with generated sequence behavior |
 | `OID`, `XID` | Distinct unsigned 32-bit PostgreSQL identities over the integer carrier |
-| `REAL`, `FLOAT4` | Distinct single-precision declaration over the floating runtime carrier |
+| `REGTYPE` | Type-catalog OID over the integer carrier; cast to text or use PostgreSQL result formatting for its visible SQL name |
+| User-defined domains | A distinct catalog type over its base value, with [declaration defaults and conversion-time constraints](02-ddl.md#domain-declarations-and-deletion) |
+| `REAL`, `FLOAT4` | IEEE 754 single-precision inputs, arithmetic, and sums over a widened floating runtime carrier |
 | `FLOAT8`, `DOUBLE PRECISION` | Double-precision declaration over the floating runtime carrier |
 | `NUMERIC(p,s)`, `DECIMAL(p,s)` | Exact decimal carrier with declared precision and scale checks |
 | `TEXT`, `VARCHAR(n)`, `NAME`, `UUID` | Distinct declared identities over text-compatible carriers; length and UUID input are validated |
 | `CHARACTER(n)`, `CHAR(n)` | Blank-padded fixed-length character value; default length is 1 |
 | `BOOLEAN`, `BOOL` | Boolean carrier |
 | `DATE` | Calendar date |
-| `TIME` | Time without timezone |
-| `TIMETZ`, `TIME WITH TIME ZONE` | Time with timezone |
-| `TIMESTAMP` | Timestamp without timezone |
-| `TIMESTAMPTZ`, `TIMESTAMP WITH TIME ZONE` | Timestamp with timezone semantics |
-| `INTERVAL` | Calendar/time interval |
+| `TIME[(p)]` | Time without timezone, with optional fractional-second precision |
+| `TIMETZ[(p)]`, `TIME[(p)] WITH TIME ZONE` | Time with timezone and optional fractional-second precision |
+| `TIMESTAMP[(p)]` | Timestamp without timezone and optional fractional-second precision |
+| `TIMESTAMPTZ[(p)]`, `TIMESTAMP[(p)] WITH TIME ZONE` | Timestamp with timezone semantics and optional fractional-second precision |
+| `INTERVAL [fields] [(p)]` | Calendar/time interval with optional stored-field restriction and fractional-second precision |
 | `JSON` | Validated JSON value |
 | `JSONB` | Canonical JSON value with JSONB operations |
 | `BYTEA` | Byte string |
@@ -40,7 +42,19 @@ Serial declarations allocate generated integer identities. Sequence functions `n
 
 ## Floating point
 
-`REAL`, `FLOAT4`, `FLOAT8`, and `DOUBLE PRECISION` use an IEEE 754 64-bit value. Floating-point equality, ordering, NaN, and infinity behavior should be tested for the application's edge cases. Vector inputs reject non-finite values even when a general floating expression can represent them.
+`REAL` (`FLOAT4`) converts inputs directly to IEEE 754 single precision. Widening the stored value to the engine's 64-bit carrier preserves that rounded value; casting it to `DOUBLE PRECISION` does not restore discarded precision. `FLOAT8` (`DOUBLE PRECISION`) uses double precision. Arrays, domain bases, column assignment, and declared prepared parameters apply the same conversions. PostgreSQL text output and character casts use the declared floating width.
+
+The `+`, `-`, `*`, and `/` operators use single precision when both operands are `REAL`. Mixing `REAL` with an integer, `NUMERIC`, or `DOUBLE PRECISION` selects double precision. `SUM(real)` rounds at each single-precision addition, while `AVG(real)` returns double precision. Aggregate `ORDER BY` controls the addition order. Grouped, window, and spilled aggregate state retain the selected width.
+
+Invalid floating text reports `22P02`; overflow or underflow outside the representable range reports `22003`. Representable subnormal values, signed zero, NaN, and infinity are retained. Division by zero reports `22012`, except that a NaN numerator remains NaN. Vector inputs still reject non-finite values.
+
+```sql execute
+SELECT 16777217::real::double precision AS rounded_input,
+       (16777216::real + 1::real)::double precision AS real_sum,
+       16777216::real + 1 AS mixed_sum;
+```
+
+The result is `16777216`, `16777216`, and `16777217`, respectively. The [compatibility ledger](09-compatibility.md) tracks the remaining complete floating-point regression and I/O matrix.
 
 ## Exact decimal
 
@@ -64,6 +78,15 @@ Use exact decimal for financial values. Do not substitute floating point where e
 ## Temporal types
 
 Temporal types support comparisons, extraction, truncation, construction, formatting, parsing, age calculation, and current-time functions. The default session timezone is `UTC`, and `SET timezone` changes session behavior where timezone conversion applies.
+
+`TIME(p)`, `TIMESTAMP(p)`, and their timezone variants retain a fractional-second precision from 0 through 6 in column declarations, casts, function-source column definitions, array elements, result metadata, and persistent catalogs. Values are rounded when a cast or assignment applies the declaration. Rounding at the end of a day can produce `24:00:00`, which remains distinct from `00:00:00` as a time value. `pg_attribute.atttypmod` and `information_schema.columns.datetime_precision` expose the declared modifier after reopen.
+
+`INTERVAL` supports the fields `YEAR`, `MONTH`, `DAY`, `HOUR`, `MINUTE`, and `SECOND`, plus `YEAR TO MONTH`, `DAY TO HOUR`, `DAY TO MINUTE`, `DAY TO SECOND`, `HOUR TO MINUTE`, `HOUR TO SECOND`, and `MINUTE TO SECOND`. The least significant field determines truncation: for example, `INTERVAL HOUR TO MINUTE` preserves years, months, days, hours, and minutes while discarding seconds. `INTERVAL(p)` and ranges ending in `SECOND(p)` round fractional seconds. `information_schema.columns.interval_type` exposes an explicit field restriction, including its precision when present.
+
+```sql execute
+SELECT '23:59:59.9995'::time(3) AS midnight,
+       '1 year 2 mons 3 days 04:05:06.789'::interval hour to minute AS whole_minutes;
+```
 
 ```sql
 CREATE TABLE events (

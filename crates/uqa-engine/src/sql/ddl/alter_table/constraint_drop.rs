@@ -6,6 +6,8 @@
 
 //! Constraint and dependent-column removal for `ALTER TABLE`.
 
+use std::collections::BTreeSet;
+
 use super::{
     constraint_error, ddl_storage_error, find_constraint, publish_constraint_state,
     table_constraint_state, ConstraintLocation, Engine, SQLError,
@@ -339,7 +341,40 @@ fn drop_key_constraint_dependencies(
     Ok(local_dependents)
 }
 
-pub(super) fn drop_column_cascade(
+pub(super) fn drop_column(
+    engine: &Engine,
+    table: &str,
+    column: &str,
+    if_exists: bool,
+    cascade: bool,
+) -> Result<(), SQLError> {
+    if !ensure_drop_column_exists(engine, table, column, if_exists)? {
+        return Ok(());
+    }
+    engine.drop_column_routine_dependents(table, column, cascade)?;
+    let rewritten = if engine
+        .try_table_has_column(table, column)
+        .map_err(|error| ddl_storage_error("DROP COLUMN routine aliases", error))?
+    {
+        engine.prepare_routine_column_alias_drop(
+            BTreeSet::from([(table.to_string(), column.to_string())]),
+            &[],
+        )?
+    } else {
+        Vec::new()
+    };
+    engine.handle_drop_column_event_dependencies(table, column, cascade)?;
+    if cascade {
+        // A routine/domain cycle may already have removed the root column.
+        drop_column_cascade(engine, table, column, true)?;
+    } else {
+        drop_column_restrict(engine, table, column, false)?;
+    }
+    engine.publish_stored_routine_body_rewrites(rewritten)?;
+    engine.refresh_stored_merge_target_plans()
+}
+
+pub(crate) fn drop_column_cascade(
     engine: &Engine,
     table: &str,
     column: &str,
@@ -347,6 +382,20 @@ pub(super) fn drop_column_cascade(
 ) -> Result<(), SQLError> {
     if !ensure_drop_column_exists(engine, table, column, if_exists)? {
         return Ok(());
+    }
+    let views = engine
+        .views_depending_on_column(table, column)
+        .map_err(|error| ddl_storage_error("DROP COLUMN dependency", error))?;
+    let closure = engine.cascade_view_closure(views)?;
+    engine
+        .drop_rules_depending_on_relations_inner(&closure)
+        .map_err(|error| ddl_storage_error("DROP COLUMN dependency", error))?;
+    engine.drop_views_inner(&closure, false)?;
+    for generated in engine
+        .generated_columns_referencing_column(table, column)
+        .map_err(|error| ddl_storage_error("DROP COLUMN dependency", error))?
+    {
+        drop_column_cascade(engine, table, &generated, true)?;
     }
     let dependents = foreign_keys_referencing_column(engine, table, column)?;
     for (referrer, name) in dependents {
@@ -413,7 +462,14 @@ fn ensure_drop_column_exists(
     if if_exists {
         return Ok(false);
     }
-    Err(SQLError::UnknownColumn(format!("{table}.{column}")))
+    let relation = crate::RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
+    Err(constraint_error(
+        "42703",
+        format!(
+            "column \"{column}\" of relation \"{}\" does not exist",
+            relation.name
+        ),
+    ))
 }
 
 fn foreign_keys_referencing_column(

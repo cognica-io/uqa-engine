@@ -126,7 +126,7 @@ fn create_table_if_not_exists_checks_the_relation_before_its_definition() {
             &[],
         )
         .expect_err("a free target must analyze its definition");
-    assert_eq!(error.sqlstate(), Some("0A000"));
+    assert_eq!(error.sqlstate(), Some("42704"));
     assert!(error.to_string().contains("missing_type"));
     let error = engine
         .sql(
@@ -216,7 +216,11 @@ fn boolean_type_is_enforced_and_survives_reopen() {
             "CREATE TABLE flags (id INTEGER PRIMARY KEY, enabled BOOLEAN)",
         );
         exec(&engine, "INSERT INTO flags VALUES (1, true), (2, 'false')");
-        assert_err_contains(&engine, "INSERT INTO flags VALUES (3, 1)", "to boolean");
+        assert_err_contains(
+            &engine,
+            "INSERT INTO flags VALUES (3, 1)",
+            "column \"enabled\" is of type boolean but expression is of type integer",
+        );
     }
 
     let reopened = Engine::open(&path).unwrap();
@@ -603,7 +607,7 @@ fn unique_constraint_basic() {
     assert_err_contains(
         &engine,
         "INSERT INTO t (id, email) VALUES (2, 'a@test.com')",
-        "UNIQUE constraint",
+        "duplicate key value violates unique constraint \"t_email_key\"",
     );
 }
 
@@ -645,7 +649,7 @@ fn primary_key_enforces_uniqueness() {
     assert_err_contains(
         &engine,
         "INSERT INTO t (id, val) VALUES (1, 'b')",
-        "PRIMARY KEY constraint",
+        "duplicate key value violates unique constraint \"t_pkey\"",
     );
 }
 
@@ -753,7 +757,7 @@ fn alter_column_type_preserves_oid_source_width_and_cast_context() {
         "SELECT small_value, pg_typeof(small_value) AS small_type FROM type_sources",
     );
     assert_eq!(row.rows[0]["small_value"], Value::Int(i64::from(u32::MAX)));
-    assert_eq!(row.rows[0]["small_type"], Value::Str("oid".into()));
+    assert_eq!(row.rows[0]["small_type"], Value::Int(26));
 
     let error = engine
         .sql(
@@ -767,7 +771,7 @@ fn alter_column_type_preserves_oid_source_width_and_cast_context() {
         "SELECT big_value, pg_typeof(big_value) AS big_type FROM type_sources",
     );
     assert_eq!(unchanged.rows[0]["big_value"], Value::Int(-1));
-    assert_eq!(unchanged.rows[0]["big_type"], Value::Str("bigint".into()));
+    assert_eq!(unchanged.rows[0]["big_type"], Value::Int(20));
 
     let error = engine
         .sql(

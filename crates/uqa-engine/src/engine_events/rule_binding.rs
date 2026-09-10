@@ -24,15 +24,16 @@ mod row_expansion;
 mod scope;
 pub(crate) use references::{
     first_rule_row_reference_in_expr, first_rule_row_reference_in_select,
-    rule_action_has_set_operation, rule_condition_plan_references_whole_row,
-    rule_condition_plan_row_columns, rule_expr_references_row, rule_expr_references_whole_row,
-    rule_expr_row_columns, rule_statement_references_row, rule_statement_references_whole_row,
+    first_rule_row_reference_in_statement, rule_action_has_set_operation,
+    rule_condition_plan_references_whole_row, rule_condition_plan_row_columns,
+    rule_expr_references_row, rule_expr_references_whole_row, rule_expr_row_columns,
+    rule_new_row_columns, rule_statement_references_row, rule_statement_references_whole_row,
     rule_statement_row_columns,
 };
 pub(crate) use returning::expand_rule_action_returning_stars;
 pub(crate) use row_expansion::expand_rule_action_row_stars;
 use scope::{
-    apply_positional_aliases, collect_visible_scope, select_output_columns, RuleBindingScope,
+    apply_positional_aliases, collect_visible_scope, cte_output_columns, RuleBindingScope,
 };
 
 pub(super) fn action_target_qualifier_referenced(
@@ -79,7 +80,7 @@ impl<'a> RuleBindingContext<'a> {
             if cte.recursive {
                 context.ctes.entry(key.clone()).or_default();
             }
-            let mut columns = select_output_columns(&cte.query, &context)?;
+            let mut columns = cte_output_columns(&cte.body, &context)?;
             apply_positional_aliases(&mut columns, &cte.columns);
             if let Some(search) = &cte.search {
                 columns.push(search.sequence_column.clone());
@@ -290,7 +291,7 @@ fn bind_rule_expr_with_scope(
                     .unwrap_or_else(|| expr.clone())
             }
         }
-        Expr::Default | Expr::Literal(_) | Expr::Star => expr.clone(),
+        Expr::Default | Expr::Literal(_) | Expr::TypedLiteral { .. } | Expr::Star => expr.clone(),
         Expr::Func { .. } => bind_rule_function_expression(expr, resolver, scope, context)?,
         Expr::Array(items) => Expr::Array(bind_exprs(items, resolver, scope, context)?),
         Expr::Row(items) => Expr::Row(bind_expanding_exprs(items, resolver, scope, context)?),
@@ -767,7 +768,7 @@ fn bind_ctes(
                 .ctes
                 .entry(cte.name.to_ascii_lowercase())
                 .or_default();
-            let mut columns = select_output_columns(&cte.query, &visible)?;
+            let mut columns = cte_output_columns(&cte.body, &visible)?;
             apply_positional_aliases(&mut columns, &cte.columns);
             visible.ctes.insert(cte.name.to_ascii_lowercase(), columns);
         }
@@ -800,11 +801,15 @@ fn bind_ctes(
                     })
                 })
                 .transpose()?,
-            query: Box::new(bind_select_with_scope(
-                &cte.query, resolver, inherited, &visible,
-            )?),
+            body: match &cte.body {
+                uqa_sql::ast::CteBody::Query(query) => uqa_sql::ast::CteBody::Query(Box::new(
+                    bind_select_with_scope(query, resolver, inherited, &visible)?,
+                )),
+                // Command CTEs cannot reference a rule's event row. Their own DML row-image aliases belong to RETURNING and must retain their local identities.
+                body => body.clone(),
+            },
         });
-        let mut columns = select_output_columns(&cte.query, &visible)?;
+        let mut columns = cte_output_columns(&cte.body, &visible)?;
         apply_positional_aliases(&mut columns, &cte.columns);
         if let Some(search) = &cte.search {
             columns.push(search.sequence_column.clone());

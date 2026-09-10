@@ -11,7 +11,8 @@ use super::{
     Expr, FromClause, JoinKind, Node, NodeEnum, OrderBy, Projection, Result, SQLError, SelectStmt,
     SetOp, SetOpKind, Value, CTE,
 };
-use crate::ast::{CteCycleClause, CteMaterialization, CteSearchClause};
+mod cte;
+pub(in crate::compiler) use cte::compile_with_clause;
 
 #[expect(clippy::too_many_lines, reason = "preserves PostgreSQL lowering order")]
 pub(in crate::compiler) fn compile_select(
@@ -693,9 +694,109 @@ pub(in crate::compiler) fn compile_projections(
             Some(node) => compile_expr(node)?,
             None => return Err(SQLError::Internal("ResTarget without value".into())),
         };
+        let alias = match (
+            alias,
+            res_target.val.as_ref().and_then(|node| node.node.as_ref()),
+        ) {
+            (None, Some(NodeEnum::TypeCast(cast))) => cast
+                .arg
+                .as_ref()
+                .and_then(|argument| strong_projection_name(argument))
+                .or_else(|| {
+                    cast.type_name
+                        .as_ref()
+                        .and_then(|ty| ty.names.last())
+                        .and_then(|node| match node.node.as_ref() {
+                            Some(NodeEnum::String(name)) => Some(name.sval.clone()),
+                            _ => None,
+                        })
+                }),
+            (None, Some(NodeEnum::SqlvalueFunction(function))) => {
+                sql_value_projection_name(function.op()).map(str::to_owned)
+            }
+            (alias, _) => alias,
+        };
         out.push(Projection { expr, alias });
     }
     Ok(out)
+}
+
+fn strong_projection_name(node: &Node) -> Option<String> {
+    let name = |nodes: &[Node]| {
+        nodes
+            .iter()
+            .rev()
+            .find_map(|node| match node.node.as_ref() {
+                Some(NodeEnum::String(name)) => Some(name.sval.clone()),
+                _ => None,
+            })
+    };
+    match node.node.as_ref()? {
+        NodeEnum::ColumnRef(column) => name(&column.fields),
+        NodeEnum::FuncCall(function) => name(&function.funcname),
+        NodeEnum::TypeCast(cast) => cast
+            .arg
+            .as_ref()
+            .and_then(|argument| strong_projection_name(argument)),
+        NodeEnum::CollateClause(collate) => collate
+            .arg
+            .as_ref()
+            .and_then(|argument| strong_projection_name(argument)),
+        NodeEnum::AIndirection(indirection) => name(&indirection.indirection).or_else(|| {
+            indirection
+                .arg
+                .as_ref()
+                .and_then(|argument| strong_projection_name(argument))
+        }),
+        NodeEnum::CaseExpr(case) => case
+            .defresult
+            .as_ref()
+            .and_then(|argument| strong_projection_name(argument)),
+        NodeEnum::AArrayExpr(_) => Some("array".into()),
+        NodeEnum::RowExpr(_) => Some("row".into()),
+        NodeEnum::CoalesceExpr(_) => Some("coalesce".into()),
+        NodeEnum::GroupingFunc(_) => Some("grouping".into()),
+        NodeEnum::SqlvalueFunction(function) => {
+            sql_value_projection_name(function.op()).map(str::to_owned)
+        }
+        NodeEnum::MinMaxExpr(expression) => Some(
+            if expression.op == pg_query::protobuf::MinMaxOp::IsGreatest as i32 {
+                "greatest"
+            } else {
+                "least"
+            }
+            .into(),
+        ),
+        NodeEnum::AExpr(expression)
+            if expression.kind == pg_query::protobuf::AExprKind::AexprNullif as i32 =>
+        {
+            Some("nullif".into())
+        }
+        NodeEnum::SubLink(link)
+            if link.sub_link_type == pg_query::protobuf::SubLinkType::ExistsSublink as i32 =>
+        {
+            Some("exists".into())
+        }
+        _ => None,
+    }
+}
+
+fn sql_value_projection_name(op: pg_query::protobuf::SqlValueFunctionOp) -> Option<&'static str> {
+    use pg_query::protobuf::SqlValueFunctionOp as Op;
+    Some(match op {
+        Op::SvfopCurrentDate => "current_date",
+        Op::SvfopCurrentTime | Op::SvfopCurrentTimeN => "current_time",
+        Op::SvfopCurrentTimestamp | Op::SvfopCurrentTimestampN => "current_timestamp",
+        Op::SvfopLocaltime | Op::SvfopLocaltimeN => "localtime",
+        Op::SvfopLocaltimestamp | Op::SvfopLocaltimestampN => "localtimestamp",
+        Op::SvfopCurrentRole => "current_role",
+        Op::SvfopCurrentUser => "current_user",
+        Op::SvfopUser => "user",
+        Op::SvfopSessionUser => "session_user",
+        Op::SvfopCurrentCatalog => "current_catalog",
+        Op::SvfopCurrentSchema => "current_schema",
+        _ => return None,
+    })
 }
 
 pub(in crate::compiler) fn compile_order_by(
@@ -804,174 +905,6 @@ pub(in crate::compiler) fn compile_set_op(
         combined_with_ties: false,
         combined_offset: None,
     })))
-}
-
-#[expect(clippy::too_many_lines, reason = "preserves PostgreSQL lowering order")]
-pub(in crate::compiler) fn compile_with_clause(
-    wc: &pg_query::protobuf::WithClause,
-) -> Result<Vec<CTE>> {
-    let mut out = Vec::with_capacity(wc.ctes.len());
-    for cte_node in &wc.ctes {
-        let inner = cte_node
-            .node
-            .as_ref()
-            .ok_or_else(|| SQLError::Internal("WITH contains an empty CTE".into()))?;
-        let cte = match inner {
-            NodeEnum::CommonTableExpr(c) => c,
-            _ => return Err(SQLError::Internal("expected CommonTableExpr".into())),
-        };
-        if cte.ctename.is_empty() {
-            return Err(SQLError::Internal("CTE name is empty".into()));
-        }
-        let materialization = match cte.ctematerialized() {
-            pg_query::protobuf::CteMaterialize::CtematerializeUndefined
-            | pg_query::protobuf::CteMaterialize::Default => CteMaterialization::Default,
-            pg_query::protobuf::CteMaterialize::Always => CteMaterialization::Materialized,
-            pg_query::protobuf::CteMaterialize::Never => CteMaterialization::NotMaterialized,
-        };
-        let select_node = cte
-            .ctequery
-            .as_ref()
-            .ok_or_else(|| SQLError::Internal("CTE without query".into()))?;
-        let select_inner = select_node
-            .node
-            .as_ref()
-            .ok_or_else(|| SQLError::Internal("CTE query node empty".into()))?;
-        let select = match select_inner {
-            NodeEnum::SelectStmt(s) => s,
-            _ => return Err(SQLError::Unsupported("CTE body must be SELECT".into())),
-        };
-        let columns = extract_strings(&cte.aliascolnames)?;
-        let search = cte
-            .search_clause
-            .as_ref()
-            .map(|clause| -> Result<CteSearchClause> {
-                Ok(CteSearchClause {
-                    columns: extract_strings(&clause.search_col_list)?,
-                    breadth_first: clause.search_breadth_first,
-                    sequence_column: clause.search_seq_column.clone(),
-                })
-            })
-            .transpose()?;
-        let cycle = cte
-            .cycle_clause
-            .as_deref()
-            .map(|clause| -> Result<CteCycleClause> {
-                let mark_value = clause
-                    .cycle_mark_value
-                    .as_deref()
-                    .map(compile_expr)
-                    .transpose()?
-                    .unwrap_or(Expr::Literal(Value::Bool(true)));
-                let mark_default = clause
-                    .cycle_mark_default
-                    .as_deref()
-                    .map(compile_expr)
-                    .transpose()?
-                    .unwrap_or(Expr::Literal(Value::Bool(false)));
-                Ok(CteCycleClause {
-                    columns: extract_strings(&clause.cycle_col_list)?,
-                    mark_column: clause.cycle_mark_column.clone(),
-                    mark_value,
-                    mark_default,
-                    path_column: clause.cycle_path_column.clone(),
-                })
-            })
-            .transpose()?;
-        let query = compile_select(select)?;
-        let recursive = wc.recursive && select_references_relation(&query, &cte.ctename);
-        if recursive {
-            reject_recursive_query_ordering(&query)?;
-        }
-        if (search.is_some() || cycle.is_some()) && !recursive {
-            return Err(SQLError::Routine {
-                sqlstate: "42601".into(),
-                message: "WITH query is not recursive".into(),
-            });
-        }
-        if let (Some(search), Some(cycle)) = (&search, &cycle) {
-            if search.sequence_column == cycle.mark_column {
-                return Err(SQLError::Routine {
-                    sqlstate: "42601".into(),
-                    message: "search sequence column name and cycle mark column name are the same"
-                        .into(),
-                });
-            }
-            if search.sequence_column == cycle.path_column {
-                return Err(SQLError::Routine {
-                    sqlstate: "42601".into(),
-                    message: "search sequence column name and cycle path column name are the same"
-                        .into(),
-                });
-            }
-        }
-        if cycle
-            .as_ref()
-            .is_some_and(|cycle| cycle.mark_column == cycle.path_column)
-        {
-            return Err(SQLError::Routine {
-                sqlstate: "42601".into(),
-                message: "cycle mark column name and cycle path column name are the same".into(),
-            });
-        }
-        out.push(CTE {
-            name: cte.ctename.clone(),
-            columns,
-            recursive: wc.recursive,
-            materialization,
-            search,
-            cycle,
-            query: Box::new(query),
-        });
-    }
-    Ok(out)
-}
-
-fn select_references_relation(statement: &SelectStmt, name: &str) -> bool {
-    fn from_references_relation(from: &FromClause, name: &str) -> bool {
-        match from {
-            FromClause::Table { name: table, .. } => table == name,
-            FromClause::Join { left, right, .. } => {
-                from_references_relation(left, name) || from_references_relation(right, name)
-            }
-            FromClause::Subquery { body, .. } => select_references_relation(body, name),
-            FromClause::Values { .. }
-            | FromClause::Function { .. }
-            | FromClause::FunctionGroup { .. } => false,
-        }
-    }
-    statement
-        .from
-        .as_ref()
-        .is_some_and(|from| from_references_relation(from, name))
-        || statement.set_op.as_ref().is_some_and(|set| {
-            set.left
-                .as_deref()
-                .is_some_and(|left| select_references_relation(left, name))
-                || select_references_relation(&set.right, name)
-        })
-}
-
-fn reject_recursive_query_ordering(statement: &SelectStmt) -> Result<()> {
-    let Some(set_op) = statement.set_op.as_ref() else {
-        return Ok(());
-    };
-    if !set_op.combined_order_by.is_empty() {
-        return Err(SQLError::Unsupported(
-            "ORDER BY in a recursive query is not implemented".into(),
-        ));
-    }
-    if set_op.combined_offset.is_some() {
-        return Err(SQLError::Unsupported(
-            "OFFSET in a recursive query is not implemented".into(),
-        ));
-    }
-    if set_op.combined_limit.is_some() {
-        return Err(SQLError::Unsupported(
-            "LIMIT in a recursive query is not implemented".into(),
-        ));
-    }
-    Ok(())
 }
 
 /// Compile a `LIMIT` / `OFFSET` operand into an [`Expr`]. The expression is coerced to bigint at execute time, so parameter-bearing forms work end-to-end. Ordinary `LIMIT NULL` is absent, while `FETCH ... WITH TIES` preserves NULL to raise `PostgreSQL`'s clause-specific error.

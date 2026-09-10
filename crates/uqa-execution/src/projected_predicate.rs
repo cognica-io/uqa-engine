@@ -45,6 +45,7 @@ pub(super) enum ProjectedExpr {
         lhs: Box<Self>,
         rhs: Box<Self>,
         integer_width: Option<IntegerWidth>,
+        real_arithmetic: bool,
     },
     UnaryMinus(Box<Self>),
     IntFieldComparison {

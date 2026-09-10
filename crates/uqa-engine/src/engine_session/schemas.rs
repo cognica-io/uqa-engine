@@ -6,6 +6,8 @@
 
 //! Schema/catalog enumeration and schema lifecycle.
 
+mod drop;
+
 use super::{CatalogIndexRow, Engine, RelationIdentity, StorageBackendError, StorageBackendResult};
 
 /// Namespaces the engine implements without a durable schema row: the
@@ -49,15 +51,14 @@ impl Engine {
         })
     }
 
-    /// Drop an empty durable schema. `public` and the virtual system
-    /// namespaces cannot be removed.
+    /// Drop an empty durable schema. Virtual system namespaces cannot be removed.
     pub fn drop_schema(&self, name: &str) -> StorageBackendResult<bool> {
         self.with_implicit_storage_transaction(|engine| engine.drop_schema_inner(name))
     }
 
     pub(crate) fn preflight_drop_schema(&self, name: &str) -> StorageBackendResult<bool> {
         self.synchronize_catalog_registries()?;
-        if name == "public" || is_virtual_system_schema(name) {
+        if is_virtual_system_schema(name) {
             return Err(StorageBackendError::Other(format!(
                 "schema `{name}` cannot be dropped"
             )));
@@ -108,7 +109,7 @@ impl Engine {
         crate::engine_capabilities::validate_schema_name(name)
     }
 
-    fn schema_is_empty(&self, schema: &str) -> bool {
+    pub(crate) fn schema_is_empty(&self, schema: &str) -> bool {
         !self
             .storage
             .tables
@@ -139,6 +140,12 @@ impl Engine {
                 .read()
                 .keys()
                 .any(|relation| relation.schema == schema)
+            && !self
+                .durable
+                .domains
+                .read()
+                .values()
+                .any(|domain| domain.identity.schema == schema)
             && !self.durable.sql_user_functions.read().keys().any(|name| {
                 RelationIdentity::from_legacy_name(name)
                     .map_or(true, |relation| relation.schema == schema)

@@ -152,7 +152,7 @@ fn canonical_default_dependency_survives_reopen_and_blocks_only_its_sequence_dro
         );
         assert!(reopened.drop_sequence("ids").unwrap());
         let error = reopened.drop_sequence("app.ids").unwrap_err();
-        assert!(error.contains("app.items.generated_id"), "{error}");
+        assert!(error.contains("other objects depend on it"), "{error}");
         reopened
             .sql("INSERT INTO app.items (id) VALUES (1)", &[])
             .unwrap();
@@ -436,7 +436,10 @@ fn sequence_drop_rejects_a_bound_view_dependency() {
         .unwrap();
 
     let error = eng.drop_sequence("ids").unwrap_err();
-    assert!(error.contains("public.generated"), "{error}");
+    assert_eq!(
+        error,
+        "cannot drop sequence ids because other objects depend on it"
+    );
     assert!(eng.sequence_state("ids").unwrap().is_some());
     eng.sql("DROP VIEW generated", &[]).unwrap();
     assert!(eng.drop_sequence("ids").unwrap());

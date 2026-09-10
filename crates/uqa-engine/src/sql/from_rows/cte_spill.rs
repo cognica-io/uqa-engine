@@ -46,6 +46,7 @@ pub(in crate::sql) fn save_and_remove_cte_names(
         .iter()
         .map(|name| SavedCteBinding {
             name: name.clone(),
+            non_returning: ctes.non_returning_ctes.contains(name),
             rows: ctes.remove_materialized(name),
             deferred: ctes.remove_deferred(name),
         })
@@ -54,6 +55,7 @@ pub(in crate::sql) fn save_and_remove_cte_names(
 
 pub(in crate::sql) fn restore_cte_names(ctes: &mut CteScope, saved: Vec<SavedCteBinding>) {
     for binding in saved {
+        let name = binding.name.clone();
         ctes.remove_materialized(&binding.name);
         ctes.remove_deferred(&binding.name);
         if let Some(rows) = binding.rows {
@@ -61,11 +63,15 @@ pub(in crate::sql) fn restore_cte_names(ctes: &mut CteScope, saved: Vec<SavedCte
         } else if let Some(plan) = binding.deferred {
             ctes.insert_deferred(plan);
         }
+        if binding.non_returning {
+            ctes.non_returning_ctes.insert(name);
+        }
     }
 }
 
 pub(in crate::sql) struct SavedCteBinding {
     name: String,
+    non_returning: bool,
     rows: Option<uqa_execution::SharedSpill>,
     deferred: Option<CtePlan>,
 }
@@ -79,7 +85,7 @@ pub(in crate::sql) fn query_cte_names(plan: &QueryPlan) -> BTreeSet<String> {
 pub(in crate::sql) fn collect_query_cte_names(plan: &QueryPlan, names: &mut BTreeSet<String>) {
     for cte in &plan.ctes {
         names.insert(cte.name.clone());
-        collect_query_cte_names(&cte.query, names);
+        collect_cte_body_names(&cte.body, names);
     }
     match &plan.root {
         RelationalPlan::QueryBlock(block) => {
@@ -92,6 +98,24 @@ pub(in crate::sql) fn collect_query_cte_names(plan: &QueryPlan, names: &mut BTre
             collect_query_cte_names(right, names);
         }
         RelationalPlan::Values { .. } => {}
+    }
+}
+
+fn collect_cte_body_names(body: &uqa_planner::CtePlanBody, names: &mut BTreeSet<String>) {
+    match body {
+        uqa_planner::CtePlanBody::Query(query) => collect_query_cte_names(query, names),
+        uqa_planner::CtePlanBody::Command(command) => {
+            for cte in command.ctes() {
+                names.insert(cte.name.clone());
+                collect_cte_body_names(&cte.body, names);
+            }
+            for query in command.query_inputs() {
+                collect_query_cte_names(query, names);
+            }
+            if let Some(source) = command.source_input() {
+                collect_source_query_cte_names(source, names);
+            }
+        }
     }
 }
 

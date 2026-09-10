@@ -54,11 +54,33 @@ engine.sql(
 `SQLResult` contains:
 
 - `columns`: projected column labels in order
+- `column_types`: SQL types in projection order, including empty results
 - `rows`: compatibility rows represented as `BTreeMap<String, Value>`
 - `value_at(row, column)`: positional access that distinguishes repeated labels
 - `affected_rows`: the DML row count
+- `command_tag`: optional PostgreSQL command completion text, such as `SELECT 2`, `INSERT 0 1`, or `CREATE TABLE`
+- `kind`: `SQLResultKind::Command` or `Rows`, distinguishing commands from zero-column queries; clients without descriptor information use `Unknown`
 
 When projected labels repeat, `SQLResult` retains the distinct final values in a positional carrier while keeping `rows` for existing named-map callers. Use `value_at`, a cursor, or the columnar path to address repeated labels by position.
+
+`REGTYPE` results, including `pg_typeof`, use `Value::Int` for the catalog OID. Request `pg_typeof(expression)::text` for the visible type name, or use `sql::format_postgres_text(value, column_type, Some(&engine))` with the result's declared type. `sql::postgres_result_type` returns the PostgreSQL type OID, size, and modifier; scalar domain results expose their base type in a PostgreSQL client descriptor.
+
+### Simple Query messages
+
+`Engine::sql_simple_query(query, params, consume)` accepts a SQL message containing zero or more statements and a `FnMut(&SQLResult) -> Result<(), SQLError>` callback. It parses the complete message before executing any statement, then delivers results in statement order. An empty message delivers one empty result with no `command_tag`.
+
+Statements outside explicit transaction blocks share an implicit transaction segment. Explicit transaction commands control the segment boundaries. The final result is delivered after its implicit transaction commits, so a deferred constraint failure prevents that final callback. Earlier callbacks may already have observed results when a later statement fails; those earlier results do not establish that the segment committed. An execution error stops the remaining statements, and a callback error rolls back an implicit segment that is still open. A final callback runs after commit and cannot undo that commit.
+
+```rust
+let engine = uqa_engine::Engine::new();
+let mut tags = Vec::new();
+engine.sql_simple_query("SELECT 1; SELECT 2", &[], |result| {
+    tags.push(result.command_tag.clone());
+    Ok(())
+})?;
+assert_eq!(tags, [Some("SELECT 1".into()), Some("SELECT 1".into())]);
+# Ok::<(), uqa_engine::SQLError>(())
+```
 
 ## Stream results
 
@@ -138,6 +160,8 @@ Do not issue concurrent statements through the same session while an explicit tr
 ## Sessions
 
 `Engine::new_session()` creates a new SQL session over the same persistent provider. Each session has independent transaction state, session variables, prepared statements, statement caches, and cancellation tokens. Durable rows, catalog objects, indexes, graph data, and runtime UDF registries are shared.
+
+`Engine::new_session_for_user(user)` opens an independent session for a role authenticated by the embedding host. It verifies that the role exists, has `LOGIN`, and has database `CONNECT`, then sets both `session_user` and `current_user` to that role. The host owns credential verification and connection limits. The [PostgreSQL TCP server](11-postgresql-server.md) uses this entry point after its configured authentication policy accepts a connection.
 
 Session creation is available for engines backed by one persistent provider. An engine assembled from separate persistent backends does not provide the single provider needed to create a new session.
 

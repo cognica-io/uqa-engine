@@ -232,8 +232,8 @@ fn array_types_coerce_elements_and_survive_engine_reopen() {
         exec(
             &engine,
             "INSERT INTO array_values VALUES
-                 (1, ARRAY[1, 2], ARRAY['10', '20'],
-                  ARRAY[ARRAY['1', '2'], ARRAY['3', '4']]),
+                 (1, ARRAY[1, 2], ARRAY['10', '20']::INTEGER[],
+                  ARRAY[ARRAY['1', '2'], ARRAY['3', '4']]::INTEGER[][]),
                  (2, '{alpha,beta}', '{30,40}', '{{5,6},{7,8}}')",
         );
         let error = engine

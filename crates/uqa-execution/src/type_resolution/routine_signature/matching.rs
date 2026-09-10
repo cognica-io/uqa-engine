@@ -144,9 +144,25 @@ pub fn match_routine_signature(
                 && mapping.variadic_mode == RoutineVariadicMode::Pack,
         );
         let actual = call.argument_types[argument_index].as_ref();
-        let Some(target) = resolve_target(&effective_declared, actual, &substitutions) else {
+        let Some(mut target) = resolve_target(&effective_declared, actual, &substitutions) else {
             return Ok(None);
         };
+        if routine_polymorphic_type(&effective_declared).is_none() {
+            target.column_type = parameters[parameter_index]
+                .column_type
+                .as_ref()
+                .map(|ty| {
+                    if Some(parameter_index) == mapping.variadic_index
+                        && mapping.variadic_mode == RoutineVariadicMode::Pack
+                    {
+                        if let ColumnType::Array(element) = ty {
+                            return element.as_ref().clone();
+                        }
+                    }
+                    ty.clone()
+                })
+                .or(target.column_type);
+        }
         if let Some(actual) = actual {
             if routine_polymorphic_type(&effective_declared).is_none() {
                 let raw_actual = canonical_column_type_name(actual);
@@ -156,7 +172,12 @@ pub fn match_routine_signature(
                     exact_matches += 1;
                 } else if base_actual == target.type_name {
                     exact_matches += 1;
-                } else if routine_type_accepts_implicit_cast(&base_actual, &target.type_name) {
+                } else if target.column_type.as_ref().is_some_and(|target| {
+                    let target_base = canonical_column_type_name(base_type(target));
+                    base_actual == target_base
+                        || routine_type_accepts_implicit_cast(&base_actual, &target_base)
+                }) || routine_type_accepts_implicit_cast(&base_actual, &target.type_name)
+                {
                     preferred_matches += usize::from(routine_type_is_preferred(&target.type_name));
                 } else {
                     return Ok(None);
@@ -216,6 +237,11 @@ pub fn match_routine_signature(
     Ok(Some(MatchedRoutineSignature {
         declared_identity,
         argument_targets,
+        argument_sources: call
+            .argument_types
+            .iter()
+            .map(|ty| ty.as_ref().map(ColumnType::sql_name))
+            .collect(),
         argument_positions: mapping.argument_positions,
         coercion_targets,
         parameter_types,

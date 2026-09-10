@@ -7,10 +7,49 @@
 use super::*;
 
 #[test]
+fn read_only_database_reopens_with_read_only_lock_sidecars() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("read-only.sqlite3");
+    register_database(&path, SQLiteCompressionOptions::default(), None).unwrap();
+    let writer = rusqlite::Connection::open_with_flags_and_vfs(
+        &path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_CREATE,
+        VFS_NAME,
+    )
+    .unwrap();
+    writer
+        .execute_batch("CREATE TABLE saved (id INTEGER); INSERT INTO saved VALUES (42)")
+        .unwrap();
+    drop(writer);
+    let mut files = vec![path.clone()];
+    files.extend(locking::lock_paths(&path));
+    let permissions = files
+        .iter()
+        .map(|file| fs::metadata(file).unwrap().permissions())
+        .collect::<Vec<_>>();
+    for (file, original) in files.iter().zip(&permissions) {
+        let mut read_only = original.clone();
+        read_only.set_readonly(true);
+        fs::set_permissions(file, read_only).unwrap();
+    }
+    let result = rusqlite::Connection::open_with_flags_and_vfs(
+        &path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        VFS_NAME,
+    )
+    .and_then(|reader| reader.query_row("SELECT id FROM saved", [], |row| row.get::<_, i64>(0)));
+    for (file, original) in files.iter().zip(permissions) {
+        fs::set_permissions(file, original).unwrap();
+    }
+    assert_eq!(result.unwrap(), 42);
+}
+
+#[test]
 fn vfs_delete_with_dir_sync_removes_real_file() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("delete-with-dir-sync.sqlite3");
     std::fs::write(&path, b"content").unwrap();
+    drop(FileLocks::open(&path, false).unwrap());
     let name = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
 
     // SAFETY: `name` is a valid NUL-terminated path for the duration of the call.
@@ -18,6 +57,107 @@ fn vfs_delete_with_dir_sync_removes_real_file() {
 
     assert_eq!(result, ffi::SQLITE_OK);
     assert!(!path.exists());
+    assert!(locking::lock_paths(&path).iter().all(|path| !path.exists()));
+}
+
+#[test]
+fn delete_on_close_removes_the_file_and_every_lock_sidecar() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("temporary.sqlite3");
+    let name = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+    let mut file = CompressedSQLiteFile {
+        base: ffi::sqlite3_file {
+            pMethods: ptr::null(),
+        },
+        handle: ptr::null_mut(),
+    };
+    // SAFETY: the file wrapper provides the VFS's complete allocation, and the path remains NUL-terminated during xOpen.
+    unsafe {
+        assert_eq!(
+            vfs_open(
+                ptr::null_mut(),
+                name.as_ptr(),
+                &raw mut file.base,
+                ffi::SQLITE_OPEN_READWRITE
+                    | ffi::SQLITE_OPEN_CREATE
+                    | ffi::SQLITE_OPEN_DELETEONCLOSE,
+                ptr::null_mut()
+            ),
+            ffi::SQLITE_OK
+        );
+        assert_eq!(
+            IO_METHODS.xWrite.unwrap()(&raw mut file.base, [1_u8].as_ptr().cast(), 1, 0),
+            ffi::SQLITE_OK
+        );
+        assert_eq!(
+            IO_METHODS.xSync.unwrap()(&raw mut file.base, 0),
+            ffi::SQLITE_OK
+        );
+        assert!(path.exists());
+        assert!(locking::lock_paths(&path).iter().all(|path| path.exists()));
+        assert_eq!(
+            IO_METHODS.xClose.unwrap()(&raw mut file.base),
+            ffi::SQLITE_OK
+        );
+    }
+    assert!(!path.exists());
+    assert!(locking::lock_paths(&path).iter().all(|path| !path.exists()));
+}
+
+#[test]
+fn exclusive_downgrade_publishes_truncation_before_admitting_readers() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("downgrade.sqlite3");
+    let name = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+    let mut file = CompressedSQLiteFile {
+        base: ffi::sqlite3_file {
+            pMethods: ptr::null(),
+        },
+        handle: ptr::null_mut(),
+    };
+    // SAFETY: the file wrapper, NUL-terminated path, and write buffer remain valid throughout the VFS callbacks.
+    unsafe {
+        assert_eq!(
+            vfs_open(
+                ptr::null_mut(),
+                name.as_ptr(),
+                &raw mut file.base,
+                ffi::SQLITE_OPEN_READWRITE | ffi::SQLITE_OPEN_CREATE | ffi::SQLITE_OPEN_MAIN_DB,
+                ptr::null_mut()
+            ),
+            ffi::SQLITE_OK
+        );
+        assert_eq!(
+            IO_METHODS.xLock.unwrap()(&raw mut file.base, SQLITE_LOCK_SHARED),
+            ffi::SQLITE_OK
+        );
+        assert_eq!(
+            IO_METHODS.xLock.unwrap()(&raw mut file.base, SQLITE_LOCK_EXCLUSIVE),
+            ffi::SQLITE_OK
+        );
+        assert_eq!(
+            IO_METHODS.xWrite.unwrap()(&raw mut file.base, [1_u8, 2, 3].as_ptr().cast(), 3, 0),
+            ffi::SQLITE_OK
+        );
+        assert_eq!(
+            IO_METHODS.xSync.unwrap()(&raw mut file.base, 0),
+            ffi::SQLITE_OK
+        );
+        assert_eq!(
+            IO_METHODS.xTruncate.unwrap()(&raw mut file.base, 1),
+            ffi::SQLITE_OK
+        );
+        assert_eq!(
+            IO_METHODS.xUnlock.unwrap()(&raw mut file.base, SQLITE_LOCK_SHARED),
+            ffi::SQLITE_OK
+        );
+        let persisted = ContainerFile::load(path.clone(), None).unwrap();
+        assert_eq!(
+            IO_METHODS.xClose.unwrap()(&raw mut file.base),
+            ffi::SQLITE_OK
+        );
+        assert_eq!(persisted.logical_len, 1);
+    }
 }
 
 #[test]
@@ -50,7 +190,7 @@ fn vfs_delete_nonexistent_file_with_missing_parent_skips_dir_sync() {
 #[test]
 fn failed_exclusive_upgrade_preserves_the_existing_shared_lock() {
     let dir = tempfile::tempdir().unwrap();
-    let lock_path = dir.path().join("upgrade.lock");
+    let lock_path = dir.path().join("upgrade.data.lock");
     let data_path = dir.path().join("upgrade.data");
     let open = || {
         OpenOptions::new()
@@ -73,17 +213,15 @@ fn failed_exclusive_upgrade_preserves_the_existing_shared_lock() {
     };
     let mut first_handle = Box::new(FileHandle {
         file: VfsFile::Plain(data()),
-        lock_file: open(),
+        locks: FileLocks::open(&data_path, false).unwrap(),
         read_only: false,
         delete_on_close: false,
-        lock_state: SQLITE_LOCK_NONE,
     });
     let mut second_handle = Box::new(FileHandle {
         file: VfsFile::Plain(data()),
-        lock_file: open(),
+        locks: FileLocks::open(&data_path, false).unwrap(),
         read_only: false,
         delete_on_close: false,
-        lock_state: SQLITE_LOCK_NONE,
     });
     let mut first = CompressedSQLiteFile {
         base: ffi::sqlite3_file {
@@ -112,6 +250,10 @@ fn failed_exclusive_upgrade_preserves_the_existing_shared_lock() {
         );
         assert_eq!(
             lock(&raw mut first.base, SQLITE_LOCK_RESERVED),
+            ffi::SQLITE_OK
+        );
+        assert_eq!(
+            lock(&raw mut first.base, SQLITE_LOCK_EXCLUSIVE),
             ffi::SQLITE_BUSY
         );
         assert_eq!(

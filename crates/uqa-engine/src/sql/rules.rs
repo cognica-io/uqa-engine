@@ -69,7 +69,7 @@ pub(in crate::sql) struct PreparedRuleBatch {
 pub(in crate::sql) struct RuleExecutionOutcome {
     pub(in crate::sql) returning: Option<RuleReturningResult>,
     pub(in crate::sql) affected_rows: u64,
-    pub(in crate::sql) executed_action: bool,
+    pub(in crate::sql) sets_command_tag: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -167,7 +167,7 @@ impl PreparedRuleBatch {
             return Ok(RuleExecutionOutcome {
                 returning: None,
                 affected_rows: 0,
-                executed_action: false,
+                sets_command_tag: false,
             });
         }
         let privilege_subject = engine.rule_privilege_subject(&self.table)?;
@@ -188,7 +188,7 @@ impl PreparedRuleBatch {
             });
         let mut returning = provider_exists.then(RuleReturningResult::empty);
         let mut affected_rows = 0_u64;
-        let mut executed_action = false;
+        let mut sets_command_tag = false;
         let mut provider_captured = false;
         for prepared in &self.rules {
             for (action_index, action) in prepared.rule.definition.actions.iter().enumerate() {
@@ -344,8 +344,18 @@ impl PreparedRuleBatch {
                     &[],
                     &privilege_subject,
                 )?;
-                affected_rows = result.affected_rows;
-                executed_action = true;
+                if prepared.rule.definition.instead
+                    && prepared.rule.definition.condition.is_none()
+                    && matches!(
+                        (self.event, action),
+                        (RuleEvent::Insert, Statement::Insert(_))
+                            | (RuleEvent::Update, Statement::Update(_))
+                            | (RuleEvent::Delete, Statement::Delete(_))
+                    )
+                {
+                    affected_rows = result.affected_rows;
+                    sets_command_tag = true;
+                }
                 if captures_action {
                     let definitions = returning_columns.as_deref().ok_or_else(|| {
                         SQLError::Internal(
@@ -365,7 +375,7 @@ impl PreparedRuleBatch {
         Ok(RuleExecutionOutcome {
             returning,
             affected_rows,
-            executed_action,
+            sets_command_tag,
         })
     }
 }

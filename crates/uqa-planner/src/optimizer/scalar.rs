@@ -4,112 +4,115 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Scalar Boolean simplification and vector-threshold rewrites.
+//! Scalar simplification with SQL errors preserved at the planning boundary.
 
 use super::{
     AssignmentPlan, BTreeMap, OptimizerConfig, ProjectionPlan, ScalarExpr, ScalarFrameBound, Value,
 };
-use uqa_core::ArrayValue;
-use uqa_sql::expr::{
-    cast_value, eval_binary_values_with_integer_width, integer_width_for_literal, truthy,
-};
+use uqa_sql::SQLError;
 
-pub(super) fn optimize_assignments(assignments: &mut [AssignmentPlan], config: &OptimizerConfig) {
+mod conditional;
+mod constants;
+
+use conditional::{optimize_boolean, optimize_case, optimize_coalesce};
+use constants::fold_literal_expression;
+
+pub(super) fn optimize_assignments(
+    assignments: &mut [AssignmentPlan],
+    config: &OptimizerConfig,
+) -> Result<(), SQLError> {
     for assignment in assignments {
-        optimize_scalar_slot(&mut assignment.value, config);
+        optimize_scalar_slot(&mut assignment.value, config)?;
     }
+    Ok(())
 }
 
-pub(super) fn optimize_projections(projections: &mut [ProjectionPlan], config: &OptimizerConfig) {
+pub(super) fn optimize_projections(
+    projections: &mut [ProjectionPlan],
+    config: &OptimizerConfig,
+) -> Result<(), SQLError> {
     for projection in projections {
-        optimize_scalar_slot(&mut projection.expr, config);
+        optimize_scalar_slot(&mut projection.expr, config)?;
     }
+    Ok(())
 }
 
-pub(super) fn optimize_scalar_slot(expression: &mut ScalarExpr, config: &OptimizerConfig) {
+pub(super) fn optimize_scalar_slot(
+    expression: &mut ScalarExpr,
+    config: &OptimizerConfig,
+) -> Result<(), SQLError> {
     let placeholder = ScalarExpr::Literal(Value::Null);
-    let mut optimized = optimize_scalar(std::mem::replace(expression, placeholder), config);
+    let mut optimized = optimize_scalar(std::mem::replace(expression, placeholder), config)?;
     if config.enable_vector_threshold_merge {
         optimized = merge_vector_thresholds(optimized);
     }
     *expression = optimized;
+    Ok(())
+}
+
+fn optimize_list(
+    items: Vec<ScalarExpr>,
+    config: &OptimizerConfig,
+) -> Result<Vec<ScalarExpr>, SQLError> {
+    items
+        .into_iter()
+        .map(|item| optimize_scalar(item, config))
+        .collect()
+}
+
+fn optimize_optional(
+    expression: Option<Box<ScalarExpr>>,
+    config: &OptimizerConfig,
+) -> Result<Option<Box<ScalarExpr>>, SQLError> {
+    expression
+        .map(|expression| optimize_scalar(*expression, config).map(Box::new))
+        .transpose()
 }
 
 #[expect(
     clippy::too_many_lines,
     reason = "optimizer rewrite preserves exhaustive variants and fixed-point order"
 )]
-fn optimize_scalar(expression: ScalarExpr, config: &OptimizerConfig) -> ScalarExpr {
+fn optimize_scalar(
+    expression: ScalarExpr,
+    config: &OptimizerConfig,
+) -> Result<ScalarExpr, SQLError> {
     let optimized = match expression {
-        ScalarExpr::Array(items) => ScalarExpr::Array(
-            items
-                .into_iter()
-                .map(|item| optimize_scalar(item, config))
-                .collect(),
-        ),
+        ScalarExpr::Array(items) => ScalarExpr::Array(optimize_list(items, config)?),
+        ScalarExpr::Row(items) => ScalarExpr::Row(optimize_list(items, config)?),
         ScalarExpr::Binary { op, lhs, rhs } => ScalarExpr::Binary {
             op,
-            lhs: Box::new(optimize_scalar(*lhs, config)),
-            rhs: Box::new(optimize_scalar(*rhs, config)),
+            lhs: Box::new(optimize_scalar(*lhs, config)?),
+            rhs: Box::new(optimize_scalar(*rhs, config)?),
         },
         ScalarExpr::UnaryMinus(inner) => {
-            ScalarExpr::UnaryMinus(Box::new(optimize_scalar(*inner, config)))
+            ScalarExpr::UnaryMinus(Box::new(optimize_scalar(*inner, config)?))
         }
         ScalarExpr::Not(inner) => {
-            let inner = optimize_scalar(*inner, config);
-            if config.enable_boolean_simplify {
-                match inner {
-                    ScalarExpr::Literal(Value::Bool(value)) => {
-                        ScalarExpr::Literal(Value::Bool(!value))
-                    }
-                    ScalarExpr::Not(inner) => *inner,
-                    other => ScalarExpr::Not(Box::new(other)),
-                }
-            } else {
-                ScalarExpr::Not(Box::new(inner))
+            let inner = optimize_scalar(*inner, config)?;
+            match inner {
+                ScalarExpr::Not(inner) if config.enable_boolean_simplify => *inner,
+                other => ScalarExpr::Not(Box::new(other)),
             }
         }
-        ScalarExpr::And(items) => {
-            let items = items
-                .into_iter()
-                .map(|item| optimize_scalar(item, config))
-                .collect();
-            if config.enable_boolean_simplify {
-                simplify_and(items)
-            } else {
-                ScalarExpr::And(items)
-            }
-        }
-        ScalarExpr::Or(items) => {
-            let items = items
-                .into_iter()
-                .map(|item| optimize_scalar(item, config))
-                .collect();
-            if config.enable_boolean_simplify {
-                simplify_or(items)
-            } else {
-                ScalarExpr::Or(items)
-            }
-        }
+        ScalarExpr::And(items) => optimize_boolean(items, true, config)?,
+        ScalarExpr::Or(items) => optimize_boolean(items, false, config)?,
         ScalarExpr::IsNull { expr, negated } => ScalarExpr::IsNull {
-            expr: Box::new(optimize_scalar(*expr, config)),
+            expr: Box::new(optimize_scalar(*expr, config)?),
             negated,
         },
         ScalarExpr::Between { expr, low, high } => ScalarExpr::Between {
-            expr: Box::new(optimize_scalar(*expr, config)),
-            low: Box::new(optimize_scalar(*low, config)),
-            high: Box::new(optimize_scalar(*high, config)),
+            expr: Box::new(optimize_scalar(*expr, config)?),
+            low: Box::new(optimize_scalar(*low, config)?),
+            high: Box::new(optimize_scalar(*high, config)?),
         },
         ScalarExpr::InList {
             expr,
             list,
             negated,
         } => ScalarExpr::InList {
-            expr: Box::new(optimize_scalar(*expr, config)),
-            list: list
-                .into_iter()
-                .map(|item| optimize_scalar(item, config))
-                .collect(),
+            expr: Box::new(optimize_scalar(*expr, config)?),
+            list: optimize_list(list, config)?,
             negated,
         },
         ScalarExpr::Func {
@@ -121,21 +124,20 @@ fn optimize_scalar(expression: ScalarExpr, config: &OptimizerConfig) -> ScalarEx
             filter,
         } => {
             for order in &mut order_by {
-                order.expr = optimize_scalar(
-                    std::mem::replace(&mut order.expr, ScalarExpr::Literal(Value::Null)),
-                    config,
-                );
+                optimize_scalar_slot(&mut order.expr, config)?;
             }
+            let args = if constants::is_coalesce(&name, binding.as_ref()) {
+                optimize_coalesce(args, config)?
+            } else {
+                optimize_list(args, config)?
+            };
             ScalarExpr::Func {
                 name,
                 binding,
-                args: args
-                    .into_iter()
-                    .map(|argument| optimize_scalar(argument, config))
-                    .collect(),
+                args,
                 distinct,
                 order_by,
-                filter: filter.map(|filter| Box::new(optimize_scalar(*filter, config))),
+                filter: optimize_optional(filter, config)?,
             }
         }
         ScalarExpr::WindowCall {
@@ -143,27 +145,17 @@ fn optimize_scalar(expression: ScalarExpr, config: &OptimizerConfig) -> ScalarEx
             args,
             mut spec,
         } => {
-            spec.partition_by = spec
-                .partition_by
-                .into_iter()
-                .map(|expression| optimize_scalar(expression, config))
-                .collect();
+            spec.partition_by = optimize_list(spec.partition_by, config)?;
             for order in &mut spec.order_by {
-                order.expr = optimize_scalar(
-                    std::mem::replace(&mut order.expr, ScalarExpr::Literal(Value::Null)),
-                    config,
-                );
+                optimize_scalar_slot(&mut order.expr, config)?;
             }
             if let Some(frame) = &mut spec.frame {
-                optimize_frame_bound(&mut frame.start, config);
-                optimize_frame_bound(&mut frame.end, config);
+                optimize_frame_bound(&mut frame.start, config)?;
+                optimize_frame_bound(&mut frame.end, config)?;
             }
             ScalarExpr::WindowCall {
                 name,
-                args: args
-                    .into_iter()
-                    .map(|argument| optimize_scalar(argument, config))
-                    .collect(),
+                args: optimize_list(args, config)?,
                 spec,
             }
         }
@@ -171,21 +163,9 @@ fn optimize_scalar(expression: ScalarExpr, config: &OptimizerConfig) -> ScalarEx
             base,
             when,
             else_branch,
-        } => ScalarExpr::Case {
-            base: base.map(|base| Box::new(optimize_scalar(*base, config))),
-            when: when
-                .into_iter()
-                .map(|(condition, result)| {
-                    (
-                        optimize_scalar(condition, config),
-                        optimize_scalar(result, config),
-                    )
-                })
-                .collect(),
-            else_branch: else_branch.map(|branch| Box::new(optimize_scalar(*branch, config))),
-        },
+        } => optimize_case(base, when, else_branch, config)?,
         ScalarExpr::Cast { expr, ty } => ScalarExpr::Cast {
-            expr: Box::new(optimize_scalar(*expr, config)),
+            expr: Box::new(optimize_scalar(*expr, config)?),
             ty,
         },
         ScalarExpr::InSubquery {
@@ -193,7 +173,7 @@ fn optimize_scalar(expression: ScalarExpr, config: &OptimizerConfig) -> ScalarEx
             subquery,
             negated,
         } => ScalarExpr::InSubquery {
-            expr: Box::new(optimize_scalar(*expr, config)),
+            expr: Box::new(optimize_scalar(*expr, config)?),
             subquery,
             negated,
         },
@@ -202,171 +182,19 @@ fn optimize_scalar(expression: ScalarExpr, config: &OptimizerConfig) -> ScalarEx
     fold_literal_expression(optimized)
 }
 
-/// Fold deterministic scalar work whose complete input is already in the
-/// physical plan. Failed folds stay in the plan so SQL errors retain their
-/// normal execution-time behavior.
-fn fold_literal_expression(expression: ScalarExpr) -> ScalarExpr {
-    match expression {
-        ScalarExpr::Cast { expr, ty } => match *expr {
-            ScalarExpr::Literal(value) if is_integer_type(&ty) => ScalarExpr::Cast {
-                expr: Box::new(ScalarExpr::Literal(value)),
-                ty,
-            },
-            ScalarExpr::Literal(value) => {
-                let folded = cast_value(&value, &ty).unwrap_or(value);
-                // The cast is also the static type identity of this constant.
-                // Dropping it makes later binding reconstruct a declaration
-                // from the runtime carrier, which cannot distinguish int2,
-                // int4, int8, varchar, bpchar, or float widths.
-                ScalarExpr::Cast {
-                    expr: Box::new(ScalarExpr::Literal(folded)),
-                    ty,
-                }
-            }
-            expr => ScalarExpr::Cast {
-                expr: Box::new(expr),
-                ty,
-            },
-        },
-        ScalarExpr::Binary { op, lhs, rhs } => match (*lhs, *rhs) {
-            (ScalarExpr::Literal(lhs), ScalarExpr::Literal(rhs)) => {
-                let integer_width = match (&lhs, &rhs) {
-                    (Value::Int(lhs), Value::Int(rhs)) => {
-                        Some(integer_width_for_literal(*lhs).max(integer_width_for_literal(*rhs)))
-                    }
-                    _ => None,
-                };
-                eval_binary_values_with_integer_width(op, &lhs, &rhs, integer_width)
-                    .map(ScalarExpr::Literal)
-                    .unwrap_or_else(|_| ScalarExpr::Binary {
-                        op,
-                        lhs: Box::new(ScalarExpr::Literal(lhs)),
-                        rhs: Box::new(ScalarExpr::Literal(rhs)),
-                    })
-            }
-            (lhs, rhs) => ScalarExpr::Binary {
-                op,
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
-            },
-        },
-        ScalarExpr::UnaryMinus(inner) => match *inner {
-            ScalarExpr::Literal(value) => uqa_sql::expr::negate_value(&value, None)
-                .map(ScalarExpr::Literal)
-                .unwrap_or_else(|_| ScalarExpr::UnaryMinus(Box::new(ScalarExpr::Literal(value)))),
-            inner => ScalarExpr::UnaryMinus(Box::new(inner)),
-        },
-        ScalarExpr::Not(inner) => match *inner {
-            ScalarExpr::Literal(Value::Null) => ScalarExpr::Literal(Value::Null),
-            ScalarExpr::Literal(value) => ScalarExpr::Literal(Value::Bool(!truthy(&value))),
-            inner => ScalarExpr::Not(Box::new(inner)),
-        },
-        ScalarExpr::IsNull { expr, negated } => match *expr {
-            ScalarExpr::Literal(value) => {
-                let is_null = matches!(value, Value::Null);
-                ScalarExpr::Literal(Value::Bool(if negated { !is_null } else { is_null }))
-            }
-            expr => ScalarExpr::IsNull {
-                expr: Box::new(expr),
-                negated,
-            },
-        },
-        ScalarExpr::Array(items)
-            if items
-                .iter()
-                .all(|item| matches!(item, ScalarExpr::Literal(_))) =>
-        {
-            let values = items
-                .into_iter()
-                .filter_map(|item| match item {
-                    ScalarExpr::Literal(value) => Some(value),
-                    _ => None,
-                })
-                .collect::<Vec<_>>();
-            ArrayValue::try_new(values.clone()).map_or_else(
-                || ScalarExpr::Array(values.into_iter().map(ScalarExpr::Literal).collect()),
-                |array| ScalarExpr::Literal(Value::Array(array)),
-            )
-        }
-        other => other,
-    }
-}
-
-fn is_integer_type(ty: &str) -> bool {
-    matches!(
-        ty,
-        "smallint"
-            | "int2"
-            | "pg_catalog.int2"
-            | "integer"
-            | "int"
-            | "int4"
-            | "serial"
-            | "serial4"
-            | "pg_catalog.int4"
-            | "bigint"
-            | "int8"
-            | "bigserial"
-            | "serial8"
-            | "pg_catalog.int8"
-            | "oid"
-            | "pg_catalog.oid"
-            | "xid"
-            | "pg_catalog.xid"
-    )
-}
-
-fn optimize_frame_bound(bound: &mut ScalarFrameBound, config: &OptimizerConfig) {
+fn optimize_frame_bound(
+    bound: &mut ScalarFrameBound,
+    config: &OptimizerConfig,
+) -> Result<(), SQLError> {
     match bound {
         ScalarFrameBound::Preceding(expression) | ScalarFrameBound::Following(expression) => {
-            optimize_scalar_slot(expression, config);
+            optimize_scalar_slot(expression, config)?;
         }
         ScalarFrameBound::UnboundedPreceding
         | ScalarFrameBound::UnboundedFollowing
         | ScalarFrameBound::CurrentRow => {}
     }
-}
-
-fn simplify_and(items: Vec<ScalarExpr>) -> ScalarExpr {
-    let mut kept = Vec::new();
-    for item in items {
-        match item {
-            ScalarExpr::Literal(Value::Bool(true)) => {}
-            ScalarExpr::Literal(Value::Bool(false)) => {
-                return ScalarExpr::Literal(Value::Bool(false));
-            }
-            ScalarExpr::And(inner) => kept.extend(inner),
-            other => kept.push(other),
-        }
-    }
-    if kept.is_empty() {
-        ScalarExpr::Literal(Value::Bool(true))
-    } else if kept.len() == 1 {
-        kept.remove(0)
-    } else {
-        ScalarExpr::And(kept)
-    }
-}
-
-fn simplify_or(items: Vec<ScalarExpr>) -> ScalarExpr {
-    let mut kept = Vec::new();
-    for item in items {
-        match item {
-            ScalarExpr::Literal(Value::Bool(false)) => {}
-            ScalarExpr::Literal(Value::Bool(true)) => {
-                return ScalarExpr::Literal(Value::Bool(true));
-            }
-            ScalarExpr::Or(inner) => kept.extend(inner),
-            other => kept.push(other),
-        }
-    }
-    if kept.is_empty() {
-        ScalarExpr::Literal(Value::Bool(false))
-    } else if kept.len() == 1 {
-        kept.remove(0)
-    } else {
-        ScalarExpr::Or(kept)
-    }
+    Ok(())
 }
 
 fn merge_vector_thresholds(expression: ScalarExpr) -> ScalarExpr {
@@ -426,12 +254,11 @@ mod tests {
             ty: "date".into(),
         };
 
-        optimize_scalar_slot(&mut expression, &OptimizerConfig::default());
+        optimize_scalar_slot(&mut expression, &OptimizerConfig::default()).unwrap();
 
         assert!(matches!(
             expression,
-            ScalarExpr::Cast { expr, ty }
-                if ty == "date" && matches!(*expr, ScalarExpr::Literal(Value::Temporal(_)))
+            ScalarExpr::Cast { ty, .. } if ty == "date"
         ));
     }
 
@@ -447,20 +274,18 @@ mod tests {
             rhs: Box::new(ScalarExpr::Literal(Value::Int(4))),
         };
 
-        optimize_scalar_slot(&mut expression, &OptimizerConfig::default());
+        optimize_scalar_slot(&mut expression, &OptimizerConfig::default()).unwrap();
 
         assert_eq!(expression, ScalarExpr::Literal(Value::Int(20)));
     }
 
     #[test]
-    fn leaves_invalid_literal_cast_for_runtime_error_reporting() {
+    fn reports_invalid_constant_input_during_planning() {
         let mut expression = ScalarExpr::Cast {
-            expr: Box::new(ScalarExpr::Literal(Value::Str("not-a-date".into()))),
-            ty: "date".into(),
+            expr: Box::new(ScalarExpr::Literal(Value::Str("not-an-integer".into()))),
+            ty: "integer".into(),
         };
-
-        optimize_scalar_slot(&mut expression, &OptimizerConfig::default());
-
-        assert!(matches!(expression, ScalarExpr::Cast { .. }));
+        let error = optimize_scalar_slot(&mut expression, &OptimizerConfig::default()).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("22P02"));
     }
 }

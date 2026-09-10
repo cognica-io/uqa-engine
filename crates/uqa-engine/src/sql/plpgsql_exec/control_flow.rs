@@ -230,10 +230,17 @@ impl Interpreter<'_> {
             if self.def.is_procedure || self.is_set || !self.out_datums.is_empty() {
                 return Ok(Flow::Return);
             }
+            self.ret_record_types = self.return_record_types(value)?;
+            let source = self.return_value_type(value)?;
             let value = self.eval_return_value(value)?;
             self.ret = match &self.def.returns {
                 FunctionReturns::Scalar { type_name } => {
-                    coerce_routine_value(self.engine, &value, type_name)?
+                    super::resolution::coerce_routine_value_from(
+                        self.engine,
+                        &value,
+                        type_name,
+                        source.as_ref(),
+                    )?
                 }
                 _ => value,
             };

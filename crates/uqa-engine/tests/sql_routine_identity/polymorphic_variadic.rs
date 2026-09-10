@@ -35,7 +35,7 @@ fn polymorphic_scalar_substitution_and_ambiguity_match_postgresql_18() {
         )
         .unwrap();
     assert_eq!(identity.rows[0]["v"], Value::Int(7));
-    assert_eq!(identity.rows[0]["t"], Value::Str("bigint".into()));
+    assert_eq!(identity.rows[0]["t"], Value::Int(20));
     assert_eq!(identity.column_types[0], Some(ColumnType::BigInteger));
 
     let compatible = engine
@@ -45,7 +45,7 @@ fn polymorphic_scalar_substitution_and_ambiguity_match_postgresql_18() {
         )
         .unwrap();
     assert_eq!(compatible.rows[0]["v"], Value::Int(1));
-    assert_eq!(compatible.rows[0]["t"], Value::Str("bigint".into()));
+    assert_eq!(compatible.rows[0]["t"], Value::Int(20));
     assert_eq!(compatible.column_types[0], Some(ColumnType::BigInteger));
 
     assert_sqlstate(&engine, "SELECT poly_identity(NULL)", "42804");
@@ -116,14 +116,14 @@ fn compatible_families_and_typed_routine_parameters_keep_concrete_call_types() {
         )
         .unwrap();
     assert_eq!(promoted.rows[0]["v"], Value::Int(1));
-    assert_eq!(promoted.rows[0]["t"], Value::Str("bigint".into()));
+    assert_eq!(promoted.rows[0]["t"], Value::Int(20));
     assert_eq!(promoted.column_types[0], Some(ColumnType::BigInteger));
     assert_eq!(
         scalar(
             &engine,
             "SELECT pg_typeof(compatible_nonarray(1::smallint, 2::bigint)) AS v"
         ),
-        Value::Str("bigint".into())
+        Value::Int(20)
     );
     assert_sqlstate(
         &engine,
@@ -138,7 +138,7 @@ fn compatible_families_and_typed_routine_parameters_keep_concrete_call_types() {
         )
         .unwrap();
     assert_eq!(unknown.rows[0]["v"], Value::Str("left".into()));
-    assert_eq!(unknown.rows[0]["t"], Value::Str("text".into()));
+    assert_eq!(unknown.rows[0]["t"], Value::Int(25));
 
     let arrays = engine
         .sql(
@@ -150,7 +150,7 @@ fn compatible_families_and_typed_routine_parameters_keep_concrete_call_types() {
         arrays.rows[0]["v"],
         Value::Array(ArrayValue::try_new(vec![Value::Int(1)]).unwrap())
     );
-    assert_eq!(arrays.rows[0]["t"], Value::Str("bigint[]".into()));
+    assert_eq!(arrays.rows[0]["t"], Value::Int(1016));
     assert_eq!(
         scalar(&engine, "SELECT polymorphic_nested(7::bigint) AS v"),
         Value::Str("bigint".into())
@@ -162,7 +162,7 @@ fn compatible_families_and_typed_routine_parameters_keep_concrete_call_types() {
         )
         .unwrap();
     assert_eq!(plpgsql.rows[0]["v"], Value::Int(7));
-    assert_eq!(plpgsql.rows[0]["t"], Value::Str("bigint".into()));
+    assert_eq!(plpgsql.rows[0]["t"], Value::Int(20));
 }
 
 #[test]
@@ -197,7 +197,7 @@ fn sql_polymorphic_variadic_table_and_setof_results_keep_concrete_types() {
             .iter()
             .map(|row| row["item_type"].clone())
             .collect::<Vec<_>>(),
-        vec![Value::Str("bigint".into()), Value::Str("bigint".into())]
+        vec![Value::Int(20), Value::Int(20)]
     );
     assert_eq!(table.column_types[0], Some(ColumnType::BigInteger));
 
@@ -235,7 +235,7 @@ fn sql_polymorphic_variadic_table_and_setof_results_keep_concrete_types() {
             .iter()
             .map(|row| row["value_type"].clone())
             .collect::<Vec<_>>(),
-        vec![Value::Str("bigint".into()), Value::Str("bigint".into())]
+        vec![Value::Int(20), Value::Int(20)]
     );
     assert_eq!(set.column_types[0], Some(ColumnType::BigInteger));
 
@@ -256,7 +256,7 @@ fn sql_polymorphic_variadic_table_and_setof_results_keep_concrete_types() {
     assert!(projected_set
         .rows
         .iter()
-        .all(|row| row["value_type"] == Value::Str("bigint".into())));
+        .all(|row| row["value_type"] == Value::Int(20)));
     assert_eq!(projected_set.column_types[0], Some(ColumnType::BigInteger));
 }
 
@@ -290,7 +290,7 @@ fn plpgsql_polymorphic_variadic_return_next_keeps_concrete_set_type() {
             .iter()
             .map(|row| row["value_type"].clone())
             .collect::<Vec<_>>(),
-        vec![Value::Str("bigint".into()), Value::Str("bigint".into())]
+        vec![Value::Int(20), Value::Int(20)]
     );
     assert_eq!(implicit.column_types[0], Some(ColumnType::BigInteger));
 
@@ -357,7 +357,7 @@ fn variadic_procedure_call_supports_implicit_explicit_and_named_arrays() {
     assert!(result
         .rows
         .iter()
-        .all(|row| row["items_type"] == Value::Str("integer[]".into())));
+        .all(|row| row["items_type"] == Value::Int(1007)));
     assert_eq!(
         result.column_types[1],
         Some(ColumnType::Array(Box::new(ColumnType::Integer)))
@@ -390,7 +390,7 @@ fn generated_expression_uses_concrete_polymorphic_return_for_nested_overload() {
     assert_eq!(result.rows[0]["source"], Value::Int(42));
     assert_eq!(result.rows[0]["copied"], Value::Int(42));
     assert_eq!(result.rows[0]["kind"], Value::Str("bigint".into()));
-    assert_eq!(result.rows[0]["copied_type"], Value::Str("bigint".into()));
+    assert_eq!(result.rows[0]["copied_type"], Value::Int(20));
     assert_eq!(result.column_types[1], Some(ColumnType::BigInteger));
 }
 

@@ -379,6 +379,9 @@ mod unified_plan_tests {
     #[test]
     fn sql_boundaries_are_cached_as_structural_unified_plans() {
         let engine = Engine::new();
+        engine
+            .sql("CREATE TABLE ledger (account text, amount integer)", &[])
+            .expect("plan source table");
 
         let arithmetic = one(&engine, "SELECT amount * 2 + 1 AS adjusted FROM ledger");
         let UnifiedPlan::Query(query) = arithmetic else {

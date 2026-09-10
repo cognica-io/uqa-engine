@@ -262,8 +262,11 @@ pub(super) fn compile_variable_set(
         }
         VariableSetKind::VarResetAll => return Ok(Statement::ResetAllVariables),
         VariableSetKind::VarSetDefault => {
-            return Ok(Statement::ResetVariable {
+            return Ok(Statement::SetVariable {
                 name: stmt.name.clone(),
+                value: String::new(),
+                local: stmt.is_local,
+                is_default: true,
             });
         }
         _ => {}
@@ -373,6 +376,8 @@ pub(super) fn compile_variable_set(
     Ok(Statement::SetVariable {
         name: stmt.name.clone(),
         value,
+        local: stmt.is_local,
+        is_default: false,
     })
 }
 

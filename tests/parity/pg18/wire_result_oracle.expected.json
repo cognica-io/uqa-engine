@@ -1,0 +1,1176 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "version",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT NULL AS unknown, true AS boolean, 7::smallint AS smallint, 42 AS integer, 1234567890123::bigint AS bigint",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "unknown",
+            "boolean",
+            "smallint",
+            "integer",
+            "bigint"
+          ],
+          "type_oids": [
+            25,
+            16,
+            21,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              null,
+              "t",
+              "7",
+              "42",
+              "1234567890123"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "unknown",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "boolean",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 16,
+              "type_size": 1,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "smallint",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 21,
+              "type_size": 2,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "integer",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 23,
+              "type_size": 4,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "bigint",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 20,
+              "type_size": 8,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'a'::char(3) AS fixed, 'abc'::varchar(5) AS varying, ''::text AS empty, 'hello'::name AS name",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "fixed",
+            "varying",
+            "empty",
+            "name"
+          ],
+          "type_oids": [
+            1042,
+            1043,
+            25,
+            19
+          ],
+          "rows": [
+            [
+              "a  ",
+              "abc",
+              "",
+              "hello"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "fixed",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1042,
+              "type_size": -1,
+              "type_modifier": 7,
+              "format": 0
+            },
+            {
+              "name": "varying",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1043,
+              "type_size": -1,
+              "type_modifier": 9,
+              "format": 0
+            },
+            {
+              "name": "empty",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "name",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 19,
+              "type_size": 64,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 1.20::numeric(6,2) AS positive_scale, 1200::numeric(4,-2) AS negative_scale, 1.25::real AS real, 1.25::double precision AS double",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "positive_scale",
+            "negative_scale",
+            "real",
+            "double"
+          ],
+          "type_oids": [
+            1700,
+            1700,
+            700,
+            701
+          ],
+          "rows": [
+            [
+              "1.20",
+              "1200",
+              "1.25",
+              "1.25"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "positive_scale",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1700,
+              "type_size": -1,
+              "type_modifier": 393222,
+              "format": 0
+            },
+            {
+              "name": "negative_scale",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1700,
+              "type_size": -1,
+              "type_modifier": 264194,
+              "format": 0
+            },
+            {
+              "name": "real",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 700,
+              "type_size": 4,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "double",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 701,
+              "type_size": 8,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 1e-7::real AS tiny_real, 1e7::real AS large_real, 1e-7::double precision AS tiny_double, 1e20::double precision AS large_double",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "tiny_real",
+            "large_real",
+            "tiny_double",
+            "large_double"
+          ],
+          "type_oids": [
+            700,
+            700,
+            701,
+            701
+          ],
+          "rows": [
+            [
+              "1e-07",
+              "1e+07",
+              "1e-07",
+              "1e+20"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "tiny_real",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 700,
+              "type_size": 4,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "large_real",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 700,
+              "type_size": 4,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "tiny_double",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 701,
+              "type_size": 8,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "large_double",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 701,
+              "type_size": 8,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'NaN'::real AS real_nan, 'Infinity'::double precision AS double_inf, '-0'::real AS real_zero",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "real_nan",
+            "double_inf",
+            "real_zero"
+          ],
+          "type_oids": [
+            700,
+            701,
+            700
+          ],
+          "rows": [
+            [
+              "NaN",
+              "Infinity",
+              "-0"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "real_nan",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 700,
+              "type_size": 4,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "double_inf",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 701,
+              "type_size": 8,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "real_zero",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 700,
+              "type_size": 4,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ARRAY[true,false,NULL] AS booleans, ARRAY[1,2,NULL] AS integers, ARRAY['a,b', '', 'NULL', 'a b'] AS texts",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "booleans",
+            "integers",
+            "texts"
+          ],
+          "type_oids": [
+            1000,
+            1007,
+            1009
+          ],
+          "rows": [
+            [
+              "{t,f,NULL}",
+              "{1,2,NULL}",
+              "{\"a,b\",\"\",\"NULL\",\"a b\"}"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "booleans",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1000,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "integers",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1007,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "texts",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1009,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '[0:2]={1,2,3}'::integer[] AS bounded, ARRAY[[1,2],[3,4]] AS matrix, ARRAY['x'::varchar(4)] AS varying_array",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "bounded",
+            "matrix",
+            "varying_array"
+          ],
+          "type_oids": [
+            1007,
+            1007,
+            1015
+          ],
+          "rows": [
+            [
+              "[0:2]={1,2,3}",
+              "{{1,2},{3,4}}",
+              "{x}"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "bounded",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1007,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "matrix",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1007,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "varying_array",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1015,
+              "type_size": -1,
+              "type_modifier": 8,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '2001-02-03'::date AS date, '04:05:06.123456'::time(3) AS time, '2001-02-03 04:05:06.123456'::timestamp(3) AS timestamp",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "date",
+            "time",
+            "timestamp"
+          ],
+          "type_oids": [
+            1082,
+            1083,
+            1114
+          ],
+          "rows": [
+            [
+              "2001-02-03",
+              "04:05:06.123",
+              "2001-02-03 04:05:06.123"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "date",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1082,
+              "type_size": 4,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "time",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1083,
+              "type_size": 8,
+              "type_modifier": 3,
+              "format": 0
+            },
+            {
+              "name": "timestamp",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1114,
+              "type_size": 8,
+              "type_modifier": 3,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '2001-02-03 04:05:06+09'::timestamptz AS timestamp_tz, '04:05:06+09'::timetz AS time_tz, '1 year 2 mons 3 days 04:05:06'::interval AS interval",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "timestamp_tz",
+            "time_tz",
+            "interval"
+          ],
+          "type_oids": [
+            1184,
+            1266,
+            1186
+          ],
+          "rows": [
+            [
+              "2001-02-02 19:05:06+00",
+              "04:05:06+09",
+              "1 year 2 mons 3 days 04:05:06"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "timestamp_tz",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1184,
+              "type_size": 8,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "time_tz",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1266,
+              "type_size": 12,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "interval",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1186,
+              "type_size": 16,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '1999-12-31 23:59:59.9995'::timestamp(3) AS before_epoch, '2000-01-01 00:00:00.0005+00'::timestamptz(3) AS after_epoch, '23:59:59.9995'::time(3) AS midnight, '24:00:00+09'::timetz(3) AS zoned_midnight",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "before_epoch",
+            "after_epoch",
+            "midnight",
+            "zoned_midnight"
+          ],
+          "type_oids": [
+            1114,
+            1184,
+            1083,
+            1266
+          ],
+          "rows": [
+            [
+              "1999-12-31 23:59:59.999",
+              "2000-01-01 00:00:00.001+00",
+              "24:00:00",
+              "24:00:00+09"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "before_epoch",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1114,
+              "type_size": 8,
+              "type_modifier": 3,
+              "format": 0
+            },
+            {
+              "name": "after_epoch",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1184,
+              "type_size": 8,
+              "type_modifier": 3,
+              "format": 0
+            },
+            {
+              "name": "midnight",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1083,
+              "type_size": 8,
+              "type_modifier": 3,
+              "format": 0
+            },
+            {
+              "name": "zoned_midnight",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1266,
+              "type_size": 12,
+              "type_modifier": 3,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ARRAY['04:05:06.123456', '23:59:59.9995']::time(3)[] AS times, CASE WHEN true THEN '04:05:06.123456'::time(3) ELSE '00:00'::time(3) END AS same_precision, CASE WHEN false THEN '04:05:06.123456'::time(3) ELSE '00:00'::time(4) END AS mixed_precision",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "times",
+            "same_precision",
+            "mixed_precision"
+          ],
+          "type_oids": [
+            1183,
+            1083,
+            1083
+          ],
+          "rows": [
+            [
+              "{04:05:06.123,24:00:00}",
+              "04:05:06.123",
+              "00:00:00"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "times",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1183,
+              "type_size": -1,
+              "type_modifier": 3,
+              "format": 0
+            },
+            {
+              "name": "same_precision",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1083,
+              "type_size": 8,
+              "type_modifier": 3,
+              "format": 0
+            },
+            {
+              "name": "mixed_precision",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1083,
+              "type_size": 8,
+              "type_modifier": 4,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '1 year 2 mons 3 days 04:05:06.789'::interval year AS years, '1 year 2 mons 3 days 04:05:06.789'::interval month AS months, '1 year 2 mons 3 days 04:05:06.789'::interval day AS days, '1 year 2 mons 3 days 04:05:06.789'::interval hour to minute AS minutes",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "years",
+            "months",
+            "days",
+            "minutes"
+          ],
+          "type_oids": [
+            1186,
+            1186,
+            1186,
+            1186
+          ],
+          "rows": [
+            [
+              "1 year",
+              "1 year 2 mons",
+              "1 year 2 mons 3 days",
+              "1 year 2 mons 3 days 04:05:00"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "years",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1186,
+              "type_size": 16,
+              "type_modifier": 327679,
+              "format": 0
+            },
+            {
+              "name": "months",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1186,
+              "type_size": 16,
+              "type_modifier": 196607,
+              "format": 0
+            },
+            {
+              "name": "days",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1186,
+              "type_size": 16,
+              "type_modifier": 589823,
+              "format": 0
+            },
+            {
+              "name": "minutes",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1186,
+              "type_size": 16,
+              "type_modifier": 201392127,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '23:59:59.9995'::interval second(3) AS positive, '-23:59:59.9995'::interval(3) AS negative, ARRAY['1 day 04:05:06.7895']::interval day to second(3)[] AS intervals",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "positive",
+            "negative",
+            "intervals"
+          ],
+          "type_oids": [
+            1186,
+            1186,
+            1187
+          ],
+          "rows": [
+            [
+              "24:00:00",
+              "-24:00:00",
+              "{\"1 day 04:05:06.79\"}"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "positive",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1186,
+              "type_size": 16,
+              "type_modifier": 268435459,
+              "format": 0
+            },
+            {
+              "name": "negative",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1186,
+              "type_size": 16,
+              "type_modifier": 2147418115,
+              "format": 0
+            },
+            {
+              "name": "intervals",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1187,
+              "type_size": -1,
+              "type_modifier": 470286339,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CASE WHEN b THEN 'longtext' ELSE 'x'::varchar(3) END AS varying, CASE WHEN b THEN '04:05:06.12345' ELSE '00:00'::time(3) END AS time FROM (VALUES (true), (false)) AS inputs(b)",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "varying",
+            "time"
+          ],
+          "type_oids": [
+            1043,
+            1083
+          ],
+          "rows": [
+            [
+              "longtext",
+              "04:05:06.12345"
+            ],
+            [
+              "x",
+              "00:00:00"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "varying",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1043,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "time",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1083,
+              "type_size": 8,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CASE WHEN true THEN 'alpha' ELSE 'beta' END AS strings, CASE WHEN false THEN 1::integer ELSE 2::bigint END AS widened, CASE WHEN false THEN '00:00'::time(3) END AS typed_null",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "strings",
+            "widened",
+            "typed_null"
+          ],
+          "type_oids": [
+            25,
+            20,
+            1083
+          ],
+          "rows": [
+            [
+              "alpha",
+              "2",
+              null
+            ]
+          ],
+          "fields": [
+            {
+              "name": "strings",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 25,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "widened",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 20,
+              "type_size": 8,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "typed_null",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1083,
+              "type_size": 8,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CASE 1 WHEN '1' THEN '00:00'::time(3) ELSE '00:00'::time(4) END AS simple_case, CASE WHEN 1 = 2 THEN '00:00'::time(3) ELSE '00:00'::time(4) END AS folded_condition",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "simple_case",
+            "folded_condition"
+          ],
+          "type_oids": [
+            1083,
+            1083
+          ],
+          "rows": [
+            [
+              "00:00:00",
+              "00:00:00"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "simple_case",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1083,
+              "type_size": 8,
+              "type_modifier": 3,
+              "format": 0
+            },
+            {
+              "name": "folded_condition",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1083,
+              "type_size": 8,
+              "type_modifier": 4,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '{\"b\": 2, \"a\": 1}'::json AS json, '{\"b\": 2, \"a\": 1}'::jsonb AS jsonb, decode('00ff41', 'hex') AS bytes, '550e8400-e29b-41d4-a716-446655440000'::uuid AS uuid",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "json",
+            "jsonb",
+            "bytes",
+            "uuid"
+          ],
+          "type_oids": [
+            114,
+            3802,
+            17,
+            2950
+          ],
+          "rows": [
+            [
+              "{\"b\": 2, \"a\": 1}",
+              "{\"a\": 1, \"b\": 2}",
+              "\\x00ff41",
+              "550e8400-e29b-41d4-a716-446655440000"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "json",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 114,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "jsonb",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 3802,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "bytes",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 17,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "uuid",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 2950,
+              "type_size": 16,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '[1,5)'::int4range AS range, '{[1,5),[10,12)}'::int4multirange AS multirange",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "range",
+            "multirange"
+          ],
+          "type_oids": [
+            3904,
+            4451
+          ],
+          "rows": [
+            [
+              "[1,5)",
+              "{[1,5),[10,12)}"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "range",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 3904,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            },
+            {
+              "name": "multirange",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 4451,
+              "type_size": -1,
+              "type_modifier": -1,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN short_text AS varchar(5)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'abc'::short_text AS domain_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "domain_value"
+          ],
+          "type_oids": [
+            1043
+          ],
+          "rows": [
+            [
+              "abc"
+            ]
+          ],
+          "fields": [
+            {
+              "name": "domain_value",
+              "table_oid": 0,
+              "column_attribute_number": 0,
+              "type_oid": 1043,
+              "type_size": -1,
+              "type_modifier": 9,
+              "format": 0
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

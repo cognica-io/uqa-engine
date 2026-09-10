@@ -29,6 +29,7 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
         qualifier,
         alias,
         column_aliases,
+        bound_columns,
         include_descendants,
     } = source
     else {
@@ -87,11 +88,14 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
         .as_ref()
         .map(super::super::SourceProjection::metadata)
         .unwrap_or_default();
-    let table_columns = root_table
-        .columns
-        .iter()
-        .map(|column| column.name.clone())
-        .collect::<Vec<_>>();
+    let table_columns = crate::sql::from_rows::bound_source_column_names(
+        root_table
+            .columns
+            .iter()
+            .map(|column| column.name.clone())
+            .collect::<Vec<_>>(),
+        bound_columns.as_deref(),
+    )?;
     if column_aliases.len() > table_columns.len() {
         return Err(SQLError::Routine {
             sqlstate: "42P10".into(),
@@ -280,6 +284,7 @@ pub(in crate::sql) fn try_streaming_local_table_scan<'a>(
             .transpose()?
             .map(Value::Int);
         sources.push(EngineTableRowSource {
+            cancellation: engine.cancellation_token(),
             table_name,
             table,
             column_definitions,

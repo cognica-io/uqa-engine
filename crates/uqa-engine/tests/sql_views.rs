@@ -60,7 +60,9 @@ impl SQLScalarFunction for ObserveValue {
 }
 
 fn exec(engine: &Engine, sql: &str) -> SQLResult {
-    engine.sql(sql, &[]).unwrap()
+    engine
+        .sql(sql, &[])
+        .unwrap_or_else(|error| panic!("{sql}: {error}"))
 }
 
 fn engine() -> Engine {
@@ -575,7 +577,10 @@ fn view_sequence_literals_bind_to_creation_namespace_and_block_drop() {
 
     assert!(engine.drop_sequence("s2.ids").unwrap());
     let error = engine.drop_sequence("s1.ids").unwrap_err();
-    assert!(error.contains("public.sequence_values"), "{error}");
+    assert_eq!(
+        error,
+        "cannot drop sequence s1.ids because other objects depend on it"
+    );
 }
 
 #[test]
@@ -606,7 +611,10 @@ fn persisted_view_sequence_binding_survives_reopen() {
         Value::Int(100)
     );
     let error = engine.drop_sequence("s1.ids").unwrap_err();
-    assert!(error.contains("public.sequence_value"), "{error}");
+    assert_eq!(
+        error,
+        "cannot drop sequence s1.ids because other objects depend on it"
+    );
 }
 
 fn downgrade_serialized_subscript_dispatch(value: &mut serde_json::Value) -> usize {

@@ -49,7 +49,7 @@ fn compile_into_target(into: &pg_query::protobuf::IntoClause, command: &str) -> 
         .as_ref()
         .ok_or_else(|| SQLError::Internal(format!("{command} target has no name")))?;
     let persistence = relation_persistence(relation, command)?;
-    let on_commit = compile_on_commit(into.on_commit(), persistence, command)?;
+    let on_commit = compile_on_commit(into.on_commit(), persistence)?;
     let column_names = into
         .col_names
         .iter()
@@ -202,6 +202,19 @@ pub(super) fn compile_create_table_as(
 
 pub(super) fn compile_prepare(stmt: &pg_query::protobuf::PrepareStmt) -> Result<Statement> {
     let name = stmt.name.clone();
+    let parameter_types = stmt
+        .argtypes
+        .iter()
+        .map(|node| {
+            let Some(NodeEnum::TypeName(type_name)) = node.node.as_ref() else {
+                return Err(SQLError::Internal(
+                    "PREPARE parameter without type name".into(),
+                ));
+            };
+            super::types::compile_pg_type_reference(type_name, "PREPARE parameter")
+                .map(|ty| ty.without_type_modifiers())
+        })
+        .collect::<Result<Vec<_>>>()?;
     let body = stmt
         .query
         .as_deref()
@@ -209,6 +222,7 @@ pub(super) fn compile_prepare(stmt: &pg_query::protobuf::PrepareStmt) -> Result<
     let inner = compile_stmt(body)?;
     Ok(Statement::Prepare {
         name,
+        parameter_types,
         body: Box::new(inner),
     })
 }

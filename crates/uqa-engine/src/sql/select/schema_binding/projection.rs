@@ -237,6 +237,11 @@ pub(super) fn rename_schema(
         }
         None => RowSchema::with_types(columns, schema.column_types().to_vec()),
     };
+    let renamed = if schema.columns_are_open(None) {
+        RowSchema::with_open_columns(&renamed, qualifier)
+    } else {
+        renamed
+    };
     let mut hidden = Vec::new();
     let mut conflicting = Vec::new();
     for (identity, ty) in schema.typed_virtual_identities() {

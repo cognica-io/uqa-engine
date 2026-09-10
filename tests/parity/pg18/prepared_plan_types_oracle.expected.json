@@ -1,0 +1,532 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SCHEMA prepared_plan_types",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN prepared_plan_types.positive_small AS smallint CHECK (VALUE > 0)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE typed_domain(prepared_plan_types.positive_small) AS SELECT $1 AS value, pg_typeof($1)::text AS declared, $1 + 0::smallint AS sum, pg_typeof($1 + 0::smallint)::text AS sum_type",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE typed_domain(7)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "declared",
+            "sum",
+            "sum_type"
+          ],
+          "type_oids": [
+            21,
+            25,
+            21,
+            25
+          ],
+          "rows": [
+            [
+              "7",
+              "prepared_plan_types.positive_small",
+              "7",
+              "smallint"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE typed_domain(NULL)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "declared",
+            "sum",
+            "sum_type"
+          ],
+          "type_oids": [
+            21,
+            25,
+            21,
+            25
+          ],
+          "rows": [
+            [
+              null,
+              "prepared_plan_types.positive_small",
+              null,
+              "smallint"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE typed_domain(-1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "value for domain prepared_plan_types.positive_small violates check constraint \"positive_small_check\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='typed_domain'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "typed_domain",
+              "0",
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE typed_conditional(prepared_plan_types.positive_small,boolean) AS SELECT CASE WHEN $2 THEN $1 ELSE $1 END AS result, pg_typeof(CASE WHEN $2 THEN $1 ELSE $1 END)::text AS result_type",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE typed_conditional(5,true)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result",
+            "result_type"
+          ],
+          "type_oids": [
+            21,
+            25
+          ],
+          "rows": [
+            [
+              "5",
+              "prepared_plan_types.positive_small"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE typed_conditional(NULL,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result",
+            "result_type"
+          ],
+          "type_oids": [
+            21,
+            25
+          ],
+          "rows": [
+            [
+              null,
+              "prepared_plan_types.positive_small"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE typed_overflow(prepared_plan_types.positive_small) AS SELECT $1 + 1::smallint",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE typed_overflow(32767)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "smallint out of range"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='typed_overflow'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "typed_overflow",
+              "0",
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SET plan_cache_mode=force_generic_plan",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE typed_domain(8)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "declared",
+            "sum",
+            "sum_type"
+          ],
+          "type_oids": [
+            21,
+            25,
+            21,
+            25
+          ],
+          "rows": [
+            [
+              "8",
+              "prepared_plan_types.positive_small",
+              "8",
+              "smallint"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE typed_conditional(6,false)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result",
+            "result_type"
+          ],
+          "type_oids": [
+            21,
+            25
+          ],
+          "rows": [
+            [
+              "6",
+              "prepared_plan_types.positive_small"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE typed_overflow(32767)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "smallint out of range"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='typed_overflow'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "typed_overflow",
+              "1",
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "RESET plan_cache_mode",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE typed_values(smallint,bigint,real,integer[]) AS SELECT $1 AS small, $2 AS big, $3 AS real_value, $4 AS array_value, pg_typeof($1)::text AS small_type, pg_typeof($2)::text AS big_type, pg_typeof($3)::text AS real_type, pg_typeof($4)::text AS array_type",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE typed_values(2,3,1.25,ARRAY[1,2])",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "small",
+            "big",
+            "real_value",
+            "array_value",
+            "small_type",
+            "big_type",
+            "real_type",
+            "array_type"
+          ],
+          "type_oids": [
+            21,
+            20,
+            700,
+            1007,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "2",
+              "3",
+              "1.25",
+              "{1,2}",
+              "smallint",
+              "bigint",
+              "real",
+              "integer[]"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE typed_values(NULL,NULL,NULL,NULL)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "small",
+            "big",
+            "real_value",
+            "array_value",
+            "small_type",
+            "big_type",
+            "real_type",
+            "array_type"
+          ],
+          "type_oids": [
+            21,
+            20,
+            700,
+            1007,
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              null,
+              null,
+              null,
+              null,
+              "smallint",
+              "bigint",
+              "real",
+              "integer[]"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DEALLOCATE ALL",
+      "command_tags": [
+        "DEALLOCATE ALL"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA prepared_plan_types CASCADE",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    }
+  ]
+}

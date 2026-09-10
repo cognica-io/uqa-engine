@@ -148,6 +148,24 @@ mod ranges;
 mod scalar;
 mod sequences;
 
+const fn subscript_handler(oid: i64, name: &'static str) -> BuiltinRoutineCatalogEntry {
+    BuiltinRoutineCatalogEntry {
+        oid,
+        name,
+        kind: "f",
+        strict: true,
+        volatility: "i",
+        parallel: "s",
+        leakproof: false,
+        return_type: 2281,
+        argument_types: &[2281],
+        argument_names: &[],
+        default_arguments: 0,
+        argument_defaults: None,
+        source: name,
+    }
+}
+
 pub(super) const PG18_BUILTIN_ROUTINE_GROUPS: &[&[BuiltinRoutineCatalogEntry]] = &[
     scalar::ROUTINES,
     definitions::ROUTINES,
@@ -155,4 +173,9 @@ pub(super) const PG18_BUILTIN_ROUTINE_GROUPS: &[&[BuiltinRoutineCatalogEntry]] =
     privileges::ROUTINES,
     ranges::ROUTINES,
     sequences::ROUTINES,
+    &[
+        subscript_handler(6098, "jsonb_subscript_handler"),
+        subscript_handler(6179, "array_subscript_handler"),
+        subscript_handler(6180, "raw_array_subscript_handler"),
+    ],
 ];

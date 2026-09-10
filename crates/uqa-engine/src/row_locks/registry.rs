@@ -126,6 +126,16 @@ impl RowLockManager {
         self.relation_key(LockRelationIdentity::BackendWriter)
     }
 
+    #[cfg(test)]
+    pub(crate) fn waiting_for_backend_writer(&self, session_id: u64) -> bool {
+        let key = self.backend_writer_key();
+        self.state
+            .lock()
+            .waiting_relations
+            .get(&session_id)
+            .is_some_and(|relations| relations.contains_key(&key))
+    }
+
     pub(crate) fn key_reservation_key(&self, digest: [u8; 32]) -> u64 {
         self.relation_key(LockRelationIdentity::KeyReservation(digest))
     }

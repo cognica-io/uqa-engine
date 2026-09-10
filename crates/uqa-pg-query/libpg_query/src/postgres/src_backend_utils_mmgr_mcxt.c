@@ -1090,6 +1090,7 @@ MemoryContextCreate(MemoryContext node,
 	node->prevchild = NULL;
 	node->name = name;
 	node->ident = NULL;
+	node->libpg_query_plpgsql_catalog = NULL;
 	node->reset_cbs = NULL;
 
 	/* OK to link node into context tree */

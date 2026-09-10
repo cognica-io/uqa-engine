@@ -102,6 +102,40 @@ impl RuleReturningRequest {
         subqueries
     }
 
+    fn inspect_cte_body(
+        &mut self,
+        body: &uqa_planner::CtePlanBody,
+        aliases: &ReturningAliases,
+        inherited: &BTreeSet<String>,
+    ) {
+        match body {
+            uqa_planner::CtePlanBody::Query(query) => self.inspect_query(query, aliases, inherited),
+            uqa_planner::CtePlanBody::Command(command) => {
+                let mut scope = inherited.clone();
+                if let Some(qualifier) = command.target_qualifier() {
+                    scope.insert(qualifier.to_ascii_lowercase());
+                }
+                if let Some(source) = command.source_input() {
+                    collect_source_qualifiers(source, &mut scope);
+                    self.inspect_source(source, aliases, inherited);
+                }
+                if let Some(aliases) = command.returning_aliases() {
+                    scope.insert(aliases.old.to_ascii_lowercase());
+                    scope.insert(aliases.new.to_ascii_lowercase());
+                }
+                for cte in command.ctes() {
+                    self.inspect_cte_body(&cte.body, aliases, &scope);
+                }
+                for query in command.query_inputs() {
+                    self.inspect_query(query, aliases, &scope);
+                }
+                for expression in command.expressions() {
+                    let _ = self.inspect_expression(expression, aliases, &scope);
+                }
+            }
+        }
+    }
+
     fn inspect_query(
         &mut self,
         query: &QueryPlan,
@@ -109,7 +143,7 @@ impl RuleReturningRequest {
         inherited: &BTreeSet<String>,
     ) {
         for cte in &query.ctes {
-            self.inspect_query(&cte.query, aliases, inherited);
+            self.inspect_cte_body(&cte.body, aliases, inherited);
         }
         match &query.root {
             RelationalPlan::QueryBlock(block) => {
@@ -329,12 +363,16 @@ pub(in crate::sql) fn validate_rule_returning_contract(
     let relation = RelationIdentity::from_legacy_name(&table)
         .map_err(|error| SQLError::Internal(format!("decode rule relation `{table}`: {error}")))?;
     let event = rule_event_name(event);
-    Err(SQLError::Routine {
+    Err(SQLError::Diagnostic {
         sqlstate: "0A000".into(),
         message: format!(
-            "cannot perform {event} RETURNING on relation \"{}\"\nHINT: You need an unconditional ON {event} DO INSTEAD rule with a RETURNING clause.",
+            "cannot perform {event} RETURNING on relation \"{}\"",
             relation.name
         ),
+        detail: None,
+        hint: Some(format!(
+            "You need an unconditional ON {event} DO INSTEAD rule with a RETURNING clause."
+        )),
     })
 }
 

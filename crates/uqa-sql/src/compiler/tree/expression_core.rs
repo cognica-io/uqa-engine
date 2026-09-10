@@ -273,14 +273,16 @@ pub(in crate::compiler) fn compile_sql_value_function(
     use pg_query::protobuf::SqlValueFunctionOp;
     let name = match svf.op() {
         SqlValueFunctionOp::SvfopCurrentDate => "current_date",
-        SqlValueFunctionOp::SvfopCurrentTimestamp
-        | SqlValueFunctionOp::SvfopCurrentTimestampN
-        | SqlValueFunctionOp::SvfopLocaltimestamp
-        | SqlValueFunctionOp::SvfopLocaltimestampN
-        | SqlValueFunctionOp::SvfopCurrentTime
-        | SqlValueFunctionOp::SvfopCurrentTimeN
-        | SqlValueFunctionOp::SvfopLocaltime
-        | SqlValueFunctionOp::SvfopLocaltimeN => "current_timestamp",
+        SqlValueFunctionOp::SvfopCurrentTimestamp | SqlValueFunctionOp::SvfopCurrentTimestampN => {
+            "current_timestamp"
+        }
+        SqlValueFunctionOp::SvfopLocaltimestamp | SqlValueFunctionOp::SvfopLocaltimestampN => {
+            "localtimestamp"
+        }
+        SqlValueFunctionOp::SvfopCurrentTime | SqlValueFunctionOp::SvfopCurrentTimeN => {
+            "current_time"
+        }
+        SqlValueFunctionOp::SvfopLocaltime | SqlValueFunctionOp::SvfopLocaltimeN => "localtime",
         SqlValueFunctionOp::SvfopCurrentSchema => "current_schema",
         SqlValueFunctionOp::SvfopCurrentCatalog => "current_database",
         SqlValueFunctionOp::SvfopCurrentUser
@@ -293,13 +295,41 @@ pub(in crate::compiler) fn compile_sql_value_function(
             )));
         }
     };
-    Ok(Expr::Func {
-        binding: None,
+    let call = Expr::Func {
+        binding: Some(crate::ast::FunctionBinding {
+            object_id: None,
+            name: name.into(),
+            argument_types: Vec::new(),
+            builtin: true,
+            dispatch: None,
+            invocation: None,
+            resolution_error: None,
+        }),
         name: name.into(),
         args: Vec::new(),
         distinct: false,
         order_by: Vec::new(),
         filter: None,
+    };
+    let precision = u32::try_from(svf.typmod)
+        .ok()
+        .map(|precision| precision.min(6));
+    let target = precision.and_then(|precision| {
+        use crate::ast::ColumnType;
+        Some(match name {
+            "current_time" => ColumnType::TimeTzPrecision(precision),
+            "current_timestamp" => ColumnType::TimestampTzPrecision(precision),
+            "localtime" => ColumnType::TimePrecision(precision),
+            "localtimestamp" => ColumnType::TimestampPrecision(precision),
+            _ => return None,
+        })
+    });
+    Ok(match target {
+        Some(target) => Expr::Cast {
+            expr: Box::new(call),
+            ty: target.sql_name(),
+        },
+        None => call,
     })
 }
 

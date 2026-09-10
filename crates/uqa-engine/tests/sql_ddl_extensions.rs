@@ -145,8 +145,8 @@ fn drop_table_if_exists_is_noop_when_missing() {
 fn drop_table_without_if_exists_errors_when_missing() {
     let eng = Engine::new();
     let err = eng.sql("DROP TABLE missing", &[]).unwrap_err();
-    let msg = format!("{err}");
-    assert!(msg.contains("DROP TABLE"), "unexpected error: {msg}");
+    assert_eq!(err.sqlstate(), Some("42P01"));
+    assert_eq!(err.to_string(), "table \"missing\" does not exist");
 }
 
 #[test]

@@ -39,6 +39,7 @@ fn regobject_input_parsers_preserve_postgresql_name_and_type_identity() {
         Some(ParsedRegtypeName {
             names: vec!["pg_catalog".into(), "int4".into()],
             array_dimensions: 2,
+            has_type_modifiers: false,
         })
     );
     assert_eq!(
@@ -46,6 +47,7 @@ fn regobject_input_parsers_preserve_postgresql_name_and_type_identity() {
         Some(ParsedRegtypeName {
             names: vec!["integer".into()],
             array_dimensions: 0,
+            has_type_modifiers: false,
         })
     );
     assert_eq!(
@@ -53,6 +55,7 @@ fn regobject_input_parsers_preserve_postgresql_name_and_type_identity() {
         Some(ParsedRegtypeName {
             names: vec!["pg_catalog".into(), "int4".into()],
             array_dimensions: 1,
+            has_type_modifiers: false,
         })
     );
     assert_eq!(parse_regtype_name("SETOF integer").unwrap(), None);
@@ -68,14 +71,17 @@ fn regobject_input_parsers_preserve_postgresql_name_and_type_identity() {
             ParsedRegtypeName {
                 names: vec!["pg_catalog".into(), "int4".into()],
                 array_dimensions: 0,
+                has_type_modifiers: false,
             },
             ParsedRegtypeName {
                 names: vec!["integer".into()],
                 array_dimensions: 1,
+                has_type_modifiers: false,
             },
             ParsedRegtypeName {
                 names: vec!["pg_catalog".into(), "varchar".into()],
                 array_dimensions: 0,
+                has_type_modifiers: true,
             },
         ])
     );

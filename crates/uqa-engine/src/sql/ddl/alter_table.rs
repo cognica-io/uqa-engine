@@ -25,8 +25,8 @@ mod constraint_lifecycle;
 mod foreign_key;
 mod recursion;
 
-pub(crate) use constraint_drop::drop_constraint_dependency;
-use constraint_drop::{drop_column_cascade, drop_column_restrict, drop_constraint};
+use constraint_drop::{drop_column, drop_constraint};
+pub(crate) use constraint_drop::{drop_column_cascade, drop_constraint_dependency};
 use constraint_lifecycle::{
     add_check_constraint, add_foreign_key_constraint, add_not_null_constraint, alter_constraint,
     ensure_constraint_name_available, set_not_null_constraint,
@@ -277,6 +277,15 @@ fn run_alter_table_inner(engine: &Engine, stmt: AlterTableStmt) -> Result<SQLRes
                 continue;
             }
         }
+        match &mut action {
+            AlterTableAction::AddColumn { column, .. } => {
+                column.ty = crate::sql::resolve_declared_column_type(engine, &column.ty)?;
+            }
+            AlterTableAction::AlterColumnType { ty, .. } => {
+                *ty = crate::sql::resolve_declared_column_type(engine, ty)?;
+            }
+            _ => {}
+        }
         materialize_recursive_action_names(engine, &table, recurse, &mut action)?;
         // Column merging can stop at an existing child column. Its CHECK still has an independent inheritance lifecycle and must reach every supplying edge.
         let column_check = if let AlterTableAction::AddColumn { column, .. } = &mut action {
@@ -484,7 +493,7 @@ fn run_alter_table_action(
                 )?;
             } else {
                 let default_expr = engine
-                    .try_column_default_expr(&stmt.table, &col_name)
+                    .try_column_insert_default_expr(&stmt.table, &col_name)
                     .map_err(|e| ddl_storage_error("ALTER TABLE ADD COLUMN default", e))?;
                 let missing_value = backfill_added_column(
                     engine,
@@ -599,18 +608,9 @@ fn run_alter_table_action(
         AlterTableAction::DropColumn {
             name,
             if_exists,
-            cascade: false,
+            cascade,
         } => {
-            engine.handle_drop_column_event_dependencies(&stmt.table, &name, false)?;
-            drop_column_restrict(engine, &stmt.table, &name, if_exists)?;
-        }
-        AlterTableAction::DropColumn {
-            name,
-            if_exists,
-            cascade: true,
-        } => {
-            engine.handle_drop_column_event_dependencies(&stmt.table, &name, true)?;
-            drop_column_cascade(engine, &stmt.table, &name, if_exists)?;
+            drop_column(engine, &stmt.table, &name, if_exists, cascade)?;
         }
         AlterTableAction::RenameColumn { from, to } => {
             super::validate_postgres_column_name(&to)?;
@@ -618,17 +618,24 @@ fn run_alter_table_action(
                 .try_table_has_column(&stmt.table, &from)
                 .map_err(|err| ddl_storage_error("ALTER TABLE RENAME COLUMN", err))?
             {
-                return Err(SQLError::Unsupported(format!(
-                    "ALTER TABLE RENAME COLUMN: column `{from}` does not exist"
-                )));
+                return Err(SQLError::Routine {
+                    sqlstate: "42703".into(),
+                    message: format!("column \"{from}\" does not exist"),
+                });
             }
             if engine
                 .try_table_has_column(&stmt.table, &to)
                 .map_err(|err| ddl_storage_error("ALTER TABLE RENAME COLUMN", err))?
             {
-                return Err(SQLError::Unsupported(format!(
-                    "ALTER TABLE RENAME COLUMN: column `{to}` already exists"
-                )));
+                let relation = crate::RelationIdentity::from_legacy_name(&stmt.table)
+                    .map_err(SQLError::Internal)?;
+                return Err(SQLError::Routine {
+                    sqlstate: "42701".into(),
+                    message: format!(
+                        "column \"{to}\" of relation \"{}\" already exists",
+                        relation.name
+                    ),
+                });
             }
             engine
                 .try_rename_column(&stmt.table, &from, &to)

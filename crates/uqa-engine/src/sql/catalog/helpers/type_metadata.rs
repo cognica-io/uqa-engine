@@ -57,6 +57,9 @@ pub(in crate::sql::catalog) fn catalog_regtype_name(oid: i64) -> Option<&'static
 )]
 pub(in crate::sql::catalog) fn pg_type_oid(ty: &ColumnType) -> i64 {
     match ty {
+        ColumnType::Named(name) => {
+            unreachable!("unresolved declaration type {name} reached catalog projection")
+        }
         ColumnType::SmallInteger => 21,
         ColumnType::Integer => 23,
         ColumnType::BigInteger => 20,
@@ -106,6 +109,9 @@ pub(in crate::sql::catalog) fn pg_type_oid(ty: &ColumnType) -> i64 {
             RangeSubtype::BigInteger => 4536,
         },
         ColumnType::Array(element) => match element.as_ref() {
+            ColumnType::Named(name) => {
+                unreachable!("unresolved declaration type {name} reached catalog projection")
+            }
             ColumnType::SmallInteger => 1005,
             ColumnType::Integer => 1007,
             ColumnType::BigInteger => 1016,
@@ -139,11 +145,11 @@ pub(in crate::sql::catalog) fn pg_type_oid(ty: &ColumnType) -> i64 {
             ColumnType::AnyArray => 0,
             ColumnType::Record => 2287,
             ColumnType::Date => 1182,
-            ColumnType::Time => 1183,
-            ColumnType::TimeTz => 1270,
-            ColumnType::Timestamp => 1115,
-            ColumnType::TimestampTz => 1185,
-            ColumnType::Interval => 1187,
+            ColumnType::Time | ColumnType::TimePrecision(_) => 1183,
+            ColumnType::TimeTz | ColumnType::TimeTzPrecision(_) => 1270,
+            ColumnType::Timestamp | ColumnType::TimestampPrecision(_) => 1115,
+            ColumnType::TimestampTz | ColumnType::TimestampTzPrecision(_) => 1185,
+            ColumnType::Interval | ColumnType::IntervalWithFields { .. } => 1187,
             ColumnType::Vector(_) => 380_002,
             ColumnType::Tensor(_) => 380_003,
             ColumnType::Domain { oid, .. } => pg_domain_array_oid(*oid),
@@ -166,11 +172,11 @@ pub(in crate::sql::catalog) fn pg_type_oid(ty: &ColumnType) -> i64 {
             ColumnType::Array(_) => pg_type_oid(element),
         },
         ColumnType::Date => 1082,
-        ColumnType::Time => 1083,
-        ColumnType::TimeTz => 1266,
-        ColumnType::Timestamp => 1114,
-        ColumnType::TimestampTz => 1184,
-        ColumnType::Interval => 1186,
+        ColumnType::Time | ColumnType::TimePrecision(_) => 1083,
+        ColumnType::TimeTz | ColumnType::TimeTzPrecision(_) => 1266,
+        ColumnType::Timestamp | ColumnType::TimestampPrecision(_) => 1114,
+        ColumnType::TimestampTz | ColumnType::TimestampTzPrecision(_) => 1184,
+        ColumnType::Interval | ColumnType::IntervalWithFields { .. } => 1186,
         ColumnType::Vector(_) => 380_000,
         ColumnType::Tensor(_) => 380_001,
         ColumnType::Domain { oid, .. } => i64::from(*oid),
@@ -285,8 +291,12 @@ mod routine_type_oid_tests {
 
 pub(in crate::sql::catalog) fn pg_type_len(ty: &ColumnType) -> i64 {
     match ty {
+        ColumnType::Named(name) => {
+            unreachable!("unresolved declaration type {name} reached catalog projection")
+        }
         ColumnType::SmallInteger => 2,
-        ColumnType::Integer
+        ColumnType::Void
+        | ColumnType::Integer
         | ColumnType::Oid
         | ColumnType::Xid
         | ColumnType::Regproc
@@ -298,12 +308,19 @@ pub(in crate::sql::catalog) fn pg_type_len(ty: &ColumnType) -> i64 {
         ColumnType::BigInteger => 8,
         ColumnType::Boolean | ColumnType::InternalChar => 1,
         ColumnType::Name => 64,
-        ColumnType::Uuid | ColumnType::Interval | ColumnType::AclItem => 16,
+        ColumnType::Uuid
+        | ColumnType::Interval
+        | ColumnType::IntervalWithFields { .. }
+        | ColumnType::AclItem => 16,
         ColumnType::Real => 4,
-        ColumnType::DoublePrecision | ColumnType::Timestamp | ColumnType::TimestampTz => 8,
+        ColumnType::DoublePrecision
+        | ColumnType::Timestamp
+        | ColumnType::TimestampPrecision(_)
+        | ColumnType::TimestampTz
+        | ColumnType::TimestampTzPrecision(_) => 8,
         ColumnType::Date => 4,
-        ColumnType::Time => 8,
-        ColumnType::TimeTz => 12,
+        ColumnType::Time | ColumnType::TimePrecision(_) => 8,
+        ColumnType::TimeTz | ColumnType::TimeTzPrecision(_) => 12,
         ColumnType::Domain { base, .. } => pg_type_len(base),
         _ => -1,
     }
@@ -329,13 +346,19 @@ pub(in crate::sql::catalog) fn pg_type_by_value(ty: &ColumnType) -> bool {
             | ColumnType::DoublePrecision
             | ColumnType::Date
             | ColumnType::Time
+            | ColumnType::TimePrecision(_)
             | ColumnType::Timestamp
+            | ColumnType::TimestampPrecision(_)
             | ColumnType::TimestampTz
+            | ColumnType::TimestampTzPrecision(_)
     ) || matches!(ty, ColumnType::Domain { base, .. } if pg_type_by_value(base))
 }
 
 pub(in crate::sql::catalog) fn pg_type_align(ty: &ColumnType) -> &'static str {
     match ty {
+        ColumnType::Named(name) => {
+            unreachable!("unresolved declaration type {name} reached catalog projection")
+        }
         ColumnType::Boolean | ColumnType::InternalChar | ColumnType::Name | ColumnType::Uuid => "c",
         ColumnType::SmallInteger => "s",
         ColumnType::BigInteger
@@ -343,10 +366,15 @@ pub(in crate::sql::catalog) fn pg_type_align(ty: &ColumnType) -> &'static str {
         | ColumnType::AclItem
         | ColumnType::AnyArray
         | ColumnType::Time
+        | ColumnType::TimePrecision(_)
         | ColumnType::TimeTz
+        | ColumnType::TimeTzPrecision(_)
         | ColumnType::Timestamp
+        | ColumnType::TimestampPrecision(_)
         | ColumnType::TimestampTz
+        | ColumnType::TimestampTzPrecision(_)
         | ColumnType::Interval
+        | ColumnType::IntervalWithFields { .. }
         | ColumnType::Range(
             RangeSubtype::BigInteger | RangeSubtype::Timestamp | RangeSubtype::TimestampTz,
         )
@@ -361,6 +389,9 @@ pub(in crate::sql::catalog) fn pg_type_align(ty: &ColumnType) -> &'static str {
 
 pub(in crate::sql::catalog) fn pg_type_storage(ty: &ColumnType) -> &'static str {
     match ty {
+        ColumnType::Named(name) => {
+            unreachable!("unresolved declaration type {name} reached catalog projection")
+        }
         ColumnType::Numeric { .. } => "m",
         ColumnType::Text
         | ColumnType::RefCursor
@@ -384,6 +415,9 @@ pub(in crate::sql::catalog) fn pg_type_storage(ty: &ColumnType) -> &'static str 
 
 pub(in crate::sql::catalog) fn pg_type_array_oid(ty: &ColumnType) -> i64 {
     match ty {
+        ColumnType::Named(name) => {
+            unreachable!("unresolved declaration type {name} reached catalog projection")
+        }
         ColumnType::Array(_) => 0,
         ColumnType::Domain { oid, .. } => pg_domain_array_oid(*oid),
         other => pg_type_oid(&ColumnType::Array(Box::new(other.clone()))),
@@ -397,12 +431,15 @@ fn pg_domain_array_oid(domain_oid: u32) -> i64 {
         13_312 => 13_311,
         13_318 => 13_317,
         13_320 => 13_319,
-        _ => 0,
+        _ => super::oids::stable_oid("domain_array", &domain_oid.to_string()),
     }
 }
 
 pub(in crate::sql::catalog) fn pg_type_element_oid(ty: &ColumnType) -> i64 {
     match ty {
+        ColumnType::Named(name) => {
+            unreachable!("unresolved declaration type {name} reached catalog projection")
+        }
         ColumnType::Name => 18,
         ColumnType::Int2Vector => 21,
         ColumnType::OidVector => 26,
@@ -413,6 +450,9 @@ pub(in crate::sql::catalog) fn pg_type_element_oid(ty: &ColumnType) -> i64 {
 
 pub(in crate::sql::catalog) fn pg_type_collation_oid(ty: &ColumnType) -> i64 {
     let scalar = match ty {
+        ColumnType::Named(name) => {
+            unreachable!("unresolved declaration type {name} reached catalog projection")
+        }
         ColumnType::Array(element) => element.as_ref(),
         other => other,
     };
@@ -431,20 +471,37 @@ pub(in crate::sql::catalog) fn pg_type_collation_oid(ty: &ColumnType) -> i64 {
     }
 }
 
-pub(in crate::sql::catalog) fn pg_type_subscript_handler(ty: &ColumnType) -> &'static str {
+pub(in crate::sql::catalog) fn pg_type_subscript_handler(ty: &ColumnType) -> i64 {
     match ty {
-        ColumnType::Array(_) => "array_subscript_handler",
-        ColumnType::Int2Vector | ColumnType::OidVector => "array_subscript_handler",
-        ColumnType::Name => "raw_array_subscript_handler",
-        ColumnType::JsonB => "jsonb_subscript_handler",
-        _ => "-",
+        ColumnType::Named(name) => {
+            unreachable!("unresolved declaration type {name} reached catalog projection")
+        }
+        ColumnType::Array(_) => 6179,
+        ColumnType::Int2Vector | ColumnType::OidVector => 6179,
+        ColumnType::Name => 6180,
+        ColumnType::JsonB => 6098,
+        _ => 0,
     }
 }
 
 pub(in crate::sql::catalog) fn pg_type_modifier(ty: &ColumnType) -> i64 {
+    if let ColumnType::IntervalWithFields { fields, precision } = ty {
+        return (i64::from(fields.modifier_mask()) << 16) | i64::from(precision.unwrap_or(65535));
+    }
+    if let Some(precision) = ty.temporal_precision() {
+        return i64::from(precision);
+    }
     match ty {
+        ColumnType::Named(name) => {
+            unreachable!("unresolved declaration type {name} reached catalog projection")
+        }
         // PostgreSQL stores varlena type modifiers with a four-byte header.
         ColumnType::Character(length) | ColumnType::Varchar(Some(length)) => i64::from(*length) + 4,
+        ColumnType::Numeric {
+            precision: Some(precision),
+            scale,
+        } => ((i64::from(*precision) << 16) | (i64::from(scale.unwrap_or(0)) & 0x7ff)) + 4,
+        ColumnType::Array(element) => pg_type_modifier(element),
         _ => -1,
     }
 }
@@ -496,6 +553,9 @@ pub(in crate::sql::catalog) fn pg_type_routine_oids(ty: &ColumnType) -> PgTypeRo
         return PgTypeRoutineOids::new(2597, base.output, 2598, base.send);
     }
     match ty {
+        ColumnType::Named(name) => {
+            unreachable!("unresolved declaration type {name} reached catalog projection")
+        }
         ColumnType::Boolean => PgTypeRoutineOids::new(1242, 1243, 2436, 2437),
         ColumnType::Void => PgTypeRoutineOids::new(2298, 2299, 3120, 3121),
         ColumnType::Bytea => PgTypeRoutineOids::new(1244, 31, 2412, 2413),
@@ -527,19 +587,19 @@ pub(in crate::sql::catalog) fn pg_type_routine_oids(ty: &ColumnType) -> PgTypeRo
             PgTypeRoutineOids::new(1046, 1047, 2432, 2433).with_modifier(2915, 2916)
         }
         ColumnType::Date => PgTypeRoutineOids::new(1084, 1085, 2468, 2469),
-        ColumnType::Time => {
+        ColumnType::Time | ColumnType::TimePrecision(_) => {
             PgTypeRoutineOids::new(1143, 1144, 2470, 2471).with_modifier(2909, 2910)
         }
-        ColumnType::Timestamp => {
+        ColumnType::Timestamp | ColumnType::TimestampPrecision(_) => {
             PgTypeRoutineOids::new(1312, 1313, 2474, 2475).with_modifier(2905, 2906)
         }
-        ColumnType::TimestampTz => {
+        ColumnType::TimestampTz | ColumnType::TimestampTzPrecision(_) => {
             PgTypeRoutineOids::new(1150, 1151, 2476, 2477).with_modifier(2907, 2908)
         }
-        ColumnType::Interval => {
+        ColumnType::Interval | ColumnType::IntervalWithFields { .. } => {
             PgTypeRoutineOids::new(1160, 1161, 2478, 2479).with_modifier(2903, 2904)
         }
-        ColumnType::TimeTz => {
+        ColumnType::TimeTz | ColumnType::TimeTzPrecision(_) => {
             PgTypeRoutineOids::new(1350, 1351, 2472, 2473).with_modifier(2911, 2912)
         }
         ColumnType::Numeric { .. } => {

@@ -1,0 +1,598 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT round(2.71828, 2) AS rounded",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "rounded"
+          ],
+          "type_oids": [
+            1700
+          ],
+          "rows": [
+            [
+              "2.72"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT round(2.71828::float8, 2) AS rounded",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function round(double precision, integer) does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT round(2.71828::float4, 2) AS rounded",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function round(real, integer) does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT round(sin(pi()/2), 6)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function round(double precision, integer) does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT round(sin(pi()/2)::numeric, 6)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "round"
+          ],
+          "type_oids": [
+            1700
+          ],
+          "rows": [
+            [
+              "1.000000"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT round(NULL::float8, 2)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function round(double precision, integer) does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT round(NULL::numeric, 2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "round"
+          ],
+          "type_oids": [
+            1700
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE late_abs AS SELECT abs($1)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE late_abs(-2.5)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "abs"
+          ],
+          "type_oids": [
+            701
+          ],
+          "rows": [
+            [
+              "2.5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE late_round AS SELECT round($1)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE late_round(2.5)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "round"
+          ],
+          "type_oids": [
+            701
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE late_round(3.5)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "round"
+          ],
+          "type_oids": [
+            701
+          ],
+          "rows": [
+            [
+              "4"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE late_numeric AS SELECT round($1, $2)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE late_numeric(2.71828, 2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "round"
+          ],
+          "type_oids": [
+            1700
+          ],
+          "rows": [
+            [
+              "2.72"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE late_numeric(2.5, 0)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "round"
+          ],
+          "type_oids": [
+            1700
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,from_sql,prepare_time <= clock_timestamp() AS created FROM pg_prepared_statements ORDER BY name",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "from_sql",
+            "created"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "late_abs",
+              "{\"double precision\"}",
+              "{\"double precision\"}",
+              "t",
+              "t"
+            ],
+            [
+              "late_numeric",
+              "{numeric,integer}",
+              "{numeric}",
+              "t",
+              "t"
+            ],
+            [
+              "late_round",
+              "{\"double precision\"}",
+              "{\"double precision\"}",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE metadata_empty AS SELECT FROM generate_series(1,2)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE metadata_no_result AS DELETE FROM pg_prepared_statements WHERE false",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot delete from view \"pg_prepared_statements\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT name, result_types::text FROM pg_prepared_statements WHERE name='metadata_empty'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "result_types"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "metadata_empty",
+              "{}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE metadata_source AS SELECT 1; PREPARE metadata_source2 AS SELECT 2;",
+      "command_tags": [
+        "PREPARE",
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,statement FROM pg_prepared_statements WHERE name IN ('metadata_source','metadata_source2') ORDER BY name",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "statement"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "metadata_source",
+              "PREPARE metadata_source AS SELECT 1; PREPARE metadata_source2 AS SELECT 2;"
+            ],
+            [
+              "metadata_source2",
+              "PREPARE metadata_source AS SELECT 1; PREPARE metadata_source2 AS SELECT 2;"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DELETE FROM pg_prepared_statements WHERE false",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot delete from view \"pg_prepared_statements\""
+      },
+      "results": []
+    },
+    {
+      "sql": "UPDATE pg_prepared_statements SET name = name WHERE false",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot update view \"pg_prepared_statements\""
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO pg_prepared_statements (name) VALUES ('test')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot insert into view \"pg_prepared_statements\""
+      },
+      "results": []
+    },
+    {
+      "sql": "PREPARE metadata_update AS UPDATE pg_prepared_statements SET name = $1 WHERE false",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot update view \"pg_prepared_statements\""
+      },
+      "results": []
+    },
+    {
+      "sql": "PREPARE metadata_insert AS INSERT INTO pg_prepared_statements (name) VALUES ($1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot insert into view \"pg_prepared_statements\""
+      },
+      "results": []
+    },
+    {
+      "sql": "PREPARE metadata_bad_column AS DELETE FROM pg_prepared_statements WHERE missing = 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"missing\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "PREPARE metadata_bad_type AS DELETE FROM pg_prepared_statements WHERE 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "argument of WHERE must be type boolean, not type integer"
+      },
+      "results": []
+    },
+    {
+      "sql": "PREPARE metadata_unknown AS DELETE FROM pg_prepared_statements WHERE $1 IS NULL",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P18",
+        "message": "could not determine data type of parameter $1"
+      },
+      "results": []
+    },
+    {
+      "sql": "WITH removed AS (DELETE FROM pg_prepared_statements RETURNING name) SELECT count(*) FROM removed",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot delete from view \"pg_prepared_statements\""
+      },
+      "results": []
+    },
+    {
+      "sql": "PREPARE metadata_cte AS WITH removed AS (DELETE FROM pg_prepared_statements RETURNING name) SELECT count(*) FROM removed",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot delete from view \"pg_prepared_statements\""
+      },
+      "results": []
+    },
+    {
+      "sql": "MERGE INTO pg_prepared_statements AS target USING (VALUES ('test')) AS source(name) ON target.name=source.name WHEN MATCHED THEN DELETE",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot delete from view \"pg_prepared_statements\""
+      },
+      "results": []
+    },
+    {
+      "sql": "PREPARE metadata_merge AS MERGE INTO pg_prepared_statements AS target USING (VALUES ('test')) AS source(name) ON target.name=source.name WHEN MATCHED THEN DELETE",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot delete from view \"pg_prepared_statements\""
+      },
+      "results": []
+    },
+    {
+      "sql": "PREPARE metadata_noop_merge AS MERGE INTO pg_prepared_statements AS target USING (VALUES (1)) AS source(n) ON false WHEN MATCHED THEN DO NOTHING",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DELETE FROM pg_prepared_statements WHERE missing = 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"missing\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "DELETE FROM pg_prepared_statements WHERE 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "argument of WHERE must be type boolean, not type integer"
+      },
+      "results": []
+    },
+    {
+      "sql": "UPDATE pg_prepared_statements SET name = 1 WHERE false",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "cannot update view \"pg_prepared_statements\""
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO pg_prepared_statements (missing) VALUES (1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"missing\" of relation \"pg_prepared_statements\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "DEALLOCATE ALL",
+      "command_tags": [
+        "DEALLOCATE ALL"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    }
+  ]
+}

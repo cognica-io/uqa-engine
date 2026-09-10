@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Statistics snapshots cannot block WAL writers or supersede newer changes.
+//! Statistics sampling and publication preserve concurrent writes and newer changes.
 
 use super::*;
 
@@ -51,6 +51,61 @@ fn sampling_read_snapshot_allows_writes_and_rejects_obsolete_statistics() {
     assert!(!worker
         .publish_automatic_analysis("public.t", sampled)
         .unwrap());
+    assert!(worker.run_automatic_analyze("public.t").unwrap());
+    assert_eq!(worker.column_stats("t").unwrap()["id"].row_count, 2);
+}
+
+#[test]
+fn compressed_statistics_publication_releases_reader_before_waiting_for_writer() {
+    let directory = tempfile::tempdir().unwrap();
+    let writer = Engine::open_compressed(
+        &directory.path().join("statistics.db"),
+        uqa_storage::SQLiteCompressionOptions::default(),
+    )
+    .unwrap();
+    writer
+        .sql(
+            "CREATE TABLE t (id INTEGER PRIMARY KEY); INSERT INTO t VALUES (1)",
+            &[],
+        )
+        .unwrap();
+    let worker = writer.new_session().unwrap();
+    for engine in [&writer, &worker] {
+        engine.release_automatic_statistics_client();
+        engine
+            .session
+            .statistics_worker
+            .store(true, Ordering::Release);
+    }
+    let backend = worker.storage.backend.as_ref().unwrap();
+    backend.begin_read_transaction().unwrap();
+    worker.refresh_pinned_transaction_snapshot().unwrap();
+    let sampled = worker
+        .collect_automatic_analysis("public.t")
+        .unwrap()
+        .unwrap();
+    backend.rollback_transaction().unwrap();
+    writer.sql("BEGIN; INSERT INTO t VALUES (2)", &[]).unwrap();
+
+    let worker_id = worker.session_id;
+    let waiting_thread = std::thread::spawn(move || {
+        let result = worker.publish_automatic_analysis("public.t", sampled);
+        (worker, result)
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while !writer.row_locks.waiting_for_backend_writer(worker_id) {
+        assert!(std::time::Instant::now() < deadline, "worker did not wait");
+        std::thread::yield_now();
+    }
+    // A maintenance publication starts its own deferred transaction after
+    // sampling. That new reader must also end before the logical writer wait.
+    let committed = writer.sql("COMMIT", &[]);
+    let (worker, published) = waiting_thread.join().unwrap();
+    committed.unwrap();
+    assert!(
+        !published.unwrap(),
+        "stale statistics replaced the newer rows"
+    );
     assert!(worker.run_automatic_analyze("public.t").unwrap());
     assert_eq!(worker.column_stats("t").unwrap()["id"].row_count, 2);
 }

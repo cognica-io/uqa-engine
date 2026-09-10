@@ -56,6 +56,7 @@ pub(in crate::sql) fn expr_has_window(expr: &ScalarExpr) -> bool {
         | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
+        | ScalarExpr::TypedLiteral { .. }
         | ScalarExpr::Param(_)
         | ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. }

@@ -18,10 +18,10 @@ use super::{
     reason = "builtin dispatch preserves arity, NULL, and error precedence"
 )]
 pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
+    if let Some(result) = super::current_time::eval_current_time(name, args, None) {
+        return Some(result);
+    }
     const NAMES: &[&str] = &[
-        "now",
-        "current_timestamp",
-        "current_date",
         "to_timestamp",
         "extract",
         "date_part",
@@ -36,7 +36,6 @@ pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Resu
         "to_number",
         "isfinite",
         "clock_timestamp",
-        "statement_timestamp",
         "timeofday",
         "typeof",
         "pg_typeof",
@@ -51,15 +50,6 @@ pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Resu
     }
     Some((|| -> Result<Value> {
         match name {
-            "now" | "current_timestamp" => Ok(Value::Temporal(TemporalValue::TimestampTz {
-                micros: chrono::Utc::now().timestamp_micros(),
-            })),
-            "current_date" => {
-                let micros = chrono::Utc::now().timestamp_micros();
-                Ok(Value::Temporal(TemporalValue::Date {
-                    days: (micros.div_euclid(86_400_000_000)) as i32,
-                }))
-            }
             "to_timestamp" => {
                 if args.len() != 1 {
                     return Err(SQLError::TypeMismatch("to_timestamp takes 1 arg".into()));
@@ -89,15 +79,6 @@ pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Resu
             }
             "age" => {
                 let (a, b) = match args.len() {
-                    // One-argument age() measures against today's midnight.
-                    1 => {
-                        let micros = chrono::Utc::now().timestamp_micros();
-                        let midnight = micros.div_euclid(86_400_000_000) * 86_400_000_000;
-                        (
-                            coerce_temporal(&args[0])?,
-                            TemporalValue::Timestamp { micros: midnight },
-                        )
-                    }
                     2 => (coerce_temporal(&args[0])?, coerce_temporal(&args[1])?),
                     _ => return Err(SQLError::TypeMismatch("age takes 1-2 args".into())),
                 };
@@ -281,11 +262,9 @@ pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Resu
                     ))),
                 }
             }
-            "clock_timestamp" | "statement_timestamp" => {
-                Ok(Value::Temporal(TemporalValue::TimestampTz {
-                    micros: chrono::Utc::now().timestamp_micros(),
-                }))
-            }
+            "clock_timestamp" => Ok(Value::Temporal(TemporalValue::TimestampTz {
+                micros: chrono::Utc::now().timestamp_micros(),
+            })),
             "timeofday" => Ok(Value::Str(
                 chrono::Utc::now()
                     .format("%a %b %d %H:%M:%S%.6f %Y UTC")

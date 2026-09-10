@@ -233,18 +233,19 @@ fn discard_all_clears_session_state() {
 }
 
 #[test]
-fn discard_plans_drops_prepared_only() {
+fn discard_plans_preserves_prepared_definitions() {
     let eng = Engine::new();
     eng.sql("CREATE TABLE t (id INTEGER PRIMARY KEY)", &[])
         .unwrap();
     eng.sql("PREPARE p1 AS SELECT id FROM t", &[]).unwrap();
     assert!(eng.lookup_prepared("p1").is_some());
     eng.discard(DiscardTarget::Plans).unwrap();
-    assert!(eng.lookup_prepared("p1").is_none());
+    assert!(eng.lookup_prepared("p1").is_some());
+    assert!(eng.sql("EXECUTE p1", &[]).unwrap().rows.is_empty());
 }
 
 #[test]
-fn discard_temp_drops_temporary_relations_and_rejects_transaction_blocks() {
+fn discard_temp_drops_temporary_relations_inside_transaction_blocks() {
     let eng = Engine::new();
     eng.sql("CREATE TEMP TABLE scratch (id INTEGER)", &[])
         .unwrap();
@@ -256,8 +257,7 @@ fn discard_temp_drops_temporary_relations_and_rejects_transaction_blocks() {
         Some("42P01")
     );
     eng.sql("BEGIN", &[]).unwrap();
-    let error = eng.sql("DISCARD TEMP", &[]).unwrap_err();
-    assert_eq!(error.sqlstate(), Some("25001"));
+    eng.sql("DISCARD TEMP", &[]).unwrap();
     eng.sql("ROLLBACK", &[]).unwrap();
 }
 
@@ -274,7 +274,8 @@ fn discard_distinguishes_a_simple_query_batch_from_explicit_begin() {
         .unwrap();
     assert!(engine.currval("discard_batch_sequence").is_err());
 
-    let error = engine.sql("BEGIN; DISCARD SEQUENCES", &[]).unwrap_err();
+    engine.sql("BEGIN; DISCARD SEQUENCES", &[]).unwrap();
+    let error = engine.sql("DISCARD ALL", &[]).unwrap_err();
     assert_eq!(error.sqlstate(), Some("25001"));
     engine.sql("ROLLBACK", &[]).unwrap();
 }

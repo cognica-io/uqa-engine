@@ -87,6 +87,19 @@ pub(in crate::sql) fn build_table_function_row_stream_with_row(
 ) -> Result<TableFunctionRows, SQLError> {
     let ordinality = call.ordinality;
     let mut output = build_table_function_value_row_stream_with_row(context, call, row)?;
+    let cancellation = context.engine.cancellation_token();
+    let mut rows = output.rows;
+    let mut cancelled = false;
+    output.rows = Box::new(std::iter::from_fn(move || {
+        if cancelled {
+            return None;
+        }
+        if let Err(error) = cancellation.check() {
+            cancelled = true;
+            return Some(Err(SQLError::from(error).into()));
+        }
+        rows.next()
+    }));
     if !ordinality {
         return Ok(output);
     }

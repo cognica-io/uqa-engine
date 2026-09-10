@@ -56,6 +56,7 @@ impl Engine {
                         .collect(),
                     fts_fields: table.fts_fields.read().clone(),
                     columns: table.columns.read().clone(),
+                    columns_declared: *table.columns_declared.read(),
                     next_id: *table.next_id.lock(),
                     analyzer: table.analyzer.read().clone(),
                     column_stats: table.column_stats.read().clone(),
@@ -136,6 +137,7 @@ impl Engine {
                 .write()
                 .clone_from(&table_snapshot.fts_fields);
             table.columns.write().clone_from(&table_snapshot.columns);
+            *table.columns_declared.write() = table_snapshot.columns_declared;
             *table.next_id.lock() = table_snapshot.next_id;
             *table.analyzer.write() = table_snapshot.analyzer.clone();
             *table.column_stats.write() = table_snapshot.column_stats.clone();
@@ -191,7 +193,17 @@ impl Engine {
     }
 
     pub(super) fn restore_session_state(&self, snapshot: &SessionStateSnapshot) {
-        *self.session.state.write() = snapshot.clone();
+        let mut restored = snapshot.clone();
+        let mut current = self.session.state.write();
+        // Sequence DDL can restore an old object and its session value, while
+        // DISCARD SEQUENCES must remain effective across every rollback boundary.
+        if current.sequence_discard_generation != snapshot.sequence_discard_generation {
+            restored.sequence_currvals = std::mem::take(&mut current.sequence_currvals);
+            restored.last_sequence = current.last_sequence.take();
+            restored.sequence_discard_generation = current.sequence_discard_generation;
+        }
+        *current = restored;
+        drop(current);
         self.session
             .portals
             .lock()

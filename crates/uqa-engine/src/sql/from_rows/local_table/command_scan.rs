@@ -34,10 +34,12 @@ impl EngineTableRowSource {
             || crate::sql::projections_use_tuple_xmin(&self.columns, &self.column_definitions);
         let mut rows = Vec::with_capacity(max_rows);
         while rows.len() < max_rows {
+            self.cancellation.check().map_err(SQLError::from)?;
             let remaining = max_rows - rows.len();
             let mut candidates = Vec::with_capacity(remaining);
             let mut exhausted = false;
             while candidates.len() < remaining {
+                self.cancellation.check().map_err(SQLError::from)?;
                 if self.command_base_ids.is_empty() && !self.command_base_exhausted {
                     let page_size = remaining.max(uqa_execution::DEFAULT_BATCH_SIZE);
                     let doc_ids = self

@@ -66,7 +66,7 @@ pub fn eval_scalar(
         ScalarExpr::QualifiedColumn { qualifier, column } => context
             .sql_context()
             .qualified_column_value(qualifier, column),
-        ScalarExpr::Literal(value) => Ok(value.clone()),
+        ScalarExpr::Literal(value) | ScalarExpr::TypedLiteral { value, .. } => Ok(value.clone()),
         ScalarExpr::Param(index) => eval_parameter(*index, context.params()),
         ScalarExpr::Func {
             name,
@@ -74,6 +74,17 @@ pub fn eval_scalar(
             args,
             ..
         } => {
+            if name.eq_ignore_ascii_case("coalesce")
+                && binding.as_ref().is_none_or(|binding| binding.builtin)
+            {
+                for argument in args {
+                    let value = eval_scalar(argument, context)?;
+                    if !matches!(value, Value::Null) {
+                        return Ok(value);
+                    }
+                }
+                return Ok(Value::Null);
+            }
             let arguments = eval_call_arguments(args, context)?;
             if let Some(binding) = binding {
                 if let Some(uqa_sql::ast::FunctionResolutionError::UndefinedFunction {
@@ -130,11 +141,31 @@ pub fn eval_scalar(
         ScalarExpr::Binary { op, lhs, rhs } => {
             let left = eval_scalar(lhs, context)?;
             let right = eval_scalar(rhs, context)?;
+            if (matches!(left, Value::Float(_)) || matches!(right, Value::Float(_)))
+                && matches!(
+                    op,
+                    BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide
+                )
+                && scalar_source_type(lhs, context).is_some_and(|ty| real_type_name(&ty))
+                && scalar_source_type(rhs, context).is_some_and(|ty| real_type_name(&ty))
+            {
+                return uqa_sql::expr::eval_float_arithmetic(
+                    *op,
+                    &left,
+                    &right,
+                    uqa_sql::expr::FloatWidth::Real,
+                );
+            }
             eval_binary_values_with_integer_width(
                 *op,
                 &left,
                 &right,
-                scalar_integer_binary_width(lhs, rhs),
+                scalar_integer_binary_width(
+                    lhs,
+                    rhs,
+                    context.row_schema().unwrap_or(&crate::RowSchema::default()),
+                    context.params(),
+                ),
             )
         }
         ScalarExpr::UnaryMinus(inner) => {
@@ -441,7 +472,28 @@ fn execute_in_subquery(
 
 fn scalar_source_type(expression: &ScalarExpr, context: &ScalarEvalContext<'_>) -> Option<String> {
     match expression {
-        ScalarExpr::Cast { ty, .. } => return Some(ty.clone()),
+        ScalarExpr::TypedLiteral {
+            bound_type: Some(ty),
+            ..
+        } => {
+            return Some(literal_operator_type(ty).sql_name());
+        }
+        ScalarExpr::Func {
+            binding: Some(binding),
+            ..
+        } if binding
+            .invocation
+            .as_ref()
+            .is_some_and(|invocation| invocation.return_type.is_some()) =>
+        {
+            return binding
+                .invocation
+                .as_ref()
+                .and_then(|invocation| invocation.return_type.clone());
+        }
+        ScalarExpr::Cast { ty, .. } | ScalarExpr::TypedLiteral { ty, .. } => {
+            return Some(ty.clone())
+        }
         ScalarExpr::UnaryMinus(inner) => return scalar_source_type(inner, context),
         ScalarExpr::Literal(Value::Int(value)) if i32::try_from(*value).is_ok() => {
             return Some("integer".into());
@@ -451,20 +503,34 @@ fn scalar_source_type(expression: &ScalarExpr, context: &ScalarEvalContext<'_>) 
         ScalarExpr::Literal(Value::Str(_) | Value::FixedChar(_)) => return None,
         _ => {}
     }
-    context
-        .row_schema()
-        .and_then(|schema| {
-            crate::scalar_type(expression, schema, context.params())
-                .ok()
-                .flatten()
-        })
-        .map(|ty| ty.sql_name())
+    let empty = crate::RowSchema::default();
+    crate::scalar_type(
+        expression,
+        context.row_schema().unwrap_or(&empty),
+        context.params(),
+    )
+    .ok()
+    .flatten()
+    .map(|ty| literal_operator_type(&ty).sql_name())
+}
+
+fn real_type_name(name: &str) -> bool {
+    matches!(
+        uqa_sql::ast::ColumnType::from_sql_name(name),
+        Ok(uqa_sql::ast::ColumnType::Real)
+    )
 }
 
 fn scalar_integer_width(expression: &ScalarExpr) -> Option<IntegerWidth> {
     match expression {
         ScalarExpr::Literal(Value::Int(value)) => Some(integer_width_for_literal(*value)),
-        ScalarExpr::Cast { ty, .. } => integer_width_for_type(ty),
+        ScalarExpr::TypedLiteral {
+            bound_type: Some(ty),
+            ..
+        } => integer_width_for_type(&literal_operator_type(ty).sql_name()),
+        ScalarExpr::Cast { ty, .. } | ScalarExpr::TypedLiteral { ty, .. } => {
+            integer_width_for_type(ty)
+        }
         ScalarExpr::UnaryMinus(inner) => scalar_integer_width(inner),
         ScalarExpr::Binary {
             op: BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide,
@@ -475,9 +541,26 @@ fn scalar_integer_width(expression: &ScalarExpr) -> Option<IntegerWidth> {
     }
 }
 
+fn literal_operator_type(mut ty: &uqa_sql::ast::ColumnType) -> &uqa_sql::ast::ColumnType {
+    while let uqa_sql::ast::ColumnType::Domain { base, .. } = ty {
+        ty = base;
+    }
+    ty
+}
+
 pub(crate) fn scalar_integer_binary_width(
     lhs: &ScalarExpr,
     rhs: &ScalarExpr,
+    schema: &crate::RowSchema,
+    parameters: &[SQLParam],
 ) -> Option<IntegerWidth> {
-    Some(scalar_integer_width(lhs)?.max(scalar_integer_width(rhs)?))
+    let width = |expression| {
+        scalar_integer_width(expression).or_else(|| {
+            let ty = crate::scalar_type(expression, schema, parameters)
+                .ok()
+                .flatten()?;
+            integer_width_for_type(&literal_operator_type(&ty).sql_name())
+        })
+    };
+    Some(width(lhs)?.max(width(rhs)?))
 }

@@ -1,0 +1,2391 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN short_text AS varchar(5)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'abc'::short_text AS domain_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "domain_value"
+          ],
+          "type_oids": [
+            1043
+          ],
+          "rows": [
+            [
+              "abc"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'abcdef'::short_text AS truncated, NULL::short_text AS nullable",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "truncated",
+            "nullable"
+          ],
+          "type_oids": [
+            1043,
+            1043
+          ],
+          "rows": [
+            [
+              "abcde",
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN short_text AS integer",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "type \"short_text\" already exists"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 'short_text'::regtype AS domain_type, pg_typeof('a'::short_text)::text AS expression_type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "domain_type",
+            "expression_type"
+          ],
+          "type_oids": [
+            2206,
+            25
+          ],
+          "rows": [
+            [
+              "short_text",
+              "short_text"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN positive AS integer DEFAULT 7 NOT NULL CONSTRAINT positive_value CHECK (VALUE > 0)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 3::positive AS number",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "number"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 0::positive",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "value for domain positive violates check constraint \"positive_value\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT NULL::positive",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23502",
+        "message": "domain positive does not allow null values"
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE domain_values (id integer, number positive, label short_text)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO domain_values (id) VALUES (1)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id + 0 AS id, number + 0 AS number, label::text AS label FROM domain_values ORDER BY id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "number",
+            "label"
+          ],
+          "type_oids": [
+            23,
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "7",
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO domain_values VALUES (2, 9, 'fine')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO domain_values VALUES (3, -1, 'fine')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "value for domain positive violates check constraint \"positive_value\""
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO domain_values VALUES (4, NULL, 'fine')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23502",
+        "message": "domain positive does not allow null values"
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO domain_values VALUES (5, 2, 'too long')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22001",
+        "message": "value too long for type character varying(5)"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT id + 0 AS id, number + 0 AS number, label::text AS label FROM domain_values ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "number",
+            "label"
+          ],
+          "type_oids": [
+            23,
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "7",
+              null
+            ],
+            [
+              "2",
+              "9",
+              "fine"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '{1,2,3}'::positive[]::text AS array_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "array_value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{1,2,3}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '{1,0}'::positive[]::text AS bad_array",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "value for domain positive violates check constraint \"positive_value\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT '{1,NULL}'::positive[]::text AS null_element",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23502",
+        "message": "domain positive does not allow null values"
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE DOMAIN limited AS positive CHECK (VALUE < 10)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 10::limited",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "value for domain limited violates check constraint \"limited_check\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT NULL::limited",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23502",
+        "message": "domain limited does not allow null values"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT typname::text AS name, typtype::text AS kind, typnotnull OR false AS not_null, typbasetype::regtype AS base_type, typtypmod + 0 AS modifier FROM pg_type WHERE oid IN ('short_text'::regtype, 'positive'::regtype, 'limited'::regtype) ORDER BY typname",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "kind",
+            "not_null",
+            "base_type",
+            "modifier"
+          ],
+          "type_oids": [
+            25,
+            25,
+            16,
+            2206,
+            23
+          ],
+          "rows": [
+            [
+              "limited",
+              "d",
+              "f",
+              "positive",
+              "-1"
+            ],
+            [
+              "positive",
+              "d",
+              "t",
+              "integer",
+              "-1"
+            ],
+            [
+              "short_text",
+              "d",
+              "f",
+              "character varying",
+              "9"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN; CREATE DOMAIN rolled_back AS integer; ROLLBACK",
+      "command_tags": [
+        "BEGIN",
+        "CREATE DOMAIN",
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        },
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 1::rolled_back",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"rolled_back\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE SCHEMA domains",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN domains.\"Mixed.Domain\" AS varchar(4)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'hello'::domains.\"Mixed.Domain\" AS quoted_domain",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "quoted_domain"
+          ],
+          "type_oids": [
+            1043
+          ],
+          "rows": [
+            [
+              "hell"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE quoted_domain_values (value domains.\"Mixed.Domain\")",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO quoted_domain_values VALUES ('okay')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT value::text AS value FROM quoted_domain_values",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "okay"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN invalid_check AS integer CHECK (VALUE)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "argument of CHECK must be type boolean, not type integer"
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE DOMAIN invalid_reference AS integer CHECK (missing > 0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"missing\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE DOMAIN invalid_default AS integer DEFAULT (SELECT 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot use subquery in DEFAULT expression"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT count(*)::integer AS invalid_domains FROM pg_type WHERE typname IN ('invalid_check', 'invalid_reference', 'invalid_default')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "invalid_domains"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE domain_checks",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION counted_check(value integer) RETURNS boolean LANGUAGE SQL VOLATILE AS 'SELECT nextval(''domain_checks'') > 0'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN counted AS integer CHECK (counted_check(VALUE))",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE counted_values (value counted)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO counted_values VALUES (1)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT last_value FROM domain_checks",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO counted_values SELECT value FROM counted_values",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "UPDATE counted_values SET value = value",
+      "command_tags": [
+        "UPDATE 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT last_value FROM domain_checks",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "UPDATE counted_values SET value = value + 1",
+      "command_tags": [
+        "UPDATE 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT last_value FROM domain_checks",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 1::counted AS checked_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "checked_value"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO counted_values VALUES (2::counted)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT last_value FROM domain_checks",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE nullable_domain_values (value positive)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO nullable_domain_values VALUES ((SELECT number FROM domain_values WHERE false))",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT value IS NULL AS is_null FROM nullable_domain_values",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "is_null"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE type_names_as_text (value text)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO type_names_as_text VALUES (pg_typeof(1))",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT value FROM type_names_as_text",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "integer"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN invalid_domain_default AS integer DEFAULT 'bad'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"bad\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT count(*)::integer AS invalid_domains FROM pg_type WHERE typname = 'invalid_domain_default'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "invalid_domains"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 1::positive(3)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "type modifier is not allowed for type \"positive\""
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE invalid_domain_modifier (value positive(3))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "type modifier is not allowed for type \"positive\""
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE DOMAIN invalid_base_modifier AS positive(3)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "type modifier is not allowed for type \"positive\""
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE DOMAIN domains.\"integer\" AS text CHECK (length(VALUE) > 1)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE domain_named_builtin (value domains.\"integer\")",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO domain_named_builtin VALUES ('okay')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT value::text AS value FROM domain_named_builtin",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "okay"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'ab'::domains.\"integer\" AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "ab"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN \"Boolean\" AS integer",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE case_domain_value (value \"Boolean\")",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO case_domain_value VALUES (3)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT value + 0 AS value FROM case_domain_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN \"integer\" AS text",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'ab'::\"integer\" AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "ab"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_typeof('ab'::\"integer\")::text AS type_name",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "type_name"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "\"integer\""
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 1::pg_catalog.\"integer\"",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"pg_catalog.integer\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE SEQUENCE trigger_domain_checks",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION trigger_domain_check(value integer) RETURNS boolean LANGUAGE SQL VOLATILE AS 'SELECT nextval(''trigger_domain_checks'') > 0 AND value > 0'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN trigger_positive AS integer CHECK (trigger_domain_check(VALUE))",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE domain_trigger_values (id integer, value trigger_positive, note text)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION domain_trigger() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TRIGGER domain_before BEFORE INSERT ON domain_trigger_values FOR EACH ROW EXECUTE FUNCTION domain_trigger()",
+      "command_tags": [
+        "CREATE TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO domain_trigger_values VALUES (1, 10, 'unchanged')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT last_value FROM trigger_domain_checks",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE OR REPLACE FUNCTION domain_trigger() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.value := NEW.value; NEW.note := pg_typeof(NEW.value)::text; RETURN NEW; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO domain_trigger_values VALUES (2, 11, '')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT last_value FROM trigger_domain_checks",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE OR REPLACE FUNCTION domain_trigger() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.value := NEW.value + 1; RETURN NEW; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO domain_trigger_values VALUES (3, 12, 'incremented')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT last_value FROM trigger_domain_checks",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "4"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE OR REPLACE FUNCTION domain_trigger() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN BEGIN NEW.value := -1; EXCEPTION WHEN check_violation THEN NEW.value := 9; END; RETURN NEW; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO domain_trigger_values VALUES (4, 13, 'caught')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT last_value FROM trigger_domain_checks",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE OR REPLACE FUNCTION domain_trigger() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN ROW(NEW.id, NEW.value, 'row'::text); END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO domain_trigger_values VALUES (5, 14, '')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT last_value FROM trigger_domain_checks",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "8"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE OR REPLACE FUNCTION domain_trigger() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN ROW(NEW.id, NEW.value::integer, 'wrong type'::text); END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO domain_trigger_values VALUES (6, 15, '')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "returned row structure does not match the structure of the triggering table"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT last_value FROM trigger_domain_checks",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "9"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE OR REPLACE FUNCTION domain_trigger() RETURNS trigger LANGUAGE plpgsql AS $$ DECLARE item record; BEGIN SELECT NEW.id AS other_id, NEW.value AS other_value, NEW.note AS other_note INTO item; RETURN item; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO domain_trigger_values VALUES (7, 16, 'record')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT last_value FROM trigger_domain_checks",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "10"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id, value + 0 AS value, note FROM domain_trigger_values ORDER BY id",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "value",
+            "note"
+          ],
+          "type_oids": [
+            23,
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "10",
+              "unchanged"
+            ],
+            [
+              "2",
+              "11",
+              "trigger_positive"
+            ],
+            [
+              "3",
+              "13",
+              "incremented"
+            ],
+            [
+              "4",
+              "9",
+              "caught"
+            ],
+            [
+              "5",
+              "14",
+              "row"
+            ],
+            [
+              "7",
+              "16",
+              "record"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE ROLE domain_type_owner",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "GRANT CREATE ON SCHEMA public TO domain_type_owner",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE domain_type_owner",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN owned_domain AS integer",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT t.typowner = r.oid AS owns_domain, a.typowner = r.oid AS owns_array FROM pg_type t JOIN pg_roles r ON r.rolname = 'domain_type_owner' JOIN pg_type a ON a.oid = t.typarray WHERE t.typname = 'owned_domain'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "owns_domain",
+            "owns_array"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE routine_domain_checks",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION routine_domain_check(value integer) RETURNS boolean LANGUAGE SQL VOLATILE AS 'SELECT nextval(''routine_domain_checks'') > 0'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN routine_counted AS integer CHECK (routine_domain_check(VALUE))",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION routine_domain_local() RETURNS integer LANGUAGE plpgsql AS $$ DECLARE value routine_counted := 7; BEGIN value := value; RETURN value; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT routine_domain_local() AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT last_value FROM routine_domain_checks",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION routine_domain_identity(value routine_counted) RETURNS routine_counted LANGUAGE plpgsql AS $$ BEGIN RETURN value; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT routine_domain_identity(8) + 0 AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "8"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT last_value FROM routine_domain_checks",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT routine_domain_identity(9::routine_counted) + 0 AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "9"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT last_value FROM routine_domain_checks",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION routine_domain_sql_identity(value routine_counted) RETURNS routine_counted LANGUAGE SQL AS $$ SELECT value $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT routine_domain_sql_identity(10::routine_counted) + 0 AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "10"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT last_value FROM routine_domain_checks",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "4"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN routine_default AS integer DEFAULT 7",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION routine_domain_default() RETURNS integer LANGUAGE plpgsql AS $$ DECLARE value routine_default; BEGIN RETURN value; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT routine_domain_default() AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN routine_required AS integer NOT NULL",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION routine_domain_null() RETURNS integer LANGUAGE plpgsql AS $$ DECLARE value routine_required; BEGIN RETURN value; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT routine_domain_null() AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23502",
+        "message": "domain routine_required does not allow null values"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 1::\"NoType\"[][]",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"NoType[]\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 1::\"NoType\"(3)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"NoType\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE DOMAIN \"Routine.Mixed\" AS integer CHECK (VALUE > 0)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION routine_quoted_local() RETURNS integer LANGUAGE plpgsql AS $$ DECLARE v \"Routine.Mixed\" := 13; a \"Routine.Mixed\"[] := ARRAY[2]; BEGIN RETURN v + a[1]; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT routine_quoted_local() AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "15"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN routine_item AS integer CHECK (VALUE > 0)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION routine_domain_array() RETURNS integer LANGUAGE plpgsql AS $$ DECLARE v routine_item[] := ARRAY[7, 8]; BEGIN RETURN v[1]; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT routine_domain_array() AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION routine_builtin_domain() RETURNS integer LANGUAGE plpgsql AS $$ DECLARE v information_schema.cardinal_number := 2; BEGIN RETURN v; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT routine_builtin_domain() AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SCHEMA \"Domain.Schema\"",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN \"Domain.Schema\".\"Local.Mixed\" AS integer CHECK (VALUE > 0)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION routine_qualified_local() RETURNS integer LANGUAGE plpgsql AS $$ DECLARE v \"Domain.Schema\".\"Local.Mixed\" := 11; BEGIN RETURN v; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT routine_qualified_local() AS value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "11"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DO $$ DECLARE v \"Routine.Mixed\" := 17; a \"Routine.Mixed\"[] := ARRAY[1, 2]; BEGIN ASSERT v = 17; ASSERT a[2] = 2; END $$",
+      "command_tags": [
+        "DO"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE domain_for_do (value \"Routine.Mixed\")",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DO $$ DECLARE v domain_for_do.value%TYPE := 19; BEGIN ASSERT v = 19; END $$",
+      "command_tags": [
+        "DO"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    }
+  ]
+}

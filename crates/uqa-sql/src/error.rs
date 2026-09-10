@@ -8,13 +8,13 @@
 
 #[derive(Debug, thiserror::Error)]
 pub enum SQLError {
-    #[error("parse error: {0}")]
+    #[error("{0}")]
     Parse(String),
-    #[error("unsupported SQL feature: {0}")]
+    #[error("{0}")]
     Unsupported(String),
     #[error("relation \"{0}\" does not exist")]
     UnknownTable(String),
-    #[error("unknown column: {0}")]
+    #[error("column \"{0}\" does not exist")]
     UnknownColumn(String),
     #[error("column reference \"{0}\" is ambiguous")]
     AmbiguousColumn(String),
@@ -40,11 +40,26 @@ pub enum SQLError {
     /// `SQLERRM` report the same code `PostgreSQL` would.
     #[error("{message}")]
     Routine { sqlstate: String, message: String },
+    /// A primary SQL error with separate `PostgreSQL` diagnostic fields. `SQLERRM` and `Display` expose only the primary message; protocol clients receive detail and hint independently.
+    #[error("{message}")]
+    Diagnostic {
+        sqlstate: String,
+        message: String,
+        detail: Option<String>,
+        hint: Option<String>,
+    },
     #[error("internal error: {0}")]
     Internal(String),
 }
 
 impl SQLError {
+    pub fn unknown_qualified_column(qualifier: &str, column: &str) -> Self {
+        Self::Routine {
+            sqlstate: "42703".into(),
+            message: format!("column {qualifier}.{column} does not exist"),
+        }
+    }
+
     /// `PostgreSQL` `SQLSTATE` code for the error, mirroring the
     /// the current exception-to-state mapping. `None` for
     /// errors that do not carry a defined `SQLSTATE`.
@@ -61,7 +76,9 @@ impl SQLError {
             SQLError::BadArity { .. } => Some("42883"), // undefined_function (PG)
             SQLError::MissingParam(_) => Some("S1002"), // ERRCODE_INVALID_PARAMETER_VALUE
             SQLError::VectorDimMismatch { .. } => Some("22023"), // invalid_parameter_value
-            SQLError::Routine { sqlstate, .. } => Some(sqlstate),
+            SQLError::Routine { sqlstate, .. } | SQLError::Diagnostic { sqlstate, .. } => {
+                Some(sqlstate)
+            }
             SQLError::Internal(_) => Some("XX000"), // internal_error
         }
     }
@@ -88,6 +105,7 @@ impl From<pg_query::Error> for SQLError {
                     message,
                 }
             }
+            pg_query::Error::Parse(message) => SQLError::Parse(message),
             other => SQLError::Parse(other.to_string()),
         }
     }

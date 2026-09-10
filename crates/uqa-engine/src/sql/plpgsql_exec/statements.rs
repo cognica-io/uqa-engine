@@ -19,8 +19,9 @@ impl Interpreter<'_> {
         match stmt {
             PLpgSQLStmt::Block(block) => self.exec_block(block),
             PLpgSQLStmt::Assign { target, expr } => {
-                let value = self.eval_expr(expr)?;
-                self.assign_datum(*target, value)?;
+                let record_types = self.record_expression_types(expr)?;
+                let (value, source) = self.eval_expr_with_type(expr)?;
+                self.assign_datum_typed(*target, value, source.as_ref(), record_types)?;
                 Ok(Flow::Normal)
             }
             PLpgSQLStmt::If {
@@ -207,7 +208,12 @@ impl Interpreter<'_> {
                         strict_into_check(row_count)?;
                     }
                     let values = result_row_values(&result, 0);
-                    self.assign_into(target, &result.columns, values.as_deref())?;
+                    self.assign_into(
+                        target,
+                        &result.columns,
+                        &result.column_types,
+                        values.as_deref(),
+                    )?;
                 }
                 // PostgreSQL: EXECUTE never changes FOUND.
                 Ok(Flow::Normal)

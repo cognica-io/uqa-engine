@@ -82,6 +82,7 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
         alias,
         column_aliases,
         include_descendants,
+        ..
     } = from
     {
         if !ctes.is_visible_cte(name) {
@@ -846,7 +847,7 @@ fn collect_expr_prune_columns(
                 *valid = false;
             }
         }
-        ScalarExpr::Literal(_) | ScalarExpr::Param(_) => {}
+        ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. } | ScalarExpr::Param(_) => {}
         ScalarExpr::Default
         | ScalarExpr::Star
         | ScalarExpr::Position(_)

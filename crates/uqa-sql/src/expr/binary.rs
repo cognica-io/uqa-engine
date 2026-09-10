@@ -7,7 +7,7 @@
 //! SQL comparison, three-valued logic, and numeric arithmetic.
 
 use super::{
-    eval, json_delete, time, to_decimal, to_f64, BinaryOp, DecimalValue, EvalContext, Expr, Result,
+    eval, json_delete, time, to_decimal, BinaryOp, DecimalValue, EvalContext, Expr, Result,
     SQLError, SQLParam, Value,
 };
 
@@ -22,7 +22,38 @@ pub(super) fn eval_binary(
     }
     let l = eval(lhs, ctx)?;
     let r = eval(rhs, ctx)?;
+    if is_arithmetic(op) && real_expr(lhs, ctx.params) && real_expr(rhs, ctx.params) {
+        return super::eval_float_arithmetic(op, &l, &r, super::FloatWidth::Real);
+    }
     eval_binary_values_with_integer_width(op, &l, &r, integer_binary_width(lhs, rhs))
+}
+
+pub(super) fn is_arithmetic(op: BinaryOp) -> bool {
+    matches!(
+        op,
+        BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide
+    )
+}
+
+fn real_expr(expression: &Expr, params: &[SQLParam]) -> bool {
+    match expression {
+        Expr::Cast { ty, .. } | Expr::TypedLiteral { ty, .. } => {
+            matches!(
+                crate::ast::ColumnType::from_sql_name(ty),
+                Ok(crate::ast::ColumnType::Real)
+            )
+        }
+        Expr::Param(index) => index
+            .checked_sub(1)
+            .and_then(|index| params.get(index))
+            .and_then(SQLParam::declared_scalar_type)
+            .is_some_and(|ty| matches!(ty, crate::ast::ColumnType::Real)),
+        Expr::UnaryMinus(inner) => real_expr(inner, params),
+        Expr::Binary { op, lhs, rhs } if is_arithmetic(*op) => {
+            real_expr(lhs, params) && real_expr(rhs, params)
+        }
+        _ => false,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -59,7 +90,7 @@ pub fn integer_width_for_type(ty: &str) -> Option<IntegerWidth> {
 fn integer_expr_width(expr: &Expr) -> Option<IntegerWidth> {
     match expr {
         Expr::Literal(Value::Int(value)) => Some(integer_width_for_literal(*value)),
-        Expr::Cast { ty, .. } => integer_width_for_type(ty),
+        Expr::Cast { ty, .. } | Expr::TypedLiteral { ty, .. } => integer_width_for_type(ty),
         Expr::Binary {
             op: BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide,
             lhs,
@@ -435,25 +466,7 @@ pub(super) fn arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
     if has_decimal && !has_float {
         return decimal_arith(a, b, op);
     }
-    let lf = to_f64(a)?;
-    let rf = to_f64(b)?;
-    let result = match op {
-        BinaryOp::Add => lf + rf,
-        BinaryOp::Subtract => lf - rf,
-        BinaryOp::Multiply => lf * rf,
-        BinaryOp::Divide => {
-            if rf == 0.0 {
-                return Err(division_by_zero());
-            }
-            lf / rf
-        }
-        _ => {
-            return Err(SQLError::Internal(format!(
-                "non-arithmetic operator {op:?} reached floating arithmetic"
-            )))
-        }
-    };
-    Ok(Value::Float(result))
+    super::eval_float_arithmetic(op, a, b, super::FloatWidth::DoublePrecision)
 }
 
 pub(super) fn decimal_arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {

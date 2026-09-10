@@ -37,7 +37,7 @@ fn integer_column(name: &str, default: Option<Expr>) -> ColumnDef {
 }
 
 #[test]
-fn cascade_flags_and_wrong_relation_kinds_fail_before_side_effects() {
+fn wrong_relation_kinds_fail_before_side_effects() {
     let engine = Engine::new();
     engine.sql("CREATE SCHEMA app", &[]).unwrap();
     engine
@@ -49,17 +49,6 @@ fn cascade_flags_and_wrong_relation_kinds_fail_before_side_effects() {
             &[],
         )
         .unwrap();
-
-    for (sql, expected) in [
-        ("DROP SCHEMA app CASCADE", "DROP SCHEMA CASCADE"),
-        (
-            "ALTER TABLE app.items DROP COLUMN id CASCADE",
-            "DROP COLUMN CASCADE",
-        ),
-    ] {
-        let error = engine.sql(sql, &[]).unwrap_err();
-        assert!(error.to_string().contains(expected), "{error}");
-    }
 
     for (sql, expected) in [
         ("DROP TABLE IF EXISTS app.items_view", "not a table"),
@@ -105,7 +94,7 @@ fn cascade_flags_and_wrong_relation_kinds_fail_before_side_effects() {
         )
         .unwrap();
     let error = engine.sql("DROP SCHEMA routine_app", &[]).unwrap_err();
-    assert!(error.to_string().contains("not empty"), "{error}");
+    assert!(error.sqlstate() == Some("2BP01"), "{error}");
     assert!(engine.has_schema("routine_app").unwrap());
 }
 

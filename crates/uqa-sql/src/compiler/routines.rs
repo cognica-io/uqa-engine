@@ -145,7 +145,7 @@ fn compile_routine_config_action(
     };
     match setting.kind() {
         VariableSetKind::VarSetValue => {
-            let Statement::SetVariable { name, value } =
+            let Statement::SetVariable { name, value, .. } =
                 super::administrative::compile_variable_set(setting)?
             else {
                 return Err(SQLError::Internal(

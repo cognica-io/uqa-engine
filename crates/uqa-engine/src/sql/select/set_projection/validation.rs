@@ -311,6 +311,7 @@ pub(in crate::sql) fn expression_may_return_set(
         | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
+        | ScalarExpr::TypedLiteral { .. }
         | ScalarExpr::Param(_)
         | ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. } => Ok(false),
@@ -556,6 +557,7 @@ fn validate_set_context(
         | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
+        | ScalarExpr::TypedLiteral { .. }
         | ScalarExpr::Param(_)
         | ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. } => {}

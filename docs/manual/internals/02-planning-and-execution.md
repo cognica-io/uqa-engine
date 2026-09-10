@@ -1,6 +1,6 @@
 # Planning and Execution
 
-Every compiled statement follows one top-level path: SQL statement, unified lowering, plan-native optimization, and `UnifiedPlanExecutor`. There is no separate top-level row dispatcher that bypasses the unified executor.
+Every compiled statement follows one top-level path: SQL statement, unified lowering, semantic analysis, plan-native optimization, and `UnifiedPlanExecutor`. There is no separate top-level row dispatcher that bypasses the unified executor.
 
 ## End-to-end pipeline
 
@@ -32,6 +32,8 @@ Retrieval function calls remain syntax expressions until the engine and planner 
 ## UnifiedPlan
 
 The plan owns read queries and physical command bodies. Relational query blocks cover CTEs, set operations, joins, values and function sources, subqueries, filters, scalar projection, aggregation, windows, ordering, distinctness, offset, and limit. Mutation plans own sources, scalar assignments, conflict behavior, conditions, CTEs, and `RETURNING` expressions.
+
+Each AST CTE owns a `CteBody` and each planner CTE owns a `CtePlanBody`, so visitors must handle both query and mutation bodies. Command CTEs materialize their typed `RETURNING` outputs once. Their read snapshot contains frozen table and catalog handles; the evaluation scope holds no `Engine`, session, or transaction capability. The execution boundary constructs the read view and keeps mutation effects on the live command path.
 
 `ScalarExpr` is the executable scalar IR. Scalar subqueries point to owned query-plan slots and execute inside the current physical scope; the executor does not reconstruct a parser statement at runtime.
 
@@ -92,7 +94,14 @@ Tuple-producing operator joins are SQL table-function sources. `text_similarity_
 
 ## Plan-native optimization
 
-Optimization recursively visits query blocks, CTEs, set-operation branches, scalar subqueries, mutations, prepared bodies, and explained bodies. Important passes include predicate handling, access selection, join order, ordering propagation, score top-K selection, and specialized `OperatorTree` rewrites.
+Optimization recursively visits executable query blocks, CTEs, set-operation branches, scalar subqueries, mutations, and explained bodies. PREPARE and stored view or routine definitions retain logical plans until execution; CTAS and materialized-view creation optimize the populated query after their target checks. Important passes include predicate handling, access selection, join order, ordering propagation, score top-K selection, and specialized `OperatorTree` rewrites.
+
+Constant folding preserves declared SQL types and propagates arithmetic and conversion errors through `OptimizerError::Expression`; join-graph errors use `OptimizerError::JoinGraph`. CASE, Boolean expressions, and COALESCE retain their type-analysis requirements while respecting value-evaluation order. Runtime COALESCE evaluates arguments only until the first non-NULL value.
+
+Before constant planning, rule-input analysis follows automatic-view column mappings and retains only NEW inputs needed by surviving actions. Commands suppressed by unconditional INSTEAD NOTHING can discard their unused source, predicates, and CTEs; scalar-subquery arenas are compacted with surviving references remapped. Command completion uses the original command's row count when it survives, otherwise the last unconditional INSTEAD action of the same command kind.
+
+Schema analysis distinguishes declared zero-column SQL tables from document sources and registered native table functions whose fields become available at execution. Open descriptor metadata defers only names in those source namespaces; closed sources still reject missing or ambiguous columns before evaluation. The declared-column distinction survives transaction rollback, catalog refresh, and durable reopen.
+
 
 `OperatorTree` runs through `QueryOptimizer`, then `PlanExecutor`, then the engine driver. The driver match is exhaustive; an unknown opaque operator fails explicitly.
 
@@ -196,7 +205,7 @@ Distinct, aggregate, window, facet, volatile-limit, and residual-filter shapes d
 
 The exact SQL statement cache retains parsed and lowered plans. In-memory read-only calls can reuse optimized plans while relevant epochs remain unchanged. Persistent execution pins the current storage snapshot before using or optimizing a plan.
 
-Prepared statements and stored views retain plans but are rebound or invalidated after relevant catalog and function registry changes. A cache hit is never authority to ignore a changed schema, index, routine, model, or analyzer.
+Prepared statements retain the analyzed definition, a reusable generic plan, accumulated custom-plan costs, and usage counters. Custom planning substitutes already-coerced parameters while retaining resolved domain identities and bare-parameter provenance. The first five parameterized executions use custom plans in auto mode; subsequent selections compare generic execution cost with average custom execution plus planning cost. Relational costing uses shared operator coefficients, live row counts, MCV statistics, and eligible index access. A newly built generic plan is costed before deciding whether to execute it. Catalog invalidation discards executable plans while retaining cost history and counters; replanning checks the original result descriptor. Stored views remain logical until invocation. A cache hit is never authority to ignore a changed schema, index, routine, model, or analyzer.
 
 ## Result boundaries
 

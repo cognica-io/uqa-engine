@@ -352,7 +352,10 @@ fn references_external_row(
         ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. }
         | ScalarExpr::InSubquery { .. } => true,
-        ScalarExpr::Default | ScalarExpr::Literal(_) | ScalarExpr::Param(_) => false,
+        ScalarExpr::Default
+        | ScalarExpr::Literal(_)
+        | ScalarExpr::TypedLiteral { .. }
+        | ScalarExpr::Param(_) => false,
     }
 }
 

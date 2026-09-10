@@ -13,12 +13,19 @@
 
 mod analysis;
 mod catalog_sources;
+mod commands;
 mod cte_controls;
+mod ctes;
+mod merge_scopes;
+mod preparation;
 mod projection;
 mod routine_binding;
 mod scope;
 mod sources;
 mod type_resolution;
+
+pub(in crate::sql) use commands::analyze_prepared_command_schema;
+pub(in crate::sql) use preparation::infer_prepared_parameter_types;
 
 #[cfg(test)]
 mod tests;
@@ -34,8 +41,8 @@ pub(in crate::sql) use routine_binding::{
     bind_expression_plan_routines_for_storage, bind_query_plan_routines_for_storage,
 };
 pub(in crate::sql) use scope::{
-    analyze_query_plan_schema, analyze_query_plan_schema_with_catalog, bind_expression_plan_type,
-    bind_query_plan_schema,
+    analyze_expression_plan_type, analyze_query_plan_schema,
+    analyze_query_plan_schema_with_catalog, bind_expression_plan_type, bind_query_plan_schema,
 };
 pub(in crate::sql) use scope::{overlay_outer_schema, values_types_in_scope};
 pub(in crate::sql) use sources::{
@@ -51,7 +58,7 @@ use sources::{alias_table_schema, table_function_member_source, JoinSchemaBindin
 use type_resolution::{set_operation_output_schema, QueryFunctionTypeResolver};
 
 use super::{
-    cte_references_own_name, expr_contains_subquery, ordered_plan_ctes, projection_columns,
+    cte_references_own_name, expr_contains_subquery, projection_columns,
     user_function_output_columns, CteScope, QueryBlockPlan, QueryPlan, RelationalPlan, SQLError,
     SQLParam, ScalarExpr, SourcePlan, Value,
 };
@@ -72,9 +79,16 @@ struct SchemaScope {
     resolution: RelationNameResolution,
     ctes: BTreeMap<String, RowSchema>,
     deferred_ctes: BTreeMap<String, uqa_planner::CtePlan>,
+    non_returning_ctes: BTreeSet<String>,
     visiting_views: BTreeSet<String>,
     validate_references: bool,
     stored_expression_outer: Option<RowSchema>,
+}
+
+fn non_returning_cte_error(name: &str) -> SQLError {
+    SQLError::Unsupported(format!(
+        "WITH query \"{name}\" does not have a RETURNING clause"
+    ))
 }
 
 impl SchemaScope {
@@ -95,6 +109,7 @@ impl SchemaScope {
                 })
                 .collect(),
             deferred_ctes: ctes.deferred_ctes().clone(),
+            non_returning_ctes: ctes.non_returning_ctes.clone(),
             visiting_views: BTreeSet::new(),
             validate_references: false,
             stored_expression_outer: None,
@@ -113,6 +128,7 @@ impl SchemaScope {
             resolution,
             ctes: BTreeMap::new(),
             deferred_ctes: BTreeMap::new(),
+            non_returning_ctes: BTreeSet::new(),
             visiting_views: BTreeSet::new(),
             validate_references: true,
             stored_expression_outer: None,
@@ -167,32 +183,7 @@ impl SchemaScope {
         outer: Option<&RowSchema>,
         preserve_top_level_unknown: bool,
     ) -> Result<RowSchema, SQLError> {
-        let mut previous = Vec::with_capacity(plan.ctes.len());
-        for cte in ordered_plan_ctes(plan)? {
-            let self_recursive = cte_references_own_name(cte);
-            let provisional = if self_recursive {
-                self.bind_recursive_seed(routines, &cte.query, params, outer)?
-            } else {
-                self.bind_query(routines, &cte.query, params, outer)?
-            };
-            let provisional = rename_schema(&provisional, &cte.columns, None);
-            let provisional = if self_recursive {
-                extend_recursive_cte_binding_schema(routines, cte, provisional, params)?
-            } else {
-                extend_cte_generated_schema(routines, cte, provisional, params)?
-            };
-            previous.push((
-                cte.name.clone(),
-                self.ctes.insert(cte.name.clone(), provisional),
-            ));
-
-            if self_recursive {
-                let complete = self.bind_query(routines, &cte.query, params, outer)?;
-                let complete = rename_schema(&complete, &cte.columns, None);
-                let complete = extend_cte_generated_schema(routines, cte, complete, params)?;
-                self.ctes.insert(cte.name.clone(), complete);
-            }
-        }
+        let previous = self.bind_cte_schemas(routines, &plan.ctes, params, outer)?;
 
         let result = self.bind_root(
             routines,
@@ -201,16 +192,7 @@ impl SchemaScope {
             outer,
             preserve_top_level_unknown,
         );
-        for (name, schema) in previous.into_iter().rev() {
-            match schema {
-                Some(schema) => {
-                    self.ctes.insert(name, schema);
-                }
-                None => {
-                    self.ctes.remove(&name);
-                }
-            }
-        }
+        self.restore_cte_schemas(previous);
         result
     }
 
@@ -301,7 +283,7 @@ impl SchemaScope {
             |source| self.bind_source(routines, source, &block.subqueries, params, outer),
         )?;
         let source = if self.validate_references {
-            analysis::with_unqualified_table_pseudo_columns(&source)
+            analysis::with_query_source_columns(&source, block)
         } else {
             source
         };
@@ -326,6 +308,8 @@ impl SchemaScope {
                     )
                 {
                     None
+                } else if matches!(&projection.expr, ScalarExpr::Literal(Value::Null)) {
+                    Some(ColumnType::Text)
                 } else {
                     self.bind_expression_type(
                         routines,
@@ -339,6 +323,7 @@ impl SchemaScope {
             );
         }
         let output = RowSchema::with_types(columns, types);
+        let output = analysis::with_projected_open_columns(&output, &block.projections, &source);
         if self.validate_references {
             self.validate_query_block_clauses(
                 routines,
@@ -457,7 +442,7 @@ impl SchemaScope {
         clippy::too_many_lines,
         reason = "preserves SELECT schema and row identity"
     )]
-    fn bind_source(
+    fn bind_source_inner(
         &mut self,
         routines: &dyn RoutineResolution,
         source: &SourcePlan,
@@ -471,16 +456,31 @@ impl SchemaScope {
                 qualifier,
                 alias,
                 column_aliases,
+                bound_columns,
                 ..
             } => {
                 let qualifier = alias.as_deref().unwrap_or(qualifier);
                 let cte_name = super::cte_reference_name(name);
                 if let Some(schema) = cte_name.as_ref().and_then(|name| self.ctes.get(name)) {
+                    if let Some(name) = cte_name
+                        .as_ref()
+                        .filter(|name| self.non_returning_ctes.contains(*name))
+                    {
+                        return Err(non_returning_cte_error(name));
+                    }
                     return alias_table_schema(schema, qualifier, column_aliases);
+                }
+                if let Some(plan) = cte_name
+                    .as_ref()
+                    .and_then(|name| self.deferred_ctes.get(name))
+                {
+                    if !plan.body.returns_rows() {
+                        return Err(non_returning_cte_error(&plan.name));
+                    }
                 }
                 if let Some(plan) = cte_name.and_then(|name| self.deferred_ctes.remove(&name)) {
                     let result = self
-                        .bind_query(routines, &plan.query, params, outer)
+                        .bind_cte_body(routines, &plan.body, params, outer)
                         .and_then(|schema| {
                             let schema = rename_schema(&schema, &plan.columns, Some(qualifier));
                             alias_table_schema(&schema, qualifier, column_aliases)
@@ -554,7 +554,16 @@ impl SchemaScope {
                         .map(|column| Some(column.ty.clone()))
                         .collect();
                     let schema = RowSchema::with_qualified_types(qualifier, columns, types);
+                    let schema = crate::sql::from_rows::bound_source_schema(
+                        &schema,
+                        bound_columns.as_deref(),
+                    )?;
                     let schema = alias_table_schema(&schema, qualifier, column_aliases)?;
+                    let schema = if table.columns.is_empty() && !table.columns_declared {
+                        RowSchema::with_open_columns(&schema, Some(qualifier))
+                    } else {
+                        schema
+                    };
                     return Ok(analysis::with_table_pseudo_columns(&schema, qualifier));
                 }
                 let foreign_table = self
@@ -572,6 +581,10 @@ impl SchemaScope {
                         .collect();
                     let types = typed_columns.into_iter().map(|(_, ty)| Some(ty)).collect();
                     let schema = RowSchema::with_qualified_types(qualifier, columns, types);
+                    let schema = crate::sql::from_rows::bound_source_schema(
+                        &schema,
+                        bound_columns.as_deref(),
+                    )?;
                     return alias_table_schema(&schema, qualifier, column_aliases);
                 }
                 if let Some(schema) =
@@ -647,7 +660,7 @@ impl SchemaScope {
                 let input = outer.cloned().unwrap_or_default();
                 let type_resolver = self.query_function_type_resolver_for_subqueries(
                     routines,
-                    args.iter().any(expr_contains_subquery),
+                    args,
                     &input,
                     subqueries,
                     params,
@@ -750,7 +763,17 @@ impl SchemaScope {
                     &type_resolver,
                 );
                 let qualifier = alias.as_deref().unwrap_or(output_name);
-                Ok(RowSchema::with_qualified_types(qualifier, columns, types))
+                let schema = RowSchema::with_qualified_types(qualifier, columns, types);
+                Ok(
+                    if user_function.is_none()
+                        && column_types.is_empty()
+                        && routines.has_registered_table_function(name)
+                    {
+                        RowSchema::with_open_columns(&schema, Some(qualifier))
+                    } else {
+                        schema
+                    },
+                )
             }
             SourcePlan::FunctionGroup {
                 functions,
@@ -763,9 +786,11 @@ impl SchemaScope {
                     .ok_or_else(|| SQLError::Internal("ROWS FROM group has no functions".into()))?;
                 let mut columns = Vec::new();
                 let mut types = Vec::new();
+                let mut open = false;
                 for function in functions {
                     let member = table_function_member_source(function);
                     let schema = self.bind_source(routines, &member, subqueries, params, outer)?;
+                    open |= schema.columns_are_open(None);
                     columns.extend(schema.iter().enumerate().map(|(position, column)| {
                         schema.public_name(position).unwrap_or(column).to_string()
                     }));
@@ -784,7 +809,12 @@ impl SchemaScope {
                 for (column, alias) in columns.iter_mut().zip(column_aliases) {
                     column.clone_from(alias);
                 }
-                Ok(RowSchema::with_qualified_types(qualifier, columns, types))
+                let schema = RowSchema::with_qualified_types(qualifier, columns, types);
+                Ok(if open {
+                    RowSchema::with_open_columns(&schema, Some(qualifier))
+                } else {
+                    schema
+                })
             }
             SourcePlan::Subquery {
                 body,
@@ -908,7 +938,7 @@ impl SchemaScope {
                 let input = outer.cloned().unwrap_or_default();
                 let resolver = self.query_function_type_resolver_for_subqueries(
                     routines,
-                    args.iter().any(expr_contains_subquery),
+                    args,
                     &input,
                     subqueries,
                     params,

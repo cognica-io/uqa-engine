@@ -8,7 +8,7 @@ use super::{
     compile_function_type_name, compile_qualified_name, def_elem_bool, NodeEnum, Result, SQLError,
     Statement,
 };
-use crate::compiler::range_var_name;
+use crate::compiler::{extract_string, range_var_name};
 
 pub(in crate::compiler) fn compile_role_spec(
     role: &pg_query::protobuf::RoleSpec,
@@ -75,6 +75,20 @@ pub(in crate::compiler) fn compile_alter_routine_owner(
 ) -> Result<Statement> {
     use crate::ast::{AlterRoutineKind, AlterRoutineOwnerStmt};
     use pg_query::protobuf::ObjectType;
+    if statement.object_type() == ObjectType::ObjectSchema {
+        let target = statement
+            .object
+            .as_deref()
+            .ok_or_else(|| SQLError::Internal("ALTER SCHEMA has no target".into()))?;
+        let owner = statement
+            .newowner
+            .as_ref()
+            .ok_or_else(|| SQLError::Internal("ALTER SCHEMA has no owner".into()))?;
+        return Ok(Statement::AlterSchemaOwner {
+            name: extract_string(target)?,
+            new_owner: compile_role_spec(owner, false, "ALTER SCHEMA OWNER TO")?,
+        });
+    }
     let (kind, context) = match statement.object_type() {
         ObjectType::ObjectFunction => (AlterRoutineKind::Function, "ALTER FUNCTION"),
         ObjectType::ObjectProcedure => (AlterRoutineKind::Procedure, "ALTER PROCEDURE"),

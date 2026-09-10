@@ -6,7 +6,7 @@
 
 //! PL/pgSQL datum and `INTO` assignment semantics.
 
-use super::{coerce_routine_value, Interpreter, IntoTarget, PLpgSQLDatum, SQLError, Value};
+use super::{ColumnType, Interpreter, IntoTarget, PLpgSQLDatum, SQLError, Value};
 
 impl Interpreter<'_> {
     pub(super) fn datum_name(&self, idx: usize) -> Result<String, SQLError> {
@@ -22,6 +22,17 @@ impl Interpreter<'_> {
 
     /// Store into a datum applying CONSTANT / type / NOT NULL rules.
     pub(super) fn assign_datum(&mut self, idx: usize, value: Value) -> Result<(), SQLError> {
+        self.assign_datum_typed(idx, value, None, None)
+    }
+
+    pub(super) fn assign_datum_typed(
+        &mut self,
+        idx: usize,
+        value: Value,
+        source: Option<&ColumnType>,
+        record_types: Option<Vec<Option<ColumnType>>>,
+    ) -> Result<(), SQLError> {
+        let target_type = self.datum_type(idx);
         match &self.datums[idx] {
             PLpgSQLDatum::Var(var) => {
                 if var.constant {
@@ -30,7 +41,12 @@ impl Interpreter<'_> {
                         message: format!("variable \"{}\" is declared CONSTANT", var.name),
                     });
                 }
-                let value = coerce_routine_value(self.engine, &value, &var.type_name)?;
+                let value = super::resolution::coerce_routine_value_from(
+                    self.engine,
+                    &value,
+                    &var.type_name,
+                    source,
+                )?;
                 if var.not_null && matches!(value, Value::Null) {
                     return Err(SQLError::Routine {
                         sqlstate: "22004".into(),
@@ -43,27 +59,43 @@ impl Interpreter<'_> {
                 self.values[idx] = value;
                 Ok(())
             }
-            PLpgSQLDatum::Rec { .. } => match value {
-                Value::Record(_) | Value::Null => {
-                    self.values[idx] = value;
-                    Ok(())
+            PLpgSQLDatum::Rec { .. } => {
+                if let Some(types) = record_types {
+                    self.record_types.insert(idx, types);
+                } else {
+                    self.record_types.remove(&idx);
                 }
-                Value::Row(values) => {
-                    self.values[idx] = Value::Record(
-                        values
-                            .into_iter()
-                            .enumerate()
-                            .map(|(index, value)| (format!("f{}", index + 1), value))
-                            .collect(),
-                    );
-                    Ok(())
+                match value {
+                    Value::Record(_) | Value::Null => {
+                        self.values[idx] = value;
+                        Ok(())
+                    }
+                    Value::Row(values) => {
+                        self.values[idx] = Value::Record(
+                            values
+                                .into_iter()
+                                .enumerate()
+                                .map(|(index, value)| (format!("f{}", index + 1), value))
+                                .collect(),
+                        );
+                        Ok(())
+                    }
+                    _ => Err(SQLError::Routine {
+                        sqlstate: "42804".into(),
+                        message: "cannot assign non-composite value to a record variable".into(),
+                    }),
                 }
-                _ => Err(SQLError::Routine {
-                    sqlstate: "42804".into(),
-                    message: "cannot assign non-composite value to a record variable".into(),
-                }),
-            },
+            }
             PLpgSQLDatum::RecField { field, parent } => {
+                let value = match target_type.as_ref() {
+                    Some(target) => crate::sql::ddl::coerce_assignment_value(
+                        self.engine,
+                        value,
+                        target,
+                        source,
+                    )?,
+                    None => value,
+                };
                 let parent_name = self.datum_name(*parent)?;
                 match &mut self.values[*parent] {
                     Value::Record(fields) => {
@@ -134,26 +166,28 @@ impl Interpreter<'_> {
         &mut self,
         target: &IntoTarget,
         columns: &[String],
+        column_types: &[Option<ColumnType>],
         values: Option<&[Value]>,
     ) -> Result<(), SQLError> {
         match target {
             IntoTarget::Rec(dno) => {
-                let value = match values {
-                    Some(values) => Value::Record(
-                        columns
-                            .iter()
-                            .enumerate()
-                            .map(|(index, column)| {
-                                (
-                                    column.clone(),
-                                    values.get(index).cloned().unwrap_or(Value::Null),
-                                )
-                            })
-                            .collect(),
-                    ),
-                    None => Value::Null,
-                };
+                let value = Value::Record(
+                    columns
+                        .iter()
+                        .enumerate()
+                        .map(|(index, column)| {
+                            (
+                                column.clone(),
+                                values
+                                    .and_then(|values| values.get(index))
+                                    .cloned()
+                                    .unwrap_or(Value::Null),
+                            )
+                        })
+                        .collect(),
+                );
                 self.values[*dno] = value;
+                self.record_types.insert(*dno, column_types.to_vec());
                 Ok(())
             }
             IntoTarget::Row(fields) => {
@@ -162,7 +196,12 @@ impl Interpreter<'_> {
                         .and_then(|values| values.get(idx))
                         .cloned()
                         .unwrap_or(Value::Null);
-                    self.assign_datum(field.varno, value)?;
+                    self.assign_datum_typed(
+                        field.varno,
+                        value,
+                        column_types.get(idx).and_then(Option::as_ref),
+                        None,
+                    )?;
                 }
                 Ok(())
             }

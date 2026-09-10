@@ -18,6 +18,8 @@ use uqa_sql::ast::{
 pub struct RoutineParameterDescriptor {
     pub name: Option<String>,
     pub type_name: String,
+    /// Catalog-resolved declaration, including named domains and their base type.
+    pub column_type: Option<ColumnType>,
     pub has_default: bool,
     pub variadic: bool,
 }
@@ -199,6 +201,7 @@ pub struct MatchedRoutineSignature {
     pub declared_identity: Vec<String>,
     /// Effective target signature, one entry per supplied argument.
     pub argument_targets: Vec<String>,
+    pub argument_sources: Vec<Option<String>>,
     /// Supplied-argument to declared-parameter mapping; an expanded variadic position may occur repeatedly.
     pub argument_positions: Vec<usize>,
     pub coercion_targets: Vec<RoutineCoercionTarget>,
@@ -276,6 +279,7 @@ impl MatchedRoutineSignature {
         RoutineInvocationBinding {
             argument_positions: self.argument_positions.clone(),
             argument_targets: self.argument_targets.clone(),
+            argument_sources: self.argument_sources.clone(),
             parameter_types: self.parameter_types.clone(),
             return_type: declared_return_type
                 .and_then(|type_name| self.substitute_type_name(type_name)),

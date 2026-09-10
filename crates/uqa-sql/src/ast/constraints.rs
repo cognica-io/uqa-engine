@@ -193,6 +193,9 @@ pub struct TableKeyConstraint {
 /// databases written before constraint persistence backward compatible.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TableConstraintSet {
+    /// Distinguish a declared zero-column SQL relation from a schema-free document table. Missing legacy metadata retains inference from existing columns.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub columns_declared: Option<bool>,
     #[serde(default)]
     pub checks: Vec<TableCheck>,
     #[serde(default)]

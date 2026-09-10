@@ -213,10 +213,7 @@ fn information_schema_catalog_name_preserves_its_pg18_type_identity() {
     assert_eq!(array_type["typtype"], Value::Str("b".into()));
     assert_eq!(array_type["typcategory"], Value::Str("A".into()));
     assert_eq!(array_type["typrelid"], Value::Int(0));
-    assert_eq!(
-        array_type["typsubscript"],
-        Value::Str("array_subscript_handler".into())
-    );
+    assert_eq!(array_type["typsubscript"], Value::Int(6179));
     assert_eq!(array_type["typelem"], Value::Int(13_315));
     assert_eq!(array_type["typarray"], Value::Int(0));
     assert_eq!(
@@ -232,7 +229,7 @@ fn information_schema_catalog_name_preserves_its_pg18_type_identity() {
     assert_eq!(composite_type["typtype"], Value::Str("c".into()));
     assert_eq!(composite_type["typcategory"], Value::Str("C".into()));
     assert_eq!(composite_type["typrelid"], Value::Int(13_313));
-    assert_eq!(composite_type["typsubscript"], Value::Str("-".into()));
+    assert_eq!(composite_type["typsubscript"], Value::Int(0));
     assert_eq!(composite_type["typelem"], Value::Int(0));
     assert_eq!(composite_type["typarray"], Value::Int(13_314));
     assert_eq!(

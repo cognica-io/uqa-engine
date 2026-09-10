@@ -67,7 +67,7 @@ fn recursive_search_depth_and_breadth_match_postgresql_18() {
     assert!(depth
         .rows
         .iter()
-        .all(|row| row["ord_type"] == Value::Str("record[]".into())));
+        .all(|row| row["ord_type"] == Value::Int(2287)));
 
     let breadth = engine
         .sql(
@@ -84,7 +84,7 @@ fn recursive_search_depth_and_breadth_match_postgresql_18() {
     assert!(breadth
         .rows
         .iter()
-        .all(|row| row["ord_type"] == Value::Str("record".into())));
+        .all(|row| row["ord_type"] == Value::Int(2249)));
 }
 
 #[test]
@@ -111,10 +111,10 @@ fn recursive_cycle_emits_cycle_rows_without_expanding_them() {
             .count(),
         2
     );
-    assert!(result.rows.iter().all(|row| {
-        row["mark_type"] == Value::Str("boolean".into())
-            && row["path_type"] == Value::Str("record[]".into())
-    }));
+    assert!(result
+        .rows
+        .iter()
+        .all(|row| { row["mark_type"] == Value::Int(16) && row["path_type"] == Value::Int(2287) }));
 
     let custom = engine
         .sql(
@@ -131,7 +131,7 @@ fn recursive_cycle_emits_cycle_rows_without_expanding_them() {
     assert!(custom
         .rows
         .iter()
-        .all(|row| row["mark_type"] == Value::Str("integer".into())));
+        .all(|row| row["mark_type"] == Value::Int(23)));
 }
 
 #[test]
@@ -160,7 +160,7 @@ fn recursive_cycle_columns_are_bindable_but_hidden_from_the_recursive_wildcard()
     assert!(wildcard
         .rows
         .iter()
-        .all(|row| row["path_type"] == Value::Str("record[]".into())));
+        .all(|row| row["path_type"] == Value::Int(2287)));
 
     let explicit = engine
         .sql(
@@ -482,8 +482,8 @@ fn stored_views_retain_recursive_controls_and_materialization_policy_after_reope
             .count(),
         1
     );
-    assert!(result.rows.iter().all(|row| {
-        row["ord_type"] == Value::Str("text".into())
-            && row["path_type"] == Value::Str("text".into())
-    }));
+    assert!(result
+        .rows
+        .iter()
+        .all(|row| { row["ord_type"] == Value::Int(25) && row["path_type"] == Value::Int(25) }));
 }

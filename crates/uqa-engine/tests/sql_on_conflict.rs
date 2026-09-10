@@ -503,10 +503,11 @@ fn alter_table_add_composite_primary_key_enforces_nullability_and_uniqueness() {
             &[],
         )
         .unwrap_err();
-    assert!(duplicate
-        .to_string()
-        .to_ascii_lowercase()
-        .contains("primary key"));
+    assert_eq!(duplicate.sqlstate(), Some("23505"));
+    assert_eq!(
+        duplicate.to_string(),
+        "duplicate key value violates unique constraint \"labels_pkey\""
+    );
 
     let null = eng
         .sql(

@@ -247,6 +247,61 @@ fn unchanged_persistent_statements_keep_their_loaded_catalog_snapshot() {
 }
 
 #[test]
+fn compressed_catalog_writer_fence_releases_reader_before_waiting() {
+    let directory = tempfile::tempdir().unwrap();
+    let writer = Engine::open_compressed(
+        &directory.path().join("catalog-fence.db"),
+        uqa_storage::SQLiteCompressionOptions::default(),
+    )
+    .unwrap();
+    writer
+        .sql(
+            "CREATE TABLE items (id INTEGER); INSERT INTO items VALUES (1)",
+            &[],
+        )
+        .unwrap();
+    let waiter = writer.new_session().unwrap();
+    for engine in [&writer, &waiter] {
+        engine.release_automatic_statistics_client();
+        engine
+            .session
+            .statistics_worker
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+    writer
+        .sql("BEGIN; INSERT INTO items VALUES (2)", &[])
+        .unwrap();
+    waiter.begin().unwrap();
+    waiter.sql("SAVEPOINT before_fence", &[]).unwrap();
+    let waiter_id = waiter.session_id;
+    let waiting_thread = std::thread::spawn(move || {
+        let result = waiter.fence_catalog_writer_and_refresh_snapshot();
+        (waiter, result)
+    });
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while !writer.row_locks.waiting_for_backend_writer(waiter_id) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "catalog fence did not wait"
+        );
+        std::thread::yield_now();
+    }
+    let committed = writer.sql("COMMIT", &[]);
+    let (waiter, fenced) = waiting_thread.join().unwrap();
+    committed.unwrap();
+    fenced.unwrap();
+    waiter.sql("ROLLBACK TO before_fence", &[]).unwrap();
+    assert_eq!(
+        integer_column(
+            &waiter.sql("SELECT id FROM items ORDER BY id", &[]).unwrap(),
+            "id"
+        ),
+        [1, 2]
+    );
+    waiter.commit().unwrap();
+}
+
+#[test]
 fn compressed_write_refresh_uses_the_pinned_transaction_connection() {
     let directory = tempfile::tempdir().unwrap();
     let engine = Engine::open_compressed(

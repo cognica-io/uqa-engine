@@ -33,8 +33,10 @@ use uqa_sql::ast::{
     AlterTableAction, AlterTableStmt, BinaryOp, ColumnType, CreateIndex, CreateTable, DropKind,
     DropStmt, ForeignKey, ForeignKeyAction, ForeignKeyMatch, SetOpKind, Statement,
 };
+#[cfg(test)]
+use uqa_sql::compile;
 use uqa_sql::expr::{value_to_tensor, value_to_vector};
-use uqa_sql::{compile, ResultRow, SQLError, SQLParam, SQLResult};
+use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult};
 use uqa_storage::document_store::{Document, DocumentMetadata, StoredDocument};
 
 use crate::{Engine, HNSWIndexParams, IVFIndexParams, ScoredEntry, VectorIndexSpec};
@@ -42,14 +44,17 @@ use crate::{Engine, HNSWIndexParams, IVFIndexParams, ScoredEntry, VectorIndexSpe
 mod age_cypher;
 mod aggregates;
 mod catalog;
-pub(crate) use catalog::rename_view_column_query;
 pub(crate) use catalog::snapshot_table_relation_oid;
+pub(crate) use catalog::{rename_view_column_query, view_query_references_column};
 mod catalog_statement_routines;
+mod completion;
 mod copy;
 mod correlation;
+mod cte_validation;
 mod cursor;
 mod ddl;
 pub(crate) mod dml;
+mod domains;
 mod driver;
 mod engine_api;
 mod from_rows;
@@ -57,8 +62,14 @@ mod generated;
 mod hierarchy;
 mod mutability;
 mod plan_executor;
+mod result_text;
+pub use result_text::format_postgres_text;
 mod planning;
 mod plpgsql_exec;
+mod prepared;
+pub(crate) use prepared::{
+    analyze_prepared_plan, infer_prepared_parameter_types, prepared_result_schema_matches,
+};
 mod read_only;
 mod regrole_dependencies;
 mod row_functions;
@@ -76,11 +87,13 @@ mod volatility;
 mod where_eval;
 mod window;
 
+pub use catalog::{postgres_result_type, SQLTypeMetadata};
 pub(crate) use catalog_statement_routines::{
     bind_catalog_statement_routines, collect_expression_routine_references,
     mark_catalog_statement_relations_bound, BoundRoutineReference,
 };
 pub use cursor::{SQLCursor, SQLCursorSummary};
+pub(crate) use domains::{cast_domain_value, resolve_declared_column_type};
 pub(crate) use driver::{execute, execute_nested};
 use mutability::{
     is_transaction_control, query_may_mutate_engine, query_requires_statement_transaction,
@@ -89,8 +102,9 @@ use mutability::{
 use planning::compile_logical_plans;
 use planning::lower_statement;
 pub(super) use planning::{
-    execute_compiled_statement, execute_compiled_statement_with_privilege_subject,
-    optimize_engine_plan,
+    estimate_engine_plan, execute_compiled_statement,
+    execute_compiled_statement_with_privilege_subject, optimize_engine_plan, optimize_engine_query,
+    plan_for_execution,
 };
 pub(crate) use plpgsql_exec::{call_bound_user_scalar_function, call_user_scalar_function};
 use select::query_has_row_locks;
@@ -105,16 +119,17 @@ use aggregates::{
 use catalog::build_info_schema_rows;
 pub(crate) use catalog::query_source_column_names;
 pub(crate) use catalog::{
-    foreign_table_relation_oid, resolve_age_label_relation_name, resolve_catalog_column_type,
-    resolve_catalog_column_type_name, resolve_regclass_kind_by_oid, resolve_regclass_oid,
+    foreign_table_relation_oid, plpgsql_catalog, resolve_age_label_relation_name,
+    resolve_bound_regclass_oid, resolve_catalog_column_type, resolve_catalog_column_type_name,
+    resolve_catalog_domain_type_by_oid, resolve_regclass_kind_by_oid, resolve_regclass_oid,
     resolve_regnamespace_oid, resolve_regobject_oid, resolve_regprocedure_oid, resolve_regrole_oid,
-    resolve_regtype_output, runtime_constraints, schema_object_oid, sequence_relation_oid,
-    view_relation_oid, RegtypeOutputCatalog,
+    resolve_regtype_oid, resolve_regtype_output, runtime_constraints, schema_object_oid,
+    sequence_relation_oid, view_relation_oid, RegtypeOutputCatalog,
 };
 pub(in crate::sql) use catalog::{virtual_relation_accepts_row_lock, virtual_relation_schema};
 pub(crate) use ddl::{
     bind_stored_check_expression_routines, bind_stored_schema_expression_routines,
-    convert_value_to_column_type, convert_value_to_column_type_with_engine,
+    convert_value_to_column_type, convert_value_to_column_type_with_engine, drop_column_cascade,
     drop_constraint_dependency, drop_index_dependency, validate_check_expression,
     validate_default_expression, validate_postgres_column_name,
     validate_postgres_relation_column_type, validate_vector_dimensions,

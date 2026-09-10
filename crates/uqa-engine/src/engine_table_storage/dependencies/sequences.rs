@@ -148,7 +148,9 @@ impl Engine {
         rewrite_sequence_function_references(expression, &mut |reference| {
             *reference = self.resolve_sequence_reference_for_binding(reference)?;
             Ok(())
-        })
+        })?;
+        self.bind_schema_regclass_constants(expression, false)?;
+        Ok(())
     }
 
     pub(in crate::engine_table_storage) fn resolve_stored_sequence_references_in_expr(
@@ -187,6 +189,26 @@ impl Engine {
                 self.resolve_stored_sequence_reference_from_loaded_registry(reference)?;
             targets.insert(canonical.clone());
             *reference = canonical;
+            Ok(())
+        })?;
+        let identities = self
+            .durable
+            .sequence_object_ids
+            .read()
+            .iter()
+            .map(|(name, id)| {
+                (
+                    crate::sql::sequence_relation_oid(*id),
+                    name.qualified_name(),
+                )
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+        super::super::walk_schema_expr_mut(&mut expression, &mut |node| {
+            if let Some(name) =
+                super::regclass::regclass_constant_oid(node).and_then(|oid| identities.get(&oid))
+            {
+                targets.insert(name.clone());
+            }
             Ok(())
         })?;
         Ok(targets)

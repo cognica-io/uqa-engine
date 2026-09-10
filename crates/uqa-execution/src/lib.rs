@@ -122,7 +122,7 @@ pub use set_operation::ExternalSetOperation;
 pub use spill::{IndexedSpill, SharedSpill, SharedSpillReader, SpillBuffer};
 pub use spill_scan::{SharedSpillScan, SpillScan};
 pub use type_resolution::{
-    bind_type_introspection, bind_type_introspection_with_resolver,
+    assignment_type_compatible, bind_type_introspection, bind_type_introspection_with_resolver,
     builtin_function_argument_targets, common_context_expression_type, common_type,
     equality_operand_type, foreign_key_operand_type, resolve_checksum_overload,
     resolve_gamma_overload, resolve_json_strip_overload, resolve_length_overload,

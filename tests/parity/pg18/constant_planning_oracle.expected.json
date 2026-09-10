@@ -1,0 +1,1075 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 1/0 AS result",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 2147483647+1 AS result",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "integer out of range"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 'bad'::integer AS result",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"bad\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 'bad'::date AS result",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22007",
+        "message": "invalid input syntax for type date: \"bad\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT false AND 1/0=0 AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 1/0=0 AND false AS result",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT true OR 1/0=0 AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 1/0=0 OR true AS result",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT NULL::boolean AND false AND 1/0=0 AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT NULL::boolean OR true OR 1/0=0 AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT NULL::boolean AND true AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT NULL::boolean OR false AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CASE WHEN true THEN 1 ELSE 1/0 END AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CASE WHEN false THEN 1/0 ELSE 2 END AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CASE WHEN NULL THEN 1/0 ELSE 2 END AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CASE 1 WHEN 1 THEN 2 ELSE 1/0 END AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CASE 1 WHEN 2 THEN 1/0 ELSE 3 END AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CASE WHEN false THEN 1::bigint ELSE 2 END AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CASE WHEN true THEN 2 ELSE 1::bigint END AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT coalesce(1,1/0) AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT coalesce(NULL::integer,2,1/0) AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT coalesce(NULL::integer,1/0) AS result",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT coalesce(NULL::bigint,1) AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 32767::smallint+1::smallint AS result",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22003",
+        "message": "smallint out of range"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 2147483647::bigint+1 AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2147483648"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT NULL::integer/0 AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 10::integer/2::integer AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 10::bigint/2::bigint AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 10::numeric/4::numeric AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            1700
+          ],
+          "rows": [
+            [
+              "2.5000000000000000"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ARRAY[1/0] AS result",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT ROW(1/0,2) AS result",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT CASE WHEN flag THEN 1 ELSE 1/0 END AS result FROM (VALUES(true)) AS t(flag)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 1/0 AS result WHERE false",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT unknown_column,1/0",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"unknown_column\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 1/0,unknown_column",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"unknown_column\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 1/0 FROM unknown_relation",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"unknown_relation\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT CASE WHEN true THEN 1 ELSE unknown_column END",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"unknown_column\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE VIEW plan_error_view AS SELECT 1/0 AS value",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM plan_error_view",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP VIEW plan_error_view",
+      "command_tags": [
+        "DROP VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE plan_error AS SELECT 1/0",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE plan_error",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT generic_plans,custom_plans FROM pg_prepared_statements WHERE name='plan_error'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "0",
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DEALLOCATE plan_error",
+      "command_tags": [
+        "DEALLOCATE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE no_parameters AS SELECT 1 AS value",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE no_parameters(1/0)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE no_parameters(unknown_column)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE no_parameters((SELECT 1))",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE no_parameters(sum(1))",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE no_parameters(row_number() OVER ())",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DEALLOCATE no_parameters",
+      "command_tags": [
+        "DEALLOCATE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TEMP TABLE scope_planning(id integer PRIMARY KEY, label text)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO scope_planning VALUES(1,'before')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TEMP VIEW scope_planning_view AS SELECT id AS item_id,label AS item_label FROM scope_planning",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO scope_planning_view VALUES(1,'from-excluded') ON CONFLICT(item_id) DO UPDATE SET item_label=(SELECT excluded.item_label) RETURNING item_id,item_label",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "item_id",
+            "item_label"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "from-excluded"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO scope_planning_view VALUES(1,'mixed') ON CONFLICT(item_id) DO UPDATE SET item_label=coalesce((SELECT excluded.item_label),(SELECT scope_planning_view.item_label)) RETURNING (SELECT item_label) AS label",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "label"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "mixed"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO scope_planning VALUES(1,'direct') ON CONFLICT(id) DO UPDATE SET label=(SELECT excluded.label) || (SELECT scope_planning.label) RETURNING (SELECT label) AS label",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "label"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "directmixed"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM scope_planning",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "label"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "directmixed"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP VIEW scope_planning_view",
+      "command_tags": [
+        "DROP VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE scope_planning",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT '[0:2]={1,2,3}'::integer[] AS bounded, ARRAY[[1,2],[3,4]] AS matrix, ARRAY['x'::varchar(4)] AS varying_array",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "bounded",
+            "matrix",
+            "varying_array"
+          ],
+          "type_oids": [
+            1007,
+            1007,
+            1015
+          ],
+          "rows": [
+            [
+              "[0:2]={1,2,3}",
+              "{{1,2},{3,4}}",
+              "{x}"
+            ]
+          ]
+        }
+      ]
+    }
+  ]
+}

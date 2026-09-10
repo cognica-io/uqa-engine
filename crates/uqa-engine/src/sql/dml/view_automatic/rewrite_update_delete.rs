@@ -26,6 +26,7 @@ pub(in crate::sql::dml) fn rewrite_update_to_base(
     engine: &Engine,
     statement: &UpdatePlan,
     params: &[uqa_sql::SQLParam],
+    inherited_ctes: Option<&super::CteScope>,
 ) -> Result<UpdatePlan, SQLError> {
     validate_public_view_targets(
         engine,
@@ -41,6 +42,7 @@ pub(in crate::sql::dml) fn rewrite_update_to_base(
         &statement.ctes,
         &statement.subqueries,
         params,
+        inherited_ctes,
     )?;
     validate_public_update_contract(engine, statement, source_schema.as_ref())?;
     let Some(initial_layer) = automatic_view_layer(engine, &statement.table)? else {
@@ -147,11 +149,19 @@ pub(in crate::sql::dml) fn rewrite_update_to_base(
         }
         let target_qualifier = plan.target_qualifier.clone();
         if visited.len() == 1 {
-            validate_update_expressions(engine, &plan, &layer, source_schema.as_ref(), params)?;
+            validate_update_expressions(
+                engine,
+                &plan,
+                &layer,
+                source_schema.as_ref(),
+                params,
+                inherited_ctes,
+            )?;
         }
         let ordinary_subquery_ids = update_ordinary_subquery_ids(&plan);
         rewrite_correlated_dml_context(
             CorrelatedDmlContext {
+                inherited_ctes,
                 engine,
                 layer: &layer,
                 target_qualifier: &target_qualifier,
@@ -167,6 +177,7 @@ pub(in crate::sql::dml) fn rewrite_update_to_base(
         let returning_subquery_ids = returning_subquery_ids(&plan.returning);
         rewrite_correlated_dml_context(
             CorrelatedDmlContext {
+                inherited_ctes,
                 engine,
                 layer: &layer,
                 target_qualifier: &target_qualifier,
@@ -286,6 +297,7 @@ pub(in crate::sql::dml) fn rewrite_delete_to_base(
     engine: &Engine,
     statement: &DeletePlan,
     params: &[uqa_sql::SQLParam],
+    inherited_ctes: Option<&super::CteScope>,
 ) -> Result<DeletePlan, SQLError> {
     let source_schema = dml_source_schema(
         engine,
@@ -293,6 +305,7 @@ pub(in crate::sql::dml) fn rewrite_delete_to_base(
         &statement.ctes,
         &statement.subqueries,
         params,
+        inherited_ctes,
     )?;
     validate_public_delete_contract(engine, statement, source_schema.as_ref())?;
     validate_direct_view_rule_path(
@@ -377,11 +390,19 @@ pub(in crate::sql::dml) fn rewrite_delete_to_base(
         }
         let target_qualifier = plan.target_qualifier.clone();
         if visited.len() == 1 {
-            validate_delete_expressions(engine, &plan, &layer, source_schema.as_ref(), params)?;
+            validate_delete_expressions(
+                engine,
+                &plan,
+                &layer,
+                source_schema.as_ref(),
+                params,
+                inherited_ctes,
+            )?;
         }
         let ordinary_subquery_ids = delete_ordinary_subquery_ids(&plan);
         rewrite_correlated_dml_context(
             CorrelatedDmlContext {
+                inherited_ctes,
                 engine,
                 layer: &layer,
                 target_qualifier: &target_qualifier,
@@ -397,6 +418,7 @@ pub(in crate::sql::dml) fn rewrite_delete_to_base(
         let returning_subquery_ids = returning_subquery_ids(&plan.returning);
         rewrite_correlated_dml_context(
             CorrelatedDmlContext {
+                inherited_ctes,
                 engine,
                 layer: &layer,
                 target_qualifier: &target_qualifier,

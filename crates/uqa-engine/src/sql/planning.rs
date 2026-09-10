@@ -6,6 +6,10 @@
 
 use super::{volatility, Engine, SQLError, SQLParam, SQLResult, Statement, UnifiedPlanExecutor};
 
+mod plan_cost;
+mod rule_inputs;
+pub(crate) use plan_cost::estimate_engine_plan;
+
 #[cfg(test)]
 use super::{compile, Arc};
 
@@ -66,10 +70,10 @@ impl uqa_planner::SourceStatistics for EngineSourceStatistics<'_> {
         else {
             return None;
         };
-        if args
-            .iter()
-            .any(uqa_execution::ScalarExpr::contains_parameter)
-        {
+        if args.iter().any(|argument| {
+            argument.contains_parameter()
+                || volatility::expr_contains_volatile_function(self.engine, argument)
+        }) {
             return None;
         }
         let identity = name.to_ascii_lowercase();
@@ -97,8 +101,17 @@ impl uqa_planner::SourceStatistics for EngineSourceStatistics<'_> {
         table: &str,
         predicate: &uqa_execution::ScalarExpr,
     ) -> Option<uqa_planner::LocalAccessEstimate> {
-        if predicate.contains_parameter() {
+        if volatility::expr_contains_volatile_function(self.engine, predicate) {
             return None;
+        }
+        if predicate.contains_parameter() {
+            return match plan_cost::parameterized_access(self, table, predicate) {
+                Ok(estimate) => estimate,
+                Err(error) => {
+                    self.record_error(error);
+                    None
+                }
+            };
         }
         match self.engine.try_table(table) {
             Ok(Some(_)) => {}
@@ -165,11 +178,82 @@ pub(super) fn lower_statement(engine: &Engine, statement: Statement) -> uqa_plan
     })
 }
 
-pub(crate) fn optimize_engine_plan(
+/// Analyze executable statements before optimizer evaluation can raise SQL errors.
+pub(crate) fn plan_for_execution(
     engine: &Engine,
     plan: uqa_planner::UnifiedPlan,
+    params: &[SQLParam],
 ) -> Result<uqa_planner::UnifiedPlan, SQLError> {
+    analyze_executable_plan(engine, &plan, params)?;
+    optimize_engine_plan(engine, plan)
+}
+
+fn analyze_executable_plan(
+    engine: &Engine,
+    plan: &uqa_planner::UnifiedPlan,
+    params: &[SQLParam],
+) -> Result<(), SQLError> {
+    use uqa_planner::{CommandPlan, UnifiedPlan};
+    let scope = super::select::CteScope::new_for_current_routine(engine);
+    match plan {
+        UnifiedPlan::Query(query) => {
+            super::select::analyze_query_plan_schema(engine, query, params, &scope, None)?;
+        }
+        UnifiedPlan::Command(command) => match command.as_ref() {
+            CommandPlan::Explain { body, .. } => analyze_executable_plan(engine, body, params)?,
+            CommandPlan::CreateTableAs { query, .. }
+            | CommandPlan::CreateMaterializedView { query, .. }
+            | CommandPlan::DeclareCursor { query, .. } => {
+                super::select::analyze_query_plan_schema(engine, query, params, &scope, None)?;
+            }
+            _ => {
+                if command.mutation_target().is_some() {
+                    super::prepared::analyze_command_parameters(engine, command, params, &scope)?;
+                }
+                super::select::analyze_prepared_command_schema(engine, command, params, &scope)?;
+            }
+        },
+    }
+    Ok(())
+}
+
+pub(crate) fn optimize_engine_query(
+    engine: &Engine,
+    query: &uqa_planner::QueryPlan,
+) -> Result<uqa_planner::QueryPlan, SQLError> {
+    match optimize_engine_plan(
+        engine,
+        uqa_planner::UnifiedPlan::Query(Box::new(query.clone())),
+    )? {
+        uqa_planner::UnifiedPlan::Query(query) => Ok(*query),
+        uqa_planner::UnifiedPlan::Command(_) => Err(SQLError::Internal(
+            "query optimization produced a command".into(),
+        )),
+    }
+}
+
+pub(crate) fn optimize_engine_plan(
+    engine: &Engine,
+    mut plan: uqa_planner::UnifiedPlan,
+) -> Result<uqa_planner::UnifiedPlan, SQLError> {
+    rule_inputs::rewrite_plan(engine, &mut plan)?;
     let callback_error = std::cell::RefCell::new(None);
+    let statistics = EngineSourceStatistics {
+        engine,
+        error: &callback_error,
+    };
+    let optimized = optimize_plan_with_statistics(engine, plan, &statistics);
+    if let Some(error) = callback_error.into_inner() {
+        return Err(error);
+    }
+    optimized
+}
+
+fn optimize_plan_with_statistics(
+    engine: &Engine,
+    plan: uqa_planner::UnifiedPlan,
+    statistics: &dyn uqa_planner::SourceStatistics,
+) -> Result<uqa_planner::UnifiedPlan, SQLError> {
     let mut optimizer_config = uqa_planner::optimizer::OptimizerConfig::default();
     if volatility::unified_plan_contains_volatile_function(engine, &plan) {
         // Predicate prioritization and DPccp both move expressions across
@@ -179,20 +263,18 @@ pub(crate) fn optimize_engine_plan(
         optimizer_config.enable_filter_pushdown = false;
         optimizer_config.enable_join_reordering = false;
     }
-    let statistics = EngineSourceStatistics {
-        engine,
-        error: &callback_error,
-    };
     let optimized = uqa_planner::optimizer::optimize_with_aggregates_and_statistics(
         plan,
         &optimizer_config,
         &|name: &str| engine.has_registered_aggregate_function(name),
-        &statistics,
+        statistics,
     );
-    if let Some(error) = callback_error.into_inner() {
-        return Err(error);
-    }
-    optimized.map_err(|error| SQLError::Internal(format!("optimize SQL join order: {error}")))
+    optimized.map_err(|error| match error {
+        uqa_planner::optimizer::OptimizerError::Expression(error) => error,
+        uqa_planner::optimizer::OptimizerError::JoinGraph(error) => {
+            SQLError::Internal(format!("optimize SQL join order: {error}"))
+        }
+    })
 }
 
 /// Lower and execute an already-compiled statement through the same unified
@@ -206,7 +288,7 @@ pub(crate) fn execute_compiled_statement(
     let plan = uqa_planner::UnifiedPlan::lower_with(statement, &|name: &str| {
         engine.has_registered_aggregate_function(name)
     });
-    let plan = optimize_engine_plan(engine, plan)?;
+    let plan = plan_for_execution(engine, plan, params)?;
     UnifiedPlanExecutor::new_nested(engine, params).execute(&plan)
 }
 
@@ -220,7 +302,7 @@ pub(crate) fn execute_compiled_statement_with_privilege_subject(
         engine.has_registered_aggregate_function(name)
     });
     super::catalog_statement_routines::mark_catalog_statement_relations_bound(&mut plan)?;
-    let plan = optimize_engine_plan(engine, plan)?;
+    let plan = plan_for_execution(engine, plan, params)?;
     UnifiedPlanExecutor::new_nested(engine, params)
         .with_privilege_subject(privilege_subject)
         .execute(&plan)

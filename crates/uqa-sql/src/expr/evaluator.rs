@@ -29,7 +29,7 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
         Expr::Default => Err(SQLError::Internal(
             "DEFAULT reached scalar expression evaluation without a mutation target".into(),
         )),
-        Expr::Literal(v) => Ok(v.clone()),
+        Expr::Literal(v) | Expr::TypedLiteral { value: v, .. } => Ok(v.clone()),
         Expr::Param(i) => match i.checked_sub(1).and_then(|index| ctx.params.get(index)) {
             Some(SQLParam::Scalar(v) | SQLParam::TypedScalar { value: v, .. }) => Ok(v.clone()),
             Some(SQLParam::Vector(v)) => Ok(Value::List(
@@ -107,6 +107,17 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             args,
             ..
         } => {
+            if name.eq_ignore_ascii_case("coalesce")
+                && binding.as_ref().is_none_or(|binding| binding.builtin)
+            {
+                for argument in args {
+                    let value = eval(argument, ctx)?;
+                    if !matches!(value, Value::Null) {
+                        return Ok(value);
+                    }
+                }
+                return Ok(Value::Null);
+            }
             let call_args = evaluate_call_args(args, ctx)?;
             if let Some(binding) = binding {
                 if let Some(FunctionResolutionError::UndefinedFunction { signature }) =
@@ -253,7 +264,7 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
 
 fn explicit_expr_type(expr: &Expr) -> Option<&str> {
     match expr {
-        Expr::Cast { ty, .. } => Some(ty),
+        Expr::Cast { ty, .. } | Expr::TypedLiteral { ty, .. } => Some(ty),
         Expr::Literal(Value::Int(value)) if i32::try_from(*value).is_ok() => Some("integer"),
         Expr::Literal(Value::Int(_)) => Some("bigint"),
         Expr::Literal(Value::Bytes(_)) => Some("bytea"),

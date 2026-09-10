@@ -196,7 +196,7 @@ One `CatalogReadView` owns the immutable table-definition and durable-registry s
 
 `ScalarExpr` is the executable scalar IR at relational and DML expression sites. Scalar subqueries point to owned `QueryPlan` slots and run through the current physical query scope, while query blocks execute directly from `QueryBlockPlan` without reconstructing a `SelectStmt`.
 
-Prepared statements and stored views retain optimized plans. The exact single-statement cache retains parsed and lowered plans, in-memory read-only calls can reuse optimized plans until relevant state changes, and persistent calls optimize after pinning the current storage snapshot.
+Prepared statements, stored views, and routine bodies retain logical definitions; executable prepared plans are cached after successful optimization. The exact single-statement cache retains parsed and lowered plans, in-memory read-only calls can reuse optimized plans until relevant state changes, and persistent calls optimize after pinning the current storage snapshot.
 
 The optimizer recursively visits CTEs, set-operation branches, scalar subqueries, mutations, prepared and explained bodies, and query-valued commands. Its single-source access decision chooses row, `OperatorTree`, or hybrid posting-plus-residual execution only after the complete query block is lowered. Joined blocks use the same child algebra to cost relation-local retrieval and to realize tuple-producing operator-function atoms, so relational join enumeration and cross-paradigm access are nested parts of one hierarchy rather than mutually exclusive planners.
 

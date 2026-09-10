@@ -85,6 +85,16 @@ fn cast_regrole_array(
 /// accepted here: lowering assigns them physical query-plan slots executed by
 /// `uqa-execution::ScalarSubqueryRunner`.
 pub trait EngineHook {
+    /// Start of the current SQL transaction, in Unix microseconds.
+    fn transaction_timestamp_micros(&self) -> Option<i64> {
+        None
+    }
+
+    /// Start of the current frontend SQL message, in Unix microseconds.
+    fn statement_timestamp_micros(&self) -> Option<i64> {
+        None
+    }
+
     fn nextval(&self, name: &str) -> Result<i64>;
     fn currval(&self, name: &str) -> Result<i64>;
     fn lastval(&self) -> Result<i64> {
@@ -116,6 +126,21 @@ pub trait EngineHook {
 
     /// Resolve a catalog-owned SQL type name for casts evaluated with an engine context.
     fn resolve_type_name(&self, _name: &str) -> std::result::Result<Option<ColumnType>, String> {
+        Ok(None)
+    }
+
+    /// Apply catalog-owned domain conversion and constraints. A missing implementation leaves built-in catalog domains on their base-type conversion path.
+    fn cast_domain(
+        &self,
+        _value: &Value,
+        _source: Option<&str>,
+        _target: &ColumnType,
+    ) -> Result<Option<Value>> {
+        Ok(None)
+    }
+
+    /// Resolve a regtype cast to its OID carrier when a complete type catalog is available.
+    fn resolve_regtype_input(&self, _name: &str) -> Result<Option<i64>> {
         Ok(None)
     }
 
@@ -303,13 +328,26 @@ fn format_regtype_array_elements(
         .collect()
 }
 
-/// Cast a value after resolving catalog-owned source and target types and flattening domains to their coercion types.
+/// Cast a value after resolving catalog-owned types and enforcing domain constraints before exposing a base-type carrier.
 pub fn cast_value_with_type_resolution(
     value: &Value,
     source_ty: Option<&str>,
     target_ty: &str,
     engine: Option<&dyn EngineHook>,
 ) -> Result<Value> {
+    let resolved_target = engine
+        .map(|engine| engine.resolve_type_name(target_ty))
+        .transpose()
+        .map_err(SQLError::Internal)?
+        .flatten();
+    if let (Some(engine), Some(target)) = (engine, resolved_target.as_ref()) {
+        if let Some(value) = engine.cast_domain(value, source_ty, target)? {
+            return Ok(value);
+        }
+        if matches!(target, ColumnType::Array(_)) && requires_catalog_array_cast(target) {
+            return cast_catalog_array(value, source_ty, target, engine);
+        }
+    }
     let resolved_source = match (engine, source_ty) {
         (Some(engine), Some(source_ty)) => engine
             .resolve_type_name(source_ty)
@@ -318,11 +356,6 @@ pub fn cast_value_with_type_resolution(
         _ => None,
     };
     let source_ty = resolved_source.as_deref().or(source_ty);
-    let resolved_target = engine
-        .map(|engine| engine.resolve_type_name(target_ty))
-        .transpose()
-        .map_err(SQLError::Internal)?
-        .flatten();
     let target_ty = resolved_target.as_ref().map_or_else(
         || Cow::Borrowed(target_ty),
         |ty| Cow::Owned(coercion_type_name(ty)),
@@ -387,7 +420,67 @@ pub fn cast_value_with_type_resolution(
                 });
         }
     }
+    if matches!(target_column_type.as_ref(), Some(ColumnType::Regtype)) {
+        if let (Some(engine), Value::Str(name) | Value::FixedChar(name)) = (engine, value) {
+            if let Some(oid) = engine.resolve_regtype_input(name)? {
+                return Ok(Value::Int(oid));
+            }
+        }
+    }
     cast_value_from(value, &target_ty, source_ty)
+}
+
+fn requires_catalog_array_cast(ty: &ColumnType) -> bool {
+    match ty {
+        ColumnType::Domain { .. } | ColumnType::Regtype => true,
+        ColumnType::Array(element) => requires_catalog_array_cast(element),
+        _ => false,
+    }
+}
+
+fn cast_catalog_array(
+    value: &Value,
+    source: Option<&str>,
+    target: &ColumnType,
+    engine: &dyn EngineHook,
+) -> Result<Value> {
+    if matches!(value, Value::Null) {
+        return Ok(Value::Null);
+    }
+    let array = match value {
+        Value::Array(array) => array.clone(),
+        Value::Str(text) => parse_pg_array_literal(text)?,
+        other => {
+            return Err(SQLError::TypeMismatch(format!(
+                "CAST AS {}: expected array, got {other:?}",
+                target.sql_name()
+            )))
+        }
+    };
+    let source_element = source.map(|name| name.trim_end_matches("[]"));
+    let target_element = array_leaf_type(target).sql_name();
+    let values =
+        cast_catalog_array_elements(array.elements(), source_element, &target_element, engine)?;
+    ArrayValue::with_lower_bounds(values, array.lower_bounds().to_vec())
+        .map(Value::Array)
+        .ok_or_else(|| SQLError::TypeMismatch("array dimensions changed during cast".into()))
+}
+
+fn cast_catalog_array_elements(
+    values: &[Value],
+    source: Option<&str>,
+    target: &str,
+    engine: &dyn EngineHook,
+) -> Result<Vec<Value>> {
+    values
+        .iter()
+        .map(|value| match value {
+            Value::List(values) => {
+                cast_catalog_array_elements(values, source, target, engine).map(Value::List)
+            }
+            value => cast_value_with_type_resolution(value, source, target, Some(engine)),
+        })
+        .collect()
 }
 
 /// Read-only row interface used by the expression evaluator. Most callers

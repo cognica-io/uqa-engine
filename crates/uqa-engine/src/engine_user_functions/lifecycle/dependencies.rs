@@ -35,7 +35,8 @@ impl Engine {
         }
         let mut changed = self.bind_routine_definition_dependencies(def, mode)?;
         let mut compiled = self.compile_routine_for_mode(def, mode)?;
-        let body_changed = self.bind_sql_standard_body_routines(def, &compiled)?;
+        let body_changed = self.bind_sql_standard_body_routines(def, &compiled)?
+            | self.bind_routine_regclass_constants(def)?;
         changed |= body_changed;
         if body_changed {
             compiled = self.compile_routine_for_mode(def, mode)?;
@@ -127,6 +128,8 @@ impl Engine {
                 matches!(mode, RoutineCompilationMode::Persisted),
                 "SQL routine body",
             )?;
+            changed |= self.bind_stored_merge_target_columns(statement)?;
+            changed |= self.bind_stored_statement_source_columns(statement)?;
         }
         Ok(changed)
     }
@@ -136,6 +139,8 @@ impl Engine {
         def: &mut CreateFunction,
         compiled: &CompiledFunctionBody,
     ) -> Result<bool, SQLError> {
+        let dependency_body = self.stored_merge_dependency_body(def)?;
+        let compiled = dependency_body.as_ref().unwrap_or(compiled);
         let FunctionBody::Statements(statements) = &mut def.body else {
             return Ok(false);
         };

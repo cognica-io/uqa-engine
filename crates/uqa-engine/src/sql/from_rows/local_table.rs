@@ -42,6 +42,7 @@ type StreamingLocalTableScan<'a> = (Box<dyn uqa_execution::PhysicalOperator + 'a
 type SharedLockOrigin = (Arc<str>, Arc<str>);
 
 pub(in crate::sql) struct EngineTableRowSource {
+    cancellation: uqa_core::CancellationToken,
     table_name: String,
     table: std::sync::Arc<crate::TableState>,
     column_definitions: Arc<Vec<uqa_sql::ast::ColumnDef>>,

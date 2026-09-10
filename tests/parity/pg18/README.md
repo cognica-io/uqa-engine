@@ -359,3 +359,58 @@ The default container name is `pg-parity`, the default published PostgreSQL port
 ```sh
 bash tests/parity/pg18/clients/run.sh
 ```
+
+## Command CTE and Simple Query oracles
+
+`cte_commands_oracle.expected.json` contains 98 PostgreSQL 18.4 statements covering data-modifying CTE result types, snapshots, statement effects, and diagnostics. `cte_command_composition_oracle.expected.json` adds 56 statements covering MERGE CTE scopes in automatic views and privilege analysis, statement-trigger order and snapshots, validation before trigger effects, SQL-standard routine dependencies, quoted rewrite-rule column names, and qualified function output labels. `command_completion_oracle.expected.json` contains 105 Simple Query messages covering ordered command tags and transaction boundaries. Engine tests execute all three fixtures on memory and SQLite, and separate SQLite tests verify bound UPDATE and MERGE routines after reopen and relation rename.
+
+The fixtures record SQL input, PostgreSQL version, ordered command tags, primary errors and SQLSTATEs, column labels and type OIDs, and rows. Reproduce a fixture by passing its JSON to `capture_command_completion_oracle.py --rows` in a fresh PostgreSQL 18.4 database through `PG_COMPLETION_CONNECTION`; the composition fixture also requires a fresh `merge_actor` role name. The capture script uses libpq and preserves each case as one Simple Query message.
+
+```sh
+cargo test -p uqa-engine --test integration sql_cte_commands
+cargo test -p uqa-engine --test integration sql_simple_query
+```
+
+## Domain deletion oracle
+
+`domain_drop_oracle.expected.json` contains 208 PostgreSQL 18.4 cases covering domain deletion, schema ownership transfer, namespace access, exact command tags and errors, type/column/index/routine/view dependency cascades, multi-target atomicity, and transaction boundaries. The `domain_drop` engine tests run it on memory, SQLite, and forced-spill execution; a separate SQLite test covers ownership and dependency restoration, sibling-engine refresh, stable domain identity, and durable reopen.
+
+Reproduce the transcript with `capture_command_completion_oracle.py --rows` in a fresh PostgreSQL 18.4 database named `uqa`, with fresh `domain_drop_*` role names and a superuser connection in `PG_COMPLETION_CONNECTION`. The database name is significant because the ownership cases grant CREATE on that database. The checked-in JSON itself is accepted as input, and the capture tool verifies the first `SELECT version()` before writing reference evidence.
+
+## Stored routine column rename oracle
+
+`stored_column_rename_oracle.expected.json` contains 109 PostgreSQL 18.4 cases covering column renames in SQL-standard query and mutation-command routines, functions and procedures, aliases, CTEs, subqueries, joins, preserved result names, late-bound bodies, target errors, ownership, and reuse of the old name. The `stored_column_rename` tests run it on memory, SQLite, and forced-spill engines; a separate SQLite lifecycle test checks rollback, cross-engine refresh, and durable reopen. Reproduce it by passing the JSON to `capture_command_completion_oracle.py --rows` with a superuser `PG_COMPLETION_CONNECTION` in a fresh PostgreSQL 18.4 database and a fresh `stored_column_owner` role name.
+
+## Stored routine column deletion oracle
+
+`stored_column_drop_oracle.expected.json` contains 196 PostgreSQL 18.4 cases covering DROP COLUMN RESTRICT and CASCADE, query and mutation-command routines, generated columns, views, owned sequences, indirect routine/domain/default/CHECK dependencies, authority, missing columns, multi-action atomicity, and savepoints. MERGE cases distinguish column reads from write-only destinations and verify retired writes, skipped nextval evaluation, preserved routine/sequence dependencies, implicit INSERT destination lists, command CTEs, procedures, repeated name reuse, and persistent domain coercion dependencies while excluding DEFAULT assignments and omitted destinations. The `stored_column_drop` tests run the transcript on memory, SQLite, and forced-spill engines, with separate direct-API, rollback/refresh/reopen, and legacy target-identity migration tests.
+
+Reproduce it by passing the JSON to `capture_command_completion_oracle.py --rows` in a fresh PostgreSQL 18.4 database through a superuser `PG_COMPLETION_CONNECTION`. The `stored_column_owner` and `stored_column_outsider` role names must be unused. The first SELECT version() is verified before reference evidence is written.
+
+## Stored routine source aliases after column deletion
+
+`stored_column_alias_drop_oracle.expected.json` contains 186 PostgreSQL 18.4 cases covering positional source aliases after unread-column deletion, table and nested join input shapes, subqueries, CTEs, lateral and FULL/USING joins, added columns, old-name reuse, expanded projections, routine replacement, table-function star projections, zero-column table sources, query and mutation-command functions/procedures, late-bound SQL string bodies, owner authority, multi-action rollback, and domain/function/schema/sequence cascades. Sequence cases verify creation-bound regclass constants in stored and virtual generated columns, defaults and CHECK constraints, rename, old-name recreation, RESTRICT diagnostics, and savepoint restoration. The `stored_column_alias_drop` tests run the transcript on memory, SQLite, and forced-spill engines; four lifecycle tests cover direct Rust column deletion, rollback, observer refresh, initial-open source/regclass migration, and durable reopen.
+
+Reproduce it by passing the JSON to `capture_command_completion_oracle.py --rows` in a fresh PostgreSQL 18.4 database through a superuser `PG_COMPLETION_CONNECTION`, with an unused `alias_column_owner` role name. The first SELECT version() is verified before reference evidence is written.
+
+## Prepared analysis and session metadata oracles
+
+The prepared-statement fixtures compare PostgreSQL 18.4 command tags, SQLSTATEs and primary diagnostics, result names and type OIDs, and ordered text values. `prepared_parameters_oracle.expected.json` retains 125 execution and lifecycle cases. `prepared_analysis_oracle.expected.json` adds 53 preparation and fixed-descriptor cases on memory, SQLite, and forced-spill engines; `ordered_parameter_inference_oracle.expected.json` adds 178 ordered inference cases; `static_cast_analysis_oracle.expected.json` checks 2917 preparation-time casts; `static_operator_analysis_oracle.expected.json` checks 4207 preparation-time binary operator cases; and `prepared_signatures_metadata_oracle.expected.json` checks 40 function-signature, original-source, zero-column result, and read-only metadata cases. Separate integration tests verify callback registration does not bypass fixed result validation and that changing a scalar callback to an aggregate invalidates its cached plan.
+
+Reproduce each transcript by passing its JSON to `capture_command_completion_oracle.py --rows` through a superuser `PG_COMPLETION_CONNECTION` in a fresh PostgreSQL 18.4 database. The reference image is `postgres@sha256:22c89fe0d0f507606260237fd55e51f6137f58b2d5bcf6152242b96d9fe8f9a4`. The operator and cast signature tables in `uqa-execution` come from this image's `pg_catalog.pg_operator` and `pg_catalog.pg_cast`; the fixtures test their use during semantic analysis without running the prepared expressions.
+
+```sh
+cargo test -p uqa-engine --test integration sql_prepared
+```
+
+`constant_planning_oracle.expected.json` contains 62 PostgreSQL 18.4 cases for constant arithmetic, typed results, CASE and Boolean evaluation order, COALESCE, relation and column error precedence, deferred view planning, zero-parameter EXECUTE, and distinct scalar-subquery namespaces in ON CONFLICT and RETURNING. `prepared_plan_error_order_oracle.expected.json` adds 16 cases for argument errors preceding body planning and for plan-use counters after planning failures. The engine integration target runs both fixtures through the existing prepared-statement oracle helper, and the PostgreSQL server target compares them over a real TCP connection.
+
+`rule_input_planning_oracle.expected.json` contains 66 PostgreSQL 18.4 cases for suppressed commands, unused NEW inputs, rule RETURNING diagnostics, and command tags from same-kind versus different-kind INSTEAD actions, ALSO actions, multiple actions, UPDATE FROM, and automatic views. The engine target runs this fixture on memory and SQLite, and the server target runs it over TCP; a separate wire assertion verifies primary-message and hint fields.
+
+
+`prepared_plan_selection_oracle.expected.json` contains 84 PostgreSQL 18.4 cases for automatic and forced custom/generic selection, plan-use counters, argument errors, planning errors, and invalidation. `prepared_plan_cost_oracle.expected.json` contains 60 cases over a 10,000-row indexed relation with a 9,999:1 distribution: rare keys retain custom plans while common keys switch to generic plans. `prepared_plan_settings_oracle.expected.json` contains 53 cases for enum metadata, exact invalid-value errors, SET DEFAULT completion, and local/session changes across savepoints, commit, rollback, and RESET ALL. `prepared_plan_types_oracle.expected.json` contains 25 cases for scalar and array types, domain identity, typed NULLs, constraint diagnostics, and smallint overflow in both plan modes. The existing engine integration target and server TCP target run these fixtures; selection and skewed-data fixtures also run against SQLite.
+
+```sh
+cargo test -p uqa-engine prepared
+cargo test -p uqa-pg-server --test integration prepared_plan_selection
+```

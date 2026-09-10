@@ -3910,6 +3910,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "uqa-pg-server"
+version = "0.2.3"
+dependencies = [
+ "getrandom 0.3.4",
+ "parking_lot",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "uqa-core",
+ "uqa-engine",
+ "uqa-pg-wire",
+ "uqa-sql",
+]
+
+[[package]]
 name = "uqa-pg-wire"
 version = "0.2.3"
 dependencies = [

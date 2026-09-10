@@ -42,6 +42,23 @@ pub(in crate::sql) fn bind_expression_plan_type(
     )
 }
 
+/// Validate a command argument's names and types without running its expressions.
+pub(in crate::sql) fn analyze_expression_plan_type(
+    routines: &dyn RoutineResolution,
+    plan: &ExpressionPlan,
+    params: &[SQLParam],
+    ctes: &CteScope,
+) -> Result<Option<ColumnType>, SQLError> {
+    SchemaScope::for_analysis(ctes)?.bind_expression_type(
+        routines,
+        &plan.scalar,
+        &RowSchema::default(),
+        &plan.subqueries,
+        params,
+        None,
+    )
+}
+
 /// Analyze every catalog and scalar reference and derive the exact output row type without executing the query.
 pub(in crate::sql) fn analyze_query_plan_schema(
     routines: &dyn RoutineResolution,

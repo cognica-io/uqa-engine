@@ -251,6 +251,7 @@ pub(in crate::sql) fn collect_aggregate_exprs<'a>(
         | ScalarExpr::InternalColumn(_)
         | ScalarExpr::QualifiedColumn { .. }
         | ScalarExpr::Literal(_)
+        | ScalarExpr::TypedLiteral { .. }
         | ScalarExpr::Param(_)
         | ScalarExpr::WindowCall { .. }
         | ScalarExpr::ScalarSubquery(_)
@@ -313,7 +314,10 @@ pub(in crate::sql) fn expr_references_columns(expr: &ScalarExpr) -> bool {
         }
         ScalarExpr::InSubquery { expr, .. } => expr_references_columns(expr),
         ScalarExpr::ScalarSubquery(_) | ScalarExpr::Exists { .. } => true,
-        ScalarExpr::Default | ScalarExpr::Literal(_) | ScalarExpr::Param(_) => false,
+        ScalarExpr::Default
+        | ScalarExpr::Literal(_)
+        | ScalarExpr::TypedLiteral { .. }
+        | ScalarExpr::Param(_) => false,
     }
 }
 

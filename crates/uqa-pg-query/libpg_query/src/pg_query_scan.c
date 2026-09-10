@@ -77,6 +77,8 @@ PgQueryScanResult pg_query_scan(const char* input)
     scanner_finish(yyscanner);
 
     output_tokens = malloc(sizeof(PgQuery__ScanToken *) * token_count);
+    result.tokens = malloc(sizeof(PgQueryScanToken) * token_count);
+    result.token_count = token_count;
 
     /* initialize the flex scanner --- should match raw_parser() */
     yyscanner = scanner_init(input, &yyextra, &ScanKeywords, ScanKeywordTokens);
@@ -106,6 +108,11 @@ PgQueryScanResult pg_query_scan(const char* input)
       #undef PG_KEYWORD
       default: output_tokens[i]->keyword_kind = 0;
       }
+
+      result.tokens[i].start = output_tokens[i]->start;
+      result.tokens[i].end = output_tokens[i]->end;
+      result.tokens[i].token = output_tokens[i]->token;
+      result.tokens[i].keyword_kind = output_tokens[i]->keyword_kind;
     }
 
     scanner_finish(yyscanner);
@@ -170,5 +177,6 @@ void pg_query_free_scan_result(PgQueryScanResult result)
   }
 
   free(result.pbuf.data);
+  free(result.tokens);
   free(result.stderr_buffer);
 }

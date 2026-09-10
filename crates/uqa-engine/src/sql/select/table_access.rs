@@ -161,18 +161,21 @@ pub(in crate::sql) fn run_single_table_select_output(
         .as_ref()
         .map(SourceProjection::metadata)
         .unwrap_or_default();
+    let bound_columns = match stmt.from.as_ref() {
+        Some(uqa_planner::SourcePlan::Table { bound_columns, .. }) => bound_columns.as_deref(),
+        _ => None,
+    };
+    let table_columns = crate::sql::from_rows::bound_source_column_names(
+        table_snapshot
+            .columns
+            .iter()
+            .map(|column| column.name.clone())
+            .collect(),
+        bound_columns,
+    )?;
     let source_schema: Vec<String> = source_projection
         .and_then(SourceProjection::explicit_columns)
-        .map_or_else(
-            || {
-                table_snapshot
-                    .columns
-                    .iter()
-                    .map(|column| column.name.clone())
-                    .collect()
-            },
-            |columns| columns.into_iter().collect(),
-        );
+        .map_or_else(|| table_columns, |columns| columns.into_iter().collect());
 
     if let Some(facet_fields) = facet_projection_fields(&stmt.projections)? {
         let execution = FacetExecution {
@@ -194,7 +197,16 @@ pub(in crate::sql) fn run_single_table_select_output(
     let predicate_schema = uqa_execution::RowSchema::with_qualified_types(
         qualifier,
         source_schema.clone(),
-        vec![None; source_schema.len()],
+        source_schema
+            .iter()
+            .map(|name| {
+                table_snapshot
+                    .columns
+                    .iter()
+                    .find(|column| column.name == *name)
+                    .map(|column| column.ty.clone())
+            })
+            .collect(),
     );
     let (pushed_predicate, residual_filter) =
         split_projected_filter(physical_filter.take(), &predicate_schema, params)?;

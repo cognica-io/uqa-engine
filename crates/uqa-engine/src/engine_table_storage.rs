@@ -93,11 +93,8 @@ fn walk_schema_expr_mut(
             }
         }
         Expr::WindowCall { args, spec, .. } => {
-            for argument in args {
+            for argument in args.iter_mut().chain(&mut spec.partition_by) {
                 walk_schema_expr_mut(argument, visit)?;
-            }
-            for partition in &mut spec.partition_by {
-                walk_schema_expr_mut(partition, visit)?;
             }
             for order in &mut spec.order_by {
                 walk_schema_expr_mut(&mut order.expr, visit)?;
@@ -144,6 +141,7 @@ fn walk_schema_expr_mut(
         | Expr::QualifiedColumn { .. }
         | Expr::InternalColumn(_)
         | Expr::Literal(_)
+        | Expr::TypedLiteral { .. }
         | Expr::Param(_) => {}
     }
     Ok(())

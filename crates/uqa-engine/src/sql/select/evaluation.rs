@@ -40,6 +40,7 @@ use subqueries::ScalarSubqueryCacheEntry;
 pub(crate) struct CteScope {
     pub(in crate::sql) rows: BTreeMap<String, uqa_execution::SharedSpill>,
     deferred_ctes: BTreeMap<String, CtePlan>,
+    pub(in crate::sql) non_returning_ctes: BTreeSet<String>,
     pub(in crate::sql) scalar_subqueries: Vec<QueryPlan>,
     pub(in crate::sql) lock_identities: LockIdentityOptions,
     row_lock: Option<Box<RowLockScopeState>>,
@@ -55,6 +56,7 @@ pub(crate) struct CteScope {
     catalog: Option<CatalogReadView>,
     catalog_resolution: Option<RelationNameResolution>,
     privilege_subject: Option<String>,
+    command_cte_snapshot: Option<Arc<crate::engine_session::StatementReadSnapshot>>,
 }
 
 impl Default for CteScope {
@@ -62,6 +64,7 @@ impl Default for CteScope {
         Self {
             rows: BTreeMap::new(),
             deferred_ctes: BTreeMap::new(),
+            non_returning_ctes: BTreeSet::new(),
             scalar_subqueries: Vec::new(),
             lock_identities: LockIdentityOptions::default(),
             row_lock: None,
@@ -76,6 +79,7 @@ impl Default for CteScope {
             catalog: None,
             catalog_resolution: None,
             privilege_subject: None,
+            command_cte_snapshot: None,
         }
     }
 }

@@ -11,6 +11,18 @@ use uqa_sql::{ResultRow, SQLError};
 use crate::engine_capabilities::{CatalogReadView, RelationNameResolution, SessionExecutionView};
 use crate::{ConstraintIdentity, Engine, RelationIdentity};
 
+pub(crate) fn domain_object_oid(object_id: &[u8; 16]) -> u32 {
+    u32::try_from(helpers::oids::stable_object_oid("domain", object_id))
+        .expect("catalog OIDs fit in u32")
+}
+
+pub(in crate::sql) fn is_virtual_catalog_relation(
+    resolution: &RelationNameResolution,
+    name: &str,
+) -> bool {
+    resolve_virtual_relation(resolution, name).is_some()
+}
+
 pub(super) fn build_info_schema_rows(
     engine: &Engine,
     catalog: &CatalogReadView,
@@ -60,7 +72,7 @@ pub(super) fn build_info_schema_rows(
         VirtualRelation::PgTables => build_pg_tables(catalog, resolution)?,
         VirtualRelation::PgViews => build_pg_views(catalog, resolution)?,
         VirtualRelation::PgIndexes => build_pg_indexes(catalog, resolution)?,
-        VirtualRelation::PgType => build_pg_type(),
+        VirtualRelation::PgType => build_pg_type(catalog),
         VirtualRelation::PgRange => build_pg_range(),
         VirtualRelation::PgProc => build_pg_proc(catalog)?,
         VirtualRelation::PgDatabase => build_pg_database(catalog)?,
@@ -68,6 +80,7 @@ pub(super) fn build_info_schema_rows(
         VirtualRelation::PgRoles => build_pg_roles(catalog),
         VirtualRelation::PgUser => build_pg_user(catalog),
         VirtualRelation::PgSettings => build_pg_settings(session)?,
+        VirtualRelation::PgPreparedStatements => prepared_statements::rows(session)?,
         VirtualRelation::PgDescription => Vec::new(),
         VirtualRelation::PgMatviews => build_pg_matviews(catalog, resolution)?,
         VirtualRelation::PgSequences => build_pg_sequences(catalog, session)?,
@@ -81,19 +94,35 @@ mod builtin_routines;
 mod events;
 mod expression_text;
 mod index_definition;
+mod mutation;
 pub(in crate::sql) use index_definition::pg_get_indexdef_value;
+pub(in crate::sql) use mutation::virtual_relation_mutation_error;
 pub(in crate::sql) use regtypes::format_type_value;
 mod view_definition;
 pub(in crate::sql) use view_definition::pg_get_viewdef_value;
-pub(crate) use view_definition::rename_view_column_query;
+pub(crate) use view_definition::{rename_view_column_query, view_query_references_column};
 mod helpers;
+mod result_type;
+pub use result_type::{postgres_result_type, SQLTypeMetadata};
 mod information_schema;
 mod partitioning;
 mod pg_catalog;
 mod pg_namespace;
 mod pg_proc;
 mod pg_settings;
+mod plpgsql;
+mod prepared_statements;
 mod regtypes;
+pub(crate) fn plpgsql_catalog(
+    engine: &Engine,
+) -> Result<uqa_sql::plpgsql::PlpgsqlCatalog, SQLError> {
+    let catalog = engine.catalog_read_view();
+    let resolution = engine.session_execution_view().relation_name_resolution();
+    let search_path = engine
+        .current_schema_names(true)
+        .map_err(|error| SQLError::Internal(error.to_string()))?;
+    plpgsql::plpgsql_catalog(&catalog, &resolution, search_path)
+}
 mod relation_catalog;
 mod schema;
 
@@ -262,8 +291,9 @@ use pg_namespace::build_pg_namespace;
 use pg_proc::build_pg_proc;
 use pg_settings::build_pg_settings;
 pub(crate) use regtypes::{
-    resolve_catalog_column_type, resolve_regclass_kind_by_oid, resolve_regclass_oid,
-    resolve_regnamespace_oid, resolve_regobject_oid, resolve_regprocedure_oid, resolve_regrole_oid,
+    resolve_bound_regclass_oid, resolve_catalog_column_type, resolve_catalog_domain_type_by_oid,
+    resolve_regclass_kind_by_oid, resolve_regclass_oid, resolve_regnamespace_oid,
+    resolve_regobject_oid, resolve_regprocedure_oid, resolve_regrole_oid, resolve_regtype_oid,
     resolve_regtype_output, RegtypeOutputCatalog,
 };
 
@@ -271,9 +301,41 @@ pub(crate) fn resolve_catalog_column_type_name(
     engine: &Engine,
     type_name: &str,
 ) -> Result<uqa_sql::ast::ColumnType, SQLError> {
+    let parsed = uqa_sql::parse_regtype_name(type_name)?;
+    if let Some(parsed) = parsed.as_ref() {
+        if parsed.has_type_modifiers {
+            let name = parsed
+                .names
+                .iter()
+                .map(|name| format!("\"{}\"", name.replace('"', "\"\"")))
+                .collect::<Vec<_>>()
+                .join(".");
+            if resolve_catalog_column_type(engine, &name)
+                .is_some_and(|ty| matches!(ty, uqa_sql::ColumnType::Domain { .. }))
+            {
+                return Err(SQLError::Routine {
+                    sqlstate: "42601".into(),
+                    message: format!(
+                        "type modifier is not allowed for type \"{}\"",
+                        parsed.names.join(".")
+                    ),
+                });
+            }
+        }
+    }
     resolve_catalog_column_type(engine, type_name).ok_or_else(|| SQLError::Routine {
         sqlstate: "42704".into(),
-        message: format!("type \"{}\" does not exist", type_name.trim_matches('"')),
+        message: format!(
+            "type \"{}\" does not exist",
+            parsed.as_ref().map_or_else(
+                || type_name.to_string(),
+                |name| format!(
+                    "{}{}",
+                    name.names.join("."),
+                    if name.array_dimensions > 0 { "[]" } else { "" }
+                )
+            )
+        ),
     })
 }
 

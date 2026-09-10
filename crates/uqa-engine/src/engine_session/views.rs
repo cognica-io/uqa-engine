@@ -245,6 +245,8 @@ impl Engine {
         &self,
         relations: &[String],
     ) -> StorageBackendResult<()> {
+        self.drop_relation_routine_dependents(relations, true, "relation")
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         let mut pending = relations.to_vec();
         let mut views = std::collections::BTreeSet::new();
         while let Some(relation) = pending.pop() {
@@ -281,7 +283,7 @@ impl Engine {
         self.with_implicit_transaction(|engine| {
             match engine.try_resolve_visible_relation_kind(name)? {
                 Some((canonical, "view")) => {
-                    engine.drop_views_inner(&[canonical], true)?;
+                    engine.drop_views(&[canonical], false, "view")?;
                     Ok(true)
                 }
                 Some((canonical, kind)) => Err(SQLError::Unsupported(format!(
@@ -292,13 +294,20 @@ impl Engine {
         })
     }
 
-    pub(crate) fn drop_views(&self, names: &[String], cascade: bool) -> Result<(), SQLError> {
+    pub(crate) fn drop_views(
+        &self,
+        names: &[String],
+        cascade: bool,
+        kind: &str,
+    ) -> Result<(), SQLError> {
         self.with_implicit_transaction(|engine| {
-            if !cascade {
-                return engine.drop_views_inner(names, true);
-            }
             engine.ensure_view_drop_authorities(names)?;
-            let closure = engine.cascade_view_closure(names.to_vec())?;
+            engine.drop_relation_routine_dependents(names, cascade, kind)?;
+            if !cascade {
+                return engine.drop_views_inner(names, false);
+            }
+            let remaining = engine.remaining_view_drop_targets(names)?;
+            let closure = engine.cascade_view_closure(remaining)?;
             engine
                 .drop_rules_depending_on_relations_inner(&closure)
                 .map_err(|error| {
@@ -306,6 +315,25 @@ impl Engine {
                 })?;
             engine.drop_views_inner(&closure, false)
         })
+    }
+
+    pub(crate) fn remaining_view_drop_targets(
+        &self,
+        names: &[String],
+    ) -> Result<Vec<String>, SQLError> {
+        let remaining = names
+            .iter()
+            .filter_map(|name| match RelationIdentity::from_legacy_name(name) {
+                Ok(identity) => self
+                    .durable
+                    .views
+                    .read()
+                    .contains_key(&identity)
+                    .then(|| Ok(name.clone())),
+                Err(error) => Some(Err(SQLError::Internal(error))),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(remaining)
     }
 
     fn ensure_view_drop_authorities(&self, names: &[String]) -> Result<(), SQLError> {

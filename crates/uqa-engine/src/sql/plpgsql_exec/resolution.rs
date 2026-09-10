@@ -7,12 +7,11 @@
 //! Routine overload resolution, argument binding, and coercion.
 
 use super::{
-    canonical_routine_type_name, cast_value, eval_lowered_expression, value_type_name, Arc,
-    ArrayValue, CreateFunction, Engine, FunctionBinding, SQLError, SQLUserFunction, Value,
+    canonical_routine_type_name, cast_value, value_type_name, Arc, ArrayValue, CreateFunction,
+    Engine, FunctionBinding, SQLError, SQLUserFunction, Value,
 };
 use crate::engine_user_functions::RoutineCallKind;
 use uqa_sql::ast::{ColumnType, FunctionParamMode, RoutineInvocationBinding, RoutineVariadicMode};
-use uqa_sql::expr::coercion_type_name;
 
 pub(super) fn output_column_names(def: &CreateFunction) -> Vec<String> {
     def.output_params()
@@ -128,7 +127,23 @@ pub(super) fn resolve_bound_routine(
         .iter()
         .map(|(name, _)| name.clone())
         .collect::<Vec<_>>();
-    let argument_types = runtime_argument_types(args)?;
+    let argument_types = if let Some(invocation) = binding
+        .invocation
+        .as_ref()
+        .filter(|invocation| invocation.argument_sources.len() == args.len())
+    {
+        invocation
+            .argument_sources
+            .iter()
+            .map(|name| {
+                name.as_deref()
+                    .map(|name| crate::sql::resolve_catalog_column_type_name(engine, name))
+                    .transpose()
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    } else {
+        runtime_argument_types(args)?
+    };
     let explicit_variadic = binding.invocation.as_ref().is_some_and(|invocation| {
         matches!(
             invocation.variadic_mode,
@@ -201,7 +216,13 @@ fn materialize_arguments(
         args.iter().zip(&invocation.argument_positions).enumerate()
     {
         let target = &invocation.argument_targets[argument_index];
-        let value = coerce_routine_value(engine, value, target)?;
+        let source = invocation
+            .argument_sources
+            .get(argument_index)
+            .and_then(Option::as_deref)
+            .map(|name| crate::sql::resolve_catalog_column_type_name(engine, name))
+            .transpose()?;
+        let value = coerce_routine_value_from(engine, value, target, source.as_ref())?;
         if Some(*parameter_index) == expanded_parameter {
             expanded_values.push(value);
         } else if slots[*parameter_index].replace(value).is_some() {
@@ -245,8 +266,14 @@ fn materialize_arguments(
                     parameter_index + 1
                 ))
             })?;
-            let value = eval_lowered_expression(engine, default, None, &[])?;
-            coerce_routine_value(engine, &value, &invocation.parameter_types[parameter_index])?
+            let (value, source) =
+                crate::sql::scalar::eval_lowered_expression_with_type(engine, default, None, &[])?;
+            coerce_routine_value_from(
+                engine,
+                &value,
+                &invocation.parameter_types[parameter_index],
+                source.as_ref(),
+            )?
         };
         bound.push(value);
     }
@@ -260,6 +287,15 @@ pub(super) fn coerce_routine_value(
     engine: &Engine,
     value: &Value,
     type_name: &str,
+) -> Result<Value, SQLError> {
+    coerce_routine_value_from(engine, value, type_name, None)
+}
+
+pub(super) fn coerce_routine_value_from(
+    engine: &Engine,
+    value: &Value,
+    type_name: &str,
+    source: Option<&ColumnType>,
 ) -> Result<Value, SQLError> {
     match canonical_routine_type_name(type_name).as_str() {
         "record" => match value {
@@ -278,7 +314,7 @@ pub(super) fn coerce_routine_value(
             }),
         },
         "trigger" => match value {
-            Value::Record(_) | Value::Null => Ok(value.clone()),
+            Value::Record(_) | Value::Row(_) | Value::Null => Ok(value.clone()),
             _ => Err(SQLError::Routine {
                 sqlstate: "42804".into(),
                 message: "trigger function must return a row or NULL".into(),
@@ -304,10 +340,15 @@ pub(super) fn coerce_routine_value(
             message: "cannot cast non-null value to type void".into(),
         }),
         _ => {
-            let target = crate::sql::resolve_catalog_column_type(engine, type_name)
-                .as_ref()
-                .map_or_else(|| type_name.to_string(), coercion_type_name);
-            cast_value(value, &target)
+            if let Some(target) = crate::sql::resolve_catalog_column_type(engine, type_name) {
+                return crate::sql::ddl::coerce_assignment_value(
+                    engine,
+                    value.clone(),
+                    &target,
+                    source,
+                );
+            }
+            cast_value(value, type_name)
         }
     }
 }

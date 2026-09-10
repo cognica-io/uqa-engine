@@ -13,6 +13,7 @@ The reference manual describes public ways to operate and embed UQA Engine.
 | [Graphs](07-graphs.md) | Named graphs, Cypher, regular path queries, and SQL integration |
 | [Bindings and extensions](08-bindings-and-extensions.md) | QueryBuilder, Python, Node.js, browser WASM, UDFs, and FDWs |
 | [HTTP Engine](09-http-engine.md) | Direct authenticated local and Cloud SQL, atomic batches, streaming, and security |
+| [PostgreSQL TCP server](11-postgresql-server.md) | Development Simple Query listener, trust authentication, session behavior, and Rust embedding |
 | [Upgrading](10-upgrading.md) | Version 0.2.3 package selection, Rust graph API and custom catalog changes, automatic statistics, session caches, and persistent migration |
 
 For syntax organized by SQL feature, use the [Supported SQL manual](../sql/README.md). For implementation ownership and invariants, use the [Internals manual](../internals/README.md).

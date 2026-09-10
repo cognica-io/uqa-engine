@@ -17,7 +17,7 @@ fn simple_query_batch_restarts_after_an_existing_transaction_ends() {
         &engine,
         "COMMIT; INSERT INTO items VALUES (2); INSERT INTO items VALUES (2)",
         "23505",
-        "violated",
+        "duplicate key value violates unique constraint",
     );
     assert_eq!(
         engine
@@ -33,7 +33,7 @@ fn simple_query_batch_restarts_after_an_existing_transaction_ends() {
         &engine,
         "ROLLBACK; INSERT INTO items VALUES (4); INSERT INTO items VALUES (4)",
         "23505",
-        "violated",
+        "duplicate key value violates unique constraint",
     );
     assert_eq!(
         engine.sql("SELECT id FROM items", &[]).unwrap().rows[0]["id"],
@@ -228,7 +228,7 @@ fn set_constraints_uses_batch_callback_and_temporary_namespace_transaction_conte
         &engine,
         "INSERT INTO parent VALUES (303); INSERT INTO parent VALUES (303); COMMIT",
         "23505",
-        "violated",
+        "duplicate key value violates unique constraint",
     );
     assert!(engine
         .sql("SELECT id FROM parent WHERE id = 303", &[])

@@ -8,6 +8,8 @@
 
 mod binding;
 mod fetch;
+mod statement_snapshot;
+pub(crate) use statement_snapshot::StatementReadSnapshot;
 
 use crate::{
     AnalyzerPhase, DocumentStore, Engine, EpochCoordinator, InvertedIndex, MemoryDocumentStore,
@@ -227,40 +229,6 @@ impl Engine {
             },
         );
         Ok(())
-    }
-
-    /// Capture the relation and catalog state visible at the start of a SQL statement. A `BEFORE STATEMENT` trigger executes inside the statement's transaction and may therefore change the live engine before the statement evaluates its source query. `PostgreSQL` keeps those changes outside the statement snapshot, so the remaining query work must read through an immutable query engine while trigger and row effects continue to use the live engine.
-    pub(crate) fn capture_statement_snapshot_engine(&self) -> Result<Engine, SQLError> {
-        let dependencies = SessionPortalTableDependencies::all();
-        let snapshot_gate = self
-            .row_locks
-            .begin_change_snapshot(&self.runtime.cancellation)?;
-        let transaction_overlay = self.capture_session_portal_transaction_overlay()?;
-        snapshot_gate.baseline()?;
-        drop(snapshot_gate);
-        let table_sources = {
-            let stack = self.session.transactions.lock();
-            let fixed_snapshot = stack
-                .first()
-                .and_then(|frame| frame.fixed_snapshot.as_ref());
-            self.capture_session_portal_table_sources(fixed_snapshot, &dependencies)
-        };
-        let table_snapshots = Self::detach_session_portal_table_snapshots(
-            table_sources,
-            transaction_overlay.as_ref(),
-        )?;
-        let mut catalog_snapshot = self.durable.snapshot();
-        catalog_snapshot.graphs = self.freeze_graph_read_handles(None, true)?;
-        let catalog_snapshot = std::sync::Arc::new(catalog_snapshot);
-        let view_snapshots = std::sync::Arc::clone(&catalog_snapshot.views);
-        let sql_function_snapshots = std::sync::Arc::clone(&catalog_snapshot.sql_user_functions);
-        Ok(self.session_portal_worker_engine(
-            table_snapshots,
-            view_snapshots,
-            sql_function_snapshots,
-            catalog_snapshot,
-            self.allocate_session_portal_transaction_origin(),
-        ))
     }
 
     pub(crate) fn ensure_session_portal_available(&self, name: &str) -> Result<(), SQLError> {
@@ -598,6 +566,10 @@ impl Engine {
         )
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "rebuilds pinned table metadata and physical state together"
+    )]
     fn detached_query_table_from_documents(
         data: &std::sync::Arc<TableState>,
         metadata: &std::sync::Arc<TableState>,
@@ -669,6 +641,9 @@ impl Engine {
             vector_indexes: parking_lot::RwLock::new(vector_indexes),
             fts_fields: crate::engine_state::CatalogCell::new(fts_fields),
             columns: crate::engine_state::CatalogCell::new(metadata_columns),
+            columns_declared: crate::engine_state::CatalogCell::from_snapshot(
+                metadata.columns_declared.snapshot(),
+            ),
             next_id: parking_lot::Mutex::new(*metadata.next_id.lock()),
             analyzer: crate::engine_state::CatalogCell::new(analyzer),
             column_stats: crate::engine_state::CatalogCell::from_snapshot(

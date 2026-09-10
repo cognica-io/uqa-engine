@@ -27,9 +27,65 @@ CREATE SCHEMA scratch;
 DROP SCHEMA scratch;
 ```
 
-Schema-qualified objects are supported, and the role active at `CREATE SCHEMA` owns the schema. Schema ACLs support `USAGE`, `CREATE`, `ALL [PRIVILEGES]`, `PUBLIC`, `WITH GRANT OPTION`, `GRANT OPTION FOR`, `GRANTED BY`, `RESTRICT`, and `CASCADE` through `GRANT` and `REVOKE` on explicit schema targets. Inherited ownership and grant-option paths are honored, dependent grants follow `RESTRICT` or `CASCADE`, schema owners and ACL grantors or grantees prevent `DROP ROLE`, and changes follow transaction, savepoint, cross-engine refresh, and durable-reopen lifecycle. `pg_namespace.nspowner` and `nspacl` expose the durable owner and ACL, while `information_schema.schemata` exposes schemas on which the current role has `USAGE` or `CREATE`. The six current-user or explicit-role name/OID `has_schema_privilege` overloads accept comma-separated `USAGE` and `CREATE` checks, including `WITH GRANT OPTION`, and preserve PostgreSQL 18 owner, inherited-role, system-schema, current temporary-schema, strict-NULL, missing-object, error-precedence, and `pg_proc` behavior. A numeric text argument remains a schema name, and `pg_temp` is not accepted as an alias by this inquiry function; use the allocated temporary namespace name or OID. Schema `CREATE` is enforced for durable tables, CTAS, `SELECT INTO`, views, materialized views, sequences, foreign tables, functions, procedures, standalone indexes, and indexed key constraints, including inherited grants, immediate revocation, transactions, savepoints, qualified versus search-path selection, inferred temporary views, and PostgreSQL source-analysis, definition-error, and collision precedence; unqualified creation and sibling-object creation through indexes or indexed constraints also require schema `USAGE`. Routine calls and ALTER, DROP, GRANT, and REVOKE routine-target lookup enforce schema `USAGE`. Ordinary relation queries, `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE`, `ALTER TABLE`, `DROP TABLE`, trigger and rule definition or removal targets, constraint-trigger referenced relations, rule-action mutation targets, `INHERITS`, `PARTITION OF`, `ATTACH PARTITION`, ALTER-time inheritance and foreign-key targets, stored-view source binding, and hard or soft `regclass` input use the same rule: qualified inaccessible schemas report `42501` before object existence, authority, or column validation, while unqualified lookup skips inaccessible search-path entries. Inherited grants and immediate prepared-plan revocation are honored; views, materialized views, SQL-standard query bodies, declared cursors, and stored rule-action mutation targets retain exact definition-time relation identities instead of repeating namespace-name checks. System-catalog projection likewise follows canonical catalog relationships without applying the caller's namespace lookup to those stored identities. Remaining object paths, remaining relation-owner checks, and default privileges remain open compatibility bugs. `CREATE SCHEMA AUTHORIZATION` and schema elements embedded inside `CREATE SCHEMA` are not implemented. Cross-database names are rejected. `DROP SCHEMA` requires an empty schema; `DROP SCHEMA ... CASCADE` is implemented only for graph namespaces, where it drops the named graph.
+Schema-qualified objects are supported, and the role active at `CREATE SCHEMA` owns the schema. Schema ACLs support `USAGE`, `CREATE`, `ALL [PRIVILEGES]`, `PUBLIC`, `WITH GRANT OPTION`, `GRANT OPTION FOR`, `GRANTED BY`, `RESTRICT`, and `CASCADE` through `GRANT` and `REVOKE` on explicit schema targets. Inherited ownership and grant-option paths are honored, dependent grants follow `RESTRICT` or `CASCADE`, schema owners and ACL grantors or grantees prevent `DROP ROLE`, and changes follow transaction, savepoint, cross-engine refresh, and durable-reopen lifecycle. `pg_namespace.nspowner` and `nspacl` expose the durable owner and ACL, while `information_schema.schemata` exposes schemas on which the current role has `USAGE` or `CREATE`. The six current-user or explicit-role name/OID `has_schema_privilege` overloads accept comma-separated `USAGE` and `CREATE` checks, including `WITH GRANT OPTION`, and preserve PostgreSQL 18 owner, inherited-role, system-schema, current temporary-schema, strict-NULL, missing-object, error-precedence, and `pg_proc` behavior. A numeric text argument remains a schema name, and `pg_temp` is not accepted as an alias by this inquiry function; use the allocated temporary namespace name or OID. Schema `CREATE` is enforced for durable tables, CTAS, `SELECT INTO`, views, materialized views, sequences, foreign tables, functions, procedures, standalone indexes, and indexed key constraints, including inherited grants, immediate revocation, transactions, savepoints, qualified versus search-path selection, inferred temporary views, and PostgreSQL source-analysis, definition-error, and collision precedence; unqualified creation and sibling-object creation through indexes or indexed constraints also require schema `USAGE`. Routine calls and ALTER, DROP, GRANT, and REVOKE routine-target lookup enforce schema `USAGE`. Ordinary relation queries, `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE`, `ALTER TABLE`, `DROP TABLE`, trigger and rule definition or removal targets, constraint-trigger referenced relations, rule-action mutation targets, `INHERITS`, `PARTITION OF`, `ATTACH PARTITION`, ALTER-time inheritance and foreign-key targets, stored-view source binding, and hard or soft `regclass` input use the same rule: qualified inaccessible schemas report `42501` before object existence, authority, or column validation, while unqualified lookup skips inaccessible search-path entries. Inherited grants and immediate prepared-plan revocation are honored; views, materialized views, SQL-standard query bodies, declared cursors, and stored rule-action mutation targets retain exact definition-time relation identities instead of repeating namespace-name checks. System-catalog projection likewise follows canonical catalog relationships without applying the caller's namespace lookup to those stored identities. Remaining object paths, remaining relation-owner checks, and default privileges remain open compatibility bugs. `CREATE SCHEMA AUTHORIZATION` and schema elements embedded inside `CREATE SCHEMA` are not implemented. Cross-database names are rejected. `DROP SCHEMA` requires ownership of the schema and, by default, an empty schema. See the deletion contract below.
 
 Every named graph reserves a namespace of its own name and `ag_catalog` is reserved for the Apache AGE catalog, so `CREATE SCHEMA` rejects those names as existing or reserved schemas and `DROP SCHEMA graph_name` fails until the graph is dropped; see [Graph SQL and Cypher](07-graph.md).
+
+`ALTER SCHEMA name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }` transfers schema ownership and rewrites owner-rooted ACL entries while retaining other grants. Unless the requested owner is already current, the caller must own the schema and be able to SET ROLE to the new owner; the new owner must have database CREATE privilege. A superuser bypasses these privilege checks. A missing role reports `42704`, a missing schema reports `3F000`, and insufficient authority reports `42501`. It returns `ALTER SCHEMA` without rows and participates in transaction rollback, refresh, and reopen.
+
+`DROP SCHEMA [IF EXISTS] name [, ...] [CASCADE | RESTRICT]` accepts namespace identifiers and returns the `DROP SCHEMA` command tag without rows. The schema owner, an inheriting role, or a superuser may remove the schema, including objects owned by other roles. `RESTRICT` is the default; a contained table, view, materialized view, sequence, function, procedure, or domain prevents removal with `2BP01`. A missing schema reports `3F000`; `IF EXISTS` skips it with a notice. A nonowner reports `42501` before dependency checks. Duplicate targets are removed once, and all target names and ownership checks precede deletion.
+
+`CASCADE` removes contained objects and the implemented dependency closure across schemas. Dependent views and SQL-standard routines are removed; referencing tables survive after removal of dependent foreign keys, defaults, CHECK constraints, or typed and generated columns. Domains based on a removed type are removed, as are domains whose defaults require a removed type or function. Remaining columns retain their rows. The whole statement participates in transaction and savepoint rollback. The ordinary `public` schema may be dropped and remains absent across reopen; creating it again is explicit. Named graph namespaces continue to remove their graphs with `CASCADE`. Full dependency catalog coverage, complete notice details, and virtual catalog-schema deletion remain tracked implementation work in [Compatibility](09-compatibility.md).
+
+```sql execute
+CREATE SCHEMA disposable_schema;
+CREATE TABLE disposable_schema.parent (id integer PRIMARY KEY);
+CREATE TABLE schema_drop_reference (id integer REFERENCES disposable_schema.parent(id));
+DROP SCHEMA disposable_schema CASCADE;
+INSERT INTO schema_drop_reference VALUES (42);
+DROP TABLE schema_drop_reference;
+```
+
+## Domain declarations and deletion
+
+```sql
+CREATE DOMAIN schema_name.domain_name AS base_type
+    DEFAULT default_expression
+    CONSTRAINT not_null_name NOT NULL
+    CONSTRAINT check_name CHECK (VALUE > 0);
+```
+
+The schema, default, constraint names, and constraints are optional. A domain retains its own type identity over a scalar, array, or another domain. `VALUE` denotes the value being checked; CHECK expressions must return Boolean, cannot reference other columns or contain subqueries, and accept TRUE or NULL. Multiple CHECK constraints run in alphabetical order of their names, after inherited domain checks. A column default overrides the domain default.
+
+Domain creation participates in the surrounding transaction. Definitions, defaults, constraint bindings, and type identities survive SQLite reopen and remain available to new sessions. A duplicate type name reports `42710`; invalid CHECK result types report `42804`, failed checks report `23514`, and a prohibited NULL conversion reports `23502`.
+
+Constraints run when a value is converted into a domain. Assigning an already typed domain value preserves its identity without checking it again, including a typed NULL produced by an empty scalar subquery. Explicit casts follow the base type's explicit conversion rules; assignments enforce its declaration limits. For example, casting to a `varchar(5)` domain truncates an overlength string, while assigning an overlength string to its column reports `22001`.
+
+```sql execute
+CREATE DOMAIN positive_amount AS integer DEFAULT 1
+    NOT NULL CHECK (VALUE > 0);
+CREATE TABLE domain_orders (id integer, amount positive_amount);
+INSERT INTO domain_orders (id) VALUES (1);
+INSERT INTO domain_orders VALUES (2, 5);
+SELECT id, amount FROM domain_orders ORDER BY id;
+```
+
+`DROP DOMAIN [IF EXISTS] name [, ...] [CASCADE | RESTRICT]` removes domains after resolving every target and checking domain-owner or containing-schema-owner authority. Qualified names require schema `USAGE`; unqualified names skip inaccessible search-path schemas. `IF EXISTS` reports missing types or schemas as notices, while a non-domain type still reports `42809`. Missing domains report `42704`, missing schemas report `3F000`, and insufficient authority reports `42501`.
+
+RESTRICT is the default and reports `2BP01` when another object depends on a target. Explicitly naming both a base and its derived domain permits their joint deletion when no outside dependency remains. CASCADE removes derived domains, typed columns, generated columns, dependent views and SQL-standard routines, and indexes whose expressions or predicates require the domain. Defaults and CHECK constraints that require it are removed while their independent columns and domains survive. A table retains its unrelated columns and rows. SQL-standard query and INSERT, UPDATE, DELETE, and MERGE bodies retain column dependencies; routines reading only unrelated columns and string-literal SQL bodies survive column deletion.
+
+The command returns `DROP DOMAIN` with no result rows. All target and dependency changes participate in transaction and savepoint rollback, catalog refresh, and SQLite reopen. Domain deletion in a read-only transaction reports `25006`.
+
+```sql execute
+CREATE DOMAIN cleanup_amount AS integer CHECK (VALUE > 0);
+CREATE TABLE cleanup_orders (id integer, amount cleanup_amount);
+INSERT INTO cleanup_orders VALUES (1, 5);
+CREATE FUNCTION cleanup_amount_reader() RETURNS integer
+    LANGUAGE SQL BEGIN ATOMIC SELECT amount::integer FROM cleanup_orders; END;
+DROP DOMAIN cleanup_amount CASCADE;
+SELECT * FROM cleanup_orders;
+SELECT to_regprocedure('cleanup_amount_reader()') IS NULL AS routine_removed;
+```
 
 ## Tables
 
@@ -277,7 +333,49 @@ ALTER TABLE generated_totals ALTER COLUMN line_total SET EXPRESSION AS (quantity
 ALTER TABLE orders OWNER TO app_owner;
 ```
 
-Type changes evaluate an optional `USING` expression once for each old row, validate all rewritten rows, constraints, and generated dependencies, and publish the new schema and data atomically. Built-in ranges can be rewritten to their paired multirange with `USING multirange(column)` while retaining `WITHOUT OVERLAPS`; changing one side of an existing `PERIOD` relationship to an incompatible range identity is rejected with PostgreSQL 18 datatype-mismatch SQLSTATE `42804`. `DROP COLUMN CASCADE` removes inbound foreign keys before dropping the column; other dependency kinds that are not yet modeled for cascade still reject the operation atomically.
+Column renames preserve creation-bound references in SQL-standard function and procedure bodies, including SELECT, INSERT, UPDATE, DELETE, and MERGE. Bound table columns change while relation aliases, CTE outputs, function parameters, declared result columns, and view outputs retain their identities. The table owner may rename a column used by a routine in an inaccessible schema. Recreating the old column name does not redirect stored references. String-literal SQL bodies continue resolving their original source text at execution. Missing source columns report `42703`, and duplicate destination names report `42701` before mutation. The changes follow transaction and savepoint rollback, sibling-engine catalog refresh, and SQLite reopen.
+
+```sql execute
+CREATE TABLE renamed_amounts (id integer, amount integer);
+INSERT INTO renamed_amounts VALUES (1, 42);
+CREATE FUNCTION renamed_amount_reader() RETURNS integer
+    LANGUAGE SQL BEGIN ATOMIC SELECT amount FROM renamed_amounts; END;
+ALTER TABLE renamed_amounts RENAME COLUMN amount TO total;
+ALTER TABLE renamed_amounts ADD COLUMN amount integer DEFAULT 1000;
+SELECT renamed_amount_reader();
+```
+
+`ALTER TABLE name DROP COLUMN [IF EXISTS] column [RESTRICT | CASCADE]` takes a column identifier and defaults to RESTRICT. It returns the `ALTER TABLE` command tag without rows. SQL-standard function and procedure bodies retain dependencies on columns read by queries and INSERT, UPDATE, DELETE, and MERGE expressions; INSERT and UPDATE destination columns also establish dependencies. A dependent routine blocks RESTRICT with `2BP01`. Missing columns report `42703`, while `IF EXISTS` skips a missing column after relation and owner validation.
+
+CASCADE follows stored routine dependencies through generated columns, views, owned sequences, other routines, and domains, and removes dependent defaults, CHECK constraints, indexes, and inbound foreign keys through the corresponding object lifecycle. Unrelated columns, rows, and routines survive. The table owner's authority permits removal of a dependent routine in an inaccessible schema. Statement and savepoint failures roll back the column and dependent objects together, committed changes refresh sibling engines, and stored definitions survive SQLite reopen. The Rust `Engine::drop_column` API also protects stored readers with RESTRICT behavior.
+
+Stored SQL-standard routines retain the creation-time input columns of ordinary and foreign table sources. Deleting an unread column removes its positional alias from table and enclosing join alias lists; adding columns, including reuse of a deleted name, does not change the surviving bindings or expanded projections. Renames update the retained physical names while preserving SQL aliases. This applies to nested joins, CTEs, subqueries, query and mutation-command bodies, and procedures. Source shape metadata alone does not create a read dependency: a routine that only counts rows can survive removal of every column.
+
+```sql execute
+CREATE TABLE alias_kept_source (discarded integer, amount integer);
+INSERT INTO alias_kept_source VALUES (5, 42);
+CREATE FUNCTION alias_kept_reader() RETURNS integer
+    LANGUAGE SQL BEGIN ATOMIC SELECT s.kept FROM alias_kept_source AS s(unused, kept); END;
+ALTER TABLE alias_kept_source DROP COLUMN discarded;
+ALTER TABLE alias_kept_source ADD COLUMN discarded integer DEFAULT 1000;
+SELECT alias_kept_reader();
+```
+
+A MERGE destination used only for writing does not establish a column dependency. A retained stored MERGE routine skips writes to that deleted column, including evaluation of their value expressions, while continuing to mutate surviving columns. Those stored expressions keep their routine and sequence dependencies. Non-DEFAULT assignments also retain the original destination domain dependencies, including domains inside arrays, after column removal; omitted destinations and DEFAULT assignments do not add those coercion dependencies. Reusing the old column name does not redirect the retired write. The same behavior applies to implicit INSERT destination lists, MERGE command CTEs, procedures, transaction rollback, catalog refresh, and durable reopen.
+
+```sql execute
+CREATE TABLE removed_amounts (id integer, amount integer);
+INSERT INTO removed_amounts VALUES (1, 42);
+CREATE FUNCTION removed_amount_reader() RETURNS integer
+    LANGUAGE SQL BEGIN ATOMIC SELECT amount FROM removed_amounts; END;
+CREATE FUNCTION retained_id_reader() RETURNS integer
+    LANGUAGE SQL BEGIN ATOMIC SELECT id FROM removed_amounts; END;
+ALTER TABLE removed_amounts DROP COLUMN amount CASCADE;
+SELECT to_regprocedure('removed_amount_reader()') IS NULL AS reader_removed,
+       retained_id_reader() AS retained_id;
+```
+
+Type changes evaluate an optional `USING` expression once for each old row, validate all rewritten rows, constraints, and generated dependencies, and publish the new schema and data atomically. Built-in ranges can be rewritten to their paired multirange with `USING multirange(column)` while retaining `WITHOUT OVERLAPS`; changing one side of an existing `PERIOD` relationship to an incompatible range identity is rejected with PostgreSQL 18 datatype-mismatch SQLSTATE `42804`.
 
 The role active at `CREATE TABLE` owns the ordinary table. ALTER requires the current role to be a superuser or to inherit the table owner, while DROP also permits the owning role of the containing schema. `ALTER TABLE name OWNER TO role` requires an existing target role, a SET-enabled path to it, and target-role `CREATE` on the containing schema unless the caller is a superuser. Owner transfer preserves relation and storage identities, rewrites owned serial and identity sequence ownership, updates table and index `pg_class.relowner` plus `pg_tables.tableowner`, blocks removal of dependent roles, and follows transaction, savepoint, temporary-table, cross-engine refresh, and durable-reopen lifecycle. Table ACLs and owner checks on the remaining relation-administration paths outside this standalone-index boundary are still open compatibility bugs.
 
@@ -458,7 +556,7 @@ Sequence definition changes are transactional. A parameter-changing `ALTER SEQUE
 
 `DROP SEQUENCE [ IF EXISTS ] name [, ...] [ CASCADE | RESTRICT ]` resolves relation names through the current `search_path`, validates every target before mutation, ignores duplicate targets, and uses `RESTRICT` by default. A missing target reports `42P01` unless `IF EXISTS` requests a notice and continuation, a target of another relation kind reports `42809` even with `IF EXISTS`, a dependency rejected by `RESTRICT` reports `2BP01`, and a read-only transaction reports `25006` before target lookup.
 
-`CASCADE` removes referencing column defaults, column- and table-level `CHECK` constraints, and the complete closure of dependent views while retaining the underlying tables; the same expression-granular behavior applies to foreign-table defaults and `CHECK` constraints. Dropping a serial sequence with `CASCADE` removes its column default and serial ownership metadata; if the serial default was replaced first, an ordinary drop succeeds and preserves the replacement expression. Sequence rename rewrites these stored schema expressions to the new exact relation identity, and recreating the old name cannot retarget them. Sequence drops are transactional: transaction and savepoint rollback restore the catalog object and its session-local `currval` and `lastval` identity, while a committed drop remains absent after reopen and does not transfer session values to a same-named replacement.
+`CASCADE` removes referencing column defaults, column- and table-level `CHECK` constraints, stored or virtual generated columns, routines that read those removed columns, and the complete closure of dependent views while retaining the underlying tables; the same expression-granular behavior applies to foreign-table defaults and `CHECK` constraints. Dropping a serial sequence with `CASCADE` removes its column default and serial ownership metadata; if the serial default was replaced first, an ordinary drop succeeds and preserves the replacement expression. Sequence rename rewrites these stored schema expressions to the new exact relation identity, and recreating the old name cannot retarget them. String literals explicitly cast to `regclass` in stored schema expressions bind the original relation identity. A sequence rename or recreation of the old name cannot redirect these constants, including generated values and defaults evaluated by later inserts. Surviving routine source aliases are updated when a sequence cascade removes generated columns. Sequence drops are transactional: transaction and savepoint rollback restore the catalog object and its session-local `currval` and `lastval` identity, while a committed drop remains absent after reopen and does not transfer session values to a same-named replacement.
 
 ## Foreign servers and tables
 
@@ -494,6 +592,33 @@ SELECT definition FROM pg_views WHERE viewname = 'foreign_rename_dependent';
 Foreign tables use the same nullable relation ACL and per-column ACL model as other table-shaped relations. `GRANT` and `REVOKE ... ON TABLE` support all eight relation privileges and column `SELECT`, `INSERT`, `UPDATE`, and `REFERENCES`, including `PUBLIC`, independent rooted grant-option paths, dependent `RESTRICT` and `CASCADE`, implicit owner rights, `ALL TABLES IN SCHEMA`, owner-transfer grantor rewriting, and role dependencies. SQL scans enforce table or exact-column `SELECT` across direct, joined, stored definer-view, and `security_invoker` paths; the built-in foreign wrappers expose a read-only scan interface, so `information_schema.tables.is_insertable_into` and foreign columns' `is_updatable` are `NO`. `pg_class.relacl`, `pg_attribute.attacl`, all name/OID `has_table_privilege` and `has_column_privilege` forms, `information_schema.tables`, `columns`, `column_privileges`, and `role_column_grants` expose the same durable state through transactions, savepoints, cross-engine refresh, migration, corruption validation, and reopen.
 
 Foreign tables accept ordinary `BEFORE` and `AFTER` row and statement trigger definitions for `INSERT`, `UPDATE`, `DELETE`, and `TRUNCATE`, including `UPDATE OF` and `WHEN`; constraint triggers, transition relations, and `INSTEAD OF` timing are rejected with PostgreSQL's foreign-table diagnostic. Creation enforces the foreign table's `TRIGGER` privilege and the function's `EXECUTE` privilege. The foreign table owner controls trigger rename and `ALTER FOREIGN TABLE` or historical `ALTER TABLE` enable modes, while `DROP TRIGGER` derives authority from the same live owner. `pg_trigger`, `pg_class.relhastriggers`, function dependencies, owner transfer, rollback, cross-engine refresh, durable reopen, and automatic trigger removal with `DROP FOREIGN TABLE` use the durable trigger catalog. The built-in foreign wrappers remain read-only, so writable foreign-table DML and trigger execution remain compatibility work.
+
+## Stored relation and routine dependencies
+
+`DROP TABLE`, `DROP FOREIGN TABLE`, `DROP VIEW`, `DROP MATERIALIZED VIEW`, and `DROP SEQUENCE` accept relation identifiers and use `RESTRICT` unless `CASCADE` is specified. SQL-standard `RETURN` and `BEGIN ATOMIC` routine bodies retain dependencies on referenced relations. A dependent routine prevents removal with SQLSTATE `2BP01`; a successful command returns its `DROP` tag without rows.
+
+`CASCADE` follows dependencies through stored views, routines, domain defaults, and typed or generated columns until no additional objects depend on the removed objects. This includes routines reached through a view in another schema and cycles between a view and a routine. Dropping a function or schema follows the same routine/view closure. The owner of the requested object authorizes the cascade; dependent objects do not require separate ownership or schema access. Referencing tables and unrelated columns remain. Multi-target failures are atomic, and dependency removal follows transaction and savepoint rollback, catalog refresh, and durable reopen.
+
+`regclass` casts of string literals, literal sequence arguments to `nextval`, `currval`, and `setval`, and string literals supplied to `regclass` routine arguments or parameter defaults retain the relation OID chosen at routine creation. Named arguments and scalar domains over `regclass` use the same binding. Sequence rename and recreation of the old name do not retarget these bindings. String-literal SQL and PL/pgSQL bodies retain execution-time body lookup. Explicit `text` sequence arguments also retain execution-time lookup. Integer-to-`regclass` conversions and implicit conversion at the SQL routine result boundary do not establish a stored relation dependency; parameter defaults remain creation-bound regardless of body syntax. [Column renames and deletion](#alter-table) also preserve SQL-standard body identities and enforce the corresponding read and write dependencies, including after reuse of the old column name. See [routine lifecycle](08-transactions-and-routines.md#routine-lifecycle) and [compatibility accounting](09-compatibility.md) for the remaining dependency implementation work.
+
+```sql execute
+CREATE TABLE routine_drop_source (id integer);
+CREATE VIEW routine_drop_bridge AS SELECT id FROM routine_drop_source;
+CREATE FUNCTION routine_drop_reader() RETURNS integer LANGUAGE SQL
+BEGIN ATOMIC
+    SELECT id FROM routine_drop_bridge LIMIT 1;
+END;
+DROP TABLE routine_drop_source CASCADE;
+SELECT to_regclass('routine_drop_bridge') IS NULL AS view_removed,
+       to_regprocedure('routine_drop_reader()') IS NULL AS routine_removed;
+
+CREATE SEQUENCE routine_drop_sequence START 7;
+CREATE FUNCTION routine_drop_next() RETURNS bigint LANGUAGE SQL
+RETURN nextval('routine_drop_sequence');
+ALTER SEQUENCE routine_drop_sequence RENAME TO routine_drop_sequence_moved;
+SELECT routine_drop_next();
+DROP SEQUENCE routine_drop_sequence_moved CASCADE;
+```
 
 ## TRUNCATE and DROP
 

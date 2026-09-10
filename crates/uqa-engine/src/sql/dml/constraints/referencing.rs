@@ -186,7 +186,7 @@ pub(in crate::sql) fn apply_set_action_to_child(
             ForeignKeyAction::SetNull => Value::Null,
             ForeignKeyAction::SetDefault => {
                 if let Some(expr) = engine
-                    .try_column_default_expr(table, column)
+                    .try_column_insert_default_expr(table, column)
                     .map_err(|err| dml_storage_error("referential SET DEFAULT", err))?
                 {
                     eval_lowered_expression(engine, &expr, Some(old_doc), params)?

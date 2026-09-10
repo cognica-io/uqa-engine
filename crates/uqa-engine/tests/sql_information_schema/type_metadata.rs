@@ -99,7 +99,7 @@ fn pg_catalog_system_type_storage_metadata_matches_postgresql_18() {
     let system_types = eng
         .sql(
             "SELECT typname, typlen, typbyval, typtype, typcategory, typispreferred,
-                    typalign, typstorage, typelem, typarray, typsubscript, typcollation
+                    typalign, typstorage, typelem, typarray, typsubscript::text AS typsubscript, typcollation
              FROM pg_catalog.pg_type
              WHERE typname IN ('char', 'int2vector', 'regproc', 'oid', 'xid',
                                'oidvector', 'pg_node_tree', 'aclitem', 'regclass', 'regtype', 'anyarray')
@@ -389,7 +389,7 @@ fn postgresql_18_type_catalog_preserves_io_routines_and_pseudo_types() {
         .sql(
             "SELECT oid, typname, typnamespace, typowner, typlen, typbyval, typtype,
                     typcategory, typispreferred, typisdefined, typdelim, typrelid,
-                    typsubscript, typelem, typarray, typinput, typoutput, typreceive,
+                    typsubscript::text AS typsubscript, typelem, typarray, typinput, typoutput, typreceive,
                     typsend, typmodin, typmodout, typanalyze, typalign, typstorage,
                     typnotnull, typbasetype, typtypmod, typndims, typcollation
              FROM pg_catalog.pg_type

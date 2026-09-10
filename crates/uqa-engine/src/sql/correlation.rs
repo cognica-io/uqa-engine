@@ -217,7 +217,9 @@ fn query_has_external_reference(
     if plan.ctes.iter().any(|cte| cte.recursive) {
         for cte in &plan.ctes {
             let columns = if cte.columns.is_empty() {
-                query_output_columns(&cte.query)
+                cte.body
+                    .query()
+                    .map_or_else(RelationColumns::default, query_output_columns)
             } else {
                 RelationColumns::known(cte.columns.clone())
             };
@@ -226,14 +228,18 @@ fn query_has_external_reference(
     }
     for cte in &plan.ctes {
         let columns = if cte.columns.is_empty() {
-            query_output_columns(&cte.query)
+            cte.body
+                .query()
+                .map_or_else(RelationColumns::default, query_output_columns)
         } else {
             RelationColumns::known(cte.columns.clone())
         };
         if cte.recursive {
             ctes.insert(cte.name.clone(), columns.clone());
         }
-        if query_has_external_reference(engine, &cte.query, scopes)? {
+        if cte.body.query().map_or(Ok(true), |query| {
+            query_has_external_reference(engine, query, scopes)
+        })? {
             return Ok(true);
         }
         ctes.insert(cte.name.clone(), columns);
@@ -351,6 +357,7 @@ fn source_scope(
 ) -> Result<QueryScope, SQLError> {
     match source {
         SourcePlan::Table {
+            bound_columns,
             name,
             qualifier,
             alias,
@@ -359,7 +366,10 @@ fn source_scope(
         } => {
             let mut qualifiers = BTreeSet::new();
             qualifiers.insert(alias.as_ref().unwrap_or(qualifier).clone());
-            let mut columns = relation_columns(engine, name, ctes)?;
+            let mut columns = match bound_columns {
+                Some(columns) => RelationColumns::known(columns.clone()),
+                None => relation_columns(engine, name, ctes)?,
+            };
             columns.apply_positional_aliases(column_aliases);
             Ok(QueryScope {
                 qualifiers,
@@ -721,6 +731,7 @@ fn expression_has_external_reference(expr: &ScalarExpr, scopes: &[QueryScope]) -
         | ScalarExpr::Star
         | ScalarExpr::Position(_)
         | ScalarExpr::Literal(_)
+        | ScalarExpr::TypedLiteral { .. }
         | ScalarExpr::Param(_)
         | ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. } => false,
@@ -773,6 +784,7 @@ mod tests {
             )
             .unwrap();
         let source = SourcePlan::Table {
+            bound_columns: None,
             name: "correlation_alias_source".into(),
             qualifier: "correlation_alias_source".into(),
             alias: Some("source".into()),

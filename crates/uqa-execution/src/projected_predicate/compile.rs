@@ -37,15 +37,22 @@ pub(super) fn compile(
             };
             ProjectedExpr::Field(index)
         }
-        ScalarExpr::Literal(value) => ProjectedExpr::Literal(value.clone()),
+        ScalarExpr::Literal(value) | ScalarExpr::TypedLiteral { value, .. } => {
+            ProjectedExpr::Literal(value.clone())
+        }
         ScalarExpr::Param(index) => ProjectedExpr::Literal(parameter(*index, params)?),
         ScalarExpr::Binary { op, lhs, rhs } => {
-            let integer_width = scalar_integer_binary_width(lhs, rhs);
+            let integer_width = scalar_integer_binary_width(lhs, rhs, schema, params);
+            let real_arithmetic = matches!(
+                crate::scalar_type(expression, schema, params)?,
+                Some(uqa_sql::ast::ColumnType::Real)
+            );
             compiled_binary(
                 *op,
                 require(lhs, schema, params)?,
                 require(rhs, schema, params)?,
                 integer_width,
+                real_arithmetic,
             )
         }
         ScalarExpr::UnaryMinus(expression) => {
@@ -121,6 +128,9 @@ pub(super) fn compile(
             }
         }
         ScalarExpr::Cast { expr, ty } => {
+            if uqa_sql::ast::ColumnType::from_sql_name(ty).is_err() {
+                return Ok(None);
+            }
             let expression = require(expr, schema, params)?;
             match expression {
                 // A typed SQL literal is represented as CAST(literal AS type).
@@ -217,6 +227,7 @@ fn compiled_binary(
     lhs: ProjectedExpr,
     rhs: ProjectedExpr,
     integer_width: Option<uqa_sql::expr::IntegerWidth>,
+    real_arithmetic: bool,
 ) -> ProjectedExpr {
     use uqa_sql::ast::BinaryOp;
 
@@ -254,6 +265,7 @@ fn compiled_binary(
         lhs: Box::new(lhs),
         rhs: Box::new(rhs),
         integer_width,
+        real_arithmetic,
     }
 }
 

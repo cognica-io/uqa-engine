@@ -34,7 +34,7 @@ pub(crate) use protocol::{
 };
 use view_rules::{prepare_view_rule_batches, ViewRuleBatchRequest};
 
-fn prune_unused_query_outputs(
+pub(in crate::sql) fn prune_unused_query_outputs(
     query: &mut QueryPlan,
     required_positions: &BTreeSet<usize>,
     expected_width: usize,
@@ -62,7 +62,7 @@ fn dml_storage_error(action: &str, err: impl std::fmt::Display) -> SQLError {
 }
 
 /// Resolve a statement's mutation target once, before any internal storage or rewrite path can observe its textual name.
-fn resolve_dml_target_name(
+pub(in crate::sql) fn resolve_dml_target_name(
     engine: &Engine,
     name: &str,
     target_relation_bound: bool,
@@ -709,7 +709,13 @@ fn validate_mutation_columns<'a>(
     // supplies definitions, and those targets must reject misspelled or
     // repeated mutation columns instead of persisting arbitrary fields.
     if definitions.is_empty() {
-        return Ok(());
+        let declared = engine
+            .try_table(table)
+            .map_err(|error| dml_storage_error(action, error))?
+            .is_some_and(|table| *table.columns_declared.read());
+        if !declared {
+            return Ok(());
+        }
     }
     let known: BTreeSet<&str> = definitions
         .iter()
@@ -723,7 +729,14 @@ fn validate_mutation_columns<'a>(
             )));
         }
         if !known.contains(column) {
-            return Err(SQLError::UnknownColumn(format!("{table}.{column}")));
+            let relation = RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
+            return Err(SQLError::Routine {
+                sqlstate: "42703".into(),
+                message: format!(
+                    "column \"{column}\" of relation \"{}\" does not exist",
+                    relation.name
+                ),
+            });
         }
     }
     Ok(())
@@ -804,7 +817,7 @@ fn eval_mutation_assignment(
             return Ok(None);
         }
         let value = match engine
-            .try_column_default_expr(table, column)
+            .try_column_insert_default_expr(table, column)
             .map_err(|error| dml_storage_error(action, error))?
         {
             Some(default) => eval_lowered_expression(engine, &default, None, params)?,
@@ -817,8 +830,12 @@ fn eval_mutation_assignment(
             "column `{column}` is a generated column; only DEFAULT may be assigned"
         )));
     }
+    let empty_schema = RowSchema::default();
+    let schema = row.map_or(&empty_schema, |row| &row.schema);
+    let hook = ScopedEngineHook::new(engine, ctes);
+    let source = uqa_execution::scalar_type_with_resolver(expression, schema, params, &hook)?;
     let value = eval_mutation_expr(engine, ctes, expression, row, params)?;
-    coerce_to_column_type(engine, table, column, value).map(Some)
+    super::ddl::coerce_to_column_type_from(engine, table, column, value, source.as_ref()).map(Some)
 }
 
 fn eval_view_rule_update_assignment(
@@ -888,6 +905,51 @@ pub(in crate::sql) use merge::*;
 pub(in crate::sql) use update::*;
 pub(in crate::sql) use update_from::*;
 pub(in crate::sql) use vectors::*;
+
+pub(in crate::sql) fn execute_cte_command(
+    engine: &Engine,
+    command: &uqa_planner::CommandPlan,
+    params: &[SQLParam],
+    ctes: &CteScope,
+) -> Result<SQLResult, SQLError> {
+    if let Some(error) =
+        super::catalog::virtual_relation_mutation_error(&ctes.relation_name_resolution()?, command)
+    {
+        super::prepared::analyze_command_parameters(engine, command, params, ctes)?;
+        return Err(error);
+    }
+    let mut command = command.clone();
+    let subject = ctes.privilege_subject()?.to_string();
+    match &mut command {
+        uqa_planner::CommandPlan::Insert(plan) => {
+            plan.statement_privilege_subject
+                .get_or_insert(subject.clone());
+            plan.target_privilege_subject.get_or_insert(subject);
+            insert::run_insert_with_ctes(engine, *plan.clone(), params, ctes)
+        }
+        uqa_planner::CommandPlan::Update(plan) => {
+            plan.statement_privilege_subject
+                .get_or_insert(subject.clone());
+            plan.target_privilege_subject.get_or_insert(subject);
+            update::run_update_with_ctes(engine, *plan.clone(), params, ctes)
+        }
+        uqa_planner::CommandPlan::Delete(plan) => {
+            plan.statement_privilege_subject
+                .get_or_insert(subject.clone());
+            plan.target_privilege_subject.get_or_insert(subject);
+            delete::run_delete_with_ctes(engine, *plan.clone(), params, ctes)
+        }
+        uqa_planner::CommandPlan::Merge(plan) => {
+            plan.statement_privilege_subject
+                .get_or_insert(subject.clone());
+            plan.target_privilege_subject.get_or_insert(subject);
+            merge::run_merge_with_ctes(engine, *plan.clone(), params, ctes)
+        }
+        _ => Err(SQLError::Internal(
+            "non-DML command in a WITH definition".into(),
+        )),
+    }
+}
 
 pub(in crate::sql) fn cursor_command_returning_schema(
     engine: &Engine,

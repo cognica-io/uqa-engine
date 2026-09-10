@@ -9,16 +9,17 @@
 use pg_query::protobuf::Node;
 use pg_query::NodeEnum;
 
-use crate::ast::{ColumnType, RangeSubtype};
+use crate::ast::{ColumnType, IntervalFields, RangeSubtype};
 use crate::error::{Result, SQLError};
 
 use super::tree::extract_string;
 
-/// Parser-normalized type identity used by `PostgreSQL`'s `regtype` and `regprocedure` input functions. Components retain the parser's distinction between aliases such as unquoted `integer` (normalized to `pg_catalog.int4`) and a quoted type named `"integer"`; type modifiers are intentionally omitted because these aliases identify a base catalog type.
+/// Parser-normalized type identity used by `PostgreSQL`'s `regtype` and `regprocedure` input functions. Components retain the parser's distinction between aliases such as unquoted `integer` (normalized to `pg_catalog.int4`) and a quoted type named `"integer"`. Modifier values do not participate in OID lookup; their presence is retained for declaration validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedRegtypeName {
     pub names: Vec<String>,
     pub array_dimensions: usize,
+    pub has_type_modifiers: bool,
 }
 
 /// Parser-normalized routine name and optional exact input-type signature used by `PostgreSQL`'s `regproc` and `regprocedure` input functions.
@@ -150,6 +151,7 @@ pub fn parse_regtype_name(input: &str) -> Result<Option<ParsedRegtypeName>> {
     Ok(Some(ParsedRegtypeName {
         names,
         array_dimensions,
+        has_type_modifiers: tokens.contains(&pg_query::protobuf::Token::Ascii40),
     }))
 }
 
@@ -354,164 +356,206 @@ pub(super) fn compile_pg_type_name(
             ))
         })?
         .to_lowercase();
-    let base = match raw.as_str() {
-        "smallint" | "int2" | "smallserial" | "serial2" => Ok(ColumnType::SmallInteger),
-        "int" | "int4" | "integer" | "serial" | "serial4" => Ok(ColumnType::Integer),
-        "bigint" | "int8" | "bigserial" | "serial8" => Ok(ColumnType::BigInteger),
-        "oid" => Ok(ColumnType::Oid),
-        "xid" => Ok(ColumnType::Xid),
-        "void" => Ok(ColumnType::Void),
-        "text" => Ok(ColumnType::Text),
-        "name" => Ok(ColumnType::Name),
-        "uuid" => Ok(ColumnType::Uuid),
-        "varchar" | "character varying" => {
-            if type_name.typmods.len() > 1 {
-                return Err(SQLError::TypeMismatch(format!(
-                    "CHARACTER VARYING accepts at most one length modifier, got {}",
-                    type_name.typmods.len()
-                )));
+    let bind_named = names
+        .first()
+        .is_some_and(|schema| names.len() > 1 && schema != "pg_catalog")
+        || names.last().is_some_and(|name| *name != raw)
+        || matches!(raw.as_str(), "integer" | "smallint" | "bigint" | "boolean");
+    let base = if bind_named {
+        compile_named_type(&names, type_name)
+    } else {
+        match raw.as_str() {
+            "smallint" | "int2" | "smallserial" | "serial2" => Ok(ColumnType::SmallInteger),
+            "int" | "int4" | "integer" | "serial" | "serial4" => Ok(ColumnType::Integer),
+            "bigint" | "int8" | "bigserial" | "serial8" => Ok(ColumnType::BigInteger),
+            "oid" => Ok(ColumnType::Oid),
+            "xid" => Ok(ColumnType::Xid),
+            "void" => Ok(ColumnType::Void),
+            "text" => Ok(ColumnType::Text),
+            "name" => Ok(ColumnType::Name),
+            "uuid" => Ok(ColumnType::Uuid),
+            "varchar" | "character varying" => {
+                if type_name.typmods.len() > 1 {
+                    return Err(SQLError::TypeMismatch(format!(
+                        "CHARACTER VARYING accepts at most one length modifier, got {}",
+                        type_name.typmods.len()
+                    )));
+                }
+                let length = type_name
+                    .typmods
+                    .first()
+                    .map(|node| expect_positive_character_length(node, "varchar"))
+                    .transpose()?;
+                Ok(ColumnType::Varchar(length))
             }
-            let length = type_name
-                .typmods
-                .first()
-                .map(expect_positive_character_length)
-                .transpose()?;
-            Ok(ColumnType::Varchar(length))
-        }
-        "character" | "char" | "bpchar" => {
-            if type_name.typmods.len() > 1 {
-                return Err(SQLError::TypeMismatch(format!(
-                    "CHARACTER accepts at most one length modifier, got {}",
-                    type_name.typmods.len()
-                )));
+            "char" => Ok(ColumnType::InternalChar),
+            "character" | "bpchar" => {
+                if type_name.typmods.len() > 1 {
+                    return Err(SQLError::TypeMismatch(format!(
+                        "CHARACTER accepts at most one length modifier, got {}",
+                        type_name.typmods.len()
+                    )));
+                }
+                let length = type_name
+                    .typmods
+                    .first()
+                    .map(|node| expect_positive_character_length(node, "bpchar"))
+                    .transpose()?
+                    .unwrap_or(1);
+                Ok(ColumnType::Character(length))
             }
-            let length = type_name
-                .typmods
-                .first()
-                .map(expect_positive_character_length)
-                .transpose()?
-                .unwrap_or(1);
-            Ok(ColumnType::Character(length))
-        }
-        "bool" | "boolean" => Ok(ColumnType::Boolean),
-        "real" | "float4" => Ok(ColumnType::Real),
-        "float8" | "double" | "double precision" => Ok(ColumnType::DoublePrecision),
-        "numeric" | "decimal" => {
-            if type_name.typmods.len() > 2 {
-                return Err(SQLError::TypeMismatch(format!(
-                    "NUMERIC accepts at most precision and scale, got {} modifiers",
-                    type_name.typmods.len()
-                )));
+            "bool" | "boolean" => Ok(ColumnType::Boolean),
+            "real" | "float4" => Ok(ColumnType::Real),
+            "float8" | "double" | "double precision" => Ok(ColumnType::DoublePrecision),
+            "numeric" | "decimal" => {
+                if type_name.typmods.len() > 2 {
+                    return Err(SQLError::TypeMismatch(format!(
+                        "NUMERIC accepts at most precision and scale, got {} modifiers",
+                        type_name.typmods.len()
+                    )));
+                }
+                let mut typmods_iter = type_name.typmods.iter();
+                let precision = typmods_iter
+                    .next()
+                    .map(|n| {
+                        let value = expect_integer_const(n)?;
+                        if !(1..=1000).contains(&value) {
+                            return Err(SQLError::TypeMismatch(format!(
+                                "NUMERIC precision must be between 1 and 1000, got {value}"
+                            )));
+                        }
+                        Ok(value as u32)
+                    })
+                    .transpose()?;
+                let scale = typmods_iter
+                    .next()
+                    .map(|n| {
+                        let value = expect_integer_const(n)?;
+                        if !(-1000..=1000).contains(&value) {
+                            return Err(SQLError::TypeMismatch(format!(
+                                "NUMERIC scale must be between -1000 and 1000, got {value}"
+                            )));
+                        }
+                        Ok(value as i32)
+                    })
+                    .transpose()?;
+                // PostgreSQL semantics: NUMERIC(precision) without an
+                // explicit scale defaults to scale=0, rounding to integers.
+                let scale = scale.or(precision.map(|_| 0));
+                Ok(ColumnType::Numeric { precision, scale })
             }
-            let mut typmods_iter = type_name.typmods.iter();
-            let precision = typmods_iter
-                .next()
-                .map(|n| {
-                    let value = expect_integer_const(n)?;
-                    if !(1..=1000).contains(&value) {
-                        return Err(SQLError::TypeMismatch(format!(
-                            "NUMERIC precision must be between 1 and 1000, got {value}"
-                        )));
-                    }
-                    Ok(value as u32)
-                })
-                .transpose()?;
-            let scale = typmods_iter
-                .next()
-                .map(|n| {
-                    let value = expect_integer_const(n)?;
-                    if !(-1000..=1000).contains(&value) {
-                        return Err(SQLError::TypeMismatch(format!(
-                            "NUMERIC scale must be between -1000 and 1000, got {value}"
-                        )));
-                    }
-                    Ok(value as i32)
-                })
-                .transpose()?;
-            // PostgreSQL semantics: NUMERIC(precision) without an
-            // explicit scale defaults to scale=0, rounding to integers.
-            let scale = scale.or(precision.map(|_| 0));
-            Ok(ColumnType::Numeric { precision, scale })
-        }
-        "date" => Ok(ColumnType::Date),
-        "time" | "time without time zone" => Ok(ColumnType::Time),
-        "timetz" | "time with time zone" => Ok(ColumnType::TimeTz),
-        "timestamp" | "datetime" | "timestamp without time zone" => Ok(ColumnType::Timestamp),
-        "timestamptz" | "timestamp with time zone" => Ok(ColumnType::TimestampTz),
-        "interval" => Ok(ColumnType::Interval),
-        "int4range" => Ok(ColumnType::Range(RangeSubtype::Integer)),
-        "int8range" => Ok(ColumnType::Range(RangeSubtype::BigInteger)),
-        "numrange" => Ok(ColumnType::Range(RangeSubtype::Numeric)),
-        "daterange" => Ok(ColumnType::Range(RangeSubtype::Date)),
-        "tsrange" => Ok(ColumnType::Range(RangeSubtype::Timestamp)),
-        "tstzrange" => Ok(ColumnType::Range(RangeSubtype::TimestampTz)),
-        "int4multirange" => Ok(ColumnType::Multirange(RangeSubtype::Integer)),
-        "int8multirange" => Ok(ColumnType::Multirange(RangeSubtype::BigInteger)),
-        "nummultirange" => Ok(ColumnType::Multirange(RangeSubtype::Numeric)),
-        "datemultirange" => Ok(ColumnType::Multirange(RangeSubtype::Date)),
-        "tsmultirange" => Ok(ColumnType::Multirange(RangeSubtype::Timestamp)),
-        "tstzmultirange" => Ok(ColumnType::Multirange(RangeSubtype::TimestampTz)),
-        "json" => Ok(ColumnType::Json),
-        "jsonb" => Ok(ColumnType::JsonB),
-        "bytea" => Ok(ColumnType::Bytea),
-        "regproc" => Ok(ColumnType::Regproc),
-        "regprocedure" => Ok(ColumnType::Regprocedure),
-        "regclass" => Ok(ColumnType::Regclass),
-        "regnamespace" => Ok(ColumnType::Regnamespace),
-        "regrole" => Ok(ColumnType::Regrole),
-        "regtype" => Ok(ColumnType::Regtype),
-        "pg_node_tree" => Ok(ColumnType::PgNodeTree),
-        "aclitem" => Ok(ColumnType::AclItem),
-        "int2vector" => Ok(ColumnType::Int2Vector),
-        "oidvector" => Ok(ColumnType::OidVector),
-        "anyarray" => Ok(ColumnType::AnyArray),
-        "record" => Ok(ColumnType::Record),
-        "vector" => {
-            // VECTOR(N): the dimension is the only typmod argument.
-            let [arg] = type_name.typmods.as_slice() else {
-                return Err(SQLError::Unsupported(
-                    "VECTOR requires exactly one dimension".into(),
-                ));
-            };
-            let raw_dim = expect_integer_const(arg)?;
-            let dim = u32::try_from(raw_dim).map_err(|_| {
-                SQLError::TypeMismatch(format!(
-                    "VECTOR dimension must be between 1 and {}, got {raw_dim}",
-                    u32::MAX
-                ))
-            })?;
-            if dim == 0 {
-                return Err(SQLError::TypeMismatch(
-                    "VECTOR dimension must be greater than zero".into(),
-                ));
+            "date" => Ok(ColumnType::Date),
+            "time" | "time without time zone" => Ok(ColumnType::Time),
+            "timetz" | "time with time zone" => Ok(ColumnType::TimeTz),
+            "timestamp" | "datetime" | "timestamp without time zone" => Ok(ColumnType::Timestamp),
+            "timestamptz" | "timestamp with time zone" => Ok(ColumnType::TimestampTz),
+            "interval" => {
+                let fields = type_name
+                    .typmods
+                    .first()
+                    .map(expect_integer_const)
+                    .transpose()?
+                    .unwrap_or(32767);
+                let fields = IntervalFields::from_modifier_mask(fields)
+                    .ok_or_else(|| SQLError::TypeMismatch("invalid interval fields".into()))?;
+                let precision = type_name
+                    .typmods
+                    .get(1)
+                    .map(expect_integer_const)
+                    .transpose()?;
+                ColumnType::with_interval_modifiers(fields, precision)
             }
-            Ok(ColumnType::Vector(dim))
-        }
-        "tensor" => {
-            // TENSOR(N): an array of N-dimensional vectors.
-            let [arg] = type_name.typmods.as_slice() else {
-                return Err(SQLError::Unsupported(
-                    "TENSOR requires exactly one dimension".into(),
-                ));
-            };
-            let raw_dim = expect_integer_const(arg)?;
-            let dim = u32::try_from(raw_dim).map_err(|_| {
-                SQLError::TypeMismatch(format!(
-                    "TENSOR dimension must be between 1 and {}, got {raw_dim}",
-                    u32::MAX
-                ))
-            })?;
-            if dim == 0 {
-                return Err(SQLError::TypeMismatch(
-                    "TENSOR dimension must be greater than zero".into(),
-                ));
+            "int4range" => Ok(ColumnType::Range(RangeSubtype::Integer)),
+            "int8range" => Ok(ColumnType::Range(RangeSubtype::BigInteger)),
+            "numrange" => Ok(ColumnType::Range(RangeSubtype::Numeric)),
+            "daterange" => Ok(ColumnType::Range(RangeSubtype::Date)),
+            "tsrange" => Ok(ColumnType::Range(RangeSubtype::Timestamp)),
+            "tstzrange" => Ok(ColumnType::Range(RangeSubtype::TimestampTz)),
+            "int4multirange" => Ok(ColumnType::Multirange(RangeSubtype::Integer)),
+            "int8multirange" => Ok(ColumnType::Multirange(RangeSubtype::BigInteger)),
+            "nummultirange" => Ok(ColumnType::Multirange(RangeSubtype::Numeric)),
+            "datemultirange" => Ok(ColumnType::Multirange(RangeSubtype::Date)),
+            "tsmultirange" => Ok(ColumnType::Multirange(RangeSubtype::Timestamp)),
+            "tstzmultirange" => Ok(ColumnType::Multirange(RangeSubtype::TimestampTz)),
+            "json" => Ok(ColumnType::Json),
+            "jsonb" => Ok(ColumnType::JsonB),
+            "bytea" => Ok(ColumnType::Bytea),
+            "regproc" => Ok(ColumnType::Regproc),
+            "regprocedure" => Ok(ColumnType::Regprocedure),
+            "regclass" => Ok(ColumnType::Regclass),
+            "regnamespace" => Ok(ColumnType::Regnamespace),
+            "regrole" => Ok(ColumnType::Regrole),
+            "regtype" => Ok(ColumnType::Regtype),
+            "pg_node_tree" => Ok(ColumnType::PgNodeTree),
+            "aclitem" => Ok(ColumnType::AclItem),
+            "int2vector" => Ok(ColumnType::Int2Vector),
+            "oidvector" => Ok(ColumnType::OidVector),
+            "anyarray" => Ok(ColumnType::AnyArray),
+            "record" => Ok(ColumnType::Record),
+            "vector" => {
+                // VECTOR(N): the dimension is the only typmod argument.
+                let [arg] = type_name.typmods.as_slice() else {
+                    return Err(SQLError::Unsupported(
+                        "VECTOR requires exactly one dimension".into(),
+                    ));
+                };
+                let raw_dim = expect_integer_const(arg)?;
+                let dim = u32::try_from(raw_dim).map_err(|_| {
+                    SQLError::TypeMismatch(format!(
+                        "VECTOR dimension must be between 1 and {}, got {raw_dim}",
+                        u32::MAX
+                    ))
+                })?;
+                if dim == 0 {
+                    return Err(SQLError::TypeMismatch(
+                        "VECTOR dimension must be greater than zero".into(),
+                    ));
+                }
+                Ok(ColumnType::Vector(dim))
             }
-            Ok(ColumnType::Tensor(dim))
+            "tensor" => {
+                // TENSOR(N): an array of N-dimensional vectors.
+                let [arg] = type_name.typmods.as_slice() else {
+                    return Err(SQLError::Unsupported(
+                        "TENSOR requires exactly one dimension".into(),
+                    ));
+                };
+                let raw_dim = expect_integer_const(arg)?;
+                let dim = u32::try_from(raw_dim).map_err(|_| {
+                    SQLError::TypeMismatch(format!(
+                        "TENSOR dimension must be between 1 and {}, got {raw_dim}",
+                        u32::MAX
+                    ))
+                })?;
+                if dim == 0 {
+                    return Err(SQLError::TypeMismatch(
+                        "TENSOR dimension must be greater than zero".into(),
+                    ));
+                }
+                Ok(ColumnType::Tensor(dim))
+            }
+            _ => compile_named_type(&names, type_name),
         }
-        other => Err(SQLError::Unsupported(format!(
-            "column `{column_name}` type `{other}` is not supported"
-        ))),
     }?;
+    let base = if matches!(
+        base,
+        ColumnType::Time | ColumnType::TimeTz | ColumnType::Timestamp | ColumnType::TimestampTz
+    ) {
+        if type_name.typmods.len() > 1 {
+            return Err(SQLError::TypeMismatch(
+                "invalid temporal type modifier".into(),
+            ));
+        }
+        base.with_temporal_precision(
+            type_name
+                .typmods
+                .first()
+                .map(expect_integer_const)
+                .transpose()?,
+        )?
+    } else {
+        base
+    };
     if matches!(base, ColumnType::Void) && !type_name.array_bounds.is_empty() {
         return Err(SQLError::Routine {
             sqlstate: "42704".into(),
@@ -524,15 +568,67 @@ pub(super) fn compile_pg_type_name(
         .fold(base, |element, _| ColumnType::Array(Box::new(element))))
 }
 
-fn expect_positive_character_length(node: &Node) -> Result<u32> {
+/// Resolve a type reference without interpreting column-only serial pseudo-types.
+pub(super) fn compile_pg_type_reference(
+    type_name: &pg_query::protobuf::TypeName,
+    context: &str,
+) -> Result<ColumnType> {
+    let names = type_name
+        .names
+        .iter()
+        .map(extract_string)
+        .collect::<Result<Vec<_>>>()?;
+    if names.last().is_some_and(|name| {
+        matches!(
+            name.as_str(),
+            "serial" | "serial2" | "serial4" | "serial8" | "smallserial" | "bigserial"
+        )
+    }) {
+        let base = compile_named_type(&names, type_name)?;
+        return Ok(type_name
+            .array_bounds
+            .iter()
+            .fold(base, |element, _| ColumnType::Array(Box::new(element))));
+    }
+    compile_pg_type_name(type_name, context)
+}
+
+fn compile_named_type(
+    names: &[String],
+    type_name: &pg_query::protobuf::TypeName,
+) -> Result<ColumnType> {
+    let mut name = names
+        .iter()
+        .map(|name| format!("\"{}\"", name.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(".");
+    if !type_name.typmods.is_empty() {
+        let modifiers = type_name
+            .typmods
+            .iter()
+            .map(expect_integer_const)
+            .collect::<Result<Vec<_>>>()?;
+        name.push('(');
+        name.push_str(
+            &modifiers
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+        name.push(')');
+    }
+    Ok(ColumnType::Named(name))
+}
+
+fn expect_positive_character_length(node: &Node, type_name: &str) -> Result<u32> {
     let length = expect_integer_const(node)?;
     u32::try_from(length)
         .ok()
         .filter(|length| *length > 0)
-        .ok_or_else(|| {
-            SQLError::TypeMismatch(format!(
-                "character length must be greater than zero, got {length}"
-            ))
+        .ok_or_else(|| SQLError::Routine {
+            sqlstate: "22023".into(),
+            message: format!("length for type {type_name} must be at least 1"),
         })
 }
 

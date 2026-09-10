@@ -12,6 +12,7 @@
 
 pub mod cancel;
 pub mod doc_set;
+mod float_text;
 pub mod posting_list;
 pub mod predicate;
 pub mod ranked_view;
@@ -20,6 +21,7 @@ pub mod types;
 
 pub use cancel::{CancellationToken, QueryCancelled, SQLSTATE_QUERY_CANCELED};
 pub use doc_set::DocSet;
+pub use float_text::format_float_pg;
 pub use posting_list::{GeneralizedPostingList, PostingList};
 pub use predicate::Predicate;
 pub use ranked_view::RankedView;

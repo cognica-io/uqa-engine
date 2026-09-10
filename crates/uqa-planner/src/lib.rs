@@ -57,6 +57,7 @@ pub mod join_graph;
 pub mod join_order;
 pub mod optimizer;
 pub mod parallel;
+pub mod plan_cost;
 pub mod query_optimizer;
 pub mod text_top_k;
 pub mod unified_plan;
@@ -88,10 +89,10 @@ pub use query_optimizer::{
 pub use text_top_k::{plan_text_top_k, TextTopKCapabilities};
 pub use unified_plan::{
     rewrite_scalar_expression, AccessPathPlan, AggregateClassifier, AssignmentPlan, CommandPlan,
-    ComputePlan, ConflictActionPlan, ConflictPlan, CteCyclePlan, CtePlan, CteSearchPlan,
-    DeletePlan, ExpressionPlan, InsertPlan, JoinExecutionStrategy, MergePlan, MergeWhenPlan,
-    OrderPlan, ProjectionPlan, QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan,
-    TableFunctionPlan, UnifiedPlan, UpdatePlan, ViewCheckPlan, ViewRuleInsertPlan,
+    ComputePlan, ConflictActionPlan, ConflictPlan, CteCyclePlan, CtePlan, CtePlanBody,
+    CteSearchPlan, DeletePlan, ExpressionPlan, InsertPlan, JoinExecutionStrategy, MergePlan,
+    MergeWhenPlan, OrderPlan, ProjectionPlan, QueryBlockPlan, QueryPlan, RelationalPlan,
+    SourcePlan, TableFunctionPlan, UnifiedPlan, UpdatePlan, ViewCheckPlan, ViewRuleInsertPlan,
     ViewRuleReturningPlan, ViewRuleUpdatePlan,
 };
 pub use uqa_execution::{

@@ -298,9 +298,19 @@ fn evaluate<'a, F: FieldValues + ?Sized>(
             lhs,
             rhs,
             integer_width,
+            real_arithmetic,
         } => {
             let lhs = evaluate(lhs, fields)?;
             let rhs = evaluate(rhs, fields)?;
+            if *real_arithmetic {
+                return uqa_sql::expr::eval_float_arithmetic(
+                    *op,
+                    lhs.as_value(),
+                    rhs.as_value(),
+                    uqa_sql::expr::FloatWidth::Real,
+                )
+                .map(ProjectedValue::Owned);
+            }
             ProjectedValue::Owned(eval_binary_values_with_integer_width(
                 *op,
                 lhs.as_value(),

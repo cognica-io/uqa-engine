@@ -6,6 +6,15 @@
 
 //! Prepared-statement coverage.
 
+#[path = "sql_prepared/analysis.rs"]
+mod analysis;
+#[path = "sql_prepared/parameters.rs"]
+mod parameters;
+#[path = "sql_prepared/planning.rs"]
+mod planning;
+#[path = "sql_prepared/selection.rs"]
+mod selection;
+
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLResult};
 use uqa_sql::{ColumnType, SQLParam};
@@ -60,7 +69,7 @@ fn direct_parameters_retain_static_type_during_projection_binding() {
             &[SQLParam::Scalar(Value::Int(1))],
         )
         .unwrap();
-    assert_eq!(result.rows[0]["ty"], Value::Str("integer".into()));
+    assert_eq!(result.rows[0]["ty"], Value::Int(23));
     assert_eq!(result.column_types, [Some(ColumnType::Regtype)]);
 }
 
@@ -217,25 +226,13 @@ fn aggregate_results_preserve_postgresql_return_types() {
             pg_typeof(ARRAY_AGG(small_value)) AS small_array_type
          FROM aggregate_types",
     );
-    assert_eq!(types.rows[0]["count_type"], Value::Str("bigint".into()));
-    assert_eq!(types.rows[0]["small_sum_type"], Value::Str("bigint".into()));
-    assert_eq!(
-        types.rows[0]["small_avg_type"],
-        Value::Str("numeric".into())
-    );
-    assert_eq!(types.rows[0]["big_sum_type"], Value::Str("numeric".into()));
-    assert_eq!(
-        types.rows[0]["real_avg_type"],
-        Value::Str("double precision".into())
-    );
-    assert_eq!(
-        types.rows[0]["small_min_type"],
-        Value::Str("smallint".into())
-    );
-    assert_eq!(
-        types.rows[0]["small_array_type"],
-        Value::Str("smallint[]".into())
-    );
+    assert_eq!(types.rows[0]["count_type"], Value::Int(20));
+    assert_eq!(types.rows[0]["small_sum_type"], Value::Int(20));
+    assert_eq!(types.rows[0]["small_avg_type"], Value::Int(1700));
+    assert_eq!(types.rows[0]["big_sum_type"], Value::Int(1700));
+    assert_eq!(types.rows[0]["real_avg_type"], Value::Int(701));
+    assert_eq!(types.rows[0]["small_min_type"], Value::Int(21));
+    assert_eq!(types.rows[0]["small_array_type"], Value::Int(1005));
 }
 
 #[test]
@@ -412,7 +409,12 @@ fn execute_missing_param_raises() {
         &engine,
         "PREPARE q AS SELECT name FROM employees WHERE id = $1 AND dept = $2",
     );
-    assert!(err(&engine, "EXECUTE q (1)").contains("No value supplied"));
+    let error = engine.sql("EXECUTE q (1)", &[]).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42601"));
+    assert_eq!(
+        error.to_string(),
+        "wrong number of parameters for prepared statement \"q\""
+    );
 }
 
 #[test]

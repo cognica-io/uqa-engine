@@ -176,6 +176,12 @@ pub enum Expr {
     #[doc(hidden)]
     InternalColumn(InternalColumnRef),
     Literal(Value),
+    /// An already-coerced runtime datum with its declared SQL type. Variable binding emits this leaf so reading a domain value does not repeat its constraints.
+    #[doc(hidden)]
+    TypedLiteral {
+        value: Value,
+        ty: String,
+    },
     /// A positional bind parameter (`$1`, `$2`, ...).
     Param(usize),
     /// `text_match(...)`, `knn_match(...)`, etc. - dispatched through
@@ -389,6 +395,7 @@ impl Expr {
             | Self::QualifiedColumn { .. }
             | Self::InternalColumn(_)
             | Self::Literal(_)
+            | Self::TypedLiteral { .. }
             | Self::Param(_) => {}
         }
         changed
@@ -487,6 +494,7 @@ impl Expr {
             | Self::QualifiedColumn { .. }
             | Self::InternalColumn(_)
             | Self::Literal(_)
+            | Self::TypedLiteral { .. }
             | Self::Param(_)
             | Self::ScalarSubquery(_)
             | Self::Exists { .. } => false,
@@ -531,7 +539,13 @@ fn upgrade_ctes(ctes: &mut [CTE]) -> bool {
             changed |= cycle.mark_value.upgrade_legacy_serialized_dispatches();
             changed |= cycle.mark_default.upgrade_legacy_serialized_dispatches();
         }
-        changed | cte.query.upgrade_legacy_serialized_dispatches()
+        let mut statement = cte.body.clone().into_statement();
+        let body_changed = statement.upgrade_legacy_serialized_dispatches();
+        if body_changed {
+            cte.body = super::CteBody::try_from(statement)
+                .expect("dispatch migration preserves the CTE statement kind");
+        }
+        changed | body_changed
     })
 }
 
@@ -627,6 +641,13 @@ impl Statement {
     pub fn upgrade_legacy_serialized_dispatches(&mut self) -> bool {
         match self {
             Self::Select(select) => select.upgrade_legacy_serialized_dispatches(),
+            Self::CreateDomain(domain) => {
+                let mut changed = upgrade_optional(&mut domain.default);
+                for check in &mut domain.checks {
+                    changed |= check.expression.upgrade_legacy_serialized_dispatches();
+                }
+                changed
+            }
             Self::Insert(insert) => {
                 let mut changed = upgrade_ctes(&mut insert.with);
                 changed |= upgrade_rows(&mut insert.rows);
@@ -681,7 +702,8 @@ impl Statement {
             Self::Execute { params, .. } | Self::Call { args: params, .. } => upgrade_exprs(params),
             Self::Values { rows } => upgrade_rows(rows),
             Self::Merge(merge) => {
-                let mut changed = merge.source.upgrade_legacy_serialized_dispatches();
+                let mut changed = upgrade_ctes(&mut merge.with);
+                changed |= merge.source.upgrade_legacy_serialized_dispatches();
                 changed |= merge.join_condition.upgrade_legacy_serialized_dispatches();
                 for clause in &mut merge.when_clauses {
                     changed |= clause.upgrade_legacy_serialized_dispatches();
@@ -723,6 +745,7 @@ impl Statement {
             | Self::AlterView(_)
             | Self::RefreshMaterializedView { .. }
             | Self::CreateSchema { .. }
+            | Self::AlterSchemaOwner { .. }
             | Self::Notify { .. }
             | Self::Listen { .. }
             | Self::Unlisten { .. }

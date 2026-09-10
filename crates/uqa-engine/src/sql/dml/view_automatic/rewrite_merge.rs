@@ -25,6 +25,7 @@ pub(in crate::sql::dml) fn rewrite_merge_to_base(
     engine: &Engine,
     statement: &MergePlan,
     params: &[uqa_sql::SQLParam],
+    inherited_ctes: Option<&super::CteScope>,
 ) -> Result<MergePlan, SQLError> {
     if super::super::view_triggers::target_view_kind(engine, &statement.target)?
         == Some(StoredViewKind::Materialized)
@@ -37,7 +38,12 @@ pub(in crate::sql::dml) fn rewrite_merge_to_base(
             ),
         });
     }
-    let analysis_scope = dml_analysis_scope(engine, &[], &statement.subqueries);
+    let analysis_scope = dml_analysis_scope(
+        engine,
+        &statement.ctes,
+        &statement.subqueries,
+        inherited_ctes,
+    );
     let source_schema = crate::sql::select::analyze_source_plan_schema(
         engine,
         &statement.source,
@@ -61,7 +67,14 @@ pub(in crate::sql::dml) fn rewrite_merge_to_base(
         .unwrap_or_else(|| not_automatically_updatable(&statement.target, "MERGE")));
     };
     validate_merge_targets(&initial_layer, statement)?;
-    validate_merge_expressions(engine, statement, &initial_layer, &source_schema, params)?;
+    validate_merge_expressions(
+        engine,
+        statement,
+        &initial_layer,
+        &source_schema,
+        params,
+        inherited_ctes,
+    )?;
     if let Some(error) = merge_action_capability_error(
         &statement.target,
         &statement.when_clauses,
@@ -106,13 +119,14 @@ pub(in crate::sql::dml) fn rewrite_merge_to_base(
         let matched_subqueries = merge_matched_subquery_ids(&plan);
         rewrite_correlated_dml_context(
             CorrelatedDmlContext {
+                inherited_ctes,
                 engine,
                 layer: &layer,
                 target_qualifier: &plan.target_qualifier,
                 source: Some(&source_schema),
                 returning_aliases: None,
                 include_excluded: false,
-                ctes: &[],
+                ctes: &plan.ctes,
                 ids: &matched_subqueries,
                 params,
             },
@@ -121,13 +135,14 @@ pub(in crate::sql::dml) fn rewrite_merge_to_base(
         let target_only_subqueries = merge_target_only_subquery_ids(&plan);
         rewrite_correlated_dml_context(
             CorrelatedDmlContext {
+                inherited_ctes,
                 engine,
                 layer: &layer,
                 target_qualifier: &plan.target_qualifier,
                 source: None,
                 returning_aliases: None,
                 include_excluded: false,
-                ctes: &[],
+                ctes: &plan.ctes,
                 ids: &target_only_subqueries,
                 params,
             },
@@ -136,13 +151,14 @@ pub(in crate::sql::dml) fn rewrite_merge_to_base(
         let returning_subqueries = returning_subquery_ids(&plan.returning);
         rewrite_correlated_dml_context(
             CorrelatedDmlContext {
+                inherited_ctes,
                 engine,
                 layer: &layer,
                 target_qualifier: &plan.target_qualifier,
                 source: Some(&source_schema),
                 returning_aliases: Some(&plan.returning_aliases),
                 include_excluded: false,
-                ctes: &[],
+                ctes: &plan.ctes,
                 ids: &returning_subqueries,
                 params,
             },

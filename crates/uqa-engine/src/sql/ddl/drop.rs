@@ -34,13 +34,17 @@ pub(in crate::sql) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLRes
     if stmt.kind == DropKind::Index {
         return run_drop_index(engine, stmt);
     }
-    if stmt.cascade
-        && stmt.kind == DropKind::Schema
-        && !only_graph_namespaces(engine, &stmt.names, stmt.if_exists)?
-    {
-        return Err(SQLError::Unsupported(
-            "DROP SCHEMA CASCADE is not supported; no objects were changed".into(),
-        ));
+    if stmt.kind == DropKind::Schema {
+        return engine.with_implicit_transaction(|engine| {
+            engine.drop_schemas_sql(&stmt)?;
+            Ok(SQLResult::empty())
+        });
+    }
+    if stmt.kind == DropKind::Domain {
+        return engine.with_implicit_transaction(|engine| {
+            engine.drop_domains_sql(&stmt)?;
+            Ok(SQLResult::empty())
+        });
     }
     let mut lock_targets = std::collections::BTreeSet::new();
     match stmt.kind {
@@ -61,50 +65,14 @@ pub(in crate::sql) fn run_drop(engine: &Engine, stmt: DropStmt) -> Result<SQLRes
             }
         }
         DropKind::Index => unreachable!("DROP INDEX has a bound execution path"),
-        DropKind::Schema => {
-            // Dropping a schema removes every relation it owns, including the label relations of a graph namespace, so each of them takes the same AccessExclusive lock a direct DROP would.
-            for name in &stmt.names {
-                for table in engine
-                    .tables_in_schema(name)
-                    .map_err(|err| ddl_storage_error("DROP SCHEMA relation lock", err))?
-                {
-                    lock_targets.insert(format!("{name}.{table}"));
-                }
-            }
-        }
+        DropKind::Schema => unreachable!("DROP SCHEMA has a namespace dependency path"),
+        DropKind::Domain => unreachable!("DROP DOMAIN has a type dependency path"),
         DropKind::Sequence => {}
     }
     for table in lock_targets {
         engine.lock_relation(&table, crate::row_locks::RelationLockMode::AccessExclusive)?;
     }
     engine.with_implicit_transaction(move |engine| run_drop_inner(engine, stmt))
-}
-
-/// `DROP SCHEMA ... CASCADE` is implemented for graph namespaces, whose only
-/// dependents are the graph's own label relations, so cascading drops the
-/// graph exactly like AGE.
-fn only_graph_namespaces(
-    engine: &Engine,
-    names: &[String],
-    if_exists: bool,
-) -> Result<bool, SQLError> {
-    for name in names {
-        let is_graph = engine
-            .has_graph(name)
-            .map_err(|err| ddl_storage_error("DROP SCHEMA", err))?;
-        let is_schema = engine
-            .has_schema(name)
-            .map_err(|err| ddl_storage_error("DROP SCHEMA", err))?;
-        // `IF EXISTS` skips a name that is neither a graph nor a schema, so
-        // it must not force the unsupported-CASCADE rejection.
-        if if_exists && !is_graph && !is_schema {
-            continue;
-        }
-        if !is_graph || is_schema {
-            return Ok(false);
-        }
-    }
-    Ok(!names.is_empty())
 }
 
 #[expect(
@@ -116,18 +84,39 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
         DropKind::Table => {
             let mut tables = Vec::new();
             for name in &stmt.names {
-                match engine.try_resolve_visible_relation_kind(name)? {
-                    Some((canonical, "table")) => tables.push(canonical),
-                    Some((canonical, kind)) => {
-                        return Err(SQLError::Unsupported(format!(
-                            "DROP TABLE: relation `{canonical}` is a {kind}, not a table"
-                        )));
+                let (_, local) =
+                    crate::RelationIdentity::parse_reference(name).map_err(SQLError::Internal)?;
+                match engine.resolve_visible_relation_kind(name)? {
+                    RelationResolution::Found(canonical, "table") => tables.push(canonical),
+                    RelationResolution::Found(_, _) => {
+                        return Err(SQLError::Routine {
+                            sqlstate: "42809".into(),
+                            message: format!("\"{local}\" is not a table"),
+                        });
                     }
-                    None if stmt.if_exists => {}
-                    None => {
-                        return Err(SQLError::Unsupported(format!(
-                            "DROP TABLE: relation `{name}` does not exist"
-                        )));
+                    RelationResolution::MissingSchema(schema) if stmt.if_exists => {
+                        engine.push_sql_notice(
+                            "NOTICE",
+                            &format!("schema \"{schema}\" does not exist, skipping"),
+                        );
+                    }
+                    RelationResolution::MissingRelation if stmt.if_exists => {
+                        engine.push_sql_notice(
+                            "NOTICE",
+                            &format!("table \"{local}\" does not exist, skipping"),
+                        );
+                    }
+                    RelationResolution::MissingSchema(schema) => {
+                        return Err(SQLError::Routine {
+                            sqlstate: "3F000".into(),
+                            message: format!("schema \"{schema}\" does not exist"),
+                        });
+                    }
+                    RelationResolution::MissingRelation => {
+                        return Err(SQLError::Routine {
+                            sqlstate: "42P01".into(),
+                            message: format!("table \"{local}\" does not exist"),
+                        });
                     }
                 }
             }
@@ -145,6 +134,7 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
                 });
             }
             if !stmt.cascade {
+                engine.drop_relation_routine_dependents(&tables, false, "table")?;
                 let restrict_dependents = engine
                     .try_drop_table_restrict_dependents(&tables)
                     .map_err(|err| ddl_storage_error("DROP TABLE dependency preflight", err))?;
@@ -211,6 +201,11 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
             for table in &foreign_tables {
                 engine.ensure_foreign_table_drop_authority(table)?;
             }
+            engine.drop_relation_routine_dependents(
+                &foreign_tables,
+                stmt.cascade,
+                "foreign table",
+            )?;
             let target_names = foreign_tables.iter().cloned().collect();
             let owned_sequences = engine
                 .foreign_table_owned_sequence_names(&foreign_tables)
@@ -323,7 +318,7 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
                     }
                 }
             }
-            engine.drop_views(&views, stmt.cascade)?;
+            engine.drop_views(&views, stmt.cascade, expected_kind)?;
         }
         DropKind::Sequence => {
             let mut sequences = Vec::new();
@@ -365,50 +360,8 @@ fn run_drop_inner(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
             }
             engine.drop_sequences_sql_inner(&sequences, stmt.cascade)?;
         }
-        DropKind::Schema => {
-            let mut schemas = Vec::new();
-            let mut graphs = Vec::new();
-            for name in &stmt.names {
-                let exists = engine
-                    .preflight_drop_schema(name)
-                    .map_err(|err| ddl_storage_error("DROP SCHEMA", err))?;
-                if exists {
-                    schemas.push(name.clone());
-                    continue;
-                }
-                // A named graph owns a namespace of the same name whose
-                // label relations always depend on it, exactly like AGE's
-                // graph schema: RESTRICT fails and CASCADE drops the graph.
-                if engine
-                    .has_graph(name)
-                    .map_err(|err| ddl_storage_error("DROP SCHEMA", err))?
-                {
-                    if !stmt.cascade {
-                        return Err(SQLError::Routine {
-                            sqlstate: "2BP01".into(),
-                            message: format!(
-                                "cannot drop schema {name} because other objects depend on it"
-                            ),
-                        });
-                    }
-                    graphs.push(name.clone());
-                } else if !stmt.if_exists {
-                    return Err(SQLError::Unsupported(format!(
-                        "DROP SCHEMA: schema `{name}` does not exist"
-                    )));
-                }
-            }
-            for schema in schemas {
-                engine
-                    .drop_schema(&schema)
-                    .map_err(|err| ddl_storage_error("DROP SCHEMA", err))?;
-            }
-            for graph in graphs {
-                engine
-                    .drop_graph(&graph)
-                    .map_err(|err| ddl_storage_error("DROP SCHEMA", err))?;
-            }
-        }
+        DropKind::Schema => unreachable!("DROP SCHEMA has a namespace dependency path"),
+        DropKind::Domain => unreachable!("DROP DOMAIN has a type dependency path"),
     }
     Ok(SQLResult::empty())
 }

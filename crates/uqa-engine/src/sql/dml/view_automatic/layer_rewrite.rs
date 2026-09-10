@@ -213,6 +213,63 @@ fn rename_source_plan_subqueries(
     }
 }
 
+fn rename_shadowing_cte_qualifier(
+    body: &mut uqa_planner::CtePlanBody,
+    qualifier: &str,
+    replacement: &str,
+    inherited: bool,
+) {
+    match body {
+        uqa_planner::CtePlanBody::Query(query) => {
+            rename_shadowing_query_qualifier(query, qualifier, replacement, inherited);
+        }
+        uqa_planner::CtePlanBody::Command(command) => {
+            if let Some(ctes) = command.ctes_mut() {
+                for cte in ctes {
+                    rename_shadowing_cte_qualifier(
+                        &mut cte.body,
+                        qualifier,
+                        replacement,
+                        inherited,
+                    );
+                }
+            }
+            for query in command.query_inputs_mut() {
+                rename_shadowing_query_qualifier(query, qualifier, replacement, inherited);
+            }
+            if let Some(source) = command.source_input_mut() {
+                rename_source_plan_subqueries(source, qualifier, replacement, inherited);
+            }
+        }
+    }
+}
+
+fn collect_cte_source_qualifiers(
+    body: &uqa_planner::CtePlanBody,
+    qualifiers: &mut BTreeSet<String>,
+) {
+    match body {
+        uqa_planner::CtePlanBody::Query(query) => {
+            collect_query_source_qualifiers(query, qualifiers);
+        }
+        uqa_planner::CtePlanBody::Command(command) => {
+            if let Some(qualifier) = command.target_qualifier() {
+                qualifiers.insert(qualifier.to_string());
+            }
+            for cte in command.ctes() {
+                qualifiers.insert(cte.name.clone());
+                collect_cte_source_qualifiers(&cte.body, qualifiers);
+            }
+            for query in command.query_inputs() {
+                collect_query_source_qualifiers(query, qualifiers);
+            }
+            if let Some(source) = command.source_input() {
+                collect_source_qualifiers(source, qualifiers);
+            }
+        }
+    }
+}
+
 fn rename_shadowing_query_qualifier(
     query: &mut QueryPlan,
     qualifier: &str,
@@ -220,7 +277,7 @@ fn rename_shadowing_query_qualifier(
     inherited: bool,
 ) {
     for cte in &mut query.ctes {
-        rename_shadowing_query_qualifier(&mut cte.query, qualifier, replacement, inherited);
+        rename_shadowing_cte_qualifier(&mut cte.body, qualifier, replacement, inherited);
     }
     match &mut query.root {
         RelationalPlan::QueryBlock(block) => {
@@ -312,7 +369,7 @@ fn rename_shadowing_query_qualifier(
 fn collect_query_source_qualifiers(query: &QueryPlan, qualifiers: &mut BTreeSet<String>) {
     for cte in &query.ctes {
         qualifiers.insert(cte.name.clone());
-        collect_query_source_qualifiers(&cte.query, qualifiers);
+        collect_cte_source_qualifiers(&cte.body, qualifiers);
     }
     match &query.root {
         RelationalPlan::QueryBlock(block) => {
@@ -464,7 +521,12 @@ fn rewrite_layer_source_query(
     for cte in &mut query.ctes {
         rewrite_layer_source_query(
             context,
-            &mut cte.query,
+            cte.body.query_mut().ok_or_else(|| {
+                SQLError::Unsupported(
+                    "WITH clause containing a data-modifying statement must be at the top level"
+                        .into(),
+                )
+            })?,
             &query_scope,
             inherited_qualifier_shadows,
             inherited_column_shadows,

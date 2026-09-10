@@ -1,5 +1,6 @@
 #include "pg_query.h"
 #include "pg_query_json_plpgsql.h"
+#include "pg_query_plpgsql_catalog.h"
 
 #include "pg_query_json_helper.c"
 
@@ -726,6 +727,8 @@ dump_type(StringInfo out, PLpgSQL_type *node)
 	WRITE_NODE_TYPE("PLpgSQL_type");
 
 	WRITE_STRING_FIELD(typname, typname, typname);
+	if (pg_query_plpgsql_catalog_available())
+		appendStringInfo(out, "\"typoid\":%u,", node->typoid);
 	if (node->origtypname != NULL && node->origtypname->names != NIL)
 	{
 		appendStringInfoString(out, "\"typname_identifiers\":[");

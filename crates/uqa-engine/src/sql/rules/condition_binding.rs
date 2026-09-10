@@ -194,6 +194,7 @@ where
         | Expr::InternalColumn(_)
         | Expr::Default
         | Expr::Literal(_)
+        | Expr::TypedLiteral { .. }
         | Expr::Star
         | Expr::QualifiedStar(_) => bind_expr(expression, resolver)?,
     })

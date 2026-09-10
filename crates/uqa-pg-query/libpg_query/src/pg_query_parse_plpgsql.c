@@ -3,6 +3,7 @@
 #include "pg_query.h"
 #include "pg_query_internal.h"
 #include "pg_query_json_plpgsql.h"
+#include "pg_query_plpgsql_catalog.h"
 #include "pg_query_proctup_attrs.h"
 
 #include <assert.h>
@@ -25,6 +26,156 @@ typedef struct {
 } PgQueryInternalPlpgsqlFuncAndError;
 
 static PgQueryInternalPlpgsqlFuncAndError pg_query_raw_parse_plpgsql(Node* stmt);
+
+static const PgQueryPlpgsqlCatalog *
+pg_query_current_plpgsql_catalog(void)
+{
+	MemoryContext context = CurrentMemoryContext;
+
+	while (context != NULL)
+	{
+		if (context->libpg_query_plpgsql_catalog != NULL)
+			return (const PgQueryPlpgsqlCatalog *)
+				context->libpg_query_plpgsql_catalog;
+		context = context->parent;
+	}
+	return NULL;
+}
+
+static void
+pg_query_report_plpgsql_catalog_error(const PgQueryPlpgsqlCatalog *catalog,
+									 const char *fallback)
+{
+	const char *message = catalog->get_error(catalog->context);
+
+	if (message == NULL || message[0] == '\0')
+		message = fallback;
+	elog(ERROR, "%s", message);
+}
+
+static bool
+pg_query_plpgsql_type_metadata_is_valid(
+	const PgQueryPlpgsqlTypeMetadata *type)
+{
+	return type != NULL && type->oid != 0 && type->namespace_oid != 0
+		&& type->name != NULL
+		&& type->name[0] != '\0' && strlen(type->name) < NAMEDATALEN
+		&& (type->length == -2 || type->length == -1 || type->length > 0)
+		&& (!type->by_value
+			|| type->length == 1 || type->length == 2
+			|| type->length == 4 || type->length == 8)
+		&& strchr("bcdeprm", type->type_kind) != NULL
+		&& type->category != '\0'
+		&& strchr("csid", type->alignment) != NULL
+		&& strchr("pexm", type->storage) != NULL;
+}
+
+bool
+pg_query_plpgsql_catalog_available(void)
+{
+	return pg_query_current_plpgsql_catalog() != NULL;
+}
+
+bool
+pg_query_plpgsql_lookup_namespace(const char *schema_name,
+								  uint32_t *namespace_oid)
+{
+	const PgQueryPlpgsqlCatalog *catalog = pg_query_current_plpgsql_catalog();
+	PgQueryCatalogLookupResult lookup_result;
+
+	if (catalog == NULL)
+		return false;
+	if (schema_name == NULL || schema_name[0] == '\0'
+		|| namespace_oid == NULL)
+		elog(ERROR, "invalid PL/pgSQL namespace catalog lookup arguments");
+	*namespace_oid = 0;
+	lookup_result = catalog->lookup_namespace(catalog->context, schema_name,
+											 namespace_oid);
+	switch (lookup_result)
+	{
+		case PG_QUERY_CATALOG_LOOKUP_FOUND:
+			if (*namespace_oid == 0)
+				elog(ERROR, "PL/pgSQL catalog returned an invalid namespace OID");
+			return true;
+		case PG_QUERY_CATALOG_LOOKUP_NOT_FOUND:
+			return false;
+		case PG_QUERY_CATALOG_LOOKUP_ERROR:
+			pg_query_report_plpgsql_catalog_error(
+				catalog, "PL/pgSQL namespace catalog lookup failed");
+			return false;
+		default:
+			elog(ERROR, "PL/pgSQL namespace catalog returned an invalid result");
+			return false;
+	}
+}
+
+bool
+pg_query_plpgsql_lookup_type_by_name(
+	const char *schema_name, const char *type_name,
+	PgQueryPlpgsqlTypeMetadata *type)
+{
+	const PgQueryPlpgsqlCatalog *catalog = pg_query_current_plpgsql_catalog();
+	PgQueryCatalogLookupResult lookup_result;
+
+	if (catalog == NULL)
+		return false;
+	if ((schema_name != NULL && schema_name[0] == '\0')
+		|| type_name == NULL || type_name[0] == '\0' || type == NULL)
+		elog(ERROR, "invalid PL/pgSQL type catalog lookup arguments");
+	memset(type, 0, sizeof(*type));
+	lookup_result = catalog->lookup_type_by_name(
+		catalog->context, schema_name, type_name, type);
+	switch (lookup_result)
+	{
+		case PG_QUERY_CATALOG_LOOKUP_FOUND:
+			if (!pg_query_plpgsql_type_metadata_is_valid(type))
+				elog(ERROR, "PL/pgSQL catalog returned invalid type metadata");
+			if (strcmp(type->name, type_name) != 0)
+				elog(ERROR, "PL/pgSQL catalog returned mismatched type metadata");
+			return true;
+		case PG_QUERY_CATALOG_LOOKUP_NOT_FOUND:
+			return false;
+		case PG_QUERY_CATALOG_LOOKUP_ERROR:
+			pg_query_report_plpgsql_catalog_error(
+				catalog, "PL/pgSQL type catalog lookup failed");
+			return false;
+		default:
+			elog(ERROR, "PL/pgSQL type catalog returned an invalid result");
+			return false;
+	}
+}
+
+bool
+pg_query_plpgsql_lookup_type_by_oid(
+	uint32_t type_oid, PgQueryPlpgsqlTypeMetadata *type)
+{
+	const PgQueryPlpgsqlCatalog *catalog = pg_query_current_plpgsql_catalog();
+	PgQueryCatalogLookupResult lookup_result;
+
+	if (catalog == NULL)
+		return false;
+	if (type_oid == 0 || type == NULL)
+		elog(ERROR, "invalid PL/pgSQL type OID catalog lookup arguments");
+	memset(type, 0, sizeof(*type));
+	lookup_result = catalog->lookup_type_by_oid(catalog->context, type_oid, type);
+	switch (lookup_result)
+	{
+		case PG_QUERY_CATALOG_LOOKUP_FOUND:
+			if (!pg_query_plpgsql_type_metadata_is_valid(type)
+				|| type->oid != type_oid)
+				elog(ERROR, "PL/pgSQL catalog returned mismatched type metadata");
+			return true;
+		case PG_QUERY_CATALOG_LOOKUP_NOT_FOUND:
+			return false;
+		case PG_QUERY_CATALOG_LOOKUP_ERROR:
+			pg_query_report_plpgsql_catalog_error(
+				catalog, "PL/pgSQL type OID catalog lookup failed");
+			return false;
+		default:
+			elog(ERROR, "PL/pgSQL type OID catalog returned an invalid result");
+			return false;
+	}
+}
 
 /*
  *	 Examine the RETURNS clause of the CREATE FUNCTION statement
@@ -586,7 +737,9 @@ static bool stmts_walker(Node *node, plStmts *state)
 	return result;
 }
 
-PgQueryPlpgsqlParseResult pg_query_parse_plpgsql(const char* input)
+PgQueryPlpgsqlParseResult
+pg_query_parse_plpgsql_with_catalog(const char *input,
+									const PgQueryPlpgsqlCatalog *catalog)
 {
 	MemoryContext ctx = NULL;
 	PgQueryPlpgsqlParseResult result = {0};
@@ -595,6 +748,19 @@ PgQueryPlpgsqlParseResult pg_query_parse_plpgsql(const char* input)
 	size_t i;
 
 	ctx = pg_query_enter_memory_context();
+	if (catalog != NULL
+		&& (catalog->lookup_namespace == NULL
+			|| catalog->lookup_type_by_name == NULL
+			|| catalog->lookup_type_by_oid == NULL
+			|| catalog->get_error == NULL))
+	{
+		result.error = calloc(1, sizeof(PgQueryError));
+		result.error->message = strdup(
+			"PL/pgSQL catalog resolver is incomplete");
+		pg_query_exit_memory_context(ctx);
+		return result;
+	}
+	ctx->libpg_query_plpgsql_catalog = catalog;
 
 	parse_result = pg_query_raw_parse(input, PG_QUERY_PARSE_DEFAULT);
 	result.error = parse_result.error;
@@ -661,6 +827,12 @@ PgQueryPlpgsqlParseResult pg_query_parse_plpgsql(const char* input)
 	pg_query_exit_memory_context(ctx);
 
 	return result;
+}
+
+PgQueryPlpgsqlParseResult
+pg_query_parse_plpgsql(const char *input)
+{
+	return pg_query_parse_plpgsql_with_catalog(input, NULL);
 }
 
 void pg_query_free_plpgsql_parse_result(PgQueryPlpgsqlParseResult result)

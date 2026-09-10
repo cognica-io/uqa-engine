@@ -47,11 +47,6 @@ pub(in crate::sql) fn run_single_foreign_select_output(
     let source_types = typed_columns.into_iter().map(|(_, ty)| Some(ty)).collect();
     let source_schema =
         uqa_execution::RowSchema::with_qualified_types(qualifier, source_columns, source_types);
-    let columns = expand_from_star_columns(
-        projection_columns(&stmt.projections),
-        &stmt.projections,
-        &source_schema,
-    )?;
     let source: Box<dyn uqa_execution::PhysicalOperator + '_> =
         Box::new(uqa_execution::RowIteratorScan::with_row_schema(
             source_schema,
@@ -60,6 +55,16 @@ pub(in crate::sql) fn run_single_foreign_select_output(
                     .map_err(uqa_execution::ExecError::from)
             })),
         ));
+    let bound_columns = match stmt.from.as_ref() {
+        Some(uqa_planner::SourcePlan::Table { bound_columns, .. }) => bound_columns.as_deref(),
+        _ => None,
+    };
+    let source = crate::sql::from_rows::bound_source_operator(source, bound_columns)?;
+    let columns = expand_from_star_columns(
+        projection_columns(&stmt.projections),
+        &stmt.projections,
+        source.row_schema(),
+    )?;
     execute_query_block_operator_output(
         engine,
         source,

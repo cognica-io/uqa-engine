@@ -82,18 +82,24 @@ fn run_create_table_as_inner(
     }
     let preliminary_name = create_table_as_target_name(engine, execution)?;
     if should_skip_existing_create_table_as(engine, &preliminary_name, execution.if_not_exists)? {
-        return Ok(SQLResult::empty());
+        return Ok(SQLResult::empty().with_command_tag("CREATE TABLE AS"));
     }
     let columns = create_table_as_columns(&query_schema, execution.column_names)?;
     if execution.persistence != uqa_sql::ast::RelationPersistence::Temporary {
         engine.ensure_relation_creation_privilege(&preliminary_name)?;
     }
+    let executable = if execution.with_no_data {
+        None
+    } else {
+        Some(crate::sql::optimize_engine_query(engine, execution.query)?)
+    };
+    let executable = executable.as_ref().unwrap_or(execution.query);
     // A locking source must acquire and recheck every tuple before this session promotes its deferred backend transaction. Promoting first would invert the global writer and tuple-lock order against a concurrent updater. The target is checked again after promotion so a concurrent relation create still wins atomically.
     let locking_result =
-        if !execution.with_no_data && crate::sql::select::query_has_row_locks(execution.query) {
+        if !execution.with_no_data && crate::sql::select::query_has_row_locks(executable) {
             Some(crate::sql::select::execute_query_plan(
                 engine,
-                execution.query,
+                executable,
                 execution.params,
             )?)
         } else {
@@ -104,7 +110,7 @@ fn run_create_table_as_inner(
     }
     let name = create_table_as_target_name(engine, execution)?;
     if should_skip_existing_create_table_as(engine, &name, execution.if_not_exists)? {
-        return Ok(SQLResult::empty());
+        return Ok(SQLResult::empty().with_command_tag("CREATE TABLE AS"));
     }
     if execution.persistence != uqa_sql::ast::RelationPersistence::Temporary {
         engine.ensure_relation_creation_privilege(&name)?;
@@ -116,7 +122,7 @@ fn run_create_table_as_inner(
     } else {
         Some(crate::sql::select::execute_query_plan(
             engine,
-            execution.query,
+            executable,
             execution.params,
         )?)
     };
@@ -139,7 +145,12 @@ fn run_create_table_as_inner(
     let affected = result.as_ref().map_or(Ok(0), |result| {
         materialize_create_table_as_rows(engine, &name, &columns, result)
     })?;
-    Ok(SQLResult::from_affected(affected))
+    let tag = if execution.with_no_data {
+        "CREATE TABLE AS".to_string()
+    } else {
+        format!("SELECT {affected}")
+    };
+    Ok(SQLResult::from_affected(affected).with_command_tag(tag))
 }
 
 fn create_table_as_target_name(

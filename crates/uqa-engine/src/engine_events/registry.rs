@@ -118,7 +118,6 @@ impl Engine {
             let plan = uqa_planner::UnifiedPlan::lower_with(action, &|name: &str| {
                 self.has_registered_aggregate_function(name)
             });
-            let plan = crate::sql::optimize_engine_plan(self, plan)?;
             let uqa_planner::UnifiedPlan::Query(plan) = plan else {
                 return Err(SQLError::Internal(
                     "ON SELECT rule action lowered to a command".into(),

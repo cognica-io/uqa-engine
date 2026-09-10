@@ -566,10 +566,13 @@ fn validate_rule_action_namespace(engine: &Engine, action: &Statement) -> Result
 
 fn validate_rule_ctes(engine: &Engine, ctes: &[uqa_sql::ast::CTE]) -> Result<(), SQLError> {
     for cte in ctes {
-        if let Some(qualifier) = first_rule_row_reference_in_select(engine, &cte.query) {
+        let statement = cte.body.clone().into_statement();
+        if let Some(qualifier) =
+            super::rule_binding::first_rule_row_reference_in_statement(engine, &statement)?
+        {
             return Err(invalid_rule_cte_reference(&qualifier));
         }
-        validate_rule_select_scopes(engine, &cte.query)?;
+        validate_rule_action_reference_scopes(engine, &statement)?;
     }
     Ok(())
 }
@@ -731,6 +734,7 @@ fn validate_rule_expr_scopes(engine: &Engine, expr: &Expr) -> Result<(), SQLErro
         }
         Expr::Default
         | Expr::Literal(_)
+        | Expr::TypedLiteral { .. }
         | Expr::Star
         | Expr::QualifiedStar(_)
         | Expr::Column(_)

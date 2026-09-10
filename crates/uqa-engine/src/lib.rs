@@ -85,6 +85,7 @@ mod engine_cancellation;
 mod engine_capabilities;
 mod engine_catalog_indexes;
 mod engine_database_security;
+mod engine_domains;
 mod engine_events;
 mod engine_fdw;
 mod engine_foreign_table_security;
@@ -446,6 +447,7 @@ pub(crate) struct ConstraintModeState {
 }
 
 struct TransactionFrame {
+    started_at_micros: i64,
     /// Whether this outer frame is an implicit SQL-driver boundary rather than a user-visible `BEGIN` block. A simple-query batch promotes it when the batch reaches `BEGIN`.
     implicit_statement: bool,
     /// Whether the user has entered an explicit transaction block. A multi-statement simple-query message still owns one atomic frame, but `PostgreSQL` permits `DISCARD` there until `BEGIN` promotes it.
@@ -545,7 +547,7 @@ struct TransactionSavepoint {
     constraint_modes: ConstraintModeState,
 }
 
-/// Lightweight SQL-session state that follows transaction/savepoint rollback for every backend. It is intentionally separate from the database-sized memory-engine snapshot so persistent sessions receive identical SET, search-path, PREPARE, and statement-cache semantics. Sequence `currval` and last-used entries produced after the snapshot are reapplied because sequence functions are nontransactional in `PostgreSQL`.
+/// Lightweight SQL-session state that follows transaction/savepoint rollback for every backend. It is intentionally separate from the database-sized memory-engine snapshot so persistent sessions receive identical SET, search-path, and statement-cache semantics. Sequence `currval` and last-used entries produced after the snapshot are reapplied because sequence functions are nontransactional in `PostgreSQL`.
 #[derive(Clone, Default)]
 struct SessionStateSnapshot {
     /// A pinned physical graph view plus this transaction's changed identities. Savepoints retain only handles and changed-id checkpoints, never graph payload replicas.
@@ -553,9 +555,10 @@ struct SessionStateSnapshot {
     search_path: Vec<String>,
     temporary_namespace_allocated: bool,
     session_vars: BTreeMap<String, String>,
+    local_parameter_restore: BTreeMap<String, engine_state::RuntimeParameterValue>,
     sequence_currvals: BTreeMap<RelationIdentity, SessionSequenceValue>,
     last_sequence: Option<SessionLastSequenceReference>,
-    prepared: BTreeMap<String, PreparedStatementPlan>,
+    sequence_discard_generation: u64,
     sql_statement_cache: SQLStatementCache,
     /// Names of portals that existed at this transaction or savepoint boundary. Rollback removes portals created later without rewinding cursor positions or resurrecting closed portals.
     portal_names: BTreeSet<String>,
@@ -720,6 +723,7 @@ struct EngineDataSnapshot {
 }
 
 #[derive(Clone)]
+#[expect(clippy::struct_excessive_bools, reason = "independent snapshot flags")]
 struct TableDataSnapshot {
     state: Arc<TableState>,
     security: engine_state::TableSecurity,
@@ -730,6 +734,7 @@ struct TableDataSnapshot {
     value_indexes: BTreeMap<uqa_storage::ValueIndexKey, value_index::ColumnValueIndex>,
     fts_fields: Vec<FieldName>,
     columns: Vec<uqa_sql::ast::ColumnDef>,
+    columns_declared: bool,
     /// One-past-the-last allocated document id. `u128` is intentional: it
     /// represents `u64::MAX + 1`, so exhaustion is distinguishable from an
     /// available final id and can never wrap or issue a duplicate.
@@ -759,13 +764,10 @@ pub(crate) struct TableState {
     inverted_index: RwLock<Box<dyn InvertedIndex>>,
     vector_indexes: RwLock<BTreeMap<FieldName, Box<dyn VectorIndex>>>,
     fts_fields: engine_state::CatalogCell<Vec<FieldName>>,
-    /// Column schema captured at CREATE TABLE / ALTER TABLE time.
-    /// Drives auto-id allocation and ALTER COLUMN bookkeeping.
+    /// Column schema captured at CREATE TABLE / ALTER TABLE time, driving auto-id allocation and ALTER COLUMN bookkeeping.
     columns: engine_state::CatalogCell<Vec<uqa_sql::ast::ColumnDef>>,
-    /// Monotonic id watermark for SERIAL/BIGSERIAL columns. The first
-    /// allocated value is `1`; the watermark grows past
-    /// `max(existing_doc_id, allocated)` so reopened catalogs do not
-    /// collide with existing rows.
+    columns_declared: engine_state::CatalogCell<bool>,
+    /// Monotonic id watermark for SERIAL/BIGSERIAL columns. The first allocated value is `1`; the watermark grows past `max(existing_doc_id, allocated)` so reopened catalogs do not collide with existing rows.
     next_id: parking_lot::Mutex<u128>,
     analyzer: engine_state::CatalogCell<Analyzer>,
     /// Per-column statistics refreshed by `ANALYZE table_name` or lazily

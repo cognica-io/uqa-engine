@@ -55,8 +55,10 @@ pub(in crate::sql) enum AggregateAccumulatorTemplate {
 }
 
 impl AggregateAccumulatorTemplate {
-    pub(super) fn builtin(name: &str) -> Self {
-        Self::Builtin(AggregateStatePlan::builtin(name))
+    pub(super) fn builtin(name: &str, input_type: Option<&uqa_sql::ast::ColumnType>) -> Self {
+        Self::Builtin(AggregateStatePlan::builtin_with_input_type(
+            name, input_type,
+        ))
     }
 
     pub(super) fn generic() -> Self {
@@ -127,6 +129,7 @@ pub(in crate::sql) enum AggregateStatePlan {
     Generic,
     Count,
     Sum,
+    SumReal,
     Min,
     Max,
     BoolAnd,
@@ -136,6 +139,18 @@ pub(in crate::sql) enum AggregateStatePlan {
 }
 
 impl AggregateStatePlan {
+    fn builtin_with_input_type(name: &str, input_type: Option<&uqa_sql::ast::ColumnType>) -> Self {
+        use uqa_sql::ast::ColumnType;
+        if let Some(ColumnType::Domain { base, .. }) = input_type {
+            return Self::builtin_with_input_type(name, Some(base));
+        }
+        if name.eq_ignore_ascii_case("sum") && matches!(input_type, Some(ColumnType::Real)) {
+            Self::SumReal
+        } else {
+            Self::builtin(name)
+        }
+    }
+
     pub(super) fn builtin(name: &str) -> Self {
         match name.to_ascii_lowercase().as_str() {
             "count" => Self::Count,
@@ -227,6 +242,15 @@ impl AggregateAccumulator {
         }
     }
 
+    pub(in crate::sql) fn builtin_with_input_type(
+        name: &str,
+        input_type: Option<&uqa_sql::ast::ColumnType>,
+    ) -> Self {
+        let mut accumulator = Self::builtin(name);
+        accumulator.state_plan = AggregateStatePlan::builtin_with_input_type(name, input_type);
+        accumulator
+    }
+
     pub(super) fn builtin_with_budget(name: &str, budget_bytes: usize) -> Self {
         Self::from_plan_with_budget(AggregateStatePlan::builtin(name), budget_bytes)
     }
@@ -275,7 +299,7 @@ impl AggregateAccumulator {
                     .ok_or_else(|| SQLError::TypeMismatch("aggregate count overflow".into()))?;
                 Ok(())
             }
-            AggregateStatePlan::Sum => {
+            AggregateStatePlan::Sum | AggregateStatePlan::SumReal => {
                 self.count = self
                     .count
                     .checked_add(1)
@@ -327,7 +351,7 @@ impl AggregateAccumulator {
                     .checked_add(1)
                     .ok_or_else(|| SQLError::TypeMismatch("aggregate count overflow".into()))?;
             }
-            AggregateStatePlan::Sum => {
+            AggregateStatePlan::Sum | AggregateStatePlan::SumReal => {
                 self.count = self
                     .count
                     .checked_add(1)
@@ -501,7 +525,11 @@ impl AggregateAccumulator {
                         self.integer_sum as f64
                     };
                 }
-                self.sum += *value;
+                self.sum = if self.count == 1 {
+                    *value
+                } else {
+                    self.combine_float_sum(self.sum, *value)?
+                };
                 self.numeric_inputs.observe_float();
             }
             _ => {
@@ -511,6 +539,26 @@ impl AggregateAccumulator {
             }
         }
         Ok(())
+    }
+
+    pub(super) fn combine_float_sum(&self, left: f64, right: f64) -> Result<f64, SQLError> {
+        use uqa_sql::expr::{eval_float_arithmetic, FloatWidth};
+        let width = if matches!(self.state_plan, AggregateStatePlan::SumReal) {
+            FloatWidth::Real
+        } else {
+            FloatWidth::DoublePrecision
+        };
+        match eval_float_arithmetic(
+            uqa_sql::ast::BinaryOp::Add,
+            &Value::Float(left),
+            &Value::Float(right),
+            width,
+        )? {
+            Value::Float(value) => Ok(value),
+            _ => Err(SQLError::Internal(
+                "floating sum lost its numeric carrier".into(),
+            )),
+        }
     }
 
     pub(super) fn observe_min(&mut self, value: &Value) {
@@ -555,10 +603,10 @@ impl AggregateAccumulator {
         if matches!(value, Value::Null) {
             return Ok(());
         }
-        self.observe_state(value)?;
         if self.state_plan.retains_values() {
-            self.values.push(value.clone(), keys)?;
+            self.observe_state(value)?;
         }
+        self.values.push(value.clone(), keys)?;
         Ok(())
     }
 

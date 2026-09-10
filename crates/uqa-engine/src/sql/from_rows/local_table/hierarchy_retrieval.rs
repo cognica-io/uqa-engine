@@ -42,6 +42,7 @@ pub(super) fn build_hierarchy_retrieval_operator<'a>(
     let SourcePlan::Table {
         name: logical_table,
         column_aliases,
+        bound_columns,
         include_descendants,
         ..
     } = source
@@ -52,13 +53,16 @@ pub(super) fn build_hierarchy_retrieval_operator<'a>(
     };
     let catalog = ctes.catalog_read_view()?;
     let resolution = ctes.relation_name_resolution()?;
-    let physical_columns = catalog
-        .table_resolved(&resolution, logical_table)?
-        .ok_or_else(|| SQLError::UnknownTable(logical_table.clone()))?
-        .columns
-        .iter()
-        .map(|column| column.name.clone())
-        .collect::<Vec<_>>();
+    let physical_columns = crate::sql::from_rows::bound_source_column_names(
+        catalog
+            .table_resolved(&resolution, logical_table)?
+            .ok_or_else(|| SQLError::UnknownTable(logical_table.clone()))?
+            .columns
+            .iter()
+            .map(|column| column.name.clone())
+            .collect::<Vec<_>>(),
+        bound_columns.as_deref(),
+    )?;
     let mut physical_predicate = predicate.clone();
     uqa_planner::rewrite_scalar_expression(&mut physical_predicate, &mut |expression| {
         let column = match expression {

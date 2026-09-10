@@ -105,6 +105,7 @@ impl Engine {
             vector_indexes: RwLock::new(vectors),
             fts_fields: CatalogCell::from_snapshot(source.fts_fields.snapshot()),
             columns: CatalogCell::from_snapshot(source.columns.snapshot()),
+            columns_declared: CatalogCell::from_snapshot(source.columns_declared.snapshot()),
             next_id: Mutex::new(*source.next_id.lock()),
             analyzer: CatalogCell::from_snapshot(source.analyzer.snapshot()),
             column_stats: CatalogCell::from_snapshot(source.column_stats.snapshot()),

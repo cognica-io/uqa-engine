@@ -1,0 +1,1912 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SHOW plan_cache_mode",
+      "command_tags": [
+        "SHOW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "plan_cache_mode"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "auto"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SET plan_cache_mode = 'invalid'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "invalid value for parameter \"plan_cache_mode\": \"invalid\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SET plan_cache_mode = auto",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE cache_plain AS SELECT 1 AS result",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_plain'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_plain",
+              "{}",
+              "{integer}",
+              "0",
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_plain",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_plain'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_plain",
+              "{}",
+              "{integer}",
+              "1",
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_plain",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_plain'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_plain",
+              "{}",
+              "{integer}",
+              "2",
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE cache_parameter AS SELECT $1::integer + 1 AS result",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_parameter",
+              "{integer}",
+              "{integer}",
+              "0",
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_parameter(1)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_parameter",
+              "{integer}",
+              "{integer}",
+              "0",
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_parameter(2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_parameter",
+              "{integer}",
+              "{integer}",
+              "0",
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_parameter(3)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "4"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_parameter",
+              "{integer}",
+              "{integer}",
+              "0",
+              "3"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_parameter(4)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_parameter",
+              "{integer}",
+              "{integer}",
+              "0",
+              "4"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_parameter(5)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_parameter",
+              "{integer}",
+              "{integer}",
+              "0",
+              "5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_parameter(6)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_parameter",
+              "{integer}",
+              "{integer}",
+              "1",
+              "5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_parameter(7)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "8"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_parameter",
+              "{integer}",
+              "{integer}",
+              "2",
+              "5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_parameter(8)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "9"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_parameter",
+              "{integer}",
+              "{integer}",
+              "3",
+              "5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_parameter",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "wrong number of parameters for prepared statement \"cache_parameter\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_parameter",
+              "{integer}",
+              "{integer}",
+              "3",
+              "5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_parameter('bad')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"bad\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_parameter",
+              "{integer}",
+              "{integer}",
+              "3",
+              "5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_parameter(true)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "parameter $1 of type boolean cannot be coerced to the expected type integer"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_parameter",
+              "{integer}",
+              "{integer}",
+              "3",
+              "5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SET plan_cache_mode = force_custom_plan",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_parameter(9)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "10"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_parameter",
+              "{integer}",
+              "{integer}",
+              "3",
+              "6"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_plain",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_plain'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_plain",
+              "{}",
+              "{integer}",
+              "3",
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SET plan_cache_mode = force_generic_plan",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_parameter(10)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "11"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_parameter",
+              "{integer}",
+              "{integer}",
+              "4",
+              "6"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DISCARD PLANS",
+      "command_tags": [
+        "DISCARD PLANS"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_parameter(11)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "12"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_parameter",
+              "{integer}",
+              "{integer}",
+              "5",
+              "6"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "RESET plan_cache_mode",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_parameter(12)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "13"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_parameter'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_parameter",
+              "{integer}",
+              "{integer}",
+              "6",
+              "6"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE cache_division AS SELECT 10 / $1 AS result",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_division(0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_division'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_division",
+              "{integer}",
+              "{integer}",
+              "0",
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_division(2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_division'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_division",
+              "{integer}",
+              "{integer}",
+              "0",
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SET plan_cache_mode = force_generic_plan",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_division(0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_division'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_division",
+              "{integer}",
+              "{integer}",
+              "1",
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SET plan_cache_mode = force_custom_plan",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_division(0)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_division'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_division",
+              "{integer}",
+              "{integer}",
+              "1",
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_division(NULL)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_division'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_division",
+              "{integer}",
+              "{integer}",
+              "1",
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE cache_constant AS SELECT 1 / 0 AS result",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_constant(1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_constant'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_constant",
+              "{}",
+              "{integer}",
+              "0",
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_constant",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_constant'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_constant",
+              "{}",
+              "{integer}",
+              "0",
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE cache_conditional AS SELECT CASE WHEN $1 THEN 1 ELSE 1 / 0 END AS result",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_conditional(true)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_conditional'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_conditional",
+              "{boolean}",
+              "{integer}",
+              "0",
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_conditional(false)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_conditional'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_conditional",
+              "{boolean}",
+              "{integer}",
+              "0",
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SET plan_cache_mode = force_generic_plan",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_conditional(true)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_conditional'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_conditional",
+              "{boolean}",
+              "{integer}",
+              "0",
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "RESET plan_cache_mode",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE cache_argument_sequence",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE cache_argument AS SELECT 1 / 0 + $1 AS result",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE cache_argument(nextval('cache_argument_sequence')::integer)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM cache_argument_sequence",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text,result_types::text,generic_plans,custom_plans FROM pg_prepared_statements WHERE name='cache_argument'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "result_types",
+            "generic_plans",
+            "custom_plans"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "cache_argument",
+              "{integer}",
+              "{integer}",
+              "0",
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP SEQUENCE cache_argument_sequence",
+      "command_tags": [
+        "DROP SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DEALLOCATE ALL",
+      "command_tags": [
+        "DEALLOCATE ALL"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    }
+  ]
+}

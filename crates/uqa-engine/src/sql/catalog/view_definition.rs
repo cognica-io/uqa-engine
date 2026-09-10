@@ -20,7 +20,7 @@ use crate::{Engine, RelationIdentity, StoredView, StoredViewKind};
 mod expressions;
 mod query;
 mod rename;
-pub(crate) use rename::rename_view_column_query;
+pub(crate) use rename::{rename_view_column_query, view_query_references_column};
 mod sources;
 
 pub(in crate::sql) fn pg_get_viewdef_value(

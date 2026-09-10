@@ -8,6 +8,21 @@ use super::{BuiltinRoutineCatalogEntry, FALSE_NODE};
 
 pub(super) const ROUTINES: &[BuiltinRoutineCatalogEntry] = &[
     BuiltinRoutineCatalogEntry {
+        oid: 89,
+        name: "version",
+        kind: "f",
+        strict: true,
+        volatility: "s",
+        parallel: "s",
+        leakproof: false,
+        return_type: 25,
+        argument_types: &[],
+        argument_names: &[],
+        default_arguments: 0,
+        argument_defaults: None,
+        source: "pgsql_version",
+    },
+    BuiltinRoutineCatalogEntry {
         oid: 2212,
         name: "regprocedurein",
         kind: "f",

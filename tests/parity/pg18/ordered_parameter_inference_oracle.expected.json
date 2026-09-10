@@ -1,0 +1,3032 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN parameter_domain AS integer CHECK(VALUE>0)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE parameter_target(id integer, label varchar(4), domain_value parameter_domain)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION parameter_function(a integer, b text DEFAULT 'b') RETURNS text LANGUAGE SQL AS $$SELECT a::text || b$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_000 AS SELECT $1",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_000'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{text}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_001 AS SELECT $1, $1::integer",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P08",
+        "message": "inconsistent types deduced for parameter $1"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_001'",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_002 AS SELECT $1::integer, $1",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_002'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_003 AS SELECT $1 WHERE $1=1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P08",
+        "message": "inconsistent types deduced for parameter $1"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_003'",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_004 AS SELECT $1::integer WHERE $1=1",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_004'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_005 AS SELECT pg_typeof($1), $1::integer",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P08",
+        "message": "could not determine data type of parameter $1"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_005'",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_006 AS SELECT $1::integer, pg_typeof($1)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_006'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_007 AS SELECT $1 IS NULL",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P18",
+        "message": "could not determine data type of parameter $1"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_007'",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_008 AS SELECT $1 IS NULL, $1::integer",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P08",
+        "message": "could not determine data type of parameter $1"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_008'",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_009 AS SELECT $1::integer, $1 IS NULL",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_009'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_010 AS SELECT $1 + 1",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_010'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_011 AS SELECT 1 + $1",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_011'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_012 AS SELECT $1 + $2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42725",
+        "message": "operator is not unique: unknown + unknown"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_012'",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_013 AS SELECT $1 = $2",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_013'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{text,text}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_014 AS SELECT $1 + 1::bigint",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_014'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{bigint}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_015 AS SELECT $1 + 1.0::numeric",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_015'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{numeric}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_016 AS SELECT $1 + 1::real",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_016'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{real}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_017 AS SELECT $1 = 'x'",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_017'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{text}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_018 AS SELECT $1 = true",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_018'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{boolean}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_019 AS SELECT DATE '2026-09-10' + $1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42725",
+        "message": "operator is not unique: date + unknown"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_019'",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_020 AS SELECT DATE '2026-09-10' - $1",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_020'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{date}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_021 AS SELECT $1 + DATE '2026-09-10'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42725",
+        "message": "operator is not unique: unknown + date"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_021'",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_022 AS SELECT TIMESTAMP '2026-09-10' + $1",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_022'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{interval}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_023 AS SELECT INTERVAL '1 day' * $1",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_023'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{\"double precision\"}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_024 AS SELECT INTERVAL '1 day' + $1",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_024'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{interval}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_025 AS SELECT -$1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42725",
+        "message": "operator is not unique: - unknown"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_025'",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_026 AS SELECT $1::varchar(4)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_026'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{\"character varying\"}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_027 AS SELECT $1::parameter_domain",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_027'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{parameter_domain}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_028 AS SELECT CASE WHEN $1 THEN 1 ELSE 2 END",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_028'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{boolean}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_029 AS SELECT CASE WHEN true THEN $1 ELSE 1 END",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_029'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_030 AS SELECT CASE $1 WHEN 1 THEN $2 ELSE 2 END",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: text = integer"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_030'",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_031 AS SELECT coalesce($1, 1)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_031'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_032 AS SELECT greatest($1, 1)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_032'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_033 AS SELECT least($1, 1::bigint)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_033'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{bigint}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_034 AS SELECT nullif($1, 1)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_034'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_035 AS SELECT $1 IN (1,2)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_035'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_036 AS SELECT 1 IN ($1,$2)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_036'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer,integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_037 AS SELECT $1 BETWEEN 1 AND 2",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_037'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_038 AS SELECT ARRAY[$1,1]",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_038'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_039 AS SELECT ARRAY[$1,$2]",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_039'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{text,text}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_040 AS SELECT ARRAY[$1]::integer[]",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_040'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_041 AS SELECT abs($1)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_041'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{\"double precision\"}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_042 AS SELECT length($1)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_042'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{text}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_043 AS SELECT lower($1)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_043'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{text}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_044 AS SELECT round($1)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_044'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{\"double precision\"}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_045 AS SELECT substring($1, $2, $3)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_045'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{text,text,text}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_046 AS SELECT date_trunc('day', $1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42725",
+        "message": "function date_trunc(unknown, unknown) is not unique"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_046'",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_047 AS SELECT $1 UNION ALL SELECT 1",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_047'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_048 AS SELECT 1 UNION ALL SELECT $1",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_048'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_049 AS SELECT $1 UNION SELECT $2",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_049'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{text,text}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_050 AS SELECT $1 UNION SELECT $1::integer",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_050'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_051 AS SELECT (SELECT $1)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_051'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{text}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_052 AS SELECT (SELECT $1::integer), $1",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_052'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_053 AS SELECT $1 IN (SELECT 1)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_053'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_054 AS VALUES ($1), (1)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_054'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_055 AS VALUES ($1,$2), (1,2::bigint)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_055'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer,bigint}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_056 AS WITH v AS (SELECT $1::integer AS x) SELECT x + $1 FROM v",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_056'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_057 AS WITH v AS (SELECT $1 AS x) SELECT x FROM v WHERE $1=1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: text = integer"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_057'",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_058 AS WITH RECURSIVE v(x) AS (SELECT $1::integer UNION ALL SELECT x+1 FROM v WHERE x<$2) SELECT * FROM v",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_058'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer,integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_059 AS SELECT * FROM (VALUES ($1),(1)) v(x)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_059'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_060 AS SELECT * FROM parameter_target t JOIN parameter_target u ON t.id=$1",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_060'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_061 AS SELECT * FROM parameter_target t JOIN parameter_target u ON $1",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_061'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{boolean}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_062 AS SELECT * FROM parameter_target WHERE $1",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_062'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{boolean}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_063 AS SELECT 1 LIMIT $1 OFFSET $2",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_063'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{bigint,bigint}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_064 AS SELECT 1 LIMIT 1.2",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_064'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_065 AS SELECT count(*) FROM parameter_target HAVING $1",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_065'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{boolean}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_066 AS SELECT sum(id) FILTER (WHERE $1) FROM parameter_target",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_066'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{boolean}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_067 AS SELECT sum(id) OVER (ORDER BY id ROWS $1 PRECEDING) FROM parameter_target",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_067'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{bigint}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_068 AS SELECT * FROM generate_series($1,10)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_068'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_069 AS INSERT INTO parameter_target VALUES($1,$2,$3)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_069'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer,\"character varying\",parameter_domain}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_070 AS INSERT INTO parameter_target SELECT $1,$2,$3",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_070'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer,\"character varying\",parameter_domain}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_071 AS INSERT INTO parameter_target VALUES($1,$1,$2)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P08",
+        "message": "inconsistent types deduced for parameter $1"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_071'",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_072 AS INSERT INTO parameter_target SELECT $1,$1,$2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P08",
+        "message": "inconsistent types deduced for parameter $1"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_072'",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_073 AS INSERT INTO parameter_target VALUES($1,$2,$3) RETURNING $4",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_073'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer,\"character varying\",parameter_domain,text}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_074 AS UPDATE parameter_target SET id=$1 WHERE label=$2",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_074'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer,text}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_075 AS UPDATE parameter_target SET id=$1, label=$1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P08",
+        "message": "inconsistent types deduced for parameter $1"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_075'",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_076 AS UPDATE parameter_target SET id=$1 WHERE $1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "column \"id\" is of type integer but expression is of type boolean"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_076'",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_077 AS DELETE FROM parameter_target WHERE id=$1 RETURNING $2",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_077'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer,text}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_078 AS WITH v AS (INSERT INTO parameter_target VALUES($1,$2,$3) RETURNING id) SELECT * FROM v",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_078'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer,\"character varying\",parameter_domain}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_079 AS SELECT parameter_function($1)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_079'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_080 AS SELECT parameter_function(b => $1, a => $2)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_080'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{text,integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_081 AS SELECT $1 + 1 WHERE $1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "argument of WHERE must be type boolean, not type integer"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_081'",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_082 AS SELECT CASE WHEN true THEN $1 ELSE $1::integer END",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_082'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_083 AS SELECT coalesce($1,$1::integer)",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_083'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inference_084 AS SELECT $1::integer, $1::parameter_domain",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT parameter_types::text FROM pg_prepared_statements WHERE name='inference_084'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "parameter_types"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DEALLOCATE ALL",
+      "command_tags": [
+        "DEALLOCATE ALL"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE parameter_target",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION parameter_function(integer,text)",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN parameter_domain",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    }
+  ]
+}

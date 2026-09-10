@@ -132,22 +132,21 @@ fn test_entropy_lower_bound_in_intersection() {
 }
 
 #[test]
-fn test_entropy_clamping_in_filter_selectivity() {
+fn unlisted_equality_uses_uniform_distinct_count_without_common_values() {
     let mut column_stats = BTreeMap::new();
     column_stats.insert("color".into(), make_stats(4, Vec::new()));
     let estimator = CardinalityEstimator::new().with_column_stats(column_stats);
     let selectivity =
         estimator.filter_selectivity("color", &Predicate::Equals(Value::Str("red".into())), 100.0);
-    assert!(selectivity >= 0.25 - 1e-9);
+    assert!((selectivity - 0.25).abs() < 1e-9);
 }
 
 #[test]
-fn test_entropy_clamping_does_not_raise_high_selectivity() {
+fn range_estimates_respect_known_value_bounds() {
     let mut column_stats = BTreeMap::new();
     column_stats.insert("score".into(), make_stats(4, Vec::new()));
     let estimator = CardinalityEstimator::new().with_column_stats(column_stats);
     let selectivity =
         estimator.filter_selectivity("score", &Predicate::GreaterThan(Value::Int(25)), 100.0);
-    assert!(selectivity >= 0.25);
-    assert!(selectivity <= 1.0);
+    assert_eq!(selectivity, 0.0);
 }

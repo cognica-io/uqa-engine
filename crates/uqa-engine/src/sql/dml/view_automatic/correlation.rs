@@ -17,8 +17,12 @@ pub(super) fn dml_analysis_scope(
     engine: &Engine,
     ctes: &[uqa_planner::CtePlan],
     subqueries: &[QueryPlan],
+    inherited_ctes: Option<&CteScope>,
 ) -> CteScope {
     let mut scope = CteScope::new_for_current_routine(engine);
+    if let Some(parent) = inherited_ctes {
+        scope.inherit_cte_bindings(parent);
+    }
     for cte in ctes {
         scope.insert_deferred(cte.clone());
     }
@@ -111,8 +115,9 @@ fn validate_correlated_subquery_ids(
     ids: &BTreeSet<usize>,
     outer: &RowSchema,
     params: &[uqa_sql::SQLParam],
+    inherited_ctes: Option<&CteScope>,
 ) -> Result<(), SQLError> {
-    let scope = dml_analysis_scope(engine, ctes, subqueries);
+    let scope = dml_analysis_scope(engine, ctes, subqueries, inherited_ctes);
     for id in ids {
         let query = subqueries.get(*id).ok_or_else(|| {
             SQLError::Internal(format!("DML scalar subquery slot {id} is out of bounds"))
@@ -219,7 +224,12 @@ fn rewrite_correlated_query(
     for cte in &mut query.ctes {
         rewrite_correlated_query(
             context,
-            &mut cte.query,
+            cte.body.query_mut().ok_or_else(|| {
+                SQLError::Unsupported(
+                    "WITH clause containing a data-modifying statement must be at the top level"
+                        .into(),
+                )
+            })?,
             &query_scope,
             inherited_qualifier_shadows,
             inherited_column_shadows,
@@ -389,11 +399,12 @@ pub(super) fn dml_source_schema(
     ctes: &[uqa_planner::CtePlan],
     subqueries: &[QueryPlan],
     params: &[uqa_sql::SQLParam],
+    inherited_ctes: Option<&CteScope>,
 ) -> Result<Option<RowSchema>, SQLError> {
     let Some(source) = source else {
         return Ok(None);
     };
-    let scope = dml_analysis_scope(engine, ctes, subqueries);
+    let scope = dml_analysis_scope(engine, ctes, subqueries, inherited_ctes);
     crate::sql::select::analyze_source_plan_schema(engine, source, params, &scope, None).map(Some)
 }
 
@@ -401,11 +412,12 @@ pub(super) fn insert_input_width(
     engine: &Engine,
     plan: &InsertPlan,
     params: &[uqa_sql::SQLParam],
+    inherited_ctes: Option<&CteScope>,
 ) -> Result<usize, SQLError> {
     let Some(source) = plan.source.as_deref() else {
         return Ok(plan.rows.first().map_or(0, Vec::len));
     };
-    let scope = dml_analysis_scope(engine, &plan.ctes, &plan.subqueries);
+    let scope = dml_analysis_scope(engine, &plan.ctes, &plan.subqueries, inherited_ctes);
     Ok(crate::sql::select::analyze_query_plan_schema(engine, source, params, &scope, None)?.len())
 }
 
@@ -499,6 +511,7 @@ pub(super) struct CorrelatedDmlContext<'a> {
     pub(super) returning_aliases: Option<&'a ReturningAliases>,
     pub(super) include_excluded: bool,
     pub(super) ctes: &'a [uqa_planner::CtePlan],
+    pub(super) inherited_ctes: Option<&'a CteScope>,
     pub(super) ids: &'a BTreeSet<usize>,
     pub(super) params: &'a [uqa_sql::SQLParam],
 }
@@ -522,6 +535,7 @@ fn validate_correlated_dml_context(
         context.ids,
         &outer,
         context.params,
+        context.inherited_ctes,
     )
 }
 
@@ -537,7 +551,12 @@ pub(super) fn rewrite_correlated_dml_context(
         context.returning_aliases,
         context.include_excluded,
     )?;
-    let scope = dml_analysis_scope(context.engine, context.ctes, subqueries);
+    let scope = dml_analysis_scope(
+        context.engine,
+        context.ctes,
+        subqueries,
+        context.inherited_ctes,
+    );
     let rewrite_context = CorrelatedRewriteContext {
         engine: context.engine,
         layer: context.layer,
@@ -568,9 +587,11 @@ pub(super) fn validate_update_expressions(
     layer: &AutomaticViewLayer,
     source: Option<&RowSchema>,
     params: &[uqa_sql::SQLParam],
+    inherited_ctes: Option<&CteScope>,
 ) -> Result<(), SQLError> {
     validate_correlated_dml_context(
         CorrelatedDmlContext {
+            inherited_ctes,
             engine,
             layer,
             target_qualifier: &plan.target_qualifier,
@@ -585,6 +606,7 @@ pub(super) fn validate_update_expressions(
     )?;
     validate_correlated_dml_context(
         CorrelatedDmlContext {
+            inherited_ctes,
             engine,
             layer,
             target_qualifier: &plan.target_qualifier,
@@ -625,9 +647,11 @@ pub(super) fn validate_delete_expressions(
     layer: &AutomaticViewLayer,
     source: Option<&RowSchema>,
     params: &[uqa_sql::SQLParam],
+    inherited_ctes: Option<&CteScope>,
 ) -> Result<(), SQLError> {
     validate_correlated_dml_context(
         CorrelatedDmlContext {
+            inherited_ctes,
             engine,
             layer,
             target_qualifier: &plan.target_qualifier,
@@ -642,6 +666,7 @@ pub(super) fn validate_delete_expressions(
     )?;
     validate_correlated_dml_context(
         CorrelatedDmlContext {
+            inherited_ctes,
             engine,
             layer,
             target_qualifier: &plan.target_qualifier,
@@ -673,22 +698,28 @@ pub(super) fn validate_delete_expressions(
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "validates every MERGE action against the public view schema"
+)]
 pub(super) fn validate_merge_expressions(
     engine: &Engine,
     plan: &MergePlan,
     layer: &AutomaticViewLayer,
     source: &RowSchema,
     params: &[uqa_sql::SQLParam],
+    inherited_ctes: Option<&CteScope>,
 ) -> Result<(), SQLError> {
     validate_correlated_dml_context(
         CorrelatedDmlContext {
+            inherited_ctes,
             engine,
             layer,
             target_qualifier: &plan.target_qualifier,
             source: Some(source),
             returning_aliases: None,
             include_excluded: false,
-            ctes: &[],
+            ctes: &plan.ctes,
             ids: &merge_matched_subquery_ids(plan),
             params,
         },
@@ -696,13 +727,14 @@ pub(super) fn validate_merge_expressions(
     )?;
     validate_correlated_dml_context(
         CorrelatedDmlContext {
+            inherited_ctes,
             engine,
             layer,
             target_qualifier: &plan.target_qualifier,
             source: None,
             returning_aliases: None,
             include_excluded: false,
-            ctes: &[],
+            ctes: &plan.ctes,
             ids: &merge_target_only_subquery_ids(plan),
             params,
         },
@@ -710,13 +742,14 @@ pub(super) fn validate_merge_expressions(
     )?;
     validate_correlated_dml_context(
         CorrelatedDmlContext {
+            inherited_ctes,
             engine,
             layer,
             target_qualifier: &plan.target_qualifier,
             source: Some(source),
             returning_aliases: Some(&plan.returning_aliases),
             include_excluded: false,
-            ctes: &[],
+            ctes: &plan.ctes,
             ids: &returning_subquery_ids(&plan.returning),
             params,
         },
@@ -787,9 +820,11 @@ pub(super) fn validate_insert_expressions(
     plan: &InsertPlan,
     layer: &AutomaticViewLayer,
     params: &[uqa_sql::SQLParam],
+    inherited_ctes: Option<&CteScope>,
 ) -> Result<(), SQLError> {
     validate_correlated_dml_context(
         CorrelatedDmlContext {
+            inherited_ctes,
             engine,
             layer,
             target_qualifier: &plan.target_qualifier,
@@ -804,6 +839,7 @@ pub(super) fn validate_insert_expressions(
     )?;
     validate_correlated_dml_context(
         CorrelatedDmlContext {
+            inherited_ctes,
             engine,
             layer,
             target_qualifier: &plan.target_qualifier,

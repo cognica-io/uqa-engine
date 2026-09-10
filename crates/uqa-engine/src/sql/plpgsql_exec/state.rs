@@ -7,11 +7,11 @@
 //! Interpreter activation state, expression binding, and routine lifecycle.
 
 use super::{
-    bind_expr, bind_statement, cast_value_from, coerce_routine_value, coercion_type_name,
-    eval_lowered_expression, eval_lowered_expression_with_type, execute_compiled_statement,
-    BTreeSet, ColumnType, CreateFunction, DatumResolver, Engine, Expr, Flow, FunctionReturns,
-    HashMap, Interpreter, PLpgSQLBlock, PLpgSQLDatum, PLpgSQLFunction, RoutineOutcome, SQLError,
-    SQLResult, Statement, Value,
+    bind_expr, bind_statement, cast_value_from, coercion_type_name, eval_lowered_expression,
+    eval_lowered_expression_with_type, execute_compiled_statement, BTreeSet, ColumnType,
+    CreateFunction, DatumResolver, Engine, Expr, Flow, FunctionReturns, HashMap, Interpreter,
+    PLpgSQLBlock, PLpgSQLDatum, PLpgSQLFunction, RoutineOutcome, SQLError, SQLResult, Statement,
+    Value,
 };
 
 impl<'a> Interpreter<'a> {
@@ -65,10 +65,12 @@ impl<'a> Interpreter<'a> {
             def,
             datums,
             values: vec![Value::Null; datums.len()],
+            record_types: HashMap::new(),
             bindings,
             err_stack: Vec::new(),
             set_rows: Vec::new(),
             ret: Value::Null,
+            ret_record_types: None,
             out_datums,
             found: parsed.found_datum,
             last_row_count: 0,
@@ -119,11 +121,16 @@ impl<'a> Interpreter<'a> {
             {
                 continue;
             }
-            if let Some(default) = &var.default {
-                let value = interpreter.eval_expr(default)?;
-                let value = coerce_routine_value(interpreter.engine, &value, &var.type_name)?;
-                interpreter.values[idx] = value;
-            }
+            let (value, source) = match &var.default {
+                Some(default) => interpreter.eval_expr_with_type(default)?,
+                None => (Value::Null, None),
+            };
+            interpreter.values[idx] = super::resolution::coerce_routine_value_from(
+                interpreter.engine,
+                &value,
+                &var.type_name,
+                source.as_ref(),
+            )?;
             if var.not_null && matches!(interpreter.values[idx], Value::Null) {
                 return Err(SQLError::Routine {
                     sqlstate: "22004".into(),
@@ -147,7 +154,7 @@ impl<'a> Interpreter<'a> {
             value: self.ret,
             out_values,
             set_rows: self.set_rows,
-            anonymous_record_column_types: None,
+            anonymous_record_column_types: self.ret_record_types,
         }
     }
 
@@ -158,9 +165,13 @@ impl<'a> Interpreter<'a> {
     ) -> Result<(), SQLError> {
         if let Some(index) = parsed.new_datum {
             self.values[index] = context.new.clone();
+            self.record_types
+                .insert(index, context.column_types.clone());
         }
         if let Some(index) = parsed.old_datum {
             self.values[index] = context.old.clone();
+            self.record_types
+                .insert(index, context.column_types.clone());
         }
         let argument_values = context
             .arguments
@@ -239,6 +250,7 @@ impl<'a> Interpreter<'a> {
             engine: self.engine,
             datums: self.datums,
             values: &self.values,
+            record_types: &self.record_types,
             bindings: &self.bindings,
             error: self.err_stack.last(),
             param_count: self.def.params.len(),

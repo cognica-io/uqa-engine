@@ -9,14 +9,15 @@
 use std::cell::RefCell;
 
 use super::{
-    coerce_routine_value, result_row_values, Cell, CompiledFunctionBody, CreateFunction, Engine,
-    FunctionReturns, Interpreter, PLpgSQLDatum, RoutineOutcome, SQLError, SQLParam, SQLResult,
-    SQLUserFunction, UnifiedPlanExecutor, Value,
+    result_row_values, Cell, CompiledFunctionBody, CreateFunction, Engine, FunctionReturns,
+    Interpreter, PLpgSQLDatum, RoutineOutcome, SQLError, SQLParam, SQLResult, SQLUserFunction,
+    UnifiedPlanExecutor, Value,
 };
 use crate::engine_user_functions::{canonical_routine_type_name, routine_returns_anonymous_record};
 use uqa_sql::ast::RoutineInvocationBinding;
 
 pub(in crate::sql) struct TriggerRoutineContext {
+    pub(in crate::sql) column_types: Vec<Option<uqa_sql::ast::ColumnType>>,
     pub(in crate::sql) old: Value,
     pub(in crate::sql) new: Value,
     pub(in crate::sql) name: String,
@@ -225,7 +226,7 @@ pub(in crate::sql) fn execute_trigger_routine(
         let mut interpreter = Interpreter::new(engine, &function.def, parsed, Vec::new())?;
         interpreter.initialize_trigger_context(parsed, context)?;
         interpreter.run(&parsed.action)?;
-        Ok(interpreter.into_outcome().value)
+        super::records::shape_trigger_outcome(interpreter.into_outcome(), context)
     })
 }
 
@@ -328,7 +329,8 @@ fn execute_sql_language(
                 )
         )
         .then(|| DirectRoutineCommandGuard::enter(engine));
-        last = UnifiedPlanExecutor::new_nested(engine, &params).execute(plan)?;
+        let plan = super::super::plan_for_execution(engine, plan.clone(), &params)?;
+        last = UnifiedPlanExecutor::new_nested(engine, &params).execute(&plan)?;
     }
     let out_params = def.output_params();
     let returns_anonymous_record = routine_returns_anonymous_record(def);
@@ -360,11 +362,23 @@ fn execute_sql_language(
                 values = vec![anonymous_record_value(&last.columns, values)];
             } else if out_params.is_empty() {
                 if let FunctionReturns::SetOf { type_name } = &def.returns {
-                    values[0] = coerce_routine_value(engine, &values[0], type_name)?;
+                    values[0] = super::resolution::coerce_routine_value_from(
+                        engine,
+                        &values[0],
+                        type_name,
+                        last.column_types.first().and_then(Option::as_ref),
+                    )?;
                 }
             } else {
-                for (value, parameter) in values.iter_mut().zip(&out_params) {
-                    *value = coerce_routine_value(engine, value, &parameter.type_name)?;
+                for ((value, parameter), source) in
+                    values.iter_mut().zip(&out_params).zip(&last.column_types)
+                {
+                    *value = super::resolution::coerce_routine_value_from(
+                        engine,
+                        value,
+                        &parameter.type_name,
+                        source.as_ref(),
+                    )?;
                 }
             }
             set_rows.push(values);
@@ -382,7 +396,12 @@ fn execute_sql_language(
         let mut out_values = vec![Value::Null; out_params.len()];
         if let Some(values) = first {
             for (idx, value) in values.into_iter().take(out_values.len()).enumerate() {
-                out_values[idx] = coerce_routine_value(engine, &value, &out_params[idx].type_name)?;
+                out_values[idx] = super::resolution::coerce_routine_value_from(
+                    engine,
+                    &value,
+                    &out_params[idx].type_name,
+                    last.column_types.get(idx).and_then(Option::as_ref),
+                )?;
             }
         }
         return Ok(RoutineOutcome {
@@ -402,7 +421,12 @@ fn execute_sql_language(
                 let value = values.remove(0);
                 match &def.returns {
                     FunctionReturns::Scalar { type_name } => {
-                        coerce_routine_value(engine, &value, type_name)?
+                        super::resolution::coerce_routine_value_from(
+                            engine,
+                            &value,
+                            type_name,
+                            last.column_types.first().and_then(Option::as_ref),
+                        )?
                     }
                     _ => value,
                 }

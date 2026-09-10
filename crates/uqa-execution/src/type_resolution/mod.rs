@@ -34,6 +34,7 @@ mod reverse;
 mod routine_signature;
 mod string_binary;
 
+pub use cast_compatibility::{assignment_type_compatible, explicit_type_compatible};
 #[doc(hidden)]
 pub use checksum::{resolve_checksum_overload, ResolvedChecksumOverload};
 pub use common::{
@@ -58,7 +59,9 @@ pub use length::{resolve_length_overload, ResolvedLengthOverload};
 #[doc(hidden)]
 pub use md5::{resolve_md5_overload, ResolvedMd5Overload};
 #[doc(hidden)]
-pub use operators::{require_equality_operator, require_ordering_operator};
+pub use operators::{
+    binary_operator_types, binary_result_type, require_equality_operator, require_ordering_operator,
+};
 #[doc(hidden)]
 pub use overload_resolution::{
     builtin_binding_matches, builtin_name_matches, canonical_column_type_name,
@@ -233,6 +236,23 @@ pub(super) fn scalar_type_inner(
             qualified_column::resolve(schema, qualifier, column)
         }
         ScalarExpr::Literal(value) => Ok(common::value_type(value)),
+        ScalarExpr::TypedLiteral {
+            bound_type: Some(ty),
+            ..
+        } => Ok(Some(ty.clone())),
+        ScalarExpr::TypedLiteral { ty, .. } => {
+            let target = match ColumnType::from_sql_name(ty) {
+                Ok(ty) => Ok(Some(ty)),
+                Err(error @ SQLError::Unsupported(_)) => match resolver {
+                    Some(resolver) => resolver
+                        .resolve_type_name(ty)?
+                        .map_or(Err(error), |ty| Ok(Some(ty))),
+                    None => Err(error),
+                },
+                Err(error) => Err(error),
+            }?;
+            Ok(target)
+        }
         ScalarExpr::Param(index) => Ok(index
             .checked_sub(1)
             .and_then(|index| params.get(index))
@@ -250,11 +270,14 @@ pub(super) fn scalar_type_inner(
                 Err(error) => Err(error),
             }?;
             if let Some(target) = target.as_ref() {
-                cast_compatibility::validate_void_cast(source.as_ref(), target)?;
+                cast_compatibility::validate_explicit_cast(source.as_ref(), target)?;
             }
             Ok(target)
         }
         ScalarExpr::Array(items) => {
+            if items.is_empty() {
+                return Ok(None);
+            }
             let mut element = None;
             for item in items {
                 element = common::merge_optional_types(
@@ -262,7 +285,9 @@ pub(super) fn scalar_type_inner(
                     common::common_context_expression_type(item, schema, params, resolver)?,
                 )?;
             }
-            Ok(element.map(|element| ColumnType::Array(Box::new(element))))
+            Ok(Some(ColumnType::Array(Box::new(
+                element.unwrap_or(ColumnType::Text),
+            ))))
         }
         ScalarExpr::Row(items) => {
             for item in items {
@@ -271,8 +296,8 @@ pub(super) fn scalar_type_inner(
             Ok(Some(ColumnType::Record))
         }
         ScalarExpr::Binary { op, lhs, rhs } => {
-            let left = scalar_type_inner(lhs, schema, params, resolver)?;
-            let right = scalar_type_inner(rhs, schema, params, resolver)?;
+            let left = common_context_expression_type(lhs, schema, params, resolver)?;
+            let right = common_context_expression_type(rhs, schema, params, resolver)?;
             operators::binary_result_type(*op, left.as_ref(), right.as_ref())
         }
         ScalarExpr::UnaryMinus(inner) => scalar_type_inner(inner, schema, params, resolver)?
@@ -339,12 +364,16 @@ pub(super) fn scalar_type_inner(
             let simple = base.is_some();
             let base_type = base
                 .as_deref()
-                .map(|base| scalar_type_inner(base, schema, params, resolver))
+                .map(|base| common::common_context_expression_type(base, schema, params, resolver))
                 .transpose()?
                 .flatten();
             let mut result = None;
             for (condition, value) in when {
-                let condition_type = scalar_type_inner(condition, schema, params, resolver)?;
+                let condition_type = if simple {
+                    common::common_context_expression_type(condition, schema, params, resolver)?
+                } else {
+                    scalar_type_inner(condition, schema, params, resolver)?
+                };
                 if simple {
                     operators::binary_result_type(
                         uqa_sql::ast::BinaryOp::Equal,
@@ -363,7 +392,13 @@ pub(super) fn scalar_type_inner(
                     common::common_context_expression_type(value, schema, params, resolver)?,
                 )?;
             }
-            Ok(result)
+            match result {
+                Some(result) => {
+                    common::case_output_type(expression, &result, schema, params, resolver)
+                        .map(Some)
+                }
+                result => Ok(result),
+            }
         }
         ScalarExpr::Func {
             name,

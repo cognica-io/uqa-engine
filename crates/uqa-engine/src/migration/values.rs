@@ -82,13 +82,17 @@ pub(super) fn integer_to_temporal_value(
                 PythonMigrationError::Invalid(format!("date day offset {value} out of range: {e}"))
             })?,
         },
-        ColumnType::Time => TemporalValue::Time { micros: value },
-        ColumnType::TimeTz => TemporalValue::TimeTz {
+        ColumnType::Time | ColumnType::TimePrecision(_) => TemporalValue::Time { micros: value },
+        ColumnType::TimeTz | ColumnType::TimeTzPrecision(_) => TemporalValue::TimeTz {
             micros: value,
             offset_minutes: 0,
         },
-        ColumnType::Timestamp => TemporalValue::Timestamp { micros: value },
-        ColumnType::TimestampTz => TemporalValue::TimestampTz { micros: value },
+        ColumnType::Timestamp | ColumnType::TimestampPrecision(_) => {
+            TemporalValue::Timestamp { micros: value }
+        }
+        ColumnType::TimestampTz | ColumnType::TimestampTzPrecision(_) => {
+            TemporalValue::TimestampTz { micros: value }
+        }
         other => {
             return Err(PythonMigrationError::Invalid(format!(
                 "temporal type resolver returned non-temporal type {other:?} for {raw_type}"
@@ -107,10 +111,14 @@ pub(super) fn text_to_temporal_value(
     };
     let parsed = match ty {
         ColumnType::Date => TemporalValue::parse_date(text),
-        ColumnType::Time => TemporalValue::parse_time(text),
-        ColumnType::TimeTz => TemporalValue::parse_time_tz(text),
-        ColumnType::Timestamp => TemporalValue::parse_timestamp(text),
-        ColumnType::TimestampTz => TemporalValue::parse_timestamp_tz(text),
+        ColumnType::Time | ColumnType::TimePrecision(_) => TemporalValue::parse_time(text),
+        ColumnType::TimeTz | ColumnType::TimeTzPrecision(_) => TemporalValue::parse_time_tz(text),
+        ColumnType::Timestamp | ColumnType::TimestampPrecision(_) => {
+            TemporalValue::parse_timestamp(text)
+        }
+        ColumnType::TimestampTz | ColumnType::TimestampTzPrecision(_) => {
+            TemporalValue::parse_timestamp_tz(text)
+        }
         _ => None,
     }
     .ok_or_else(|| {

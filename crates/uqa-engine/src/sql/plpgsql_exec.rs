@@ -42,6 +42,7 @@ mod cursors;
 mod datum;
 mod diagnostics;
 mod handlers;
+mod records;
 mod resolution;
 mod resolver;
 mod routine;
@@ -98,10 +99,12 @@ struct Interpreter<'a> {
     def: &'a CreateFunction,
     datums: &'a [PLpgSQLDatum],
     values: Vec<Value>,
+    record_types: HashMap<usize, Vec<Option<ColumnType>>>,
     bindings: HashMap<String, Vec<usize>>,
     err_stack: Vec<(String, String)>,
     set_rows: Vec<Vec<Value>>,
     ret: Value,
+    ret_record_types: Option<Vec<Option<ColumnType>>>,
     out_datums: Vec<usize>,
     found: Option<usize>,
     last_row_count: i64,
@@ -113,6 +116,7 @@ struct DatumResolver<'a> {
     engine: &'a Engine,
     datums: &'a [PLpgSQLDatum],
     values: &'a [Value],
+    record_types: &'a HashMap<usize, Vec<Option<ColumnType>>>,
     bindings: &'a HashMap<String, Vec<usize>>,
     error: Option<&'a (String, String)>,
     param_count: usize,

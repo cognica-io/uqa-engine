@@ -7,6 +7,7 @@
 //! CTE materialization, EXPLAIN, VALUES, and SELECT-without-FROM execution.
 
 use super::*;
+use uqa_planner::{CommandPlan, CtePlanBody};
 
 /// Decode a source reference into a CTE identifier. Qualified relations never resolve to CTEs.
 pub(in crate::sql) fn cte_reference_name(reference: &str) -> Option<String> {
@@ -50,16 +51,25 @@ pub(in crate::sql) fn materialize_plan_ctes_with_filters<'a>(
         let outer_row = ctes.row_lock_outer_row().cloned();
         let result = {
             let mut cte_scope = ctes.enter_lock_identity_emission(false);
-            if let Some(outer_row) = outer_row.as_ref() {
-                execute_lateral_subquery_output(engine, &plan.query, outer_row, params, &cte_scope)?
-            } else {
-                execute_query_plan_output(
-                    engine,
-                    &plan.query,
-                    params,
-                    &mut cte_scope,
-                    QueryOutputMode::SharedSpill,
-                )?
+            match &plan.body {
+                CtePlanBody::Query(query) => {
+                    if let Some(outer_row) = outer_row.as_ref() {
+                        execute_lateral_subquery_output(
+                            engine, query, outer_row, params, &cte_scope,
+                        )?
+                    } else {
+                        execute_query_plan_output(
+                            engine,
+                            query,
+                            params,
+                            &mut cte_scope,
+                            QueryOutputMode::SharedSpill,
+                        )?
+                    }
+                }
+                CtePlanBody::Command(command) => {
+                    execute_command_cte(engine, command, params, &cte_scope)?
+                }
             }
         };
         let mut columns = result.columns.clone();
@@ -112,8 +122,36 @@ pub(in crate::sql) fn materialize_plan_ctes_with_filters<'a>(
             ));
         };
         ctes.insert_shared(plan.name.clone(), materialized);
+        if !plan.body.returns_rows() {
+            ctes.non_returning_ctes.insert(plan.name.clone());
+        }
     }
     Ok(())
+}
+
+fn execute_command_cte(
+    engine: &Engine,
+    command: &uqa_planner::CommandPlan,
+    params: &[SQLParam],
+    scope: &CteScope,
+) -> Result<super::QueryOutput, SQLError> {
+    let result = crate::sql::dml::execute_cte_command(engine, command, params, scope)?;
+    let schema =
+        uqa_execution::RowSchema::with_types(result.columns.clone(), result.column_types.clone());
+    let rows = (0..result.rows.len())
+        .map(|row| {
+            let values = (0..result.columns.len())
+                .map(|column| result.value_at(row, column).cloned().unwrap_or(Value::Null))
+                .collect();
+            uqa_execution::PhysicalRow::from_values(values)
+        })
+        .collect();
+    collect_query_operator(
+        engine,
+        result.columns,
+        Box::new(uqa_execution::TableScan::from_physical_rows(schema, rows)),
+        QueryOutputMode::SharedSpill,
+    )
 }
 
 /// Return the CTEs whose query results can be reached from this query root. `PostgreSQL` does not evaluate an unreferenced SELECT CTE. References are resolved through nested query scopes so a shadowing inner CTE does not make an outer CTE reachable, while a reachable inner CTE can still depend on an outer one.
@@ -127,7 +165,12 @@ pub(in crate::sql) fn reachable_plan_cte_names(plan: &QueryPlan) -> BTreeSet<Str
         return BTreeSet::new();
     }
 
-    let mut reachable = BTreeSet::new();
+    let mut reachable = plan
+        .ctes
+        .iter()
+        .filter(|cte| cte.body.modifies_data())
+        .map(|cte| cte.name.clone())
+        .collect::<BTreeSet<_>>();
     collect_target_cte_references_from_root(&plan.root, &targets, &BTreeSet::new(), &mut reachable);
 
     let mut expanded = BTreeSet::new();
@@ -151,8 +194,8 @@ pub(in crate::sql) fn reachable_plan_cte_names(plan: &QueryPlan) -> BTreeSet<Str
                     .map(|dependency| dependency.name.clone())
                     .collect::<BTreeSet<_>>()
             };
-            collect_target_cte_references_from_nested_query(
-                &cte.query,
+            collect_target_cte_references_from_body(
+                &cte.body,
                 &visible_dependencies,
                 &BTreeSet::new(),
                 &mut reachable,
@@ -165,17 +208,16 @@ pub(in crate::sql) fn reachable_plan_cte_names(plan: &QueryPlan) -> BTreeSet<Str
 pub(in crate::sql) fn cte_references_own_name(cte: &CtePlan) -> bool {
     let targets = BTreeSet::from([cte.name.clone()]);
     let mut references = BTreeSet::new();
-    collect_target_cte_references_from_nested_query(
-        &cte.query,
-        &targets,
-        &BTreeSet::new(),
-        &mut references,
-    );
+    collect_target_cte_references_from_body(&cte.body, &targets, &BTreeSet::new(), &mut references);
     references.contains(&cte.name)
 }
 
 pub(in crate::sql) fn ordered_plan_ctes(plan: &QueryPlan) -> Result<Vec<&CtePlan>, SQLError> {
-    order_cte_plans(plan.ctes.iter().collect())
+    ordered_cte_plans(&plan.ctes)
+}
+
+pub(in crate::sql) fn ordered_cte_plans(ctes: &[CtePlan]) -> Result<Vec<&CtePlan>, SQLError> {
+    order_cte_plans(ctes.iter().collect())
 }
 
 fn order_cte_plans(plans: Vec<&CtePlan>) -> Result<Vec<&CtePlan>, SQLError> {
@@ -190,8 +232,8 @@ fn order_cte_plans(plans: Vec<&CtePlan>) -> Result<Vec<&CtePlan>, SQLError> {
         .iter()
         .map(|cte| {
             let mut references = BTreeSet::new();
-            collect_target_cte_references_from_nested_query(
-                &cte.query,
+            collect_target_cte_references_from_body(
+                &cte.body,
                 &targets,
                 &BTreeSet::new(),
                 &mut references,
@@ -245,9 +287,30 @@ fn count_plan_cte_references(
     counts: &mut BTreeMap<String, usize>,
 ) {
     for cte in &plan.ctes {
-        count_plan_cte_references(&cte.query, targets, counts);
+        count_cte_body_references(&cte.body, targets, counts);
     }
     count_relational_cte_references(&plan.root, targets, counts);
+}
+
+fn count_cte_body_references(
+    body: &CtePlanBody,
+    targets: &BTreeSet<String>,
+    counts: &mut BTreeMap<String, usize>,
+) {
+    match body {
+        CtePlanBody::Query(query) => count_plan_cte_references(query, targets, counts),
+        CtePlanBody::Command(command) => {
+            for cte in command.ctes() {
+                count_cte_body_references(&cte.body, targets, counts);
+            }
+            for query in command.query_inputs() {
+                count_plan_cte_references(query, targets, counts);
+            }
+            if let Some(source) = command.source_input() {
+                count_source_cte_references(source, targets, counts);
+            }
+        }
+    }
 }
 
 fn count_relational_cte_references(
@@ -376,6 +439,95 @@ fn collect_target_cte_references_from_source(
     }
 }
 
+fn collect_target_cte_references_from_command_root(
+    command: &CommandPlan,
+    targets: &BTreeSet<String>,
+    shadowed: &BTreeSet<String>,
+    references: &mut BTreeSet<String>,
+) {
+    for query in command.query_inputs() {
+        collect_target_cte_references_from_nested_query(query, targets, shadowed, references);
+    }
+    if let Some(source) = command.source_input() {
+        collect_target_cte_references_from_source(source, targets, shadowed, references);
+    }
+}
+
+fn collect_target_cte_references_from_body(
+    body: &CtePlanBody,
+    targets: &BTreeSet<String>,
+    shadowed: &BTreeSet<String>,
+    references: &mut BTreeSet<String>,
+) {
+    let CtePlanBody::Command(command) = body else {
+        if let CtePlanBody::Query(query) = body {
+            collect_target_cte_references_from_nested_query(query, targets, shadowed, references);
+        }
+        return;
+    };
+    let locals = command
+        .ctes()
+        .iter()
+        .map(|cte| cte.name.clone())
+        .collect::<BTreeSet<_>>();
+    let mut reachable = command
+        .ctes()
+        .iter()
+        .filter(|cte| cte.body.modifies_data())
+        .map(|cte| cte.name.clone())
+        .collect::<BTreeSet<_>>();
+    collect_target_cte_references_from_command_root(
+        command,
+        &locals,
+        &BTreeSet::new(),
+        &mut reachable,
+    );
+    let mut expanded = BTreeSet::new();
+    loop {
+        let pending = command
+            .ctes()
+            .iter()
+            .enumerate()
+            .filter(|(_, cte)| reachable.contains(&cte.name) && !expanded.contains(&cte.name))
+            .collect::<Vec<_>>();
+        if pending.is_empty() {
+            break;
+        }
+        for (index, cte) in pending {
+            expanded.insert(cte.name.clone());
+            let visible = if cte.recursive {
+                locals.clone()
+            } else {
+                command.ctes()[..index]
+                    .iter()
+                    .map(|cte| cte.name.clone())
+                    .collect()
+            };
+            collect_target_cte_references_from_body(
+                &cte.body,
+                &visible,
+                &BTreeSet::new(),
+                &mut reachable,
+            );
+        }
+    }
+    let mut root_shadowed = shadowed.clone();
+    root_shadowed.extend(locals.iter().cloned());
+    collect_target_cte_references_from_command_root(command, targets, &root_shadowed, references);
+    let mut preceding = shadowed.clone();
+    for cte in command.ctes() {
+        if reachable.contains(&cte.name) {
+            let definition = if cte.recursive {
+                shadowed.union(&locals).cloned().collect()
+            } else {
+                preceding.clone()
+            };
+            collect_target_cte_references_from_body(&cte.body, targets, &definition, references);
+        }
+        preceding.insert(cte.name.clone());
+    }
+}
+
 fn collect_target_cte_references_from_nested_query(
     plan: &QueryPlan,
     targets: &BTreeSet<String>,
@@ -416,8 +568,8 @@ fn collect_target_cte_references_from_nested_query(
                         .cloned(),
                 );
             }
-            collect_target_cte_references_from_nested_query(
-                &cte.query,
+            collect_target_cte_references_from_body(
+                &cte.body,
                 targets,
                 &definition_shadowed,
                 references,
@@ -472,6 +624,8 @@ pub(in crate::sql) fn run_explain(
         let mut row = ResultRow::new();
         row.insert("plan".to_string(), Value::Str(payload.to_string()));
         return Ok(SQLResult {
+            kind: uqa_sql::SQLResultKind::Rows,
+            command_tag: None,
             columns: vec!["plan".to_string()],
             column_types: vec![Some(uqa_sql::ColumnType::Text)],
             rows: vec![row],
@@ -491,6 +645,8 @@ pub(in crate::sql) fn run_explain(
         rows.push(r);
     }
     Ok(SQLResult {
+        kind: uqa_sql::SQLResultKind::Rows,
+        command_tag: None,
         columns: vec!["plan".to_string()],
         column_types: vec![Some(uqa_sql::ColumnType::Text)],
         rows,

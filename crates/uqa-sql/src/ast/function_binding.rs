@@ -214,6 +214,9 @@ pub struct RoutineInvocationBinding {
     pub argument_positions: Vec<usize>,
     /// Concrete coercion target for each call argument, aligned with the call argument list.
     pub argument_targets: Vec<String>,
+    /// Declared source types before argument coercion; absent only in legacy bindings.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub argument_sources: Vec<Option<String>>,
     /// Concrete type for each declared parameter, aligned with [`crate::ast::CreateFunction::params`].
     pub parameter_types: Vec<String>,
     /// Concrete invocation result type after polymorphic substitution.

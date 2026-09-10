@@ -32,6 +32,15 @@ pub(in crate::sql) fn aggregate_value_with_args(
     if let Some(value) = acc.registered_value() {
         return value;
     }
+    if !acc.state_plan.retains_values() && acc.values.next_sequence != 0 {
+        let mut ordered = AggregateAccumulator {
+            state_plan: acc.state_plan,
+            ..AggregateAccumulator::default()
+        };
+        acc.values
+            .for_each_ordered(|record| ordered.observe(&record.value))?;
+        return aggregate_value_with_args(name, &ordered, args);
+    }
     let lname = name.to_ascii_lowercase();
 
     let value = match lname.as_str() {
@@ -431,7 +440,9 @@ pub(in crate::sql) fn projection_label_at(proj: &ProjectionPlan) -> String {
         ScalarExpr::Column(c) => c.clone(),
         ScalarExpr::QualifiedColumn { column, .. } => column.clone(),
         ScalarExpr::Star | ScalarExpr::QualifiedStar(_) => "*".into(),
-        ScalarExpr::Func { name, .. } => name.clone(),
+        ScalarExpr::Func { name, .. } => uqa_sql::parse_regobject_name(name)
+            .and_then(|mut names| names.pop())
+            .unwrap_or_else(|| name.clone()),
         _ => "?column?".into(),
     }
 }

@@ -57,11 +57,7 @@ pub(super) fn function_volatility_with_binding(
     let identity = name.to_ascii_lowercase();
     let lower = builtin_function_dispatch_name(&identity);
 
-    // These implementations either mutate engine/session state or derive a
-    // fresh value on every evaluation.  `now`/`current_timestamp`,
-    // `statement_timestamp`, and `current_date` are intentionally included:
-    // the scalar evaluator currently obtains wall-clock time per call rather
-    // than owning a statement timestamp snapshot.
+    // These implementations either mutate engine/session state or derive a fresh value on every evaluation.
     if matches!(
         lower.as_str(),
         "random"
@@ -73,14 +69,6 @@ pub(super) fn function_volatility_with_binding(
             | "currval"
             | "lastval"
             | "setval"
-            | "now"
-            | "current_date"
-            | "current_time"
-            | "current_timestamp"
-            | "localtime"
-            | "localtimestamp"
-            | "statement_timestamp"
-            | "transaction_timestamp"
             | "clock_timestamp"
             | "timeofday"
             | "gen_random_uuid"
@@ -106,8 +94,7 @@ pub(super) fn function_volatility_with_binding(
             | "bayesian_match_with_prior"
             | "fts_match"
             | "multi_field_match"
-    ) || (lower == "age" && argument_count == 1)
-    {
+    ) {
         return FunctionVolatility::Volatile;
     }
 
@@ -129,8 +116,17 @@ pub(super) fn function_volatility_with_binding(
         || matches!(
             lower.as_str(),
             "current_schema"
+                | "now"
+                | "current_date"
+                | "current_time"
+                | "current_timestamp"
+                | "localtime"
+                | "localtimestamp"
+                | "statement_timestamp"
+                | "transaction_timestamp"
                 | "current_schemas"
                 | "pg_backend_pid"
+                | "version"
                 | "pg_listening_channels"
                 | "to_regclass"
                 | "to_regnamespace"
@@ -157,6 +153,7 @@ pub(super) fn function_volatility_with_binding(
                 | "has_schema_privilege"
                 | "has_sequence_privilege"
         )
+        || (lower == "age" && argument_count == 1)
     {
         FunctionVolatility::Stable
     } else {
@@ -286,7 +283,12 @@ fn query_contains_volatile_function_inner(
     visiting_views: &mut BTreeSet<String>,
 ) -> Result<bool, SQLError> {
     for cte in &plan.ctes {
-        if query_contains_volatile_function_inner(engine, &cte.query, visiting_views)? {
+        if match &cte.body {
+            uqa_planner::CtePlanBody::Query(query) => {
+                query_contains_volatile_function_inner(engine, query, visiting_views)?
+            }
+            uqa_planner::CtePlanBody::Command(_) => true,
+        } {
             return Ok(true);
         }
     }

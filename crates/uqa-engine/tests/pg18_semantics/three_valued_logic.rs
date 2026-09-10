@@ -32,11 +32,11 @@ fn row_constructors_are_records_and_keep_postgresql_null_comparison_semantics() 
     );
     assert_eq!(
         scalar(&eng, "SELECT pg_typeof(ROW(1, 2))"),
-        Value::Str("record".into())
+        Value::Int(2249)
     );
     assert_eq!(
         scalar(&eng, "SELECT pg_typeof(ARRAY[1, 2])"),
-        Value::Str("integer[]".into())
+        Value::Int(1007)
     );
     assert_eq!(
         scalar(&eng, "SELECT ROW(1, NULL) = ROW(1, NULL)"),

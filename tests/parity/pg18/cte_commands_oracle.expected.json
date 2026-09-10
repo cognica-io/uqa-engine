@@ -1,0 +1,2033 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE cte_values (id integer PRIMARY KEY, amount integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE cte_log (id integer, amount integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO cte_values VALUES (1,10),(2,20),(3,30)",
+      "command_tags": [
+        "INSERT 0 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "WITH added AS (INSERT INTO cte_values VALUES (4,40) RETURNING id, amount) SELECT * FROM added",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "4",
+              "40"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH changed AS (UPDATE cte_values SET amount=amount+1 WHERE id=1 RETURNING id, amount) SELECT changed.id, changed.amount AS after, cte_values.amount AS before FROM changed JOIN cte_values USING (id)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "after",
+            "before"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "11",
+              "10"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH first AS (INSERT INTO cte_values VALUES (5,50) RETURNING id, amount), second AS (INSERT INTO cte_log SELECT * FROM first RETURNING id, amount) SELECT * FROM second",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "5",
+              "50"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH ignored AS (INSERT INTO cte_values VALUES (6,60)) SELECT 1 AS answer",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "answer"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH ignored AS (INSERT INTO cte_values VALUES (7,70)) SELECT * FROM ignored",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "WITH query \"ignored\" does not have a RETURNING clause"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT * FROM cte_values ORDER BY id",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "11"
+            ],
+            [
+              "2",
+              "20"
+            ],
+            [
+              "3",
+              "30"
+            ],
+            [
+              "4",
+              "40"
+            ],
+            [
+              "5",
+              "50"
+            ],
+            [
+              "6",
+              "60"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH added AS NOT MATERIALIZED (INSERT INTO cte_values VALUES (8,80) RETURNING id, amount) SELECT a.id AS left_id, b.id AS right_id FROM added a CROSS JOIN added b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "left_id",
+            "right_id"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "8",
+              "8"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH added AS (INSERT INTO cte_values VALUES (9,90),(10,100) RETURNING id) SELECT * FROM added LIMIT 0",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT count(*) AS count FROM cte_values",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "9"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH removed AS (DELETE FROM cte_values WHERE id=2 RETURNING id, amount) SELECT removed.id, removed.amount, (SELECT count(*) FROM cte_values) AS snapshot_count FROM removed",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount",
+            "snapshot_count"
+          ],
+          "type_oids": [
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "2",
+              "20",
+              "9"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH nothing AS (UPDATE cte_values SET amount=amount WHERE false RETURNING id, amount) SELECT * FROM nothing",
+      "command_tags": [
+        "SELECT 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "WITH nothing AS (UPDATE cte_values SET amount=amount WHERE false RETURNING id, amount) SELECT pg_typeof((SELECT amount FROM nothing)) AS declared_type",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "declared_type"
+          ],
+          "type_oids": [
+            2206
+          ],
+          "rows": [
+            [
+              "integer"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH changed AS (UPDATE cte_values SET amount=amount+10 WHERE id=3 RETURNING id AS value, amount AS value) SELECT * FROM changed",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value",
+            "value"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "3",
+              "40"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH changed(key, value) AS (UPDATE cte_values SET amount=amount+1 WHERE id=3 RETURNING id, amount) SELECT * FROM changed",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "key",
+            "value"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "3",
+              "41"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH changed AS (UPDATE cte_values SET amount=amount+1 WHERE id=3 RETURNING old.amount AS before, new.amount AS after) SELECT * FROM changed",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "before",
+            "after"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "41",
+              "42"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH failed AS (INSERT INTO cte_values VALUES (11,110) RETURNING id) SELECT 1/0 FROM failed",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT count(*) AS count FROM cte_values WHERE id=11",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE cte_sequence START WITH 100",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "WITH failed AS (INSERT INTO cte_values VALUES (nextval('cte_sequence'),100) RETURNING id) SELECT missing FROM failed",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"missing\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT nextval('cte_sequence') AS next_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "next_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "100"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM (WITH changed AS (INSERT INTO cte_values VALUES (12,120) RETURNING id) SELECT * FROM changed) nested",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "WITH clause containing a data-modifying statement must be at the top level"
+      },
+      "results": []
+    },
+    {
+      "sql": "WITH RECURSIVE changed AS (INSERT INTO cte_values SELECT id, amount FROM changed RETURNING *) SELECT * FROM changed",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P19",
+        "message": "recursive query \"changed\" must not contain data-modifying statements"
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE VIEW cte_view AS WITH changed AS (INSERT INTO cte_values VALUES (13,130) RETURNING *) SELECT * FROM changed",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "views must not contain data-modifying statements in WITH"
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE MATERIALIZED VIEW cte_materialized AS WITH changed AS (INSERT INTO cte_values VALUES (14,140) RETURNING *) SELECT * FROM changed",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "materialized views must not use data-modifying statements in WITH"
+      },
+      "results": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DECLARE cte_cursor CURSOR FOR WITH changed AS (INSERT INTO cte_values VALUES (15,150) RETURNING *) SELECT * FROM changed",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "DECLARE CURSOR must not contain data-modifying statements in WITH"
+      },
+      "results": []
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE cte_copy AS WITH changed AS (INSERT INTO cte_values VALUES (16,160) RETURNING id, amount) SELECT * FROM changed",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM cte_copy",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "16",
+              "160"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH input AS (SELECT 17 AS id, 170 AS amount), added AS (INSERT INTO cte_values SELECT * FROM input RETURNING *) SELECT * FROM added",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "17",
+              "170"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH removed AS (DELETE FROM cte_values WHERE id=4 RETURNING *) INSERT INTO cte_log SELECT * FROM removed RETURNING *",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "4",
+              "40"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH changed AS (INSERT INTO cte_values VALUES (18,180) RETURNING *) UPDATE cte_log SET amount=changed.amount FROM changed WHERE cte_log.id=4 RETURNING cte_log.id, cte_log.amount",
+      "command_tags": [
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "4",
+              "180"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH changed AS (INSERT INTO cte_values VALUES (19,190) RETURNING *) DELETE FROM cte_log USING changed WHERE cte_log.id=5 RETURNING cte_log.id",
+      "command_tags": [
+        "DELETE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH input AS (SELECT 20 AS id, 200 AS amount), changed AS (MERGE INTO cte_values t USING input s ON t.id=s.id WHEN NOT MATCHED THEN INSERT (id,amount) VALUES (s.id,s.amount) RETURNING t.id,t.amount) SELECT * FROM changed",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "20",
+              "200"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH input AS (SELECT 20 AS id, 201 AS amount) MERGE INTO cte_values t USING input s ON t.id=s.id WHEN MATCHED THEN UPDATE SET amount=s.amount RETURNING t.id,t.amount",
+      "command_tags": [
+        "MERGE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "20",
+              "201"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW cte_writable AS SELECT id, amount FROM cte_values",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "WITH input AS (SELECT 21 AS id, 210 AS amount), added AS (INSERT INTO cte_writable SELECT * FROM input RETURNING *) SELECT * FROM added",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "21",
+              "210"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM cte_values ORDER BY id",
+      "command_tags": [
+        "SELECT 13"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "11"
+            ],
+            [
+              "3",
+              "42"
+            ],
+            [
+              "5",
+              "50"
+            ],
+            [
+              "6",
+              "60"
+            ],
+            [
+              "8",
+              "80"
+            ],
+            [
+              "9",
+              "90"
+            ],
+            [
+              "10",
+              "100"
+            ],
+            [
+              "16",
+              "160"
+            ],
+            [
+              "17",
+              "170"
+            ],
+            [
+              "18",
+              "180"
+            ],
+            [
+              "19",
+              "190"
+            ],
+            [
+              "20",
+              "201"
+            ],
+            [
+              "21",
+              "210"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM cte_log ORDER BY id, amount",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "4",
+              "180"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT t.missing FROM cte_values t",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column t.missing does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT \"Upper Alias\".\"Missing Column\" FROM cte_values AS \"Upper Alias\"",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column Upper Alias.Missing Column does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT \"missing.column\" FROM cte_values",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"missing.column\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "WITH a AS (UPDATE cte_values SET amount=amount+100 WHERE id=1 RETURNING amount), b AS (UPDATE cte_values SET amount=(SELECT amount FROM cte_values WHERE id=1) WHERE id=3 RETURNING amount) SELECT a.amount AS first_change, b.amount AS second_change, (SELECT amount FROM cte_values WHERE id=1) AS snapshot_value FROM a CROSS JOIN b",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "first_change",
+            "second_change",
+            "snapshot_value"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "111",
+              "11",
+              "11"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH removed AS (DELETE FROM cte_values WHERE id=5 RETURNING id, amount), added AS (INSERT INTO cte_values SELECT id+100, amount FROM removed RETURNING id, amount) SELECT * FROM added",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "105",
+              "50"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH added AS (INSERT INTO cte_values VALUES (22,220) RETURNING *) UPDATE cte_values SET amount=999 WHERE id=22 RETURNING *",
+      "command_tags": [
+        "UPDATE 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id, amount FROM cte_values WHERE id=22",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "22",
+              "220"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH input AS (SELECT 21 AS id, 211 AS amount), changed AS (UPDATE cte_writable SET amount=input.amount FROM input WHERE cte_writable.id=input.id RETURNING cte_writable.id, cte_writable.amount) SELECT * FROM changed",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "21",
+              "211"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH input AS (SELECT 21 AS id), removed AS (DELETE FROM cte_writable USING input WHERE cte_writable.id=input.id RETURNING cte_writable.id) SELECT * FROM removed",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "21"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH input AS (SELECT 23 AS id, 230 AS amount), changed AS (MERGE INTO cte_writable t USING input s ON t.id=s.id WHEN NOT MATCHED THEN INSERT (id,amount) VALUES (s.id,s.amount) RETURNING t.id,t.amount) SELECT * FROM changed",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "23",
+              "230"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH added AS (WITH RECURSIVE numbers(n) AS (VALUES (30) UNION ALL SELECT n+1 FROM numbers WHERE n<32) INSERT INTO cte_values SELECT n,n*10 FROM numbers RETURNING id) SELECT * FROM added ORDER BY id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "30"
+            ],
+            [
+              "31"
+            ],
+            [
+              "32"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH RECURSIVE second AS (INSERT INTO cte_values SELECT id+1,amount+10 FROM first RETURNING *), first AS (INSERT INTO cte_values VALUES (34,340) RETURNING *) SELECT * FROM second",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "35",
+              "350"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH outer_change AS (WITH inner_change AS (INSERT INTO cte_values VALUES (36,360) RETURNING *) INSERT INTO cte_log SELECT * FROM inner_change RETURNING *) SELECT * FROM outer_change",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "WITH clause containing a data-modifying statement must be at the top level"
+      },
+      "results": []
+    },
+    {
+      "sql": "WITH unused AS (SELECT nextval('cte_sequence')), written AS (INSERT INTO cte_values VALUES (37,370) RETURNING *) SELECT 1 AS answer",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "answer"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT nextval('cte_sequence') AS next_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "next_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "101"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN READ ONLY",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "WITH changed AS (UPDATE cte_values SET amount=amount WHERE false RETURNING *) SELECT * FROM changed",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "25006",
+        "message": "cannot execute SELECT in a read-only transaction"
+      },
+      "results": []
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE RULE cte_also AS ON INSERT TO cte_log DO ALSO INSERT INTO cte_values VALUES (NEW.id,NEW.amount)",
+      "command_tags": [
+        "CREATE RULE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "WITH changed AS (INSERT INTO cte_log VALUES (38,380) RETURNING *) SELECT * FROM changed",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "DO ALSO rules are not supported for data-modifying statements in WITH"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP RULE cte_also ON cte_log",
+      "command_tags": [
+        "DROP RULE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM cte_values ORDER BY id",
+      "command_tags": [
+        "SELECT 20"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "111"
+            ],
+            [
+              "3",
+              "11"
+            ],
+            [
+              "6",
+              "60"
+            ],
+            [
+              "8",
+              "80"
+            ],
+            [
+              "9",
+              "90"
+            ],
+            [
+              "10",
+              "100"
+            ],
+            [
+              "16",
+              "160"
+            ],
+            [
+              "17",
+              "170"
+            ],
+            [
+              "18",
+              "180"
+            ],
+            [
+              "19",
+              "190"
+            ],
+            [
+              "20",
+              "201"
+            ],
+            [
+              "22",
+              "220"
+            ],
+            [
+              "23",
+              "230"
+            ],
+            [
+              "30",
+              "300"
+            ],
+            [
+              "31",
+              "310"
+            ],
+            [
+              "32",
+              "320"
+            ],
+            [
+              "34",
+              "340"
+            ],
+            [
+              "35",
+              "350"
+            ],
+            [
+              "37",
+              "370"
+            ],
+            [
+              "105",
+              "50"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE RULE cte_conditional AS ON INSERT TO cte_log WHERE NEW.id > 0 DO INSTEAD INSERT INTO cte_values VALUES (NEW.id,NEW.amount)",
+      "command_tags": [
+        "CREATE RULE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "WITH changed AS (INSERT INTO cte_log VALUES (38,380)) SELECT 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "conditional DO INSTEAD rules are not supported for data-modifying statements in WITH"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP RULE cte_conditional ON cte_log",
+      "command_tags": [
+        "DROP RULE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE RULE cte_multiple AS ON INSERT TO cte_log DO INSTEAD (INSERT INTO cte_values VALUES (NEW.id,NEW.amount); INSERT INTO cte_values VALUES (NEW.id+100,NEW.amount))",
+      "command_tags": [
+        "CREATE RULE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "WITH changed AS (INSERT INTO cte_log VALUES (38,380)) SELECT 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "multi-statement DO INSTEAD rules are not supported for data-modifying statements in WITH"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP RULE cte_multiple ON cte_log",
+      "command_tags": [
+        "DROP RULE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE RULE cte_nothing AS ON INSERT TO cte_log DO INSTEAD NOTHING",
+      "command_tags": [
+        "CREATE RULE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "WITH changed AS (INSERT INTO cte_log VALUES (38,380)) SELECT 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "DO INSTEAD NOTHING rules are not supported for data-modifying statements in WITH"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP RULE cte_nothing ON cte_log",
+      "command_tags": [
+        "DROP RULE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW cte_triggered AS SELECT id, amount FROM cte_values",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION cte_trigger_write() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF TG_OP='INSERT' THEN INSERT INTO cte_values VALUES (NEW.id,NEW.amount); RETURN NEW; ELSIF TG_OP='UPDATE' THEN UPDATE cte_values SET amount=NEW.amount WHERE id=OLD.id; RETURN NEW; ELSE DELETE FROM cte_values WHERE id=OLD.id; RETURN OLD; END IF; END $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TRIGGER cte_write INSTEAD OF INSERT OR UPDATE OR DELETE ON cte_triggered FOR EACH ROW EXECUTE FUNCTION cte_trigger_write()",
+      "command_tags": [
+        "CREATE TRIGGER"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "WITH input AS (SELECT 40 AS id,400 AS amount), added AS (INSERT INTO cte_triggered SELECT * FROM input RETURNING *) SELECT * FROM added",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "40",
+              "400"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH input AS (SELECT 40 AS id,401 AS amount), changed AS (UPDATE cte_triggered SET amount=input.amount FROM input WHERE cte_triggered.id=input.id RETURNING cte_triggered.*) SELECT * FROM changed",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "40",
+              "401"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH input AS (SELECT 41 AS id,410 AS amount), changed AS (MERGE INTO cte_triggered t USING input s ON t.id=s.id WHEN MATCHED THEN UPDATE SET amount=s.amount WHEN NOT MATCHED THEN INSERT (id,amount) VALUES (s.id,s.amount) RETURNING t.*) SELECT * FROM changed",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "41",
+              "410"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH input AS (SELECT 41 AS id,415 AS amount), changed AS (MERGE INTO cte_triggered t USING input s ON t.id=s.id WHEN MATCHED THEN UPDATE SET amount=s.amount WHEN NOT MATCHED THEN INSERT (id,amount) VALUES (s.id,s.amount) RETURNING t.*) SELECT * FROM changed",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "41",
+              "415"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH input AS (SELECT 40 AS id), changed AS (DELETE FROM cte_triggered USING input WHERE cte_triggered.id=input.id RETURNING cte_triggered.*) SELECT * FROM changed",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "40",
+              "401"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH added AS (INSERT INTO cte_values VALUES (42,420) RETURNING *), merged AS (MERGE INTO cte_values t USING added s ON t.id=s.id WHEN MATCHED THEN UPDATE SET amount=s.amount+1 WHEN NOT MATCHED THEN INSERT (id,amount) VALUES (s.id,s.amount) RETURNING t.*) SELECT * FROM merged",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"cte_values_pkey\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT * FROM cte_values WHERE id >= 40 ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "41",
+              "415"
+            ],
+            [
+              "105",
+              "50"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH added AS (INSERT INTO cte_values VALUES (43,430) RETURNING *) INSERT INTO cte_triggered SELECT id+1,amount+10 FROM added RETURNING *",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "44",
+              "440"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "WITH changed AS (UPDATE cte_values SET amount=amount+1 WHERE id=1 RETURNING *) SELECT changed.amount AS updated, cte_triggered.amount AS snapshot FROM changed JOIN cte_triggered USING (id)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "updated",
+            "snapshot"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "112",
+              "111"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM cte_values ORDER BY id",
+      "command_tags": [
+        "SELECT 23"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "112"
+            ],
+            [
+              "3",
+              "11"
+            ],
+            [
+              "6",
+              "60"
+            ],
+            [
+              "8",
+              "80"
+            ],
+            [
+              "9",
+              "90"
+            ],
+            [
+              "10",
+              "100"
+            ],
+            [
+              "16",
+              "160"
+            ],
+            [
+              "17",
+              "170"
+            ],
+            [
+              "18",
+              "180"
+            ],
+            [
+              "19",
+              "190"
+            ],
+            [
+              "20",
+              "201"
+            ],
+            [
+              "22",
+              "220"
+            ],
+            [
+              "23",
+              "230"
+            ],
+            [
+              "30",
+              "300"
+            ],
+            [
+              "31",
+              "310"
+            ],
+            [
+              "32",
+              "320"
+            ],
+            [
+              "34",
+              "340"
+            ],
+            [
+              "35",
+              "350"
+            ],
+            [
+              "37",
+              "370"
+            ],
+            [
+              "41",
+              "415"
+            ],
+            [
+              "43",
+              "430"
+            ],
+            [
+              "44",
+              "440"
+            ],
+            [
+              "105",
+              "50"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION cte_bump(value integer) RETURNS integer LANGUAGE SQL IMMUTABLE RETURN value + 1",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION cte_bump(value text) RETURNS text LANGUAGE SQL IMMUTABLE RETURN value || 'x'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION cte_saved() RETURNS TABLE(id integer,amount integer) LANGUAGE SQL BEGIN ATOMIC WITH changed AS (UPDATE cte_values SET amount=cte_bump(amount) WHERE id=1 RETURNING *) SELECT * FROM changed; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM cte_saved()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "113"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE cte_values RENAME TO cte_saved_values",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM cte_saved()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "114"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION cte_bump(text)",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION cte_bump(integer)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop function cte_bump(integer) because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER TABLE cte_saved_values RENAME TO cte_values",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION cte_saved()",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION cte_bump(integer)",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    }
+  ]
+}

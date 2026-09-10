@@ -15,6 +15,9 @@ pub(crate) fn sql_column_type_to_fdw(
     column_type: &uqa_sql::ast::ColumnType,
 ) -> uqa_fdw::ColumnType {
     match column_type {
+        uqa_sql::ast::ColumnType::Named(name) => {
+            unreachable!("unresolved declaration type {name} reached foreign-table projection")
+        }
         uqa_sql::ast::ColumnType::Boolean => uqa_fdw::ColumnType::Bool,
         uqa_sql::ast::ColumnType::Void => uqa_fdw::ColumnType::Void,
         uqa_sql::ast::ColumnType::SmallInteger => uqa_fdw::ColumnType::SmallInteger,
@@ -38,11 +41,19 @@ pub(crate) fn sql_column_type_to_fdw(
         uqa_sql::ast::ColumnType::Json => uqa_fdw::ColumnType::Json,
         uqa_sql::ast::ColumnType::JsonB => uqa_fdw::ColumnType::JsonB,
         uqa_sql::ast::ColumnType::Date => uqa_fdw::ColumnType::Date,
-        uqa_sql::ast::ColumnType::Time => uqa_fdw::ColumnType::Time,
-        uqa_sql::ast::ColumnType::TimeTz => uqa_fdw::ColumnType::TimeTz,
-        uqa_sql::ast::ColumnType::Timestamp => uqa_fdw::ColumnType::Timestamp,
-        uqa_sql::ast::ColumnType::TimestampTz => uqa_fdw::ColumnType::TimestampTz,
-        uqa_sql::ast::ColumnType::Interval => uqa_fdw::ColumnType::Interval,
+        uqa_sql::ast::ColumnType::Time | uqa_sql::ast::ColumnType::TimePrecision(_) => {
+            uqa_fdw::ColumnType::Time
+        }
+        uqa_sql::ast::ColumnType::TimeTz | uqa_sql::ast::ColumnType::TimeTzPrecision(_) => {
+            uqa_fdw::ColumnType::TimeTz
+        }
+        uqa_sql::ast::ColumnType::Timestamp | uqa_sql::ast::ColumnType::TimestampPrecision(_) => {
+            uqa_fdw::ColumnType::Timestamp
+        }
+        uqa_sql::ast::ColumnType::TimestampTz
+        | uqa_sql::ast::ColumnType::TimestampTzPrecision(_) => uqa_fdw::ColumnType::TimestampTz,
+        uqa_sql::ast::ColumnType::Interval
+        | uqa_sql::ast::ColumnType::IntervalWithFields { .. } => uqa_fdw::ColumnType::Interval,
         uqa_sql::ast::ColumnType::Range(subtype) => {
             uqa_fdw::ColumnType::Range(sql_range_subtype_to_fdw(*subtype))
         }
@@ -402,6 +413,9 @@ impl Engine {
         mut checks: Vec<uqa_sql::ast::TableCheck>,
         options: Vec<(String, String)>,
     ) -> Result<(), uqa_sql::SQLError> {
+        for column in &mut columns {
+            column.ty = crate::sql::resolve_declared_column_type(self, &column.ty)?;
+        }
         self.materialize_implicit_sequences(
             "CREATE FOREIGN TABLE",
             name,

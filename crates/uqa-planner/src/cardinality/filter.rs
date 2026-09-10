@@ -6,10 +6,7 @@
 
 //! Indexed predicate selectivity from MCV and histogram statistics.
 
-use super::{
-    column_entropy, compare_values, value_as_f64, CardinalityEstimator, ColumnStats, Predicate,
-    Value,
-};
+use super::{compare_values, value_as_f64, CardinalityEstimator, ColumnStats, Predicate, Value};
 
 impl CardinalityEstimator {
     // -----------------------------------------------------------------
@@ -20,16 +17,15 @@ impl CardinalityEstimator {
         let Some(cs) = self.column_stats.get(field) else {
             return 0.5;
         };
-        if cs.distinct_count == 0 {
-            return 0.5;
-        }
-        let ndv = cs.distinct_count;
-        let mut selectivity = match predicate {
-            Predicate::Equals(target) => Self::equality_selectivity(cs, target, ndv),
-            Predicate::NotEquals(target) => 1.0 - Self::equality_selectivity(cs, target, ndv),
+        let selectivity = match predicate {
+            Predicate::Equals(target) => cs.equality_selectivity_for(target),
+            Predicate::NotEquals(Value::Null) => 0.0,
+            Predicate::NotEquals(target) => {
+                cs.non_null_fraction() - cs.equality_selectivity_for(target)
+            }
             Predicate::InSet(values) => values
                 .iter()
-                .map(|v| Self::equality_selectivity(cs, v, ndv))
+                .map(|v| cs.equality_selectivity_for(v))
                 .sum::<f64>()
                 .min(1.0),
             Predicate::Between { low, high } => self.range_selectivity_for(cs, low, high),
@@ -56,28 +52,7 @@ impl CardinalityEstimator {
             }
         };
 
-        // Entropy-based lower bound.
-        if cs.distinct_count > 1 {
-            let h = column_entropy(cs);
-            if h > 0.0 {
-                let min_sel = 1.0 / 2.0_f64.powf(h);
-                selectivity = selectivity.max(min_sel);
-            }
-        }
         selectivity.clamp(0.0, 1.0)
-    }
-
-    fn equality_selectivity(cs: &ColumnStats, target: &Value, ndv: u64) -> f64 {
-        for (mcv, freq) in cs.mcv_values.iter().zip(cs.mcv_frequencies.iter()) {
-            if mcv == target {
-                return *freq;
-            }
-        }
-        if ndv > 0 {
-            1.0 / ndv as f64
-        } else {
-            1.0
-        }
     }
 
     fn histogram_fraction(boundaries: &[Value], low: &Value, high: &Value) -> f64 {

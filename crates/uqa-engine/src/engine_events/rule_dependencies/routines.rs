@@ -26,8 +26,12 @@ pub(crate) fn bind_stored_statement_routines(
             Ok(())
         };
     StoredAstVisitor {
-        visit_relation: &mut ignore_relation,
-        visit_routine: &mut bind,
+        source: None,
+        merge: None,
+        expression: None,
+        ty: None,
+        relation: &mut ignore_relation,
+        routine: &mut bind,
     }
     .bind_statement(statement)?;
     if let Some(reference) = references.next() {
@@ -60,8 +64,12 @@ pub(crate) fn rewrite_statement_routine_identity(
         Ok(())
     };
     StoredAstVisitor {
-        visit_relation: &mut ignore_relation,
-        visit_routine: &mut rewrite,
+        source: None,
+        merge: None,
+        expression: None,
+        ty: None,
+        relation: &mut ignore_relation,
+        routine: &mut rewrite,
     }
     .bind_statement(statement)?;
     Ok(changed)
@@ -88,8 +96,12 @@ pub(crate) fn rewrite_expression_routine_identity(
         Ok(())
     };
     StoredAstVisitor {
-        visit_relation: &mut ignore_relation,
-        visit_routine: &mut rewrite,
+        source: None,
+        merge: None,
+        expression: None,
+        ty: None,
+        relation: &mut ignore_relation,
+        routine: &mut rewrite,
     }
     .bind_expr(expression, &BTreeSet::new())?;
     Ok(changed)
@@ -113,8 +125,12 @@ pub(crate) fn bind_stored_expression_routines(
             Ok(())
         };
     StoredAstVisitor {
-        visit_relation: &mut ignore_relation,
-        visit_routine: &mut bind,
+        source: None,
+        merge: None,
+        expression: None,
+        ty: None,
+        relation: &mut ignore_relation,
+        routine: &mut bind,
     }
     .bind_expr(expression, &BTreeSet::new())?;
     if let Some(reference) = references.next() {
@@ -144,8 +160,12 @@ pub(crate) fn statement_references_routine_identity(
         Ok(())
     };
     StoredAstVisitor {
-        visit_relation: &mut ignore_relation,
-        visit_routine: &mut inspect,
+        source: None,
+        merge: None,
+        expression: None,
+        ty: None,
+        relation: &mut ignore_relation,
+        routine: &mut inspect,
     }
     .bind_statement(&mut statement)?;
     Ok(found)
@@ -169,8 +189,12 @@ pub(crate) fn expression_references_routine_identity(
         Ok(())
     };
     StoredAstVisitor {
-        visit_relation: &mut ignore_relation,
-        visit_routine: &mut inspect,
+        source: None,
+        merge: None,
+        expression: None,
+        ty: None,
+        relation: &mut ignore_relation,
+        routine: &mut inspect,
     }
     .bind_expr(&mut expression, &BTreeSet::new())?;
     Ok(found)

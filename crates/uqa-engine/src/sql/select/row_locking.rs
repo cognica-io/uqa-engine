@@ -62,13 +62,7 @@ fn lock_query_plan_relations(
         if cte.recursive {
             definition_scope.insert(cte.name.clone());
         }
-        lock_query_plan_relations(
-            engine,
-            &cte.query,
-            &definition_scope,
-            locked,
-            visiting_views,
-        )?;
+        lock_cte_plan_relations(engine, &cte.body, &definition_scope, locked, visiting_views)?;
         visible_ctes.insert(cte.name.clone());
     }
     lock_relational_plan_relations(
@@ -79,6 +73,95 @@ fn lock_query_plan_relations(
         locked,
         visiting_views,
     )
+}
+
+fn lock_cte_plan_relations(
+    engine: &Engine,
+    body: &uqa_planner::CtePlanBody,
+    inherited: &std::collections::BTreeSet<String>,
+    locked: &mut std::collections::BTreeSet<String>,
+    visiting: &mut std::collections::BTreeSet<String>,
+) -> Result<(), SQLError> {
+    match body {
+        uqa_planner::CtePlanBody::Query(query) => {
+            lock_query_plan_relations(engine, query, inherited, locked, visiting)
+        }
+        uqa_planner::CtePlanBody::Command(command) => {
+            let bound = match command.as_ref() {
+                uqa_planner::CommandPlan::Insert(plan) => plan.relations_bound,
+                uqa_planner::CommandPlan::Update(plan) => plan.relations_bound,
+                uqa_planner::CommandPlan::Delete(plan) => plan.relations_bound,
+                _ => false,
+            };
+            if let Some(target) = command.mutation_target() {
+                if let Some((table, _)) =
+                    engine.try_resolve_relation_kind_for_query(target, bound)?
+                {
+                    engine
+                        .lock_relation(&table, crate::row_locks::RelationLockMode::RowExclusive)?;
+                }
+            }
+            let mut visible = inherited.clone();
+            if command.ctes().iter().any(|cte| cte.recursive) {
+                visible.extend(command.ctes().iter().map(|cte| cte.name.clone()));
+            }
+            for cte in command.ctes() {
+                lock_cte_plan_relations(engine, &cte.body, &visible, locked, visiting)?;
+                visible.insert(cte.name.clone());
+            }
+            for query in command.query_inputs() {
+                lock_query_plan_relations(engine, query, &visible, locked, visiting)?;
+            }
+            if let Some(source) = command.source_input() {
+                lock_source_plan_relations(engine, source, &visible, bound, locked, visiting)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn validate_cte_row_locks(
+    engine: &Engine,
+    body: &uqa_planner::CtePlanBody,
+    params: &[SQLParam],
+    ctes: &CteScope,
+) -> Result<(), SQLError> {
+    match body {
+        uqa_planner::CtePlanBody::Query(query) => {
+            validate_query_plan_row_locks(engine, query, params, ctes)
+        }
+        uqa_planner::CtePlanBody::Command(command) => {
+            for cte in command.ctes() {
+                validate_cte_row_locks(engine, &cte.body, params, ctes)?;
+            }
+            for query in command.query_inputs() {
+                validate_query_plan_row_locks(engine, query, params, ctes)?;
+            }
+            if let Some(source) = command.source_input() {
+                validate_source_row_locks(engine, source, params, ctes)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn cte_plan_has_row_locks(body: &uqa_planner::CtePlanBody) -> bool {
+    match body {
+        uqa_planner::CtePlanBody::Query(query) => query_plan_has_row_locks(query),
+        uqa_planner::CtePlanBody::Command(command) => {
+            command
+                .ctes()
+                .iter()
+                .any(|cte| cte_plan_has_row_locks(&cte.body))
+                || command
+                    .query_inputs()
+                    .into_iter()
+                    .any(query_plan_has_row_locks)
+                || command
+                    .source_input()
+                    .is_some_and(source_plan_has_row_locks)
+        }
+    }
 }
 
 fn lock_relational_plan_relations(
@@ -246,7 +329,7 @@ fn validate_query_plan_row_locks(
     ctes: &CteScope,
 ) -> Result<(), SQLError> {
     for cte in &query.ctes {
-        validate_query_plan_row_locks(engine, &cte.query, params, ctes)?;
+        validate_cte_row_locks(engine, &cte.body, params, ctes)?;
     }
     match &query.root {
         RelationalPlan::QueryBlock(block) => {
@@ -303,7 +386,7 @@ fn query_plan_has_row_locks(query: &QueryPlan) -> bool {
     query
         .ctes
         .iter()
-        .any(|cte| query_plan_has_row_locks(&cte.query))
+        .any(|cte| cte_plan_has_row_locks(&cte.body))
         || relational_has_row_locks(&query.root)
 }
 
