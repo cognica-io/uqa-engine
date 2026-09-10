@@ -128,6 +128,7 @@ impl Engine {
                 matches!(mode, RoutineCompilationMode::Persisted),
                 "SQL routine body",
             )?;
+            changed |= self.bind_stored_merge_target_columns(statement)?;
         }
         Ok(changed)
     }
@@ -137,6 +138,8 @@ impl Engine {
         def: &mut CreateFunction,
         compiled: &CompiledFunctionBody,
     ) -> Result<bool, SQLError> {
+        let dependency_body = self.stored_merge_dependency_body(def)?;
+        let compiled = dependency_body.as_ref().unwrap_or(compiled);
         let FunctionBody::Statements(statements) = &mut def.body else {
             return Ok(false);
         };

@@ -520,6 +520,8 @@ Relation and sequence deletion follows [stored relation and routine dependencies
 
 [Column renames](02-ddl.md#alter-table) rewrite and recompile SQL-standard query and mutation-command bodies against the same column identity. Stored projections retain their output names, unrelated routine parameters and CTE bindings retain their names, and later reuse of the old column name does not redirect the routine.
 
+[Column deletion](02-ddl.md#alter-table) rejects stored routine dependents with RESTRICT and removes their transitive dependency closure with CASCADE, preserving routines that use only unrelated columns. Retained MERGE routines skip a deleted write-only destination without evaluating its value expression, yet keep the expression's stored routine and sequence dependencies and the domain identities used by non-DEFAULT assignment coercions. The destination retains its original column identity across old-name reuse; restored catalogs validate the complete stored expressions separately from the executable writes.
+
 Durable SQL and PL/pgSQL routine definitions are restored with the catalog. Restoration installs routine definitions before rebinding stored views and compiles routine bodies after every row-producing relation is present, so a stored view may call a routine while another SQL-standard routine reads that view. Stored join plans use the loaded catalog statistics during restoration so rollback does not reenter the transaction-state lock. Rust, Python, Node.js, and browser WASM runtime callbacks are not durable and must be registered after process start.
 
 ## Cancellation and failure

@@ -339,6 +339,27 @@ fn drop_key_constraint_dependencies(
     Ok(local_dependents)
 }
 
+pub(super) fn drop_column(
+    engine: &Engine,
+    table: &str,
+    column: &str,
+    if_exists: bool,
+    cascade: bool,
+) -> Result<(), SQLError> {
+    if !ensure_drop_column_exists(engine, table, column, if_exists)? {
+        return Ok(());
+    }
+    engine.drop_column_routine_dependents(table, column, cascade)?;
+    engine.handle_drop_column_event_dependencies(table, column, cascade)?;
+    if cascade {
+        // A routine/domain cycle may already have removed the root column.
+        drop_column_cascade(engine, table, column, true)?;
+    } else {
+        drop_column_restrict(engine, table, column, false)?;
+    }
+    engine.refresh_stored_merge_target_plans()
+}
+
 pub(crate) fn drop_column_cascade(
     engine: &Engine,
     table: &str,
@@ -427,7 +448,14 @@ fn ensure_drop_column_exists(
     if if_exists {
         return Ok(false);
     }
-    Err(SQLError::UnknownColumn(format!("{table}.{column}")))
+    let relation = crate::RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
+    Err(constraint_error(
+        "42703",
+        format!(
+            "column \"{column}\" of relation \"{}\" does not exist",
+            relation.name
+        ),
+    ))
 }
 
 fn foreign_keys_referencing_column(

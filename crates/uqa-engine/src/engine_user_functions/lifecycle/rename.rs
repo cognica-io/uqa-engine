@@ -49,7 +49,7 @@ impl Engine {
         })
     }
 
-    fn rewrite_stored_routine_bodies(
+    pub(super) fn rewrite_stored_routine_bodies(
         &self,
         mut rewrite: impl FnMut(&mut uqa_sql::ast::Statement) -> Result<bool, SQLError>,
     ) -> Result<(), SQLError> {

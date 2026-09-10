@@ -26,6 +26,7 @@ pub(crate) fn bind_stored_statement_routines(
             Ok(())
         };
     StoredAstVisitor {
+        merge: None,
         expression: None,
         ty: None,
         relation: &mut ignore_relation,
@@ -62,6 +63,7 @@ pub(crate) fn rewrite_statement_routine_identity(
         Ok(())
     };
     StoredAstVisitor {
+        merge: None,
         expression: None,
         ty: None,
         relation: &mut ignore_relation,
@@ -92,6 +94,7 @@ pub(crate) fn rewrite_expression_routine_identity(
         Ok(())
     };
     StoredAstVisitor {
+        merge: None,
         expression: None,
         ty: None,
         relation: &mut ignore_relation,
@@ -119,6 +122,7 @@ pub(crate) fn bind_stored_expression_routines(
             Ok(())
         };
     StoredAstVisitor {
+        merge: None,
         expression: None,
         ty: None,
         relation: &mut ignore_relation,
@@ -152,6 +156,7 @@ pub(crate) fn statement_references_routine_identity(
         Ok(())
     };
     StoredAstVisitor {
+        merge: None,
         expression: None,
         ty: None,
         relation: &mut ignore_relation,
@@ -179,6 +184,7 @@ pub(crate) fn expression_references_routine_identity(
         Ok(())
     };
     StoredAstVisitor {
+        merge: None,
         expression: None,
         ty: None,
         relation: &mut ignore_relation,

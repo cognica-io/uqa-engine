@@ -450,20 +450,28 @@ pub(super) fn compile_function_body(
     engine: &Engine,
     def: &CreateFunction,
 ) -> Result<CompiledFunctionBody, SQLError> {
-    compile_function_body_inner(engine, def, false)
+    compile_function_body_inner(engine, def, false, false)
 }
 
 pub(super) fn compile_persisted_function_body(
     engine: &Engine,
     def: &CreateFunction,
 ) -> Result<CompiledFunctionBody, SQLError> {
-    compile_function_body_inner(engine, def, true)
+    compile_function_body_inner(engine, def, true, false)
+}
+
+pub(super) fn compile_persisted_function_dependencies(
+    engine: &Engine,
+    def: &CreateFunction,
+) -> Result<CompiledFunctionBody, SQLError> {
+    compile_function_body_inner(engine, def, true, true)
 }
 
 fn compile_function_body_inner(
     engine: &Engine,
     def: &CreateFunction,
     persisted_definition: bool,
+    preserve_target_expressions: bool,
 ) -> Result<CompiledFunctionBody, SQLError> {
     if !matches!(def.language.as_str(), "plpgsql" | "sql") {
         return Err(SQLError::Routine {
@@ -501,6 +509,7 @@ fn compile_function_body_inner(
                 statements,
                 bind_catalog_dependencies,
                 persisted_definition && matches!(def.body, FunctionBody::Statements(_)),
+                preserve_target_expressions,
             )?;
             if bind_catalog_dependencies {
                 for plan in &mut plans {
@@ -520,6 +529,7 @@ fn compile_sql_routine_plans(
     statements: Vec<Statement>,
     bind_catalog_dependencies: bool,
     persisted_definition: bool,
+    preserve_target_expressions: bool,
 ) -> Result<Vec<UnifiedPlan>, SQLError> {
     let local_name = routine_local_name(&def.name)?;
     let signature_params = def.signature_params();
@@ -550,7 +560,10 @@ fn compile_sql_routine_plans(
     );
     statements
         .into_iter()
-        .map(|statement| {
+        .map(|mut statement| {
+            if bind_catalog_dependencies && !preserve_target_expressions {
+                engine.normalize_stored_merge_target_columns(&mut statement)?;
+            }
             let mut plan = UnifiedPlan::lower_with(statement, &|name: &str| {
                 engine.has_registered_aggregate_function(name)
             });

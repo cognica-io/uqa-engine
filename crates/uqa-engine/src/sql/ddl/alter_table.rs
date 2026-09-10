@@ -25,8 +25,8 @@ mod constraint_lifecycle;
 mod foreign_key;
 mod recursion;
 
+use constraint_drop::{drop_column, drop_constraint};
 pub(crate) use constraint_drop::{drop_column_cascade, drop_constraint_dependency};
-use constraint_drop::{drop_column_restrict, drop_constraint};
 use constraint_lifecycle::{
     add_check_constraint, add_foreign_key_constraint, add_not_null_constraint, alter_constraint,
     ensure_constraint_name_available, set_not_null_constraint,
@@ -608,18 +608,9 @@ fn run_alter_table_action(
         AlterTableAction::DropColumn {
             name,
             if_exists,
-            cascade: false,
+            cascade,
         } => {
-            engine.handle_drop_column_event_dependencies(&stmt.table, &name, false)?;
-            drop_column_restrict(engine, &stmt.table, &name, if_exists)?;
-        }
-        AlterTableAction::DropColumn {
-            name,
-            if_exists,
-            cascade: true,
-        } => {
-            engine.handle_drop_column_event_dependencies(&stmt.table, &name, true)?;
-            drop_column_cascade(engine, &stmt.table, &name, if_exists)?;
+            drop_column(engine, &stmt.table, &name, if_exists, cascade)?;
         }
         AlterTableAction::RenameColumn { from, to } => {
             super::validate_postgres_column_name(&to)?;

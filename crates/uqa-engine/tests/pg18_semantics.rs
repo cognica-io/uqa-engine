@@ -121,3 +121,6 @@ mod domain_drop;
 
 #[path = "pg18_semantics/stored_column_rename.rs"]
 mod stored_column_rename;
+
+#[path = "pg18_semantics/stored_column_drop.rs"]
+mod stored_column_drop;

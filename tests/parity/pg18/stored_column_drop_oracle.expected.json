@@ -1,0 +1,3255 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE stored_column_source(id integer, amount integer, spare integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO stored_column_source VALUES(1,42,99)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_read() RETURNS integer LANGUAGE SQL IMMUTABLE BEGIN ATOMIC SELECT amount FROM stored_column_source; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_return() RETURNS integer LANGUAGE SQL RETURN (SELECT amount FROM stored_column_source)",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_keep(amount integer DEFAULT 5) RETURNS integer LANGUAGE SQL BEGIN ATOMIC WITH x(amount) AS (VALUES(2)) SELECT id+x.amount+stored_column_keep.amount FROM stored_column_source,x; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_count() RETURNS bigint LANGUAGE SQL BEGIN ATOMIC SELECT count(*) FROM stored_column_source; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_late() RETURNS integer LANGUAGE SQL AS 'SELECT amount FROM stored_column_source'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_caller() RETURNS integer LANGUAGE SQL RETURN stored_column_read()",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW stored_column_view AS SELECT stored_column_caller() AS total",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_view_read() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT total FROM stored_column_view; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_column_source DROP COLUMN amount RESTRICT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop column amount of table stored_column_source because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT stored_column_read() AS amount, stored_column_return() AS via_return, stored_column_view_read() AS via_view, stored_column_keep() AS kept",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "amount",
+            "via_return",
+            "via_view",
+            "kept"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "42",
+              "42",
+              "42",
+              "8"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_column_source DROP COLUMN missing CASCADE",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"missing\" of relation \"stored_column_source\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER TABLE stored_column_source DROP COLUMN IF EXISTS missing CASCADE",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_column_source DROP COLUMN amount CASCADE, DROP COLUMN missing",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"missing\" of relation \"stored_column_source\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT stored_column_read() AS amount, stored_column_view_read() AS total",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "amount",
+            "total"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "42",
+              "42"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SAVEPOINT before_column",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_column_source DROP COLUMN amount CASCADE",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('stored_column_read()') IS NULL AS reader_gone, to_regprocedure('stored_column_return()') IS NULL AS return_gone, to_regprocedure('stored_column_caller()') IS NULL AS caller_gone, to_regclass('stored_column_view') IS NULL AS view_gone, to_regprocedure('stored_column_view_read()') IS NULL AS view_reader_gone, stored_column_keep() AS kept, stored_column_count() AS count",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "reader_gone",
+            "return_gone",
+            "caller_gone",
+            "view_gone",
+            "view_reader_gone",
+            "kept",
+            "count"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "8",
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK TO before_column",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT stored_column_read() AS amount, stored_column_view_read() AS via_view",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "amount",
+            "via_view"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "42",
+              "42"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "COMMIT",
+      "command_tags": [
+        "COMMIT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_column_source DROP COLUMN spare",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT stored_column_read() AS amount",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "amount"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "42"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_column_source DROP COLUMN amount CASCADE",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('stored_column_read()') IS NULL AS reader_gone, to_regprocedure('stored_column_late()') IS NOT NULL AS late_survives, stored_column_keep() AS kept, stored_column_count() AS count",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "reader_gone",
+            "late_survives",
+            "kept",
+            "count"
+          ],
+          "type_oids": [
+            16,
+            16,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "8",
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_column_source ADD COLUMN amount integer DEFAULT 1000",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT stored_column_late() AS new_amount",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "new_amount"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1000"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE stored_column_source CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION stored_column_late()",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE stored_column_dml(id integer PRIMARY KEY, amount integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO stored_column_dml VALUES(1,42)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_insert() RETURNS integer LANGUAGE SQL BEGIN ATOMIC INSERT INTO stored_column_dml(id,amount) VALUES(2,50) RETURNING amount; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_implicit_insert() RETURNS integer LANGUAGE SQL BEGIN ATOMIC INSERT INTO stored_column_dml VALUES(3,60) RETURNING id; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_update() RETURNS integer LANGUAGE SQL BEGIN ATOMIC UPDATE stored_column_dml AS d SET amount=d.amount+1 WHERE id=1 RETURNING amount; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_delete() RETURNS integer LANGUAGE SQL BEGIN ATOMIC DELETE FROM stored_column_dml WHERE amount<0 RETURNING id; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_merge() RETURNS integer LANGUAGE SQL BEGIN ATOMIC MERGE INTO stored_column_dml d USING (VALUES(1,43)) s(id,amount) ON d.id=s.id WHEN MATCHED THEN UPDATE SET amount=s.amount WHEN NOT MATCHED THEN INSERT(id,amount) VALUES(s.id,s.amount) RETURNING d.id; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE PROCEDURE stored_column_procedure() LANGUAGE SQL BEGIN ATOMIC UPDATE stored_column_dml SET amount=amount+1 WHERE id=1; END",
+      "command_tags": [
+        "CREATE PROCEDURE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_insert_keep() RETURNS integer LANGUAGE SQL BEGIN ATOMIC INSERT INTO stored_column_dml(id) VALUES(4) RETURNING id; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_delete_keep() RETURNS integer LANGUAGE SQL BEGIN ATOMIC DELETE FROM stored_column_dml WHERE id<0 RETURNING id; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_update_keep() RETURNS integer LANGUAGE SQL BEGIN ATOMIC UPDATE stored_column_dml SET id=id+10 WHERE id=4 RETURNING id; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_column_dml DROP COLUMN amount",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop column amount of table stored_column_dml because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER TABLE stored_column_dml DROP COLUMN amount CASCADE",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('stored_column_insert()') IS NULL AS insert_gone, to_regprocedure('stored_column_implicit_insert()') IS NULL AS implicit_gone, to_regprocedure('stored_column_update()') IS NULL AS update_gone, to_regprocedure('stored_column_delete()') IS NULL AS delete_gone, to_regprocedure('stored_column_merge()') IS NULL AS merge_gone, to_regprocedure('stored_column_procedure()') IS NULL AS procedure_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "insert_gone",
+            "implicit_gone",
+            "update_gone",
+            "delete_gone",
+            "merge_gone",
+            "procedure_gone"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t",
+              "t",
+              "f",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT stored_column_insert_keep() AS inserted",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "inserted"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "4"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT stored_column_update_keep() AS updated",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "updated"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "14"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT stored_column_delete_keep() AS deleted",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "deleted"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM stored_column_dml ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "14"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE stored_column_dml CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE stored_column_generated(id integer, amount integer, bonus integer GENERATED ALWAYS AS (amount+1) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO stored_column_generated(id,amount) VALUES(1,42)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_generated_read() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT bonus FROM stored_column_generated; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW stored_column_generated_view AS SELECT bonus FROM stored_column_generated",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_generated_view_read() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT bonus FROM stored_column_generated_view; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_column_generated DROP COLUMN amount RESTRICT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop column amount of table stored_column_generated because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER TABLE stored_column_generated DROP COLUMN amount CASCADE",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('stored_column_generated_read()') IS NULL AS reader_gone, to_regclass('stored_column_generated_view') IS NULL AS view_gone, to_regprocedure('stored_column_generated_view_read()') IS NULL AS view_reader_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "reader_gone",
+            "view_gone",
+            "view_reader_gone"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM stored_column_generated",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE stored_column_generated",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE stored_column_sequence(id bigserial, kept bigserial, note text)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO stored_column_sequence(note) VALUES('keep row')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_sequence_read() RETURNS bigint LANGUAGE SQL RETURN nextval('stored_column_sequence_id_seq')",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_sequence_keep() RETURNS bigint LANGUAGE SQL RETURN nextval('stored_column_sequence_kept_seq')",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_sequence_default(s regclass DEFAULT 'stored_column_sequence_id_seq') RETURNS integer LANGUAGE SQL AS 'SELECT 7'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_sequence_late() RETURNS bigint LANGUAGE SQL AS $$SELECT nextval('stored_column_sequence_id_seq')$$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW stored_column_sequence_view AS SELECT nextval('stored_column_sequence_id_seq') AS n",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_sequence_view_read() RETURNS bigint LANGUAGE SQL BEGIN ATOMIC SELECT n FROM stored_column_sequence_view; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_column_sequence DROP COLUMN id RESTRICT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop column id of table stored_column_sequence because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER TABLE stored_column_sequence DROP COLUMN id CASCADE",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regclass('stored_column_sequence_id_seq') IS NULL AS sequence_gone, to_regprocedure('stored_column_sequence_read()') IS NULL AS reader_gone, to_regprocedure('stored_column_sequence_default(regclass)') IS NULL AS default_gone, to_regclass('stored_column_sequence_view') IS NULL AS view_gone, to_regprocedure('stored_column_sequence_view_read()') IS NULL AS view_reader_gone, to_regprocedure('stored_column_sequence_late()') IS NOT NULL AS late_kept, stored_column_sequence_keep() AS kept_sequence",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "sequence_gone",
+            "reader_gone",
+            "default_gone",
+            "view_gone",
+            "view_reader_gone",
+            "late_kept",
+            "kept_sequence"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16,
+            20
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM stored_column_sequence",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "kept",
+            "note"
+          ],
+          "type_oids": [
+            20,
+            25
+          ],
+          "rows": [
+            [
+              "1",
+              "keep row"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE stored_column_sequence CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION stored_column_sequence_late()",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE stored_column_closure(id integer, amount integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO stored_column_closure VALUES(1,42)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_closure_read() RETURNS integer LANGUAGE SQL IMMUTABLE BEGIN ATOMIC SELECT amount FROM stored_column_closure; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN stored_column_closure_domain AS integer DEFAULT stored_column_closure_read()",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE stored_column_closure_dependent(id integer, typed stored_column_closure_domain, calculated integer GENERATED ALWAYS AS (stored_column_closure_read()) STORED, ordinary integer DEFAULT stored_column_closure_read(), CHECK (ordinary<=stored_column_closure_read()))",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO stored_column_closure_dependent(id) VALUES(2)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_closure_typed() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT typed::integer FROM stored_column_closure_dependent; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_closure_generated() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT calculated FROM stored_column_closure_dependent; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_closure_keep() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT ordinary FROM stored_column_closure_dependent; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW stored_column_closure_view AS SELECT calculated FROM stored_column_closure_dependent",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_closure_view_read() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT calculated FROM stored_column_closure_view; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_column_closure DROP COLUMN amount CASCADE",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regtype('stored_column_closure_domain') IS NULL AS domain_gone, to_regprocedure('stored_column_closure_typed()') IS NULL AS typed_gone, to_regprocedure('stored_column_closure_generated()') IS NULL AS generated_gone, to_regclass('stored_column_closure_view') IS NULL AS view_gone, to_regprocedure('stored_column_closure_view_read()') IS NULL AS view_reader_gone, stored_column_closure_keep() AS kept",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "domain_gone",
+            "typed_gone",
+            "generated_gone",
+            "view_gone",
+            "view_reader_gone",
+            "kept"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            23
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "42"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM stored_column_closure_dependent",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "ordinary"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "42"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO stored_column_closure_dependent(id,ordinary) VALUES(3,99)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE stored_column_closure,stored_column_closure_dependent CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE ROLE stored_column_owner",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE ROLE stored_column_outsider",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SCHEMA stored_column_private",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE stored_column_authority(id integer, amount integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO stored_column_authority VALUES(1,42)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_column_private.reader() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT amount FROM public.stored_column_authority; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_column_authority OWNER TO stored_column_owner",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE stored_column_outsider",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_column_authority DROP COLUMN missing CASCADE",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of table stored_column_authority"
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER TABLE stored_column_authority DROP COLUMN amount CASCADE",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42501",
+        "message": "must be owner of table stored_column_authority"
+      },
+      "results": []
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE stored_column_owner",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_column_authority DROP COLUMN amount RESTRICT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop column amount of table stored_column_authority because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER TABLE stored_column_authority DROP COLUMN amount CASCADE",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM stored_column_authority",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('stored_column_private.reader()') IS NULL AS reader_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "reader_gone"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE stored_column_authority",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA stored_column_private",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP ROLE stored_column_owner,stored_column_outsider",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE stored_merge_identity(id integer, amount bigint)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE stored_merge_identity_counter",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO stored_merge_identity VALUES(1,42)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_merge_identity_write() RETURNS integer LANGUAGE SQL BEGIN ATOMIC MERGE INTO stored_merge_identity d USING (VALUES(1),(2)) s(id) ON d.id=s.id WHEN MATCHED THEN UPDATE SET amount=nextval('stored_merge_identity_counter') WHEN NOT MATCHED THEN INSERT(id,amount) VALUES(s.id,nextval('stored_merge_identity_counter')) RETURNING d.id; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_merge_identity_read() RETURNS integer LANGUAGE SQL BEGIN ATOMIC MERGE INTO stored_merge_identity d USING (VALUES(1)) s(id) ON d.id=s.id WHEN MATCHED THEN UPDATE SET amount=d.amount+1 RETURNING d.id; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_merge_identity DROP COLUMN amount RESTRICT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop column amount of table stored_merge_identity because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SAVEPOINT merge_column",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_merge_identity DROP COLUMN amount CASCADE",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('stored_merge_identity_write()') IS NOT NULL AS writer_kept, to_regprocedure('stored_merge_identity_read()') IS NULL AS reader_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "writer_kept",
+            "reader_gone"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT stored_merge_identity_write() AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM stored_merge_identity ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM stored_merge_identity_counter",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK TO merge_column",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "COMMIT",
+      "command_tags": [
+        "COMMIT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT stored_merge_identity_read() AS read_result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "read_result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_merge_identity DROP COLUMN amount CASCADE",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT stored_merge_identity_write() AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_merge_identity ADD COLUMN amount integer DEFAULT 1000",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT stored_merge_identity_write() AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM stored_merge_identity ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1000"
+            ],
+            [
+              "2",
+              "1000"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_merge_identity RENAME COLUMN amount TO replacement",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_merge_identity ADD COLUMN amount integer DEFAULT 2000",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT stored_merge_identity_write() AS result",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "result"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM stored_merge_identity ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "replacement",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1000",
+              "2000"
+            ],
+            [
+              "2",
+              "1000",
+              "2000"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP SEQUENCE stored_merge_identity_counter RESTRICT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop sequence stored_merge_identity_counter because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP TABLE stored_merge_identity CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SEQUENCE stored_merge_identity_counter",
+      "command_tags": [
+        "DROP SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE stored_merge_more(id integer, amount integer, kept integer DEFAULT 700)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_merge_value(v integer) RETURNS integer LANGUAGE SQL RETURN v+1",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_merge_implicit() RETURNS integer LANGUAGE SQL BEGIN ATOMIC MERGE INTO stored_merge_more d USING (VALUES(1)) s(id) ON d.id=s.id WHEN MATCHED THEN UPDATE SET amount=stored_merge_value(41) WHEN NOT MATCHED THEN INSERT VALUES(s.id,stored_merge_value(42),800) RETURNING d.kept; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_merge_cte(v integer) RETURNS integer LANGUAGE SQL BEGIN ATOMIC WITH m AS (MERGE INTO stored_merge_more d USING (VALUES(2)) s(id) ON d.id=s.id WHEN MATCHED THEN UPDATE SET amount=stored_merge_value(v) WHEN NOT MATCHED THEN INSERT(id,amount) VALUES(s.id,stored_merge_value(v)) RETURNING d.kept) SELECT kept FROM m; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT stored_merge_implicit() AS kept",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "kept"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "800"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT stored_merge_cte(43) AS kept",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "kept"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "700"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_merge_more DROP COLUMN amount RESTRICT",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT stored_merge_implicit() AS kept",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "kept"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "800"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT stored_merge_cte(50) AS kept",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "kept"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "700"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM stored_merge_more ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "kept"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "800"
+            ],
+            [
+              "2",
+              "700"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_merge_more ADD COLUMN amount integer DEFAULT 1000",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT stored_merge_implicit() AS kept",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "kept"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "800"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT stored_merge_cte(60) AS kept",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "kept"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "700"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM stored_merge_more ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "kept",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "800",
+              "1000"
+            ],
+            [
+              "2",
+              "700",
+              "1000"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER FUNCTION stored_merge_value(integer) RENAME TO stored_merge_renamed",
+      "command_tags": [
+        "ALTER FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT stored_merge_cte(70) AS kept",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "kept"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "700"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION stored_merge_renamed(integer) RESTRICT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop function stored_merge_renamed(integer) because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP FUNCTION stored_merge_renamed(integer) CASCADE",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('stored_merge_implicit()') IS NULL AS implicit_gone, to_regprocedure('stored_merge_cte(integer)') IS NULL AS cte_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "implicit_gone",
+            "cte_gone"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE stored_merge_more",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE stored_merge_default(id integer DEFAULT 7, amount integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE PROCEDURE stored_merge_default_writer() LANGUAGE SQL BEGIN ATOMIC MERGE INTO stored_merge_default d USING (VALUES(1)) s(id) ON false WHEN NOT MATCHED THEN INSERT(amount) VALUES(9); END",
+      "command_tags": [
+        "CREATE PROCEDURE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_merge_default DROP COLUMN amount RESTRICT",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CALL stored_merge_default_writer()",
+      "command_tags": [
+        "CALL"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM stored_merge_default",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "7"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE stored_merge_default CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN stored_merge_target_domain AS integer CHECK(VALUE > 0)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE stored_merge_typed(id integer, amount stored_merge_target_domain DEFAULT 3)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO stored_merge_typed VALUES(1,4)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_merge_typed_update() RETURNS integer LANGUAGE SQL BEGIN ATOMIC MERGE INTO stored_merge_typed d USING (VALUES(1,2)) s(id,n) ON d.id=s.id WHEN MATCHED THEN UPDATE SET amount=s.n RETURNING d.id; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_merge_typed_insert() RETURNS integer LANGUAGE SQL BEGIN ATOMIC MERGE INTO stored_merge_typed d USING (VALUES(2,3)) s(id,n) ON d.id=s.id WHEN NOT MATCHED THEN INSERT(id,amount) VALUES(s.id,s.n) RETURNING d.id; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_merge_typed_omitted() RETURNS integer LANGUAGE SQL BEGIN ATOMIC MERGE INTO stored_merge_typed d USING (VALUES(3)) s(id) ON d.id=s.id WHEN NOT MATCHED THEN INSERT(id) VALUES(s.id) RETURNING d.id; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_merge_typed_default() RETURNS integer LANGUAGE SQL BEGIN ATOMIC MERGE INTO stored_merge_typed d USING (VALUES(1)) s(id) ON d.id=s.id WHEN MATCHED THEN UPDATE SET amount=DEFAULT RETURNING d.id; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_merge_typed_insert_default() RETURNS integer LANGUAGE SQL BEGIN ATOMIC MERGE INTO stored_merge_typed d USING (VALUES(4)) s(id) ON d.id=s.id WHEN NOT MATCHED THEN INSERT(id,amount) VALUES(s.id,DEFAULT) RETURNING d.id; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_merge_typed DROP COLUMN amount RESTRICT",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_merge_typed ADD COLUMN amount integer DEFAULT 1000",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT stored_merge_typed_update(), stored_merge_typed_insert(), stored_merge_typed_omitted(), stored_merge_typed_default(), stored_merge_typed_insert_default()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "stored_merge_typed_update",
+            "stored_merge_typed_insert",
+            "stored_merge_typed_omitted",
+            "stored_merge_typed_default",
+            "stored_merge_typed_insert_default"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "2",
+              "3",
+              "1",
+              "4"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id,amount FROM stored_merge_typed ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1000"
+            ],
+            [
+              "2",
+              "1000"
+            ],
+            [
+              "3",
+              "1000"
+            ],
+            [
+              "4",
+              "1000"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN stored_merge_target_domain RESTRICT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type stored_merge_target_domain because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP DOMAIN stored_merge_target_domain CASCADE",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('stored_merge_typed_update()') IS NULL AS update_gone, to_regprocedure('stored_merge_typed_insert()') IS NULL AS insert_gone, to_regprocedure('stored_merge_typed_omitted()') IS NOT NULL AS omitted_survives, to_regprocedure('stored_merge_typed_default()') IS NOT NULL AS default_survives, to_regprocedure('stored_merge_typed_insert_default()') IS NOT NULL AS insert_default_survives",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "update_gone",
+            "insert_gone",
+            "omitted_survives",
+            "default_survives",
+            "insert_default_survives"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE stored_merge_typed CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN stored_merge_base AS integer CHECK(VALUE > 0)",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN stored_merge_derived AS stored_merge_base",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN stored_merge_replacement AS integer",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE stored_merge_domain_array(id integer, amounts stored_merge_derived[])",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO stored_merge_domain_array VALUES(1,ARRAY[2,3])",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_merge_array_writer() RETURNS integer LANGUAGE SQL BEGIN ATOMIC WITH changed AS (MERGE INTO stored_merge_domain_array d USING (VALUES(1)) s(id) ON d.id=s.id WHEN MATCHED THEN UPDATE SET amounts=ARRAY[4,5] RETURNING d.id) SELECT id FROM changed; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_merge_domain_array DROP COLUMN amounts RESTRICT",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_merge_domain_array ADD COLUMN amounts stored_merge_replacement DEFAULT 1000",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT stored_merge_array_writer()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "stored_merge_array_writer"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN stored_merge_replacement CASCADE",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT stored_merge_array_writer()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "stored_merge_array_writer"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN stored_merge_base RESTRICT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type stored_merge_base because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP DOMAIN stored_merge_base CASCADE",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_regprocedure('stored_merge_array_writer()') IS NULL AS writer_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "writer_gone"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE stored_merge_domain_array",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    }
+  ]
+}

@@ -117,7 +117,24 @@ impl Engine {
     }
 
     pub fn drop_column(&self, table: &str, column: &str) -> StorageBackendResult<bool> {
-        self.try_drop_column(table, column)
+        self.with_implicit_storage_transaction(|engine| {
+            if let Some(canonical) =
+                engine.resolve_table_ddl_target(table, "ALTER TABLE DROP COLUMN")?
+            {
+                if engine.try_table_has_column(&canonical, column)? {
+                    engine
+                        .drop_column_routine_dependents(&canonical, column, false)
+                        .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+                }
+            }
+            let dropped = engine.try_drop_column_inner(table, column)?;
+            if dropped {
+                engine
+                    .refresh_stored_merge_target_plans()
+                    .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+            }
+            Ok(dropped)
+        })
     }
 
     pub(crate) fn try_drop_column(&self, table: &str, column: &str) -> StorageBackendResult<bool> {

@@ -123,9 +123,24 @@ impl Engine {
         resolution: &mut RoutineDropResolution,
         domains: &mut BTreeSet<u32>,
     ) -> Result<(), SQLError> {
+        self.expand_routine_domain_column_drop(registry, resolution, domains, BTreeSet::new())
+    }
+
+    pub(super) fn expand_routine_domain_column_drop(
+        &self,
+        registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
+        resolution: &mut RoutineDropResolution,
+        domains: &mut BTreeSet<u32>,
+        mut columns: BTreeSet<(String, String)>,
+    ) -> Result<(), SQLError> {
         let mut relations = BTreeSet::new();
         loop {
-            let previous = (resolution.targets.len(), domains.len(), relations.len());
+            let previous = (
+                resolution.targets.len(),
+                domains.len(),
+                relations.len(),
+                columns.len(),
+            );
             self.expand_stored_routine_drop_dependents(registry, true, resolution)?;
             let bindings = resolution
                 .targets
@@ -134,7 +149,7 @@ impl Engine {
                 .collect::<Vec<_>>();
             self.expand_domain_drop_targets(domains, &bindings)?;
             let dependents = self.routine_object_dependents(&resolution.targets, true)?;
-            let mut columns = self.domain_drop_column_names(domains)?;
+            columns.extend(self.domain_drop_column_names(domains)?);
             columns.extend(
                 dependents
                     .columns
@@ -143,6 +158,7 @@ impl Engine {
             );
             relations.extend(dependents.views);
             relations.extend(self.domain_drop_view_names(domains)?);
+            self.expand_column_drop_dependencies(&mut columns, &mut relations)?;
             relations = self.relation_drop_closure(relations)?;
             for (name, overloads) in registry {
                 for function in overloads {
@@ -162,7 +178,14 @@ impl Engine {
                     }
                 }
             }
-            if previous == (resolution.targets.len(), domains.len(), relations.len()) {
+            if previous
+                == (
+                    resolution.targets.len(),
+                    domains.len(),
+                    relations.len(),
+                    columns.len(),
+                )
+            {
                 break;
             }
         }

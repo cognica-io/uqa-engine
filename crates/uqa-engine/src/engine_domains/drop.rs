@@ -124,6 +124,20 @@ impl Engine {
         }
         if let FunctionBody::Statements(statements) = &definition.body {
             for statement in statements {
+                let mut merge_assignment_depends = false;
+                crate::engine_events::visit_stored_statement_merges(
+                    &mut statement.clone(),
+                    &mut |merge| {
+                        merge_assignment_depends |= merge
+                            .target_column_bindings
+                            .values()
+                            .any(|binding| !binding.domain_dependencies.is_disjoint(targets));
+                        Ok(())
+                    },
+                )?;
+                if merge_assignment_depends {
+                    return Ok(true);
+                }
                 if crate::engine_events::stored_statement_type_names(statement)?
                     .iter()
                     .any(|name| self.type_name_references_domain(name, targets))

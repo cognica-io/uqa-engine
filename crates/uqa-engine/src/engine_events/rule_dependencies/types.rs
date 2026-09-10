@@ -13,6 +13,7 @@ pub(crate) fn stored_statement_relation_names(
 ) -> Result<Vec<String>, SQLError> {
     let mut names = Vec::new();
     StoredAstVisitor {
+            merge: None,
             expression: None,
         ty: None,
         relation: &mut |name: &mut String| {
@@ -51,6 +52,7 @@ fn collect_type_names(
     ) -> Result<(), SQLError> = |_, _| Ok(());
     let mut collect = |name: &mut String| names.push(name.clone());
     visit(&mut StoredAstVisitor {
+        merge: None,
         expression: None,
         ty: Some(&mut collect),
         relation: &mut relation,

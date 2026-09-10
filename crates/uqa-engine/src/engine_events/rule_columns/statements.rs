@@ -48,6 +48,7 @@ impl RuleColumnBinder<'_> {
         )?;
         let (local, scopes) =
             self.bind_dml_source(Some(&mut merge.source), &target, outer, &context)?;
+        let dropped_targets = self.engine.dropped_stored_merge_targets(merge);
         self.bind_expr(&mut merge.join_condition, &scopes, &context)?;
         for action in &mut merge.when_clauses {
             let condition = match action {
@@ -60,7 +61,9 @@ impl RuleColumnBinder<'_> {
                     assignments,
                 } => {
                     for (column, expression) in assignments {
-                        self.bind_target_name(column, &target);
+                        if self.mode.is_rename() && !dropped_targets.contains(column) {
+                            self.bind_target_name(column, &target);
+                        }
                         self.bind_expr(expression, &scopes, &context)?;
                     }
                     condition
@@ -78,7 +81,13 @@ impl RuleColumnBinder<'_> {
                             .map(|column| column.current_name.clone())
                             .collect();
                     }
-                    self.bind_target_names(columns, &target);
+                    if self.mode.is_rename() {
+                        for column in columns {
+                            if !dropped_targets.contains(column) {
+                                self.bind_target_name(column, &target);
+                            }
+                        }
+                    }
                     for expression in values {
                         self.bind_expr(expression, &scopes, &context)?;
                     }
@@ -92,6 +101,13 @@ impl RuleColumnBinder<'_> {
             };
             if let Some(condition) = condition {
                 self.bind_expr(condition, &scopes, &context)?;
+            }
+        }
+        if let ColumnBindingMode::Rename { relation, from, to } = self.mode {
+            if merge.target == relation.qualified_name() && !dropped_targets.contains(from) {
+                if let Some(binding) = merge.target_column_bindings.remove(from) {
+                    merge.target_column_bindings.insert(to.to_string(), binding);
+                }
             }
         }
         let returning =

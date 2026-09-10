@@ -743,12 +743,23 @@ pub struct TruncateTarget {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MergeTargetColumnBinding {
+    pub object_id: [u8; 16],
+    /// Domain identities used by non-DEFAULT assignment coercions, including after target deletion.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub domain_dependencies: std::collections::BTreeSet<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MergeStmt {
     #[serde(default)]
     pub with: Vec<CTE>,
     pub target: String,
     pub target_qualifier: String,
     pub target_alias: Option<String>,
+    /// Creation-bound write targets in a stored body. Removed identities retain their expressions and dependencies but receive no writes.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub target_column_bindings: std::collections::BTreeMap<String, MergeTargetColumnBinding>,
     #[serde(default = "default_include_descendants")]
     pub include_descendants: bool,
     pub source: FromClause,

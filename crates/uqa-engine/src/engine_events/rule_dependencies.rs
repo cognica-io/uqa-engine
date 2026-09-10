@@ -8,10 +8,12 @@
 
 mod ctes;
 mod expressions;
+mod merge;
 mod routines;
 mod types;
 use ctes::{collect_cte_relation_dependencies, collect_cte_source_routine_dependencies};
 pub(crate) use expressions::{visit_stored_expression, visit_stored_statement_expressions};
+pub(crate) use merge::visit_stored_statement_merges;
 pub(crate) use types::{
     stored_expression_type_names, stored_statement_relation_names, stored_statement_type_names,
 };
@@ -33,9 +35,12 @@ pub(crate) use routines::{
     rewrite_statement_routine_identity, statement_references_routine_identity,
 };
 
+type MergeCallback<'a> = &'a mut dyn FnMut(&mut uqa_sql::ast::MergeStmt) -> Result<(), SQLError>;
+
 type ExpressionCallback<'a> = &'a mut dyn FnMut(&mut Expr) -> Result<(), SQLError>;
 
 struct StoredAstVisitor<'a, R, F> {
+    merge: Option<MergeCallback<'a>>,
     expression: Option<ExpressionCallback<'a>>,
     ty: Option<&'a mut dyn FnMut(&mut String)>,
     relation: &'a mut R,
@@ -147,59 +152,6 @@ where
         }
         for projection in &mut delete.returning {
             self.bind_expr(&mut projection.expr, &visible)?;
-        }
-        Ok(())
-    }
-
-    fn bind_merge(
-        &mut self,
-        merge: &mut uqa_sql::ast::MergeStmt,
-        inherited: &BTreeSet<String>,
-    ) -> Result<(), SQLError> {
-        (self.relation)(&mut merge.target)?;
-        let ctes = self.bind_ctes(&mut merge.with, inherited)?;
-        self.bind_from(&mut merge.source, &ctes)?;
-        self.bind_expr(&mut merge.join_condition, &ctes)?;
-        for clause in &mut merge.when_clauses {
-            match clause {
-                uqa_sql::ast::MergeWhen::UpdateMatched {
-                    condition,
-                    assignments,
-                }
-                | uqa_sql::ast::MergeWhen::UpdateNotMatchedBySource {
-                    condition,
-                    assignments,
-                } => {
-                    if let Some(condition) = condition {
-                        self.bind_expr(condition, &ctes)?;
-                    }
-                    for (_, expression) in assignments {
-                        self.bind_expr(expression, &ctes)?;
-                    }
-                }
-                uqa_sql::ast::MergeWhen::InsertNotMatched {
-                    condition, values, ..
-                } => {
-                    if let Some(condition) = condition {
-                        self.bind_expr(condition, &ctes)?;
-                    }
-                    for expression in values {
-                        self.bind_expr(expression, &ctes)?;
-                    }
-                }
-                uqa_sql::ast::MergeWhen::DeleteMatched { condition }
-                | uqa_sql::ast::MergeWhen::DeleteNotMatchedBySource { condition }
-                | uqa_sql::ast::MergeWhen::NothingMatched { condition }
-                | uqa_sql::ast::MergeWhen::NothingNotMatched { condition }
-                | uqa_sql::ast::MergeWhen::NothingNotMatchedBySource { condition } => {
-                    if let Some(condition) = condition {
-                        self.bind_expr(condition, &ctes)?;
-                    }
-                }
-            }
-        }
-        for projection in &mut merge.returning {
-            self.bind_expr(&mut projection.expr, &ctes)?;
         }
         Ok(())
     }
@@ -556,6 +508,7 @@ impl Engine {
                                   _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
          -> Result<(), SQLError> { Ok(()) };
         StoredAstVisitor {
+            merge: None,
             expression: None,
             ty: None,
             relation: &mut bind,
@@ -588,6 +541,7 @@ impl Engine {
                                   _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
          -> Result<(), SQLError> { Ok(()) };
         StoredAstVisitor {
+            merge: None,
             expression: None,
             ty: None,
             relation: &mut bind,
@@ -626,6 +580,7 @@ impl Engine {
                                   _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
          -> Result<(), SQLError> { Ok(()) };
         StoredAstVisitor {
+            merge: None,
             expression: None,
             ty: None,
             relation: &mut bind,
@@ -670,6 +625,7 @@ pub(crate) fn rewrite_stored_statement_relation(
                               _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
      -> Result<(), SQLError> { Ok(()) };
     StoredAstVisitor {
+        merge: None,
         expression: None,
         ty: None,
         relation: &mut rewrite,
@@ -724,6 +680,7 @@ pub(super) fn rewrite_stored_rule_relation(
                                   _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
          -> Result<(), SQLError> { Ok(()) };
         StoredAstVisitor {
+            merge: None,
             expression: None,
             ty: None,
             relation: &mut rewrite,

@@ -7,8 +7,11 @@
 //! Routine registration, catalog persistence, alteration, and removal.
 
 mod cascade;
+mod column_dependencies;
+mod compilation;
 mod dependencies;
 mod drop_planning;
+mod merge_columns;
 mod regclass;
 mod relation_dependencies;
 mod rename;
@@ -27,10 +30,7 @@ use crate::{
     StorageBackendError, StorageBackendResult, FUNCTIONS_METADATA_KEY,
 };
 
-use super::declaration::{
-    compile_persisted_function_body, resolve_alter_routine_identity_types,
-    resolve_routine_type_references,
-};
+use super::declaration::{resolve_alter_routine_identity_types, resolve_routine_type_references};
 use super::resolution::{routine_kind, routine_signature_types};
 use super::{canonical_routine_type_name, CompiledFunctionBody, SQLUserFunction};
 use dependencies::{stored_routine_dependents, RoutineCompilationMode};
@@ -631,22 +631,6 @@ impl Engine {
         catalog
             .set_metadata(FUNCTIONS_METADATA_KEY, &json)
             .map_err(|err| SQLError::Internal(format!("persist function catalog: {err}")))
-    }
-
-    fn compile_persisted_sql_function(
-        &self,
-        def: &CreateFunction,
-    ) -> Result<CompiledFunctionBody, SQLError> {
-        if !matches!(def.body, FunctionBody::Statements(_)) || def.creation_search_path.is_empty() {
-            return compile_persisted_function_body(self, def);
-        }
-        let previous = {
-            let mut state = self.session.state.write();
-            std::mem::replace(&mut state.search_path, def.creation_search_path.clone())
-        };
-        let compiled = compile_persisted_function_body(self, def);
-        self.session.state.write().search_path = previous;
-        compiled
     }
 
     fn canonicalize_persisted_sql_functions(

@@ -382,6 +382,7 @@ impl Engine {
         self.drop_routine_object_dependents(&dependents)?;
         self.commit_domain_drop(&domains)?;
         self.commit_routine_registry_drop(&targets)?;
+        self.refresh_stored_merge_target_plans()?;
         for (level, message) in notices {
             self.push_sql_notice(level, &message);
         }
