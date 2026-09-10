@@ -286,3 +286,53 @@ impl Engine {
         Ok((row.relation, state))
     }
 }
+
+impl Engine {
+    pub(crate) fn move_sequence_state(
+        &self,
+        source: &RelationIdentity,
+        target: &RelationIdentity,
+    ) -> Result<(), crate::SQLError> {
+        let mut sequences = self.durable.sequences.write();
+        let mut object_ids = self.durable.sequence_object_ids.write();
+        let mut persistence = self.durable.sequence_persistence.write();
+        let mut security = self.durable.sequence_security.write();
+        if !sequences.contains_key(source)
+            || !object_ids.contains_key(source)
+            || !persistence.contains_key(source)
+            || !security.contains_key(source)
+        {
+            return Err(crate::SQLError::Internal(format!(
+                "sequence registry entry `{}` disappeared during rename",
+                source.qualified_name()
+            )));
+        }
+        if sequences.contains_key(target)
+            || object_ids.contains_key(target)
+            || persistence.contains_key(target)
+            || security.contains_key(target)
+        {
+            return Err(crate::SQLError::Internal(format!(
+                "sequence registry target `{}` appeared during rename",
+                target.qualified_name()
+            )));
+        }
+        let state = sequences
+            .remove(source)
+            .expect("preflighted sequence state must exist");
+        let object_id = object_ids
+            .remove(source)
+            .expect("preflighted sequence object identity must exist");
+        let stored_persistence = persistence
+            .remove(source)
+            .expect("preflighted sequence persistence must exist");
+        let stored_security = security
+            .remove(source)
+            .expect("preflighted sequence security must exist");
+        sequences.insert(target.clone(), state);
+        object_ids.insert(target.clone(), object_id);
+        persistence.insert(target.clone(), stored_persistence);
+        security.insert(target.clone(), stored_security);
+        Ok(())
+    }
+}

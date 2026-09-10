@@ -91,3 +91,42 @@ pub fn role_oid(name: &str) -> i64 {
     }
     20_000 + i64::try_from(hash % 2_000_000_000).unwrap_or(0)
 }
+
+/// Session names used by `CURRENT_USER` and `SESSION_USER` role references.
+pub trait RoleReferenceNames {
+    fn current_user_name(&self) -> String;
+    fn session_user_name(&self) -> String;
+}
+pub fn resolve_role_reference(names: &dyn RoleReferenceNames, name: &str) -> String {
+    match name {
+        "CURRENT_USER" => names.current_user_name(),
+        "SESSION_USER" => names.session_user_name(),
+        other => other.to_string(),
+    }
+}
+pub fn require_role_exists(
+    roles: &std::collections::BTreeMap<String, RoleDefinition>,
+    name: &str,
+) -> Result<(), crate::SQLError> {
+    if roles.contains_key(name) {
+        return Ok(());
+    }
+    Err(crate::SQLError::Routine {
+        sqlstate: "42704".into(),
+        message: format!("role \"{name}\" does not exist"),
+    })
+}
+pub fn require_set_role(
+    roles: &std::collections::BTreeMap<String, RoleDefinition>,
+    memberships: &std::collections::BTreeMap<RoleMembershipKey, RoleMembership>,
+    current: &str,
+    target: &str,
+) -> Result<(), crate::SQLError> {
+    if role_can_set(roles, memberships, current, target) {
+        return Ok(());
+    }
+    Err(crate::SQLError::Routine {
+        sqlstate: "42501".into(),
+        message: format!("must be able to SET ROLE \"{target}\""),
+    })
+}

@@ -7,9 +7,9 @@
 //! Sequence identities and lifecycle dependencies in stored schema expressions.
 
 use crate::sequences::SequenceSchemaDependent;
-use crate::{Engine, RelationIdentity, StorageBackendError, StorageBackendResult};
+use crate::{Engine, StorageBackendError, StorageBackendResult};
 
-use super::super::{rewrite_sequence_function_references, stored_relation_reference_matches};
+use super::super::rewrite_sequence_function_references;
 
 fn expression_references_sequence(
     engine: &Engine,
@@ -21,58 +21,6 @@ fn expression_references_sequence(
             .stored_sequence_targets_in_loaded_expr(expression)?
             .contains(sequence))
     })
-}
-
-fn rewrite_sequence_schema_references(
-    columns: &mut [uqa_sql::ast::ColumnDef],
-    checks: &mut [uqa_sql::ast::TableCheck],
-    from: &RelationIdentity,
-    to: &str,
-) -> StorageBackendResult<bool> {
-    let mut changed = false;
-    for column in columns {
-        if let Some(sequence) = column
-            .auto_increment
-            .as_mut()
-            .and_then(|provenance| provenance.sequence.as_mut())
-        {
-            if stored_relation_reference_matches(sequence, from) {
-                *sequence = to.to_string();
-                changed = true;
-            }
-        }
-        for expression in [&mut column.default, &mut column.check]
-            .into_iter()
-            .flatten()
-        {
-            rewrite_sequence_function_references(expression, &mut |reference| {
-                if stored_relation_reference_matches(reference, from) {
-                    *reference = to.to_string();
-                    changed = true;
-                }
-                Ok(())
-            })?;
-        }
-        if let Some(generated) = &mut column.generated {
-            rewrite_sequence_function_references(&mut generated.expression, &mut |reference| {
-                if stored_relation_reference_matches(reference, from) {
-                    *reference = to.to_string();
-                    changed = true;
-                }
-                Ok(())
-            })?;
-        }
-    }
-    for check in checks {
-        rewrite_sequence_function_references(&mut check.expr, &mut |reference| {
-            if stored_relation_reference_matches(reference, from) {
-                *reference = to.to_string();
-                changed = true;
-            }
-            Ok(())
-        })?;
-    }
-    Ok(changed)
 }
 
 fn append_sequence_schema_expression_dependents(
@@ -262,143 +210,6 @@ impl Engine {
                 .collect::<Vec<_>>()
                 .join("`, `")
         )))
-    }
-
-    pub(crate) fn rewrite_sequence_schema_dependencies(
-        &self,
-        from: &RelationIdentity,
-        to: &str,
-    ) -> StorageBackendResult<()> {
-        let mut table_updates = Vec::new();
-        for (table_name, table) in self.table_entries() {
-            let mut columns = table.columns.read().clone();
-            let mut checks = table.table_checks.read().clone();
-            let foreign_keys = table.foreign_keys.read().clone();
-            let key_constraints = table.key_constraints.read().clone();
-            let hierarchy = table.hierarchy.read().clone();
-            if rewrite_sequence_schema_references(&mut columns, &mut checks, from, to)? {
-                table_updates.push((
-                    table_name,
-                    table,
-                    columns,
-                    checks,
-                    foreign_keys,
-                    key_constraints,
-                    hierarchy,
-                ));
-            }
-        }
-        let mut foreign_updates = Vec::new();
-        for (relation, mut table) in self.durable.foreign_tables.read().clone() {
-            if rewrite_sequence_schema_references(&mut table.columns, &mut table.checks, from, to)?
-            {
-                foreign_updates.push((relation, table));
-            }
-        }
-        for (table_name, table, columns, checks, foreign_keys, key_constraints, hierarchy) in
-            &table_updates
-        {
-            self.persist_constraint_candidate_with_hierarchy(
-                table_name,
-                table,
-                columns,
-                checks,
-                foreign_keys,
-                key_constraints,
-                hierarchy,
-            )?;
-        }
-        for (relation, table) in &foreign_updates {
-            self.persist_foreign_table_definition(relation, table)?;
-        }
-        for (_, table, columns, checks, _, _, _) in &table_updates {
-            (*table.columns.write()).clone_from(columns);
-            (*table.table_checks.write()).clone_from(checks);
-        }
-        let foreign_tables_changed = !foreign_updates.is_empty();
-        if foreign_tables_changed {
-            let mut tables = self.durable.foreign_tables.write();
-            for (relation, table) in foreign_updates {
-                tables.insert(relation, table);
-            }
-        }
-        if !table_updates.is_empty() {
-            self.note_table_catalog_changed();
-        }
-        if foreign_tables_changed {
-            self.note_catalog_registry_changed();
-        }
-        Ok(())
-    }
-
-    /// Retire the legacy name-based owner marker after an explicit `ALTER SEQUENCE ... OWNED BY` action. Generation provenance and the bound sequence reference remain on the original SERIAL or identity column, while the stable dependency stored on the sequence becomes authoritative for lifecycle operations.
-    pub(crate) fn clear_auto_increment_owner_markers(
-        &self,
-        sequence: &str,
-    ) -> StorageBackendResult<()> {
-        let target =
-            RelationIdentity::from_legacy_name(sequence).map_err(StorageBackendError::Other)?;
-        let mut catalog_changed = false;
-        for (table_name, table) in self.table_entries() {
-            let mut columns = table.columns.read().clone();
-            let mut changed = false;
-            for column in &mut columns {
-                let Some(provenance) = column.auto_increment.as_mut() else {
-                    continue;
-                };
-                if provenance.owner.is_some()
-                    && provenance.sequence.as_deref().is_some_and(|reference| {
-                        stored_relation_reference_matches(reference, &target)
-                    })
-                {
-                    provenance.owner = None;
-                    changed = true;
-                }
-            }
-            if !changed {
-                continue;
-            }
-            if self.is_persistent() {
-                self.try_save_table_schema_with_columns(&table_name, &table, &columns)?;
-            }
-            *table.columns.write() = columns;
-            catalog_changed = true;
-        }
-        if catalog_changed {
-            self.note_table_catalog_changed();
-        }
-        let mut foreign_updates = Vec::new();
-        for (relation, mut table) in self.durable.foreign_tables.read().clone() {
-            let mut changed = false;
-            for column in &mut table.columns {
-                let Some(provenance) = column.auto_increment.as_mut() else {
-                    continue;
-                };
-                if provenance.owner.is_some()
-                    && provenance.sequence.as_deref().is_some_and(|reference| {
-                        stored_relation_reference_matches(reference, &target)
-                    })
-                {
-                    provenance.owner = None;
-                    changed = true;
-                }
-            }
-            if changed {
-                foreign_updates.push((relation, table));
-            }
-        }
-        for (relation, table) in &foreign_updates {
-            self.persist_foreign_table_definition(relation, table)?;
-        }
-        if !foreign_updates.is_empty() {
-            let mut tables = self.durable.foreign_tables.write();
-            for (relation, table) in foreign_updates {
-                tables.insert(relation, table);
-            }
-            drop(tables);
-            self.note_catalog_registry_changed();
-        }
-        Ok(())
     }
 
     fn drop_sequence_schema_dependencies(

@@ -108,3 +108,28 @@ pub fn bind_sequence_owner(
     }
     Ok(Some(owner_column))
 }
+
+pub fn require_sequence_ownership(
+    local_name: &str,
+    has_owner_privileges: bool,
+) -> Result<(), SQLError> {
+    if has_owner_privileges {
+        return Ok(());
+    }
+    Err(SQLError::Routine {
+        sqlstate: "42501".into(),
+        message: format!("must be owner of sequence {local_name}"),
+    })
+}
+pub fn reject_owned_sequence_role_change(
+    local_name: &str,
+    has_column_owner: bool,
+) -> Result<(), SQLError> {
+    if !has_column_owner {
+        return Ok(());
+    }
+    Err(SQLError::Routine {
+        sqlstate: "0A000".into(),
+        message: format!("cannot change owner of sequence \"{local_name}\""),
+    })
+}

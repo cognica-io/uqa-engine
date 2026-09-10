@@ -56,6 +56,22 @@ impl TableSchemaCatalog for Engine {
     }
 }
 impl TableSchemaState for SchemaTableBinding<'_> {
+    fn dependency_constraints(&self) -> TableConstraintSet {
+        TableConstraintSet {
+            checks: self.state.table_checks.read().clone(),
+            foreign_keys: self.state.foreign_keys.read().clone(),
+            key_constraints: self.state.key_constraints.read().clone(),
+            hierarchy: self.state.hierarchy.read().clone(),
+            columns_declared: None,
+            persistence: self.state.persistence,
+            on_commit: self.state.on_commit,
+        }
+    }
+    fn publish_expressions(&self, columns: &[ColumnDef], checks: &[uqa_sql::ast::TableCheck]) {
+        columns.clone_into(&mut *self.state.columns.write());
+        checks.clone_into(&mut *self.state.table_checks.write());
+    }
+
     fn write_columns(
         &self,
     ) -> Box<dyn uqa_execution::schema::publication::columns::ColumnSchemaWrite + '_> {
@@ -168,5 +184,147 @@ impl uqa_execution::schema::publication::columns::ColumnSchemaWrite for SchemaCo
     }
     fn publish(&mut self, columns: Vec<ColumnDef>) {
         *self.columns = columns;
+    }
+}
+
+impl Engine {
+    pub(crate) fn schema_dependency_publication_context(
+        &self,
+    ) -> uqa_execution::schema::publication::dependencies::SchemaDependencyPublicationContext<'_>
+    {
+        uqa_execution::schema::publication::dependencies::SchemaDependencyPublicationContext {
+            tables: self,
+            foreign: self,
+            changes: self,
+        }
+    }
+}
+impl uqa_execution::schema::publication::dependencies::LoadedTableSchemas for Engine {
+    fn table_schemas(
+        &self,
+    ) -> Vec<uqa_execution::schema::publication::dependencies::LoadedTableSchema<'_>> {
+        self.table_entries()
+            .into_iter()
+            .map(|(name, state)| {
+                (
+                    name.clone(),
+                    Box::new(SchemaTableBinding {
+                        engine: self,
+                        name,
+                        state,
+                    }) as Box<dyn TableSchemaState>,
+                )
+            })
+            .collect()
+    }
+}
+impl uqa_execution::schema::publication::dependencies::ForeignSchemaPublication for Engine {
+    fn foreign_tables(
+        &self,
+    ) -> std::collections::BTreeMap<
+        uqa_core::RelationIdentity,
+        uqa_execution::catalog::foreign::StoredForeignTable,
+    > {
+        self.durable.foreign_tables.read().clone()
+    }
+    fn persist_foreign_table(
+        &self,
+        relation: &uqa_core::RelationIdentity,
+        table: &uqa_execution::catalog::foreign::StoredForeignTable,
+    ) -> StorageBackendResult<()> {
+        self.persist_foreign_table_definition(relation, table)
+    }
+    fn publish_foreign_tables(
+        &self,
+        updates: Vec<(
+            uqa_core::RelationIdentity,
+            uqa_execution::catalog::foreign::StoredForeignTable,
+        )>,
+    ) {
+        let mut tables = self.durable.foreign_tables.write();
+        for (relation, table) in updates {
+            tables.insert(relation, table);
+        }
+    }
+}
+impl uqa_execution::schema::publication::dependencies::CatalogPublicationChanges for Engine {
+    fn table_catalog_changed(&self) {
+        self.note_table_catalog_changed();
+    }
+    fn catalog_registry_changed(&self) {
+        self.note_catalog_registry_changed();
+    }
+}
+
+impl Engine {
+    pub(crate) fn view_sequence_rewrite_context(
+        &self,
+    ) -> uqa_execution::schema::sequences::dependencies::ViewSequenceRewriteContext<'_> {
+        uqa_execution::schema::sequences::dependencies::ViewSequenceRewriteContext {
+            views: self,
+            changes: self,
+        }
+    }
+}
+impl uqa_execution::schema::sequences::dependencies::ViewCatalogPublication for Engine {
+    fn synchronize_catalog(&self) -> StorageBackendResult<()> {
+        self.synchronize_catalog_registries()
+    }
+    fn view_definitions(
+        &self,
+    ) -> uqa_execution::schema::sequences::dependencies::ViewDefinitionsRead<'_> {
+        Box::new(self.durable.views.read())
+    }
+    fn has_catalog(&self) -> bool {
+        self.storage.catalog.is_some()
+    }
+    fn save_view_row(&self, row: &uqa_storage::ViewRow) -> StorageBackendResult<()> {
+        if let Some(catalog) = self.storage.catalog.as_ref() {
+            catalog.save_view(row)?;
+        }
+        Ok(())
+    }
+    fn publish_views(
+        &self,
+        updates: Vec<(
+            uqa_core::RelationIdentity,
+            uqa_sql::catalog::stored_view::StoredView,
+        )>,
+    ) {
+        self.durable.views.write().extend(updates);
+    }
+}
+
+impl Engine {
+    pub(crate) fn event_catalog_context(
+        &self,
+    ) -> uqa_execution::schema::events::EventCatalogContext<'_> {
+        uqa_execution::schema::events::EventCatalogContext {
+            registry: self,
+            publication: self,
+            changes: self,
+        }
+    }
+}
+impl uqa_execution::schema::events::EventCatalogGuards for Engine {
+    fn triggers(&self) -> uqa_execution::schema::events::TriggerCatalogWrite<'_> {
+        Box::new(self.durable.triggers.write())
+    }
+    fn rules(&self) -> uqa_execution::schema::events::RuleCatalogWrite<'_> {
+        Box::new(self.durable.rules.write())
+    }
+}
+impl uqa_execution::schema::events::EventCatalogPublication for Engine {
+    fn persist_triggers(
+        &self,
+        triggers: &uqa_sql::catalog::events::TriggerCatalog,
+    ) -> Result<(), uqa_sql::SQLError> {
+        self.persist_trigger_catalog_snapshot(triggers)
+    }
+    fn persist_rules(
+        &self,
+        rules: &uqa_sql::catalog::events::RuleCatalog,
+    ) -> Result<(), uqa_sql::SQLError> {
+        self.persist_rule_catalog_snapshot(rules)
     }
 }

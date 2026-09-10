@@ -5,10 +5,9 @@
 //
 
 use super::{
-    BTreeMap, Engine, RelationIdentity, SQLError, SequenceDataType, SequenceOwnerDependency,
-    SequenceRestart, SequenceState, StorageBackendError, StorageBackendResult,
+    BTreeMap, Engine, RelationIdentity, SQLError, SequenceDataType, SequenceRestart, SequenceState,
+    StorageBackendError, StorageBackendResult,
 };
-use crate::capabilities::RelationResolution;
 
 mod dependencies;
 
@@ -57,38 +56,8 @@ impl Engine {
         &self,
         reference: &str,
     ) -> StorageBackendResult<String> {
-        let (schema, local_name) =
-            RelationIdentity::parse_reference(reference).map_err(|error| {
-                StorageBackendError::Other(format!(
-                    "invalid persisted sequence reference `{reference}`: {error}"
-                ))
-            })?;
-        let sequences = self.durable.sequences.read();
-        if let Some(schema) = schema {
-            let target = RelationIdentity::new(schema, local_name);
-            if sequences.contains_key(&target) {
-                return Ok(target.qualified_name());
-            }
-            return Err(StorageBackendError::Other(format!(
-                "dangling persisted sequence reference `{reference}`"
-            )));
-        }
-
-        let candidates = sequences
-            .keys()
-            .filter(|candidate| candidate.name == local_name)
-            .map(RelationIdentity::qualified_name)
-            .collect::<Vec<_>>();
-        match candidates.as_slice() {
-            [target] => Ok(target.clone()),
-            [] => Err(StorageBackendError::Other(format!(
-                "dangling persisted sequence reference `{reference}`"
-            ))),
-            _ => Err(StorageBackendError::Other(format!(
-                "ambiguous persisted sequence reference `{reference}` matches {}",
-                candidates.join(", ")
-            ))),
-        }
+        uqa_sql::schema::sequences::names::resolve_stored_sequence_reference(self, reference)
+            .map_err(StorageBackendError::Other)
     }
 
     pub fn create_sequence(
@@ -190,128 +159,10 @@ impl Engine {
     }
 
     fn alter_sequence_inner(&self, alter: &uqa_sql::ast::AlterSequence) -> Result<bool, SQLError> {
-        let Some(name) = self.alter_sequence_target_name(alter)? else {
-            return Ok(false);
-        };
-        let relation = Self::resolved_relation_identity(&name)
-            .map_err(|error| SQLError::Internal(format!("resolve sequence `{name}`: {error}")))?;
-        if let Some(role_owner) = alter.role_owner.as_deref() {
-            uqa_sql::schema::sequences::actions::validate_sequence_role_owner_shape(alter)?;
-            self.alter_sequence_role_owner_inner(&name, &relation, role_owner)?;
-            return Ok(true);
-        }
-        self.ensure_sequence_owner(&name, &relation)?;
-        let persistence = self
-            .durable
-            .sequence_persistence
-            .read()
-            .get(&relation)
-            .copied()
-            .unwrap_or_default();
-        if alter.lifecycle != uqa_sql::ast::SequenceLifecycle::Unchanged {
-            self.alter_sequence_lifecycle_inner(&name, &relation, persistence, alter)?;
-            return Ok(true);
-        }
-        let target_persistence = uqa_sql::schema::sequences::actions::altered_sequence_persistence(
+        uqa_execution::schema::sequences::dispatch::alter_sequence(
+            &self.sequence_alter_context(),
             alter,
-            persistence,
-            &relation.name,
-        )?;
-        if target_persistence == persistence
-            && uqa_sql::schema::sequences::actions::sequence_alter_is_persistence_only(alter)
-        {
-            return Ok(true);
-        }
-        let object_id = self
-            .durable
-            .sequence_object_ids
-            .read()
-            .get(&relation)
-            .copied()
-            .ok_or_else(|| {
-                SQLError::Internal(format!("sequence `{name}` has no object identity"))
-            })?;
-        let state = self
-            .durable
-            .sequences
-            .read()
-            .get(&relation)
-            .copied()
-            .ok_or_else(|| SQLError::Internal(format!("sequence `{name}` disappeared")))?;
-        let mut state = uqa_execution::catalog::sequence::altered_sequence_state(state, alter)?;
-        if alter.ownership != uqa_sql::ast::SequenceOwnership::Unchanged {
-            let owner = uqa_execution::schema::sequences::creation::bind_sequence_owner(
-                self,
-                &name,
-                &alter.ownership,
-            )?;
-            if state
-                .owner
-                .is_some_and(|current| current.dependency == SequenceOwnerDependency::Internal)
-            {
-                let owner_table = self
-                    .sequence_owner_target(state.owner.expect("identity owner was checked"))
-                    .map_or_else(|| "<missing>".into(), |(table, _, _)| table);
-                return Err(SQLError::Routine {
-                    sqlstate: "0A000".into(),
-                    message: format!(
-                        "cannot change ownership of identity sequence; sequence \"{}\" is linked to table \"{owner_table}\"",
-                        relation.name
-                    ),
-                });
-            }
-            state.owner = owner;
-        }
-        let definition_generation =
-            crate::new_sequence_definition_generation().map_err(|error| {
-                SQLError::Internal(format!(
-                    "allocate sequence `{name}` definition generation: {error}"
-                ))
-            })?;
-        state.definition_generation = definition_generation;
-        self.persist_sequence_state_replacement(
-            &name,
-            &relation,
-            object_id,
-            target_persistence,
-            state,
-            alter.persistence.is_none(),
-        )?;
-        if alter.ownership != uqa_sql::ast::SequenceOwnership::Unchanged {
-            self.clear_auto_increment_owner_markers(&name)
-                .map_err(|error| {
-                    SQLError::Internal(format!(
-                        "detach legacy sequence owner metadata for `{name}`: {error}"
-                    ))
-                })?;
-        }
-        Ok(true)
-    }
-
-    fn alter_sequence_target_name(
-        &self,
-        alter: &uqa_sql::ast::AlterSequence,
-    ) -> Result<Option<String>, SQLError> {
-        match self.resolve_visible_relation_kind(&alter.name)? {
-            RelationResolution::Found(name, "sequence") => Ok(Some(name)),
-            RelationResolution::Found(_name, _kind) => Err(SQLError::Routine {
-                sqlstate: "42809".into(),
-                message: format!("\"{}\" is not a sequence", alter.name),
-            }),
-            RelationResolution::MissingRelation | RelationResolution::MissingSchema(_)
-                if alter.if_exists =>
-            {
-                Ok(None)
-            }
-            RelationResolution::MissingSchema(schema) => Err(SQLError::Routine {
-                sqlstate: "3F000".into(),
-                message: format!("schema \"{schema}\" does not exist"),
-            }),
-            RelationResolution::MissingRelation => Err(SQLError::Routine {
-                sqlstate: "42P01".into(),
-                message: format!("relation \"{}\" does not exist", alter.name),
-            }),
-        }
+        )
     }
 
     pub(crate) fn persist_sequence_state_replacement(

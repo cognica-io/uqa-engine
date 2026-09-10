@@ -11,3 +11,8 @@ pub mod implicit;
 pub mod ownership;
 
 pub mod implicit_ownership;
+
+pub mod lifecycle;
+pub mod names;
+
+pub mod dependencies;

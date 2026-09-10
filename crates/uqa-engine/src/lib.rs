@@ -104,7 +104,6 @@ mod schema_security;
 mod search;
 mod sequence_catalog;
 mod sequence_introspection;
-mod sequence_lifecycle;
 mod sequence_ownership;
 mod sequence_security;
 mod sequence_values;

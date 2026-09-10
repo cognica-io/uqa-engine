@@ -138,11 +138,7 @@ impl Engine {
     }
 
     pub(crate) fn resolve_role_reference(&self, name: &str) -> String {
-        match name {
-            "CURRENT_USER" => self.current_user_name(),
-            "SESSION_USER" => self.session_user_name(),
-            other => other.to_string(),
-        }
+        uqa_sql::catalog::roles::resolve_role_reference(self, name)
     }
 
     pub(crate) fn set_role(&self, requested: &str) -> Result<(), SQLError> {

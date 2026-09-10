@@ -55,3 +55,27 @@ pub fn bind_implicit_sequence_owners(
     }
     Ok(bindings)
 }
+
+/// Remove legacy named owner markers for one canonically identified sequence.
+pub fn clear_auto_increment_owner_markers(
+    columns: &mut [crate::ast::ColumnDef],
+    target: &uqa_core::RelationIdentity,
+) -> bool {
+    let mut changed = false;
+    for column in columns {
+        let Some(provenance) = column.auto_increment.as_mut() else {
+            continue;
+        };
+        if provenance.owner.is_some()
+            && provenance.sequence.as_deref().is_some_and(|reference| {
+                crate::schema::dependencies::rewrites::stored_relation_reference_matches(
+                    reference, target,
+                )
+            })
+        {
+            provenance.owner = None;
+            changed = true;
+        }
+    }
+    changed
+}

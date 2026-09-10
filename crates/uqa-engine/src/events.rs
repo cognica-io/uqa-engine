@@ -9,7 +9,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-use uqa_sql::ast::CreateRule;
 use uqa_sql::SQLError;
 
 pub(crate) use rule_binding::{
@@ -40,19 +39,7 @@ pub(crate) struct PreparedRuleColumnDrop {
     rebind: BTreeSet<(crate::RelationIdentity, String)>,
 }
 
-fn synchronize_rule_sql_text(definition: &mut CreateRule) -> Result<(), SQLError> {
-    definition.condition_sql = definition
-        .condition
-        .as_ref()
-        .map(uqa_sql::render::expression_sql)
-        .transpose()?;
-    definition.action_sql = definition
-        .actions
-        .iter()
-        .map(uqa_sql::render::statement_sql)
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(())
-}
+use uqa_sql::catalog::events::synchronize_rule_sql_text;
 
 #[derive(Default, Serialize, Deserialize)]
 struct StoredTriggerCatalog {

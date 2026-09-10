@@ -89,3 +89,21 @@ impl RelationNameResolution {
         Ok(candidates)
     }
 }
+
+/// Complete outcome of resolving one relation reference through a statement namespace.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RelationResolution {
+    Found(String, &'static str),
+    MissingRelation,
+    MissingSchema(String),
+}
+
+impl RelationResolution {
+    /// Collapse namespace absence only for SQL boundaries whose contract reports an undefined relation for either absence outcome.
+    pub fn into_found(self) -> Option<(String, &'static str)> {
+        match self {
+            Self::Found(name, kind) => Some((name, kind)),
+            Self::MissingRelation | Self::MissingSchema(_) => None,
+        }
+    }
+}

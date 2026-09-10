@@ -9,3 +9,12 @@ pub mod creation;
 pub mod implicit;
 
 pub mod ownership;
+
+pub mod alteration;
+
+pub mod role_ownership;
+
+pub mod dependencies;
+
+pub mod dispatch;
+pub mod lifecycle;

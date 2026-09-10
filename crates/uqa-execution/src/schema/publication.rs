@@ -29,6 +29,9 @@ pub trait TableSchemaState {
     fn hierarchy(&self) -> uqa_sql::ast::TableHierarchy;
     fn publish_hierarchy(&self, hierarchy: uqa_sql::ast::TableHierarchy);
     fn constraints(&self) -> TableConstraintSet;
+    fn dependency_constraints(&self) -> TableConstraintSet;
+    fn publish_expressions(&self, columns: &[ColumnDef], checks: &[uqa_sql::ast::TableCheck]);
+
     fn columns_declared(&self) -> bool;
     fn mark_statistics_dirty(&self) -> StorageBackendResult<()>;
     fn persist_candidate(
@@ -206,3 +209,5 @@ pub mod hierarchy;
 pub mod keys;
 
 pub mod columns;
+
+pub mod dependencies;

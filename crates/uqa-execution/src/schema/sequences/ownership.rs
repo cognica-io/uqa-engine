@@ -83,3 +83,45 @@ pub fn attach_column_owners(
     }
     Ok(())
 }
+
+/// Persist legacy owner-marker removal before publishing each retained table generation.
+pub fn clear_auto_increment_owner_markers(
+    context: &crate::schema::publication::dependencies::SchemaDependencyPublicationContext<'_>,
+    sequence: &str,
+) -> uqa_storage::StorageBackendResult<()> {
+    let target = uqa_core::RelationIdentity::from_legacy_name(sequence)
+        .map_err(uqa_storage::StorageBackendError::Other)?;
+    let mut catalog_changed = false;
+    for (_, state) in context.tables.table_schemas() {
+        let mut columns = state.columns();
+        if !uqa_sql::schema::sequences::implicit_ownership::clear_auto_increment_owner_markers(
+            &mut columns,
+            &target,
+        ) {
+            continue;
+        }
+        state.persist_columns(&columns)?;
+        state.write_columns().publish(columns);
+        catalog_changed = true;
+    }
+    if catalog_changed {
+        context.changes.table_catalog_changed();
+    }
+    let mut foreign_updates = Vec::new();
+    for (relation, mut table) in context.foreign.foreign_tables() {
+        if uqa_sql::schema::sequences::implicit_ownership::clear_auto_increment_owner_markers(
+            &mut table.columns,
+            &target,
+        ) {
+            foreign_updates.push((relation, table));
+        }
+    }
+    for (relation, table) in &foreign_updates {
+        context.foreign.persist_foreign_table(relation, table)?;
+    }
+    if !foreign_updates.is_empty() {
+        context.foreign.publish_foreign_tables(foreign_updates);
+        context.changes.catalog_registry_changed();
+    }
+    Ok(())
+}
