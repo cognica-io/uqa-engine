@@ -37,21 +37,6 @@ pub(in crate::sql::ddl) fn validate_foreign_key_definition_with_local_state(
         foreign_key,
     )
 }
-pub(in crate::sql::ddl) fn validate_bound_foreign_key_definition_with_local_state(
-    engine: &Engine,
-    table: &str,
-    columns: Option<&[ColumnDef]>,
-    keys: Option<&[TableKeyConstraint]>,
-    foreign_key: &mut ForeignKey,
-) -> Result<(), SQLError> {
-    uqa_sql::schema::foreign_keys::validate_bound_foreign_key_definition_with_local_state(
-        &engine.foreign_key_definition_context(),
-        table,
-        columns,
-        keys,
-        foreign_key,
-    )
-}
 pub(super) fn validate_foreign_key_rows(
     engine: &Engine,
     table: &str,

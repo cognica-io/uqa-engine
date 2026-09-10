@@ -233,3 +233,23 @@ pub fn column_foreign_key(
         period: reference.period,
     }
 }
+
+pub fn resolve_foreign_key_parent(
+    context: &ForeignKeyDefinitionContext<'_>,
+    reference: &str,
+) -> Result<(String, Vec<crate::ast::ColumnDef>, Vec<TableKeyConstraint>), SQLError> {
+    let canonical = context
+        .catalog
+        .bound_table_name(reference)?
+        .ok_or_else(|| SQLError::UnknownTable(reference.to_string()))?;
+    let columns = context
+        .columns
+        .try_describe_table(&canonical)
+        .map_err(|error| SQLError::Internal(format!("describe FOREIGN KEY target: {error}")))?
+        .ok_or_else(|| SQLError::UnknownTable(canonical.clone()))?;
+    let keys = context
+        .catalog
+        .referenceable_keys(&canonical)
+        .map_err(|error| SQLError::Internal(format!("read FOREIGN KEY target keys: {error}")))?;
+    Ok((canonical, columns, keys))
+}

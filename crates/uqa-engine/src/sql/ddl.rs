@@ -21,7 +21,6 @@ mod create_index;
 mod create_table;
 mod defaults;
 mod drop;
-mod hierarchy;
 mod hierarchy_alter;
 mod sequence_ctas;
 mod value_conversion;
@@ -36,7 +35,6 @@ pub(super) use create_table::{run_create_table, run_create_table_if_not_exists};
 pub(crate) use defaults::{bind_stored_schema_expression_routines, validate_default_expression};
 pub(crate) use drop::drop_index_dependency;
 pub(super) use drop::run_drop;
-use hierarchy::prepare_create_table_hierarchy;
 pub(super) use sequence_ctas::{
     run_alter_sequence, run_create_sequence, run_create_table_as, CreateTableAsExecution,
 };

@@ -117,3 +117,22 @@ impl TableAsPublication for Engine {
         self.add_document_with_vector_values(table, id, document, vectors)
     }
 }
+
+impl Engine {
+    pub(crate) fn table_declaration_context(
+        &self,
+    ) -> uqa_sql::schema::table_creation::declaration::CreateTableAnalysisContext<'_> {
+        uqa_sql::schema::table_creation::declaration::CreateTableAnalysisContext {
+            types: self,
+            schema: self,
+            bindings: self,
+            inheritance: uqa_sql::schema::inheritance::InheritanceContext {
+                catalog: self,
+                partitions: self.partition_context(),
+                roles: self,
+            },
+            index_names: self,
+            foreign_keys: self.foreign_key_definition_context(),
+        }
+    }
+}

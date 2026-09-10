@@ -84,3 +84,5 @@ pub fn create_table_as_columns(
     }
     Ok(columns)
 }
+
+pub mod declaration;

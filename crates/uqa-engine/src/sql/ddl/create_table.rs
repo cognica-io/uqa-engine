@@ -6,15 +6,7 @@
 
 //! CREATE TABLE execution.
 
-use super::constraint_validation::{
-    resolve_foreign_key_parent, validate_check_expression, validate_foreign_key_definition,
-};
-use super::defaults::validate_default_expression;
-use super::{
-    ddl_storage_error, prepare_create_table_hierarchy, ColumnType, CreateTable, Engine, SQLError,
-    SQLResult,
-};
-use crate::sql::generated::prepare_generated_columns;
+use super::{ddl_storage_error, ColumnType, CreateTable, Engine, SQLError, SQLResult};
 use uqa_sql::schema::table_creation::validate_create_table_columns;
 
 // -------------------------------------------------------------------------
@@ -90,86 +82,22 @@ fn run_create_table_inner(engine: &Engine, mut c: CreateTable) -> Result<SQLResu
     create_table_after_preflight(engine, c)
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves DDL dependency and action order"
-)]
 fn create_table_after_preflight(
     engine: &Engine,
     mut c: CreateTable,
 ) -> Result<SQLResult, SQLError> {
-    for column in &mut c.columns {
-        column.ty = crate::sql::resolve_declared_column_type(engine, &column.ty)?;
-    }
-    prepare_create_table_hierarchy(engine, &mut c)?;
-    super::constraint_indexes::name_constraint_indexes(engine, &c.name, &mut c.key_constraints)?;
-    bind_create_table_relation_references(engine, &mut c)?;
+    let analysis = engine.table_declaration_context();
+    uqa_sql::schema::table_creation::declaration::prepare_create_table_declaration(
+        &analysis, &mut c,
+    )?;
     engine.materialize_implicit_sequences(
         "CREATE TABLE",
         &c.name,
         &mut c.columns,
         c.persistence,
     )?;
-    let check_columns = c.columns.clone();
-    for column in &mut c.columns {
-        if let Some(default) = &mut column.default {
-            validate_default_expression(engine, default, &column.ty)?;
-        }
-        if let Some(check) = &mut column.check {
-            validate_check_expression(engine, &c.name, &c.qualifier, &check_columns, check)?;
-            crate::sql::reject_stored_regrole_constants(engine, check, None)?;
-        }
-    }
-    for check in &mut c.checks {
-        validate_check_expression(
-            engine,
-            &c.name,
-            &c.qualifier,
-            &check_columns,
-            &mut check.expr,
-        )?;
-        crate::sql::reject_stored_regrole_constants(engine, &check.expr, None)?;
-    }
-    super::check_inheritance::merge_create_checks(&mut c)?;
-    for foreign_key in &mut c.foreign_keys {
-        if !foreign_key.period {
-            continue;
-        }
-        let self_reference = foreign_key.ref_table == c.name
-            || foreign_key.ref_table == c.qualifier
-            || c.name
-                .rsplit_once('.')
-                .is_some_and(|(_, local_name)| local_name == foreign_key.ref_table);
-        if self_reference {
-            validate_foreign_key_definition(
-                &c.name,
-                &c.columns,
-                &c.name,
-                &c.columns,
-                &c.key_constraints,
-                foreign_key,
-            )?;
-            foreign_key.ref_table.clone_from(&c.name);
-        } else {
-            let (canonical, parent_columns, parent_keys) =
-                resolve_foreign_key_parent(engine, &foreign_key.ref_table)?;
-            validate_foreign_key_definition(
-                &c.name,
-                &c.columns,
-                &canonical,
-                &parent_columns,
-                &parent_keys,
-                foreign_key,
-            )?;
-            foreign_key.ref_table = canonical;
-        }
-    }
-    prepare_generated_columns(
-        engine,
-        &c.qualifier,
-        &mut c.columns,
-        &c.key_constraints,
-        &c.foreign_keys,
+    uqa_sql::schema::table_creation::declaration::validate_create_table_expressions(
+        &analysis, &mut c,
     )?;
     let mut vector_fields: Vec<(String, u32)> = Vec::new();
     for col in &c.columns {
@@ -203,41 +131,11 @@ fn create_table_after_preflight(
         .try_describe_table(&c.name)
         .map_err(|err| ddl_storage_error("CREATE TABLE columns", err))?
         .ok_or_else(|| SQLError::UnknownTable(c.name.clone()))?;
-    for column in &mut registered_columns {
-        let Some(reference) = column.references.clone() else {
-            continue;
-        };
-        let mut foreign_key = super::alter_table::column_foreign_key(column, &reference);
-        super::alter_table::validate_bound_foreign_key_definition_with_local_state(
-            engine,
-            &c.name,
-            None,
-            Some(&c.key_constraints),
-            &mut foreign_key,
-        )?;
-        let [referenced_column] = foreign_key.ref_columns.as_slice() else {
-            return Err(SQLError::Internal(
-                "column FOREIGN KEY did not resolve exactly one referenced column".into(),
-            ));
-        };
-        let Some(reference) = column.references.as_mut() else {
-            return Err(SQLError::Internal(
-                "column FOREIGN KEY disappeared during validation".into(),
-            ));
-        };
-        reference.referenced_key = foreign_key.referenced_key;
-        reference.table = foreign_key.ref_table;
-        reference.column = Some(referenced_column.clone());
-    }
-    for foreign_key in &mut c.foreign_keys {
-        super::alter_table::validate_bound_foreign_key_definition_with_local_state(
-            engine,
-            &c.name,
-            None,
-            Some(&c.key_constraints),
-            foreign_key,
-        )?;
-    }
+    uqa_sql::schema::table_creation::declaration::bind_created_table_foreign_keys(
+        &analysis.foreign_keys,
+        &mut c,
+        &mut registered_columns,
+    )?;
     engine
         .replace_constraint_state(
             &c.name,
@@ -266,40 +164,4 @@ fn create_table_after_preflight(
         .refresh_value_indexes_for_table(&c.name)
         .map_err(|e| ddl_storage_error("CREATE TABLE btree indexes", e))?;
     Ok(SQLResult::empty())
-}
-
-fn bind_create_table_relation_references(
-    engine: &Engine,
-    table: &mut CreateTable,
-) -> Result<(), SQLError> {
-    let table_name = table.name.clone();
-    let qualifier = table.qualifier.clone();
-    for column in &mut table.columns {
-        if let Some(reference) = column.references.as_mut() {
-            bind_create_table_reference(engine, &table_name, &qualifier, &mut reference.table)?;
-        }
-    }
-    for foreign_key in &mut table.foreign_keys {
-        bind_create_table_reference(engine, &table_name, &qualifier, &mut foreign_key.ref_table)?;
-    }
-    Ok(())
-}
-
-fn bind_create_table_reference(
-    engine: &Engine,
-    table: &str,
-    qualifier: &str,
-    reference: &mut String,
-) -> Result<(), SQLError> {
-    let self_reference = reference == table
-        || reference == qualifier
-        || table
-            .rsplit_once('.')
-            .is_some_and(|(_, local_name)| local_name == reference);
-    if self_reference {
-        table.clone_into(reference);
-        return Ok(());
-    }
-    *reference = engine.resolve_visible_table_reference(reference)?;
-    Ok(())
 }

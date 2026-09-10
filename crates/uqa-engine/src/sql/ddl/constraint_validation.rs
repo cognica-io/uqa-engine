@@ -61,15 +61,8 @@ pub(super) fn resolve_foreign_key_parent(
     engine: &Engine,
     reference: &str,
 ) -> Result<(String, Vec<ColumnDef>, Vec<TableKeyConstraint>), SQLError> {
-    let canonical = engine
-        .try_resolve_bound_table_name(reference)?
-        .ok_or_else(|| SQLError::UnknownTable(reference.to_string()))?;
-    let columns = engine
-        .try_describe_table(&canonical)
-        .map_err(|error| SQLError::Internal(format!("describe FOREIGN KEY target: {error}")))?
-        .ok_or_else(|| SQLError::UnknownTable(canonical.clone()))?;
-    let keys = engine
-        .referenceable_keys(&canonical)
-        .map_err(|error| SQLError::Internal(format!("read FOREIGN KEY target keys: {error}")))?;
-    Ok((canonical, columns, keys))
+    uqa_sql::schema::foreign_keys::resolve_foreign_key_parent(
+        &engine.foreign_key_definition_context(),
+        reference,
+    )
 }
