@@ -8,7 +8,7 @@
 
 use super::{BTreeSet, DriverResult, OperatorTree, SQLError};
 
-pub(super) fn require_graph_name(tree: &OperatorTree, context: &str) -> DriverResult<String> {
+pub fn require_graph_name(tree: &OperatorTree, context: &str) -> DriverResult<String> {
     let mut names = BTreeSet::new();
     collect_graph_names(tree, &mut names);
     let mut iter = names.iter();
@@ -23,18 +23,18 @@ pub(super) fn require_graph_name(tree: &OperatorTree, context: &str) -> DriverRe
     }
 }
 
-pub(super) fn require_text_field(tree: &OperatorTree, context: &str) -> DriverResult<String> {
+pub fn require_text_field(tree: &OperatorTree, context: &str) -> DriverResult<String> {
     first_text_field(tree)
         .ok_or_else(|| SQLError::TypeMismatch(format!("{context} does not identify a text field")))
 }
 
-pub(super) fn require_vector_field(tree: &OperatorTree, context: &str) -> DriverResult<String> {
+pub fn require_vector_field(tree: &OperatorTree, context: &str) -> DriverResult<String> {
     first_vector_field(tree).ok_or_else(|| {
         SQLError::TypeMismatch(format!("{context} does not identify a vector field"))
     })
 }
 
-pub(super) fn require_shared_structured_field(
+pub fn require_shared_structured_field(
     left: &OperatorTree,
     right: &OperatorTree,
     context: &str,
@@ -52,7 +52,7 @@ pub(super) fn require_shared_structured_field(
     Ok((left, right))
 }
 
-pub(super) fn require_shared_vector_field(
+pub fn require_shared_vector_field(
     left: &OperatorTree,
     right: &OperatorTree,
     context: &str,
@@ -63,7 +63,7 @@ pub(super) fn require_shared_vector_field(
     ))
 }
 
-pub(super) fn first_text_field(tree: &OperatorTree) -> Option<String> {
+pub fn first_text_field(tree: &OperatorTree) -> Option<String> {
     match tree {
         OperatorTree::Term { field, .. } => field.clone(),
         OperatorTree::Score { field, .. }
@@ -81,7 +81,7 @@ pub(super) fn first_text_field(tree: &OperatorTree) -> Option<String> {
     }
 }
 
-pub(super) fn first_vector_field(tree: &OperatorTree) -> Option<String> {
+pub fn first_vector_field(tree: &OperatorTree) -> Option<String> {
     match tree {
         OperatorTree::VectorSimilarity { field, .. }
         | OperatorTree::KNN { field, .. }
@@ -100,7 +100,7 @@ pub(super) fn first_vector_field(tree: &OperatorTree) -> Option<String> {
     }
 }
 
-pub(super) fn first_structured_field(tree: &OperatorTree) -> Option<String> {
+pub fn first_structured_field(tree: &OperatorTree) -> Option<String> {
     match tree {
         OperatorTree::Filter { field, .. }
         | OperatorTree::Facet { field, .. }
@@ -116,7 +116,7 @@ pub(super) fn first_structured_field(tree: &OperatorTree) -> Option<String> {
     }
 }
 
-pub(super) fn first_child(tree: &OperatorTree) -> Option<&OperatorTree> {
+pub fn first_child(tree: &OperatorTree) -> Option<&OperatorTree> {
     match tree {
         OperatorTree::Filter {
             source: Some(source),
@@ -175,7 +175,7 @@ pub(super) fn first_child(tree: &OperatorTree) -> Option<&OperatorTree> {
     }
 }
 
-pub(super) fn collect_graph_names(tree: &OperatorTree, names: &mut BTreeSet<String>) {
+pub fn collect_graph_names(tree: &OperatorTree, names: &mut BTreeSet<String>) {
     tree.visit(&mut |node| {
         let graph = match node {
             OperatorTree::Traverse { graph, .. }
@@ -196,12 +196,8 @@ pub(super) fn collect_graph_names(tree: &OperatorTree, names: &mut BTreeSet<Stri
     });
 }
 
-/// Walk a slice of fusion signals and find the first text-bearing
-/// node so attention's query-feature extractor has a query to score
-/// against. Returns `(field, query)` of the first matching `Term` (or
-/// `Score`-wrapped `Term`); falls back to `None` when no text signal
-/// is present in the fusion args.
-pub(super) fn first_text_signal(signals: &[OperatorTree]) -> Option<(String, String)> {
+/// Walk a slice of fusion signals and find the first text-bearing node so attention's query-feature extractor has a query to score against. Returns `(field, query)` of the first matching `Term` (or `Score`-wrapped `Term`); falls back to `None` when no text signal is present in the fusion args.
+pub fn first_text_signal(signals: &[OperatorTree]) -> Option<(String, String)> {
     for sig in signals {
         if let Some(pair) = find_text_in_tree(sig) {
             return Some(pair);
@@ -210,7 +206,7 @@ pub(super) fn first_text_signal(signals: &[OperatorTree]) -> Option<(String, Str
     None
 }
 
-pub(super) fn find_text_in_tree(tree: &OperatorTree) -> Option<(String, String)> {
+pub fn find_text_in_tree(tree: &OperatorTree) -> Option<(String, String)> {
     match tree {
         OperatorTree::Term { query, field, .. } => field.clone().map(|f| (f, query.clone())),
         OperatorTree::BayesianMatchWithPrior { field, query, .. } => {
@@ -239,5 +235,20 @@ pub(super) fn find_text_in_tree(tree: &OperatorTree) -> Option<(String, String)>
         | OperatorTree::CosineProbability(inner)
         | OperatorTree::BayesianScore { source: inner, .. } => find_text_in_tree(inner),
         _ => None,
+    }
+}
+
+/// Number of score-contributing text terms in a bound BM25 query tree. Set operations merge payloads by summing scores, so the raw query score scales with this count and the calibration must be translated to it. Complements filter without contributing score.
+pub fn scored_term_count(tree: &OperatorTree) -> usize {
+    match tree {
+        OperatorTree::Term { .. } => 1,
+        OperatorTree::Intersect(children)
+        | OperatorTree::Union(children)
+        | OperatorTree::Composed(children) => children.iter().map(scored_term_count).sum(),
+        OperatorTree::Filter { source, .. } => source.as_deref().map_or(0, scored_term_count),
+        OperatorTree::BayesianScore { source, .. } | OperatorTree::Score { source, .. } => {
+            scored_term_count(source)
+        }
+        _ => 0,
     }
 }

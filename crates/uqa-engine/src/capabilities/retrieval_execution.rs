@@ -4,40 +4,20 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Bind retrieval leaves to public or already-active statement state.
+//! Bind retrieval leaves to the active statement state.
 
 use crate::{Engine, ScoringMode};
 use uqa_core::{DocId, ScoredEntry};
 use uqa_execution::query::retrieval::context::{
-    RetrievalDocuments, TextRetrieval, TextRetrievalContext, VectorPoolRetrieval,
+    RetrievalDocuments, TextRetrieval, VectorPoolRetrieval,
 };
 use uqa_scoring::BayesianBM25Params;
 use uqa_sql::SQLError;
 use uqa_storage::document_store::Document;
 
-#[derive(Clone, Copy)]
-pub(crate) enum TextRetrievalSession<'a> {
-    Public(&'a Engine),
-    InExecution(&'a Engine),
-}
-
-impl TextRetrievalSession<'_> {
-    pub(crate) fn context(&self) -> TextRetrievalContext<'_> {
-        let (Self::Public(engine) | Self::InExecution(engine)) = self;
-        TextRetrievalContext {
-            catalog: *engine,
-            text: self,
-            functions: *engine,
-        }
-    }
-}
-
-impl TextRetrieval for TextRetrievalSession<'_> {
+impl TextRetrieval for Engine {
     fn bayesian_params(&self, table: &str, field: &str) -> Result<BayesianBM25Params, SQLError> {
-        match self {
-            Self::Public(engine) => engine.bayesian_params_for(table, field),
-            Self::InExecution(engine) => engine.bayesian_params_for_in_execution(table, field),
-        }
+        self.bayesian_params_for_in_execution(table, field)
     }
     fn search(
         &self,
@@ -47,10 +27,7 @@ impl TextRetrieval for TextRetrievalSession<'_> {
         mode: &ScoringMode,
         top_k: usize,
     ) -> Result<Vec<ScoredEntry>, SQLError> {
-        match self {
-            Self::Public(engine) => engine.search(table, field, query, mode, top_k),
-            Self::InExecution(engine) => engine.search_leaf(table, field, query, mode, top_k, None),
-        }
+        self.search_leaf(table, field, query, mode, top_k, None)
     }
 }
 

@@ -9,11 +9,11 @@
 use super::{
     graph_execution_error, graph_pattern_from_ir, numeric_score, operator_execution_error,
     parse_rpq, require_graph_name, restrict_result_to_source, temporal_filter_from_ir, BTreeMap,
-    BTreeSet, DeepGraphDirection, DriverResult, EngineDriver, GeneralizedPostingList, OperatorTree,
-    Payload, PostingEntry, PostingList, SQLError, Value, WeightedPathExecution,
+    BTreeSet, DeepGraphDirection, DriverResult, GeneralizedPostingList, OperatorTree, Payload,
+    PhysicalRetrievalDriver, PostingEntry, PostingList, SQLError, Value, WeightedPathExecution,
 };
 
-impl EngineDriver<'_> {
+impl PhysicalRetrievalDriver<'_> {
     pub(super) fn execute_traverse(
         &self,
         start_vertex: u64,
@@ -147,7 +147,7 @@ impl EngineDriver<'_> {
         self.join_graph_postings(&left, &right, label, graph)
     }
 
-    pub(super) fn join_graph_postings(
+    pub fn join_graph_postings(
         &self,
         left: &PostingList,
         right: &PostingList,
@@ -362,27 +362,16 @@ impl EngineDriver<'_> {
         graph: &str,
         execute: impl FnOnce(&uqa_graph::GraphStoreHandle) -> DriverResult<R>,
     ) -> DriverResult<R> {
-        match self.execution {
-            super::DriverExecution::Public => self
-                .engine
-                .graph_with(graph, execute)
-                .map_err(|error| SQLError::Internal(format!("read graph catalog: {error}")))?
-                .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {graph:?}")))?,
-            super::DriverExecution::InExecution => execute(self.graph_handle(graph)?.as_ref()),
-        }
+        execute(self.graph_handle(graph)?.as_ref())
     }
 
     pub(super) fn graph_handle(
         &self,
         graph: &str,
     ) -> DriverResult<std::sync::Arc<uqa_graph::GraphStoreHandle>> {
-        let store = match self.execution {
-            super::DriverExecution::Public => self
-                .engine
-                .graph_handle_with(graph, std::sync::Arc::clone)
-                .map_err(|error| SQLError::Internal(format!("read graph catalog: {error}")))?,
-            super::DriverExecution::InExecution => self.engine.graph_handle_in_execution(graph),
-        };
-        store.ok_or_else(|| SQLError::Unsupported(format!("unknown graph {graph:?}")))
+        self.context
+            .graphs
+            .graph_handle(graph)
+            .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {graph:?}")))
     }
 }

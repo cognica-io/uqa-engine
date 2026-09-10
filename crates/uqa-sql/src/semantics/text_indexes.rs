@@ -319,3 +319,22 @@ pub fn validate_text_match_all_fields(
     }
     Ok(())
 }
+
+/// Validate the physical field using one retained catalog generation; indexed fields do not require a column-schema read.
+pub fn require_physical_text_index(
+    table: &str,
+    field: &str,
+    indexed_fields: &[String],
+    columns: impl FnOnce() -> Vec<crate::ast::ColumnDef>,
+) -> Result<(), SQLError> {
+    if indexed_fields.iter().any(|indexed| indexed == field) {
+        return Ok(());
+    }
+    let columns = columns();
+    if !columns.is_empty() && !columns.iter().any(|column| column.name == field) {
+        return Err(SQLError::UnknownColumn(field.to_string()));
+    }
+    Err(SQLError::TypeMismatch(format!(
+        "text search: column `{table}.{field}` has no text index; create one with CREATE INDEX ... ON {table} USING gin ({field})"
+    )))
+}

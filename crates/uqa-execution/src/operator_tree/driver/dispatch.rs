@@ -7,12 +7,12 @@
 //! Exhaustive physical dispatch for every operator-tree variant.
 
 use super::{
-    sparse_threshold_inline, DriverResult, EngineDriver, OperatorOutput, OperatorTree,
-    OperatorTreeDriver, PositiveEvidencePoolExecution, PostingList, SQLError,
+    sparse_threshold_inline, DriverResult, OperatorOutput, OperatorTree, OperatorTreeDriver,
+    PhysicalRetrievalDriver, PositiveEvidencePoolExecution, PostingList, SQLError,
     WeightedPathExecution,
 };
 
-impl OperatorTreeDriver for EngineDriver<'_> {
+impl OperatorTreeDriver for PhysicalRetrievalDriver<'_> {
     type Error = SQLError;
 
     // Keep one exhaustive physical-dispatch match: adding an IR variant must
@@ -23,9 +23,6 @@ impl OperatorTreeDriver for EngineDriver<'_> {
         reason = "preserves exhaustive IR variant order"
     )]
     fn execute_node(&self, op: &OperatorTree) -> DriverResult<OperatorOutput> {
-        if matches!(self.execution, super::DriverExecution::Public) {
-            return super::execution::execute_public_physical_node(self, op);
-        }
         let posting = match op {
             OperatorTree::Empty => Ok(PostingList::new()),
             OperatorTree::Term {

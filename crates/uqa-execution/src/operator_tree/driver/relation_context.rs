@@ -8,10 +8,10 @@
 
 use super::{
     first_text_signal, operator_execution_error, BTreeMap, ColumnType, DocId, DriverResult,
-    EngineDriver, OperatorTree, Payload, PostingEntry, PostingList, SQLError, Value,
+    OperatorTree, Payload, PhysicalRetrievalDriver, PostingEntry, PostingList, SQLError, Value,
 };
 
-impl EngineDriver<'_> {
+impl PhysicalRetrievalDriver<'_> {
     pub(super) fn execute_opaque(
         kind: &str,
         _children: &[OperatorTree],
@@ -20,12 +20,7 @@ impl EngineDriver<'_> {
         Err(SQLError::UnknownFunction(format!("operator::{kind}")))
     }
 
-    /// Build the `n_query_features=6` vector that attention fusers
-    /// expect. When the IR carries a non-empty explicit vector it wins
-    /// (test fixtures); otherwise the driver extracts the canonical
-    /// `[mean_idf, max_idf, min_idf, coverage, query_length,
-    /// vocab_overlap]` vector from the table's inverted-index stats
-    /// against the first text-bearing signal it can find.
+    /// Build the `n_query_features=6` vector that attention fusers expect. When the IR carries a non-empty explicit vector it wins (test fixtures); otherwise the driver extracts the canonical `[mean_idf, max_idf, min_idf, coverage, query_length, vocab_overlap]` vector from the table's inverted-index stats against the first text-bearing signal it can find.
     pub(super) fn attention_query_features(
         &self,
         signals: &[OperatorTree],
@@ -35,13 +30,14 @@ impl EngineDriver<'_> {
             return Ok(explicit.to_vec());
         }
         let Some(table_state) = self
-            .engine
-            .table(self.table)
+            .context
+            .indexes
+            .table_indexes(self.table)
             .map_err(|error| operator_execution_error("resolve attention table", error))?
         else {
             return Err(SQLError::UnknownTable(self.table.to_string()));
         };
-        let idx_guard = table_state.inverted_index.read();
+        let idx_guard = table_state.inverted_index();
         let index_stats = idx_guard
             .stats()
             .map_err(|error| operator_execution_error("index statistics", error))?;
@@ -59,7 +55,8 @@ impl EngineDriver<'_> {
 
     pub(super) fn require_column(&self, field: &str) -> DriverResult<()> {
         let columns = self
-            .engine
+            .context
+            .relations
             .try_describe_query_table(self.table)
             .map_err(|error| operator_execution_error("resolve operator table", error))?;
         let Some(columns) = columns else {
@@ -81,14 +78,16 @@ impl EngineDriver<'_> {
         query_vector: &[f32],
     ) -> DriverResult<()> {
         if !self
-            .engine
+            .context
+            .relations
             .has_table(self.table)
             .map_err(|error| operator_execution_error("resolve vector table", error))?
         {
             return Err(SQLError::UnknownTable(self.table.to_string()));
         }
         let declared_type = self
-            .engine
+            .context
+            .relations
             .column_type(self.table, field)
             .map_err(|error| operator_execution_error("resolve vector column", error))?;
         if let Some(column_type) = declared_type.as_ref() {
@@ -99,11 +98,12 @@ impl EngineDriver<'_> {
             }
         }
         let table = self
-            .engine
-            .table(self.table)
+            .context
+            .indexes
+            .table_indexes(self.table)
             .map_err(|error| operator_execution_error("resolve vector table", error))?
             .ok_or_else(|| SQLError::UnknownTable(self.table.to_string()))?;
-        let indexes = table.vector_indexes.read();
+        let indexes = table.vector_indexes();
         let index = indexes
             .get(field)
             .ok_or_else(|| match declared_type.as_ref() {
@@ -153,7 +153,8 @@ impl EngineDriver<'_> {
         if self.table.is_empty() {
             return Ok(uqa_operators::base::ExecutionContext::new());
         }
-        self.engine
+        self.context
+            .snapshots
             .snapshot_context(self.table)?
             .ok_or_else(|| SQLError::UnknownTable(self.table.to_string()))
     }
@@ -165,7 +166,8 @@ impl EngineDriver<'_> {
         fields: &[&str],
     ) -> DriverResult<uqa_operators::base::ExecutionContext> {
         let columns = self
-            .engine
+            .context
+            .relations
             .try_describe_query_table(self.table)
             .map_err(|error| operator_execution_error("resolve projected operator table", error))?
             .ok_or_else(|| SQLError::UnknownTable(self.table.to_string()))?;
@@ -173,24 +175,28 @@ impl EngineDriver<'_> {
             .iter()
             .map(|field| (*field).to_string())
             .collect::<Vec<_>>();
-        if !crate::generated::projection_contains_virtual_generated_column(&columns, &projection)
-            && !crate::sql::projections_use_tuple_xmin(&projection, &columns)
-        {
+        if !crate::query::generated::projection_contains_virtual_generated_column(
+            &columns,
+            &projection,
+        ) && !crate::query::document_projection::projections_use_tuple_xmin(
+            &projection,
+            &columns,
+        ) {
             return self.bridge_context();
         }
 
-        let documents = self.engine.get_documents_with_materialized_projection(
-            self.table,
-            doc_ids,
-            &projection,
-        )?;
+        let documents = self
+            .context
+            .snapshots
+            .get_documents_with_materialized_projection(self.table, doc_ids, &projection)?;
         let mut store = uqa_storage::MemoryDocumentStore::new();
         for (doc_id, document) in documents {
             uqa_storage::DocumentStore::put(&mut store, doc_id, document).map_err(|error| {
                 operator_execution_error("build projected operator snapshot", error)
             })?;
         }
-        self.engine
+        self.context
+            .snapshots
             .snapshot_context_with_document_store(self.table, std::sync::Arc::new(store))?
             .ok_or_else(|| SQLError::UnknownTable(self.table.to_string()))
     }
@@ -207,9 +213,10 @@ impl EngineDriver<'_> {
             .iter()
             .map(|entry| entry.doc_id)
             .collect::<Vec<_>>();
-        let values = self
-            .engine
-            .get_document_fields(self.table, &doc_ids, facet_field)?;
+        let values =
+            self.context
+                .relations
+                .get_document_fields(self.table, &doc_ids, facet_field)?;
         let mut counts: BTreeMap<String, u64> = BTreeMap::new();
         for entry in vec_pl.entries() {
             let Some(value) = values.get(&entry.doc_id) else {

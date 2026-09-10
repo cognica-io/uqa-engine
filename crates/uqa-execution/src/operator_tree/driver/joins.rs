@@ -9,11 +9,11 @@
 use super::{
     first_structured_field, require_graph_name, require_shared_structured_field,
     require_shared_vector_field, require_text_field, require_vector_field, DriverResult,
-    EngineDriver, GeneralizedPostingList, HybridJoinFields, OperatorTree, PostingEntry,
+    GeneralizedPostingList, HybridJoinFields, OperatorTree, PhysicalRetrievalDriver, PostingEntry,
     PostingList, SQLError,
 };
 
-impl EngineDriver<'_> {
+impl PhysicalRetrievalDriver<'_> {
     pub(super) fn execute_text_similarity_join(
         &self,
         left: &OperatorTree,
@@ -39,9 +39,9 @@ impl EngineDriver<'_> {
         )
     }
 
-    pub(super) fn join_text_similarity_postings(
+    pub fn join_text_similarity_postings(
         &self,
-        right_driver: &EngineDriver<'_>,
+        right_driver: &PhysicalRetrievalDriver<'_>,
         left_source: &PostingList,
         left_field: &str,
         right_source: &PostingList,
@@ -86,9 +86,9 @@ impl EngineDriver<'_> {
         )
     }
 
-    pub(super) fn join_vector_similarity_postings(
+    pub fn join_vector_similarity_postings(
         &self,
-        right_driver: &EngineDriver<'_>,
+        right_driver: &PhysicalRetrievalDriver<'_>,
         left_source: &PostingList,
         left_field: &str,
         right_source: &PostingList,
@@ -130,9 +130,9 @@ impl EngineDriver<'_> {
         )
     }
 
-    pub(super) fn join_hybrid_postings(
+    pub fn join_hybrid_postings(
         &self,
-        right_driver: &EngineDriver<'_>,
+        right_driver: &PhysicalRetrievalDriver<'_>,
         left_result: &PostingList,
         right_result: &PostingList,
         fields: HybridJoinFields<'_>,
@@ -184,9 +184,9 @@ impl EngineDriver<'_> {
         )
     }
 
-    pub(super) fn join_cross_paradigm_postings(
+    pub fn join_cross_paradigm_postings(
         &self,
-        right_driver: &EngineDriver<'_>,
+        right_driver: &PhysicalRetrievalDriver<'_>,
         left_result: &PostingList,
         right_source: &PostingList,
         graph: &str,
@@ -224,7 +224,8 @@ impl EngineDriver<'_> {
             std::collections::BTreeMap::new()
         } else {
             self.require_column(field)?;
-            self.engine
+            self.context
+                .relations
                 .get_document_fields(self.table, &lookup_doc_ids, field)?
         };
         let mut entries = Vec::with_capacity(source.len());

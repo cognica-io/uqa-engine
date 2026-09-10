@@ -22,10 +22,7 @@
 //!    column comparison predicates lower into `Filter` nodes. Expressions
 //!    outside that retrieval subset stay in the enclosing relational
 //!    `UnifiedPlan` filter node.
-//! 2. [`EngineDriver`] implements [`OperatorTreeDriver`] with exhaustive
-//!    physical dispatch for every concrete IR variant. Ordinary nodes use
-//!    `PostingList`, graph nodes retain `GraphPostingList`, and joins retain
-//!    their tuple identity in `GeneralizedPostingList`.
+//! 2. The execution crate's physical retrieval driver exhaustively dispatches concrete IR variants. The public [`EngineDriver`] binds that executor to the active statement and transaction; graph and tuple carriers retain their distinct identities.
 //!
 //! The integration target is a "lower -> optimise -> execute" pipeline:
 //! [`run_optimised`] does the three-step sequence and returns a
@@ -38,34 +35,21 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use uqa_core::{
-    DocId, GeneralizedPostingList, PathSegment, Payload, PostingEntry, PostingList, Predicate,
-    Value,
-};
-use uqa_execution::operator_tree::{OperatorOutput, OperatorTreeDriver, PlanExecutor};
+use uqa_core::{GeneralizedPostingList, PathSegment, Predicate, Value};
+use uqa_execution::operator_tree::{OperatorOutput, OperatorTreeDriver};
 use uqa_execution::parallel::ParallelExecutor;
 use uqa_execution::{eval_scalar, ScalarEvalContext, ScalarExpr};
 use uqa_operators::{
-    BayesianEvidenceFusionOperator, DeepGraphDirection, ExternalPriorMode, GatingSpec,
-    MultiStageCutoff, MultiStageEntry, OperatorTree, RobustPositiveEvidencePoolOperator,
-    TextScoringMode,
+    DeepGraphDirection, ExternalPriorMode, GatingSpec, MultiStageCutoff, MultiStageEntry,
+    OperatorTree, TextScoringMode,
 };
 use uqa_planner::query_optimizer::{IndexScanCandidate, QueryOptimizer};
-use uqa_sql::ast::{BinaryOp, ColumnType};
+use uqa_sql::ast::BinaryOp;
 use uqa_sql::SQLParam;
-use uqa_storage::StorageBackendError;
 
 use crate::{Engine, ScoredEntry};
 use uqa_sql::SQLError;
 
-mod deep_layers;
-mod driver_context;
-mod driver_dispatch;
-mod driver_fusion;
-mod driver_graph;
-mod driver_joins;
-mod driver_relational;
-mod graph_runtime;
 mod lowering_boolean;
 mod lowering_constants;
 mod lowering_fusion;
@@ -74,17 +58,7 @@ mod lowering_retrieval;
 mod operator_join_estimation;
 mod operator_join_execution;
 mod optimizer_binding;
-mod posting_utils;
-mod tree_introspection;
 
-use deep_layers::{
-    deep_runtime_gating, lower_deep_batch_norm, lower_deep_conv, lower_deep_dense,
-    lower_deep_dropout, lower_deep_pool,
-};
-use graph_runtime::{
-    graph_pattern_from_ir, parse_rpq, restrict_result_to_source, temporal_filter_from_ir,
-    GraphNeighborAccess,
-};
 use lowering_boolean::{column_name, lower_comparison, lower_document_boolean, lower_function};
 use lowering_constants::{
     const_bool, const_f64, const_f64_vector, const_gating, const_optional_string, const_string,
@@ -104,50 +78,9 @@ use lowering_retrieval::{
 };
 pub(crate) use operator_join_estimation::estimate_operator_join_table_function;
 pub(crate) use operator_join_execution::execute_operator_join_table_function;
-use optimizer_binding::{engine_query_optimizer, operator_tree_paradigm, scored_term_count};
-use posting_utils::{
-    fuse_signal_batches_with, fuse_signals_with, numeric_score, posting_list_to_scored,
-    scored_to_posting_list, sparse_threshold_inline, static_operator, StaticPostingList,
-};
-use tree_introspection::{
-    collect_graph_names, first_structured_field, first_text_signal, require_graph_name,
-    require_shared_structured_field, require_shared_vector_field, require_text_field,
-    require_vector_field,
-};
-
+pub(crate) use optimizer_binding::engine_query_optimizer;
+use optimizer_binding::operator_tree_paradigm;
 type DriverResult<T> = Result<T, SQLError>;
-
-#[derive(Clone, Copy)]
-struct WeightedPathExecution<'a> {
-    rpq_source: &'a str,
-    start_vertex: u64,
-    graph: &'a str,
-    weight_property: &'a str,
-    default_edge_weight: f64,
-    max_hops: usize,
-    predicate: &'a uqa_operators::PathWeightPredicate,
-    predicate_selectivity: f64,
-    score: f64,
-}
-
-#[derive(Clone, Copy)]
-struct HybridJoinFields<'a> {
-    left_structured: &'a str,
-    left_vector: &'a str,
-    right_structured: &'a str,
-    right_vector: &'a str,
-}
-
-#[derive(Clone, Copy)]
-struct PositiveEvidencePoolExecution<'a> {
-    signals: &'a [OperatorTree],
-    alpha: f64,
-    gating: &'a GatingSpec,
-    weights: Option<&'a [f64]>,
-    logit_min: Option<&'a [f64]>,
-    logit_max: Option<&'a [f64]>,
-    adaptive_weights: bool,
-}
 
 enum OptionalStringConstant {
     Null,
@@ -164,10 +97,6 @@ impl OptionalStringConstant {
 }
 
 fn operator_execution_error(operator: &str, error: impl std::fmt::Display) -> SQLError {
-    SQLError::Internal(format!("execute {operator}: {error}"))
-}
-
-fn graph_execution_error(operator: &str, error: impl std::fmt::Display) -> SQLError {
     SQLError::Internal(format!("execute {operator}: {error}"))
 }
 
@@ -321,270 +250,35 @@ pub(crate) fn lower_sql_function_bound(
     })
 }
 
-/// Physical `OperatorTreeDriver` backed by the engine's table, index, graph,
-/// join, and ML runtimes. Single-document branches compose through the core
-/// document support operations and documented payload merge policies; join
-/// branches retain the generalized tuple carrier.
-#[derive(Clone, Copy)]
-enum DriverExecution {
-    Public,
-    InExecution,
-}
-
+/// Bind a physical retrieval driver to the Engine statement and transaction boundary.
 pub struct EngineDriver<'a> {
     pub engine: &'a Engine,
     pub table: &'a str,
-    signal_table: &'a str,
     pub params: &'a [SQLParam],
     pub parallel: ParallelExecutor,
-    execution: DriverExecution,
 }
 
 impl<'a> EngineDriver<'a> {
     #[must_use]
-    pub fn new(engine: &'a Engine, table: &'a str, params: &'a [SQLParam]) -> EngineDriver<'a> {
+    pub fn new(engine: &'a Engine, table: &'a str, params: &'a [SQLParam]) -> Self {
         Self {
             engine,
             table,
-            signal_table: table,
             params,
             parallel: ParallelExecutor::default(),
-            execution: DriverExecution::Public,
         }
     }
-
-    fn new_in_execution(
-        engine: &'a Engine,
-        table: &'a str,
-        params: &'a [SQLParam],
-    ) -> EngineDriver<'a> {
-        Self {
-            engine,
-            table,
-            signal_table: table,
-            params,
-            parallel: ParallelExecutor::default(),
-            execution: DriverExecution::InExecution,
-        }
-    }
-
-    fn new_for_relation_in_execution(
-        engine: &'a Engine,
-        table: &'a str,
-        signal_table: &'a str,
-        params: &'a [SQLParam],
-    ) -> EngineDriver<'a> {
-        Self {
-            engine,
-            table,
-            signal_table,
-            params,
-            parallel: ParallelExecutor::default(),
-            execution: DriverExecution::InExecution,
-        }
-    }
-
-    /// Override the branch-level parallel executor. The default uses
-    /// rayon's pool with `DEFAULT_PARALLEL_WORKERS`; pass `0` for
-    /// fully-serial execution in tests / deterministic benchmarks.
     #[must_use]
-    pub fn with_parallel(mut self, par: ParallelExecutor) -> Self {
-        self.parallel = par;
+    pub fn with_parallel(mut self, parallel: ParallelExecutor) -> Self {
+        self.parallel = parallel;
         self
     }
+}
 
-    fn bayesian_params_for(&self, field: &str) -> DriverResult<uqa_scoring::BayesianBM25Params> {
-        match self.execution {
-            DriverExecution::Public => self.engine.bayesian_params_for(self.table, field),
-            DriverExecution::InExecution => self.engine.bayesian_params_for_relation_in_execution(
-                self.table,
-                self.signal_table,
-                field,
-            ),
-        }
-    }
-
-    fn execute_posting_node(&self, op: &OperatorTree) -> DriverResult<PostingList> {
-        match self.execute_node(op)? {
-            OperatorOutput::Posting(result) => Ok(result),
-            OperatorOutput::Graph(result) => Ok(result.to_posting_list()),
-            OperatorOutput::Generalized(_) => Err(SQLError::TypeMismatch(format!(
-                "{} produces tuple rows and cannot feed a single-document operator",
-                uqa_execution::operator_tree::operator_name(op)
-            ))),
-        }
-    }
-
-    fn execute_posting_branches(
-        &self,
-        branches: &[OperatorTree],
-    ) -> DriverResult<Vec<PostingList>> {
-        let workers: Vec<_> = branches
-            .iter()
-            .map(|branch| || self.execute_posting_node(branch))
-            .collect();
-        self.parallel
-            .execute_branches(&workers)
-            .into_iter()
-            .collect()
-    }
-
-    fn execute_output_branches(
-        &self,
-        branches: &[OperatorTree],
-    ) -> DriverResult<Vec<OperatorOutput>> {
-        let workers: Vec<_> = branches
-            .iter()
-            .map(|branch| || self.execute_node(branch))
-            .collect();
-        self.parallel
-            .execute_branches(&workers)
-            .into_iter()
-            .collect()
-    }
-
-    fn execute_term(
-        &self,
-        query: &str,
-        field: Option<&str>,
-        scoring: Option<TextScoringMode>,
-        top_k: Option<uqa_operators::TextTopKPlan>,
-    ) -> DriverResult<PostingList> {
-        let scoring = scoring.ok_or_else(|| {
-            SQLError::Internal(
-                "OperatorTree::Term reached EngineDriver without bound text scoring".into(),
-            )
-        })?;
-        if let Some(field) = field {
-            self.engine.validate_text_search_field(self.table, field)?;
-            let mode = match scoring {
-                TextScoringMode::BM25 => crate::ScoringMode::BM25(crate::BM25Params::default()),
-                TextScoringMode::BayesianBM25 => {
-                    crate::ScoringMode::BayesianBM25(self.bayesian_params_for(field)?)
-                }
-                TextScoringMode::CustomBM25(params) => crate::ScoringMode::BM25(params),
-                TextScoringMode::CustomBayesianBM25(params) => {
-                    crate::ScoringMode::BayesianBM25(params)
-                }
-            };
-            return self
-                .engine
-                .search_leaf(
-                    self.table,
-                    field,
-                    query,
-                    &mode,
-                    top_k.map_or(usize::MAX, |plan| plan.k),
-                    top_k,
-                )
-                .map(|rows| scored_to_posting_list(&rows));
-        }
-        if top_k.is_some() {
-            return Err(SQLError::Internal(
-                "physical text top-k requires one concrete field".into(),
-            ));
-        }
-        if matches!(
-            scoring,
-            TextScoringMode::CustomBM25(_) | TextScoringMode::CustomBayesianBM25(_)
-        ) {
-            return Err(SQLError::TypeMismatch(
-                "explicit text scoring parameters require one concrete field".into(),
-            ));
-        }
-        let fields = self.engine.fts_fields_for_table(self.table)?;
-        if fields.is_empty() {
-            return Err(SQLError::TypeMismatch(format!(
-                "text search: table `{}` has no text-indexed columns",
-                self.table
-            )));
-        }
-        let mut by_document = BTreeMap::<DocId, f64>::new();
-        for field in fields {
-            let mode = match scoring {
-                TextScoringMode::BM25 => crate::ScoringMode::BM25(crate::BM25Params::default()),
-                TextScoringMode::BayesianBM25 => {
-                    crate::ScoringMode::BayesianBM25(self.bayesian_params_for(&field)?)
-                }
-                TextScoringMode::CustomBM25(_) | TextScoringMode::CustomBayesianBM25(_) => {
-                    return Err(SQLError::Internal(
-                        "custom all-field scoring passed validation without a concrete field"
-                            .into(),
-                    ));
-                }
-            };
-            for entry in
-                self.engine
-                    .search_leaf(self.table, &field, query, &mode, usize::MAX, None)?
-            {
-                by_document
-                    .entry(entry.doc_id)
-                    .and_modify(|score| *score = score.max(entry.score))
-                    .or_insert(entry.score);
-            }
-        }
-        Ok(scored_to_posting_list(
-            &by_document
-                .into_iter()
-                .map(|(doc_id, score)| ScoredEntry { doc_id, score })
-                .collect::<Vec<_>>(),
-        ))
-    }
-
-    fn execute_knn(
-        &self,
-        query_vector: &[f32],
-        k: usize,
-        field: &str,
-    ) -> DriverResult<PostingList> {
-        self.require_vector_query(field, query_vector)?;
-        self.engine
-            .knn_search_leaf(self.table, field, query_vector, k)
-            .map(|rows| scored_to_posting_list(&rows))
-    }
-
-    fn execute_filter(
-        &self,
-        field: &str,
-        predicate: &Predicate,
-        source: Option<&OperatorTree>,
-    ) -> DriverResult<PostingList> {
-        self.require_column(field)?;
-        // Indexed columns resolve through the value index in
-        // O(log n + k); the index refuses predicates it cannot answer
-        // with evaluated-scan semantics, so this never changes results.
-        if let Some(indexed) = self.engine.value_index_scan(self.table, field, predicate)? {
-            return match source {
-                Some(child) => self
-                    .execute_posting_node(child)
-                    .map(|posting| posting.merge_intersection_owned(&indexed)),
-                None => Ok(indexed),
-            };
-        }
-        let candidates: Vec<DocId> = match source {
-            Some(child) => {
-                let inner = self.execute_posting_node(child)?;
-                inner.entries().iter().map(|e| e.doc_id).collect()
-            }
-            None => self.engine.table_doc_ids(self.table)?,
-        };
-        let values = self
-            .engine
-            .get_document_fields(self.table, &candidates, field)?;
-        let mut entries: Vec<PostingEntry> = Vec::with_capacity(candidates.len());
-        for doc_id in candidates {
-            let Some(value) = values.get(&doc_id) else {
-                return Err(SQLError::Internal(format!(
-                    "Filter consistency error: candidate {doc_id} is missing from the document-field snapshot for table `{}`",
-                    self.table
-                )));
-            };
-            if predicate.evaluate(Some(value)) {
-                entries.push(PostingEntry::new(doc_id, Payload::default()));
-            }
-        }
-        entries.sort_by_key(|e| e.doc_id);
-        Ok(PostingList::from_sorted_unchecked(entries))
+impl OperatorTreeDriver for EngineDriver<'_> {
+    type Error = SQLError;
+    fn execute_node(&self, tree: &OperatorTree) -> DriverResult<OperatorOutput> {
+        execution::execute_public_physical_node(self, tree)
     }
 }
 
@@ -920,4 +614,5 @@ pub(crate) use execution::{
     run_accelerated,
 };
 
-use uqa_execution::query::retrieval::combine_signal_priors;
+use uqa_execution::operator_tree::driver::introspection::collect_graph_names;
+use uqa_execution::operator_tree::driver::posting::posting_list_to_scored;

@@ -11,10 +11,7 @@ use super::{
     ScoredEntry, Value,
 };
 
-/// Replay a posting list that the [`EngineDriver`] has already
-/// computed. Used by fusion / boolean wrappers that take
-/// `Arc<dyn Operator>` signals: the driver pre-executes each child
-/// node and hands the result over as a [`StaticPostingList`].
+/// Replay a computed child posting list for operators that consume already-evaluated signals.
 pub(super) struct StaticPostingList {
     pub(super) pl: PostingList,
 }
@@ -40,9 +37,7 @@ impl uqa_operators::base::Operator for StaticPostingList {
     }
 }
 
-/// Combine a vector of per-signal posting lists into a single fused
-/// posting list. `fuse` receives one document's per-signal probability vector
-/// and returns its fused score.
+/// Combine a vector of per-signal posting lists into a single fused posting list. `fuse` receives one document's per-signal probability vector and returns its fused score.
 pub(super) fn fuse_signals_with<F>(
     posting_lists: &[PostingList],
     fuse: F,
@@ -125,7 +120,7 @@ pub(super) fn fusion_probability_matrix(
     (candidate_ids, probabilities)
 }
 
-pub(super) fn scored_to_posting_list(scored: &[ScoredEntry]) -> PostingList {
+pub fn scored_to_posting_list(scored: &[ScoredEntry]) -> PostingList {
     let mut entries: Vec<PostingEntry> = scored
         .iter()
         .map(|e| PostingEntry::new(e.doc_id, Payload::with_score(e.score)))
@@ -134,7 +129,7 @@ pub(super) fn scored_to_posting_list(scored: &[ScoredEntry]) -> PostingList {
     PostingList::from_sorted_unchecked(entries)
 }
 
-pub(super) fn posting_list_to_scored(pl: &PostingList) -> Vec<ScoredEntry> {
+pub fn posting_list_to_scored(pl: &PostingList) -> Vec<ScoredEntry> {
     pl.entries()
         .iter()
         .map(|e| ScoredEntry {

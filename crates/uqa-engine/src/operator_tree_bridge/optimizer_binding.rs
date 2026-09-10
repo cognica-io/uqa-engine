@@ -17,7 +17,7 @@ use uqa_planner::{
     AccessParadigm, CostEstimator, EdgeSample, GraphStats, GraphStoreSampler, OperatorKind,
 };
 
-pub(super) fn engine_query_optimizer(
+pub(crate) fn engine_query_optimizer(
     engine: &Engine,
     table: &str,
     tree: &OperatorTree,
@@ -404,24 +404,6 @@ pub(super) fn engine_index_candidates(
         });
     }
     Ok(candidates)
-}
-
-/// Number of score-contributing text terms in a bound BM25 query tree.
-/// Set operations merge payloads by summing scores, so the raw query
-/// score scales with this count and the calibration must be translated
-/// to it. Complements filter without contributing score.
-pub(super) fn scored_term_count(tree: &OperatorTree) -> usize {
-    match tree {
-        OperatorTree::Term { .. } => 1,
-        OperatorTree::Intersect(children)
-        | OperatorTree::Union(children)
-        | OperatorTree::Composed(children) => children.iter().map(scored_term_count).sum(),
-        OperatorTree::Filter { source, .. } => source.as_deref().map_or(0, scored_term_count),
-        OperatorTree::BayesianScore { source, .. } | OperatorTree::Score { source, .. } => {
-            scored_term_count(source)
-        }
-        _ => 0,
-    }
 }
 
 // `eval_path` lives in storage; expose a shim so we don't pull in the

@@ -11,22 +11,18 @@ use super::{
     fuse_signals_with, lower_deep_batch_norm, lower_deep_conv, lower_deep_dense,
     lower_deep_dropout, lower_deep_pool, operator_execution_error, scored_term_count,
     scored_to_posting_list, static_operator, BTreeSet, BayesianEvidenceFusionOperator, DocId,
-    DriverExecution, DriverResult, EngineDriver, ExternalPriorMode, GatingSpec,
-    GraphNeighborAccess, MultiStageCutoff, MultiStageEntry, OperatorTree, Payload,
-    PositiveEvidencePoolExecution, PostingEntry, PostingList, RobustPositiveEvidencePoolOperator,
-    SQLError, ScalarExpr, ScoredEntry, StaticPostingList, StorageBackendError, TextScoringMode,
-    Value,
+    DriverResult, ExternalPriorMode, GatingSpec, GraphNeighborAccess, MultiStageCutoff,
+    MultiStageEntry, OperatorTree, Payload, PhysicalRetrievalDriver, PositiveEvidencePoolExecution,
+    PostingEntry, PostingList, RobustPositiveEvidencePoolOperator, SQLError, ScalarExpr,
+    ScoredEntry, StaticPostingList, StorageBackendError, TextScoringMode, Value,
 };
 
-impl EngineDriver<'_> {
-    fn text_retrieval_session(&self) -> crate::capabilities::TextRetrievalSession<'_> {
-        match self.execution {
-            DriverExecution::Public => {
-                crate::capabilities::TextRetrievalSession::Public(self.engine)
-            }
-            DriverExecution::InExecution => {
-                crate::capabilities::TextRetrievalSession::InExecution(self.engine)
-            }
+impl PhysicalRetrievalDriver<'_> {
+    fn text_retrieval_context(&self) -> crate::query::retrieval::context::TextRetrievalContext<'_> {
+        crate::query::retrieval::context::TextRetrievalContext {
+            catalog: self.context.text_catalog,
+            text: self.context.text_functions,
+            functions: self.context.functions,
         }
     }
 
@@ -114,8 +110,8 @@ impl EngineDriver<'_> {
                     .map(|weight| ScalarExpr::Literal(Value::Float(*weight))),
             );
         }
-        uqa_execution::query::retrieval::run_multi_field_match(
-            &self.text_retrieval_session().context(),
+        crate::query::retrieval::run_multi_field_match(
+            &self.text_retrieval_context(),
             self.table,
             &args,
             self.params,
@@ -142,9 +138,9 @@ impl EngineDriver<'_> {
                 .to_string(),
             )),
         ];
-        uqa_execution::query::retrieval::run_bayesian_match_with_prior(
-            self.engine,
-            &self.text_retrieval_session().context(),
+        crate::query::retrieval::run_bayesian_match_with_prior(
+            self.context.documents,
+            &self.text_retrieval_context(),
             self.table,
             &args,
             self.params,
@@ -175,9 +171,9 @@ impl EngineDriver<'_> {
         if let Some(threshold) = threshold {
             args.push(ScalarExpr::Literal(Value::Float(threshold)));
         }
-        uqa_execution::query::retrieval::run_calibrated_vector_match(
-            self.engine,
-            self.engine,
+        crate::query::retrieval::run_calibrated_vector_match(
+            self.context.vector_pool,
+            self.context.functions,
             self.table,
             &args,
             self.params,
@@ -186,10 +182,14 @@ impl EngineDriver<'_> {
     }
 
     pub(super) fn execute_deep_predict(&self, model: &str) -> DriverResult<PostingList> {
-        let scores = self
-            .engine
-            .deep_predict_leaf(model)?
+        let model = self
+            .context
+            .models
+            .load_model(model)?
             .ok_or_else(|| SQLError::Unsupported(format!("unknown model {model:?}")))?;
+        let (scores, _) = model
+            .predict(&uqa_operators::base::ExecutionContext::new())
+            .map_err(|error| SQLError::Internal(format!("deep prediction failed: {error}")))?;
         Ok(PostingList::from_unsorted(
             scores
                 .into_iter()
@@ -221,14 +221,16 @@ impl EngineDriver<'_> {
     ) -> DriverResult<PostingList> {
         self.require_column(field)?;
         let index = self
-            .engine
+            .context
+            .indexes
             .catalog_index(index_name)
             .map_err(|error| operator_execution_error("resolve physical index", error))?
             .ok_or_else(|| {
                 SQLError::Unsupported(format!("unknown physical index {index_name:?}"))
             })?;
         let resolved_table = self
-            .engine
+            .context
+            .indexes
             .resolve_table_name(self.table)
             .map_err(|error| operator_execution_error("resolve index table", error))?
             .unwrap_or_else(|| self.table.to_string());
@@ -258,7 +260,8 @@ impl EngineDriver<'_> {
                 "index {index_name:?} does not cover leading field {field:?}"
             )));
         }
-        self.engine
+        self.context
+            .indexes
             .value_index_scan(self.table, field, predicate)?
             .ok_or_else(|| {
                 SQLError::Unsupported(format!(
@@ -384,10 +387,7 @@ impl EngineDriver<'_> {
             .collect()
     }
 
-    /// Execute a combination child at the typed probability/evidence boundary: the
-    /// signal contributes prior-free evidence and reports the corpus
-    /// relevance prior it would otherwise have folded in, so the
-    /// fusion can apply that prior exactly once.
+    /// Execute a combination child at the typed probability/evidence boundary: the signal contributes prior-free evidence and reports the corpus relevance prior it would otherwise have folded in, so the fusion can apply that prior exactly once.
     pub(super) fn execute_fusion_signal(
         &self,
         signal: &OperatorTree,
@@ -431,16 +431,19 @@ impl EngineDriver<'_> {
         field: Option<&str>,
     ) -> DriverResult<(PostingList, Option<f64>)> {
         if let Some(field) = field {
-            self.engine.validate_text_search_field(self.table, field)?;
+            self.context
+                .text
+                .validate_text_search_field(self.table, field)?;
             let params = self.bayesian_params_for(field)?;
             let prior = (params.base_rate > 0.0).then_some(params.base_rate);
-            let mode = crate::ScoringMode::BayesianBM25(params.evidence_params());
+            let mode = uqa_scoring::ScoringMode::BayesianBM25(params.evidence_params());
             let rows =
-                self.engine
+                self.context
+                    .text
                     .search_leaf(self.table, field, query, &mode, usize::MAX, None)?;
             return Ok((scored_to_posting_list(&rows), prior));
         }
-        let fields = self.engine.fts_fields_for_table(self.table)?;
+        let fields = self.context.text.fts_fields_for_table(self.table)?;
         if fields.is_empty() {
             return Err(SQLError::TypeMismatch(format!(
                 "text search: table `{}` has no text-indexed columns",
@@ -454,9 +457,10 @@ impl EngineDriver<'_> {
             if params.base_rate > 0.0 {
                 priors.push(params.base_rate);
             }
-            let mode = crate::ScoringMode::BayesianBM25(params.evidence_params());
+            let mode = uqa_scoring::ScoringMode::BayesianBM25(params.evidence_params());
             for entry in
-                self.engine
+                self.context
+                    .text
                     .search_leaf(self.table, &field, query, &mode, usize::MAX, None)?
             {
                 by_document
@@ -475,10 +479,7 @@ impl EngineDriver<'_> {
         ))
     }
 
-    /// Query-pool vector evidence: fit the two-Gaussian score transform on
-    /// the source's selected cosine similarities and emit unit-interval,
-    /// prior-free likelihood-ratio evidence. This is an unsupervised,
-    /// query-local estimate rather than a reusable held-out calibration model.
+    /// Query-pool vector evidence: fit the two-Gaussian score transform on the source's selected cosine similarities and emit unit-interval, prior-free likelihood-ratio evidence. This is an unsupervised, query-local estimate rather than a reusable held-out calibration model.
     pub(super) fn execute_cosine_evidence(
         &self,
         source: &OperatorTree,

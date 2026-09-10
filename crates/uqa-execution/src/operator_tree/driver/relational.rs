@@ -8,11 +8,11 @@
 
 use super::{
     graph_execution_error, operator_execution_error, static_operator, BTreeMap, BTreeSet, DocId,
-    DriverResult, EngineDriver, OperatorOutput, OperatorTree, OperatorTreeDriver, Payload,
-    PostingEntry, PostingList, SQLError,
+    DriverResult, OperatorOutput, OperatorTree, OperatorTreeDriver, Payload,
+    PhysicalRetrievalDriver, PostingEntry, PostingList, SQLError,
 };
 
-impl EngineDriver<'_> {
+impl PhysicalRetrievalDriver<'_> {
     pub(super) fn execute_intersect(&self, parts: &[OperatorTree]) -> DriverResult<OperatorOutput> {
         let membership_only = parts.iter().all(OperatorTree::is_membership_only);
         let mut iter = self.execute_output_branches(parts)?.into_iter();
@@ -65,7 +65,8 @@ impl EngineDriver<'_> {
 
     pub(super) fn execute_complement(&self, inner: &OperatorTree) -> DriverResult<PostingList> {
         if !self
-            .engine
+            .context
+            .relations
             .has_table(self.table)
             .map_err(|error| operator_execution_error("resolve complement table", error))?
         {
@@ -74,7 +75,7 @@ impl EngineDriver<'_> {
         let inner_pl = self.execute_posting_node(inner)?;
         let included: BTreeSet<DocId> = inner_pl.entries().iter().map(|e| e.doc_id).collect();
         let mut entries: Vec<PostingEntry> = Vec::new();
-        for doc_id in self.engine.table_doc_ids(self.table)? {
+        for doc_id in self.context.relations.table_doc_ids(self.table)? {
             if !included.contains(&doc_id) {
                 entries.push(PostingEntry::new(doc_id, Payload::default()));
             }
@@ -103,7 +104,7 @@ impl EngineDriver<'_> {
             .map(|child| self.execute_posting_node(child))
             .transpose()?;
         let doc_ids = source.as_ref().map_or_else(
-            || self.engine.table_doc_ids(self.table),
+            || self.context.relations.table_doc_ids(self.table),
             |posting| Ok(posting.entries().iter().map(|entry| entry.doc_id).collect()),
         )?;
         let context = self.bridge_context_for_projection(&doc_ids, &[field])?;
@@ -160,7 +161,7 @@ impl EngineDriver<'_> {
             .map(|child| self.execute_posting_node(child))
             .transpose()?;
         let doc_ids = source.as_ref().map_or_else(
-            || self.engine.table_doc_ids(self.table),
+            || self.context.relations.table_doc_ids(self.table),
             |posting| Ok(posting.entries().iter().map(|entry| entry.doc_id).collect()),
         )?;
         let context = self.bridge_context_for_projection(&doc_ids, &[field])?;

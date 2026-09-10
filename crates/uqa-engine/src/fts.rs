@@ -33,21 +33,12 @@ impl Engine {
         else {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
-        if table_state
-            .fts_fields()
-            .iter()
-            .any(|indexed| indexed == field)
-        {
-            return Ok(());
-        }
-
-        let columns = table_state.columns.read();
-        if !columns.is_empty() && !columns.iter().any(|column| column.name == field) {
-            return Err(SQLError::UnknownColumn(field.to_string()));
-        }
-        Err(SQLError::TypeMismatch(format!(
-            "text search: column `{table}.{field}` has no text index; create one with CREATE INDEX ... ON {table} USING gin ({field})"
-        )))
+        uqa_sql::semantics::text_indexes::require_physical_text_index(
+            table,
+            field,
+            &table_state.fts_fields(),
+            || table_state.columns.read().clone(),
+        )
     }
 
     pub fn fts_index_stats(

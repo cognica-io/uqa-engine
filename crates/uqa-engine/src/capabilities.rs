@@ -598,4 +598,5 @@ mod column_rewrites;
 mod constraint_changes;
 
 mod retrieval_execution;
-pub(crate) use retrieval_execution::TextRetrievalSession;
+
+mod physical_retrieval;

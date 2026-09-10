@@ -5,8 +5,7 @@
 //
 
 use super::{
-    ml_deep_learn, DeepLearnOutput, DeepModel, DocId, Engine, ExecutionContext, LearnOptions,
-    SQLError, TrainingSet,
+    ml_deep_learn, DeepLearnOutput, DeepModel, DocId, Engine, LearnOptions, SQLError, TrainingSet,
 };
 
 const VECTOR_CALIBRATION_MODEL_PREFIX: &str = "vector_calibration_model::";
@@ -256,22 +255,6 @@ impl Engine {
         drop(scoring_params);
         self.note_catalog_registry_changed();
         Ok(true)
-    }
-
-    /// Run inference for a saved model against a fresh execution
-    /// context. Returns `(doc_id, score)` pairs ordered by `doc_id`.
-    pub(crate) fn deep_predict_leaf(
-        &self,
-        name: &str,
-    ) -> Result<Option<Vec<(DocId, f64)>>, SQLError> {
-        let Some(model) = self.load_model(name)? else {
-            return Ok(None);
-        };
-        let ctx = ExecutionContext::new();
-        let (scores, _) = model
-            .predict(&ctx)
-            .map_err(|error| SQLError::Internal(format!("deep prediction failed: {error}")))?;
-        Ok(Some(scores))
     }
 
     /// Run saved-model inference through the shared operator optimizer and
