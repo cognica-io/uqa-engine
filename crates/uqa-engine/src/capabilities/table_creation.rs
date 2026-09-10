@@ -10,8 +10,10 @@ use uqa_core::DocId;
 use uqa_execution::mutation::publication::DocumentVectors;
 use uqa_execution::query::CteScope;
 use uqa_execution::schema::ctas::{
+    entry::{TableAsTransactions, TableAsWrite},
     CreateTableAsContext, TableAsNamespace, TableAsPublication, TableAsQuerySource,
 };
+use uqa_execution::schema::table_creation::entry::{TableCreationTransactions, TableCreationWrite};
 use uqa_sql::catalog::errors::storage_error;
 use uqa_sql::{
     ast::{ColumnDef, OnCommitAction, RelationPersistence},
@@ -32,6 +34,32 @@ impl Engine {
             publication: self,
             vectors: self,
         }
+    }
+}
+impl TableAsTransactions<StatementReadSnapshot> for Engine {
+    fn transaction_is_active(&self) -> bool {
+        self.transaction_depth() != 0
+    }
+    fn with_new_transaction(
+        &self,
+        write: TableAsWrite<'_, StatementReadSnapshot>,
+    ) -> Result<SQLResult, SQLError> {
+        self.transaction(|engine| engine.with_current_scope(write))
+    }
+    fn with_current_scope(
+        &self,
+        write: TableAsWrite<'_, StatementReadSnapshot>,
+    ) -> Result<SQLResult, SQLError> {
+        let scope = super::query_scope::new_for_current_routine(self);
+        write(&self.create_table_as_context(&scope))
+    }
+}
+impl TableCreationTransactions for Engine {
+    fn with_new_table_transaction(
+        &self,
+        write: TableCreationWrite<'_>,
+    ) -> Result<SQLResult, SQLError> {
+        self.transaction(|engine| write(&engine.create_table_context()))
     }
 }
 impl TableAsQuerySource for Engine {

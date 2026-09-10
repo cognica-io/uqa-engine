@@ -69,19 +69,6 @@ pub(super) fn value_to_usize(value: &super::Value) -> Result<usize, String> {
 }
 
 impl Engine {
-    pub(crate) fn resolve_relation_rename_source(
-        &self,
-        name: &str,
-        if_exists: bool,
-    ) -> Result<Option<(String, &'static str)>, SQLError> {
-        uqa_sql::catalog::resolution::resolve_relation_rename_source(
-            self.resolve_visible_relation_kind(name)?,
-            name,
-            if_exists,
-            &mut |message| self.push_sql_notice("NOTICE", message),
-        )
-    }
-
     pub(crate) fn rewrite_relation_rename_dependents(
         &self,
         from: &RelationIdentity,

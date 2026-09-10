@@ -80,26 +80,6 @@ impl Engine {
         })
     }
 
-    pub(crate) fn create_sequence_sql(
-        &self,
-        sequence: &uqa_sql::ast::CreateSequence,
-    ) -> Result<bool, SQLError> {
-        self.with_implicit_transaction(|engine| {
-            uqa_execution::schema::sequences::creation::create_sequence(
-                &engine.sequence_creation_context(),
-                &sequence.name,
-                SequenceState::from_definition(
-                    uqa_sql::schema::sequences::definition::SequenceDefinition::from_create(
-                        sequence,
-                    ),
-                ),
-                sequence.if_not_exists,
-                sequence.persistence,
-                &sequence.ownership,
-            )
-        })
-    }
-
     pub(crate) fn create_implicit_sequence_with_persistence(
         &self,
         name: &str,
@@ -149,13 +129,6 @@ impl Engine {
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         })
-    }
-
-    pub(crate) fn alter_sequence_sql(
-        &self,
-        alter: &uqa_sql::ast::AlterSequence,
-    ) -> Result<bool, SQLError> {
-        self.with_implicit_transaction(|engine| engine.alter_sequence_inner(alter))
     }
 
     fn alter_sequence_inner(&self, alter: &uqa_sql::ast::AlterSequence) -> Result<bool, SQLError> {

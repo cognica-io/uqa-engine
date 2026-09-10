@@ -12,16 +12,37 @@ use uqa_execution::schema::{
         ColumnRemovalContext, ColumnRemovalEvents, ColumnRemovalRoutines, ColumnRemovalState,
         ColumnRemovalViews,
     },
-    table_alteration::{TableAlterContext, TableEventLifecycle, TableLifecycle},
+    table_alteration::{
+        entry::{
+            RelationEventAlterContext, RelationEventAlterTransactions, RelationEventAlterWrite,
+            TableAlterEntryContext, TableAlterSession, TableAlterTransactions, TableAlterWrite,
+        },
+        TableAlterContext, TableEventLifecycle, TableLifecycle,
+    },
 };
 use uqa_sql::{
     assignment::columns::ColumnCatalogError,
     ast::{CreateFunction, EventEnableMode, ForeignKey, FunctionBinding},
     schema::columns::removal::ColumnRemovalCatalog,
-    SQLError,
+    SQLError, SQLResult,
 };
 use uqa_storage::StorageBackendResult;
 impl Engine {
+    pub(crate) fn table_alter_entry_context(
+        &self,
+    ) -> TableAlterEntryContext<'_, StatementReadSnapshot> {
+        TableAlterEntryContext {
+            session: self,
+            names: self,
+            locks: self,
+            tables: self,
+            events: self,
+            views: self,
+            foreign_tables: self,
+            sequences: self,
+            notices: self.query_runtime_view().notices,
+        }
+    }
     pub(crate) fn table_alter_context(&self) -> TableAlterContext<'_, StatementReadSnapshot> {
         TableAlterContext {
             hierarchy: self.hierarchy_execution_context(),
@@ -43,6 +64,29 @@ impl Engine {
             views: self,
             state: self,
         }
+    }
+}
+impl TableAlterSession for Engine {
+    fn in_transaction_block(&self) -> bool {
+        Engine::in_transaction_block(self)
+    }
+}
+impl TableAlterTransactions<StatementReadSnapshot> for Engine {
+    fn with_table_write(
+        &self,
+        write: TableAlterWrite<'_, StatementReadSnapshot>,
+    ) -> Result<SQLResult, SQLError> {
+        self.with_implicit_transaction(|engine| write(&engine.table_alter_context()))
+    }
+}
+impl RelationEventAlterTransactions for Engine {
+    fn with_event_write(&self, write: RelationEventAlterWrite<'_>) -> Result<SQLResult, SQLError> {
+        self.with_implicit_transaction(|engine| {
+            write(&RelationEventAlterContext {
+                events: engine,
+                foreign_access: engine,
+            })
+        })
     }
 }
 impl TableLifecycle for Engine {

@@ -23,6 +23,8 @@ use uqa_sql::schema::table_creation::{
 use uqa_sql::{SQLError, SQLResult};
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
+pub mod entry;
+
 pub trait TableCreationNamespace {
     fn prepare_writer(&self) -> Result<bool, SQLError>;
     fn temporary_name(&self, name: &str) -> Result<String, SQLError>;

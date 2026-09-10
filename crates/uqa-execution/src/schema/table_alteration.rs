@@ -16,6 +16,7 @@ use uqa_sql::{
     SQLError, SQLResult,
 };
 mod context;
+pub mod entry;
 mod recursion;
 pub use context::*;
 use recursion::{materialize_recursive_action_names, run_recursive_alter_action};

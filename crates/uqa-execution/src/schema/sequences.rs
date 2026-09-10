@@ -17,4 +17,5 @@ pub mod role_ownership;
 pub mod dependencies;
 
 pub mod dispatch;
+pub mod entry;
 pub mod lifecycle;
