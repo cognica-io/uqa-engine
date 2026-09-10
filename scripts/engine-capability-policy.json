@@ -19,6 +19,7 @@
         "crates/uqa-engine/src/capabilities.rs",
         "crates/uqa-engine/src/capabilities/catalog_execution.rs",
         "crates/uqa-engine/src/capabilities/column_rewrites.rs",
+        "crates/uqa-engine/src/capabilities/constraint_changes.rs",
         "crates/uqa-engine/src/capabilities/constraints.rs",
         "crates/uqa-engine/src/capabilities/hierarchy.rs",
         "crates/uqa-engine/src/capabilities/index_creation.rs",

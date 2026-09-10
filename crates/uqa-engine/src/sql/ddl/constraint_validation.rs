@@ -32,16 +32,3 @@ pub(crate) fn validate_check_expression(
         expression,
     )
 }
-
-use uqa_sql::ast::TableKeyConstraint;
-pub(super) use uqa_sql::schema::constraints::validate_foreign_key_definition;
-
-pub(super) fn resolve_foreign_key_parent(
-    engine: &Engine,
-    reference: &str,
-) -> Result<(String, Vec<ColumnDef>, Vec<TableKeyConstraint>), SQLError> {
-    uqa_sql::schema::foreign_keys::resolve_foreign_key_parent(
-        &engine.foreign_key_definition_context(),
-        reference,
-    )
-}

@@ -10,17 +10,13 @@ use super::{
     ddl_storage_error, rewrite_column_values_to_type, AlterTableAction, AlterTableStmt, ColumnType,
     Engine, SQLError, SQLResult,
 };
-use uqa_sql::ast::{ForeignKey, GeneratedColumn, GeneratedColumnKind};
+use uqa_sql::ast::{GeneratedColumn, GeneratedColumnKind};
 
-use super::constraint_validation::{
-    resolve_foreign_key_parent, validate_foreign_key_definition as validate_temporal_foreign_key,
-};
 use super::defaults::validate_default_expression;
 
 mod checks;
 mod constraint_drop;
 mod constraint_lifecycle;
-mod foreign_key;
 mod recursion;
 
 use constraint_drop::{drop_column, drop_constraint};
@@ -30,10 +26,7 @@ use constraint_lifecycle::{
     ensure_constraint_name_available, set_not_null_constraint,
     validate_altered_constraint_column_types, validate_and_mark_constraint,
 };
-use constraint_lifecycle::{
-    constraint_error, find_constraint, publish_constraint_state, table_constraint_state,
-    ConstraintLocation,
-};
+use constraint_lifecycle::{constraint_error, table_constraint_state};
 use recursion::{materialize_recursive_action_names, run_recursive_alter_action};
 
 pub(in crate::sql) fn run_alter_table(

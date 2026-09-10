@@ -19,3 +19,5 @@ pub mod table_creation;
 pub mod hierarchy;
 
 pub mod keys;
+
+pub mod constraints;

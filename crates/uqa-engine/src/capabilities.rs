@@ -594,3 +594,5 @@ pub(crate) use schema_publication::allocate_catalog_object_id;
 mod hierarchy;
 
 mod column_rewrites;
+
+mod constraint_changes;

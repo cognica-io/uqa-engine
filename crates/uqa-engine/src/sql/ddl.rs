@@ -12,7 +12,6 @@ use super::{
 use crate::CatalogIndexRow;
 
 mod alter_table;
-use uqa_sql::schema::check_inheritance;
 use uqa_sql::schema::indexes::names as constraint_indexes;
 mod constraint_validation;
 mod create_index;
@@ -46,5 +45,5 @@ use drop::ddl_storage_error;
 use value_conversion::rewrite_column_values_to_type;
 
 pub(crate) use uqa_sql::schema::columns::{
-    validate_postgres_column_name, validate_postgres_relation_column_type, POSTGRES_SYSTEM_COLUMNS,
+    validate_postgres_column_name, validate_postgres_relation_column_type,
 };

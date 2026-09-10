@@ -11,34 +11,6 @@ use super::{
 };
 
 impl Engine {
-    /// Atomically replace the complete durable constraint state for one table.
-    /// SQL DDL prepares and validates the candidate before calling this method;
-    /// persistence is written before the in-memory catalog is published.
-    pub(crate) fn replace_constraint_state(
-        &self,
-        table: &str,
-        columns: Vec<uqa_sql::ast::ColumnDef>,
-        constraints: uqa_sql::ast::TableConstraintSet,
-    ) -> StorageBackendResult<()> {
-        self.with_implicit_storage_transaction(|engine| {
-            engine.replace_constraint_state_inner(table, columns, constraints)
-        })
-    }
-
-    fn replace_constraint_state_inner(
-        &self,
-        table: &str,
-        columns: Vec<uqa_sql::ast::ColumnDef>,
-        constraints: uqa_sql::ast::TableConstraintSet,
-    ) -> StorageBackendResult<()> {
-        uqa_execution::schema::publication::replace_constraint_state(
-            &self.schema_publication_context(),
-            table,
-            columns,
-            constraints,
-        )
-    }
-
     pub fn set_column_default(
         &self,
         table: &str,
@@ -303,24 +275,6 @@ impl Engine {
                 hierarchy,
             },
         )
-    }
-
-    pub(crate) fn try_check_constraint_parent_count(
-        &self,
-        table: &str,
-        name: &str,
-    ) -> StorageBackendResult<usize> {
-        let mut count = 0;
-        for parent in self.try_table_hierarchy(table)?.parents {
-            if self
-                .try_check_constraint_definitions(&parent)?
-                .iter()
-                .any(|check| !check.no_inherit && check.name.as_deref() == Some(name))
-            {
-                count += 1;
-            }
-        }
-        Ok(count)
     }
 
     /// Append one validated PRIMARY KEY or UNIQUE tuple without replacing the
