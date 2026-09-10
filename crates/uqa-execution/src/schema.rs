@@ -27,3 +27,9 @@ pub mod events;
 pub mod table_alteration;
 
 pub mod removal;
+
+pub mod relation_alteration;
+
+pub mod view_alteration;
+
+pub mod foreign_table_alteration;

@@ -8,7 +8,6 @@
 
 mod columns;
 mod materialized;
-mod options;
 mod ownership;
 mod registration;
 mod restoration;

@@ -23,6 +23,7 @@
         "crates/uqa-engine/src/capabilities/constraint_changes.rs",
         "crates/uqa-engine/src/capabilities/constraints.rs",
         "crates/uqa-engine/src/capabilities/copy.rs",
+        "crates/uqa-engine/src/capabilities/foreign_table_alteration.rs",
         "crates/uqa-engine/src/capabilities/hierarchy.rs",
         "crates/uqa-engine/src/capabilities/index_creation.rs",
         "crates/uqa-engine/src/capabilities/index_removal.rs",
@@ -42,6 +43,7 @@
         "crates/uqa-engine/src/capabilities/query_semantics.rs",
         "crates/uqa-engine/src/capabilities/query_sources.rs",
         "crates/uqa-engine/src/capabilities/referential.rs",
+        "crates/uqa-engine/src/capabilities/relation_alteration.rs",
         "crates/uqa-engine/src/capabilities/relation_removal.rs",
         "crates/uqa-engine/src/capabilities/retrieval_catalog.rs",
         "crates/uqa-engine/src/capabilities/retrieval_execution.rs",
@@ -60,6 +62,7 @@
         "crates/uqa-engine/src/capabilities/table_reads/tests.rs",
         "crates/uqa-engine/src/capabilities/tests.rs",
         "crates/uqa-engine/src/capabilities/triggers.rs",
+        "crates/uqa-engine/src/capabilities/view_alteration.rs",
         "crates/uqa-engine/src/capabilities/view_rewrite.rs"
       ]
     },

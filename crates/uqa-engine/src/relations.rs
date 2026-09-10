@@ -5,8 +5,8 @@
 //
 
 use super::{
-    Arc, BTreeMap, Engine, RelationIdentity, SQLError, StorageBackendError, StorageBackendResult,
-    TableState, TrainingExample, TrainingSet,
+    Arc, Engine, RelationIdentity, SQLError, StorageBackendError, StorageBackendResult, TableState,
+    TrainingExample, TrainingSet,
 };
 use crate::capabilities::RelationResolution;
 
@@ -82,48 +82,14 @@ impl Engine {
         )
     }
 
-    pub(crate) fn relation_rename_target(
-        &self,
-        source: &RelationIdentity,
-        new_name: &str,
-        context: &str,
-    ) -> Result<RelationIdentity, SQLError> {
-        let (schema, local_name) = RelationIdentity::parse_reference(new_name)
-            .map_err(|error| SQLError::Internal(format!("invalid {context} target: {error}")))?;
-        if schema.is_some() {
-            return Err(SQLError::Internal(format!(
-                "{context} produced a qualified target"
-            )));
-        }
-        let target = RelationIdentity::new(&source.schema, local_name);
-        if target == *source
-            || self
-                .relation_kind_at(&target.qualified_name())
-                .map_err(|error| {
-                    SQLError::Internal(format!(
-                        "check {context} target `{}`: {error}",
-                        target.qualified_name()
-                    ))
-                })?
-                .is_some()
-        {
-            return Err(SQLError::Routine {
-                sqlstate: "42P07".into(),
-                message: format!("relation \"{}\" already exists", target.name),
-            });
-        }
-        Ok(target)
-    }
-
     pub(crate) fn rewrite_relation_rename_dependents(
         &self,
         from: &RelationIdentity,
         to: &RelationIdentity,
     ) -> StorageBackendResult<()> {
-        self.rewrite_view_relation_references(&BTreeMap::from([(from.clone(), to.clone())]))?;
-        self.rewrite_routine_relation_references(from, to)
-            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-        self.rename_relation_events_inner(from, to)
+        uqa_execution::schema::relation_alteration::rewrite_relation_rename_dependents(
+            self, from, to,
+        )
     }
 
     pub(crate) fn relation_lookup_candidates(
