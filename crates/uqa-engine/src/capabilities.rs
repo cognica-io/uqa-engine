@@ -583,3 +583,5 @@ pub(crate) mod mutation_commands;
 mod insert_consumers;
 
 mod table_creation;
+
+mod index_creation;

@@ -10,8 +10,6 @@ use crate::Engine;
 pub(crate) use uqa_sql::schema::generated::prepare_generated_columns;
 use uqa_sql::{ast::GeneratedColumnKind, SQLError};
 use uqa_storage::document_store::Document;
-mod indexes;
-pub(in crate::sql) use indexes::prepare_index_predicate;
 
 pub(crate) fn refresh_stored_generated_columns(
     engine: &Engine,

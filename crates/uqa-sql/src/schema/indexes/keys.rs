@@ -176,3 +176,49 @@ pub fn prepare_index_keys(
     }
     Ok(types)
 }
+
+/// Bind keys and predicates and retain the public attribute names assigned before expression simplification.
+pub fn prepare_index_definition(
+    catalog: &dyn crate::schema::SchemaExpressionCatalog,
+    bindings: &dyn crate::semantics::conflict::InferenceBindingScope,
+    c: &mut CreateIndex,
+) -> Result<crate::catalog::index::IndexDefinition, SQLError> {
+    let attribute_keys = c
+        .columns
+        .iter()
+        .cloned()
+        .chain(
+            c.included_columns
+                .iter()
+                .cloned()
+                .map(crate::ast::IndexKey::Column),
+        )
+        .collect::<Vec<_>>();
+    let key_names = key_names(&attribute_keys);
+    let binding = bindings.binding_scope()?;
+    let key_types = prepare_index_keys(
+        &SchemaBindingContext {
+            catalog,
+            binding: &binding.context(),
+        },
+        c,
+    )?;
+    if let Some(predicate) = c.predicate.as_deref_mut() {
+        let binding = bindings.binding_scope()?;
+        crate::schema::indexes::prepare_index_predicate(
+            catalog,
+            &binding.context(),
+            &c.table,
+            predicate,
+        )?;
+    }
+    Ok(crate::catalog::index::IndexDefinition {
+        key_names,
+        key_types,
+        included_columns: c.included_columns.clone(),
+        column_order: c.column_order.clone(),
+        predicate: c.predicate.clone(),
+        unique: c.unique,
+        nulls_not_distinct: c.nulls_not_distinct,
+    })
+}

@@ -30,15 +30,14 @@ use std::sync::Arc;
 
 use uqa_core::{DocId, Value};
 use uqa_sql::ast::{
-    AlterTableAction, AlterTableStmt, ColumnType, CreateIndex, CreateTable, DropKind, DropStmt,
-    Statement,
+    AlterTableAction, AlterTableStmt, ColumnType, CreateTable, DropKind, DropStmt, Statement,
 };
 #[cfg(test)]
 use uqa_sql::compile;
 use uqa_sql::{SQLError, SQLParam, SQLResult};
 use uqa_storage::document_store::Document;
 
-use crate::{Engine, HNSWIndexParams, IVFIndexParams, VectorIndexSpec};
+use crate::Engine;
 
 mod age_cypher;
 mod aggregates;

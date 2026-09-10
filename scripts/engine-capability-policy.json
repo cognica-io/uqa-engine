@@ -19,6 +19,7 @@
         "crates/uqa-engine/src/capabilities.rs",
         "crates/uqa-engine/src/capabilities/catalog_execution.rs",
         "crates/uqa-engine/src/capabilities/constraints.rs",
+        "crates/uqa-engine/src/capabilities/index_creation.rs",
         "crates/uqa-engine/src/capabilities/insert_consumers.rs",
         "crates/uqa-engine/src/capabilities/mutation_assignment.rs",
         "crates/uqa-engine/src/capabilities/mutation_commands.rs",

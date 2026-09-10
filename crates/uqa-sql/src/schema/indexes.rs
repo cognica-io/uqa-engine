@@ -134,3 +134,6 @@ pub mod keys;
 pub mod names;
 
 pub mod unique;
+
+pub mod options;
+pub mod vectors;
