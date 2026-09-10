@@ -22,8 +22,8 @@ use super::scalar::{
 };
 use super::{
     plpgsql_exec, run_alter_sequence, run_alter_table, run_create_index, run_create_sequence,
-    run_create_table, run_create_table_as, run_create_table_if_not_exists, run_delete, run_drop,
-    run_explain, run_insert, run_merge, run_update, select, CreateTableAsExecution, Engine,
+    run_create_table, run_create_table_as, run_create_table_if_not_exists, run_drop, run_explain,
+    select, CreateTableAsExecution, Engine,
 };
 
 fn call_output_schema(
@@ -247,7 +247,12 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             &mut plan.statement_privilege_subject,
             &mut plan.target_privilege_subject,
         );
-        run_insert(self.engine, plan, self.params)
+        uqa_execution::mutation::entry::run_insert(
+            &self.engine.mutation_entry_context(),
+            plan,
+            self.params,
+            None,
+        )
     }
 
     fn execute_update(&self, plan: &UpdatePlan) -> Result<SQLResult, SQLError> {
@@ -256,7 +261,12 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             &mut plan.statement_privilege_subject,
             &mut plan.target_privilege_subject,
         );
-        run_update(self.engine, plan, self.params)
+        uqa_execution::mutation::entry::run_update(
+            &self.engine.mutation_entry_context(),
+            plan,
+            self.params,
+            None,
+        )
     }
 
     fn execute_delete(&self, plan: &DeletePlan) -> Result<SQLResult, SQLError> {
@@ -265,7 +275,12 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             &mut plan.statement_privilege_subject,
             &mut plan.target_privilege_subject,
         );
-        run_delete(self.engine, plan, self.params)
+        uqa_execution::mutation::entry::run_delete(
+            &self.engine.mutation_entry_context(),
+            plan,
+            self.params,
+            None,
+        )
     }
 
     fn apply_statement_privilege_subject(
@@ -431,7 +446,12 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             &mut plan.statement_privilege_subject,
             &mut plan.target_privilege_subject,
         );
-        run_merge(self.engine, plan, self.params)
+        uqa_execution::mutation::entry::run_merge(
+            &self.engine.mutation_entry_context(),
+            plan,
+            self.params,
+            None,
+        )
     }
 
     fn execute_call(

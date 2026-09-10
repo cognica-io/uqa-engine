@@ -51,7 +51,12 @@ impl CteBodyExecutor<StatementReadSnapshot> for Engine {
         params: &[SQLParam],
         ctes: &CteScope,
     ) -> Result<SQLResult, SQLError> {
-        crate::sql::dml::execute_cte_command(self, command, params, ctes)
+        uqa_execution::mutation::entry::execute_cte_command(
+            &self.mutation_entry_context(),
+            command,
+            params,
+            ctes,
+        )
     }
 }
 impl QueryOutputRewriter for Engine {

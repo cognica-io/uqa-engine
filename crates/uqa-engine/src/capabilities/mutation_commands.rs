@@ -130,3 +130,35 @@ impl uqa_execution::mutation::statement::context::MutationSnapshots<StatementRea
         operation.run(&context)
     }
 }
+
+impl uqa_execution::mutation::entry::MutationTargetResolution for Engine {
+    fn resolve_target(&self, name: &str, bound: bool) -> Result<String, SQLError> {
+        self.resolve_mutation_target_name(name, bound)
+    }
+}
+impl uqa_execution::mutation::entry::MutationCommandBoundary<StatementReadSnapshot> for Engine {
+    fn with_command(
+        &self,
+        command: uqa_execution::mutation::entry::MutationCommand<'_, StatementReadSnapshot>,
+    ) -> Result<uqa_sql::SQLResult, SQLError> {
+        crate::transactions::run_mutation_command(self, |engine| {
+            command(&uqa_execution::mutation::entry::MutationCommandContext {
+                statement: engine.mutation_statement_context(),
+                inference: engine.inference_context(),
+                returning: engine.returning_analysis_context(),
+                prune_source_outputs: uqa_planner::mutation_outputs::prune_unused_query_outputs,
+            })
+        })
+    }
+}
+impl Engine {
+    pub(crate) fn mutation_entry_context(
+        &self,
+    ) -> uqa_execution::mutation::entry::MutationEntryContext<'_, StatementReadSnapshot> {
+        uqa_execution::mutation::entry::MutationEntryContext {
+            targets: self,
+            transactions: self,
+            routines: self,
+        }
+    }
+}

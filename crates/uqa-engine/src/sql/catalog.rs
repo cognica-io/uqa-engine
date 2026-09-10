@@ -196,7 +196,8 @@ impl CatalogExpressionEvaluation for Engine {
 }
 impl ViewCatalogCapabilities for Engine {
     fn view_updatability(&self, name: &str) -> Result<ViewCatalogMetadata, SQLError> {
-        let metadata = crate::sql::dml::view_automatic::view_updatability(self, name)?;
+        let metadata =
+            uqa_sql::semantics::view_rewrite::view_updatability(self.view_rewrite_context(), name)?;
         Ok(ViewCatalogMetadata {
             catalog: metadata.catalog,
             catalog_columns: metadata.catalog_columns,
@@ -204,6 +205,10 @@ impl ViewCatalogCapabilities for Engine {
         })
     }
     fn has_instead_of_trigger(&self, name: &str, event: TriggerEvent) -> Result<bool, SQLError> {
-        crate::sql::dml::view_automatic::has_instead_of_trigger(self, name, event)
+        uqa_sql::semantics::view_rewrite::has_instead_of_trigger(
+            self.view_rewrite_context(),
+            name,
+            event,
+        )
     }
 }

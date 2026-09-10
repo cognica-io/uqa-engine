@@ -47,7 +47,6 @@ mod correlation;
 mod cte_validation;
 mod cursor;
 mod ddl;
-pub(crate) mod dml;
 mod domains;
 mod driver;
 mod from_rows;
@@ -120,7 +119,6 @@ pub(crate) use ddl::{
     validate_postgres_column_name, validate_postgres_relation_column_type,
     validate_vector_dimensions,
 };
-use dml::{run_delete, run_insert, run_merge, run_update};
 use from_rows::engine_func_intercept;
 pub(crate) use generated::{prepare_generated_columns, refresh_stored_generated_columns};
 use plan_executor::UnifiedPlanExecutor;
@@ -180,13 +178,15 @@ pub(crate) use select::CteScope;
 pub(crate) use session_portal_worker::start_session_portal_worker;
 pub(crate) use uqa_sql::semantics::expr_is_null_free as expr_is_null_free_public;
 
-/// Analyze the declared RETURNING row type of a rewrite-rule action without
-/// executing the action.
+/// Analyze the declared RETURNING row type of a rewrite-rule action without executing the action.
 pub(crate) fn analyze_rule_action_returning_schema(
     engine: &Engine,
     statement: Statement,
 ) -> Result<Option<uqa_execution::RowSchema>, SQLError> {
-    dml::dml_statement_returning_schema(engine, statement)
+    uqa_sql::semantics::returning::dml_statement_returning_schema(
+        engine.returning_analysis_context(),
+        statement,
+    )
 }
 
 /// Bind every catalog-owned scalar and table-function call to an exact routine identity before the query plan is serialized.
@@ -226,7 +226,11 @@ pub(crate) fn validate_stored_view_check_option(
     name: &str,
     view: &crate::StoredView,
 ) -> Result<(), SQLError> {
-    dml::view_automatic::validate_view_definition_check_option(engine, name, view)
+    uqa_sql::semantics::view_rewrite::validate_view_definition_check_option(
+        engine.view_rewrite_context(),
+        name,
+        &view.rewrite_definition(),
+    )
 }
 
 pub(crate) use uqa_sql::semantics::XMIN_COLUMN;

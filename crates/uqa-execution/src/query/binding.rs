@@ -285,3 +285,25 @@ impl<S: Clone> uqa_sql::semantics::returning::ReturningScope for CteScope<S> {
         binding_context(self).map(uqa_sql::binding::snapshot::BindingSnapshot::from)
     }
 }
+
+pub fn analyze_command_parameters<S: Clone>(
+    routines: &dyn RoutineResolution,
+    command: &CommandPlan,
+    params: &[SQLParam],
+    ctes: &CteScope<S>,
+) -> Result<(), SQLError> {
+    let schema = RowSchema::default();
+    let declared = (1..=params.len())
+        .map(|index| match &params[index - 1] {
+            SQLParam::Scalar(uqa_core::Value::Str(_) | uqa_core::Value::Null) => Ok(None),
+            _ => crate::scalar_type(&ScalarExpr::Param(index), &schema, params),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    infer_prepared_parameter_types(
+        routines,
+        &UnifiedPlan::Command(Box::new(command.clone())),
+        &declared,
+        ctes,
+    )?;
+    Ok(())
+}

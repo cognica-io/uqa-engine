@@ -291,11 +291,7 @@ impl Engine {
                 break;
             }
             if !checks.is_empty() {
-                crate::sql::dml::validate_deferred_foreign_key_checks(
-                    self,
-                    &checks,
-                    Some(targets),
-                )?;
+                self.validate_deferred_foreign_key_checks(&checks, Some(targets))?;
                 let mut stack = self.session.transactions.lock();
                 let frame = stack.last_mut().ok_or_else(|| {
                     SQLError::Internal("SET CONSTRAINTS lost its transaction frame".into())
@@ -665,7 +661,7 @@ impl Engine {
                 return Ok(());
             }
             if !pending_checks.is_empty() {
-                crate::sql::dml::validate_deferred_foreign_key_checks(self, &pending_checks, None)?;
+                self.validate_deferred_foreign_key_checks(&pending_checks, None)?;
             }
             for event in &pending_events {
                 crate::sql::fire_deferred_constraint_trigger_event(self, event)?;

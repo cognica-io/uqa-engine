@@ -123,10 +123,11 @@ mod truncate;
 mod user_functions;
 mod value_index;
 
-pub(crate) use sql::dml::{
-    CommandExactIndex, CommandMutationOverlay, CommandStoredDocument, DeferredForeignKeyCheck,
-    TransactionRowChange,
+pub(crate) use uqa_execution::mutation::{
+    deferred::DeferredForeignKeyCheck,
+    overlay::{CommandExactIndex, CommandMutationOverlay, CommandStoredDocument},
 };
+pub(crate) use uqa_execution::row_locks::publication::TransactionRowChange;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;

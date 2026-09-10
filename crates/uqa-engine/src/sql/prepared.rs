@@ -47,27 +47,7 @@ pub(crate) fn analyze_prepared_plan(
     }
 }
 
-pub(super) fn analyze_command_parameters(
-    engine: &Engine,
-    command: &uqa_planner::CommandPlan,
-    params: &[SQLParam],
-    ctes: &select::CteScope,
-) -> Result<(), SQLError> {
-    let schema = uqa_execution::RowSchema::default();
-    let declared = (1..=params.len())
-        .map(|index| match &params[index - 1] {
-            SQLParam::Scalar(Value::Str(_) | Value::Null) => Ok(None),
-            _ => uqa_execution::scalar_type(&ScalarExpr::Param(index), &schema, params),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    select::infer_prepared_parameter_types(
-        engine,
-        &uqa_planner::UnifiedPlan::Command(Box::new(command.clone())),
-        &declared,
-        ctes,
-    )?;
-    Ok(())
-}
+pub(super) use uqa_execution::query::binding::analyze_command_parameters;
 
 pub(crate) fn prepared_result_schema_matches(
     left: Option<&uqa_execution::RowSchema>,

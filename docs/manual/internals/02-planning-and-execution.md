@@ -37,6 +37,8 @@ The plan owns read queries and physical command bodies. Relational query blocks 
 
 Each AST CTE owns a `CteBody` and each lowered CTE owns a `CtePlanBody`, so visitors must handle both query and mutation bodies. Command CTEs materialize their typed `RETURNING` outputs once. Their read snapshot contains frozen table and catalog handles; the evaluation scope holds no `Engine`, session, or transaction capability. The execution boundary constructs the read view and keeps mutation effects on the live command path.
 
+[`uqa-execution/src/mutation/entry.rs`](../../../crates/uqa-execution/src/mutation/entry.rs) owns INSERT, UPDATE, DELETE, MERGE, and command-CTE entry. Target resolution precedes the command transaction, and Engine binds fresh statement inputs after entering its existing transaction boundary. The same boundary reuses an active transaction without adding another frame. SQL analysis supplies inherited privilege subjects and declared RETURNING types; cursor schema analysis uses separate read contracts.
+
 `uqa_sql::ir::ScalarExpr` is the shared scalar IR. Scalar subqueries point to owned query-plan slots and execute inside the current physical scope; the executor does not reconstruct a parser statement at runtime.
 
 ## Statement capability boundaries

@@ -97,9 +97,12 @@ fn prune_rule_inputs(engine: &Engine, command: &mut CommandPlan) -> Result<(), S
         CommandPlan::Delete(plan) => (&plan.table, plan.target_relation_bound, RuleEvent::Delete),
         _ => return Ok(()),
     };
-    let table = crate::sql::dml::resolve_dml_target_name(engine, table, bound)?;
-    let Some(requirements) =
-        crate::sql::dml::view_automatic::rule_input_requirements(engine, &table, event)?
+    let table = engine.resolve_mutation_target_name(table, bound)?;
+    let Some(requirements) = uqa_sql::semantics::view_rewrite::rule_input_requirements(
+        engine.view_rewrite_context(),
+        &table,
+        event,
+    )?
     else {
         return Ok(());
     };
@@ -137,7 +140,11 @@ fn prune_rule_inputs(engine: &Engine, command: &mut CommandPlan) -> Result<(), S
                 plan.ctes.clear();
                 plan.subqueries.clear();
             } else if let Some(source) = &mut plan.source {
-                crate::sql::dml::prune_unused_query_outputs(source, &positions, columns.len());
+                uqa_planner::mutation_outputs::prune_unused_query_outputs(
+                    source,
+                    &positions,
+                    columns.len(),
+                );
             }
         }
         CommandPlan::Update(plan) => {

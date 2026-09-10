@@ -80,9 +80,7 @@ fn open_plpgsql_command_portal(
         CommandPlan::Insert(_)
         | CommandPlan::Update(_)
         | CommandPlan::Delete(_)
-        | CommandPlan::Merge(_) => {
-            super::dml::cursor_command_returning_schema(engine, command, params)?
-        }
+        | CommandPlan::Merge(_) => engine.cursor_command_returning_schema(command, params)?,
         CommandPlan::Call { name, args } => {
             super::analyze_call_result_schema(engine, name, args, params)?
         }
@@ -139,7 +137,7 @@ fn validate_explain_cursor_body(
             Ok(())
         }
         UnifiedPlan::Command(command) => {
-            let _ = super::dml::cursor_command_returning_schema(engine, command, params)?;
+            let _ = engine.cursor_command_returning_schema(command, params)?;
             Ok(())
         }
     }

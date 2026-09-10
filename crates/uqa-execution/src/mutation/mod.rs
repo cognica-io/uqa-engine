@@ -57,3 +57,5 @@ pub mod statement;
 pub mod delete;
 
 pub mod dispatch;
+
+pub mod entry;
