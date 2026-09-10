@@ -6,12 +6,12 @@
 
 //! Typed codecs for MERGE pairing and prepared-action spill rows.
 
+use crate::{OwnedPhysicalRow, PhysicalRow, RowSchema};
 use uqa_core::{DocId, Value};
-use uqa_execution::{OwnedPhysicalRow, PhysicalRow, RowSchema};
 use uqa_sql::{ast::ColumnType, SQLError};
 use uqa_storage::document_store::Document;
 
-use super::super::{
+use crate::mutation::prepared::{
     decode_prepared_doc_id, decode_prepared_mutation_action, encode_prepared_doc_id,
     encode_prepared_mutation_action, PreparedMutationAction,
 };
@@ -21,14 +21,14 @@ const MERGE_PAIR_HEADER_WIDTH: usize = 5;
 const MERGE_ACTION_WIDTH: usize = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::sql) enum MergePairKind {
+pub enum MergePairKind {
     Matched,
     NotMatchedBySource,
     NotMatchedByTarget,
 }
 
 impl MergePairKind {
-    pub(in crate::sql) fn encode(self) -> i64 {
+    pub fn encode(self) -> i64 {
         match self {
             Self::Matched => 0,
             Self::NotMatchedBySource => 1,
@@ -36,7 +36,7 @@ impl MergePairKind {
         }
     }
 
-    pub(in crate::sql) fn decode(value: &Value) -> Result<Self, SQLError> {
+    pub fn decode(value: &Value) -> Result<Self, SQLError> {
         match value {
             Value::Int(0) => Ok(Self::Matched),
             Value::Int(1) => Ok(Self::NotMatchedBySource),
@@ -48,15 +48,15 @@ impl MergePairKind {
     }
 }
 
-pub(super) struct MergePairing {
-    pub(super) kind: MergePairKind,
-    pub(super) storage_table: Option<String>,
-    pub(super) doc_id: Option<DocId>,
-    pub(super) target_document: Option<Document>,
-    pub(super) source_row: OwnedPhysicalRow,
+pub struct MergePairing {
+    pub kind: MergePairKind,
+    pub storage_table: Option<String>,
+    pub doc_id: Option<DocId>,
+    pub target_document: Option<Document>,
+    pub source_row: OwnedPhysicalRow,
 }
 
-pub(super) fn merge_pair_schema(source: &RowSchema) -> RowSchema {
+pub fn merge_pair_schema(source: &RowSchema) -> RowSchema {
     let header = RowSchema::with_internal_relation_types(
         uqa_sql::ast::InternalRelationId::allocate(),
         vec![
@@ -70,7 +70,7 @@ pub(super) fn merge_pair_schema(source: &RowSchema) -> RowSchema {
     RowSchema::join(&header, source, std::iter::empty())
 }
 
-pub(super) fn encode_merge_pair(
+pub fn encode_merge_pair(
     kind: MergePairKind,
     storage_table: Option<&str>,
     doc_id: Option<DocId>,
@@ -87,7 +87,7 @@ pub(super) fn encode_merge_pair(
     PhysicalRow::concat(&header, &source_row.row)
 }
 
-pub(super) fn decode_merge_pair(encoded: OwnedPhysicalRow) -> Result<MergePairing, SQLError> {
+pub fn decode_merge_pair(encoded: OwnedPhysicalRow) -> Result<MergePairing, SQLError> {
     if encoded.schema.physical_width() < MERGE_PAIR_HEADER_WIDTH {
         return Err(SQLError::Internal(format!(
             "spilled MERGE pairing has {} fields, expected at least {MERGE_PAIR_HEADER_WIDTH}",
@@ -162,34 +162,34 @@ pub(super) fn decode_merge_pair(encoded: OwnedPhysicalRow) -> Result<MergePairin
     })
 }
 
-pub(in crate::sql) fn merge_source_index_value(index: usize) -> Value {
+pub fn merge_source_index_value(index: usize) -> Value {
     Value::Str(index.to_string())
 }
 
-pub(super) fn prepared_mutation_action_schema() -> RowSchema {
+pub fn prepared_mutation_action_schema() -> RowSchema {
     RowSchema::with_internal_relation_types(
         uqa_sql::ast::InternalRelationId::allocate(),
         vec![None],
     )
 }
 
-pub(super) fn push_prepared_mutation_action(
-    buffer: &mut uqa_execution::SpillBuffer,
+pub fn push_prepared_mutation_action(
+    buffer: &mut crate::SpillBuffer,
     schema: &RowSchema,
     action: PreparedMutationAction,
 ) -> Result<(), SQLError> {
     buffer
-        .push(uqa_execution::Batch::from_physical_rows(
+        .push(crate::Batch::from_physical_rows(
             schema.clone(),
             vec![PhysicalRow::from_values(vec![
                 encode_prepared_mutation_action(action),
             ])],
         ))
-        .map_err(crate::sql::select::physical_exec_error)?;
+        .map_err(crate::physical::physical_exec_error)?;
     Ok(())
 }
 
-pub(super) fn decode_prepared_mutation_action_row(
+pub fn decode_prepared_mutation_action_row(
     row: OwnedPhysicalRow,
 ) -> Result<PreparedMutationAction, SQLError> {
     if row.schema.physical_width() != MERGE_ACTION_WIDTH {
@@ -209,8 +209,8 @@ pub(super) fn decode_prepared_mutation_action_row(
 mod tests {
     use std::collections::BTreeMap;
 
-    use super::super::super::{PreparedDocumentInsert, PreparedMutationAction};
     use super::*;
+    use crate::mutation::prepared::{PreparedDocumentInsert, PreparedMutationAction};
 
     fn source_row() -> OwnedPhysicalRow {
         OwnedPhysicalRow::new(

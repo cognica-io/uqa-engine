@@ -7,7 +7,7 @@
 //! Supply engine hierarchy metadata and active expression evaluation for partition routing.
 
 use crate::Engine;
-use uqa_sql::{ResultRow as Document, SQLError, SQLParam};
+use uqa_sql::{ResultRow as Document, SQLError};
 
 pub(in crate::sql) fn validate_hash_partition_spec(
     engine: &Engine,
@@ -44,21 +44,5 @@ pub(in crate::sql) fn prospective_partition_bound_accepts_document(
         parent,
         bound,
         document,
-    )
-}
-
-pub(in crate::sql) fn partition_insert_target(
-    engine: &Engine,
-    requested_table: &str,
-    document: &Document,
-    params: &[SQLParam],
-    include_descendants: bool,
-) -> Result<String, SQLError> {
-    uqa_sql::semantics::partition::partition_insert_target(
-        &engine.partition_context(),
-        requested_table,
-        document,
-        params,
-        include_descendants,
     )
 }

@@ -576,8 +576,6 @@ mod mutation_assignment;
 
 mod referential;
 
-pub(crate) mod insert_source;
-
 pub(crate) mod query_execution;
 
 pub(crate) mod mutation_commands;

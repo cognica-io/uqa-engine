@@ -10,6 +10,7 @@ use crate::{
     SQLError,
 };
 pub trait ConstraintCatalog: super::conflict::ConflictCatalog {
+    fn try_unique_columns(&self, table: &str) -> Result<Vec<String>, String>;
     fn try_check_constraint_definitions(&self, table: &str) -> Result<Vec<TableCheck>, String>;
     fn try_foreign_keys(&self, table: &str) -> Result<Vec<ForeignKey>, String>;
     fn column_type(&self, table: &str, column: &str) -> Result<Option<ColumnType>, String>;

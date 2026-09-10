@@ -6,11 +6,11 @@
 
 //! Values produced while selecting and applying a MERGE action.
 
-use super::Document;
+use uqa_storage::document_store::Document;
 
-pub(in crate::sql::dml::merge) type MergeTargetIdentity = (String, uqa_core::DocId);
+pub(super) type MergeTargetIdentity = (String, uqa_core::DocId);
 
-pub(in crate::sql::dml::merge) enum SelectedMergeAction {
+pub(super) enum SelectedMergeAction {
     Nothing,
     Update {
         doc_id: uqa_core::DocId,

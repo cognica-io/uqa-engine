@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use uqa_core::Value;
 use uqa_execution::{eval_call_arguments, ScalarEvalContext, ScalarExpr};
-use uqa_planner::{QueryPlan, SourcePlan};
+use uqa_planner::QueryPlan;
 use uqa_sql::{SQLError, SQLParam};
 
 use crate::Engine;
@@ -34,18 +34,14 @@ use uqa_sql::semantics::source_filters::checked_integer_value;
 /// document store with `next_doc_id`, so neither ids nor documents are copied
 /// into a cardinality-sized staging vector before the physical join sees its
 /// first batch.
-mod cte_spill;
 mod functions;
-mod join_predicates;
 mod lateral;
 mod source_qualification;
 mod table_function_core;
 mod table_function_dispatch;
 mod table_function_values;
 
-pub(in crate::sql) use cte_spill::*;
 pub(in crate::sql) use functions::*;
-pub(in crate::sql) use join_predicates::*;
 pub(in crate::sql) use lateral::*;
 pub(in crate::sql) use source_qualification::*;
 pub(in crate::sql) use table_function_core::*;

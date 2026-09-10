@@ -103,7 +103,7 @@ fn prune_rule_inputs(engine: &Engine, command: &mut CommandPlan) -> Result<(), S
     else {
         return Ok(());
     };
-    crate::sql::rules::validate_rule_returning_contract(
+    uqa_sql::semantics::rules::validate_rule_returning_contract(
         engine,
         &table,
         event,

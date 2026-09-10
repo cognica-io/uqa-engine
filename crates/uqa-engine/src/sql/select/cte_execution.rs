@@ -7,8 +7,8 @@
 //! Bind child CTE execution to the active engine statement.
 use super::{
     execute_lateral_subquery_output, execute_query_plan_output, push_output_filter_into_query_plan,
-    CtePlan, CteScope, Engine, QueryOutput, QueryOutputMode, QueryPlan, SQLError, SQLParam,
-    SQLResult, ScalarExpr,
+    CteScope, Engine, QueryOutput, QueryOutputMode, QueryPlan, SQLError, SQLParam, SQLResult,
+    ScalarExpr,
 };
 use crate::session::StatementReadSnapshot;
 use uqa_execution::query::cte::context::{
@@ -64,17 +64,4 @@ impl QueryOutputRewriter for Engine {
     ) -> Result<Option<QueryPlan>, SQLError> {
         push_output_filter_into_query_plan(self, query, qualifier, filter, columns)
     }
-}
-pub(in crate::sql) fn materialize_plan_ctes(
-    engine: &Engine,
-    plans: &[CtePlan],
-    params: &[SQLParam],
-    ctes: &mut CteScope,
-) -> Result<(), SQLError> {
-    uqa_execution::query::cte::materialize_plan_ctes(
-        engine.cte_execution_context(),
-        plans,
-        params,
-        ctes,
-    )
 }

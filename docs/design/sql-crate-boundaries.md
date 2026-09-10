@@ -28,8 +28,8 @@ The diagram shows ownership dependencies relevant to SQL extraction. The complet
 | --- | --- | --- |
 | `uqa-sql` | SQL AST, scalar and statement IR, lowering, SQL argument validation, name/type analysis, and SQL validation rules | `Engine`, transactions, physical row buffers, storage handles, and physical operator instances |
 | `uqa-planner` | Cardinality, costs, join order, plan rewrites, and access decisions over SQL-owned IR | Session mutation and statement publication |
-| `uqa-execution` | Physical rows and batches, operators, spill, materialization, and runtime expression evaluation | SQL parsing and catalog ownership rules |
-| `uqa-engine` | Construct statement snapshots and capabilities, own sessions and transactions, coordinate mutation and publication, and expose the application API | Generic SQL analysis or operator algorithms that can consume narrower contracts |
+| `uqa-execution` | Statement execution, physical rows and batches, operators, spill, materialization, and runtime expression evaluation | SQL parsing and catalog ownership rules |
+| `uqa-engine` | Construct statement snapshots and capabilities, own sessions and transactions, and expose the application API | Generic SQL analysis or operator algorithms that can consume narrower contracts |
 
 SQL analysis consumes immutable catalog descriptions and explicit name/routine-resolution contracts. Implementations of those contracts remain beside their state owners. An interface that merely republishes the complete `Engine` surface is not an acceptable boundary. Physical buffers and storage connections cannot be hidden inside an analysis context to evade the dependency rule.
 
@@ -53,4 +53,8 @@ The planner receives a constant-evaluation function through `OptimizerConfig::ne
 
 The operator-tree optimizer consumes immutable `IndexScanCandidate` values for access selection. Index discovery and scan-cost collection belong to the caller that owns the catalog snapshot; the optimizer does not retain `IndexManager` or import `uqa-storage` directly. The remaining retrieval-IR dependency through `uqa-operators` and the RPQ parser dependency through `uqa-graph` remain explicit in the dependency policy.
 
-The Engine still contains statement dispatch, DDL, INSERT/MERGE, view mutation, table-function execution, and operator-tree integration code. These remaining implementations must move to their owning crates through narrow contracts before the Engine SQL tree can be removed. The current policy protects the completed extractions and SQLite provider boundary; it does not yet assert that the Engine SQL tree is absent.
+INSERT, UPDATE, DELETE, and MERGE command execution now belongs to `uqa-execution`, including table/view path selection, source reads, conflict and action selection, snapshot rebinding, lock rechecks, staging, publication, and trigger scheduling. View target and column analysis, MERGE clause visibility, mutation row schemas, and RETURNING type analysis belong to `uqa-sql`; source-output pruning remains in `uqa-planner`. Engine adapters bind the active session and transaction to these consumers.
+
+The Engine still contains the unified statement dispatcher, DDL, table-function execution, and operator-tree integration code. These remaining implementations must move to their owning crates through narrow contracts before the Engine SQL tree can be removed. The current policy protects the completed extractions and SQLite provider boundary; it does not yet assert that the Engine SQL tree is absent.
+
+The borrowed `StatementContext` still combines query and mutation services. Removing that aggregate coupling requires separating read-generation selection from writable row-consumer binding; moving command loops out of Engine alone does not complete that work.

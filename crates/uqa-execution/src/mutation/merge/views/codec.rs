@@ -6,11 +6,11 @@
 
 //! Typed codec for trigger-backed view MERGE pairing spill rows.
 
+use crate::{OwnedPhysicalRow, PhysicalRow, RowSchema};
 use uqa_core::Value;
-use uqa_execution::{OwnedPhysicalRow, PhysicalRow, RowSchema};
 use uqa_sql::SQLError;
 
-use super::super::super::MergePairKind;
+use crate::mutation::merge::codec::MergePairKind;
 
 const VIEW_MERGE_SPILL_CODEC_VERSION: i64 = 1;
 const VIEW_MERGE_PAIR_HEADER_WIDTH: usize = 3;
@@ -97,19 +97,19 @@ pub(super) fn decode_view_merge_pair(encoded: OwnedPhysicalRow) -> Result<ViewMe
 }
 
 pub(super) fn push_view_merge_pair(
-    pairings: &mut uqa_execution::SpillBuffer,
+    pairings: &mut crate::SpillBuffer,
     schema: &RowSchema,
     kind: MergePairKind,
     target: Option<&[Value]>,
     source: &OwnedPhysicalRow,
 ) -> Result<(), SQLError> {
     pairings
-        .push(uqa_execution::Batch::from_physical_rows(
+        .push(crate::Batch::from_physical_rows(
             schema.clone(),
             vec![encode_view_merge_pair(kind, target, source)],
         ))
         .map(|_| ())
-        .map_err(crate::sql::select::physical_exec_error)
+        .map_err(crate::physical::physical_exec_error)
 }
 
 #[cfg(test)]

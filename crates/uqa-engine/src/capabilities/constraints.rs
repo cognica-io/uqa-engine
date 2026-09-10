@@ -37,6 +37,9 @@ impl Engine {
     }
 }
 impl ConstraintCatalog for Engine {
+    fn try_unique_columns(&self, table: &str) -> Result<Vec<String>, String> {
+        Engine::try_unique_columns(self, table).map_err(|error| error.to_string())
+    }
     fn try_check_constraint_definitions(&self, table: &str) -> Result<Vec<TableCheck>, String> {
         Engine::try_check_constraint_definitions(self, table).map_err(|error| error.to_string())
     }

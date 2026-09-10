@@ -103,3 +103,8 @@ pub mod constraint_catalog;
 pub mod mutation_patch;
 
 pub mod mutation_privileges;
+
+pub mod merge;
+pub mod view_mutation;
+
+pub mod mutation_rows;

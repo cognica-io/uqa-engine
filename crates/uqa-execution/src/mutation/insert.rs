@@ -10,3 +10,5 @@ pub mod rows;
 pub mod triggers;
 
 pub mod source;
+
+pub mod table;

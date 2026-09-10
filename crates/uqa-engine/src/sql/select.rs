@@ -7,7 +7,7 @@
 //! SQL SELECT, set-operation, `CtePlan`, ordering, and projection execution.
 
 use uqa_execution::ScalarExpr;
-use uqa_planner::{CtePlan, ProjectionPlan, QueryBlockPlan, QueryPlan};
+use uqa_planner::{QueryBlockPlan, QueryPlan};
 
 use super::from_rows::execute_lateral_subquery_output;
 use super::scalar::{
@@ -18,24 +18,17 @@ use super::{engine_func_intercept, Engine, SQLError, SQLParam, SQLResult, Value}
 
 mod cte_execution;
 mod evaluation;
-mod expression_shape;
-mod facet_projection;
 mod filter_pushdown;
 mod physical_plan;
-mod privileges;
 mod row_lock_retry_cache;
 mod row_locking;
 mod schema_binding;
 mod set_projection;
 
 pub(in crate::sql) use cte_execution::*;
-pub(in crate::sql) use evaluation::expr_contains_subquery;
 pub(crate) use evaluation::CteScope;
-pub(in crate::sql) use expression_shape::*;
-pub(in crate::sql) use facet_projection::*;
 pub(in crate::sql) use filter_pushdown::*;
 pub(in crate::sql) use physical_plan::*;
-pub(in crate::sql) use privileges::*;
 pub(crate) use row_lock_retry_cache::RowLockRetryCache;
 pub(in crate::sql) use row_locking::*;
 pub(in crate::sql) use schema_binding::*;

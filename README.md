@@ -239,7 +239,7 @@ Install the versioned commit hook once per clone:
 bash scripts/install-git-hooks.sh
 ```
 
-Every commit checks the staged crate dependency graph, including build and platform-specific edges and transitive ownership boundaries. See [crate ownership](docs/manual/internals/01-architecture.md) and the [SQL boundary design](docs/design/sql-crate-boundaries.md).
+SQL owns mutation analysis and view rewriting, the planner owns source-output pruning, and execution owns INSERT, UPDATE, DELETE, and MERGE loops and publication. Every commit checks the staged crate dependency graph, including build and platform-specific edges and transitive ownership boundaries. See [crate ownership](docs/manual/internals/01-architecture.md) and the [SQL boundary design](docs/design/sql-crate-boundaries.md).
 
 Build the complete workspace:
 

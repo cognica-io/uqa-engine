@@ -25,7 +25,7 @@
     clippy::unnested_or_patterns
 )]
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use uqa_core::{DocId, Value};
@@ -71,7 +71,6 @@ pub(crate) use prepared::{
 mod read_only;
 mod regrole_dependencies;
 mod row_functions;
-mod rules;
 pub(crate) mod scalar;
 mod select;
 pub(crate) mod session_portal_worker;
@@ -120,10 +119,10 @@ pub(crate) use catalog::{
 };
 pub(crate) use ddl::{
     bind_stored_check_expression_routines, bind_stored_schema_expression_routines,
-    convert_value_to_column_type, convert_value_to_column_type_with_engine, drop_column_cascade,
-    drop_constraint_dependency, drop_index_dependency, validate_check_expression,
-    validate_default_expression, validate_postgres_column_name,
-    validate_postgres_relation_column_type, validate_vector_dimensions,
+    convert_value_to_column_type, drop_column_cascade, drop_constraint_dependency,
+    drop_index_dependency, validate_check_expression, validate_default_expression,
+    validate_postgres_column_name, validate_postgres_relation_column_type,
+    validate_vector_dimensions,
 };
 use ddl::{
     column_type_name, json_table_arg, json_table_value_to_text, json_to_core_value,
@@ -131,11 +130,11 @@ use ddl::{
     run_create_table_as, run_create_table_if_not_exists, run_drop, CreateTableAsExecution,
 };
 use dml::{index_vectors_for_type, run_delete, run_insert, run_merge, run_update};
-use from_rows::{build_join_spill_with_ctes, engine_func_intercept};
+use from_rows::engine_func_intercept;
 pub(crate) use generated::{prepare_generated_columns, refresh_stored_generated_columns};
 pub(in crate::sql) use hierarchy::{
-    partition_insert_target, prospective_partition_bound_accepts_document,
-    validate_hash_partition_spec, validate_new_partition_bound,
+    prospective_partition_bound_accepts_document, validate_hash_partition_spec,
+    validate_new_partition_bound,
 };
 use plan_executor::UnifiedPlanExecutor;
 pub(crate) use regrole_dependencies::{
@@ -195,8 +194,8 @@ pub(crate) fn call_bound_engine_builtin(
         .collect::<Vec<_>>();
     from_rows::engine_catalog_scalar_value(engine, &binding.name, &values)
 }
+use select::run_explain;
 pub(crate) use select::CteScope;
-use select::{build_projection_physical_row_with_ctes, run_explain};
 pub(crate) use session_portal_worker::start_session_portal_worker;
 pub(crate) use uqa_sql::semantics::expr_is_null_free as expr_is_null_free_public;
 

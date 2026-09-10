@@ -232,44 +232,10 @@ pub fn null_target_row(
     table: &str,
     qualifier: &str,
 ) -> Result<OwnedPhysicalRow, SQLError> {
-    let definitions = context
-        .relations
-        .column_definitions(table)
-        .map_err(|error| dml_storage_error("DML row schema lookup", error))?
-        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-    let mut columns = if definitions.is_empty() {
-        context
-            .relations
-            .column_names(table)
-            .map_err(|error| dml_storage_error("DML row schema lookup", error))?
-    } else {
-        definitions
-            .iter()
-            .map(|definition| definition.name.clone())
-            .collect::<Vec<_>>()
-    };
-    let mut types = columns
-        .iter()
-        .map(|column| {
-            definitions
-                .iter()
-                .find(|definition| definition.name == *column)
-                .map(|definition| definition.ty.clone())
-        })
-        .collect::<Vec<_>>();
-    if !columns.iter().any(|column| column == DOC_ID_COLUMN) {
-        columns.push(DOC_ID_COLUMN.into());
-        types.push(Some(ColumnType::BigInteger));
-    }
-    columns.push(TABLE_OID_COLUMN.into());
-    types.push(Some(ColumnType::Oid));
-    columns.push(XMIN_COLUMN.into());
-    types.push(Some(ColumnType::Xid));
-    let width = columns.len();
-    Ok(OwnedPhysicalRow::new(
-        RowSchema::with_qualified_types(qualifier, columns, types),
-        PhysicalRow::nulls(width),
-    ))
+    let schema =
+        uqa_sql::semantics::mutation_rows::null_target_schema(context.relations, table, qualifier)?;
+    let row = PhysicalRow::nulls(schema.physical_width());
+    Ok(OwnedPhysicalRow::new(schema, row))
 }
 
 pub fn join_rows(left: &OwnedPhysicalRow, right: &OwnedPhysicalRow) -> OwnedPhysicalRow {
