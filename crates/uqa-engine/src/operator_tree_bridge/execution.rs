@@ -7,7 +7,7 @@
 use super::{
     engine_query_optimizer, lower_where_bound, operator_execution_error, posting_list_to_scored,
     DirectVectorRetrieval, DriverResult, Engine, EngineDriver, OperatorOutput, OperatorTree,
-    PlanExecutor, PostingList, SQLError, SQLParam, ScalarExpr, ScoredEntry, TextScoringMode,
+    SQLError, SQLParam, ScalarExpr, ScoredEntry,
 };
 
 pub(crate) fn direct_vector_retrieval(
@@ -162,13 +162,9 @@ pub(super) fn execute_public_physical_node(
     let engine = driver.engine;
     let _statement = engine.runtime.statement_gate.lock();
     let execute = |engine: &Engine| {
-        let scoped = EngineDriver::new_for_relation_in_execution(
-            engine,
-            driver.table,
-            driver.signal_table,
-            driver.params,
-        )
-        .with_parallel(driver.parallel.clone());
+        let scoped = engine
+            .physical_retrieval_driver(driver.table, driver.table, driver.params)
+            .with_parallel(driver.parallel.clone());
         scoped.execute_node(tree)
     };
     if engine.transaction_depth() == 0 && tree_may_persist_calibration(tree) {
@@ -189,12 +185,13 @@ pub(crate) fn execute_operator_tree_in_execution(
     params: &[SQLParam],
     tree: &OperatorTree,
 ) -> DriverResult<OperatorOutput> {
-    if engine.transaction_depth() == 0 && tree_may_persist_calibration(tree) {
-        return Err(SQLError::Internal(
-            "calibrating operator execution requires an active statement transaction".into(),
-        ));
-    }
-    execute_operator_tree_inner(engine, table, table, params, tree)
+    uqa_execution::operator_tree::runtime::execute_tree(
+        &engine.tree_execution_context(),
+        table,
+        table,
+        params,
+        tree,
+    )
 }
 
 /// Execute a SQL retrieval tree against a canonical storage relation while retaining the relation spelling used to address its scoring signal.
@@ -205,12 +202,13 @@ pub(crate) fn execute_relation_operator_tree_in_execution(
     params: &[SQLParam],
     tree: &OperatorTree,
 ) -> DriverResult<OperatorOutput> {
-    if engine.transaction_depth() == 0 && tree_may_persist_calibration(tree) {
-        return Err(SQLError::Internal(
-            "calibrating operator execution requires an active statement transaction".into(),
-        ));
-    }
-    execute_operator_tree_inner(engine, table, signal_table, params, tree)
+    uqa_execution::operator_tree::runtime::execute_tree(
+        &engine.tree_execution_context(),
+        table,
+        signal_table,
+        params,
+        tree,
+    )
 }
 
 fn execute_operator_tree_inner(
@@ -220,9 +218,13 @@ fn execute_operator_tree_inner(
     params: &[SQLParam],
     tree: &OperatorTree,
 ) -> DriverResult<OperatorOutput> {
-    validate_text_top_k_placement(tree)?;
-    let optimized = engine_query_optimizer(engine, table, tree)?.optimize(tree.clone());
-    execute_preoptimized_operator_tree_inner(engine, table, signal_table, params, &optimized)
+    uqa_execution::operator_tree::runtime::optimize_and_execute_tree(
+        &engine.tree_execution_context(),
+        table,
+        signal_table,
+        params,
+        tree,
+    )
 }
 
 fn execute_preoptimized_operator_tree_in_execution(
@@ -232,59 +234,13 @@ fn execute_preoptimized_operator_tree_in_execution(
     params: &[SQLParam],
     tree: &OperatorTree,
 ) -> DriverResult<OperatorOutput> {
-    if engine.transaction_depth() == 0 && tree_may_persist_calibration(tree) {
-        return Err(SQLError::Internal(
-            "calibrating operator execution requires an active statement transaction".into(),
-        ));
-    }
-    execute_preoptimized_operator_tree_inner(engine, table, signal_table, params, tree)
-}
-
-fn execute_preoptimized_operator_tree_inner(
-    engine: &Engine,
-    table: &str,
-    signal_table: &str,
-    params: &[SQLParam],
-    tree: &OperatorTree,
-) -> DriverResult<OperatorOutput> {
-    validate_text_top_k_placement(tree)?;
-    let driver = EngineDriver::new_for_relation_in_execution(engine, table, signal_table, params);
-    let mut executor = PlanExecutor::new(&driver);
-    executor.execute(tree)
-}
-
-fn validate_text_top_k_placement(tree: &OperatorTree) -> DriverResult<()> {
-    let root_is_physical_text = matches!(tree, OperatorTree::Term { top_k: Some(_), .. });
-    let mut physical_text_nodes = 0_usize;
-    tree.visit(&mut |node| {
-        if matches!(node, OperatorTree::Term { top_k: Some(_), .. }) {
-            physical_text_nodes += 1;
-        }
-    });
-    if physical_text_nodes == usize::from(root_is_physical_text) {
-        Ok(())
-    } else {
-        Err(SQLError::Internal(
-            "physical text top-k is valid only as the root retrieval leaf".into(),
-        ))
-    }
-}
-
-fn tree_may_persist_calibration(tree: &OperatorTree) -> bool {
-    let mut may_persist = false;
-    tree.visit(&mut |node| {
-        may_persist |= matches!(
-            node,
-            OperatorTree::BayesianScore { .. }
-                | OperatorTree::Term {
-                    scoring: Some(TextScoringMode::BayesianBM25),
-                    ..
-                }
-                | OperatorTree::BayesianMatchWithPrior { .. }
-                | OperatorTree::MultiFieldSearch { .. }
-        );
-    });
-    may_persist
+    uqa_execution::operator_tree::runtime::execute_preoptimized_tree(
+        &engine.tree_execution_context(),
+        table,
+        signal_table,
+        params,
+        tree,
+    )
 }
 
 /// Execute a concrete retrieval tree through the optimizer/plan-executor
@@ -300,34 +256,8 @@ pub(crate) fn execute_scored_tree(
     Ok(posting_list_to_scored(&posting))
 }
 
-pub(crate) fn expect_posting_output(
-    output: OperatorOutput,
-    context: &str,
-) -> DriverResult<PostingList> {
-    match output {
-        OperatorOutput::Posting(result) => Ok(result),
-        OperatorOutput::Graph(result) => Ok(result.to_posting_list()),
-        OperatorOutput::Generalized(_) => Err(SQLError::TypeMismatch(format!(
-            "{context} requires single-document rows, but the physical plan produced join tuples"
-        ))),
-    }
-}
-
-/// Combine the corpus priors reported by fusion signals into the single
-/// fusion-level prior: the mean of their logits. Every signal estimates
-/// the same corpus-level P(relevant), so averaging in log-odds space
-/// yields one prior no matter how many signals report it.
-pub(crate) fn combine_signal_priors(priors: &[f64]) -> Option<f64> {
-    if priors.is_empty() {
-        return None;
-    }
-    let mean_logit = priors
-        .iter()
-        .map(|rate| uqa_scoring::logit(*rate))
-        .sum::<f64>()
-        / priors.len() as f64;
-    Some(uqa_scoring::sigmoid(mean_logit))
-}
+pub(crate) use uqa_execution::operator_tree::runtime::expect_posting_output;
+use uqa_execution::operator_tree::runtime::tree_may_persist_calibration;
 
 #[cfg(test)]
 #[path = "transaction_boundary_tests.rs"]

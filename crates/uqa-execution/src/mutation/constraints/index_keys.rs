@@ -13,8 +13,22 @@ use uqa_core::{DocId, Value};
 use uqa_sql::{ast::Expr, SQLError};
 use uqa_storage::document_store::Document;
 
+#[derive(Clone, Copy)]
+pub struct IndexExpressionContext<'a> {
+    pub catalog: &'a dyn uqa_sql::semantics::conflict::ConflictCatalog,
+    pub expressions: &'a dyn uqa_sql::semantics::partition::PartitionExpressions,
+}
+impl<'a> ConstraintContext<'a> {
+    pub fn index_expressions(self) -> IndexExpressionContext<'a> {
+        IndexExpressionContext {
+            catalog: self.catalog,
+            expressions: self.partitions.expressions,
+        }
+    }
+}
+
 pub fn index_predicate_accepts(
-    context: ConstraintContext<'_>,
+    context: IndexExpressionContext<'_>,
     table: &str,
     predicate: Option<&Expr>,
     document: &Document,
@@ -35,14 +49,13 @@ pub fn index_predicate_accepts(
             .collect(),
     );
     let result = context
-        .partitions
         .expressions
         .evaluate_row(predicate, document, &schema, &[])?;
     Ok(matches!(result, Value::Bool(true)))
 }
 
 pub fn index_key_values(
-    context: ConstraintContext<'_>,
+    context: IndexExpressionContext<'_>,
     table: &str,
     keys: &[uqa_sql::ast::IndexKey],
     document: &Document,
@@ -75,10 +88,11 @@ pub fn index_key_values(
             uqa_sql::ast::IndexKey::Column(column) => {
                 Ok(document.get(column).cloned().unwrap_or(Value::Null))
             }
-            uqa_sql::ast::IndexKey::Expression(expression) => context
-                .partitions
-                .expressions
-                .evaluate_row(expression, document, &schema, &[]),
+            uqa_sql::ast::IndexKey::Expression(expression) => {
+                context
+                    .expressions
+                    .evaluate_row(expression, document, &schema, &[])
+            }
         })
         .collect()
 }
@@ -105,10 +119,15 @@ impl EnforcedKeyExecution for EnforcedKey {
         table: &str,
         document: &Document,
     ) -> Result<Option<Vec<Value>>, SQLError> {
-        if !index_predicate_accepts(context, table, self.predicate.as_deref(), document)? {
+        if !index_predicate_accepts(
+            context.index_expressions(),
+            table,
+            self.predicate.as_deref(),
+            document,
+        )? {
             return Ok(None);
         }
-        let values = index_key_values(context, table, &self.keys, document)?;
+        let values = index_key_values(context.index_expressions(), table, &self.keys, document)?;
         if self.kind == uqa_sql::ast::TableKeyConstraintKind::Unique
             && !self.nulls_not_distinct
             && values.iter().any(|value| matches!(value, Value::Null))

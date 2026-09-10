@@ -11,18 +11,6 @@ use super::{
     StorageBackendError, StorageBackendResult, Value,
 };
 
-fn stored_owner_names_current(
-    table: &RelationIdentity,
-    column: &uqa_sql::ast::ColumnDef,
-    owner: &uqa_sql::ast::AutoIncrementOwner,
-) -> bool {
-    let table_matches =
-        RelationIdentity::parse_reference(&owner.table).is_ok_and(|(schema, name)| {
-            schema.is_none_or(|schema| schema == table.schema) && name == table.name
-        });
-    table_matches && owner.column == column.name
-}
-
 fn resolve_migrated_sequence_reference(
     reference: &str,
     sequences: &[RelationIdentity],
@@ -50,80 +38,6 @@ fn resolve_migrated_sequence_reference(
     }
 }
 
-fn implicit_sequence_data_type(
-    column: &uqa_sql::ast::ColumnDef,
-) -> StorageBackendResult<uqa_sql::ast::SequenceDataType> {
-    match &column.ty {
-        uqa_sql::ast::ColumnType::SmallInteger => Ok(uqa_sql::ast::SequenceDataType::SmallInt),
-        uqa_sql::ast::ColumnType::Integer => Ok(uqa_sql::ast::SequenceDataType::Integer),
-        uqa_sql::ast::ColumnType::BigInteger => Ok(uqa_sql::ast::SequenceDataType::BigInt),
-        _ => Err(StorageBackendError::Other(format!(
-            "implicit sequence column `{}` has non-integer type",
-            column.name
-        ))),
-    }
-}
-
-const POSTGRES_IDENTIFIER_MAX_BYTES: usize = 63;
-
-fn clip_identifier_component(value: &str, byte_length: usize) -> &str {
-    let mut end = byte_length.min(value.len());
-    while !value.is_char_boundary(end) {
-        end -= 1;
-    }
-    &value[..end]
-}
-
-fn implicit_sequence_local_name(
-    table: &str,
-    column: &str,
-    collision_pass: usize,
-) -> StorageBackendResult<String> {
-    let label = if collision_pass == 0 {
-        "seq".to_string()
-    } else {
-        format!("seq{collision_pass}")
-    };
-    let overhead = label.len() + 2;
-    let available = POSTGRES_IDENTIFIER_MAX_BYTES
-        .checked_sub(overhead)
-        .filter(|available| *available > 0)
-        .ok_or_else(|| {
-            StorageBackendError::Other(format!(
-                "cannot generate an implicit sequence name with label `{label}`"
-            ))
-        })?;
-    let mut table_bytes = table.len();
-    let mut column_bytes = column.len();
-    while table_bytes + column_bytes > available {
-        if table_bytes > column_bytes {
-            table_bytes -= 1;
-        } else {
-            column_bytes -= 1;
-        }
-    }
-    let table = clip_identifier_component(table, table_bytes);
-    let column = clip_identifier_component(column, column_bytes);
-    Ok(format!("{table}_{column}_{label}"))
-}
-
-fn choose_implicit_sequence_name(
-    table: &RelationIdentity,
-    column: &str,
-    mut collides: impl FnMut(&RelationIdentity) -> StorageBackendResult<bool>,
-) -> StorageBackendResult<String> {
-    for collision_pass in 0.. {
-        let candidate = RelationIdentity::new(
-            table.schema.clone(),
-            implicit_sequence_local_name(&table.name, column, collision_pass)?,
-        );
-        if !collides(&candidate)? {
-            return Ok(candidate.qualified_name());
-        }
-    }
-    unreachable!("the collision pass is unbounded")
-}
-
 fn persisted_relation_names(
     catalog: &dyn CatalogFacade,
 ) -> StorageBackendResult<std::collections::BTreeSet<RelationIdentity>> {
@@ -149,41 +63,6 @@ fn persisted_relation_names(
             .map(|row| row.relation),
     );
     Ok(relations)
-}
-
-fn apply_implicit_sequence_metadata(
-    table_name: &str,
-    column: &mut uqa_sql::ast::ColumnDef,
-    sequence: String,
-) -> StorageBackendResult<()> {
-    let auto_increment = column.auto_increment.as_mut().ok_or_else(|| {
-        StorageBackendError::Other(format!(
-            "implicit sequence column `{table_name}`.`{}` lost its generation metadata",
-            column.name
-        ))
-    })?;
-    auto_increment.sequence = Some(sequence.clone());
-    auto_increment.owner = Some(uqa_sql::ast::AutoIncrementOwner {
-        table: table_name.to_string(),
-        column: column.name.clone(),
-    });
-    if auto_increment.kind == uqa_sql::ast::AutoIncrementKind::Serial {
-        column.default = Some(uqa_sql::ast::Expr::Func {
-            name: "nextval".into(),
-            binding: None,
-            args: vec![uqa_sql::ast::Expr::Literal(Value::Str(sequence))],
-            distinct: false,
-            order_by: Vec::new(),
-            filter: None,
-        });
-    }
-    Ok(())
-}
-
-#[derive(Clone, Copy)]
-struct SequenceOwnerColumnIdentity {
-    table_object_id: [u8; 16],
-    column_object_id: [u8; 16],
 }
 
 fn collect_migrated_sequence_owner(
@@ -236,80 +115,12 @@ fn collect_migrated_sequence_owner(
     Ok(())
 }
 
-impl Engine {
-    fn sequence_owner_column_identity(
-        &self,
-        canonical: &str,
-        relation_kind: &str,
-        column_name: &str,
-    ) -> Result<Option<SequenceOwnerColumnIdentity>, SQLError> {
-        let relation = Self::resolved_relation_identity(canonical).map_err(|error| {
-            SQLError::Internal(format!("resolve sequence owner `{canonical}`: {error}"))
-        })?;
-        let missing_column = || SQLError::Routine {
-            sqlstate: "42703".into(),
-            message: format!(
-                "column \"{column_name}\" of relation \"{}\" does not exist",
-                relation.name
-            ),
-        };
-        match relation_kind {
-            "table" => {
-                let table = self
-                    .try_table(canonical)
-                    .map_err(|error| {
-                        SQLError::Internal(format!("load table `{canonical}`: {error}"))
-                    })?
-                    .ok_or_else(|| {
-                        SQLError::Internal(format!("table `{canonical}` disappeared"))
-                    })?;
-                let column_object_id = table
-                    .columns
-                    .read()
-                    .iter()
-                    .find(|column| column.name == column_name)
-                    .ok_or_else(missing_column)?
-                    .object_id
-                    .ok_or_else(|| {
-                        SQLError::Internal(format!(
-                            "column `{canonical}`.`{column_name}` has no object identity"
-                        ))
-                    })?;
-                Ok(Some(SequenceOwnerColumnIdentity {
-                    table_object_id: table.object_id(),
-                    column_object_id,
-                }))
-            }
-            "foreign table" => {
-                let table = self
-                    .durable
-                    .foreign_tables
-                    .read()
-                    .get(&relation)
-                    .cloned()
-                    .ok_or_else(|| {
-                        SQLError::Internal(format!("foreign table `{canonical}` disappeared"))
-                    })?;
-                let column_object_id = table
-                    .columns
-                    .iter()
-                    .find(|column| column.name == column_name)
-                    .ok_or_else(missing_column)?
-                    .object_id
-                    .ok_or_else(|| {
-                        SQLError::Internal(format!(
-                            "column `{canonical}`.`{column_name}` has no object identity"
-                        ))
-                    })?;
-                Ok(Some(SequenceOwnerColumnIdentity {
-                    table_object_id: table.object_id,
-                    column_object_id,
-                }))
-            }
-            _ => Ok(None),
-        }
-    }
+use uqa_sql::schema::sequences::implicit::{
+    apply_implicit_sequence_metadata, choose_implicit_sequence_name, implicit_sequence_data_type,
+    stored_owner_names_current,
+};
 
+impl Engine {
     pub(crate) fn materialize_implicit_sequences(
         &self,
         statement: &str,
@@ -317,45 +128,13 @@ impl Engine {
         columns: &mut [uqa_sql::ast::ColumnDef],
         persistence: uqa_sql::ast::RelationPersistence,
     ) -> Result<(), SQLError> {
-        let relation = RelationIdentity::from_legacy_name(table_name).map_err(|error| {
-            SQLError::Internal(format!("resolve {statement} relation: {error}"))
-        })?;
-        let mut sequences = Vec::new();
-        for (column_index, column) in columns.iter().enumerate() {
-            let Some(auto_increment) = column.auto_increment.as_ref() else {
-                continue;
-            };
-            if auto_increment.kind == uqa_sql::ast::AutoIncrementKind::Legacy
-                || auto_increment.sequence.is_some()
-            {
-                continue;
-            }
-            let data_type = implicit_sequence_data_type(column)
-                .map_err(|error| SQLError::Internal(error.to_string()))?;
-            let sequence = choose_implicit_sequence_name(&relation, &column.name, |candidate| {
-                self.relation_kind_at(&candidate.qualified_name())
-                    .map(|kind| kind.is_some())
-            })
-            .map_err(|error| {
-                SQLError::Internal(format!(
-                    "choose implicit sequence for `{table_name}`.`{}`: {error}",
-                    column.name
-                ))
-            })?;
-            sequences.push((column_index, data_type, sequence));
-        }
-        for (column_index, data_type, sequence) in sequences {
-            self.create_implicit_sequence_with_persistence(
-                &sequence,
-                1,
-                1,
-                data_type,
-                persistence,
-            )?;
-            apply_implicit_sequence_metadata(table_name, &mut columns[column_index], sequence)
-                .map_err(|error| SQLError::Internal(error.to_string()))?;
-        }
-        Ok(())
+        uqa_execution::schema::sequences::implicit::materialize_implicit_sequences(
+            &self.implicit_sequence_context(),
+            statement,
+            table_name,
+            columns,
+            persistence,
+        )
     }
 
     pub(crate) fn materialize_persisted_foreign_implicit_sequences(
@@ -377,10 +156,14 @@ impl Engine {
             {
                 continue;
             }
-            let data_type = implicit_sequence_data_type(column)?;
-            let sequence = choose_implicit_sequence_name(relation, &column.name, |candidate| {
-                Ok(occupied_relations.contains(candidate))
-            })?;
+            let data_type =
+                implicit_sequence_data_type(column).map_err(StorageBackendError::Other)?;
+            let sequence = choose_implicit_sequence_name(
+                relation,
+                &column.name,
+                |candidate| Ok(occupied_relations.contains(candidate)),
+                StorageBackendError::Other,
+            )?;
             sequences.push((column_index, data_type, sequence));
         }
         let mut changed = false;
@@ -398,7 +181,7 @@ impl Engine {
                     column.name
                 ))
             })?;
-            let mut state = Self::default_sequence_state(1, 1, data_type);
+            let mut state = crate::SequenceState::initial(1, 1, data_type);
             state.owner = Some(SequenceOwner {
                 table_object_id,
                 column_object_id,
@@ -425,7 +208,8 @@ impl Engine {
                     "cannot migrate implicit sequence `{sequence}` because that relation name already exists"
                 )));
             }
-            apply_implicit_sequence_metadata(&table_name, column, sequence)?;
+            apply_implicit_sequence_metadata(&table_name, column, sequence)
+                .map_err(StorageBackendError::Other)?;
             changed = true;
         }
         Ok(changed)
@@ -471,7 +255,12 @@ impl Engine {
             });
         };
         let Some(owner_column) =
-            self.sequence_owner_column_identity(&canonical, kind, column_name)?
+            uqa_sql::schema::sequences::ownership::sequence_owner_column_identity(
+                self,
+                &canonical,
+                kind,
+                column_name,
+            )?
         else {
             return Ok(Value::Null);
         };
@@ -570,73 +359,18 @@ impl Engine {
         Ok(())
     }
 
-    pub(crate) fn resolve_sequence_ownership(
-        &self,
-        sequence_name: &str,
-        ownership: &uqa_sql::ast::SequenceOwnership,
-    ) -> Result<Option<SequenceOwner>, SQLError> {
-        let uqa_sql::ast::SequenceOwnership::Column { table, column } = ownership else {
-            return Ok(None);
-        };
-        let (table_name, kind) =
-            self.try_resolve_visible_relation_kind(table)?
-                .ok_or_else(|| SQLError::Routine {
-                    sqlstate: "42P01".into(),
-                    message: format!("relation \"{table}\" does not exist"),
-                })?;
-        let Some(owner_column) = self.sequence_owner_column_identity(&table_name, kind, column)?
-        else {
-            return Err(SQLError::Routine {
-                sqlstate: "42809".into(),
-                message: format!("sequence cannot be owned by relation \"{table_name}\""),
-            });
-        };
-        let sequence_relation =
-            Self::resolved_relation_identity(sequence_name).map_err(|error| {
-                SQLError::Internal(format!(
-                    "resolve sequence `{sequence_name}` ownership: {error}"
-                ))
-            })?;
-        let table_relation = Self::resolved_relation_identity(&table_name).map_err(|error| {
-            SQLError::Internal(format!("resolve table `{table_name}` ownership: {error}"))
-        })?;
-        if sequence_relation.schema != table_relation.schema {
-            return Err(SQLError::Routine {
-                sqlstate: "55000".into(),
-                message: "sequence must be in same schema as table it is linked to".into(),
-            });
-        }
-        Ok(Some(SequenceOwner {
-            table_object_id: owner_column.table_object_id,
-            column_object_id: owner_column.column_object_id,
-            dependency: SequenceOwnerDependency::Automatic,
-        }))
-    }
-
-    pub(crate) fn attach_implicit_sequence_owners(
-        &self,
-        table_name: &str,
-    ) -> StorageBackendResult<()> {
-        let table = self.try_table(table_name)?.ok_or_else(|| {
-            StorageBackendError::Other(format!("table `{table_name}` disappeared"))
-        })?;
-        let columns = table.columns.read().clone();
-        self.attach_implicit_sequence_owners_for_columns(table_name, table.object_id(), &columns)
-    }
-
     pub(crate) fn attach_implicit_sequence_owners_for_columns(
         &self,
         table_name: &str,
         table_object_id: [u8; 16],
         columns: &[uqa_sql::ast::ColumnDef],
     ) -> StorageBackendResult<()> {
-        for (sequence, owner) in
-            self.implicit_sequence_owner_bindings(table_name, table_object_id, columns)?
-        {
-            self.attach_sequence_owner_identity(&sequence, owner)
-                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-        }
-        Ok(())
+        uqa_execution::schema::sequences::ownership::attach_column_owners(
+            &self.implicit_ownership_context(),
+            table_name,
+            table_object_id,
+            columns,
+        )
     }
 
     pub(crate) fn validate_implicit_sequence_owners_for_columns(
@@ -646,7 +380,12 @@ impl Engine {
         columns: &[uqa_sql::ast::ColumnDef],
     ) -> StorageBackendResult<()> {
         for (sequence, expected) in
-            self.implicit_sequence_owner_bindings(table_name, table_object_id, columns)?
+            uqa_execution::schema::sequences::ownership::implicit_owner_bindings(
+                self,
+                table_name,
+                table_object_id,
+                columns,
+            )?
         {
             let relation = RelationIdentity::from_legacy_name(&sequence)
                 .map_err(StorageBackendError::Other)?;
@@ -665,53 +404,7 @@ impl Engine {
         Ok(())
     }
 
-    fn implicit_sequence_owner_bindings(
-        &self,
-        table_name: &str,
-        table_object_id: [u8; 16],
-        columns: &[uqa_sql::ast::ColumnDef],
-    ) -> StorageBackendResult<Vec<(String, SequenceOwner)>> {
-        let relation =
-            RelationIdentity::from_legacy_name(table_name).map_err(StorageBackendError::Other)?;
-        let mut bindings = Vec::new();
-        for column in columns {
-            let Some(provenance) = column.auto_increment.as_ref() else {
-                continue;
-            };
-            let Some(named_owner) = provenance.owner.as_ref() else {
-                continue;
-            };
-            if !stored_owner_names_current(&relation, column, named_owner) {
-                continue;
-            }
-            let Some(sequence) = provenance.sequence.as_deref() else {
-                continue;
-            };
-            let sequence = self.resolve_stored_sequence_reference_from_loaded_registry(sequence)?;
-            let column_object_id = column.object_id.ok_or_else(|| {
-                StorageBackendError::Other(format!(
-                    "column `{table_name}`.`{}` has no object identity",
-                    column.name
-                ))
-            })?;
-            let dependency = if provenance.is_identity() {
-                SequenceOwnerDependency::Internal
-            } else {
-                SequenceOwnerDependency::Automatic
-            };
-            bindings.push((
-                sequence,
-                SequenceOwner {
-                    table_object_id,
-                    column_object_id,
-                    dependency,
-                },
-            ));
-        }
-        Ok(bindings)
-    }
-
-    fn attach_sequence_owner_identity(
+    pub(crate) fn attach_sequence_owner_identity(
         &self,
         name: &str,
         owner: SequenceOwner,

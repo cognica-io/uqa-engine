@@ -6,53 +6,31 @@
 
 //! SQL DDL execution and declared-value conversion.
 
-use super::scalar::eval_lowered_expression;
-use super::{
-    index_vectors_for_type, AlterTableAction, AlterTableStmt, BTreeMap, ColumnType, CreateIndex,
-    CreateTable, Document, DropKind, DropStmt, Engine, HNSWIndexParams, IVFIndexParams,
-    RowUpdateVectors, SQLError, SQLParam, SQLResult, Value, VectorIndexSpec,
-};
-use crate::CatalogIndexRow;
+use super::{AlterTableAction, AlterTableStmt, DropKind, DropStmt, Engine, SQLError, SQLResult};
 
 mod alter_table;
-mod check_inheritance;
-mod constraint_indexes;
-mod constraint_validation;
 mod create_index;
 mod create_table;
-mod defaults;
 mod drop;
-mod hierarchy;
-mod hierarchy_alter;
 mod sequence_ctas;
-mod value_conversion;
 
 pub(super) use alter_table::run_alter_table;
-pub(crate) use alter_table::{drop_column_cascade, drop_constraint_dependency};
-pub(crate) use constraint_validation::{
-    bind_stored_check_expression_routines, validate_check_expression,
-};
 pub(super) use create_index::run_create_index;
 pub(super) use create_table::{run_create_table, run_create_table_if_not_exists};
-pub(crate) use defaults::{bind_stored_schema_expression_routines, validate_default_expression};
-pub(crate) use drop::drop_index_dependency;
 pub(super) use drop::run_drop;
-use hierarchy::prepare_create_table_hierarchy;
 pub(super) use sequence_ctas::{
     run_alter_sequence, run_create_sequence, run_create_table_as, CreateTableAsExecution,
 };
-pub(super) use value_conversion::{
-    coerce_assignment_value, coerce_to_column_type, column_type_name, json_table_arg,
-    json_table_value_to_text, json_to_core_value,
+pub(super) use uqa_sql::assignment::conversion::{
+    coerce_assignment_value, column_type_name, json_table_arg, json_table_value_to_text,
+    json_to_core_value,
 };
-pub(crate) use value_conversion::{
-    convert_value_to_column_type, convert_value_to_column_type_with_engine,
-    validate_vector_dimensions,
+pub(crate) use uqa_sql::assignment::conversion::{
+    convert_value_to_column_type, validate_vector_dimensions,
 };
-
-use drop::ddl_storage_error;
-use value_conversion::rewrite_column_values_to_type;
 
 pub(crate) use uqa_sql::schema::columns::{
-    validate_postgres_column_name, validate_postgres_relation_column_type, POSTGRES_SYSTEM_COLUMNS,
+    validate_postgres_column_name, validate_postgres_relation_column_type,
 };
+
+pub(crate) use uqa_sql::assignment::conversion::convert_value_to_column_type_with_context as convert_value_to_column_type_with_engine;

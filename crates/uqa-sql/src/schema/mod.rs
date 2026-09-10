@@ -185,3 +185,25 @@ pub mod defaults;
 pub mod domains;
 
 pub mod dependencies;
+
+pub mod check_inheritance;
+
+pub mod table_creation;
+
+pub mod inheritance;
+
+pub mod foreign_keys;
+
+pub mod sequences;
+
+pub mod constraint_metadata;
+
+pub mod keys;
+
+pub mod constraint_changes;
+
+pub mod constraint_views;
+
+pub mod table_alteration;
+
+pub mod removal;

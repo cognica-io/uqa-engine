@@ -74,28 +74,12 @@ impl Engine {
         name: &str,
         if_exists: bool,
     ) -> Result<Option<(String, &'static str)>, SQLError> {
-        match self.resolve_visible_relation_kind(name)? {
-            RelationResolution::Found(canonical, kind) => Ok(Some((canonical, kind))),
-            RelationResolution::MissingSchema(_) | RelationResolution::MissingRelation
-                if if_exists =>
-            {
-                let (_, local_name) =
-                    RelationIdentity::parse_reference(name).map_err(SQLError::Internal)?;
-                self.push_sql_notice(
-                    "NOTICE",
-                    &format!("relation \"{local_name}\" does not exist, skipping"),
-                );
-                Ok(None)
-            }
-            RelationResolution::MissingSchema(schema) => Err(SQLError::Routine {
-                sqlstate: "3F000".into(),
-                message: format!("schema \"{schema}\" does not exist"),
-            }),
-            RelationResolution::MissingRelation => Err(SQLError::Routine {
-                sqlstate: "42P01".into(),
-                message: format!("relation \"{name}\" does not exist"),
-            }),
-        }
+        uqa_sql::catalog::resolution::resolve_relation_rename_source(
+            self.resolve_visible_relation_kind(name)?,
+            name,
+            if_exists,
+            &mut |message| self.push_sql_notice("NOTICE", message),
+        )
     }
 
     pub(crate) fn relation_rename_target(

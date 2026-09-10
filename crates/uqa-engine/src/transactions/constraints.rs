@@ -46,31 +46,7 @@ fn constraint_is_deferred(
         .unwrap_or(initially_deferred)
 }
 
-pub(crate) fn foreign_key_identity(
-    table: &str,
-    foreign_key: &ForeignKey,
-) -> Result<ConstraintIdentity, SQLError> {
-    let relation = RelationIdentity::from_legacy_name(table).map_err(|error| {
-        SQLError::Internal(format!(
-            "decode foreign-key relation identity '{table}': {error}"
-        ))
-    })?;
-    let name = foreign_key.name.clone().ok_or_else(|| {
-        SQLError::Internal(format!(
-            "foreign key on '{table}' has no materialized constraint name"
-        ))
-    })?;
-    let object_id = foreign_key.object_id.ok_or_else(|| {
-        SQLError::Internal(format!(
-            "foreign key '{name}' on '{table}' has no materialized object identity"
-        ))
-    })?;
-    Ok(ConstraintIdentity {
-        relation,
-        name,
-        object_id: Some(object_id),
-    })
-}
+pub(crate) use uqa_sql::catalog::constraints::foreign_key_identity;
 
 fn rendered_constraint_name(name: &SetConstraintName) -> String {
     [
@@ -315,11 +291,7 @@ impl Engine {
                 break;
             }
             if !checks.is_empty() {
-                crate::sql::dml::validate_deferred_foreign_key_checks(
-                    self,
-                    &checks,
-                    Some(targets),
-                )?;
+                self.validate_deferred_foreign_key_checks(&checks, Some(targets))?;
                 let mut stack = self.session.transactions.lock();
                 let frame = stack.last_mut().ok_or_else(|| {
                     SQLError::Internal("SET CONSTRAINTS lost its transaction frame".into())
@@ -689,7 +661,7 @@ impl Engine {
                 return Ok(());
             }
             if !pending_checks.is_empty() {
-                crate::sql::dml::validate_deferred_foreign_key_checks(self, &pending_checks, None)?;
+                self.validate_deferred_foreign_key_checks(&pending_checks, None)?;
             }
             for event in &pending_events {
                 crate::sql::fire_deferred_constraint_trigger_event(self, event)?;

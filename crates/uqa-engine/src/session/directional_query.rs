@@ -36,7 +36,7 @@ impl DirectionalQueryTask for DirectionalSessionQuery {
         } = *self;
         let _statement_gate = engine.runtime.statement_gate.delegate_to_current_thread();
         uqa_execution::query::statement::execute_query_plan_output(
-            &engine.statement_execution_context(),
+            &engine.query_execution_context(),
             &plan,
             &params,
             &mut scope,

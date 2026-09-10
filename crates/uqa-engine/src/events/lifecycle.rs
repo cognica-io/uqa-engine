@@ -320,78 +320,11 @@ impl Engine {
         from: &RelationIdentity,
         to: &RelationIdentity,
     ) -> StorageBackendResult<()> {
-        let mut triggers = self.durable.triggers.write();
-        let mut rules = self.durable.rules.write();
-        let from_name = from.qualified_name();
-        let to_name = to.qualified_name();
-        let referenced_by_trigger = triggers.values().any(|entries| {
-            entries.values().any(|trigger| {
-                trigger.definition.referenced_table.as_deref() == Some(from_name.as_str())
-            })
-        });
-        let mut referenced_by_rule = false;
-        for (event_relation, entries) in rules.iter() {
-            for rule in entries.values() {
-                let dependencies = rule.dependencies.as_ref().ok_or_else(|| {
-                    StorageBackendError::Other(format!(
-                        "rule `{}` on `{}` has no bound dependency state",
-                        rule.definition.name,
-                        event_relation.qualified_name()
-                    ))
-                })?;
-                referenced_by_rule |= dependencies.relations.contains(from);
-            }
-        }
-        if !triggers.contains_key(from)
-            && !rules.contains_key(from)
-            && !referenced_by_trigger
-            && !referenced_by_rule
-        {
-            return Ok(());
-        }
-        let mut next_triggers = triggers.clone();
-        let mut next_rules = rules.clone();
-        if let Some(mut entries) = next_triggers.remove(from) {
-            for trigger in entries.values_mut() {
-                trigger.definition.table.clone_from(&to_name);
-            }
-            next_triggers.insert(to.clone(), entries);
-        }
-        for entries in next_triggers.values_mut() {
-            for trigger in entries.values_mut() {
-                if trigger.definition.referenced_table.as_deref() == Some(from_name.as_str()) {
-                    trigger.definition.referenced_table = Some(to_name.clone());
-                }
-            }
-        }
-        if let Some(mut entries) = next_rules.remove(from) {
-            for rule in entries.values_mut() {
-                rule.definition.table = to.qualified_name();
-            }
-            next_rules.insert(to.clone(), entries);
-        }
-        for entries in next_rules.values_mut() {
-            for rule in entries.values_mut() {
-                super::rule_dependencies::rewrite_stored_rule_relation(rule, from, to).map_err(
-                    |error| {
-                        StorageBackendError::Other(format!(
-                            "rewrite rule `{}` relation dependency: {error}",
-                            rule.definition.name
-                        ))
-                    },
-                )?;
-            }
-        }
-        self.persist_trigger_catalog_snapshot(&next_triggers)
-            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-        self.persist_rule_catalog_snapshot(&next_rules)
-            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-        *triggers = next_triggers;
-        *rules = next_rules;
-        drop(rules);
-        drop(triggers);
-        self.note_catalog_registry_changed();
-        Ok(())
+        uqa_execution::schema::events::rename_relation_events(
+            &self.event_catalog_context(),
+            from,
+            to,
+        )
     }
 
     pub(crate) fn rename_event_column_inner(

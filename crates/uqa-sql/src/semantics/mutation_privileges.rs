@@ -163,3 +163,37 @@ pub fn ensure_insert_target_privileges(
     })?;
     Ok(())
 }
+
+/// Fill missing DML privilege subjects from the surrounding WITH definition.
+pub fn inherit_command_privilege_subject(
+    command: &mut crate::plan::CommandPlan,
+    subject: String,
+) -> Result<(), SQLError> {
+    use crate::plan::CommandPlan;
+    let (statement_subject, target_subject) = match command {
+        CommandPlan::Insert(plan) => (
+            &mut plan.statement_privilege_subject,
+            &mut plan.target_privilege_subject,
+        ),
+        CommandPlan::Update(plan) => (
+            &mut plan.statement_privilege_subject,
+            &mut plan.target_privilege_subject,
+        ),
+        CommandPlan::Delete(plan) => (
+            &mut plan.statement_privilege_subject,
+            &mut plan.target_privilege_subject,
+        ),
+        CommandPlan::Merge(plan) => (
+            &mut plan.statement_privilege_subject,
+            &mut plan.target_privilege_subject,
+        ),
+        _ => {
+            return Err(SQLError::Internal(
+                "non-DML command in a WITH definition".into(),
+            ))
+        }
+    };
+    statement_subject.get_or_insert(subject.clone());
+    target_subject.get_or_insert(subject);
+    Ok(())
+}

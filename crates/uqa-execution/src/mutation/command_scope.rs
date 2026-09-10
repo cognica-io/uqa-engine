@@ -35,3 +35,19 @@ impl Drop for MutationOverlayScope<'_> {
         self.state.end_overlay();
     }
 }
+
+/// Retain the command's original read generation when CTE writes or BEFORE statement triggers can change visible rows.
+pub fn capture_command_read_snapshot<S: Clone + 'static>(
+    snapshots: &dyn crate::query::statement::context::SnapshotSource<S>,
+    inherited: Option<&CteScope<S>>,
+    before_statement_trigger: bool,
+    ctes: &[uqa_sql::plan::CtePlan],
+) -> Result<Option<std::sync::Arc<S>>, SQLError> {
+    match inherited.and_then(CteScope::command_cte_snapshot) {
+        Some(snapshot) => Ok(Some(snapshot)),
+        None if before_statement_trigger || ctes.iter().any(|cte| cte.body.modifies_data()) => {
+            Ok(Some(std::sync::Arc::new(snapshots.capture()?)))
+        }
+        None => Ok(None),
+    }
+}

@@ -5,26 +5,7 @@
 //
 
 use super::*;
-
-fn physical_text_leaf() -> OperatorTree {
-    OperatorTree::Term {
-        query: "rust search".into(),
-        field: Some("body".into()),
-        scoring: Some(TextScoringMode::BM25),
-        top_k: Some(uqa_operators::TextTopKPlan {
-            k: 10,
-            strategy: uqa_operators::TextTopKStrategy::Wand,
-        }),
-    }
-}
-
-#[test]
-fn physical_text_limit_is_rejected_below_a_parent() {
-    assert!(validate_text_top_k_placement(&physical_text_leaf()).is_ok());
-    assert!(
-        validate_text_top_k_placement(&OperatorTree::Union(vec![physical_text_leaf()])).is_err()
-    );
-}
+use uqa_operators::TextScoringMode;
 
 fn populate_calibration_fixture(engine: &Engine) {
     engine

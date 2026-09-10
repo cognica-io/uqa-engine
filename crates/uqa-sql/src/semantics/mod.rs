@@ -83,6 +83,7 @@ pub mod privileges;
 
 pub mod view_privileges;
 
+pub mod retrieval;
 pub mod text_indexes;
 
 pub mod mutation_qualifiers;
@@ -103,3 +104,8 @@ pub mod constraint_catalog;
 pub mod mutation_patch;
 
 pub mod mutation_privileges;
+
+pub mod merge;
+pub mod view_mutation;
+
+pub mod mutation_rows;

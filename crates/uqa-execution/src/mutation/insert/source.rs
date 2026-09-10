@@ -442,24 +442,6 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
     }
 }
 
-impl<S: Clone + Send + Sync + 'static> crate::query::statement::consumer::QueryRowConsumer<S>
-    for InsertSelectConsumer<S>
-{
-    fn begin(
-        &self,
-        context: &crate::query::statement::context::StatementContext<'_, S>,
-        columns: &[String],
-        schema: &crate::RowSchema,
-    ) -> Result<(), SQLError> {
-        self.begin(context.insert_source(), columns, schema)
-    }
-    fn consume(
-        &self,
-        context: &crate::query::statement::context::StatementContext<'_, S>,
-        row: crate::OwnedPhysicalRow,
-    ) -> Result<crate::query::consumer::QueryConsumerControl, SQLError> {
-        self.consume(context.insert_source(), row)
-    }
-}
-
 use crate::mutation::preparation::MutationPreparationContext;
+
+pub mod binding;

@@ -89,18 +89,19 @@ The capability, read-path, and mutation-protocol boundaries have focused executa
 
 ```sh
 cargo test -p uqa-engine --lib capabilities::tests::
-cargo test -p uqa-engine --lib sql::select::schema_binding::tests::
-cargo test -p uqa-engine --lib sql::select::physical_plan::tests::
-cargo test -p uqa-engine --lib sql::dml::protocol::
-cargo test -p uqa-engine --lib sql::dml::insert::codec::tests::
-cargo test -p uqa-engine --lib sql::dml::merge::codec::tests::
-cargo test -p uqa-engine --lib sql::dml::view_triggers::merge::codec::tests::
+cargo test -p uqa-sql --lib binding::
+cargo test -p uqa-engine --lib capabilities::table_reads::
+cargo test -p uqa-execution --lib mutation::prepared::
+cargo test -p uqa-execution --lib mutation::insert::codec::tests::
+cargo test -p uqa-execution --lib mutation::merge::codec::tests::
+cargo test -p uqa-execution --lib mutation::merge::views::codec::tests::
 cargo test -p uqa-engine --lib transactions::tests::
-cargo test -p uqa-engine --lib row_locks::tests::
-cargo test -p uqa-engine --lib row_locks::cross_process::file::tests::
-cargo test -p uqa-execution --lib scalar::traversal::tests::
+cargo test -p uqa-engine --lib transactions::command_scope::tests::
+cargo test -p uqa-execution --lib row_locks::tests::
+cargo test -p uqa-execution --lib row_locks::cross_process::file::tests::
+cargo test -p uqa-sql --lib ir::traversal::tests::
 cargo test -p uqa-engine --test integration catalog::capability_boundaries::
-cargo test -p uqa-engine --test integration transaction_lifecycle::
+cargo test -p uqa-engine --test integration storage::transaction_lifecycle::
 cargo test -p uqa-engine --test integration queries::sql_row_locks::
 cargo test -p uqa-engine --test integration queries::sql_row_locks_recheck::
 ```

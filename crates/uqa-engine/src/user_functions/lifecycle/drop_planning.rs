@@ -407,7 +407,7 @@ impl Engine {
         foreign: bool,
     ) -> Result<(), SQLError> {
         if !foreign {
-            return crate::sql::drop_constraint_dependency(self, table, constraint);
+            return self.drop_constraint_dependency(table, constraint);
         }
         if self
             .drop_foreign_table_check_dependency(table, constraint)
@@ -489,7 +489,7 @@ impl Engine {
         dependents: &RoutineObjectDependents,
     ) -> Result<(), SQLError> {
         for index in &dependents.indexes {
-            crate::sql::drop_index_dependency(self, index)?;
+            self.drop_index_dependency(index)?;
         }
         for (table, name) in &dependents.rules {
             self.drop_rule(&uqa_sql::ast::DropRule {

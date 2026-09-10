@@ -25,3 +25,5 @@ pub struct IndexDefinition {
 
 mod enforced_key;
 pub use enforced_key::EnforcedKey;
+
+pub mod stored;

@@ -8,18 +8,13 @@
 
 use crate::{
     catalog::context::CatalogContext, query::relational::QueryExpressionFactory,
-    FunctionTypeResolver, RowSchema,
+    FunctionTypeResolver,
 };
 use uqa_core::DocId;
-use uqa_sql::{ast::ColumnDef, SQLError};
+use uqa_sql::SQLError;
 use uqa_storage::DocumentMetadata;
 
-/// Relation metadata observed by mutation row construction.
-pub trait MutationRowCatalog: Sync {
-    fn column_definitions(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, String>;
-    fn column_names(&self, table: &str) -> Result<Vec<String>, String>;
-    fn view_schema(&self, name: &str) -> Result<RowSchema, SQLError>;
-}
+pub use uqa_sql::semantics::mutation_rows::MutationRowCatalog;
 
 /// Tuple provenance from the statement's read generation and write transaction.
 pub trait MutationTupleMetadata: Sync {

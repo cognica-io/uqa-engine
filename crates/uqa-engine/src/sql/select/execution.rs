@@ -15,7 +15,7 @@ pub(in crate::sql) fn execute_query_plan_with_ctes(
     ctes: &mut CteScope,
 ) -> Result<SQLResult, SQLError> {
     uqa_execution::query::statement::execute_query_plan_with_ctes(
-        &engine.statement_execution_context(),
+        &engine.query_execution_context(),
         plan,
         params,
         ctes,
@@ -29,7 +29,7 @@ pub(in crate::sql) fn execute_query_plan_output(
     output_mode: QueryOutputMode,
 ) -> Result<QueryOutput, SQLError> {
     uqa_execution::query::statement::execute_query_plan_output(
-        &engine.statement_execution_context(),
+        &engine.query_execution_context(),
         plan,
         params,
         ctes,

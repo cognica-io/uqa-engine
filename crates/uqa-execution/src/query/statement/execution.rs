@@ -7,8 +7,8 @@
 //! CTE scheduling, statement snapshot selection, and physical query execution.
 use super::{
     bound_consumer::bind_output_mode,
-    consumer::{QueryOutputMode, SetOperationRowConsumer},
-    context::{with_statement_snapshot, StatementContext},
+    consumer::{QueryOutputMode, SetOperationConsumerFactory},
+    context::{with_query_snapshot, QueryContext},
 };
 use crate::query::{
     binding::{analyze_query_plan_schema, bind_query_plan_schema},
@@ -36,7 +36,7 @@ use uqa_sql::{
 };
 
 pub fn execute_query_plan_with_ctes<S: Clone + Send + Sync + 'static>(
-    context: &StatementContext<'_, S>,
+    context: &QueryContext<'_, S>,
     plan: &QueryPlan,
     params: &[SQLParam],
     ctes: &mut CteScope<S>,
@@ -45,7 +45,7 @@ pub fn execute_query_plan_with_ctes<S: Clone + Send + Sync + 'static>(
 }
 
 pub fn execute_query_plan_output<S: Clone + Send + Sync + 'static>(
-    context: &StatementContext<'_, S>,
+    context: &QueryContext<'_, S>,
     plan: &QueryPlan,
     params: &[SQLParam],
     ctes: &mut CteScope<S>,
@@ -122,7 +122,7 @@ pub fn execute_query_plan_output<S: Clone + Send + Sync + 'static>(
         )?;
     }
     if let Some(snapshot) = ctes.command_cte_snapshot() {
-        return with_statement_snapshot(context.snapshots, &snapshot, |selected| {
+        return with_query_snapshot(context.snapshots, &snapshot, |selected| {
             execute_query_root(selected, plan, params, ctes, output_mode)
         });
     }
@@ -133,7 +133,7 @@ pub fn execute_query_plan_output<S: Clone + Send + Sync + 'static>(
     reason = "assembles set-operation execution and result delivery"
 )]
 fn execute_query_root<S: Clone + Send + Sync + 'static>(
-    context: &StatementContext<'_, S>,
+    context: &QueryContext<'_, S>,
     plan: &QueryPlan,
     params: &[SQLParam],
     ctes: &mut CteScope<S>,
@@ -145,7 +145,7 @@ fn execute_query_root<S: Clone + Send + Sync + 'static>(
             block,
             params,
             ctes,
-            bind_output_mode(context, output_mode),
+            bind_output_mode(context.generation, output_mode)?,
         ),
         RelationalPlan::SetOp {
             kind,
@@ -270,14 +270,16 @@ fn execute_query_root<S: Clone + Send + Sync + 'static>(
                         )?,
                     )
                 };
-                let consumer = Rc::new(SetOperationRowConsumer::new(
+                let consumer = Rc::new(SetOperationConsumerFactory::new(
                     Rc::clone(&downstream),
                     set_schema.clone(),
                     resolved_offset,
                     resolved_limit,
                 ));
                 if consumer.stopped() {
-                    downstream.begin(context, &columns, &set_schema)?;
+                    Rc::clone(&downstream)
+                        .bind(context.generation)?
+                        .begin(&columns, &set_schema)?;
                 } else {
                     let mut child_ctes = ctes.enter_lock_identity_emission(false);
                     execute_query_plan_output(
@@ -400,14 +402,14 @@ fn execute_query_root<S: Clone + Send + Sync + 'static>(
                 subqueries,
                 params,
                 ctes,
-                bind_output_mode(context, output_mode),
+                bind_output_mode(context.generation, output_mode)?,
             )
         }
     }
 }
 
 pub fn collect_query_operator<'a, S: Clone + Send + Sync + 'static>(
-    context: &StatementContext<'_, S>,
+    context: &QueryContext<'_, S>,
     columns: Vec<String>,
     operator: Box<dyn crate::PhysicalOperator + 'a>,
     output_mode: QueryOutputMode<S>,
@@ -416,6 +418,6 @@ pub fn collect_query_operator<'a, S: Clone + Send + Sync + 'static>(
         context.source.relational.runtime,
         columns,
         operator,
-        bind_output_mode(context, output_mode),
+        bind_output_mode(context.generation, output_mode)?,
     )
 }

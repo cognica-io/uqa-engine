@@ -29,7 +29,7 @@ use uqa_sql::SQLError;
 use crate::capabilities::{RelationLookupMode, RelationResolution};
 use crate::{Engine, RelationIdentity};
 
-use super::{RuleDependencies, RuleRoutineDependency, StoredRule};
+use super::{RuleDependencies, RuleRoutineDependency};
 
 pub(crate) use uqa_sql::catalog::stored_ast::{
     bind_stored_expression_routines, bind_stored_statement_routines,
@@ -220,115 +220,7 @@ impl Engine {
     }
 }
 
-pub(crate) fn rewrite_stored_statement_relation(
-    statement: &mut Statement,
-    from: &RelationIdentity,
-    to: &RelationIdentity,
-) -> Result<bool, SQLError> {
-    let from = from.qualified_name();
-    let to = to.qualified_name();
-    let mut changed = false;
-    let mut rewrite = |reference: &mut String| {
-        if reference == &from {
-            reference.clone_from(&to);
-            changed = true;
-        }
-        Ok(())
-    };
-    let mut ignore_routine = |_: &mut String,
-                              _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
-     -> Result<(), SQLError> { Ok(()) };
-    StoredAstVisitor {
-        source: None,
-        merge: None,
-        expression: None,
-        ty: None,
-        relation: &mut rewrite,
-        routine: &mut ignore_routine,
-    }
-    .bind_statement(statement)?;
-    Ok(changed)
-}
-
-pub(super) fn rewrite_stored_rule_relation(
-    rule: &mut StoredRule,
-    from: &RelationIdentity,
-    to: &RelationIdentity,
-) -> Result<bool, SQLError> {
-    let dependencies = rule.dependencies.as_mut().ok_or_else(|| {
-        SQLError::Internal(format!(
-            "rule `{}` has no bound dependency state",
-            rule.definition.name
-        ))
-    })?;
-    let mut changed = false;
-    if dependencies.relations.remove(from) {
-        dependencies.relations.insert(to.clone());
-        changed = true;
-    }
-    let renamed_columns = dependencies
-        .columns
-        .iter()
-        .filter(|dependency| &dependency.relation == from)
-        .cloned()
-        .collect::<Vec<_>>();
-    for mut dependency in renamed_columns {
-        dependencies.columns.remove(&dependency);
-        dependency.relation = to.clone();
-        dependencies.columns.insert(dependency);
-        changed = true;
-    }
-    for action in &mut rule.definition.actions {
-        changed |= rewrite_stored_statement_relation(action, from, to)?;
-    }
-    if let Some(condition) = &mut rule.definition.condition {
-        let from_name = from.qualified_name();
-        let to_name = to.qualified_name();
-        let mut rewrite = |reference: &mut String| {
-            if reference == &from_name {
-                reference.clone_from(&to_name);
-                changed = true;
-            }
-            Ok(())
-        };
-        let mut ignore_routine = |_: &mut String,
-                                  _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
-         -> Result<(), SQLError> { Ok(()) };
-        StoredAstVisitor {
-            source: None,
-            merge: None,
-            expression: None,
-            ty: None,
-            relation: &mut rewrite,
-            routine: &mut ignore_routine,
-        }
-        .bind_expr(condition, &BTreeSet::new())?;
-    }
-    if let Some(plan) = &mut rule.condition_plan {
-        for subquery in &mut plan.subqueries {
-            crate::session::bind_query_plan_relations(
-                subquery,
-                &BTreeSet::new(),
-                &mut |reference| -> Result<String, SQLError> {
-                    let identity =
-                        RelationIdentity::from_legacy_name(reference).map_err(|error| {
-                            SQLError::Internal(format!(
-                                "decode stored rule relation `{reference}`: {error}"
-                            ))
-                        })?;
-                    if &identity == from {
-                        changed = true;
-                        Ok(to.qualified_name())
-                    } else {
-                        Ok(reference.to_string())
-                    }
-                },
-            )?;
-        }
-    }
-    super::synchronize_rule_sql_text(&mut rule.definition)?;
-    Ok(changed)
-}
+pub(crate) use uqa_sql::catalog::events::renames::rewrite_stored_statement_relation;
 
 pub(super) fn collect_query_relation_dependencies(
     query: &QueryPlan,

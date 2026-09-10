@@ -17,7 +17,7 @@ use super::{
     bind_query_plan_relations, bind_query_plan_sequence_references,
     canonical_virtual_relation_reference, query_plan_references_relation,
     query_plan_references_sequence, Engine, QueryPlan, RelationIdentity, SQLError,
-    StorageBackendError, StorageBackendResult, StoredView, StoredViewKind, ViewRow,
+    StorageBackendError, StorageBackendResult, StoredView, StoredViewKind,
 };
 use uqa_sql::ast::FunctionBinding;
 
@@ -28,18 +28,7 @@ enum RestoredView {
     Legacy(QueryPlan),
 }
 
-pub(crate) fn catalog_view_row(
-    relation: &RelationIdentity,
-    view: &StoredView,
-) -> Result<ViewRow, serde_json::Error> {
-    Ok(ViewRow {
-        relation: relation.clone(),
-        role_owner: view.role_owner.clone(),
-        acl: view.acl.clone(),
-        column_acls: view.column_acls.clone(),
-        definition_json: serde_json::to_string(view)?,
-    })
-}
+pub(crate) use uqa_execution::catalog::view::catalog_view_row;
 
 fn upgrade_legacy_view_dispatches(plan: &mut QueryPlan) -> bool {
     let mut changed = false;
@@ -571,54 +560,6 @@ impl Engine {
             .collect::<Vec<_>>();
         dependents.sort_unstable();
         Ok(dependents)
-    }
-
-    pub(crate) fn rewrite_view_sequence_references(
-        &self,
-        from: &RelationIdentity,
-        to: &str,
-    ) -> StorageBackendResult<()> {
-        self.synchronize_catalog_registries()?;
-        let mut rewritten_views = Vec::new();
-        for (relation, stored) in self.durable.views.read().iter() {
-            let mut rewritten = stored.clone();
-            let mut changed = false;
-            bind_query_plan_sequence_references(
-                &mut rewritten.query,
-                &mut |reference| -> StorageBackendResult<String> {
-                    let (schema, name) =
-                        RelationIdentity::parse_reference(reference).map_err(|error| {
-                            StorageBackendError::Other(format!(
-                                "invalid stored view sequence reference `{reference}`: {error}"
-                            ))
-                        })?;
-                    let matches = schema.as_deref().map_or(name == from.name, |schema| {
-                        schema == from.schema && name == from.name
-                    });
-                    if matches {
-                        changed = true;
-                        Ok(to.to_string())
-                    } else {
-                        Ok(reference.to_string())
-                    }
-                },
-            )?;
-            if changed {
-                rewritten_views.push((relation.clone(), rewritten));
-            }
-        }
-        if let Some(catalog) = self.storage.catalog.as_ref() {
-            for (relation, view) in &rewritten_views {
-                if view.persistence != uqa_sql::ast::RelationPersistence::Temporary {
-                    catalog.save_view(&catalog_view_row(relation, view)?)?;
-                }
-            }
-        }
-        if !rewritten_views.is_empty() {
-            self.durable.views.write().extend(rewritten_views);
-            self.note_catalog_registry_changed();
-        }
-        Ok(())
     }
 
     pub(crate) fn cascade_view_closure(

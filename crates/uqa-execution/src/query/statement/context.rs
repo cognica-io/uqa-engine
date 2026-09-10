@@ -4,25 +4,27 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Capabilities bound to one statement generation. Query output may feed an INSERT consumer in the same generation.
+//! Query read generation, physical sources, and directional execution services.
 
-use crate::mutation::insert::source::InsertSourceContext;
 use crate::query::{sources::SourceContext, CteScope};
 use crate::{PhysicalOperator, RowSchema};
 use std::collections::BTreeMap;
 use uqa_sql::{plan::QueryPlan, SQLError, SQLParam, ScalarExpr};
 
 /// Select a read generation while keeping its owner alive only for the borrowed operation.
-pub trait StatementSnapshots<S: Clone + 'static> {
+pub trait SnapshotSource<S: Clone + 'static> {
     fn capture(&self) -> Result<S, SQLError>;
+}
+
+pub trait QuerySnapshots<S: Clone + 'static>: SnapshotSource<S> {
     fn with_snapshot(
         &self,
         snapshot: &S,
-        operation: &mut dyn ScopedStatementOperation<S>,
+        operation: &mut dyn ScopedQueryOperation<S>,
     ) -> Result<(), SQLError>;
 }
-pub trait ScopedStatementOperation<S: Clone + 'static> {
-    fn run(&mut self, context: &StatementContext<'_, S>) -> Result<(), SQLError>;
+pub trait ScopedQueryOperation<S: Clone + 'static> {
+    fn run(&mut self, context: &QueryContext<'_, S>) -> Result<(), SQLError>;
 }
 /// Fork session state for a directional child. Physical traversal belongs to execution.
 pub trait DirectionalQueryFactory<S: Clone + 'static> {
@@ -42,39 +44,29 @@ pub trait CteFilterPlanning<S: Clone> {
     ) -> Result<BTreeMap<String, (String, ScalarExpr)>, SQLError>;
 }
 #[derive(Clone)]
-pub struct StatementContext<'a, S: Clone + 'static> {
+pub struct QueryContext<'a, S: Clone + 'static> {
+    pub generation: Option<&'a S>,
     pub source: SourceContext<'a, S>,
-    pub mutation: crate::mutation::statement::MutationExecutionContext<'a, S>,
-    pub snapshots: &'a dyn StatementSnapshots<S>,
+    pub snapshots: &'a dyn QuerySnapshots<S>,
     pub directional: &'a dyn DirectionalQueryFactory<S>,
     pub cte_filters: &'a dyn CteFilterPlanning<S>,
 }
-impl<S: Clone + 'static> Copy for StatementContext<'_, S> {}
+impl<S: Clone + 'static> Copy for QueryContext<'_, S> {}
 
-impl<'a, S: Clone + 'static> StatementContext<'a, S> {
-    pub fn insert_source(&self) -> InsertSourceContext<'a, S> {
-        InsertSourceContext {
-            rows: self.mutation.preparation,
-            identities: self.mutation.identities,
-            runtime: self.source.relational.runtime,
-        }
-    }
-}
-
-pub fn with_statement_snapshot<S: Clone + 'static, T>(
-    snapshots: &dyn StatementSnapshots<S>,
+pub fn with_query_snapshot<S: Clone + 'static, T>(
+    snapshots: &dyn QuerySnapshots<S>,
     snapshot: &S,
-    action: impl for<'scope> FnOnce(&StatementContext<'scope, S>) -> Result<T, SQLError>,
+    action: impl for<'scope> FnOnce(&QueryContext<'scope, S>) -> Result<T, SQLError>,
 ) -> Result<T, SQLError> {
     struct Operation<F, T> {
         action: Option<F>,
         result: Option<T>,
     }
-    impl<S: Clone + 'static, F, T> ScopedStatementOperation<S> for Operation<F, T>
+    impl<S: Clone + 'static, F, T> ScopedQueryOperation<S> for Operation<F, T>
     where
-        F: for<'scope> FnOnce(&StatementContext<'scope, S>) -> Result<T, SQLError>,
+        F: for<'scope> FnOnce(&QueryContext<'scope, S>) -> Result<T, SQLError>,
     {
-        fn run(&mut self, context: &StatementContext<'_, S>) -> Result<(), SQLError> {
+        fn run(&mut self, context: &QueryContext<'_, S>) -> Result<(), SQLError> {
             let action = self.action.take().ok_or_else(|| {
                 SQLError::Internal("statement snapshot operation was invoked more than once".into())
             })?;

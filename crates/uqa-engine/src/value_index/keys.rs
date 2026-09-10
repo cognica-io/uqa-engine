@@ -110,17 +110,14 @@ impl Engine {
                             })?;
                         let definition = crate::catalog_indexes::index_definition(&row)
                             .map_err(|error| SQLError::Internal(error.to_string()))?;
-                        if crate::sql::dml::index_predicate_accepts(
-                            self,
+                        if self.index_predicate_accepts(
                             table,
                             definition.predicate.as_deref(),
                             document,
                         )? {
                             let keys: Vec<IndexKey> = serde_json::from_str(&row.columns_json)
                                 .map_err(|error| SQLError::Internal(error.to_string()))?;
-                            Value::Row(crate::sql::dml::index_key_values(
-                                self, table, &keys, document,
-                            )?)
+                            Value::Row(self.index_key_values(table, &keys, document)?)
                         } else {
                             Value::Null
                         }

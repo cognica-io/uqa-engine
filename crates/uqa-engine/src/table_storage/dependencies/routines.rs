@@ -9,85 +9,22 @@
 use crate::open::CatalogRestoreMode;
 use crate::{Engine, StorageBackendError, StorageBackendResult};
 
-use super::super::walk_schema_expr_mut;
-
 fn rewrite_schema_routine_references(
     columns: &mut [uqa_sql::ast::ColumnDef],
     checks: &mut [uqa_sql::ast::TableCheck],
     target: &uqa_sql::ast::FunctionBinding,
     new_name: &str,
 ) -> StorageBackendResult<bool> {
-    let mut changed = false;
-    for column in columns {
-        for expression in [&mut column.default, &mut column.check]
-            .into_iter()
-            .flatten()
-        {
-            changed |=
-                crate::events::rewrite_expression_routine_identity(expression, target, new_name)
-                    .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-        }
-        if let Some(generated) = column.generated.as_mut() {
-            changed |= crate::events::rewrite_expression_routine_identity(
-                &mut generated.expression,
-                target,
-                new_name,
-            )
-            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-            for dependency in &mut generated.function_dependencies {
-                if crate::session::function_binding_matches(dependency, target) {
-                    dependency.name = new_name.to_string();
-                    changed = true;
-                }
-            }
-        }
-    }
-    for check in checks {
-        changed |=
-            crate::events::rewrite_expression_routine_identity(&mut check.expr, target, new_name)
-                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-    }
-    Ok(changed)
+    uqa_sql::schema::dependencies::registration::rewrite_schema_routine_references(
+        columns, checks, target, new_name,
+    )
+    .map_err(StorageBackendError::Other)
 }
-
-fn schema_expr_may_require_routine_identity_binding(
-    expression: &uqa_sql::ast::Expr,
-) -> StorageBackendResult<bool> {
-    let mut expression = expression.clone();
-    let mut legacy = false;
-    walk_schema_expr_mut(&mut expression, &mut |node| {
-        if let uqa_sql::ast::Expr::Func { binding, .. } = node {
-            legacy |= binding.as_ref().is_none_or(|binding| {
-                !binding.builtin
-                    && binding.dispatch.is_none()
-                    && binding.resolution_error.is_none()
-                    && binding.object_id.is_none()
-            });
-        }
-        Ok(())
-    })?;
-    Ok(legacy)
-}
-
 fn schema_expr_has_legacy_routine_identity(
     expression: &uqa_sql::ast::Expr,
 ) -> StorageBackendResult<bool> {
-    let mut expression = expression.clone();
-    let mut legacy = false;
-    walk_schema_expr_mut(&mut expression, &mut |node| {
-        if let uqa_sql::ast::Expr::Func {
-            binding: Some(binding),
-            ..
-        } = node
-        {
-            legacy |= !binding.builtin
-                && binding.dispatch.is_none()
-                && binding.resolution_error.is_none()
-                && binding.object_id.is_none();
-        }
-        Ok(())
-    })?;
-    Ok(legacy)
+    uqa_sql::schema::dependencies::registration::schema_expr_has_legacy_routine_identity(expression)
+        .map_err(StorageBackendError::Other)
 }
 
 impl Engine {
@@ -170,83 +107,13 @@ impl Engine {
         columns: &mut [uqa_sql::ast::ColumnDef],
         checks: &mut [uqa_sql::ast::TableCheck],
     ) -> StorageBackendResult<bool> {
-        let check_columns = columns.to_vec();
-        self.bind_table_schema_routine_identities_with_check_columns(
+        uqa_sql::schema::dependencies::registration::bind_table_schema_routine_identities(
+            &self.schema_dependency_binding_context(),
             table_name,
             columns,
             checks,
-            &check_columns,
         )
-    }
-
-    pub(in crate::table_storage) fn bind_table_schema_routine_identities_with_check_columns(
-        &self,
-        table_name: &str,
-        columns: &mut [uqa_sql::ast::ColumnDef],
-        checks: &mut [uqa_sql::ast::TableCheck],
-        check_columns: &[uqa_sql::ast::ColumnDef],
-    ) -> StorageBackendResult<bool> {
-        let mut changed = self.bind_table_schema_regclass_constants(columns, checks, false)?;
-        for column in columns {
-            if let Some(default) = &mut column.default {
-                changed |=
-                    self.bind_default_routine_identities(table_name, &column.name, default)?;
-            }
-            if let Some(check) = &mut column.check {
-                if schema_expr_may_require_routine_identity_binding(check)? {
-                    changed |= crate::sql::bind_stored_check_expression_routines(
-                        self,
-                        table_name,
-                        table_name,
-                        check_columns,
-                        check,
-                    )
-                    .map_err(|error| {
-                        StorageBackendError::Other(format!(
-                            "bind CHECK routine identities for `{table_name}`.`{}`: {error}",
-                            column.name
-                        ))
-                    })?;
-                }
-            }
-        }
-        for check in checks {
-            if schema_expr_may_require_routine_identity_binding(&check.expr)? {
-                changed |= crate::sql::bind_stored_check_expression_routines(
-                    self,
-                    table_name,
-                    table_name,
-                    check_columns,
-                    &mut check.expr,
-                )
-                .map_err(|error| {
-                    StorageBackendError::Other(format!(
-                        "bind CHECK routine identities for `{table_name}`: {error}"
-                    ))
-                })?;
-            }
-        }
-        Ok(changed)
-    }
-
-    pub(crate) fn bind_default_routine_identities(
-        &self,
-        table_name: &str,
-        column_name: &str,
-        default: &mut uqa_sql::ast::Expr,
-    ) -> StorageBackendResult<bool> {
-        let changed = self.bind_schema_regclass_constants(default, false)?;
-        if !schema_expr_may_require_routine_identity_binding(default)? {
-            return Ok(changed);
-        }
-        let bound =
-            crate::sql::bind_stored_schema_expression_routines(self, default, default.clone())
-                .map_err(|error| {
-                    StorageBackendError::Other(format!(
-                    "bind default routine identities for `{table_name}`.`{column_name}`: {error}"
-                ))
-                })?;
-        Ok(changed || bound)
+        .map_err(StorageBackendError::Other)
     }
 
     pub(crate) fn rewrite_schema_routine_identity(

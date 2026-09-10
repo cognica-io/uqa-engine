@@ -538,7 +538,7 @@ mod query_semantics;
 
 mod query_operators;
 
-mod schema_expressions;
+mod schema_analysis;
 
 mod statement_effects;
 
@@ -576,8 +576,39 @@ mod mutation_assignment;
 
 mod referential;
 
-pub(crate) mod insert_source;
-
 pub(crate) mod query_execution;
 
 pub(crate) mod mutation_commands;
+
+mod insert_consumers;
+
+mod table_creation;
+
+mod index_creation;
+
+mod sequences;
+
+mod schema_publication;
+pub(crate) use schema_publication::allocate_catalog_object_id;
+
+mod hierarchy;
+
+mod column_rewrites;
+
+mod constraint_changes;
+
+mod retrieval_execution;
+
+mod physical_retrieval;
+
+mod table_alteration;
+
+mod column_removal;
+
+mod copy;
+
+mod maintenance;
+
+mod index_removal;
+
+mod relation_removal;

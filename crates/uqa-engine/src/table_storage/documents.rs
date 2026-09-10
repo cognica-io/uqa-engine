@@ -631,7 +631,8 @@ impl Engine {
         vectors: BTreeMap<String, Vec<Vec<f32>>>,
     ) -> Result<bool, SQLError> {
         let columns = updates.keys().cloned().collect::<Vec<_>>();
-        let strength = crate::sql::dml::update_lock_strength(self, table, &columns);
+        let strength =
+            uqa_execution::query::locking::context::update_lock_strength(self, table, &columns);
         self.with_implicit_row_write_transaction(table, doc_id, strength, |engine| {
             engine.update_document_fields_with_vector_values_inner(table, doc_id, updates, vectors)
         })
@@ -698,7 +699,8 @@ impl Engine {
         vectors: &BTreeMap<String, Vec<Vec<f32>>>,
     ) -> Result<bool, SQLError> {
         let columns = updates.keys().cloned().collect::<Vec<_>>();
-        let strength = crate::sql::dml::update_lock_strength(self, table, &columns);
+        let strength =
+            uqa_execution::query::locking::context::update_lock_strength(self, table, &columns);
         self.with_implicit_row_write_transaction(table, doc_id, strength, |engine| {
             engine.patch_document_fields_with_vector_values_inner(table, doc_id, updates, vectors)
         })
@@ -794,7 +796,7 @@ impl Engine {
     /// lifecycle code drops or renames the durable postings afterward.
     /// Maintaining them against the half-updated schema here would replace a
     /// renamed field with NULL before its metadata has moved.
-    pub(super) fn rewrite_document_for_schema_change(
+    pub(crate) fn rewrite_document_for_schema_change(
         &self,
         table: &str,
         doc_id: DocId,

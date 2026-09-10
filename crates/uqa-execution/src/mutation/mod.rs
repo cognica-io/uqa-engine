@@ -8,6 +8,7 @@
 
 pub mod candidate;
 pub mod deferred;
+pub mod merge;
 pub mod overlay;
 pub mod prepared;
 pub mod row_images;
@@ -54,3 +55,7 @@ pub mod point_update;
 pub mod statement;
 
 pub mod delete;
+
+pub mod dispatch;
+
+pub mod entry;

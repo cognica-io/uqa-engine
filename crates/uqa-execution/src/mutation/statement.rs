@@ -13,6 +13,7 @@ use super::{
 use uqa_sql::semantics::mutation_qualifiers::MutationTargetColumns;
 #[derive(Clone)]
 pub struct MutationExecutionContext<'a, S: Clone + 'static> {
+    pub insert_consumers: &'a dyn super::insert::source::binding::InsertSelectBinding<S>,
     pub preparation: MutationPreparationContext<'a, S>,
     pub identities: InsertIdentityContext<'a>,
     pub rules: ViewRuleContext<'a, S>,
@@ -37,3 +38,5 @@ impl<'a, S: Clone + 'static> MutationExecutionContext<'a, S> {
         }
     }
 }
+
+pub mod context;

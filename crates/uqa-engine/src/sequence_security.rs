@@ -17,7 +17,7 @@ use acl::{
 use uqa_sql::ast::{GrantSequenceStmt, GrantSequenceTarget, SequenceRevokeBehavior};
 
 use crate::capabilities::RelationResolution;
-use crate::roles::{role_can_set, RoleDefinition, RoleMembership, RoleMembershipKey};
+use crate::roles::{RoleDefinition, RoleMembership, RoleMembershipKey};
 use crate::state::SequenceSecurity;
 use crate::{Engine, RelationIdentity, SQLError, Value};
 
@@ -509,80 +509,11 @@ impl Engine {
             .ok_or_else(|| {
                 SQLError::Internal(format!("sequence `{name}` has no security metadata"))
             })?;
-        if self.current_user_has_role_privileges(&owner) {
-            return Ok(owner);
-        }
-        Err(SQLError::Routine {
-            sqlstate: "42501".into(),
-            message: format!("must be owner of sequence {}", relation.name),
-        })
-    }
-
-    pub(crate) fn alter_sequence_role_owner_inner(
-        &self,
-        name: &str,
-        relation: &RelationIdentity,
-        requested_owner: &str,
-    ) -> Result<(), SQLError> {
-        let current_owner = self.ensure_sequence_owner(name, relation)?;
-        let new_owner = self.resolve_role_reference(requested_owner);
-        let roles = self.durable.roles.read();
-        if !roles.contains_key(&new_owner) {
-            return Err(SQLError::Routine {
-                sqlstate: "42704".into(),
-                message: format!("role \"{new_owner}\" does not exist"),
-            });
-        }
-        let memberships = self.durable.role_memberships.read();
-        let current_user = self.current_user_name();
-        if !role_can_set(&roles, &memberships, &current_user, &new_owner) {
-            return Err(SQLError::Routine {
-                sqlstate: "42501".into(),
-                message: format!("must be able to SET ROLE \"{new_owner}\""),
-            });
-        }
-        let state = self
-            .durable
-            .sequences
-            .read()
-            .get(relation)
-            .copied()
-            .ok_or_else(|| SQLError::Internal(format!("sequence `{name}` disappeared")))?;
-        if state.owner.is_some() {
-            return Err(SQLError::Routine {
-                sqlstate: "0A000".into(),
-                message: format!("cannot change owner of sequence \"{}\"", relation.name),
-            });
-        }
-        if current_owner == new_owner {
-            return Ok(());
-        }
-        if !self.current_user_is_superuser() {
-            self.require_schema_privilege(
-                &relation.schema,
-                &new_owner,
-                crate::schema_security::SchemaAclPrivilege::Create,
-            )?;
-        }
-        let mut security = self
-            .durable
-            .sequence_security
-            .read()
-            .get(relation)
-            .cloned()
-            .ok_or_else(|| {
-                SQLError::Internal(format!("sequence `{name}` has no security metadata"))
-            })?;
-        rewrite_acl_owner(&mut security, &new_owner);
-        self.persist_sequence_security(name, relation, &security)?;
-        self.durable
-            .sequence_security
-            .write()
-            .insert(relation.clone(), security);
-        drop(memberships);
-        drop(roles);
-        self.note_catalog_registry_changed();
-        Ok(())
+        uqa_sql::schema::sequences::ownership::require_sequence_ownership(
+            &relation.name,
+            self.current_user_has_role_privileges(&owner),
+        )?;
+        Ok(owner)
     }
 }
 

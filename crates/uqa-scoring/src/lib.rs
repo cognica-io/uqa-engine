@@ -58,3 +58,6 @@ pub use wand::{
     AdaptiveWANDScorer, BlockMaxWANDScorer, BoundTightnessAnalyzer, CursorBlockMaxWANDScorer,
     CursorWANDQuery, CursorWANDScorer, WANDQuery, WANDResult, WANDScorer, WANDStats,
 };
+
+pub mod mode;
+pub use mode::ScoringMode;

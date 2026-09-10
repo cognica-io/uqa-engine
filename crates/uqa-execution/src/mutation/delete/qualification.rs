@@ -6,13 +6,18 @@
 
 //! DELETE candidate qualification and tuple-local rechecks.
 use crate::mutation::rows::join_rows as dml_join_rows;
-use crate::query::{statement::context::StatementContext, CteScope};
+use crate::mutation::{
+    constraints::context::MutationRead,
+    rows::context::{MutationExpressionContext, MutationRowContext},
+};
+use crate::query::CteScope;
 use uqa_core::DocId;
 use uqa_sql::{plan::DeletePlan, SQLError, SQLParam};
 use uqa_storage::document_store::Document;
 pub(super) struct DeleteCandidateRecheck<'a, 'services, S: Clone + 'static> {
-    pub(super) context: &'a StatementContext<'services, S>,
-    pub(super) expression_context: &'a StatementContext<'services, S>,
+    pub(super) reads: &'services dyn MutationRead,
+    pub(super) rows: MutationRowContext<'services>,
+    pub(super) expressions: MutationExpressionContext<'services, S>,
     pub(super) stmt: &'a DeletePlan,
     pub(super) storage_table: &'a str,
     pub(super) params: &'a [SQLParam],
@@ -25,8 +30,9 @@ pub(super) fn recheck_delete_candidate<S: Clone + Send + Sync + 'static>(
     context: DeleteCandidateRecheck<'_, '_, S>,
 ) -> Result<Option<(Document, Option<crate::OwnedPhysicalRow>)>, SQLError> {
     let DeleteCandidateRecheck {
-        context,
-        expression_context,
+        reads,
+        rows,
+        expressions,
         stmt,
         storage_table,
         params,
@@ -34,18 +40,11 @@ pub(super) fn recheck_delete_candidate<S: Clone + Send + Sync + 'static>(
         doc_id,
         source_context,
     } = context;
-    let Some(doc) = context
-        .mutation
-        .preparation
-        .referential
-        .constraints
-        .reads
-        .get_document(storage_table, doc_id)?
-    else {
+    let Some(doc) = reads.get_document(storage_table, doc_id)? else {
         return Ok(None);
     };
     let target_row = crate::mutation::rows::target_row_for_storage(
-        context.mutation.preparation.referential.assignment.rows,
+        rows,
         &stmt.table,
         storage_table,
         &stmt.target_qualifier,
@@ -57,12 +56,7 @@ pub(super) fn recheck_delete_candidate<S: Clone + Send + Sync + 'static>(
         .unwrap_or(target_row);
     let qualifies = stmt.predicate.as_ref().map_or(Ok(true), |filter| {
         crate::mutation::expressions::eval_mutation_expr(
-            expression_context
-                .mutation
-                .preparation
-                .referential
-                .assignment
-                .expressions,
+            expressions,
             ctes,
             filter,
             Some(&joined),
@@ -79,7 +73,9 @@ pub(super) struct QualifiedDeleteCandidate {
 }
 
 pub(super) struct DeleteCandidateQualification<'a, 'services, S: Clone + 'static> {
-    pub(super) context: &'a StatementContext<'services, S>,
+    pub(super) reads: &'services dyn MutationRead,
+    pub(super) rows: MutationRowContext<'services>,
+    pub(super) expressions: MutationExpressionContext<'services, S>,
     pub(super) stmt: &'a DeletePlan,
     pub(super) storage_table: &'a str,
     pub(super) params: &'a [SQLParam],
@@ -93,7 +89,9 @@ pub(super) fn qualified_delete_candidate<S: Clone + Send + Sync + 'static>(
     context: DeleteCandidateQualification<'_, '_, S>,
 ) -> Result<QualifiedDeleteCandidate, SQLError> {
     let DeleteCandidateQualification {
-        context,
+        reads,
+        rows,
+        expressions,
         stmt,
         storage_table,
         params,
@@ -102,21 +100,14 @@ pub(super) fn qualified_delete_candidate<S: Clone + Send + Sync + 'static>(
         doc_id,
         count_all_qualifications,
     } = context;
-    let Some(doc) = context
-        .mutation
-        .preparation
-        .referential
-        .constraints
-        .reads
-        .get_document(storage_table, doc_id)?
-    else {
+    let Some(doc) = reads.get_document(storage_table, doc_id)? else {
         return Ok(QualifiedDeleteCandidate {
             row: None,
             qualification_count: 0,
         });
     };
     let target_row = crate::mutation::rows::target_row_for_storage(
-        context.mutation.preparation.referential.assignment.rows,
+        rows,
         &stmt.table,
         storage_table,
         &stmt.target_qualifier,
@@ -127,12 +118,7 @@ pub(super) fn qualified_delete_candidate<S: Clone + Send + Sync + 'static>(
         None => {
             let qualifies = stmt.predicate.as_ref().map_or(Ok(true), |filter| {
                 crate::mutation::expressions::eval_mutation_expr(
-                    context
-                        .mutation
-                        .preparation
-                        .referential
-                        .assignment
-                        .expressions,
+                    expressions,
                     ctes,
                     filter,
                     Some(&target_row),
@@ -157,12 +143,7 @@ pub(super) fn qualified_delete_candidate<S: Clone + Send + Sync + 'static>(
                 let joined = dml_join_rows(&target_row, &source_context);
                 let qualifies = stmt.predicate.as_ref().map_or(Ok(true), |filter| {
                     crate::mutation::expressions::eval_mutation_expr(
-                        context
-                            .mutation
-                            .preparation
-                            .referential
-                            .assignment
-                            .expressions,
+                        expressions,
                         ctes,
                         filter,
                         Some(&joined),
@@ -189,7 +170,7 @@ pub(super) fn qualified_delete_candidate<S: Clone + Send + Sync + 'static>(
 }
 
 pub(super) fn count_delete_source_qualifications<S: Clone + Send + Sync + 'static>(
-    context: &StatementContext<'_, S>,
+    expressions: MutationExpressionContext<'_, S>,
     stmt: &DeletePlan,
     ctes: &CteScope<S>,
     using_rows: &crate::SharedSpill,
@@ -203,12 +184,7 @@ pub(super) fn count_delete_source_qualifications<S: Clone + Send + Sync + 'stati
         let source = source.map_err(crate::query::projection::physical_exec_error)?;
         let qualifies = stmt.predicate.as_ref().map_or(Ok(true), |predicate| {
             crate::mutation::expressions::eval_mutation_expr(
-                context
-                    .mutation
-                    .preparation
-                    .referential
-                    .assignment
-                    .expressions,
+                expressions,
                 ctes,
                 predicate,
                 Some(&source),

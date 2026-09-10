@@ -8,34 +8,31 @@
 use crate::{session::StatementReadSnapshot, sql::CteScope, Engine};
 use std::collections::BTreeMap;
 use uqa_execution::query::statement::context::{
-    CteFilterPlanning, DirectionalQueryFactory, ScopedStatementOperation, StatementContext,
-    StatementSnapshots,
+    CteFilterPlanning, DirectionalQueryFactory, QueryContext, QuerySnapshots, ScopedQueryOperation,
+    SnapshotSource,
 };
 use uqa_sql::{plan::QueryPlan, SQLError, SQLParam, ScalarExpr};
 impl Engine {
-    pub(crate) fn statement_execution_context(
-        &self,
-    ) -> StatementContext<'_, StatementReadSnapshot> {
-        StatementContext {
+    pub(crate) fn query_execution_context(&self) -> QueryContext<'_, StatementReadSnapshot> {
+        QueryContext {
+            generation: None,
             source: self.source_execution_context(),
-            mutation: self.mutation_execution_context(),
             snapshots: self,
             directional: self,
             cte_filters: self,
         }
     }
 }
-impl StatementSnapshots<StatementReadSnapshot> for Engine {
-    fn capture(&self) -> Result<StatementReadSnapshot, SQLError> {
-        self.capture_statement_read_snapshot()
-    }
+impl QuerySnapshots<StatementReadSnapshot> for Engine {
     fn with_snapshot(
         &self,
         snapshot: &StatementReadSnapshot,
-        operation: &mut dyn ScopedStatementOperation<StatementReadSnapshot>,
+        operation: &mut dyn ScopedQueryOperation<StatementReadSnapshot>,
     ) -> Result<(), SQLError> {
         let selected = self.statement_read_snapshot_engine(snapshot);
-        operation.run(&selected.statement_execution_context())
+        let mut context = selected.query_execution_context();
+        context.generation = Some(snapshot);
+        operation.run(&context)
     }
 }
 impl CteFilterPlanning<StatementReadSnapshot> for Engine {
@@ -56,5 +53,11 @@ impl DirectionalQueryFactory<StatementReadSnapshot> for Engine {
         schema: uqa_execution::RowSchema,
     ) -> Result<Box<dyn uqa_execution::PhysicalOperator>, SQLError> {
         self.directional_query_operator(plan, params, scope, schema)
+    }
+}
+
+impl SnapshotSource<StatementReadSnapshot> for Engine {
+    fn capture(&self) -> Result<StatementReadSnapshot, SQLError> {
+        self.capture_statement_read_snapshot()
     }
 }

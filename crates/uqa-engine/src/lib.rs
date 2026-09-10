@@ -104,7 +104,6 @@ mod schema_security;
 mod search;
 mod sequence_catalog;
 mod sequence_introspection;
-mod sequence_lifecycle;
 mod sequence_ownership;
 mod sequence_security;
 mod sequence_values;
@@ -124,10 +123,11 @@ mod truncate;
 mod user_functions;
 mod value_index;
 
-pub(crate) use sql::dml::{
-    CommandExactIndex, CommandMutationOverlay, CommandStoredDocument, DeferredForeignKeyCheck,
-    TransactionRowChange,
+pub(crate) use uqa_execution::mutation::{
+    deferred::DeferredForeignKeyCheck,
+    overlay::{CommandExactIndex, CommandMutationOverlay, CommandStoredDocument},
 };
+pub(crate) use uqa_execution::row_locks::publication::TransactionRowChange;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -243,18 +243,7 @@ pub struct FtsIndexStat {
     pub total_field_length: u64,
 }
 
-/// Scoring strategy passed to [`Engine::search`].
-#[derive(Debug, Clone)]
-pub enum ScoringMode {
-    BM25(BM25Params),
-    BayesianBM25(BayesianBM25Params),
-}
-
-impl Default for ScoringMode {
-    fn default() -> Self {
-        Self::BM25(BM25Params::default())
-    }
-}
+pub use uqa_scoring::ScoringMode;
 
 type TableFieldAnalyzerRegistry = BTreeMap<(String, String), (String, String)>;
 type SessionPortalTableSnapshots = Arc<BTreeMap<RelationIdentity, Arc<TableState>>>;
@@ -950,3 +939,5 @@ pub struct RobustHybridSearchParams<'a> {
 #[cfg(test)]
 #[path = "lib_tests.rs"]
 mod tests;
+
+mod copy;

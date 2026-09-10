@@ -20,11 +20,10 @@ pub(crate) fn run_mutation_command<R>(
     }
 }
 
-pub(crate) use uqa_execution::mutation::command_scope::MutationOverlayScope;
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uqa_execution::mutation::command_scope::MutationOverlayScope;
 
     #[test]
     fn mutation_command_uses_exactly_one_transaction_frame() {

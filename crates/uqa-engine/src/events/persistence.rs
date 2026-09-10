@@ -63,7 +63,7 @@ impl Engine {
             })
     }
 
-    pub(super) fn persist_rule_catalog_snapshot(
+    pub(crate) fn persist_rule_catalog_snapshot(
         &self,
         rules: &BTreeMap<RelationIdentity, BTreeMap<String, StoredRule>>,
     ) -> Result<(), SQLError> {
@@ -178,7 +178,7 @@ impl Engine {
         Ok(())
     }
 
-    pub(super) fn persist_trigger_catalog_snapshot(
+    pub(crate) fn persist_trigger_catalog_snapshot(
         &self,
         triggers: &BTreeMap<RelationIdentity, BTreeMap<String, StoredTrigger>>,
     ) -> Result<(), SQLError> {

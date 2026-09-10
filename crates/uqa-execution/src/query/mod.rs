@@ -34,6 +34,7 @@ pub mod output;
 pub mod catalog_expression;
 
 pub mod graph_effects;
+pub mod retrieval;
 
 pub mod source_projection;
 

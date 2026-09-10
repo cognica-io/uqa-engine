@@ -34,6 +34,6 @@ mod row_locks_session;
 mod tests;
 
 mod command_scope;
-pub(crate) use command_scope::{run_mutation_command, MutationOverlayScope};
+pub(crate) use command_scope::run_mutation_command;
 
 mod lock_execution;

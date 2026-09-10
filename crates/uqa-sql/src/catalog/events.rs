@@ -102,3 +102,34 @@ impl StoredTrigger {
         })
     }
 }
+
+use crate::SQLError;
+pub type TriggerCatalog = std::collections::BTreeMap<
+    uqa_core::RelationIdentity,
+    std::collections::BTreeMap<String, StoredTrigger>,
+>;
+pub type RuleCatalog = std::collections::BTreeMap<
+    uqa_core::RelationIdentity,
+    std::collections::BTreeMap<String, StoredRule>,
+>;
+pub mod renames;
+
+pub fn synchronize_rule_sql_text(definition: &mut CreateRule) -> Result<(), SQLError> {
+    definition.condition_sql = definition
+        .condition
+        .as_ref()
+        .map(crate::render::expression_sql)
+        .transpose()?;
+    definition.action_sql = definition
+        .actions
+        .iter()
+        .map(crate::render::statement_sql)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(())
+}
+
+/// Surviving rule definitions prepared before column metadata changes, plus the rules to rebind afterward.
+pub struct PreparedRuleColumnDrop {
+    pub rules: RuleCatalog,
+    pub rebind: BTreeSet<(uqa_core::RelationIdentity, String)>,
+}

@@ -25,20 +25,15 @@
     clippy::unnested_or_patterns
 )]
 
-use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use uqa_core::{DocId, Value};
-use uqa_sql::ast::{
-    AlterTableAction, AlterTableStmt, ColumnType, CreateIndex, CreateTable, DropKind, DropStmt,
-    ForeignKey, Statement,
-};
+use uqa_core::Value;
+use uqa_sql::ast::{AlterTableAction, AlterTableStmt, DropKind, DropStmt, Statement};
 #[cfg(test)]
 use uqa_sql::compile;
 use uqa_sql::{SQLError, SQLParam, SQLResult};
-use uqa_storage::document_store::Document;
 
-use crate::{Engine, HNSWIndexParams, IVFIndexParams, VectorIndexSpec};
+use crate::Engine;
 
 mod age_cypher;
 mod aggregates;
@@ -48,17 +43,14 @@ pub(crate) use catalog::{rename_view_column_query, view_query_references_column}
 mod api;
 mod catalog_statement_routines;
 mod completion;
-mod copy;
 mod correlation;
 mod cte_validation;
 mod cursor;
 mod ddl;
-pub(crate) mod dml;
 mod domains;
 mod driver;
 mod from_rows;
 mod generated;
-mod hierarchy;
 mod mutability;
 pub(crate) mod plan_executor;
 pub use uqa_sql::result::format_postgres_text;
@@ -71,7 +63,6 @@ pub(crate) use prepared::{
 mod read_only;
 mod regrole_dependencies;
 mod row_functions;
-mod rules;
 pub(crate) mod scalar;
 mod select;
 pub(crate) mod session_portal_worker;
@@ -80,7 +71,6 @@ mod triggers;
 pub(crate) fn active_trigger_transition_relation_names() -> std::collections::BTreeSet<String> {
     triggers::current_transition_relation_names()
 }
-mod vacuum;
 mod volatility;
 mod window;
 
@@ -118,25 +108,17 @@ pub(crate) use catalog::{
     resolve_regtype_oid, resolve_regtype_output, runtime_constraints, schema_object_oid,
     sequence_relation_oid, view_relation_oid,
 };
-pub(crate) use ddl::{
-    bind_stored_check_expression_routines, bind_stored_schema_expression_routines,
-    convert_value_to_column_type, convert_value_to_column_type_with_engine, drop_column_cascade,
-    drop_constraint_dependency, drop_index_dependency, validate_check_expression,
-    validate_default_expression, validate_postgres_column_name,
-    validate_postgres_relation_column_type, validate_vector_dimensions,
-};
 use ddl::{
     column_type_name, json_table_arg, json_table_value_to_text, json_to_core_value,
     run_alter_sequence, run_alter_table, run_create_index, run_create_sequence, run_create_table,
     run_create_table_as, run_create_table_if_not_exists, run_drop, CreateTableAsExecution,
 };
-use dml::{index_vectors_for_type, run_delete, run_insert, run_merge, run_update};
-use from_rows::{build_join_spill_with_ctes, engine_func_intercept};
-pub(crate) use generated::{prepare_generated_columns, refresh_stored_generated_columns};
-pub(in crate::sql) use hierarchy::{
-    partition_insert_target, prospective_partition_bound_accepts_document,
-    validate_hash_partition_spec, validate_new_partition_bound,
+pub(crate) use ddl::{
+    convert_value_to_column_type, validate_postgres_column_name,
+    validate_postgres_relation_column_type, validate_vector_dimensions,
 };
+use from_rows::engine_func_intercept;
+pub(crate) use generated::{prepare_generated_columns, refresh_stored_generated_columns};
 use plan_executor::UnifiedPlanExecutor;
 pub(crate) use regrole_dependencies::{
     reject_stored_plan_regrole_constants, reject_stored_query_regrole_constants,
@@ -151,12 +133,6 @@ use row_functions::{
     run_age_graph_exists_with_evaluator, run_graph_create_with_evaluator,
     run_graph_drop_with_evaluator,
 };
-pub(crate) use row_functions::{
-    run_bayesian_match_with_prior_in_execution, run_bayesian_match_with_prior_public,
-    run_calibrated_vector_match_public, run_multi_field_match_in_execution,
-    run_multi_field_match_public,
-};
-use vacuum::run_vacuum;
 
 pub(crate) fn map_physical_exec_error(error: uqa_execution::ExecError) -> SQLError {
     select::physical_exec_error(error)
@@ -195,20 +171,20 @@ pub(crate) fn call_bound_engine_builtin(
         .collect::<Vec<_>>();
     from_rows::engine_catalog_scalar_value(engine, &binding.name, &values)
 }
+use select::run_explain;
 pub(crate) use select::CteScope;
-use select::{build_projection_physical_row_with_ctes, run_explain};
 pub(crate) use session_portal_worker::start_session_portal_worker;
 pub(crate) use uqa_sql::semantics::expr_is_null_free as expr_is_null_free_public;
 
-type RowUpdateVectors = BTreeMap<String, Vec<Vec<f32>>>;
-
-/// Analyze the declared RETURNING row type of a rewrite-rule action without
-/// executing the action.
+/// Analyze the declared RETURNING row type of a rewrite-rule action without executing the action.
 pub(crate) fn analyze_rule_action_returning_schema(
     engine: &Engine,
     statement: Statement,
 ) -> Result<Option<uqa_execution::RowSchema>, SQLError> {
-    dml::dml_statement_returning_schema(engine, statement)
+    uqa_sql::semantics::returning::dml_statement_returning_schema(
+        engine.returning_analysis_context(),
+        statement,
+    )
 }
 
 /// Bind every catalog-owned scalar and table-function call to an exact routine identity before the query plan is serialized.
@@ -248,7 +224,11 @@ pub(crate) fn validate_stored_view_check_option(
     name: &str,
     view: &crate::StoredView,
 ) -> Result<(), SQLError> {
-    dml::view_automatic::validate_view_definition_check_option(engine, name, view)
+    uqa_sql::semantics::view_rewrite::validate_view_definition_check_option(
+        engine.view_rewrite_context(),
+        name,
+        &view.rewrite_definition(),
+    )
 }
 
 pub(crate) use uqa_sql::semantics::XMIN_COLUMN;
