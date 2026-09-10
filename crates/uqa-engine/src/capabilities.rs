@@ -606,3 +606,5 @@ mod table_alteration;
 mod column_removal;
 
 mod copy;
+
+mod maintenance;

@@ -26,6 +26,7 @@
         "crates/uqa-engine/src/capabilities/hierarchy.rs",
         "crates/uqa-engine/src/capabilities/index_creation.rs",
         "crates/uqa-engine/src/capabilities/insert_consumers.rs",
+        "crates/uqa-engine/src/capabilities/maintenance.rs",
         "crates/uqa-engine/src/capabilities/mutation_assignment.rs",
         "crates/uqa-engine/src/capabilities/mutation_commands.rs",
         "crates/uqa-engine/src/capabilities/mutation_publication.rs",

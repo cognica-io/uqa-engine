@@ -23,8 +23,7 @@ use super::scalar::{
 use super::{
     plpgsql_exec, run_alter_sequence, run_alter_table, run_create_index, run_create_sequence,
     run_create_table, run_create_table_as, run_create_table_if_not_exists, run_delete, run_drop,
-    run_explain, run_insert, run_merge, run_update, run_vacuum, select, CreateTableAsExecution,
-    Engine,
+    run_explain, run_insert, run_merge, run_update, select, CreateTableAsExecution, Engine,
 };
 
 fn call_output_schema(
@@ -734,7 +733,10 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
                 }
                 Ok(SQLResult::empty())
             }
-            CommandPlan::Vacuum(statement) => run_vacuum(self.engine, statement),
+            CommandPlan::Vacuum(statement) => uqa_execution::maintenance::run_vacuum(
+                &self.engine.vacuum_execution_context(),
+                statement,
+            ),
             CommandPlan::Truncate {
                 tables,
                 cascade,

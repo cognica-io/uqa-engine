@@ -4,135 +4,31 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! PostgreSQL-compatible `VACUUM` command validation and storage maintenance.
-
+//! Interpret VACUUM options and bind target relation metadata before storage maintenance.
+use crate::{
+    ast::{VacuumOption, VacuumOptionValue, VacuumStmt},
+    SQLError,
+};
 use std::collections::BTreeSet;
-use std::sync::atomic::Ordering;
-
-use uqa_sql::ast::{VacuumOption, VacuumOptionValue, VacuumStmt};
-use uqa_sql::{SQLError, SQLResult};
-use uqa_storage::StorageBackendError;
-
-use super::Engine;
-
-struct VacuumExecution {
+pub struct VacuumOptions {
     flags: VacuumFlags,
 }
-
-struct ResolvedVacuumTarget {
-    table: String,
-    include_descendants: bool,
-    columns: Vec<String>,
+pub struct ResolvedVacuumTarget {
+    pub table: String,
+    pub include_descendants: bool,
+    pub columns: Vec<String>,
 }
-
-fn vacuum_storage_error(context: &str, error: impl std::fmt::Display) -> StorageBackendError {
-    StorageBackendError::Other(format!("{context}: {error}"))
+pub trait VacuumRelation {
+    fn column_names(&self) -> BTreeSet<String>;
 }
-
-fn rewrite_full_vacuum_targets(
-    engine: &Engine,
-    targets: &[ResolvedVacuumTarget],
-) -> Result<(), SQLError> {
-    let mut tables = BTreeSet::new();
-    for target in targets {
-        tables.extend(
-            engine
-                .hierarchy_scan_tables(&target.table, target.include_descendants)?
-                .into_iter(),
-        );
-    }
-    for table in &tables {
-        if let Err(error) =
-            engine.lock_relation(table, crate::row_locks::RelationLockMode::AccessExclusive)
-        {
-            engine.row_locks.release_session(engine.session_id);
-            return Err(SQLError::Internal(format!(
-                "VACUUM FULL failed: lock relation: {error}"
-            )));
-        }
-    }
-    let result = engine
-        .with_read_only_compatible_storage_transaction(|engine| {
-            for table in &tables {
-                rewrite_full_vacuum_table(engine, table)?;
-            }
-            Ok(())
-        })
-        .and_then(|()| {
-            if let Some(backend) = engine.storage.backend.as_ref() {
-                backend.vacuum()?;
-            }
-            Ok(())
-        })
-        .map_err(|error| SQLError::Internal(format!("VACUUM FULL failed: {error}")));
-    engine.row_locks.release_session(engine.session_id);
-    result
+pub trait VacuumCatalog {
+    fn resolve_relation_kind(&self, name: &str)
+        -> Result<Option<(String, &'static str)>, SQLError>;
+    fn require_table(&self, name: &str) -> Result<Box<dyn VacuumRelation + '_>, SQLError>;
 }
-
-fn rewrite_full_vacuum_table(engine: &Engine, table_name: &str) -> Result<(), StorageBackendError> {
-    let table = engine
-        .require_table(table_name)
-        .map_err(|error| vacuum_storage_error("resolve VACUUM FULL relation", error))?;
-    let stats = table.column_stats.read().clone();
-    let stats_loaded = table.column_stats_loaded.load(Ordering::Acquire);
-    let stats_dirty = table.column_stats_dirty.load(Ordering::Acquire);
-    let documents = {
-        let store = table.document_store.read();
-        let mut ids = store.doc_ids()?;
-        ids.sort_unstable();
-        let documents = store.get_stored_many(&ids)?;
-        let mut rows = Vec::with_capacity(ids.len());
-        for doc_id in ids {
-            let document = documents.get(&doc_id).cloned().ok_or_else(|| {
-                StorageBackendError::Other(format!(
-                    "VACUUM FULL relation `{table_name}` listed document {doc_id} but did not return it"
-                ))
-            })?;
-            let vectors = Engine::document_vector_values(&table, document.fields())
-                .map_err(|error| vacuum_storage_error("snapshot VACUUM FULL vectors", error))?;
-            rows.push((doc_id, document, vectors));
-        }
-        rows
-    };
-    table.document_store.write().clear()?;
-    table.inverted_index.write().clear()?;
-    for index in table.vector_indexes.write().values_mut() {
-        index.clear()?;
-    }
-    if let Some(backend) = engine.storage.backend.as_ref() {
-        backend.clear_btree_indexes(table_name)?;
-    }
-    Engine::value_indexes_clear(&table);
-    for (doc_id, document, vectors) in documents {
-        engine
-            .add_prepared_stored_document_with_vector_values_inner(
-                table_name, doc_id, document, vectors, true,
-            )
-            .map_err(|error| vacuum_storage_error("rewrite VACUUM FULL row", error))?;
-    }
-    engine
-        .refresh_value_indexes_for_table(table_name)
-        .map_err(|error| vacuum_storage_error("rebuild VACUUM FULL indexes", error))?;
-    *table.column_stats.write() = stats.clone();
-    table
-        .column_stats_loaded
-        .store(stats_loaded, Ordering::Release);
-    table
-        .column_stats_dirty
-        .store(stats_dirty, Ordering::Release);
-    if stats_loaded
-        && !stats_dirty
-        && table.persistence != uqa_sql::ast::RelationPersistence::Temporary
-    {
-        if let Some(catalog) = engine.storage.catalog.as_ref() {
-            Engine::persist_column_stats(catalog.as_ref(), table_name, &stats)?;
-        }
-    }
-    table.doc_count_dirty.store(true, Ordering::Release);
-    engine.note_table_data_changed();
-    Ok(())
+pub trait VacuumPrivileges {
+    fn ensure_maintain(&self, table: &str) -> Result<(), SQLError>;
 }
-
 #[derive(Clone, Copy, Default)]
 struct VacuumFlags(u8);
 
@@ -150,33 +46,33 @@ impl VacuumFlags {
         }
     }
 
-    const fn contains(self, flag: u8) -> bool {
+    pub const fn contains(self, flag: u8) -> bool {
         self.0 & flag != 0
     }
 }
 
-impl VacuumExecution {
-    const fn analyze(&self) -> bool {
+impl VacuumOptions {
+    pub const fn analyze(&self) -> bool {
         self.flags.contains(VacuumFlags::ANALYZE)
     }
 
-    const fn full(&self) -> bool {
+    pub const fn full(&self) -> bool {
         self.flags.contains(VacuumFlags::FULL)
     }
 
-    const fn disable_page_skipping(&self) -> bool {
+    pub const fn disable_page_skipping(&self) -> bool {
         self.flags.contains(VacuumFlags::DISABLE_PAGE_SKIPPING)
     }
 
-    const fn process_toast(&self) -> bool {
+    pub const fn process_toast(&self) -> bool {
         self.flags.contains(VacuumFlags::PROCESS_TOAST)
     }
 
-    const fn only_database_stats(&self) -> bool {
+    pub const fn only_database_stats(&self) -> bool {
         self.flags.contains(VacuumFlags::ONLY_DATABASE_STATS)
     }
 
-    const fn has_only_database_stats_conflict(&self) -> bool {
+    pub const fn has_only_database_stats_conflict(&self) -> bool {
         self.flags
             .contains(VacuumFlags::ONLY_DATABASE_STATS_CONFLICT)
     }
@@ -261,9 +157,9 @@ fn boolean_option(option: &VacuumOption) -> Result<bool, SQLError> {
 
 #[expect(
     clippy::too_many_lines,
-    reason = "preserves catalog and storage cleanup order"
+    reason = "preserves VACUUM option validation order"
 )]
-fn validate_options(options: &[VacuumOption]) -> Result<VacuumExecution, SQLError> {
+fn validate_options(options: &[VacuumOption]) -> Result<VacuumOptions, SQLError> {
     let mut analyze = false;
     let mut full = false;
     let mut parallel = 0_i64;
@@ -370,21 +266,10 @@ fn validate_options(options: &[VacuumOption]) -> Result<VacuumExecution, SQLErro
         VacuumFlags::ONLY_DATABASE_STATS_CONFLICT,
         !effective_options.is_empty(),
     );
-    Ok(VacuumExecution { flags })
+    Ok(VacuumOptions { flags })
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves catalog and storage cleanup order"
-)]
-pub(super) fn run_vacuum(engine: &Engine, statement: &VacuumStmt) -> Result<SQLResult, SQLError> {
-    if engine.transaction_depth() != 0 {
-        return Err(SQLError::Routine {
-            sqlstate: "25001".into(),
-            message: "VACUUM cannot run inside a transaction block".into(),
-        });
-    }
-
+pub fn analyze_vacuum(statement: &VacuumStmt) -> Result<VacuumOptions, SQLError> {
     let execution = validate_options(&statement.options)?;
     if !execution.analyze()
         && statement
@@ -418,6 +303,13 @@ pub(super) fn run_vacuum(engine: &Engine, statement: &VacuumStmt) -> Result<SQLR
         ));
     }
 
+    Ok(execution)
+}
+pub fn bind_vacuum_targets(
+    catalog: &dyn VacuumCatalog,
+    privileges: &dyn VacuumPrivileges,
+    statement: &VacuumStmt,
+) -> Result<Vec<ResolvedVacuumTarget>, SQLError> {
     let mut resolved_targets = Vec::with_capacity(statement.targets.len());
     for target in &statement.targets {
         if target
@@ -435,18 +327,13 @@ pub(super) fn run_vacuum(engine: &Engine, statement: &VacuumStmt) -> Result<SQLR
                 message: format!("cross-database references are not implemented: \"{qualified}\""),
             });
         }
-        let canonical = match engine.try_resolve_visible_relation_kind(&target.table)? {
+        let canonical = match catalog.resolve_relation_kind(&target.table)? {
             Some((canonical, "table")) => canonical,
             Some(_) | None => return Err(SQLError::UnknownTable(target.table.clone())),
         };
-        let table = engine.require_table(&canonical)?;
+        let table = catalog.require_table(&canonical)?;
         if !target.columns.is_empty() {
-            let available = table
-                .columns
-                .read()
-                .iter()
-                .map(|column| column.name.clone())
-                .collect::<BTreeSet<_>>();
+            let available = table.column_names();
             if let Some(column) = target
                 .columns
                 .iter()
@@ -461,10 +348,7 @@ pub(super) fn run_vacuum(engine: &Engine, statement: &VacuumStmt) -> Result<SQLR
                 });
             }
         }
-        engine.ensure_table_privilege(
-            &canonical,
-            crate::table_security::TableAclPrivilege::Maintain,
-        )?;
+        privileges.ensure_maintain(&canonical)?;
         resolved_targets.push(ResolvedVacuumTarget {
             table: canonical,
             include_descendants: target.include_descendants,
@@ -472,41 +356,5 @@ pub(super) fn run_vacuum(engine: &Engine, statement: &VacuumStmt) -> Result<SQLR
         });
     }
 
-    if execution.only_database_stats() {
-        return Ok(SQLResult::empty());
-    }
-
-    if execution.full() {
-        if resolved_targets.is_empty() {
-            if let Some(backend) = engine.storage.backend.as_ref() {
-                backend
-                    .vacuum()
-                    .map_err(|error| SQLError::Internal(format!("VACUUM failed: {error}")))?;
-            }
-        } else {
-            rewrite_full_vacuum_targets(engine, &resolved_targets)?;
-        }
-    }
-
-    if execution.analyze() {
-        if resolved_targets.is_empty() {
-            for table in engine.maintenance_table_names("vacuum")? {
-                engine
-                    .run_analyze_target(&table, &[], true)
-                    .map_err(|error| {
-                        SQLError::Internal(format!("VACUUM ANALYZE failed: {error}"))
-                    })?;
-            }
-        } else {
-            for target in &resolved_targets {
-                engine
-                    .run_analyze_target(&target.table, &target.columns, target.include_descendants)
-                    .map_err(|error| {
-                        SQLError::Internal(format!("VACUUM ANALYZE failed: {error}"))
-                    })?;
-            }
-        }
-    }
-
-    Ok(SQLResult::empty())
+    Ok(resolved_targets)
 }
