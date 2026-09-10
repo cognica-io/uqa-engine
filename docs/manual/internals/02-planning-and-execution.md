@@ -43,6 +43,8 @@ Each AST CTE owns a `CteBody` and each lowered CTE owns a `CtePlanBody`, so visi
 
 DROP INDEX name and dependency analysis is implemented in [`uqa-sql/src/schema/indexes/removal.rs`](../../../crates/uqa-sql/src/schema/indexes/removal.rs). [`uqa-execution/src/schema/indexes/removal.rs`](../../../crates/uqa-execution/src/schema/indexes/removal.rs) retains bound index rows, acquires relation locks, removes dependent constraints, and publishes physical field and catalog changes inside the original transaction boundaries. SQL checks remaining GIN references before execution removes a shared text field, and validates vector column metadata before physical index removal.
 
+[`uqa-sql/src/schema/removal.rs`](../../../crates/uqa-sql/src/schema/removal.rs) binds DROP relation targets and analyzes AGE label protection and foreign-table dependencies. [`uqa-execution/src/schema/removal.rs`](../../../crates/uqa-execution/src/schema/removal.rs) orders hierarchy locks, transaction entry, authority and pending-event checks, and dependent-object removal. Engine supplies fresh catalog inputs at the transaction boundary and binds the existing registry publication services. Schema and domain lifecycle entry uses its separate namespace path.
+
 ## Statement capability boundaries
 
 ```mermaid

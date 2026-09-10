@@ -610,3 +610,5 @@ mod copy;
 mod maintenance;
 
 mod index_removal;
+
+mod relation_removal;

@@ -25,3 +25,5 @@ pub mod constraints;
 pub mod events;
 
 pub mod table_alteration;
+
+pub mod removal;

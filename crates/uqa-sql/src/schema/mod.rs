@@ -205,3 +205,5 @@ pub mod constraint_changes;
 pub mod constraint_views;
 
 pub mod table_alteration;
+
+pub mod removal;
