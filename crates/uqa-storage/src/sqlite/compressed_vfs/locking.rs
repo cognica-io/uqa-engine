@@ -22,16 +22,18 @@ pub(super) struct FileLocks {
 }
 
 impl FileLocks {
-    pub(super) fn open(path: &Path) -> io::Result<Self> {
+    pub(super) fn open(path: &Path, read_only: bool) -> io::Result<Self> {
         let paths = lock_paths(path);
         let open = |path: &Path| {
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent)?;
+            if !read_only {
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent)?;
+                }
             }
             OpenOptions::new()
                 .read(true)
-                .write(true)
-                .create(true)
+                .write(!read_only)
+                .create(!read_only)
                 .truncate(false)
                 .open(path)
         };

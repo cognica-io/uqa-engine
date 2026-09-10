@@ -7,11 +7,49 @@
 use super::*;
 
 #[test]
+fn read_only_database_reopens_with_read_only_lock_sidecars() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("read-only.sqlite3");
+    register_database(&path, SQLiteCompressionOptions::default(), None).unwrap();
+    let writer = rusqlite::Connection::open_with_flags_and_vfs(
+        &path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_CREATE,
+        VFS_NAME,
+    )
+    .unwrap();
+    writer
+        .execute_batch("CREATE TABLE saved (id INTEGER); INSERT INTO saved VALUES (42)")
+        .unwrap();
+    drop(writer);
+    let mut files = vec![path.clone()];
+    files.extend(locking::lock_paths(&path));
+    let permissions = files
+        .iter()
+        .map(|file| fs::metadata(file).unwrap().permissions())
+        .collect::<Vec<_>>();
+    for (file, original) in files.iter().zip(&permissions) {
+        let mut read_only = original.clone();
+        read_only.set_readonly(true);
+        fs::set_permissions(file, read_only).unwrap();
+    }
+    let result = rusqlite::Connection::open_with_flags_and_vfs(
+        &path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        VFS_NAME,
+    )
+    .and_then(|reader| reader.query_row("SELECT id FROM saved", [], |row| row.get::<_, i64>(0)));
+    for (file, original) in files.iter().zip(permissions) {
+        fs::set_permissions(file, original).unwrap();
+    }
+    assert_eq!(result.unwrap(), 42);
+}
+
+#[test]
 fn vfs_delete_with_dir_sync_removes_real_file() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("delete-with-dir-sync.sqlite3");
     std::fs::write(&path, b"content").unwrap();
-    drop(FileLocks::open(&path).unwrap());
+    drop(FileLocks::open(&path, false).unwrap());
     let name = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
 
     // SAFETY: `name` is a valid NUL-terminated path for the duration of the call.
@@ -175,13 +213,13 @@ fn failed_exclusive_upgrade_preserves_the_existing_shared_lock() {
     };
     let mut first_handle = Box::new(FileHandle {
         file: VfsFile::Plain(data()),
-        locks: FileLocks::open(&data_path).unwrap(),
+        locks: FileLocks::open(&data_path, false).unwrap(),
         read_only: false,
         delete_on_close: false,
     });
     let mut second_handle = Box::new(FileHandle {
         file: VfsFile::Plain(data()),
-        locks: FileLocks::open(&data_path).unwrap(),
+        locks: FileLocks::open(&data_path, false).unwrap(),
         read_only: false,
         delete_on_close: false,
     });

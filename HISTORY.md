@@ -17,6 +17,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Opened compressed SQLite lock sidecars with read-only access for read-only connections, preserving cross-process lock coordination without requiring write permissions or creating lock paths.
+
 - Preserved `SET LOCAL` and `SET ... DEFAULT` through compilation and execution. Local values restore at transaction completion and follow savepoint rollback; default assignments retain the PostgreSQL SET command tag.
 - Corrected rare-value selectivity using the probability left after common values and NULLs, without overriding known frequencies with an entropy floor. Domain parameters retain their identities and integer widths in custom and generic plans, and domain errors use catalog-visible type names.
 - Released unwritten compressed SQLite readers before waiting for writer ownership or snapshot publication. Automatic statistics publication no longer deadlocks an application COMMIT, and catalog writer fences retain savepoint behavior while refreshing committed data.

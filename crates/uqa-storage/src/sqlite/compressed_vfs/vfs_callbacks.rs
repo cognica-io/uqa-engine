@@ -42,7 +42,7 @@ pub(super) unsafe extern "C" fn vfs_open(
     if flags & ffi::SQLITE_OPEN_CREATE == 0 && !normalized.exists() {
         return ffi::SQLITE_CANTOPEN;
     }
-    let open_result = FileLocks::open(&normalized).and_then(|locks| {
+    let open_result = FileLocks::open(&normalized, read_only).and_then(|locks| {
         VfsFile::open(normalized, options, flags, read_only).map(|container| (container, locks))
     });
     let compressed = file.cast::<CompressedSQLiteFile>();
