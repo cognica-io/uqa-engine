@@ -147,6 +147,13 @@ SELECT length('é') AS characters,
 | Random | `random`, `setseed` |
 | Formatting | `to_bin`, `to_oct`, `to_hex`, `to_number` |
 
+`round(double precision)` and `round(numeric)` return the same type as the selected argument. `round(numeric, integer)` returns a numeric value rounded to the requested number of decimal places; floating-point values need an explicit cast to numeric when a precision argument is supplied. These functions do not change database state. A two-argument call with `real` or `double precision` reports SQLSTATE `42883`, including when the first argument is NULL.
+
+```sql execute
+SELECT round(2.71828::numeric, 2) AS rounded,
+       round(sin(pi() / 2)::numeric, 6) AS rounded_sine;
+```
+
 `gamma(double precision)` evaluates the gamma function and `lgamma(double precision)` evaluates the natural logarithm of its absolute value. PostgreSQL's implicit numeric conversions let `smallint`, `integer`, `bigint`, `numeric`, and `real` inputs reach the `double precision` signature, while unknown inputs participate in the same category, preferred-type, exact-match, and search-path ranking as user-defined overloads. Both functions are strict, immutable, parallel-safe, not leakproof, available through `pg_catalog` as OIDs 6383 and 6384, and retain their selected binding in generated expressions across reopen. Native builds call the host C math library as PostgreSQL does, so platform-specific last-bit results follow that library; targets without a native C ABI use the portable Rust math implementation. `gamma` reports SQLSTATE `22003` at poles, overflow, and underflow and for negative infinity while preserving positive infinity and NaN; `lgamma` reports `22003` at poles while preserving either infinity as positive infinity and preserving NaN. Invalid unknown text reports the `double precision` input error SQLSTATE `22P02`, and unsupported explicit signatures report `42883`.
 
 `to_bin`, `to_oct`, and `to_hex` accept PostgreSQL's exact `integer` and `bigint` overloads and return lowercase, unprefixed text; negative values use the argument type's 32-bit or 64-bit two's-complement representation. Because neither overload is preferred, an unknown, NULL, or `smallint` argument without an explicit target is ambiguous and reports SQLSTATE `42725`; unrelated types, named arguments, and unsupported arities report `42883`. `to_number(text, 'RN')` reads the PostgreSQL Roman-numeral prefix after leading whitespace, accepts values from 1 through 3999, and ignores input after that prefix.

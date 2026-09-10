@@ -514,8 +514,14 @@ fn math_abs() {
 #[test]
 fn math_round_with_decimals() {
     let eng = engine();
-    let r = rows(&eng, "SELECT ROUND(price, 1) AS rounded FROM products");
-    assert_eq!(float_col(&r[0], "rounded"), Some(10.5));
+    let r = rows(
+        &eng,
+        "SELECT ROUND(price::numeric, 1) AS rounded FROM products",
+    );
+    assert_eq!(
+        r[0]["rounded"],
+        Value::Decimal(uqa_core::DecimalValue::parse("10.5").unwrap())
+    );
 }
 
 #[test]

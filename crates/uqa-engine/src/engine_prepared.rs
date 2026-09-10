@@ -23,7 +23,7 @@ impl Engine {
         name: String,
         logical_plan: uqa_planner::UnifiedPlan,
     ) -> Result<(), uqa_sql::SQLError> {
-        self.register_prepared_plan_with_types(name, logical_plan, &[])
+        self.register_prepared_plan_with_types(name, logical_plan, &[], None)
     }
 
     pub(crate) fn register_prepared_plan_with_types(
@@ -31,23 +31,36 @@ impl Engine {
         name: String,
         mut logical_plan: uqa_planner::UnifiedPlan,
         declared: &[uqa_sql::ast::ColumnType],
+        source_sql: Option<&str>,
     ) -> Result<(), uqa_sql::SQLError> {
         let mut parameter_types = declared
             .iter()
-            .map(|ty| crate::sql::resolve_declared_column_type(self, ty).map(Some))
+            .map(|ty| match ty {
+                uqa_sql::ast::ColumnType::Named(name) if is_unknown_type(name)? => Ok(None),
+                _ => crate::sql::resolve_declared_column_type(self, ty).map(Some),
+            })
             .collect::<Result<Vec<_>, _>>()?;
         logical_plan.rewrite_scalar_expressions(&mut |expression| {
             if let uqa_execution::ScalarExpr::Param(index) = expression {
                 parameter_types.resize(parameter_types.len().max(*index), None);
             }
         });
-        let plan = crate::sql::optimize_engine_plan(self, logical_plan.clone())?;
+        let parameter_types =
+            crate::sql::infer_prepared_parameter_types(self, &logical_plan, &parameter_types)?;
+        let result_schema =
+            crate::sql::analyze_prepared_plan(self, &logical_plan, &parameter_types)?;
         self.session.prepared.write().insert(
             name,
             PreparedStatementPlan {
                 logical_plan: Arc::new(logical_plan),
-                plan: Some(plan),
+                plan: None,
                 parameter_types,
+                result_schema,
+                source_sql: source_sql.map(Arc::from),
+                prepared_at_micros: uqa_sql::expr::clock_timestamp_micros(),
+                from_sql: source_sql.is_some(),
+                generic_plans: 0,
+                custom_plans: 0,
             },
         );
         Ok(())
@@ -80,12 +93,27 @@ impl Engine {
             return Ok(None);
         };
         if let Some(plan) = entry.plan {
+            if let Some(current) = self.session.prepared.write().get_mut(name) {
+                current.generic_plans = current.generic_plans.saturating_add(1);
+            }
             return Ok(Some(plan));
+        }
+        let result_schema =
+            crate::sql::analyze_prepared_plan(self, &entry.logical_plan, &entry.parameter_types)?;
+        if !crate::sql::prepared_result_schema_matches(
+            entry.result_schema.as_ref(),
+            result_schema.as_ref(),
+        ) {
+            return Err(uqa_sql::SQLError::Routine {
+                sqlstate: "0A000".into(),
+                message: "cached plan must not change result type".into(),
+            });
         }
         let plan = crate::sql::optimize_engine_plan(self, (*entry.logical_plan).clone())?;
         if let Some(current) = self.session.prepared.write().get_mut(name) {
             if Arc::ptr_eq(&current.logical_plan, &entry.logical_plan) {
                 current.plan = Some(plan.clone());
+                current.generic_plans = current.generic_plans.saturating_add(1);
             }
         }
         Ok(Some(plan))
@@ -100,30 +128,6 @@ impl Engine {
         }
     }
 
-    pub(crate) fn rebind_prepared_plans(&self) -> Result<(), uqa_sql::SQLError> {
-        let plans = self
-            .session
-            .prepared
-            .read()
-            .iter()
-            .map(|(name, prepared)| (name.clone(), prepared.logical_plan.clone()))
-            .collect::<Vec<_>>();
-        let mut rebound = Vec::with_capacity(plans.len());
-        for (name, plan) in plans {
-            rebound.push((
-                name,
-                crate::sql::optimize_engine_plan(self, (*plan).clone())?,
-            ));
-        }
-        let mut prepared = self.session.prepared.write();
-        for (name, plan) in rebound {
-            if let Some(entry) = prepared.get_mut(&name) {
-                entry.plan = Some(plan);
-            }
-        }
-        Ok(())
-    }
-
     pub fn deallocate_prepared(&self, name: Option<&str>) {
         match name {
             Some(name) => {
@@ -132,4 +136,16 @@ impl Engine {
             None => self.session.prepared.write().clear(),
         }
     }
+}
+
+fn is_unknown_type(name: &str) -> Result<bool, uqa_sql::SQLError> {
+    Ok(uqa_sql::parse_regtype_name(name)?.is_some_and(|parsed| {
+        parsed.array_dimensions == 0
+            && !parsed.has_type_modifiers
+            && match parsed.names.as_slice() {
+                [local] => local == "unknown",
+                [schema, local] => schema == "pg_catalog" && local == "unknown",
+                _ => false,
+            }
+    }))
 }

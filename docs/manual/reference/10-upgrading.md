@@ -41,6 +41,10 @@ SQLite tracks transactional cache revisions so data-only or statistics-only comm
 
 Deeply nested Cypher and long operator or indexing chains now fail with a parse error instead of exhausting the process stack. The parser limits recursive expression parsing and constructed expression trees to 64 levels; flat lists and independent projection items remain supported. Rust code that exhaustively matches `uqa_graph::cypher::ParseError` must handle `ExpressionTooDeep { limit, position }`. See the [Cypher contract](../sql/07-graph.md#cypher-table-function).
 
+## Prepared statement analysis in development
+
+The development branch analyzes `PREPARE` before execution and infers omitted parameter types in PostgreSQL occurrence order. Statements with missing references or incompatible types can now fail when prepared. Replanning a statement whose result columns, types, or modifiers changed reports `0A000`; deallocate and prepare the updated query to adopt its new result contract. The session metadata view retains the original client SQL string. Register native SQL callbacks before preparing statements that refer to them; later callback registration invalidates cached plans and preserves the original result contract. Two-argument `round` calls require a numeric first argument, so cast floating-point expressions explicitly before supplying a precision. See [prepared statements](../sql/08-transactions-and-routines.md#prepared-statements).
+
 ## SQL AST and CHECK catalog updates
 
 The 0.2 series adds `ColumnDef.check_is_local`, `ColumnDef.check_object_id`, `TableCheck.is_local`, and `TableCheck.object_id`. Rust applications constructing these structs directly initialize local-origin fields to `true` and unassigned CHECK identities to `None`; SQL compilation and engine-owned inheritance fill them automatically. Applications with custom catalogs must also implement the graph storage methods described above.

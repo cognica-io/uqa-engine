@@ -15,9 +15,10 @@ use crate::Engine;
 use super::super::helpers::type_metadata::{pg_type_array_oid, pg_type_oid};
 use super::super::schema;
 
-static CATALOG_DOMAIN_TYPES: LazyLock<Vec<ColumnType>> = LazyLock::new(|| {
+static CATALOG_NAMED_TYPES: LazyLock<Vec<ColumnType>> = LazyLock::new(|| {
     let mut domains = schema::information_schema_domains();
     domains.extend(schema::ag_catalog_domains());
+    domains.extend([schema::age_graphid(), schema::age_agtype()]);
     domains
 });
 
@@ -26,7 +27,7 @@ pub(crate) fn resolve_catalog_domain_type_by_oid(engine: &Engine, oid: u32) -> O
     for domain in catalog
         .domains()
         .map(crate::engine_domains::StoredDomain::column_type)
-        .chain(CATALOG_DOMAIN_TYPES.iter().cloned())
+        .chain(CATALOG_NAMED_TYPES.iter().cloned())
     {
         if pg_type_oid(&domain) == i64::from(oid) {
             return Some(domain);
@@ -55,7 +56,7 @@ pub(crate) fn resolve_catalog_column_type(engine: &Engine, type_name: &str) -> O
         });
     let local_name = local_name.trim_matches('"');
     let mut resolved = engine.resolve_domain_type(base_name).or_else(|| {
-        CATALOG_DOMAIN_TYPES
+        CATALOG_NAMED_TYPES
             .iter()
             .find(|domain| match domain {
                 ColumnType::Domain {

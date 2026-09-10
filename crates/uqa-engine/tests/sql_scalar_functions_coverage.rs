@@ -132,7 +132,7 @@ fn null_scalar_functions_return_null() {
              LENGTH(s) AS len_s, \
              OCTET_LENGTH(s) AS bytes_s, \
              ROUND(x) AS round_x, \
-             ROUND(x, 2) AS round2_x, \
+             ROUND(x::numeric, 2) AS round2_x, \
              SQRT(x) AS sqrt_x, \
              COS(x) AS cos_x, \
              SIN(x) AS sin_x, \

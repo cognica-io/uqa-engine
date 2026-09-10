@@ -6,12 +6,58 @@
 
 //! Static cast compatibility that depends on declared SQL type identity.
 
+mod catalog;
+
 use uqa_sql::ast::ColumnType;
 use uqa_sql::SQLError;
 
 use super::common::base_type;
 
-/// Whether `PostgreSQL` assignment coercion accepts the declared source and target.
+/// Whether an explicit SQL cast has a `PostgreSQL` coercion path, independently of its value. NULL input does not make an otherwise missing cast valid.
+#[must_use]
+pub fn explicit_type_compatible(source: &ColumnType, target: &ColumnType) -> bool {
+    let source = base_type(source).without_type_modifiers();
+    let target = base_type(target).without_type_modifiers();
+    if source == target {
+        return true;
+    }
+    if catalog::context(&cast_catalog_name(&source), &cast_catalog_name(&target)).is_some() {
+        return true;
+    }
+    if let ColumnType::Array(target) = &target {
+        let source = match &source {
+            ColumnType::Array(source) => Some(source.as_ref()),
+            ColumnType::Int2Vector => Some(&ColumnType::SmallInteger),
+            ColumnType::OidVector => Some(&ColumnType::Oid),
+            _ => None,
+        };
+        if let Some(source) = source {
+            return explicit_type_compatible(source, target);
+        }
+    }
+    is_string_io_type(&source) || is_string_io_type(&target)
+}
+
+fn cast_catalog_name(ty: &ColumnType) -> String {
+    match ty {
+        ColumnType::InternalChar => "char".into(),
+        _ => super::canonical_column_type_name(ty),
+    }
+}
+
+pub(super) fn validate_explicit_cast(
+    source: Option<&ColumnType>,
+    target: &ColumnType,
+) -> Result<(), SQLError> {
+    if let Some(source) = source {
+        if !explicit_type_compatible(source, target) {
+            return Err(undefined_cast(source, target));
+        }
+    }
+    Ok(())
+}
+
+/// Whether ``PostgreSQL`` assignment coercion accepts the declared source and target.
 /// Domains use their base type for cast selection and retain constraint checking
 /// at the value conversion boundary; array coercion applies element by element.
 #[must_use]
@@ -50,34 +96,6 @@ pub fn assignment_type_compatible(source: &ColumnType, target: &ColumnType) -> b
                     "int4" | "int8"
                 )
         )
-}
-
-pub(super) fn validate_void_cast(
-    source: Option<&ColumnType>,
-    target: &ColumnType,
-) -> Result<(), SQLError> {
-    let target = base_type(target);
-    if matches!(target, ColumnType::Void) {
-        if source.is_none_or(|source| {
-            let source = base_type(source);
-            matches!(source, ColumnType::Void) || is_string_io_type(source)
-        }) {
-            return Ok(());
-        }
-        return Err(undefined_cast(
-            source.expect("known non-string source checked above"),
-            target,
-        ));
-    }
-    if source.is_some_and(|source| matches!(base_type(source), ColumnType::Void))
-        && !is_string_io_type(target)
-    {
-        return Err(undefined_cast(
-            source.expect("void source checked above"),
-            target,
-        ));
-    }
-    Ok(())
 }
 
 fn is_string_io_type(ty: &ColumnType) -> bool {

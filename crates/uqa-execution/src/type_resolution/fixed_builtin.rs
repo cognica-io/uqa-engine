@@ -6,6 +6,8 @@
 
 //! One registry and binding path for implemented fixed-signature `PostgreSQL` built-ins.
 
+mod standard;
+
 use uqa_core::Value;
 use uqa_sql::ast::{ColumnType, FunctionBinding, FunctionDispatch};
 use uqa_sql::{SQLError, SQLParam};
@@ -457,7 +459,21 @@ fn named_argument_value_owned(expression: ScalarExpr) -> ScalarExpr {
 )]
 fn overloads(name: &str) -> Option<Vec<BuiltinFunctionOverload>> {
     let local = local_name(name)?;
+    if let Some(overloads) = standard::overloads(&local) {
+        return Some(overloads);
+    }
     let overloads = match local.as_str() {
+        "abs" => [
+            ColumnType::SmallInteger,
+            ColumnType::Integer,
+            ColumnType::BigInteger,
+            ColumnType::Real,
+            ColumnType::DoublePrecision,
+            numeric_type(),
+        ]
+        .into_iter()
+        .map(|ty| overload(&local, std::slice::from_ref(&ty), ty.clone()))
+        .collect(),
         "reverse" => vec![
             overload(&local, &[ColumnType::Text], ColumnType::Text),
             overload(&local, &[ColumnType::Bytea], ColumnType::Bytea),
@@ -826,7 +842,14 @@ fn local_name(name: &str) -> Option<String> {
     let local = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
     matches!(
         local,
-        "reverse"
+        "abs"
+            | "round"
+            | "trunc"
+            | "substring"
+            | "substr"
+            | "date_trunc"
+            | "generate_series"
+            | "reverse"
             | "md5"
             | "crc32"
             | "crc32c"

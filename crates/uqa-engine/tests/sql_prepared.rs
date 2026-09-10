@@ -6,6 +6,8 @@
 
 //! Prepared-statement coverage.
 
+#[path = "sql_prepared/analysis.rs"]
+mod analysis;
 #[path = "sql_prepared/parameters.rs"]
 mod parameters;
 

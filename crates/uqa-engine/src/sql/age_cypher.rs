@@ -258,7 +258,7 @@ fn parameter_map(value: &Value) -> Result<BTreeMap<String, Value>, SQLError> {
     match value {
         Value::Null => Ok(BTreeMap::new()),
         Value::Map(map) => Ok(map.clone()),
-        Value::Str(s) => {
+        Value::Str(s) | Value::Json(s) | Value::JsonB(s) => {
             let parsed = serde_json::from_str::<serde_json::Value>(s)
                 .map_err(|e| SQLError::TypeMismatch(format!("invalid cypher parameters: {e}")))?;
             match super::json_to_core_value(parsed) {

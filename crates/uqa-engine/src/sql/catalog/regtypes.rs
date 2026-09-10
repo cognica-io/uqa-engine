@@ -473,6 +473,7 @@ const VIRTUAL_REGCLASSES: &[(&str, &str, i64)] = &[
     ("pg_catalog", "pg_roles", 12000),
     ("pg_catalog", "pg_user", 12014),
     ("pg_catalog", "pg_settings", 12104),
+    ("pg_catalog", "pg_prepared_statements", 12095),
     ("pg_catalog", "pg_description", 2609),
     ("pg_catalog", "pg_matviews", 12038),
     ("pg_catalog", "pg_sequences", 12048),

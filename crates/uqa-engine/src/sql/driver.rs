@@ -93,6 +93,7 @@ fn execute_with_context(
                     params,
                     nested_statement,
                 )
+                .with_source_sql(sql)
                 .execute(plan.as_ref());
             }
         }
@@ -255,6 +256,7 @@ fn execute_uncached_or_snapshot_scoped(
                     params,
                     nested_statement || simple_query_batch,
                 )
+                .with_source_sql(sql)
                 .execute(initial_plan.as_ref())?;
                 if simple_query_batch
                     && transaction.as_ref().is_some_and(|transaction| {
@@ -336,7 +338,8 @@ fn execute_uncached_or_snapshot_scoped(
                     engine,
                     params,
                     nested_statement || simple_query_batch,
-                );
+                )
+                .with_source_sql(sql);
                 match executor.execute(&optimized) {
                     Ok(result) => last = result,
                     Err(error) => return Err(engine.abort_sql_transaction_after_error(error)),
@@ -457,7 +460,8 @@ fn execute_uncached_or_snapshot_scoped(
                     engine,
                     params,
                     nested_statement || simple_query_batch,
-                );
+                )
+                .with_source_sql(sql);
                 match executor.execute(&optimized) {
                     Ok(result) => {
                         // Commit failure cleanup is owned by the transaction
@@ -489,6 +493,7 @@ fn execute_uncached_or_snapshot_scoped(
                     params,
                     nested_statement || simple_query_batch,
                 )
+                .with_source_sql(sql)
                 .execute(optimized.as_ref())?;
             }
             if statement_index != final_statement_index {

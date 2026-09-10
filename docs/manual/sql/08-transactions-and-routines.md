@@ -97,6 +97,10 @@ DEALLOCATE find_task;
 
 `PREPARE name (type, ...) AS statement` declares positional value parameters. `EXECUTE name (expression, ...)` requires the statement's parameter count and applies SQL assignment conversions to declared types. Those types survive every execution, including `NULL` values, and determine overload selection and result metadata. Declaration modifiers are validated but do not impose parameter length, precision, or scale limits; domain declarations retain their own constraints. Scalar and array domain conversions preserve PostgreSQL's distinction between input conversion and runtime constraint checks.
 
+The type list is optional. An omitted type or an explicit `unknown` is inferred from the parameter's expression or assignment context, including casts, operators, routine arguments, Boolean predicates, arrays, CTEs, set operations, and DML target columns. A bare output parameter defaults to `text`. Inference follows occurrence order: `SELECT $1::integer, $1` determines an integer parameter, while `SELECT $1, $1::integer` reports `42P08` because the earlier unresolved output occurrence conflicts with the later integer deduction. Unresolved parameter slots report `42P18`.
+
+Preparation binds relation and column references, validates expression types, and records the result schema without executing the statement. Query optimization is deferred until execution. After catalog invalidation, replanning must preserve the result column names, type identities, and type modifiers; a changed result descriptor reports `0A000` with `cached plan must not change result type`.
+
 Prepared definitions belong to the session and survive transaction and savepoint rollback. `DEALLOCATE` remains effective after rollback, and `DISCARD PLANS` invalidates executable plans while retaining definitions and parameter types. Catalog refresh invalidates cached plans; the next execution replans the affected statement. A statement whose dependency disappeared can fail without preventing unrelated queries or cleanup.
 
 Duplicate prepared names report `42P05`; missing names report `26000`. An incorrect argument count reports `42601`, and an incompatible typed argument reports `42804`. Input conversion and domain constraints retain their specific SQLSTATEs. Subqueries, aggregates, and window functions are rejected as `EXECUTE` arguments before executable argument effects. Names, types, constant inputs, and constant-expression failures are checked before volatile executable arguments, preserving sequence effects and domain conversion order.
@@ -109,7 +113,17 @@ EXECUTE manual_typed_parameter(NULL);
 DEALLOCATE manual_typed_parameter;
 ```
 
-The [compatibility ledger](09-compatibility.md) tracks remaining parameter inference, preparation analysis, catalog metadata, and Extended Query work.
+`pg_catalog.pg_prepared_statements` exposes the current session's named definitions. Its columns are `name text`, `statement text`, `prepare_time timestamptz`, `parameter_types regtype[]`, `result_types regtype[]`, `from_sql boolean`, `generic_plans bigint`, and `custom_plans bigint`. SQL-created entries retain the exact client query string, including the complete message when several statements are submitted together. A command without a result descriptor has a NULL `result_types`; a zero-column query has an empty array. Deallocation immediately removes the row, and another session cannot see it. The view is read-only: INSERT, UPDATE, DELETE, and mutating MERGE actions fail with SQLSTATE `55000`, including during PREPARE and inside data-modifying CTEs, after expression and parameter validation.
+
+```sql execute
+PREPARE manual_inferred_parameter AS SELECT $1 + 1 AS incremented;
+SELECT parameter_types::text, result_types::text, from_sql
+FROM pg_prepared_statements WHERE name = 'manual_inferred_parameter';
+EXECUTE manual_inferred_parameter(41);
+DEALLOCATE manual_inferred_parameter;
+```
+
+The [compatibility ledger](09-compatibility.md) tracks the remaining preparation and function-signature matrix, plan-selection behavior, and Extended Query execution work.
 
 ## SET and SHOW
 

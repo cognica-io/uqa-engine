@@ -119,13 +119,14 @@ fn reorder_command_joins(
         | CommandPlan::DeclareCursor { query, .. } => {
             reorder_query_joins(query, statistics)?;
         }
-        CommandPlan::Explain { body, .. } | CommandPlan::Prepare { body, .. } => {
+        CommandPlan::Explain { body, .. } => {
             reorder_unified_plan_joins(body, statistics)?;
         }
         CommandPlan::Execute { params, .. } | CommandPlan::Call { args: params, .. } => {
             reorder_expression_subquery_joins(params, statistics)?;
         }
-        CommandPlan::CreateTable(_)
+        CommandPlan::Prepare { .. }
+        | CommandPlan::CreateTable(_)
         | CommandPlan::CreateTableIfNotExists(_)
         | CommandPlan::CreateIndex(_)
         | CommandPlan::Drop(_)

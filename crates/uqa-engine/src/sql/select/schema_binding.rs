@@ -16,11 +16,15 @@ mod catalog_sources;
 mod commands;
 mod cte_controls;
 mod ctes;
+mod preparation;
 mod projection;
 mod routine_binding;
 mod scope;
 mod sources;
 mod type_resolution;
+
+pub(in crate::sql) use commands::analyze_prepared_command_schema;
+pub(in crate::sql) use preparation::infer_prepared_parameter_types;
 
 #[cfg(test)]
 mod tests;

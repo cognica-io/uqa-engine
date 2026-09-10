@@ -10,11 +10,8 @@ use uqa_core::Value;
 use uqa_engine::sql::{format_postgres_text, postgres_result_type};
 use uqa_engine::Engine;
 
-fn verify_parameters(engine: &Engine) {
-    let oracle: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../../tests/parity/pg18/prepared_parameters_oracle.expected.json"
-    ))
-    .unwrap();
+pub(super) fn verify_parameters(engine: &Engine, transcript: &str) {
+    let oracle: serde_json::Value = serde_json::from_str(transcript).unwrap();
     assert!(oracle["postgresql_version"]
         .as_str()
         .unwrap()
@@ -76,11 +73,17 @@ fn verify_parameters(engine: &Engine) {
 
 #[test]
 fn prepared_parameters_match_postgresql_memory() {
-    verify_parameters(&Engine::new());
+    verify_parameters(
+        &Engine::new(),
+        include_str!("../../../../tests/parity/pg18/prepared_parameters_oracle.expected.json"),
+    );
 }
 
 #[test]
 fn prepared_parameters_match_postgresql_sqlite() {
     let directory = tempfile::tempdir().unwrap();
-    verify_parameters(&Engine::open(&directory.path().join("prepared.db")).unwrap());
+    verify_parameters(
+        &Engine::open(&directory.path().join("prepared.db")).unwrap(),
+        include_str!("../../../../tests/parity/pg18/prepared_parameters_oracle.expected.json"),
+    );
 }

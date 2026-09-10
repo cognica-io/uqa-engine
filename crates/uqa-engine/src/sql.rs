@@ -67,6 +67,9 @@ pub use result_text::format_postgres_text;
 mod planning;
 mod plpgsql_exec;
 mod prepared;
+pub(crate) use prepared::{
+    analyze_prepared_plan, infer_prepared_parameter_types, prepared_result_schema_matches,
+};
 mod read_only;
 mod regrole_dependencies;
 mod row_functions;

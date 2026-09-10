@@ -506,6 +506,9 @@ fn compile_cast_type_name(type_name: &pg_query::protobuf::TypeName) -> Result<St
         .map(|name| crate::compiler::render_relation_component(name))
         .collect::<Vec<_>>()
         .join(".");
+    if names.len() == 1 && names[0] == "char" {
+        ty = "\"char\"".to_string();
+    }
     if crate::ast::ColumnType::from_sql_name(&ty).is_err()
         || (names.len() == 1
             && matches!(

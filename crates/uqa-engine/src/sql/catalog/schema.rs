@@ -48,6 +48,7 @@ pub(super) enum VirtualRelation {
     PgRoles,
     PgUser,
     PgSettings,
+    PgPreparedStatements,
     PgDescription,
     PgMatviews,
     PgSequences,
@@ -130,6 +131,9 @@ pub(super) fn resolve_virtual_relation(
         (_, true, "pg_user") | (false, false, "pg_user") => Some(VirtualRelation::PgUser),
         (_, true, "pg_settings") | (false, false, "pg_settings") => {
             Some(VirtualRelation::PgSettings)
+        }
+        (_, true, "pg_prepared_statements") | (false, false, "pg_prepared_statements") => {
+            Some(VirtualRelation::PgPreparedStatements)
         }
         (_, true, "pg_description") | (false, false, "pg_description") => {
             Some(VirtualRelation::PgDescription)
@@ -672,6 +676,16 @@ impl VirtualRelation {
                 "passwd" => ColumnType::Text,
                 "valuntil" => ColumnType::TimestampTz,
                 "useconfig" => array(ColumnType::Text),
+            ],
+            Self::PgPreparedStatements => columns![
+                "name" => ColumnType::Text,
+                "statement" => ColumnType::Text,
+                "prepare_time" => ColumnType::TimestampTz,
+                "parameter_types" => array(ColumnType::Regtype),
+                "result_types" => array(ColumnType::Regtype),
+                "from_sql" => ColumnType::Boolean,
+                "generic_plans" => ColumnType::BigInteger,
+                "custom_plans" => ColumnType::BigInteger,
             ],
             Self::PgSettings => columns![
                 "name" => ColumnType::Text,

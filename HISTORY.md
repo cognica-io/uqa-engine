@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Added ordered prepared-parameter inference, preparation-time schema and expression validation, fixed result-descriptor checks during replanning, and session-local `pg_prepared_statements` metadata retaining the original SQL text.
 - Added an unpublished PostgreSQL TCP server crate with independent authenticated-role sessions, explicit trust policy, Simple Query results, cancellation, notifications, and protocol 3.0/3.2 negotiation.
 - Added data-modifying CTEs for INSERT, UPDATE, DELETE, and MERGE, with typed RETURNING results, statement snapshot sharing, and execution of unreferenced commands. PostgreSQL 18 differential fixtures cover command results, state changes, and diagnostics on memory and SQLite engines.
 - Added `Engine::sql_simple_query` for ordered per-statement results and `SQLResult::command_tag` for PostgreSQL command completion. Complete-message parsing, implicit transaction segments, deferred commit errors, and callback failures preserve the transaction's actual outcome.
@@ -15,6 +16,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Deferred prepared-body optimization until execution and resolved binary operators through PostgreSQL catalog signatures. Invalid typed NULL casts and operator combinations fail during preparation; quoted `"char"` retains its internal single-byte type identity.
 - Fixed stored SQL-standard routine source aliases shifting or invalidating catalog refresh after an unread column is deleted. Table input columns, nested join aliases, and expanded projections retain their creation-time shape through added columns, old-name reuse, renames, rollback, refresh, and reopen. Sequence regclass constants in generated columns bind the original object, and sequence cascades remove dependent readers while preserving unrelated routines and aliases; legacy definitions migrate during initial open.
 - Fixed column renames leaving SQL-standard function and procedure bodies bound to old column names and breaking subsequent SQLite catalog refresh. Renames now retain query and DML bindings, aliases, CTE and result names, unrelated parameters, and exact column identity after old-name reuse, including rollback, sibling-engine refresh, and reopen. Missing and duplicate rename targets report PostgreSQL column SQLSTATEs.
 - Fixed column deletion ignoring SQL-standard routine dependencies and breaking SQLite catalog refresh. RESTRICT protects stored readers and CASCADE follows generated columns, views, owned sequences, routines, and domains while retaining unrelated rows and routines. Stored MERGE write-only targets keep their column identity after deletion, skip retired writes and their evaluation, retain expression and non-DEFAULT domain coercion dependencies, and never retarget recreated names; rollback, shared-catalog refresh, legacy definition migration, and reopen are covered.

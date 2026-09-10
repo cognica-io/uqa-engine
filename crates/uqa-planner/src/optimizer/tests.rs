@@ -388,19 +388,19 @@ fn optimizes_mutation_and_cte_children() {
 }
 
 #[test]
-fn optimizes_query_bodies_owned_by_commands() {
+fn optimizes_explained_query_bodies() {
     let UnifiedPlan::Command(command) = optimized(
-        "PREPARE search AS SELECT id FROM docs \
+        "EXPLAIN SELECT id FROM docs \
          WHERE true AND text_match(body, 'rust') \
          ORDER BY _score DESC LIMIT 3",
     ) else {
         panic!("command plan expected");
     };
-    let CommandPlan::Prepare { body, .. } = command.as_ref() else {
-        panic!("prepare plan expected");
+    let CommandPlan::Explain { body, .. } = command.as_ref() else {
+        panic!("explain plan expected");
     };
     let UnifiedPlan::Query(query) = body.as_ref() else {
-        panic!("prepared query expected");
+        panic!("explained query expected");
     };
     let RelationalPlan::QueryBlock(block) = &query.root else {
         panic!("query block expected");

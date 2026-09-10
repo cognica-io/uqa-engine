@@ -141,7 +141,7 @@ pub(super) fn optimize_command(
         | CommandPlan::DeclareCursor { query, .. } => {
             optimize_query(query, config, aggregates);
         }
-        CommandPlan::Explain { body, .. } | CommandPlan::Prepare { body, .. } => {
+        CommandPlan::Explain { body, .. } => {
             optimize_unified_plan(body, config, aggregates);
         }
         CommandPlan::Execute { params, .. } | CommandPlan::Call { args: params, .. } => {
@@ -149,7 +149,8 @@ pub(super) fn optimize_command(
                 optimize_expression_plan(expression, config, aggregates);
             }
         }
-        CommandPlan::CreateTable(_)
+        CommandPlan::Prepare { .. }
+        | CommandPlan::CreateTable(_)
         | CommandPlan::CreateTableIfNotExists(_)
         | CommandPlan::CreateIndex(_)
         | CommandPlan::Drop(_)

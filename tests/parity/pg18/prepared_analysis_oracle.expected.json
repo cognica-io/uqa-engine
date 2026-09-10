@@ -1,0 +1,977 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE prepared_analysis_source(id integer, label text, amount bigint)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO prepared_analysis_source VALUES(1,'one',40),(2,'two',50)",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE inferred AS SELECT id + $1 AS total FROM prepared_analysis_source WHERE label = $2 ORDER BY id",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text FROM pg_prepared_statements WHERE name='inferred'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "inferred",
+              "{integer,text}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE inferred(5,'one')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "total"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE bare AS SELECT $1 AS value",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text FROM pg_prepared_statements WHERE name='bare'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "bare",
+              "{text}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE bare(42)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "42"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE casts AS SELECT $1::integer AS first, $1::text AS second",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text FROM pg_prepared_statements WHERE name='casts'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "casts",
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE casts(42)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "first",
+            "second"
+          ],
+          "type_oids": [
+            23,
+            25
+          ],
+          "rows": [
+            [
+              "42",
+              "42"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE incompatible AS SELECT $1::integer AS first, $1::date AS second",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42846",
+        "message": "cannot cast type integer to date"
+      },
+      "results": []
+    },
+    {
+      "sql": "PREPARE missing_slot AS SELECT $2 AS value",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P18",
+        "message": "could not determine data type of parameter $1"
+      },
+      "results": []
+    },
+    {
+      "sql": "PREPARE missing_type AS SELECT pg_typeof($1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P18",
+        "message": "could not determine data type of parameter $1"
+      },
+      "results": []
+    },
+    {
+      "sql": "PREPARE missing_column AS SELECT missing FROM prepared_analysis_source",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"missing\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "PREPARE missing_relation AS SELECT * FROM prepared_analysis_absent",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P01",
+        "message": "relation \"prepared_analysis_absent\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "PREPARE wrong_boolean AS SELECT 1 WHERE 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "argument of WHERE must be type boolean, not type integer"
+      },
+      "results": []
+    },
+    {
+      "sql": "PREPARE wrong_operator AS SELECT 1 + true",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: integer + boolean"
+      },
+      "results": []
+    },
+    {
+      "sql": "PREPARE wrong_builtin AS SELECT abs(true)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function abs(boolean) does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "PREPARE wrong_routine AS SELECT absent_prepared_routine(1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function absent_prepared_routine(integer) does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "PREPARE no_planning AS SELECT 1 / 0 AS value",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE no_planning",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22012",
+        "message": "division by zero"
+      },
+      "results": []
+    },
+    {
+      "sql": "PREPARE inserting AS INSERT INTO prepared_analysis_source VALUES($1,$2,$3) RETURNING id,label,amount",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text FROM pg_prepared_statements WHERE name='inserting'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "inserting",
+              "{integer,text,bigint}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT count(*) AS count FROM prepared_analysis_source",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE inserting(3,'three',60)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "label",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            25,
+            20
+          ],
+          "rows": [
+            [
+              "3",
+              "three",
+              "60"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE updating AS UPDATE prepared_analysis_source SET amount=$1 WHERE id=$2 RETURNING amount",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text FROM pg_prepared_statements WHERE name='updating'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "updating",
+              "{bigint,integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE updating(70,3)",
+      "command_tags": [
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "amount"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "70"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE unused(integer) AS SELECT 1 AS value",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE unused(99)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE additional(integer) AS SELECT $1 AS first, $2::bigint AS second",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text FROM pg_prepared_statements WHERE name='additional'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "additional",
+              "{integer,bigint}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE additional(1,2)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "first",
+            "second"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE explicit_unknown(unknown) AS SELECT $1 + 1 AS value",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT name,parameter_types::text FROM pg_prepared_statements WHERE name='explicit_unknown'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "explicit_unknown",
+              "{integer}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE explicit_unknown(41)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "value"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "42"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE fixed_output AS SELECT * FROM prepared_analysis_source ORDER BY id",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE fixed_output",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "label",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            25,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "one",
+              "40"
+            ],
+            [
+              "2",
+              "two",
+              "50"
+            ],
+            [
+              "3",
+              "three",
+              "70"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE prepared_analysis_source ADD COLUMN spare boolean",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE fixed_output",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cached plan must not change result type"
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER TABLE prepared_analysis_source DROP COLUMN spare",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE fixed_output",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "label",
+            "amount"
+          ],
+          "type_oids": [
+            23,
+            25,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "one",
+              "40"
+            ],
+            [
+              "2",
+              "two",
+              "50"
+            ],
+            [
+              "3",
+              "three",
+              "70"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE renamed_output AS SELECT id FROM prepared_analysis_source ORDER BY id",
+      "command_tags": [
+        "PREPARE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE prepared_analysis_source RENAME id TO key",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE renamed_output",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"id\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER TABLE prepared_analysis_source RENAME key TO id",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "EXECUTE renamed_output",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ],
+            [
+              "3"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "PREPARE invalid_input(integer) AS SELECT $1::date",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42846",
+        "message": "cannot cast type integer to date"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT name, parameter_types::text, from_sql FROM pg_prepared_statements ORDER BY name",
+      "command_tags": [
+        "SELECT 11"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "name",
+            "parameter_types",
+            "from_sql"
+          ],
+          "type_oids": [
+            25,
+            25,
+            16
+          ],
+          "rows": [
+            [
+              "additional",
+              "{integer,bigint}",
+              "t"
+            ],
+            [
+              "bare",
+              "{text}",
+              "t"
+            ],
+            [
+              "casts",
+              "{integer}",
+              "t"
+            ],
+            [
+              "explicit_unknown",
+              "{integer}",
+              "t"
+            ],
+            [
+              "fixed_output",
+              "{}",
+              "t"
+            ],
+            [
+              "inferred",
+              "{integer,text}",
+              "t"
+            ],
+            [
+              "inserting",
+              "{integer,text,bigint}",
+              "t"
+            ],
+            [
+              "no_planning",
+              "{}",
+              "t"
+            ],
+            [
+              "renamed_output",
+              "{}",
+              "t"
+            ],
+            [
+              "unused",
+              "{integer}",
+              "t"
+            ],
+            [
+              "updating",
+              "{bigint,integer}",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DEALLOCATE ALL",
+      "command_tags": [
+        "DEALLOCATE ALL"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE prepared_analysis_source",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    }
+  ]
+}

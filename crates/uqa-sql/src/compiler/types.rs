@@ -388,7 +388,8 @@ pub(super) fn compile_pg_type_name(
                     .transpose()?;
                 Ok(ColumnType::Varchar(length))
             }
-            "character" | "char" | "bpchar" => {
+            "char" => Ok(ColumnType::InternalChar),
+            "character" | "bpchar" => {
                 if type_name.typmods.len() > 1 {
                     return Err(SQLError::TypeMismatch(format!(
                         "CHARACTER accepts at most one length modifier, got {}",

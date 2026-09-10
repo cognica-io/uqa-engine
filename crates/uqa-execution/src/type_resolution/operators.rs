@@ -9,6 +9,10 @@ use uqa_sql::SQLError;
 
 use super::common::{base_type, common_numeric_type, merge_optional_types, numeric_rank};
 
+mod catalog;
+mod resolution;
+pub use resolution::binary_operator_types;
+
 /// Require the equality semantics used by grouping, duplicate elimination, and set operations. `PostgreSQL` exposes `void` as a result pseudo-type but does not register an equality operator for it.
 pub fn require_equality_operator(ty: &ColumnType) -> Result<(), SQLError> {
     require_operator_capability(ty, "equality", equality_operator_available(ty))
@@ -68,11 +72,19 @@ pub(super) fn unary_minus_result_type(ty: &ColumnType) -> Result<ColumnType, SQL
     }
 }
 
-pub(super) fn binary_result_type(
+#[doc(hidden)]
+pub fn binary_result_type(
     op: BinaryOp,
     left: Option<&ColumnType>,
     right: Option<&ColumnType>,
 ) -> Result<Option<ColumnType>, SQLError> {
+    if left
+        .into_iter()
+        .chain(right)
+        .all(|ty| !matches!(base_type(ty), ColumnType::Vector(_) | ColumnType::Tensor(_)))
+    {
+        return binary_operator_types(op, left, right).map(|[_, _, result]| Some(result));
+    }
     if matches!(
         op,
         BinaryOp::Equal

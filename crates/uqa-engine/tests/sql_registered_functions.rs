@@ -422,11 +422,30 @@ fn prepared_plan_rebinds_when_aggregate_registry_changes() {
     eng.sql("CREATE TABLE samples (val INTEGER)", &[]).unwrap();
     eng.sql("INSERT INTO samples (val) VALUES (1), (2)", &[])
         .unwrap();
+    let missing = eng
+        .sql(
+            "PREPARE totals AS SELECT rust_sum_squares(val) AS total FROM samples",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(missing.sqlstate(), Some("42883"));
+    eng.register_scalar_function("rust_sum_squares", |args: &[Value]| {
+        let [Value::Int(value)] = args else {
+            return Err(SQLError::TypeMismatch("integer argument required".into()));
+        };
+        Ok(Value::Int(value * value))
+    })
+    .unwrap();
     eng.sql(
         "PREPARE totals AS SELECT rust_sum_squares(val) AS total FROM samples",
         &[],
     )
     .unwrap();
+
+    let scalar = eng.sql("EXECUTE totals", &[]).unwrap();
+    assert_eq!(scalar.rows.len(), 2);
+    assert_eq!(scalar.rows[0]["total"], Value::Int(1));
+    assert_eq!(scalar.rows[1]["total"], Value::Int(4));
 
     eng.register_aggregate_function("rust_sum_squares", SumSquares::default)
         .unwrap();

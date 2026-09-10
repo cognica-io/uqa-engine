@@ -111,6 +111,18 @@ pub(crate) struct SessionExecutionView<'a> {
 }
 
 impl SessionExecutionView<'_> {
+    pub(crate) fn prepared_statements(
+        &self,
+    ) -> Vec<super::engine_statement_cache::PreparedStatementMetadata> {
+        self.session
+            .prepared
+            .read()
+            .iter()
+            .filter(|(name, _)| !name.is_empty())
+            .map(|(name, entry)| entry.metadata(name))
+            .collect()
+    }
+
     pub(crate) fn search_path(&self) -> Vec<String> {
         self.session.state.read().search_path.clone()
     }

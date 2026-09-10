@@ -15,6 +15,90 @@ use uqa_sql::{SQLError, SQLParam};
 use super::scalar::{eval_physical, PhysicalEvalContext};
 use super::{select, Engine};
 
+pub(crate) fn infer_prepared_parameter_types(
+    engine: &Engine,
+    plan: &uqa_planner::UnifiedPlan,
+    declared: &[Option<ColumnType>],
+) -> Result<Vec<Option<ColumnType>>, SQLError> {
+    let scope = select::CteScope::new_for_current_routine(engine);
+    select::infer_prepared_parameter_types(engine, plan, declared, &scope)
+}
+
+pub(crate) fn analyze_prepared_plan(
+    engine: &Engine,
+    plan: &uqa_planner::UnifiedPlan,
+    parameter_types: &[Option<ColumnType>],
+) -> Result<Option<uqa_execution::RowSchema>, SQLError> {
+    let params = parameter_types
+        .iter()
+        .map(|ty| match ty {
+            Some(ty) => SQLParam::typed_scalar(Value::Null, ty.clone()),
+            None => SQLParam::Scalar(Value::Null),
+        })
+        .collect::<Vec<_>>();
+    let scope = select::CteScope::new_for_current_routine(engine);
+    match plan {
+        uqa_planner::UnifiedPlan::Query(query) => {
+            select::analyze_query_plan_schema(engine, query, &params, &scope, None).map(Some)
+        }
+        uqa_planner::UnifiedPlan::Command(command) => {
+            select::analyze_prepared_command_schema(engine, command, &params, &scope)
+        }
+    }
+}
+
+pub(super) fn analyze_command_parameters(
+    engine: &Engine,
+    command: &uqa_planner::CommandPlan,
+    params: &[SQLParam],
+    ctes: &select::CteScope,
+) -> Result<(), SQLError> {
+    let schema = uqa_execution::RowSchema::default();
+    let declared = (1..=params.len())
+        .map(|index| uqa_execution::scalar_type(&ScalarExpr::Param(index), &schema, params))
+        .collect::<Result<Vec<_>, _>>()?;
+    select::infer_prepared_parameter_types(
+        engine,
+        &uqa_planner::UnifiedPlan::Command(Box::new(command.clone())),
+        &declared,
+        ctes,
+    )?;
+    Ok(())
+}
+
+pub(crate) fn prepared_result_schema_matches(
+    left: Option<&uqa_execution::RowSchema>,
+    right: Option<&uqa_execution::RowSchema>,
+) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(left), Some(right)) => {
+            left.columns() == right.columns()
+                && left.column_types().len() == right.column_types().len()
+                && left
+                    .column_types()
+                    .iter()
+                    .zip(right.column_types())
+                    .all(|(left, right)| {
+                        prepared_type_identity(left.as_ref())
+                            == prepared_type_identity(right.as_ref())
+                    })
+        }
+        _ => false,
+    }
+}
+
+fn prepared_type_identity(ty: Option<&ColumnType>) -> Option<(u32, i32)> {
+    ty.map(|ty| {
+        if let ColumnType::Domain { oid, .. } = ty {
+            (*oid, -1)
+        } else {
+            let metadata = super::postgres_result_type(ty);
+            (metadata.type_oid, metadata.type_modifier)
+        }
+    })
+}
+
 pub(super) fn statement_error(sqlstate: &str, name: &str, reason: &str) -> SQLError {
     error(sqlstate, format!("prepared statement \"{name}\" {reason}"))
 }

@@ -151,6 +151,7 @@ pub(super) struct UnifiedPlanExecutor<'engine, 'params> {
     params: &'params [SQLParam],
     nested_statement: bool,
     privilege_subject: Option<String>,
+    source_sql: Option<String>,
 }
 
 impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
@@ -175,11 +176,17 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             params,
             nested_statement,
             privilege_subject: None,
+            source_sql: None,
         }
     }
 
     pub(super) fn with_privilege_subject(mut self, subject: &str) -> Self {
         self.privilege_subject = Some(subject.to_string());
+        self
+    }
+
+    pub(super) fn with_source_sql(mut self, sql: &str) -> Self {
+        self.source_sql = Some(sql.to_string());
         self
     }
 
@@ -352,6 +359,7 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
             name.to_string(),
             body.clone(),
             parameter_types,
+            self.source_sql.as_deref(),
         )?;
         Ok(SQLResult::empty())
     }
@@ -492,6 +500,15 @@ impl<'engine, 'params> UnifiedPlanExecutor<'engine, 'params> {
         reason = "preserves SELECT schema and row identity"
     )]
     fn execute_command(&self, command: &CommandPlan) -> Result<SQLResult, SQLError> {
+        if let Some(error) = super::catalog::virtual_relation_mutation_error(
+            &self.session.relation_name_resolution(),
+            command,
+        ) {
+            // Semantic errors precede the view's rewrite-time mutation rejection.
+            let ctes = select::CteScope::new_for_current_routine(self.engine);
+            super::prepared::analyze_command_parameters(self.engine, command, self.params, &ctes)?;
+            return Err(error);
+        }
         match command {
             CommandPlan::CreateTable(statement) => {
                 run_create_table(self.engine, statement.as_ref().clone())

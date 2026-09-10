@@ -34,7 +34,7 @@ mod reverse;
 mod routine_signature;
 mod string_binary;
 
-pub use cast_compatibility::assignment_type_compatible;
+pub use cast_compatibility::{assignment_type_compatible, explicit_type_compatible};
 #[doc(hidden)]
 pub use checksum::{resolve_checksum_overload, ResolvedChecksumOverload};
 pub use common::{
@@ -59,7 +59,9 @@ pub use length::{resolve_length_overload, ResolvedLengthOverload};
 #[doc(hidden)]
 pub use md5::{resolve_md5_overload, ResolvedMd5Overload};
 #[doc(hidden)]
-pub use operators::{require_equality_operator, require_ordering_operator};
+pub use operators::{
+    binary_operator_types, binary_result_type, require_equality_operator, require_ordering_operator,
+};
 #[doc(hidden)]
 pub use overload_resolution::{
     builtin_binding_matches, builtin_name_matches, canonical_column_type_name,
@@ -264,7 +266,7 @@ pub(super) fn scalar_type_inner(
                 Err(error) => Err(error),
             }?;
             if let Some(target) = target.as_ref() {
-                cast_compatibility::validate_void_cast(source.as_ref(), target)?;
+                cast_compatibility::validate_explicit_cast(source.as_ref(), target)?;
             }
             Ok(target)
         }
@@ -285,8 +287,8 @@ pub(super) fn scalar_type_inner(
             Ok(Some(ColumnType::Record))
         }
         ScalarExpr::Binary { op, lhs, rhs } => {
-            let left = scalar_type_inner(lhs, schema, params, resolver)?;
-            let right = scalar_type_inner(rhs, schema, params, resolver)?;
+            let left = common_context_expression_type(lhs, schema, params, resolver)?;
+            let right = common_context_expression_type(rhs, schema, params, resolver)?;
             operators::binary_result_type(*op, left.as_ref(), right.as_ref())
         }
         ScalarExpr::UnaryMinus(inner) => scalar_type_inner(inner, schema, params, resolver)?

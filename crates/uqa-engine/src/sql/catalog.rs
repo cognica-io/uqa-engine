@@ -16,6 +16,13 @@ pub(crate) fn domain_object_oid(object_id: &[u8; 16]) -> u32 {
         .expect("catalog OIDs fit in u32")
 }
 
+pub(in crate::sql) fn is_virtual_catalog_relation(
+    resolution: &RelationNameResolution,
+    name: &str,
+) -> bool {
+    resolve_virtual_relation(resolution, name).is_some()
+}
+
 pub(super) fn build_info_schema_rows(
     engine: &Engine,
     catalog: &CatalogReadView,
@@ -73,6 +80,7 @@ pub(super) fn build_info_schema_rows(
         VirtualRelation::PgRoles => build_pg_roles(catalog),
         VirtualRelation::PgUser => build_pg_user(catalog),
         VirtualRelation::PgSettings => build_pg_settings(session)?,
+        VirtualRelation::PgPreparedStatements => prepared_statements::rows(session)?,
         VirtualRelation::PgDescription => Vec::new(),
         VirtualRelation::PgMatviews => build_pg_matviews(catalog, resolution)?,
         VirtualRelation::PgSequences => build_pg_sequences(catalog, session)?,
@@ -86,7 +94,9 @@ mod builtin_routines;
 mod events;
 mod expression_text;
 mod index_definition;
+mod mutation;
 pub(in crate::sql) use index_definition::pg_get_indexdef_value;
+pub(in crate::sql) use mutation::virtual_relation_mutation_error;
 pub(in crate::sql) use regtypes::format_type_value;
 mod view_definition;
 pub(in crate::sql) use view_definition::pg_get_viewdef_value;
@@ -101,6 +111,7 @@ mod pg_namespace;
 mod pg_proc;
 mod pg_settings;
 mod plpgsql;
+mod prepared_statements;
 mod regtypes;
 pub(crate) fn plpgsql_catalog(
     engine: &Engine,

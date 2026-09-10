@@ -161,6 +161,13 @@ fn validate_command_rules(engine: &Engine, command: &CommandPlan) -> Result<(), 
         ),
         _ => return Ok(()),
     };
+    if super::catalog::is_virtual_catalog_relation(
+        &engine.session_execution_view().relation_name_resolution(),
+        table,
+    ) {
+        // Virtual catalog relations have no entries in the stored rewrite-rule registry.
+        return Ok(());
+    }
     let table = super::dml::resolve_dml_target_name(engine, table, bound)?;
     let rules = engine.rules_for(&table, event)?;
     if rules.is_empty() {

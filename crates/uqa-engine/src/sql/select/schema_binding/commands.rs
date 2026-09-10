@@ -13,6 +13,42 @@ use super::{
 use crate::engine_user_functions::RoutineResolution;
 use uqa_planner::{CommandPlan, CtePlanBody};
 
+pub(in crate::sql) fn analyze_prepared_command_schema(
+    routines: &dyn RoutineResolution,
+    command: &CommandPlan,
+    params: &[SQLParam],
+    ctes: &super::CteScope,
+) -> Result<Option<RowSchema>, SQLError> {
+    if command.mutation_target().is_none() {
+        return Ok(None);
+    }
+    let mut scope = SchemaScope::for_analysis(ctes)?;
+    let previous = scope.bind_cte_schemas(routines, command.ctes(), params, None)?;
+    let result = (|| {
+        let (_, expression) = scope.command_expression_schema(routines, command, params)?;
+        for query in command.query_inputs() {
+            scope.bind_query(routines, query, params, Some(&expression))?;
+        }
+        for scalar in command.expressions() {
+            scope.bind_expression_type(
+                routines,
+                scalar,
+                &expression,
+                command.scalar_subqueries(),
+                params,
+                None,
+            )?;
+        }
+        let result = scope.bind_command_returning(routines, command, params)?;
+        Ok(command
+            .returning()
+            .filter(|returning| !returning.is_empty())
+            .map(|_| result))
+    })();
+    scope.restore_cte_schemas(previous);
+    result
+}
+
 impl SchemaScope {
     pub(super) fn bind_cte_body(
         &mut self,
@@ -126,6 +162,11 @@ impl SchemaScope {
                         Some(&expression),
                     )?);
                 }
+            }
+            if let Some(error) =
+                crate::sql::catalog::virtual_relation_mutation_error(&self.resolution, command)
+            {
+                return Err(error);
             }
             Ok(RowSchema::with_types(columns, types))
         })();

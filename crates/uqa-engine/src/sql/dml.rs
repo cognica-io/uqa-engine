@@ -906,6 +906,12 @@ pub(in crate::sql) fn execute_cte_command(
     params: &[SQLParam],
     ctes: &CteScope,
 ) -> Result<SQLResult, SQLError> {
+    if let Some(error) =
+        super::catalog::virtual_relation_mutation_error(&ctes.relation_name_resolution()?, command)
+    {
+        super::prepared::analyze_command_parameters(engine, command, params, ctes)?;
+        return Err(error);
+    }
     let mut command = command.clone();
     let subject = ctes.privilege_subject()?.to_string();
     match &mut command {

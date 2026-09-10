@@ -133,11 +133,14 @@ fn round_with_precision() {
     eng.sql("INSERT INTO t (id) VALUES (1)", &[]).unwrap();
     let res = eng
         .sql(
-            "SELECT ROUND(CAST(2.71828 AS FLOAT8), 2) AS rounded FROM t",
+            "SELECT ROUND(CAST(2.71828 AS numeric), 2) AS rounded FROM t",
             &[],
         )
         .unwrap();
-    assert_eq!(res.rows[0]["rounded"], Value::Float(2.72));
+    assert_eq!(
+        res.rows[0]["rounded"],
+        Value::Decimal(uqa_core::DecimalValue::parse("2.72").unwrap())
+    );
 }
 
 #[test]
@@ -224,12 +227,12 @@ fn math_trig_radians() {
         .unwrap();
     eng.sql("INSERT INTO t (id) VALUES (1)", &[]).unwrap();
     let res = eng
-        .sql("SELECT round(sin(pi() / 2), 6) AS s FROM t", &[])
+        .sql("SELECT round(sin(pi() / 2)::numeric, 6) AS s FROM t", &[])
         .unwrap();
-    match res.rows[0]["s"] {
-        Value::Float(f) => assert!((f - 1.0).abs() < 1e-6, "got {f}"),
-        ref other => panic!("expected float, got {other:?}"),
-    }
+    assert_eq!(
+        res.rows[0]["s"],
+        Value::Decimal(uqa_core::DecimalValue::parse("1.000000").unwrap())
+    );
 }
 
 #[test]
