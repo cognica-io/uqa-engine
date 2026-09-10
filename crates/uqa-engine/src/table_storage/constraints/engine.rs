@@ -281,144 +281,28 @@ impl Engine {
         Ok(())
     }
 
-    /// Atomically replace the schema components that ALTER hierarchy actions
-    /// may inherit. The candidate is fully named and persisted before the
-    /// in-memory table becomes visible with its new edge.
+    /// Bind hierarchy publication to the current table generation and catalog state.
     pub(crate) fn replace_table_hierarchy_components(
         &self,
         table: &str,
-        mut columns: Vec<uqa_sql::ast::ColumnDef>,
-        mut checks: Vec<uqa_sql::ast::TableCheck>,
-        mut foreign_keys: Vec<uqa_sql::ast::ForeignKey>,
+        columns: Vec<uqa_sql::ast::ColumnDef>,
+        checks: Vec<uqa_sql::ast::TableCheck>,
+        foreign_keys: Vec<uqa_sql::ast::ForeignKey>,
         key_constraints: Vec<uqa_sql::ast::TableKeyConstraint>,
         hierarchy: uqa_sql::ast::TableHierarchy,
     ) -> StorageBackendResult<()> {
-        let table_name = self
-            .try_resolve_table_name(table)?
-            .ok_or_else(|| table_not_found(table))?;
-        let state = self
-            .try_table(&table_name)?
-            .ok_or_else(|| table_not_found(&table_name))?;
-        let previous_hierarchy = state.hierarchy.read().clone();
-        self.update_not_null_origins_for_hierarchy(&previous_hierarchy, &hierarchy, &mut columns)?;
-        self.update_check_origins_for_hierarchy(
-            &previous_hierarchy,
-            &hierarchy,
-            &mut columns,
-            &mut checks,
-        )?;
-        for foreign_key in &mut foreign_keys {
-            foreign_key.ref_table = self.canonical_foreign_key_target(&foreign_key.ref_table)?;
-        }
-        let mut constraints = uqa_sql::ast::TableConstraintSet {
-            columns_declared: Some(*state.columns_declared.read()),
-            persistence: state.persistence,
-            on_commit: state.on_commit,
-            checks,
-            foreign_keys,
-            key_constraints,
-            hierarchy,
-        };
-        self.bind_table_schema_routine_identities(
-            &table_name,
-            &mut columns,
-            &mut constraints.checks,
-        )?;
-        let relation =
-            RelationIdentity::from_legacy_name(&table_name).map_err(StorageBackendError::Other)?;
-        materialize_constraint_metadata(&relation, &mut columns, &mut constraints)?;
-        if self.is_persistent() {
-            self.try_save_table_schema_with_components(
-                &table_name,
-                &state,
-                &columns,
-                &constraints,
-            )?;
-        }
-        *state.columns_declared.write() =
-            constraints.columns_declared.unwrap_or(false) || !columns.is_empty();
-        *state.columns.write() = columns;
-        *state.table_checks.write() = constraints.checks;
-        *state.foreign_keys.write() = constraints.foreign_keys;
-        *state.key_constraints.write() = constraints.key_constraints;
-        *state.hierarchy.write() = constraints.hierarchy;
-        self.refresh_value_indexes_for_table(&table_name)?;
-        Ok(())
-    }
-
-    fn update_not_null_origins_for_hierarchy(
-        &self,
-        previous: &uqa_sql::ast::TableHierarchy,
-        next: &uqa_sql::ast::TableHierarchy,
-        columns: &mut [uqa_sql::ast::ColumnDef],
-    ) -> StorageBackendResult<()> {
-        let removed_parent = previous
-            .parents
-            .iter()
-            .any(|parent| !next.parents.contains(parent));
-        let attached_partition = !previous.is_partition() && next.is_partition();
-        if !removed_parent && !attached_partition {
-            return Ok(());
-        }
-        let mut inherited = std::collections::BTreeSet::new();
-        for parent in &next.parents {
-            for column in self
-                .try_describe_table(parent)?
-                .ok_or_else(|| table_not_found(parent))?
-            {
-                if column.not_null && !column.not_null_no_inherit {
-                    inherited.insert(column.name);
-                }
-            }
-        }
-        for column in columns.iter_mut().filter(|column| column.not_null) {
-            if attached_partition && inherited.contains(&column.name) {
-                column.not_null_is_local = false;
-            } else if removed_parent && !inherited.contains(&column.name) {
-                column.not_null_is_local = true;
-            }
-        }
-        Ok(())
-    }
-
-    fn update_check_origins_for_hierarchy(
-        &self,
-        previous: &uqa_sql::ast::TableHierarchy,
-        next: &uqa_sql::ast::TableHierarchy,
-        columns: &mut [uqa_sql::ast::ColumnDef],
-        checks: &mut [uqa_sql::ast::TableCheck],
-    ) -> StorageBackendResult<()> {
-        let removed_parent = previous
-            .parents
-            .iter()
-            .any(|parent| !next.parents.contains(parent));
-        let attached_partition = !previous.is_partition() && next.is_partition();
-        if !removed_parent && !attached_partition {
-            return Ok(());
-        }
-        let mut inherited = std::collections::BTreeSet::new();
-        for parent in &next.parents {
-            for check in self.try_check_constraint_definitions(parent)? {
-                if !check.no_inherit {
-                    inherited.extend(check.name);
-                }
-            }
-        }
-        let update = |name: Option<&String>, local: &mut bool| {
-            let supplied = name.is_some_and(|name| inherited.contains(name));
-            if attached_partition && supplied {
-                *local = false;
-            } else if removed_parent && !supplied {
-                *local = true;
-            }
-        };
-        for column in columns.iter_mut().filter(|column| column.check.is_some()) {
-            update(column.check_name.as_ref(), &mut column.check_is_local);
-        }
-        for check in checks {
-            update(check.name.as_ref(), &mut check.is_local);
-        }
-        Ok(())
+        uqa_execution::schema::publication::hierarchy::replace_hierarchy_components(
+            &self.schema_publication_context(),
+            self,
+            table,
+            uqa_execution::schema::publication::hierarchy::HierarchySchemaChange {
+                columns,
+                checks,
+                foreign_keys,
+                key_constraints,
+                hierarchy,
+            },
+        )
     }
 
     pub(crate) fn try_check_constraint_parent_count(

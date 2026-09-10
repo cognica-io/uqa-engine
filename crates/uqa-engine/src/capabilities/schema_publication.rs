@@ -56,6 +56,12 @@ impl TableSchemaCatalog for Engine {
     }
 }
 impl TableSchemaState for SchemaTableBinding<'_> {
+    fn hierarchy(&self) -> uqa_sql::ast::TableHierarchy {
+        self.state.hierarchy.read().clone()
+    }
+    fn publish_hierarchy(&self, hierarchy: uqa_sql::ast::TableHierarchy) {
+        *self.state.hierarchy.write() = hierarchy;
+    }
     fn columns(&self) -> Vec<ColumnDef> {
         self.state.columns.read().clone()
     }

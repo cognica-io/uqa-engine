@@ -20,6 +20,8 @@ use uqa_storage::{StorageBackendError, StorageBackendResult};
 /// A retained table generation with only the metadata and writes needed for schema publication.
 pub trait TableSchemaState {
     fn columns(&self) -> Vec<ColumnDef>;
+    fn hierarchy(&self) -> uqa_sql::ast::TableHierarchy;
+    fn publish_hierarchy(&self, hierarchy: uqa_sql::ast::TableHierarchy);
     fn constraints(&self) -> TableConstraintSet;
     fn columns_declared(&self) -> bool;
     fn mark_statistics_dirty(&self) -> StorageBackendResult<()>;
@@ -192,3 +194,5 @@ pub type SchemaWrite<'a> =
 pub trait SchemaWriteTransaction {
     fn with_schema_write(&self, write: SchemaWrite<'_>) -> StorageBackendResult<()>;
 }
+
+pub mod hierarchy;

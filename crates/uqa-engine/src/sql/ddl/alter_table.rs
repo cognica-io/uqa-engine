@@ -17,7 +17,6 @@ use super::constraint_validation::{
     resolve_foreign_key_parent, validate_foreign_key_definition as validate_temporal_foreign_key,
 };
 use super::defaults::validate_default_expression;
-use super::hierarchy_alter::run_alter_hierarchy_action;
 
 mod checks;
 mod constraint_drop;
@@ -361,7 +360,11 @@ fn run_alter_table_action(
         | AlterTableAction::DropInheritance { .. }
         | AlterTableAction::AttachPartition { .. }
         | AlterTableAction::DetachPartition { .. }) => {
-            run_alter_hierarchy_action(engine, &stmt.table, action)?;
+            uqa_execution::schema::hierarchy::run_alter_hierarchy_action(
+                &engine.hierarchy_execution_context(),
+                &stmt.table,
+                action,
+            )?;
         }
         AlterTableAction::AddColumn {
             mut column,

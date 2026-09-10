@@ -55,7 +55,6 @@ mod domains;
 mod driver;
 mod from_rows;
 mod generated;
-mod hierarchy;
 mod mutability;
 pub(crate) mod plan_executor;
 pub use uqa_sql::result::format_postgres_text;
@@ -128,9 +127,6 @@ pub(crate) use ddl::{
 use dml::{index_vectors_for_type, run_delete, run_insert, run_merge, run_update};
 use from_rows::engine_func_intercept;
 pub(crate) use generated::{prepare_generated_columns, refresh_stored_generated_columns};
-pub(in crate::sql) use hierarchy::{
-    prospective_partition_bound_accepts_document, validate_new_partition_bound,
-};
 use plan_executor::UnifiedPlanExecutor;
 pub(crate) use regrole_dependencies::{
     reject_stored_plan_regrole_constants, reject_stored_query_regrole_constants,

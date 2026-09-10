@@ -4,47 +4,87 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `PostgreSQL` 18 ALTER inheritance and partition lifecycle.
-
-use super::{ddl_storage_error, AlterTableAction, Engine, SQLError};
+//! Execute inheritance changes and partition attachment against active catalog and row state.
+use super::publication::{hierarchy::HierarchySchemaChange, SchemaPublicationContext};
+use crate::catalog::RelationResolution;
+use crate::mutation::constraints::context::ConstraintContext;
 use uqa_sql::schema::inheritance::alter::{
     append_inherited_foreign_keys, append_inherited_keys, detached_bound_check,
     install_inherited_identity, normalize_parent_sequence_numbers,
     remove_partition_inherited_constraints, restore_identity_overrides,
 };
+use uqa_sql::semantics::partition::PartitionContext;
+use uqa_sql::{
+    ast::{
+        AlterTableAction, AutoIncrement, ColumnDef, ForeignKey, PartitionBound,
+        RelationPersistence, TableCheck, TableConstraintSet, TableHierarchy, TableKeyConstraint,
+    },
+    SQLError,
+};
+use uqa_storage::StorageBackendResult;
 
-use uqa_sql::ast::{AutoIncrement, ColumnDef, PartitionBound, TableHierarchy};
+/// Declared and effective constraint snapshots needed by hierarchy changes.
+pub trait HierarchyCatalog {
+    fn try_describe_table(&self, table: &str) -> StorageBackendResult<Option<Vec<ColumnDef>>>;
+    fn try_check_constraint_definitions(
+        &self,
+        table: &str,
+    ) -> StorageBackendResult<Vec<TableCheck>>;
+    fn try_key_constraints(&self, table: &str) -> StorageBackendResult<Vec<TableKeyConstraint>>;
+    fn try_foreign_keys(&self, table: &str) -> StorageBackendResult<Vec<ForeignKey>>;
+    fn try_declared_table_constraints(
+        &self,
+        table: &str,
+    ) -> StorageBackendResult<TableConstraintSet>;
+    fn table_persistence(&self, table: &str) -> StorageBackendResult<Option<RelationPersistence>>;
+}
+pub trait HierarchyNamespace {
+    fn resolve_visible_relation_kind(&self, name: &str) -> Result<RelationResolution, SQLError>;
+    fn lock_exclusive(&self, table: &str) -> Result<(), SQLError>;
+}
+pub struct HierarchyContext<'a> {
+    pub catalog: &'a dyn HierarchyCatalog,
+    pub namespace: &'a dyn HierarchyNamespace,
+    pub constraints: ConstraintContext<'a>,
+    pub partitions: PartitionContext<'a>,
+    pub publication: SchemaPublicationContext<'a>,
+}
+fn ddl_storage_error(action: &str, error: uqa_storage::StorageBackendError) -> SQLError {
+    uqa_sql::catalog::errors::storage_error(action, &error)
+}
 
-use crate::capabilities::RelationResolution;
-
-pub(super) fn run_alter_hierarchy_action(
-    engine: &Engine,
+pub fn run_alter_hierarchy_action(
+    context: &HierarchyContext<'_>,
     table: &str,
     action: AlterTableAction,
 ) -> Result<(), SQLError> {
     match action {
-        AlterTableAction::AddInheritance { parent } => add_inheritance(engine, table, &parent),
-        AlterTableAction::DropInheritance { parent } => drop_inheritance(engine, table, &parent),
+        AlterTableAction::AddInheritance { parent } => add_inheritance(context, table, &parent),
+        AlterTableAction::DropInheritance { parent } => drop_inheritance(context, table, &parent),
         AlterTableAction::AttachPartition { partition, bound } => {
-            attach_partition(engine, table, &partition, bound)
+            attach_partition(context, table, &partition, bound)
         }
         AlterTableAction::DetachPartition {
             partition,
             concurrently,
             finalize,
-        } => detach_partition(engine, table, &partition, concurrently, finalize),
+        } => detach_partition(context, table, &partition, concurrently, finalize),
         _ => Err(SQLError::Internal(
             "non-hierarchy ALTER action reached hierarchy executor".into(),
         )),
     }
 }
 
-fn add_inheritance(engine: &Engine, child: &str, requested_parent: &str) -> Result<(), SQLError> {
-    let parent = resolve_table(engine, requested_parent)?;
-    lock_secondary_relation(engine, child, &parent)?;
-    validate_matching_persistence(engine, child, &parent, "inherit from")?;
-    let mut hierarchy = read_hierarchy(engine, child)?;
-    let parent_hierarchy = read_hierarchy(engine, &parent)?;
+fn add_inheritance(
+    context: &HierarchyContext<'_>,
+    child: &str,
+    requested_parent: &str,
+) -> Result<(), SQLError> {
+    let parent = resolve_table(context, requested_parent)?;
+    lock_secondary_relation(context, child, &parent)?;
+    validate_matching_persistence(context, child, &parent, "inherit from")?;
+    let mut hierarchy = read_hierarchy(context, child)?;
+    let parent_hierarchy = read_hierarchy(context, &parent)?;
     if hierarchy.is_partition() {
         return Err(wrong_object("cannot change inheritance of a partition"));
     }
@@ -72,26 +112,32 @@ fn add_inheritance(engine: &Engine, child: &str, requested_parent: &str) -> Resu
         ));
     }
     if child == parent
-        || engine
+        || context
+            .constraints
+            .catalog
             .hierarchy_scan_tables(child, true)?
             .iter()
             .any(|descendant| descendant == &parent)
     {
         return Err(routine("42P07", "circular inheritance not allowed"));
     }
-    validate_row_type(engine, &parent, child, false, false)?;
-    validate_inherited_checks(engine, &parent, child)?;
+    validate_row_type(context, &parent, child, false, false)?;
+    validate_inherited_checks(context, &parent, child)?;
     normalize_parent_sequence_numbers(&mut hierarchy);
     let sequence_number = hierarchy.next_parent_sequence_number();
     hierarchy.parents.push(parent);
     hierarchy.parent_sequence_numbers.push(sequence_number);
-    replace_hierarchy_only(engine, child, hierarchy, "ALTER TABLE INHERIT")
+    replace_hierarchy_only(context, child, hierarchy, "ALTER TABLE INHERIT")
 }
 
-fn drop_inheritance(engine: &Engine, child: &str, requested_parent: &str) -> Result<(), SQLError> {
-    let parent = resolve_table(engine, requested_parent)?;
-    lock_secondary_relation(engine, child, &parent)?;
-    let mut hierarchy = read_hierarchy(engine, child)?;
+fn drop_inheritance(
+    context: &HierarchyContext<'_>,
+    child: &str,
+    requested_parent: &str,
+) -> Result<(), SQLError> {
+    let parent = resolve_table(context, requested_parent)?;
+    lock_secondary_relation(context, child, &parent)?;
+    let mut hierarchy = read_hierarchy(context, child)?;
     if hierarchy.is_partition() {
         return Err(wrong_object("cannot change inheritance of a partition"));
     }
@@ -116,26 +162,26 @@ fn drop_inheritance(engine: &Engine, child: &str, requested_parent: &str) -> Res
     normalize_parent_sequence_numbers(&mut hierarchy);
     hierarchy.parents.remove(index);
     hierarchy.parent_sequence_numbers.remove(index);
-    replace_hierarchy_only(engine, child, hierarchy, "ALTER TABLE NO INHERIT")
+    replace_hierarchy_only(context, child, hierarchy, "ALTER TABLE NO INHERIT")
 }
 
 fn attach_partition(
-    engine: &Engine,
+    context: &HierarchyContext<'_>,
     parent: &str,
     requested_partition: &str,
     bound: PartitionBound,
 ) -> Result<(), SQLError> {
-    let partition = resolve_table(engine, requested_partition)?;
-    lock_secondary_relation(engine, parent, &partition)?;
-    validate_matching_persistence(engine, &partition, parent, "attach to")?;
-    let parent_hierarchy = read_hierarchy(engine, parent)?;
+    let partition = resolve_table(context, requested_partition)?;
+    lock_secondary_relation(context, parent, &partition)?;
+    validate_matching_persistence(context, &partition, parent, "attach to")?;
+    let parent_hierarchy = read_hierarchy(context, parent)?;
     let Some(parent_spec) = parent_hierarchy.partition_spec.as_ref() else {
         return Err(wrong_object(format!(
             "ALTER action ATTACH PARTITION cannot be performed on relation \"{}\"",
             local_relation_name(parent)
         )));
     };
-    let partition_hierarchy = read_hierarchy(engine, &partition)?;
+    let partition_hierarchy = read_hierarchy(context, &partition)?;
     if partition_hierarchy.is_partition() {
         return Err(wrong_object(format!(
             "\"{requested_partition}\" is already a partition"
@@ -144,27 +190,50 @@ fn attach_partition(
     if !partition_hierarchy.parents.is_empty() {
         return Err(wrong_object("cannot attach inheritance child as partition"));
     }
-    let direct_children = engine.direct_hierarchy_children(&partition)?;
+    let direct_children = context
+        .partitions
+        .catalog
+        .direct_hierarchy_children(&partition)?;
     if partition_hierarchy.partition_spec.is_none() && !direct_children.is_empty() {
         return Err(wrong_object(
             "cannot attach inheritance parent as partition",
         ));
     }
     if parent == partition
-        || engine
+        || context
+            .constraints
+            .catalog
             .hierarchy_scan_tables(&partition, true)?
             .iter()
             .any(|descendant| descendant == parent)
     {
         return Err(routine("42P07", "circular inheritance not allowed"));
     }
-    validate_row_type(engine, parent, &partition, true, true)?;
-    validate_inherited_checks(engine, parent, &partition)?;
-    crate::sql::validate_new_partition_bound(engine, parent, &bound)?;
-    validate_attached_rows(engine, parent, &partition, &bound)?;
-    validate_default_partition_exclusion(engine, parent, &bound)?;
+    validate_row_type(context, parent, &partition, true, true)?;
+    validate_inherited_checks(context, parent, &partition)?;
+    uqa_sql::semantics::partition::validate_new_partition_bound(
+        &context.partitions,
+        parent,
+        &bound,
+    )?;
+    validate_attached_rows(context, parent, &partition, &bound)?;
+    validate_default_partition_exclusion(context, parent, &bound)?;
 
-    let parent_columns = table_columns(engine, parent, "ATTACH PARTITION")?;
+    let subtree = inherit_partition_schema(context, parent, &partition, &bound)?;
+    for target in subtree {
+        validate_existing_constraints(context, &target)?;
+    }
+    let _ = parent_spec;
+    Ok(())
+}
+
+fn inherit_partition_schema(
+    context: &HierarchyContext<'_>,
+    parent: &str,
+    partition: &str,
+    bound: &PartitionBound,
+) -> Result<Vec<String>, SQLError> {
+    let parent_columns = table_columns(context, parent, "ATTACH PARTITION")?;
     let inherited_identity = parent_columns
         .iter()
         .filter_map(|column| {
@@ -175,17 +244,22 @@ fn attach_partition(
                 .map(|increment| (column.name.clone(), increment.clone()))
         })
         .collect::<Vec<_>>();
-    let parent_keys = engine
+    let parent_keys = context
+        .catalog
         .try_key_constraints(parent)
         .map_err(|error| ddl_storage_error("ATTACH PARTITION constraints", error))?;
-    let parent_foreign_keys = engine
+    let parent_foreign_keys = context
+        .catalog
         .try_foreign_keys(parent)
         .map_err(|error| ddl_storage_error("ATTACH PARTITION constraints", error))?;
-    let subtree = engine.hierarchy_scan_tables(&partition, true)?;
+    let subtree = context
+        .constraints
+        .catalog
+        .hierarchy_scan_tables(partition, true)?;
     for target in &subtree {
-        let mut columns = table_columns(engine, target, "ATTACH PARTITION")?;
+        let mut columns = table_columns(context, target, "ATTACH PARTITION")?;
         let identity_overrides = install_inherited_identity(&mut columns, &inherited_identity)?;
-        let mut constraints = declared_constraints(engine, target, "ATTACH PARTITION")?;
+        let mut constraints = declared_constraints(context, target, "ATTACH PARTITION")?;
         let inherited_keys = append_inherited_keys(&mut constraints.key_constraints, &parent_keys);
         let inherited_foreign_keys =
             append_inherited_foreign_keys(&mut constraints.foreign_keys, &parent_foreign_keys);
@@ -193,46 +267,45 @@ fn attach_partition(
         hierarchy.partition_identity_overrides = identity_overrides;
         hierarchy.partition_inherited_key_constraints = inherited_keys;
         hierarchy.partition_inherited_foreign_keys = inherited_foreign_keys;
-        if target == &partition {
+        if target == partition {
             hierarchy.parents = vec![parent.to_string()];
             hierarchy.parent_sequence_numbers = vec![1];
             hierarchy.partition_bound = Some(bound.clone());
         }
-        engine
-            .replace_table_hierarchy_components(
-                target,
+        super::publication::hierarchy::replace_hierarchy_components(
+            &context.publication,
+            context.catalog,
+            target,
+            HierarchySchemaChange {
                 columns,
-                constraints.checks,
-                constraints.foreign_keys,
-                constraints.key_constraints,
+                checks: constraints.checks,
+                foreign_keys: constraints.foreign_keys,
+                key_constraints: constraints.key_constraints,
                 hierarchy,
-            )
-            .map_err(|error| ddl_storage_error("ATTACH PARTITION", error))?;
+            },
+        )
+        .map_err(|error| ddl_storage_error("ATTACH PARTITION", error))?;
     }
-    for target in subtree {
-        validate_existing_constraints(engine, &target)?;
-    }
-    let _ = parent_spec;
-    Ok(())
+    Ok(subtree)
 }
 
 fn detach_partition(
-    engine: &Engine,
+    context: &HierarchyContext<'_>,
     parent: &str,
     requested_partition: &str,
     concurrently: bool,
     finalize: bool,
 ) -> Result<(), SQLError> {
-    let partition = resolve_table(engine, requested_partition)?;
-    lock_secondary_relation(engine, parent, &partition)?;
-    let parent_hierarchy = read_hierarchy(engine, parent)?;
+    let partition = resolve_table(context, requested_partition)?;
+    lock_secondary_relation(context, parent, &partition)?;
+    let parent_hierarchy = read_hierarchy(context, parent)?;
     let Some(parent_spec) = parent_hierarchy.partition_spec.as_ref() else {
         return Err(wrong_object(format!(
             "ALTER action DETACH PARTITION cannot be performed on relation \"{}\"",
             local_relation_name(parent)
         )));
     };
-    let partition_hierarchy = read_hierarchy(engine, &partition)?;
+    let partition_hierarchy = read_hierarchy(context, &partition)?;
     let attached = partition_hierarchy.is_partition()
         && partition_hierarchy
             .parents
@@ -256,7 +329,7 @@ fn detach_partition(
             ),
         ));
     }
-    if concurrently && direct_default_partition(engine, parent)?.is_some() {
+    if concurrently && direct_default_partition(context, parent)?.is_some() {
         return Err(routine(
             "55000",
             "cannot detach partitions concurrently when a default partition exists",
@@ -267,7 +340,7 @@ fn detach_partition(
         .as_ref()
         .ok_or_else(|| SQLError::Internal("attached partition lost its bound".into()))?
         .clone();
-    let inherited_identity = table_columns(engine, parent, "DETACH PARTITION")?
+    let inherited_identity = table_columns(context, parent, "DETACH PARTITION")?
         .into_iter()
         .filter_map(|column| {
             column
@@ -276,10 +349,13 @@ fn detach_partition(
                 .map(|increment| (column.name, increment))
         })
         .collect::<Vec<_>>();
-    let subtree = engine.hierarchy_scan_tables(&partition, true)?;
+    let subtree = context
+        .constraints
+        .catalog
+        .hierarchy_scan_tables(&partition, true)?;
     for target in &subtree {
-        let mut columns = table_columns(engine, target, "DETACH PARTITION")?;
-        let mut constraints = declared_constraints(engine, target, "DETACH PARTITION")?;
+        let mut columns = table_columns(context, target, "DETACH PARTITION")?;
+        let mut constraints = declared_constraints(context, target, "DETACH PARTITION")?;
         restore_identity_overrides(
             &mut columns,
             &inherited_identity,
@@ -303,29 +379,32 @@ fn detach_partition(
             hierarchy.parent_sequence_numbers.clear();
             hierarchy.partition_bound = None;
         }
-        engine
-            .replace_table_hierarchy_components(
-                target,
+        super::publication::hierarchy::replace_hierarchy_components(
+            &context.publication,
+            context.catalog,
+            target,
+            HierarchySchemaChange {
                 columns,
-                constraints.checks,
-                constraints.foreign_keys,
-                constraints.key_constraints,
+                checks: constraints.checks,
+                foreign_keys: constraints.foreign_keys,
+                key_constraints: constraints.key_constraints,
                 hierarchy,
-            )
-            .map_err(|error| ddl_storage_error("DETACH PARTITION", error))?;
+            },
+        )
+        .map_err(|error| ddl_storage_error("DETACH PARTITION", error))?;
     }
     Ok(())
 }
 
 fn validate_row_type(
-    engine: &Engine,
+    context: &HierarchyContext<'_>,
     parent: &str,
     child: &str,
     exact_columns: bool,
     reject_child_identity: bool,
 ) -> Result<(), SQLError> {
-    let parent_columns = table_columns(engine, parent, "ALTER TABLE hierarchy")?;
-    let child_columns = table_columns(engine, child, "ALTER TABLE hierarchy")?;
+    let parent_columns = table_columns(context, parent, "ALTER TABLE hierarchy")?;
+    let child_columns = table_columns(context, child, "ALTER TABLE hierarchy")?;
     uqa_sql::schema::inheritance::alter::validate_row_type(
         &parent_columns,
         &child_columns,
@@ -336,15 +415,22 @@ fn validate_row_type(
     )
 }
 
-fn validate_inherited_checks(engine: &Engine, parent: &str, child: &str) -> Result<(), SQLError> {
-    let child_columns = engine
+fn validate_inherited_checks(
+    context: &HierarchyContext<'_>,
+    parent: &str,
+    child: &str,
+) -> Result<(), SQLError> {
+    let child_columns = context
+        .catalog
         .try_describe_table(child)
         .map_err(|error| ddl_storage_error("read child CHECK columns", error))?
         .ok_or_else(|| SQLError::UnknownTable(child.to_string()))?;
-    let parent_checks = engine
+    let parent_checks = context
+        .catalog
         .try_check_constraint_definitions(parent)
         .map_err(|error| ddl_storage_error("read parent CHECK constraints", error))?;
-    let child_checks = engine
+    let child_checks = context
+        .catalog
         .try_check_constraint_definitions(child)
         .map_err(|error| ddl_storage_error("read child CHECK constraints", error))?;
     uqa_sql::schema::inheritance::alter::validate_inherited_checks(
@@ -356,18 +442,33 @@ fn validate_inherited_checks(engine: &Engine, parent: &str, child: &str) -> Resu
 }
 
 fn validate_attached_rows(
-    engine: &Engine,
+    context: &HierarchyContext<'_>,
     parent: &str,
     partition: &str,
     bound: &PartitionBound,
 ) -> Result<(), SQLError> {
-    for physical_table in engine.hierarchy_scan_tables(partition, true)? {
-        for doc_id in engine.live_table_doc_ids(&physical_table)? {
-            let Some(document) = engine.get_document(&physical_table, doc_id)? else {
+    for physical_table in context
+        .constraints
+        .catalog
+        .hierarchy_scan_tables(partition, true)?
+    {
+        for doc_id in context
+            .constraints
+            .reads
+            .live_table_doc_ids(&physical_table)?
+        {
+            let Some(document) = context
+                .constraints
+                .reads
+                .get_document(&physical_table, doc_id)?
+            else {
                 continue;
             };
-            if !crate::sql::prospective_partition_bound_accepts_document(
-                engine, parent, bound, &document,
+            if !uqa_sql::semantics::partition::prospective_partition_bound_accepts_document(
+                &context.partitions,
+                parent,
+                bound,
+                &document,
             )? {
                 return Err(routine(
                     "23514",
@@ -383,23 +484,38 @@ fn validate_attached_rows(
 }
 
 fn validate_default_partition_exclusion(
-    engine: &Engine,
+    context: &HierarchyContext<'_>,
     parent: &str,
     new_bound: &PartitionBound,
 ) -> Result<(), SQLError> {
     if matches!(new_bound, PartitionBound::Default) {
         return Ok(());
     }
-    let Some(default) = direct_default_partition(engine, parent)? else {
+    let Some(default) = direct_default_partition(context, parent)? else {
         return Ok(());
     };
-    for physical_table in engine.hierarchy_scan_tables(&default, true)? {
-        for doc_id in engine.live_table_doc_ids(&physical_table)? {
-            let Some(document) = engine.get_document(&physical_table, doc_id)? else {
+    for physical_table in context
+        .constraints
+        .catalog
+        .hierarchy_scan_tables(&default, true)?
+    {
+        for doc_id in context
+            .constraints
+            .reads
+            .live_table_doc_ids(&physical_table)?
+        {
+            let Some(document) = context
+                .constraints
+                .reads
+                .get_document(&physical_table, doc_id)?
+            else {
                 continue;
             };
-            if crate::sql::prospective_partition_bound_accepts_document(
-                engine, parent, new_bound, &document,
+            if uqa_sql::semantics::partition::prospective_partition_bound_accepts_document(
+                &context.partitions,
+                parent,
+                new_bound,
+                &document,
             )? {
                 return Err(routine(
                     "23514",
@@ -414,13 +530,16 @@ fn validate_default_partition_exclusion(
     Ok(())
 }
 
-fn validate_existing_constraints(engine: &Engine, table: &str) -> Result<(), SQLError> {
-    for doc_id in engine.live_table_doc_ids(table)? {
-        let Some(document) = engine.get_document(table, doc_id)? else {
+fn validate_existing_constraints(
+    context: &HierarchyContext<'_>,
+    table: &str,
+) -> Result<(), SQLError> {
+    for doc_id in context.constraints.reads.live_table_doc_ids(table)? {
+        let Some(document) = context.constraints.reads.get_document(table, doc_id)? else {
             continue;
         };
-        crate::sql::dml::validate_document_constraints(
-            engine,
+        crate::mutation::constraints::validate_document_constraints(
+            context.constraints,
             table,
             &document,
             &[],
@@ -430,10 +549,17 @@ fn validate_existing_constraints(engine: &Engine, table: &str) -> Result<(), SQL
     Ok(())
 }
 
-fn direct_default_partition(engine: &Engine, parent: &str) -> Result<Option<String>, SQLError> {
-    for child in engine.direct_hierarchy_children(parent)? {
+fn direct_default_partition(
+    context: &HierarchyContext<'_>,
+    parent: &str,
+) -> Result<Option<String>, SQLError> {
+    for child in context
+        .partitions
+        .catalog
+        .direct_hierarchy_children(parent)?
+    {
         if matches!(
-            read_hierarchy(engine, &child)?.partition_bound,
+            read_hierarchy(context, &child)?.partition_bound,
             Some(PartitionBound::Default)
         ) {
             return Ok(Some(child));
@@ -443,50 +569,61 @@ fn direct_default_partition(engine: &Engine, parent: &str) -> Result<Option<Stri
 }
 
 fn replace_hierarchy_only(
-    engine: &Engine,
+    context: &HierarchyContext<'_>,
     table: &str,
     hierarchy: TableHierarchy,
     action: &str,
 ) -> Result<(), SQLError> {
-    let columns = table_columns(engine, table, action)?;
-    let constraints = declared_constraints(engine, table, action)?;
-    engine
-        .replace_table_hierarchy_components(
-            table,
+    let columns = table_columns(context, table, action)?;
+    let constraints = declared_constraints(context, table, action)?;
+    super::publication::hierarchy::replace_hierarchy_components(
+        &context.publication,
+        context.catalog,
+        table,
+        HierarchySchemaChange {
             columns,
-            constraints.checks,
-            constraints.foreign_keys,
-            constraints.key_constraints,
+            checks: constraints.checks,
+            foreign_keys: constraints.foreign_keys,
+            key_constraints: constraints.key_constraints,
             hierarchy,
-        )
-        .map_err(|error| ddl_storage_error(action, error))
+        },
+    )
+    .map_err(|error| ddl_storage_error(action, error))
 }
 
-fn table_columns(engine: &Engine, table: &str, action: &str) -> Result<Vec<ColumnDef>, SQLError> {
-    engine
+fn table_columns(
+    context: &HierarchyContext<'_>,
+    table: &str,
+    action: &str,
+) -> Result<Vec<ColumnDef>, SQLError> {
+    context
+        .catalog
         .try_describe_table(table)
         .map_err(|error| ddl_storage_error(action, error))?
         .ok_or_else(|| SQLError::UnknownTable(table.to_string()))
 }
 
 fn declared_constraints(
-    engine: &Engine,
+    context: &HierarchyContext<'_>,
     table: &str,
     action: &str,
 ) -> Result<uqa_sql::ast::TableConstraintSet, SQLError> {
-    engine
+    context
+        .catalog
         .try_declared_table_constraints(table)
         .map_err(|error| ddl_storage_error(action, error))
 }
 
-fn read_hierarchy(engine: &Engine, table: &str) -> Result<TableHierarchy, SQLError> {
-    engine
+fn read_hierarchy(context: &HierarchyContext<'_>, table: &str) -> Result<TableHierarchy, SQLError> {
+    context
+        .partitions
+        .catalog
         .try_table_hierarchy(table)
         .map_err(|error| SQLError::Internal(format!("read table hierarchy: {error}")))
 }
 
-fn resolve_table(engine: &Engine, requested: &str) -> Result<String, SQLError> {
-    match engine.resolve_visible_relation_kind(requested)? {
+fn resolve_table(context: &HierarchyContext<'_>, requested: &str) -> Result<String, SQLError> {
+    match context.namespace.resolve_visible_relation_kind(requested)? {
         RelationResolution::Found(canonical, "table") => Ok(canonical),
         RelationResolution::Found(canonical, kind) => Err(wrong_object(format!(
             "relation \"{canonical}\" is a {kind}, not a table"
@@ -503,30 +640,29 @@ fn resolve_table(engine: &Engine, requested: &str) -> Result<String, SQLError> {
 }
 
 fn lock_secondary_relation(
-    engine: &Engine,
+    context: &HierarchyContext<'_>,
     primary: &str,
     secondary: &str,
 ) -> Result<(), SQLError> {
     if primary != secondary {
-        engine.lock_relation(
-            secondary,
-            crate::row_locks::RelationLockMode::AccessExclusive,
-        )?;
+        context.namespace.lock_exclusive(secondary)?;
     }
     Ok(())
 }
 
 fn validate_matching_persistence(
-    engine: &Engine,
+    context: &HierarchyContext<'_>,
     child: &str,
     parent: &str,
     operation: &str,
 ) -> Result<(), SQLError> {
-    let child_persistence = engine
+    let child_persistence = context
+        .catalog
         .table_persistence(child)
         .map_err(|error| ddl_storage_error("read child persistence", error))?
         .ok_or_else(|| SQLError::UnknownTable(child.to_string()))?;
-    let parent_persistence = engine
+    let parent_persistence = context
+        .catalog
         .table_persistence(parent)
         .map_err(|error| ddl_storage_error("read parent persistence", error))?
         .ok_or_else(|| SQLError::UnknownTable(parent.to_string()))?;
