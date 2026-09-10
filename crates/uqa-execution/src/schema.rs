@@ -6,5 +6,6 @@
 
 //! Physical schema changes and validation of stored rows.
 pub mod columns;
+pub mod ctas;
 pub mod indexes;
 pub mod validation;

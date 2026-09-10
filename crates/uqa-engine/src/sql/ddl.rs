@@ -10,7 +10,7 @@ use super::scalar::eval_lowered_expression;
 use super::{
     index_vectors_for_type, AlterTableAction, AlterTableStmt, BTreeMap, ColumnType, CreateIndex,
     CreateTable, Document, DropKind, DropStmt, Engine, HNSWIndexParams, IVFIndexParams,
-    RowUpdateVectors, SQLError, SQLParam, SQLResult, Value, VectorIndexSpec,
+    RowUpdateVectors, SQLError, SQLResult, Value, VectorIndexSpec,
 };
 use crate::CatalogIndexRow;
 
