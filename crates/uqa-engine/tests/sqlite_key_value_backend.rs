@@ -14,7 +14,8 @@ use tempfile::tempdir;
 use uqa_core::{Edge, Value, Vertex};
 use uqa_engine::{Engine, ScoringMode};
 use uqa_graph::GraphStore as _;
-use uqa_storage::{ManagedConnection, PersistentStorageProvider};
+use uqa_storage::PersistentStorageProvider;
+use uqa_storage_sqlite::ManagedConnection;
 use uqa_storage_sqlite::SQLiteKeyValueStorage;
 
 #[derive(Deserialize)]

@@ -16,7 +16,7 @@ use crate::vector_index::validate_vector_values;
 use crate::{StorageBackendError, StorageBackendResult};
 
 impl IVFIndex {
-    pub(crate) fn from_persistence(
+    pub fn from_persistence(
         dimensions: u32,
         nlist: usize,
         nprobe: usize,

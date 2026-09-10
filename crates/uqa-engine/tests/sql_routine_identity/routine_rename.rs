@@ -509,7 +509,7 @@ fn create_legacy_migration_fixture(engine: &Engine) {
     }
 }
 
-fn remove_legacy_function_identities(catalog: &uqa_storage::Catalog) {
+fn remove_legacy_function_identities(catalog: &uqa_storage_sqlite::Catalog) {
     let encoded = catalog.get_metadata("sql_functions_json").unwrap().unwrap();
     let mut definitions: serde_json::Value = serde_json::from_str(&encoded).unwrap();
     assert!(remove_routine_identity_fields(&mut definitions) >= 3);
@@ -521,7 +521,7 @@ fn remove_legacy_function_identities(catalog: &uqa_storage::Catalog) {
         .unwrap();
 }
 
-fn remove_legacy_view_identities(catalog: &uqa_storage::Catalog) {
+fn remove_legacy_view_identities(catalog: &uqa_storage_sqlite::Catalog) {
     let mut views = catalog.load_views().unwrap();
     let view = views
         .iter_mut()
@@ -533,7 +533,7 @@ fn remove_legacy_view_identities(catalog: &uqa_storage::Catalog) {
     catalog.save_view(view).unwrap();
 }
 
-fn remove_legacy_generated_column_identities(catalog: &uqa_storage::Catalog) {
+fn remove_legacy_generated_column_identities(catalog: &uqa_storage_sqlite::Catalog) {
     let mut tables = catalog.load_tables().unwrap();
     let table = tables
         .iter_mut()
@@ -545,7 +545,7 @@ fn remove_legacy_generated_column_identities(catalog: &uqa_storage::Catalog) {
     catalog.save_table(table).unwrap();
 }
 
-fn remove_legacy_schema_expression_bindings(catalog: &uqa_storage::Catalog) {
+fn remove_legacy_schema_expression_bindings(catalog: &uqa_storage_sqlite::Catalog) {
     let mut tables = catalog.load_tables().unwrap();
     let table = tables
         .iter_mut()
@@ -560,7 +560,7 @@ fn remove_legacy_schema_expression_bindings(catalog: &uqa_storage::Catalog) {
     catalog.save_table(table).unwrap();
 }
 
-fn remove_legacy_rule_and_trigger_identities(catalog: &uqa_storage::Catalog) {
+fn remove_legacy_rule_and_trigger_identities(catalog: &uqa_storage_sqlite::Catalog) {
     for metadata_key in ["sql_rules_json", "sql_triggers_json"] {
         let encoded = catalog.get_metadata(metadata_key).unwrap().unwrap();
         let mut metadata: serde_json::Value = serde_json::from_str(&encoded).unwrap();
@@ -575,7 +575,7 @@ fn remove_legacy_rule_and_trigger_identities(catalog: &uqa_storage::Catalog) {
 }
 
 fn make_catalog_legacy(database: &std::path::Path) {
-    use uqa_storage::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::{Catalog, ManagedConnection};
 
     let catalog = Catalog::open(ManagedConnection::open(database).unwrap()).unwrap();
     remove_legacy_function_identities(&catalog);
@@ -687,7 +687,7 @@ fn rename_migrated_routines(engine: &Engine) -> Value {
 }
 
 fn assert_migrated_identity_metadata(database: &std::path::Path) {
-    use uqa_storage::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::{Catalog, ManagedConnection};
 
     let catalog = Catalog::open(ManagedConnection::open(database).unwrap()).unwrap();
     let functions = catalog.get_metadata("sql_functions_json").unwrap().unwrap();
@@ -756,7 +756,7 @@ fn legacy_routine_catalog_gains_persistent_object_identities() {
 
 #[test]
 fn secondary_session_rejects_legacy_routine_metadata_without_repair() {
-    use uqa_storage::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::{Catalog, ManagedConnection};
 
     let directory = TempDir::new().unwrap();
     let database = directory.path().join("routine-load-only.sqlite");
@@ -788,7 +788,7 @@ fn secondary_session_rejects_legacy_routine_metadata_without_repair() {
 
 #[test]
 fn secondary_session_does_not_repair_routine_owned_dependency_bindings() {
-    use uqa_storage::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::{Catalog, ManagedConnection};
 
     let directory = TempDir::new().unwrap();
     let database = directory.path().join("routine-dependency-load-only.sqlite");
@@ -839,7 +839,7 @@ fn secondary_session_does_not_repair_routine_owned_dependency_bindings() {
 
 #[test]
 fn secondary_session_does_not_repair_schema_expression_bindings() {
-    use uqa_storage::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::{Catalog, ManagedConnection};
 
     let directory = TempDir::new().unwrap();
     let database = directory.path().join("schema-dependency-load-only.sqlite");
@@ -899,7 +899,7 @@ fn secondary_session_does_not_repair_schema_expression_bindings() {
 
 #[test]
 fn failed_initial_routine_migration_rolls_back_catalog_writes() {
-    use uqa_storage::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::{Catalog, ManagedConnection};
 
     let directory = TempDir::new().unwrap();
     let database = directory.path().join("routine-migration-atomicity.sqlite");

@@ -1,0 +1,965 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Routine registration, catalog persistence, alteration, and removal.
+
+mod cascade;
+mod column_aliases;
+mod column_dependencies;
+mod compilation;
+mod dependencies;
+mod drop_planning;
+mod merge_columns;
+mod regclass;
+mod relation_dependencies;
+mod rename;
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use uqa_sql::ast::{
+    AlterRoutineKind, AlterRoutineStmt, CreateFunction, DropFunctionItem, DropFunctionStmt,
+    FunctionBinding, FunctionBody, RoleAttribute,
+};
+use uqa_sql::SQLError;
+
+use crate::{
+    open::CatalogRestoreMode, roles::role_inherits, schema_security::SchemaAclPrivilege, Arc,
+    CatalogFacade, Engine, RelationIdentity, StorageBackendError, StorageBackendResult,
+    FUNCTIONS_METADATA_KEY,
+};
+
+use super::declaration::{resolve_alter_routine_identity_types, resolve_routine_type_references};
+use super::resolution::{routine_kind, routine_signature_types};
+use super::{canonical_routine_type_name, CompiledFunctionBody, SQLUserFunction};
+use dependencies::{stored_routine_dependents, RoutineCompilationMode};
+
+struct SQLFunctionDropPlan {
+    domains: BTreeSet<u32>,
+    targets: Vec<RoutineDropTarget>,
+    dependents: RoutineObjectDependents,
+    notices: Vec<(&'static str, String)>,
+}
+
+struct RoutineDropResolution {
+    targets: Vec<RoutineDropTarget>,
+    seen_targets: BTreeSet<RoutineDropTarget>,
+    notices: Vec<(&'static str, String)>,
+}
+
+struct RoutineObjectDependents {
+    indexes: Vec<crate::RelationIdentity>,
+    views: Vec<String>,
+    columns: Vec<(String, String, bool)>,
+    defaults: Vec<(String, String, bool)>,
+    checks: Vec<(String, String, bool)>,
+    triggers: Vec<(String, String)>,
+    rules: Vec<(String, String)>,
+}
+
+#[derive(Default)]
+struct RoutineSchemaDependents {
+    columns: Vec<(String, String, bool)>,
+    defaults: Vec<(String, String, bool)>,
+    checks: Vec<(String, String, bool)>,
+}
+
+pub(crate) struct PendingSQLFunctionRestore {
+    definitions: BTreeMap<String, Vec<CreateFunction>>,
+    migrated: bool,
+    previous: BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct RoutineDropTarget {
+    object_id: Option<[u8; 16]>,
+    name: String,
+    argument_types: Vec<String>,
+    is_procedure: bool,
+}
+
+impl RoutineDropTarget {
+    fn kind(&self) -> &'static str {
+        if self.is_procedure {
+            "procedure"
+        } else {
+            "function"
+        }
+    }
+
+    fn label(&self) -> String {
+        routine_signature_label(&self.name, &self.argument_types)
+    }
+
+    fn binding(&self) -> FunctionBinding {
+        FunctionBinding {
+            object_id: self.object_id,
+            name: self.name.clone(),
+            argument_types: self.argument_types.clone(),
+            builtin: false,
+            dispatch: None,
+            invocation: None,
+            resolution_error: None,
+        }
+    }
+}
+
+pub(super) fn routine_signature_label(name: &str, types: &[String]) -> String {
+    let display_types = types
+        .iter()
+        .map(|type_name| {
+            uqa_sql::ast::ColumnType::from_sql_name(type_name)
+                .map_or_else(|_| type_name.clone(), |column_type| column_type.sql_name())
+        })
+        .collect::<Vec<_>>();
+    format!("{name}({})", display_types.join(", "))
+}
+
+fn wrong_routine_kind_error(
+    name: &str,
+    types: &[String],
+    actual_is_procedure: bool,
+    expected_kind: &str,
+) -> SQLError {
+    let actual_kind = if actual_is_procedure {
+        "procedure"
+    } else {
+        "function"
+    };
+    SQLError::Routine {
+        sqlstate: "42809".into(),
+        message: format!(
+            "{} is a {actual_kind}, not a {expected_kind}",
+            routine_signature_label(name, types)
+        ),
+    }
+}
+
+fn append_routine_cascade_notice(
+    notices: &mut Vec<(&'static str, String)>,
+    cascaded_routines: &[RoutineDropTarget],
+    dependents: &RoutineObjectDependents,
+) {
+    let mut cascaded = cascaded_routines
+        .iter()
+        .map(|target| format!("{} {}", target.kind(), target.label()))
+        .collect::<Vec<_>>();
+    cascaded.extend(dependents.columns.iter().map(|(table, column, foreign)| {
+        format!(
+            "column {column} of {} {table}",
+            routine_schema_relation_kind(*foreign)
+        )
+    }));
+    cascaded.extend(dependents.defaults.iter().map(|(table, column, foreign)| {
+        format!(
+            "default value for column {column} of {} {table}",
+            routine_schema_relation_kind(*foreign)
+        )
+    }));
+    cascaded.extend(
+        dependents
+            .checks
+            .iter()
+            .map(|(table, constraint, foreign)| {
+                format!(
+                    "constraint {constraint} on {} {table}",
+                    routine_schema_relation_kind(*foreign)
+                )
+            }),
+    );
+    cascaded.extend(dependents.views.iter().map(|view| format!("view {view}")));
+    cascaded.extend(
+        dependents
+            .triggers
+            .iter()
+            .map(|(table, trigger)| format!("trigger {trigger} on table {table}")),
+    );
+    cascaded.extend(
+        dependents
+            .rules
+            .iter()
+            .map(|(table, rule)| format!("rule {rule} on table {table}")),
+    );
+    cascaded.sort();
+    cascaded.dedup();
+    match cascaded.as_slice() {
+        [] => {}
+        [object] => notices.push(("NOTICE", format!("drop cascades to {object}"))),
+        objects => notices.push((
+            "NOTICE",
+            format!("drop cascades to {} other objects", objects.len()),
+        )),
+    }
+}
+
+fn routine_schema_relation_kind(foreign: bool) -> &'static str {
+    if foreign {
+        "foreign table"
+    } else {
+        "table"
+    }
+}
+
+fn allocate_routine_object_id(
+    registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
+    name: &str,
+) -> Result<[u8; 16], SQLError> {
+    loop {
+        let candidate = crate::new_routine_object_id().map_err(|error| {
+            SQLError::Internal(format!("allocate routine `{name}` identity: {error}"))
+        })?;
+        if registry
+            .values()
+            .flat_map(|overloads| overloads.iter())
+            .all(|function| function.def.object_id != Some(candidate))
+        {
+            return Ok(candidate);
+        }
+    }
+}
+
+fn persisted_routine_object_id(def: &CreateFunction) -> Result<[u8; 16], SQLError> {
+    def.object_id.ok_or_else(|| {
+        SQLError::Internal(format!(
+            "existing routine `{}` has no catalog object identity",
+            def.name
+        ))
+    })
+}
+
+impl Engine {
+    /// Register (or replace) a user-defined routine. Applies the
+    /// `PostgreSQL` conflict rules for `(schema, name, argument types)`
+    /// collisions and persists the updated overload set.
+    pub(crate) fn register_sql_function(&self, mut def: CreateFunction) -> Result<(), SQLError> {
+        self.prepare_explicit_transaction_writer()?;
+        let requested_name = def.name.clone();
+        def.name = self.try_relation_name_for_sql_create(&requested_name)?;
+        resolve_routine_type_references(self, &mut def)?;
+        if def.owner.is_empty() {
+            def.owner = self.current_user_name();
+        }
+        if let Some(support) = def.support.as_deref() {
+            self.validate_routine_support(support)?;
+        }
+        self.apply_routine_config_actions(&mut def)?;
+        let (compiled, _) =
+            self.compile_catalog_bound_routine(&mut def, RoutineCompilationMode::Definition)?;
+        let name = def.name.clone();
+        let signature = routine_signature_types(&def);
+        let kind = routine_kind(&def);
+        let current_user = self.current_user_name();
+        let roles = self.durable.roles.read();
+        if !roles.contains_key(&def.owner) {
+            return Err(SQLError::Routine {
+                sqlstate: "42704".into(),
+                message: format!("role \"{}\" does not exist", def.owner),
+            });
+        }
+        let current_user_is_superuser = roles
+            .get(&current_user)
+            .is_some_and(|role| role.has(RoleAttribute::Superuser));
+        let memberships = self.durable.role_memberships.read();
+        if (def.security.leakproof || def.support.is_some()) && !current_user_is_superuser {
+            return Err(SQLError::Routine {
+                sqlstate: "42501".into(),
+                message: if def.security.leakproof {
+                    "only superuser can define a leakproof function".into()
+                } else {
+                    "must be superuser to specify a support function".into()
+                },
+            });
+        }
+        let mut registry = self.durable.sql_user_functions.write();
+        let mut next = registry.clone();
+        {
+            let overloads = next.entry(name.clone()).or_default();
+            if let Some(pos) = overloads
+                .iter()
+                .position(|function| routine_signature_types(&function.def) == signature)
+            {
+                let existing = &overloads[pos].def;
+                if !def.or_replace {
+                    return Err(SQLError::Routine {
+                        sqlstate: "42723".into(),
+                        message: format!(
+                            "{kind} \"{requested_name}\" already exists with same argument types"
+                        ),
+                    });
+                }
+                Self::ensure_routine_owner_as(
+                    existing,
+                    role_inherits(&roles, &memberships, &current_user, &existing.owner),
+                )?;
+                if existing.is_procedure != def.is_procedure {
+                    return Err(SQLError::Routine {
+                        sqlstate: "42809".into(),
+                        message: "cannot change routine kind".into(),
+                    });
+                }
+                if !same_return_shape(existing, &def) {
+                    return Err(SQLError::Routine {
+                        sqlstate: "42P13".into(),
+                        message: "cannot change return type of existing function".into(),
+                    });
+                }
+                // CREATE OR REPLACE changes the definition but not object ownership or privileges.
+                def.object_id = Some(persisted_routine_object_id(existing)?);
+                def.owner.clone_from(&existing.owner);
+                def.execute_acl.clone_from(&existing.execute_acl);
+                overloads[pos] = Arc::new(SQLUserFunction { def, compiled });
+            } else {
+                def.object_id = Some(allocate_routine_object_id(&registry, &name)?);
+                overloads.push(Arc::new(SQLUserFunction { def, compiled }));
+            }
+            overloads.sort_by(|left, right| {
+                routine_signature_types(&left.def)
+                    .cmp(&routine_signature_types(&right.def))
+                    .then_with(|| left.def.is_procedure.cmp(&right.def.is_procedure))
+            });
+        }
+        self.persist_sql_functions_snapshot(&next)?;
+        *registry = next;
+        drop(registry);
+        drop(memberships);
+        drop(roles);
+        self.note_catalog_registry_changed();
+        Ok(())
+    }
+
+    /// Change mutable routine attributes without replacing its identity or compiled body.
+    pub(crate) fn alter_sql_routine(&self, stmt: &AlterRoutineStmt) -> Result<(), SQLError> {
+        self.prepare_explicit_transaction_writer()?;
+        let requested_types = resolve_alter_routine_identity_types(self, stmt)?;
+        let current_user = self.current_user_name();
+        let roles = self.durable.roles.read();
+        let current_user_is_superuser = roles
+            .get(&current_user)
+            .is_some_and(|role| role.has(RoleAttribute::Superuser));
+        let memberships = self.durable.role_memberships.read();
+        let mut registry = self.durable.sql_user_functions.write();
+        let (name, position) = self.resolve_sql_routine_alter_target(
+            &registry,
+            &stmt.name,
+            requested_types.as_deref(),
+            stmt.kind,
+        )?;
+        let existing = registry
+            .get(&name)
+            .and_then(|overloads| overloads.get(position))
+            .cloned()
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "resolved ALTER routine target `{name}` disappeared before mutation"
+                ))
+            })?;
+        Self::ensure_routine_owner_as(
+            &existing.def,
+            role_inherits(&roles, &memberships, &current_user, &existing.def.owner),
+        )?;
+        if existing.def.is_procedure
+            && (stmt.volatility.is_some()
+                || stmt.strict.is_some()
+                || stmt.leakproof.is_some()
+                || stmt.parallel.is_some()
+                || stmt.support.is_some())
+        {
+            return Err(SQLError::Routine {
+                sqlstate: "42P13".into(),
+                message: "invalid attribute in procedure definition".into(),
+            });
+        }
+
+        let mut def = existing.def.clone();
+        if let Some(volatility) = stmt.volatility {
+            def.volatility = volatility;
+        }
+        if let Some(strict) = stmt.strict {
+            def.strict = strict;
+        }
+        if let Some(security_definer) = stmt.security_definer {
+            def.security.security_definer = security_definer;
+        }
+        if let Some(leakproof) = stmt.leakproof {
+            if leakproof && !current_user_is_superuser {
+                return Err(SQLError::Routine {
+                    sqlstate: "42501".into(),
+                    message: "only superuser can define a leakproof function".into(),
+                });
+            }
+            def.security.leakproof = leakproof;
+        }
+        if let Some(parallel) = stmt.parallel {
+            def.parallel = parallel;
+        }
+        if let Some(support) = &stmt.support {
+            self.validate_routine_support(support)?;
+            def.support = Some(support.clone());
+        }
+        def.config_actions.clone_from(&stmt.config_actions);
+        self.apply_routine_config_actions(&mut def)?;
+        let mut next = registry.clone();
+        let overloads = next.get_mut(&name).ok_or_else(|| {
+            SQLError::Internal(format!(
+                "resolved ALTER routine registry entry `{name}` disappeared before mutation"
+            ))
+        })?;
+        overloads[position] = Arc::new(SQLUserFunction {
+            def,
+            compiled: existing.compiled.clone(),
+        });
+        self.persist_sql_functions_snapshot(&next)?;
+        *registry = next;
+        drop(registry);
+        drop(memberships);
+        drop(roles);
+        self.note_catalog_registry_changed();
+        Ok(())
+    }
+
+    /// Resolve a routine name through the schemas the current user can access, while qualified names report missing schemas and `USAGE` denials directly.
+    fn routine_lookup_keys(&self, name: &str) -> Result<Vec<String>, SQLError> {
+        let (schema, local_name) =
+            RelationIdentity::parse_reference(name).map_err(|error| SQLError::Routine {
+                sqlstate: "42602".into(),
+                message: format!("invalid routine name `{name}`: {error}"),
+            })?;
+        if let Some(schema) = schema {
+            if self.schema_security_for_privilege(&schema).is_none() {
+                return Err(SQLError::Routine {
+                    sqlstate: "3F000".into(),
+                    message: format!("schema \"{schema}\" does not exist"),
+                });
+            }
+            self.require_schema_privilege(
+                &schema,
+                &self.current_user_name(),
+                SchemaAclPrivilege::Usage,
+            )?;
+            return Ok(vec![
+                RelationIdentity::new(schema, local_name).qualified_name()
+            ]);
+        }
+        let current_user = self.current_user_name();
+        let search_path = self.session.state.read().search_path.clone();
+        Ok(search_path
+            .into_iter()
+            .filter(|schema| {
+                self.schema_security_for_privilege(schema).is_some()
+                    && self.schema_has_privilege_for_role(
+                        schema,
+                        &current_user,
+                        SchemaAclPrivilege::Usage,
+                    )
+            })
+            .map(|schema| RelationIdentity::new(schema, &local_name).qualified_name())
+            .collect())
+    }
+
+    /// Visible overload set for `name`. Identical signatures in later
+    /// `search_path` schemas are shadowed while distinct signatures remain
+    /// candidates, matching `PostgreSQL`'s routine lookup rules.
+    pub(crate) fn lookup_visible_sql_functions(
+        &self,
+        name: &str,
+    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
+        let keys = self.routine_lookup_keys(name)?;
+        Ok(self.lookup_sql_functions_by_keys(keys))
+    }
+
+    /// Inspect accessible overloads without reporting namespace errors before recursive argument and reference validation. The definitive binder performs the checked lookup again before it records a routine identity.
+    pub(crate) fn lookup_visible_sql_functions_for_analysis(
+        &self,
+        name: &str,
+    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
+        match self.lookup_visible_sql_functions(name) {
+            Err(error) if super::is_routine_namespace_lookup_error(&error) => Ok(None),
+            result => result,
+        }
+    }
+
+    /// Resolve an already-bound routine identity without repeating namespace-name access checks. `PostgreSQL` stores object identities in views, generated expressions, and SQL-standard routine bodies, so later users need object privileges but do not re-resolve the original schema-qualified name.
+    pub(crate) fn lookup_bound_sql_functions(
+        &self,
+        name: &str,
+    ) -> Option<Vec<Arc<SQLUserFunction>>> {
+        self.lookup_sql_functions_by_keys(std::iter::once(name.to_string()))
+    }
+
+    /// Resolve a catalog-bound routine by its durable object identity. Legacy bindings without an identity retain exact canonical-name lookup only during catalog migration.
+    pub(crate) fn lookup_bound_sql_functions_by_binding(
+        &self,
+        binding: &FunctionBinding,
+    ) -> Option<Vec<Arc<SQLUserFunction>>> {
+        let Some(object_id) = binding.object_id else {
+            return self.lookup_bound_sql_functions(&binding.name);
+        };
+        let live_registry;
+        let registry = if let Some(snapshot) = self.query_sql_function_snapshots.as_ref() {
+            snapshot.as_ref()
+        } else {
+            live_registry = self.durable.sql_user_functions.read();
+            &live_registry
+        };
+        let matches = registry
+            .values()
+            .flat_map(|overloads| overloads.iter())
+            .filter(|function| function.def.object_id == Some(object_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        (!matches.is_empty()).then_some(matches)
+    }
+
+    fn lookup_sql_functions_by_keys(
+        &self,
+        keys: impl IntoIterator<Item = String>,
+    ) -> Option<Vec<Arc<SQLUserFunction>>> {
+        let live_registry;
+        let registry = if let Some(snapshot) = self.query_sql_function_snapshots.as_ref() {
+            snapshot.as_ref()
+        } else {
+            live_registry = self.durable.sql_user_functions.read();
+            &live_registry
+        };
+        let mut visible = Vec::new();
+        let mut seen = std::collections::BTreeSet::new();
+        for key in keys {
+            let Some(overloads) = registry.get(&key) else {
+                continue;
+            };
+            for function in overloads {
+                let identity = (
+                    routine_signature_types(&function.def),
+                    function.def.is_procedure,
+                );
+                if seen.insert(identity) {
+                    visible.push(function.clone());
+                }
+            }
+        }
+        (!visible.is_empty()).then_some(visible)
+    }
+
+    /// Call-resolution candidates before search-path shadowing. Named notation can make a later identical declared signature visible when an earlier routine uses different parameter names, so structural matching must happen first.
+    pub(super) fn lookup_sql_routine_candidates(
+        &self,
+        name: &str,
+    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
+        let keys = self.routine_lookup_keys(name)?;
+        Ok(self.lookup_sql_routine_candidates_by_keys(keys))
+    }
+
+    pub(super) fn lookup_bound_sql_routine_candidates_by_binding(
+        &self,
+        binding: &FunctionBinding,
+    ) -> Option<Vec<Arc<SQLUserFunction>>> {
+        if binding.object_id.is_some() {
+            self.lookup_bound_sql_functions_by_binding(binding)
+        } else {
+            self.lookup_sql_routine_candidates_by_keys(std::iter::once(binding.name.clone()))
+        }
+    }
+
+    fn lookup_sql_routine_candidates_by_keys(
+        &self,
+        keys: impl IntoIterator<Item = String>,
+    ) -> Option<Vec<Arc<SQLUserFunction>>> {
+        let live_registry;
+        let registry = if let Some(snapshot) = self.query_sql_function_snapshots.as_ref() {
+            snapshot.as_ref()
+        } else {
+            live_registry = self.durable.sql_user_functions.read();
+            &live_registry
+        };
+        let candidates = keys
+            .into_iter()
+            .filter_map(|key| registry.get(&key))
+            .flat_map(|overloads| overloads.iter().cloned())
+            .collect::<Vec<_>>();
+        (!candidates.is_empty()).then_some(candidates)
+    }
+
+    /// Current nesting cap for user-defined routine calls.
+    pub fn sql_function_depth_limit(&self) -> usize {
+        self.runtime
+            .function_depth_limit
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Adjust the nesting cap for user-defined routine calls
+    /// (minimum 1). Mirrors `PostgreSQL`'s `max_stack_depth` role for
+    /// recursive functions.
+    pub fn set_sql_function_depth_limit(&self, limit: usize) {
+        self.runtime
+            .function_depth_limit
+            .store(limit.max(1), std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Queue a notice (`RAISE NOTICE` / `WARNING` / ...).
+    pub(crate) fn push_sql_notice(&self, level: &str, message: &str) {
+        self.query_runtime_view().push_diagnostic(level, message);
+    }
+
+    /// Drain queued notices as `(level, message)` pairs in emission
+    /// order.
+    pub fn take_sql_notices(&self) -> Vec<(String, String)> {
+        std::mem::take(&mut *self.runtime.notices.lock())
+    }
+
+    pub(super) fn persist_sql_functions_snapshot(
+        &self,
+        registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
+    ) -> Result<(), SQLError> {
+        let Some(catalog) = self.storage.catalog.as_ref() else {
+            return Ok(());
+        };
+        let defs: BTreeMap<String, Vec<CreateFunction>> = registry
+            .iter()
+            .map(|(name, overloads)| {
+                (
+                    name.clone(),
+                    overloads
+                        .iter()
+                        .map(|function| function.def.clone())
+                        .collect(),
+                )
+            })
+            .collect();
+        let json = serde_json::to_string(&defs)
+            .map_err(|err| SQLError::Internal(format!("serialize function catalog: {err}")))?;
+        catalog
+            .set_metadata(FUNCTIONS_METADATA_KEY, &json)
+            .map_err(|err| SQLError::Internal(format!("persist function catalog: {err}")))
+    }
+
+    fn canonicalize_persisted_sql_functions(
+        &self,
+        defs: BTreeMap<String, Vec<CreateFunction>>,
+    ) -> StorageBackendResult<(BTreeMap<String, Vec<CreateFunction>>, bool)> {
+        let mut canonical_defs: BTreeMap<String, Vec<CreateFunction>> = BTreeMap::new();
+        let mut object_ids = BTreeSet::new();
+        let mut migrated = false;
+        for (stored_name, overloads) in defs {
+            let stored_relation =
+                RelationIdentity::from_legacy_name(&stored_name).map_err(|error| {
+                    StorageBackendError::Other(format!(
+                        "invalid persisted routine registry key `{stored_name}`: {error}"
+                    ))
+                })?;
+            if !self
+                .durable
+                .schemas
+                .read()
+                .contains_key(&stored_relation.schema)
+            {
+                return Err(StorageBackendError::Other(format!(
+                    "persisted routine `{stored_name}` references missing schema `{}`",
+                    stored_relation.schema
+                )));
+            }
+            let canonical_name = stored_relation.qualified_name();
+            for mut def in overloads {
+                if def.object_id.is_none() || def.object_id == Some([0; 16]) {
+                    def.object_id = Some(crate::new_routine_object_id()?);
+                    migrated = true;
+                }
+                let object_id = def.object_id.ok_or_else(|| {
+                    StorageBackendError::Other(format!(
+                        "persisted routine `{stored_name}` has no object identity"
+                    ))
+                })?;
+                if !object_ids.insert(object_id) {
+                    return Err(StorageBackendError::Other(format!(
+                        "duplicate persisted routine object identity for `{stored_name}`"
+                    )));
+                }
+                for parameter in &mut def.params {
+                    if let Some(default) = &mut parameter.default {
+                        migrated |= default.upgrade_legacy_serialized_dispatches();
+                    }
+                }
+                if let FunctionBody::Statements(statements) = &mut def.body {
+                    for statement in statements {
+                        migrated |= statement.upgrade_legacy_serialized_dispatches();
+                    }
+                }
+                let definition_relation =
+                    RelationIdentity::from_legacy_name(&def.name).map_err(|error| {
+                        StorageBackendError::Other(format!(
+                            "invalid persisted routine definition name `{}`: {error}",
+                            def.name
+                        ))
+                    })?;
+                if definition_relation != stored_relation {
+                    return Err(StorageBackendError::Other(format!(
+                        "persisted routine registry key `{stored_name}` does not match definition `{}`",
+                        def.name
+                    )));
+                }
+                def.name.clone_from(&canonical_name);
+                let signature = routine_signature_types(&def);
+                let definitions = canonical_defs.entry(canonical_name.clone()).or_default();
+                if definitions
+                    .iter()
+                    .any(|existing| routine_signature_types(existing) == signature)
+                {
+                    return Err(StorageBackendError::Other(format!(
+                        "duplicate persisted routine identity `{}`",
+                        routine_signature_label(&canonical_name, &signature)
+                    )));
+                }
+                definitions.push(def);
+            }
+        }
+        Ok((canonical_defs, migrated))
+    }
+
+    pub(crate) fn install_sql_function_restore_placeholders(
+        &self,
+        catalog: &dyn CatalogFacade,
+        mode: CatalogRestoreMode,
+    ) -> StorageBackendResult<Option<PendingSQLFunctionRestore>> {
+        let Some(json) = catalog.get_metadata(FUNCTIONS_METADATA_KEY)? else {
+            return Ok(None);
+        };
+        let defs = serde_json::from_str::<BTreeMap<String, Vec<CreateFunction>>>(&json)?;
+        let (canonical_defs, migrated) = self.canonicalize_persisted_sql_functions(defs)?;
+        if migrated && !mode.allows_migration() {
+            return Err(StorageBackendError::Other(
+                "routine catalog requires an initial-open object-identity migration".into(),
+            ));
+        }
+
+        // Install definition-only placeholders before compiling stored SQL-standard bodies so every exact routine identity is visible while durable function bindings are rebuilt. No routine can execute during engine construction, and any compile failure restores the previous registry atomically.
+        let placeholders = canonical_defs
+            .iter()
+            .map(|(name, definitions)| {
+                let mut overloads = definitions
+                    .iter()
+                    .cloned()
+                    .map(|def| {
+                        Arc::new(SQLUserFunction {
+                            def,
+                            compiled: CompiledFunctionBody::SQL(Vec::new()),
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                overloads.sort_by(|left, right| {
+                    routine_signature_types(&left.def)
+                        .cmp(&routine_signature_types(&right.def))
+                        .then_with(|| left.def.is_procedure.cmp(&right.def.is_procedure))
+                });
+                (name.clone(), overloads)
+            })
+            .collect();
+        let previous =
+            std::mem::replace(&mut *self.durable.sql_user_functions.write(), placeholders);
+        Ok(Some(PendingSQLFunctionRestore {
+            definitions: canonical_defs,
+            migrated,
+            previous,
+        }))
+    }
+
+    pub(crate) fn finalize_sql_function_restore(
+        &self,
+        pending: PendingSQLFunctionRestore,
+        mode: CatalogRestoreMode,
+    ) -> StorageBackendResult<()> {
+        let PendingSQLFunctionRestore {
+            definitions,
+            mut migrated,
+            previous,
+        } = pending;
+        let compiled = (|| {
+            let mut restored: BTreeMap<String, Vec<Arc<SQLUserFunction>>> = BTreeMap::new();
+            for (name, definitions) in definitions {
+                let mut overloads = Vec::with_capacity(definitions.len());
+                for mut def in definitions {
+                    let (compiled, definition_migrated) = self
+                        .compile_catalog_bound_routine(&mut def, RoutineCompilationMode::Persisted)
+                        .map_err(|err| StorageBackendError::Other(err.to_string()))?;
+                    migrated |= definition_migrated;
+                    overloads.push(Arc::new(SQLUserFunction { def, compiled }));
+                }
+                overloads.sort_by(|left, right| {
+                    routine_signature_types(&left.def)
+                        .cmp(&routine_signature_types(&right.def))
+                        .then_with(|| left.def.is_procedure.cmp(&right.def.is_procedure))
+                });
+                restored.insert(name, overloads);
+            }
+            Ok(restored)
+        })();
+        let restored = match compiled {
+            Ok(restored) => restored,
+            Err(error) => {
+                *self.durable.sql_user_functions.write() = previous;
+                return Err(error);
+            }
+        };
+        if migrated && !mode.allows_migration() {
+            *self.durable.sql_user_functions.write() = previous;
+            return Err(StorageBackendError::Other(
+                "routine-owned dependency bindings require an initial-open object-identity migration"
+                    .into(),
+            ));
+        }
+        if migrated {
+            if let Err(error) = self.persist_sql_functions_snapshot(&restored) {
+                *self.durable.sql_user_functions.write() = previous;
+                return Err(StorageBackendError::Other(error.to_string()));
+            }
+        }
+        *self.durable.sql_user_functions.write() = restored;
+        Ok(())
+    }
+}
+
+fn alter_routine_kind_name(kind: AlterRoutineKind) -> &'static str {
+    match kind {
+        AlterRoutineKind::Function => "function",
+        AlterRoutineKind::Procedure => "procedure",
+        AlterRoutineKind::Routine => "routine",
+    }
+}
+
+fn alter_routine_kind_matches(kind: AlterRoutineKind, def: &CreateFunction) -> bool {
+    match kind {
+        AlterRoutineKind::Function => !def.is_procedure,
+        AlterRoutineKind::Procedure => def.is_procedure,
+        AlterRoutineKind::Routine => true,
+    }
+}
+
+/// `CREATE OR REPLACE` may not change the declared result shape.
+fn same_return_shape(a: &CreateFunction, b: &CreateFunction) -> bool {
+    use uqa_sql::ast::FunctionReturns;
+    let same_outputs = {
+        let a_outs = a.output_params();
+        let b_outs = b.output_params();
+        a_outs.len() == b_outs.len()
+            && a_outs.iter().zip(&b_outs).all(|(x, y)| {
+                x.name == y.name
+                    && canonical_routine_type_name(&x.type_name)
+                        == canonical_routine_type_name(&y.type_name)
+                    && x.mode == y.mode
+            })
+    };
+    let same_kind = match (&a.returns, &b.returns) {
+        (FunctionReturns::None, FunctionReturns::None)
+        | (FunctionReturns::Table, FunctionReturns::Table) => true,
+        (FunctionReturns::Scalar { type_name: x }, FunctionReturns::Scalar { type_name: y })
+        | (FunctionReturns::SetOf { type_name: x }, FunctionReturns::SetOf { type_name: y }) => {
+            canonical_routine_type_name(x) == canonical_routine_type_name(y)
+        }
+        _ => false,
+    };
+    same_kind && same_outputs
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{mpsc, Arc};
+
+    use uqa_sql::ast::Statement;
+
+    use super::*;
+
+    fn create_function(sql: &str) -> CreateFunction {
+        let mut statements = uqa_sql::compile(sql).expect("compile CREATE FUNCTION");
+        assert_eq!(statements.len(), 1);
+        let Statement::CreateFunction(definition) = statements.remove(0) else {
+            panic!("expected CREATE FUNCTION statement");
+        };
+        *definition
+    }
+
+    fn drop_function(sql: &str) -> DropFunctionStmt {
+        let mut statements = uqa_sql::compile(sql).expect("compile DROP FUNCTION");
+        assert_eq!(statements.len(), 1);
+        let Statement::DropFunction(statement) = statements.remove(0) else {
+            panic!("expected DROP FUNCTION statement");
+        };
+        statement
+    }
+
+    fn has_function(engine: &Engine, name: &str, argument_types: &[&str]) -> bool {
+        let expected = argument_types
+            .iter()
+            .map(|type_name| canonical_routine_type_name(type_name))
+            .collect::<Vec<_>>();
+        engine
+            .durable
+            .sql_user_functions
+            .read()
+            .get(name)
+            .is_some_and(|overloads| {
+                overloads
+                    .iter()
+                    .any(|function| routine_signature_types(&function.def) == expected)
+            })
+    }
+
+    #[test]
+    fn drop_preserves_registration_completed_after_dependency_preflight() {
+        let engine = Arc::new(Engine::new());
+        engine
+            .register_sql_function(create_function(
+                "CREATE FUNCTION public.drop_target() RETURNS INTEGER LANGUAGE SQL IMMUTABLE AS 'SELECT 1'",
+            ))
+            .unwrap();
+        let drop_statement = drop_function("DROP FUNCTION public.drop_target()");
+        let (preflight_complete_tx, preflight_complete_rx) = mpsc::sync_channel(0);
+        let (continue_tx, continue_rx) = mpsc::sync_channel(0);
+        let drop_engine = Arc::clone(&engine);
+        let drop_thread = std::thread::spawn(move || {
+            let plan = drop_engine
+                .preflight_sql_function_drop(&drop_statement)
+                .unwrap();
+            preflight_complete_tx.send(()).unwrap();
+            continue_rx.recv().unwrap();
+            drop_engine.commit_sql_function_drop(plan)
+        });
+
+        preflight_complete_rx.recv().unwrap();
+        engine
+            .register_sql_function(create_function(
+                "CREATE FUNCTION public.drop_target(value INTEGER) RETURNS INTEGER LANGUAGE SQL IMMUTABLE AS 'SELECT $1'",
+            ))
+            .unwrap();
+        continue_tx.send(()).unwrap();
+        drop_thread.join().unwrap().unwrap();
+
+        assert!(!has_function(&engine, "public.drop_target", &[]));
+        assert!(has_function(&engine, "public.drop_target", &["INTEGER"]));
+    }
+
+    #[test]
+    fn multi_target_drop_revalidation_is_atomic() {
+        let engine = Engine::new();
+        for sql in [
+            "CREATE FUNCTION public.drop_first() RETURNS INTEGER LANGUAGE SQL IMMUTABLE AS 'SELECT 1'",
+            "CREATE FUNCTION public.drop_second() RETURNS INTEGER LANGUAGE SQL IMMUTABLE AS 'SELECT 2'",
+        ] {
+            engine
+                .register_sql_function(create_function(sql))
+                .unwrap();
+        }
+        let plan = engine
+            .preflight_sql_function_drop(&drop_function(
+                "DROP FUNCTION public.drop_first(), public.drop_second()",
+            ))
+            .unwrap();
+        engine
+            .drop_sql_functions(&drop_function("DROP FUNCTION public.drop_second()"))
+            .unwrap();
+
+        let error = engine.commit_sql_function_drop(plan).unwrap_err();
+        assert!(matches!(error, SQLError::Internal(_)), "{error}");
+        assert!(has_function(&engine, "public.drop_first", &[]));
+        assert!(!has_function(&engine, "public.drop_second", &[]));
+    }
+}

@@ -44,7 +44,7 @@ pub(in crate::sql) fn run_do_block(
     }
     let catalog = crate::sql::catalog::plpgsql_catalog(engine)?;
     let mut parsed = uqa_sql::plpgsql::parse_do_block_with_catalog(body, &catalog)?;
-    crate::engine_user_functions::resolve_plpgsql_datum_types(engine, &mut parsed)?;
+    crate::user_functions::resolve_plpgsql_datum_types(engine, &mut parsed)?;
     let def = CreateFunction {
         object_id: None,
         name: "inline_code_block".into(),
@@ -70,10 +70,15 @@ pub(in crate::sql) fn run_do_block(
     };
     let _guard = DepthGuard::enter(engine)?;
     let _transaction_context = RoutineTransactionGuard::enter(
-        engine,
+        engine.routine_session_id(),
         nonatomic_routine_entry_allowed(engine, nested_statement),
     );
-    let mut interpreter = Interpreter::new(engine, &def, &parsed, Vec::new())?;
+    let mut interpreter = Interpreter::new(
+        engine.routine_execution_context(),
+        &def,
+        &parsed,
+        Vec::new(),
+    )?;
     interpreter.run(&parsed.action)?;
     Ok(SQLResult::empty())
 }
@@ -389,7 +394,7 @@ fn execute_resolved_table_function(
     }
     let outcome = execute_routine(engine, &function, bound, &invocation, false)?;
     if let Some((columns, types)) = record_definition {
-        if !crate::engine_user_functions::routine_returns_anonymous_record(&function.def) {
+        if !crate::user_functions::routine_returns_anonymous_record(&function.def) {
             return Err(SQLError::Internal(format!(
                 "non-anonymous routine `{}` reached record-definition shaping",
                 function.def.name
@@ -474,7 +479,7 @@ fn validate_anonymous_record_column_types(
             continue;
         };
         let source = uqa_execution::canonical_column_type_name(source);
-        let target = crate::engine_user_functions::canonical_routine_type_name(target);
+        let target = crate::user_functions::canonical_routine_type_name(target);
         if !uqa_execution::routine_type_accepts_implicit_cast(&source, &target) {
             return Err(anonymous_record_shape_error());
         }

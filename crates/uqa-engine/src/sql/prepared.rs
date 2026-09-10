@@ -20,7 +20,7 @@ pub(crate) fn infer_prepared_parameter_types(
     plan: &uqa_planner::UnifiedPlan,
     declared: &[Option<ColumnType>],
 ) -> Result<Vec<Option<ColumnType>>, SQLError> {
-    let scope = select::CteScope::new_for_current_routine(engine);
+    let scope = crate::capabilities::query_scope::new_for_current_routine(engine);
     select::infer_prepared_parameter_types(engine, plan, declared, &scope)
 }
 
@@ -36,7 +36,7 @@ pub(crate) fn analyze_prepared_plan(
             None => SQLParam::Scalar(Value::Null),
         })
         .collect::<Vec<_>>();
-    let scope = select::CteScope::new_for_current_routine(engine);
+    let scope = crate::capabilities::query_scope::new_for_current_routine(engine);
     match plan {
         uqa_planner::UnifiedPlan::Query(query) => {
             select::analyze_query_plan_schema(engine, query, &params, &scope, None).map(Some)
@@ -132,7 +132,7 @@ pub(super) fn bind_execute_parameters(
             format!("wrong number of parameters for prepared statement \"{name}\""),
         ));
     }
-    let scope = select::CteScope::new_for_current_routine(engine);
+    let scope = crate::capabilities::query_scope::new_for_current_routine(engine);
     let hook = select::ScopedEngineHook::new(engine, &scope);
     let context = PhysicalEvalContext::new(None, outer_parameters)
         .with_function_hook(&hook)

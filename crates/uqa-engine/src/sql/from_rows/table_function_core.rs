@@ -11,7 +11,7 @@ use super::{
     json_array_values, json_each_row_stream, json_object_key_values, regexp_split_values,
     registered_table_function_row_stream, scalar_table_function_default_column,
     string_to_table_values, unnest_row_stream, Engine, PhysicalSubqueryRunner, PlanSubqueryArena,
-    QueryPlan, SQLError, SQLParam, ScalarEvalContext, ScalarExpr, Value,
+    QueryPlan, SQLError, SQLParam, ScalarEvalContext, Value,
 };
 
 pub(in crate::sql) struct SourceEvalContext<'a> {
@@ -40,43 +40,9 @@ impl<'a> SourceEvalContext<'a> {
     }
 }
 
-#[derive(Clone, Copy)]
-pub(in crate::sql) struct TableFunctionCall<'a> {
-    pub(in crate::sql) name: &'a str,
-    pub(in crate::sql) binding: Option<&'a uqa_sql::ast::FunctionBinding>,
-    pub(in crate::sql) output_name: &'a str,
-    pub(in crate::sql) relations: Option<&'a uqa_sql::ast::OperatorJoinRelations>,
-    pub(in crate::sql) args: &'a [ScalarExpr],
-    pub(in crate::sql) alias: Option<&'a str>,
-    pub(in crate::sql) column_aliases: &'a [String],
-    pub(in crate::sql) ordinality: bool,
-    pub(in crate::sql) column_types: &'a [String],
-}
-
-/// SQL-visible column metadata paired with positional table-function rows. Column names never participate in row transport, so duplicate and unnamed outputs remain distinct physical attributes.
-pub(in crate::sql) struct TableFunctionRows {
-    pub(in crate::sql) columns: Vec<String>,
-    pub(in crate::sql) rows: uqa_execution::PhysicalProjectRows,
-}
-
-impl TableFunctionRows {
-    pub(in crate::sql) fn new(
-        columns: Vec<String>,
-        rows: uqa_execution::PhysicalProjectRows,
-    ) -> Self {
-        Self { columns, rows }
-    }
-
-    pub(in crate::sql) fn materialized(columns: Vec<String>, rows: Vec<Vec<Value>>) -> Self {
-        Self::new(
-            columns,
-            Box::new(
-                rows.into_iter()
-                    .map(|values| Ok(uqa_execution::PhysicalRow::from_values(values))),
-            ),
-        )
-    }
-}
+pub(in crate::sql) use uqa_execution::query::table_functions::{
+    TableFunctionCall, TableFunctionRows,
+};
 
 /// Build a table-function result as a fallible owned row stream. Built-in cardinality-producing functions are evaluated lazily; registered/user functions keep their existing vector-valued API and are adapted at this explicit extension boundary. A correlated lateral caller supplies its physical outer row so function arguments are evaluated in the same scope used during binding.
 #[allow(clippy::similar_names)]

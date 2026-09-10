@@ -16,7 +16,7 @@ use serde::Deserialize;
 use uqa_analysis::analyzer::standard_analyzer;
 use uqa_core::{DocId, Edge, TemporalValue, Value, Vertex};
 use uqa_sql::ast::{ColumnDef, ColumnType, Expr};
-use uqa_storage::sqlite::ColumnStatsInput;
+use uqa_storage_sqlite::ColumnStatsInput;
 
 use crate::sql::convert_value_to_column_type;
 use crate::{Engine, HNSWIndexParams, IVFIndexParams, VectorIndexSpec};
@@ -62,7 +62,7 @@ pub enum PythonMigrationError {
     #[error("sqlite error: {0}")]
     SQLite(#[from] rusqlite::Error),
     #[error("storage error: {0}")]
-    Storage(#[from] uqa_storage::SQLiteError),
+    Storage(#[from] uqa_storage_sqlite::SQLiteError),
     #[error("storage backend error: {0}")]
     StorageBackend(#[from] uqa_storage::StorageBackendError),
     #[error("SQL error: {0}")]

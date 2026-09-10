@@ -227,7 +227,7 @@ fn remove_source_bindings(value: &mut serde_json::Value) -> usize {
 
 #[test]
 fn stored_column_alias_drop_migrates_legacy_sources_without_rebinding_on_reopen() {
-    use uqa_storage::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::{Catalog, ManagedConnection};
 
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("alias-migration.db");
@@ -264,7 +264,7 @@ fn stored_column_alias_drop_migrates_legacy_sources_without_rebinding_on_reopen(
 #[test]
 fn stored_column_alias_drop_migrates_regclass_constants_before_sequence_rename() {
     use uqa_sql::ast::{ColumnDef, Expr};
-    use uqa_storage::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::{Catalog, ManagedConnection};
 
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("alias-regclass-migration.db");

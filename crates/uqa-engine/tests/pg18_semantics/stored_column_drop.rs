@@ -310,7 +310,7 @@ fn remove_merge_target_bindings(value: &mut serde_json::Value) -> usize {
 
 #[test]
 fn stored_column_drop_merge_migrates_legacy_target_identities() {
-    use uqa_storage::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::{Catalog, ManagedConnection};
 
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("merge-column-migration.db");
@@ -357,7 +357,7 @@ fn stored_column_drop_merge_migrates_legacy_target_identities() {
 
 #[test]
 fn stored_column_drop_merge_retains_domain_dependencies_after_target_removal() {
-    use uqa_storage::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::{Catalog, ManagedConnection};
 
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("merge-domain-lifecycle.db");

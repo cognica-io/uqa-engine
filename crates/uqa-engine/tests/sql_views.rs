@@ -14,7 +14,7 @@ use std::sync::{
 use uqa_core::Value;
 use uqa_engine::{Engine, SQLResult, SQLScalarFunction};
 use uqa_sql::{ColumnType, SQLError};
-use uqa_storage::sqlite::{Catalog, ManagedConnection};
+use uqa_storage_sqlite::{Catalog, ManagedConnection};
 
 #[path = "sql_views/automatic_updatability.rs"]
 mod automatic_updatability;

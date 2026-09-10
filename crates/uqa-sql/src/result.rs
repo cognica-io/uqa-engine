@@ -12,6 +12,9 @@ use uqa_core::Value;
 
 use crate::ast::ColumnType;
 
+mod text;
+pub use text::format_postgres_text;
+
 pub type ResultRow = BTreeMap<String, Value>;
 
 /// Whether execution produced a row descriptor, independently of its column or row count.
@@ -169,3 +172,5 @@ mod tests {
         assert_eq!(result.value_at(0, 1), Some(&Value::Int(6)));
     }
 }
+
+pub mod completion;

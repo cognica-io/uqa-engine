@@ -31,7 +31,6 @@ mod pattern;
 mod persistent_store;
 mod posting_list;
 mod rpq;
-mod sqlite_store;
 mod store;
 mod subgraph_index;
 mod temporal;
@@ -71,9 +70,10 @@ pub use rpq::{
     NfaTransition, RPQBuildError, RPQParseError, RegularPathExpr, StateId, MAX_DFA_STATES,
     MAX_NFA_STATES, MAX_RPQ_AST_DEPTH,
 };
-pub use sqlite_store::SQLiteGraphStore;
 pub use store::{GraphStore, GraphStoreError, GraphStoreResult};
 pub use subgraph_index::SubgraphIndex;
 pub use temporal::{TemporalFilter, TemporalPatternMatch, TemporalTraverse};
 pub use types::Direction;
 pub use versioned_store::VersionedGraphStore;
+
+pub use persistent_store::storage::{begin_graph_write, GraphStorage, GraphWriteTransaction};

@@ -12,7 +12,7 @@ use uqa_storage::{GraphEntityFilter, GraphEntityKind};
 use crate::{GraphLabelRegistry, GraphStoreResult};
 
 /// Open a write transaction or a nested savepoint on the exact storage session.
-pub(crate) fn begin_graph_write(
+pub fn begin_graph_write(
     backend: std::sync::Arc<dyn uqa_storage::PersistentStorageBackend>,
 ) -> GraphStoreResult<Box<dyn GraphWriteTransaction>> {
     let savepoint = if backend.in_transaction() {
@@ -72,14 +72,14 @@ impl Drop for StorageGraphWriteTransaction {
 
 /// A live storage checkpoint. Implementations also roll back on Drop so a
 /// panic cannot publish half a graph mutation.
-pub(crate) trait GraphWriteTransaction {
+pub trait GraphWriteTransaction {
     fn commit(&mut self) -> GraphStoreResult<()>;
     fn rollback(&mut self) -> GraphStoreResult<()>;
 }
 
 /// No entity, membership, or adjacency collection is retained by a handle.
 /// Multi-read operations run in the caller's pinned storage transaction.
-pub(crate) trait GraphStorage: Send + Sync {
+pub trait GraphStorage: Send + Sync {
     /// Copy only transaction-local write identities when preparing a new
     /// command candidate. The underlying durable snapshots remain shared.
     fn fork_overlay(&self) -> Option<std::sync::Arc<dyn GraphStorage>> {

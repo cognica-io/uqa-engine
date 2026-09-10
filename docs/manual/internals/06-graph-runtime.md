@@ -19,7 +19,7 @@ flowchart TD
 
 A graph name identifies a workspace with vertices, edges, labels, properties, temporal deltas, and path indexes. Memory and persistent stores implement graph operations, while engine catalog ownership restores named graph identities and metadata.
 
-Persistent engines keep only session-bound `PersistentGraphStore` handles. Vertex, edge, membership, and adjacency records remain in the physical backend: neither opening, session creation, catalog refresh, nor handle cloning constructs a complete resident graph. `MemoryGraphStore` is primary storage for `Engine::new()`, not a cache for persistent engines. Standalone `SQLiteGraphStore` follows the same direct-access contract.
+Persistent engines keep only session-bound `PersistentGraphStore` handles. Vertex, edge, membership, and adjacency records remain in the physical backend: neither opening, session creation, catalog refresh, nor handle cloning constructs a complete resident graph. `MemoryGraphStore` is primary storage for `Engine::new()`, not a cache for persistent engines. Standalone `uqa_storage_sqlite::SQLiteGraphStore` follows the same direct-access contract through graph's `GraphStorage` and `GraphWriteTransaction` interfaces. Physical SQLite queries live in the provider crate.
 
 Point reads return owned entities; scans use bounded ID pages, and label and adjacency predicates start at selective physical indexes. Corrupt payloads fail when accessed rather than forcing every unrelated entity to be decoded at startup. Individual analytical queries can still require result-sized or algorithm-specific working sets, such as PageRank scores or traversal frontiers; those are not persistent graph replicas.
 
@@ -88,7 +88,8 @@ Persistent path indexes store reachability pairs in physical indexed pages. Cons
 | Area | Path |
 | --- | --- |
 | Graph crate | [`crates/uqa-graph/src/lib.rs`](../../../crates/uqa-graph/src/lib.rs) |
+| SQLite graph provider | [`crates/uqa-storage-sqlite/src/graph.rs`](../../../crates/uqa-storage-sqlite/src/graph.rs) |
 | Cypher parser | [`crates/uqa-graph/src/cypher/parser.rs`](../../../crates/uqa-graph/src/cypher/parser.rs) |
 | RPQ implementation | [`crates/uqa-graph/src/rpq.rs`](../../../crates/uqa-graph/src/rpq.rs) |
-| Engine graph API | [`crates/uqa-engine/src/engine_graphs.rs`](../../../crates/uqa-engine/src/engine_graphs.rs) |
+| Engine graph API | [`crates/uqa-engine/src/graphs.rs`](../../../crates/uqa-engine/src/graphs.rs) |
 | SQL Cypher adapter | [`crates/uqa-engine/src/sql/age_cypher.rs`](../../../crates/uqa-engine/src/sql/age_cypher.rs) |

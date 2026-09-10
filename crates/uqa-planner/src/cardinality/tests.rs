@@ -58,10 +58,10 @@ fn rare_equality_uses_probability_left_after_common_and_null_values() {
     );
     assert_eq!(column.equality_selectivity_for(&Value::Null), 0.0);
     assert!((column.equality_selectivity() - 0.495).abs() < 1e-12);
-    let parameter = uqa_execution::ScalarExpr::Binary {
+    let parameter = uqa_sql::ScalarExpr::Binary {
         op: BinaryOp::Equal,
-        lhs: Box::new(uqa_execution::ScalarExpr::Column("bucket".into())),
-        rhs: Box::new(uqa_execution::ScalarExpr::Param(1)),
+        lhs: Box::new(uqa_sql::ScalarExpr::Column("bucket".into())),
+        rhs: Box::new(uqa_sql::ScalarExpr::Param(1)),
     };
     assert!((estimator.scalar_selectivity(&parameter, &statistics).raw() - 0.495).abs() < 1e-12);
 }

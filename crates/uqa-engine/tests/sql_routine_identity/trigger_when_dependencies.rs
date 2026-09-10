@@ -300,7 +300,7 @@ fn create_trigger_when_migration_fixture(engine: &Engine) {
 
 #[test]
 fn secondary_session_refuses_to_repair_trigger_when_bindings() {
-    use uqa_storage::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::{Catalog, ManagedConnection};
 
     let directory = TempDir::new().unwrap();
     let database = directory.path().join("trigger-when-load-only.sqlite");
@@ -336,7 +336,7 @@ fn secondary_session_refuses_to_repair_trigger_when_bindings() {
 
 #[test]
 fn failed_trigger_when_migration_rolls_back_its_catalog_write() {
-    use uqa_storage::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::{Catalog, ManagedConnection};
 
     let directory = TempDir::new().unwrap();
     let database = directory

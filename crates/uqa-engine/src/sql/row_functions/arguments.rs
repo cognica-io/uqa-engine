@@ -25,18 +25,7 @@ pub(super) fn expect_evaluated_string(value: Value, name: &str) -> Result<String
     }
 }
 
-pub(in crate::sql) fn expect_column_name(
-    expr: &ScalarExpr,
-    label: &str,
-) -> Result<String, SQLError> {
-    match expr {
-        ScalarExpr::Column(name) => Ok(name.clone()),
-        ScalarExpr::QualifiedColumn { column, .. } => Ok(column.clone()),
-        other => Err(SQLError::TypeMismatch(format!(
-            "{label} must be a column reference, got {other:?}"
-        ))),
-    }
-}
+pub(in crate::sql) use uqa_sql::semantics::expect_column_name;
 
 pub(super) fn expect_field_name_or_string(
     expr: &ScalarExpr,

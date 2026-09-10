@@ -9,7 +9,7 @@
 use uqa_core::Value;
 use uqa_engine::Engine;
 use uqa_sql::ast::Expr;
-use uqa_storage::ManagedConnection;
+use uqa_storage_sqlite::ManagedConnection;
 
 #[path = "sql_sequences/cache.rs"]
 mod cache;

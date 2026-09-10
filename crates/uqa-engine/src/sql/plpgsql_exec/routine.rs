@@ -6,113 +6,25 @@
 
 //! Routine execution, recursion limits, and `LANGUAGE sql` result shaping.
 
-use std::cell::RefCell;
-
 use super::{
-    result_row_values, Cell, CompiledFunctionBody, CreateFunction, Engine, FunctionReturns,
-    Interpreter, PLpgSQLDatum, RoutineOutcome, SQLError, SQLParam, SQLResult, SQLUserFunction,
-    UnifiedPlanExecutor, Value,
+    Cell, CompiledFunctionBody, CreateFunction, Engine, FunctionReturns, Interpreter, PLpgSQLDatum,
+    RoutineOutcome, SQLError, SQLUserFunction, Value,
 };
-use crate::engine_user_functions::{canonical_routine_type_name, routine_returns_anonymous_record};
+use crate::user_functions::canonical_routine_type_name;
 use uqa_sql::ast::RoutineInvocationBinding;
 
-pub(in crate::sql) struct TriggerRoutineContext {
-    pub(in crate::sql) column_types: Vec<Option<uqa_sql::ast::ColumnType>>,
-    pub(in crate::sql) old: Value,
-    pub(in crate::sql) new: Value,
-    pub(in crate::sql) name: String,
-    pub(in crate::sql) when: String,
-    pub(in crate::sql) level: String,
-    pub(in crate::sql) operation: String,
-    pub(in crate::sql) relation_oid: i64,
-    pub(in crate::sql) table_name: String,
-    pub(in crate::sql) table_schema: String,
-    pub(in crate::sql) arguments: Vec<String>,
-}
+pub(crate) use uqa_execution::routines::TriggerRoutineContext;
 
 thread_local! {
     static CALL_DEPTH: Cell<usize> = const { Cell::new(0) };
     static STACK_BASE: Cell<usize> = const { Cell::new(0) };
-    static ROUTINE_TRANSACTION_STACK: RefCell<Vec<RoutineTransactionContext>> = const { RefCell::new(Vec::new()) };
-    static DIRECT_ROUTINE_COMMAND_STACK: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
 }
-
-#[derive(Clone, Copy)]
-struct RoutineTransactionContext {
-    session: usize,
-    nonatomic: bool,
-}
-
-pub(super) struct RoutineTransactionGuard;
-
-pub(super) struct DirectRoutineCommandGuard {
-    session: usize,
-}
-
-fn session_identity(engine: &Engine) -> usize {
-    std::sync::Arc::as_ptr(&engine.session) as usize
-}
-
-impl RoutineTransactionGuard {
-    pub(super) fn enter(engine: &Engine, nonatomic: bool) -> Self {
-        ROUTINE_TRANSACTION_STACK.with(|stack| {
-            stack.borrow_mut().push(RoutineTransactionContext {
-                session: session_identity(engine),
-                nonatomic,
-            });
-        });
-        Self
-    }
-}
-
-impl Drop for RoutineTransactionGuard {
-    fn drop(&mut self) {
-        ROUTINE_TRANSACTION_STACK.with(|stack| {
-            let removed = stack.borrow_mut().pop();
-            debug_assert!(removed.is_some(), "routine transaction stack underflow");
-        });
-    }
-}
-
-impl DirectRoutineCommandGuard {
-    pub(super) fn enter(engine: &Engine) -> Self {
-        let session = session_identity(engine);
-        DIRECT_ROUTINE_COMMAND_STACK.with(|stack| stack.borrow_mut().push(session));
-        Self { session }
-    }
-}
-
-impl Drop for DirectRoutineCommandGuard {
-    fn drop(&mut self) {
-        DIRECT_ROUTINE_COMMAND_STACK.with(|stack| {
-            let removed = stack.borrow_mut().pop();
-            debug_assert_eq!(
-                removed,
-                Some(self.session),
-                "direct routine command stack mismatch"
-            );
-        });
-    }
-}
-
-pub(super) fn routine_transaction_control_allowed(engine: &Engine) -> bool {
-    let session = session_identity(engine);
-    ROUTINE_TRANSACTION_STACK.with(|stack| {
-        stack
-            .borrow()
-            .last()
-            .is_some_and(|context| context.session == session && context.nonatomic)
-    })
-}
-
+pub(super) use uqa_execution::routines::transaction::RoutineTransactionGuard;
 pub(super) fn nonatomic_routine_entry_allowed(engine: &Engine, nested_statement: bool) -> bool {
-    if !nested_statement {
-        return true;
-    }
-    let session = session_identity(engine);
-    routine_transaction_control_allowed(engine)
-        && DIRECT_ROUTINE_COMMAND_STACK
-            .with(|stack| stack.borrow().last().is_some_and(|entry| *entry == session))
+    uqa_execution::routines::transaction::nonatomic_routine_entry_allowed(
+        engine.routine_session_id(),
+        nested_statement,
+    )
 }
 
 /// Native stack budget for nested routine calls, measured from the
@@ -188,7 +100,8 @@ pub(super) fn execute_routine(
         && definition.is_procedure
         && !definition.security.security_definer
         && definition.config.is_empty();
-    let _transaction_context = RoutineTransactionGuard::enter(engine, nonatomic);
+    let _transaction_context =
+        RoutineTransactionGuard::enter(engine.routine_session_id(), nonatomic);
     engine.ensure_routine_execute_privilege(definition)?;
     engine.with_routine_context(definition, || match &function.compiled {
         CompiledFunctionBody::PLpgSQL(parsed) => {
@@ -210,23 +123,28 @@ pub(super) fn execute_routine(
     })
 }
 
-pub(in crate::sql) fn execute_trigger_routine(
+pub(crate) fn execute_trigger_routine(
     engine: &Engine,
     function: &SQLUserFunction,
     context: &TriggerRoutineContext,
 ) -> Result<Value, SQLError> {
     let _guard = DepthGuard::enter(engine)?;
-    let _transaction_context = RoutineTransactionGuard::enter(engine, false);
+    let _transaction_context = RoutineTransactionGuard::enter(engine.routine_session_id(), false);
     engine.with_routine_context(&function.def, || {
         let CompiledFunctionBody::PLpgSQL(parsed) = &function.compiled else {
             return Err(SQLError::Unsupported(
                 "only LANGUAGE plpgsql trigger functions are executable".into(),
             ));
         };
-        let mut interpreter = Interpreter::new(engine, &function.def, parsed, Vec::new())?;
+        let mut interpreter = Interpreter::new(
+            engine.routine_execution_context(),
+            &function.def,
+            parsed,
+            Vec::new(),
+        )?;
         interpreter.initialize_trigger_context(parsed, context)?;
         interpreter.run(&parsed.action)?;
-        super::records::shape_trigger_outcome(interpreter.into_outcome(), context)
+        uqa_execution::routines::shape_trigger_outcome(interpreter.into_outcome(), context)
     })
 }
 
@@ -236,7 +154,12 @@ fn execute_plpgsql_language(
     parsed: &uqa_sql::plpgsql::PLpgSQLFunction,
     bound: Vec<Value>,
 ) -> Result<RoutineOutcome, SQLError> {
-    let mut interpreter = Interpreter::new(engine, definition, parsed, bound)?;
+    let mut interpreter = Interpreter::new(
+        engine.routine_execution_context(),
+        definition,
+        parsed,
+        bound,
+    )?;
     interpreter.run(&parsed.action)?;
     Ok(interpreter.into_outcome())
 }
@@ -285,177 +208,16 @@ fn specialized_definition(
     Ok(Some(specialized))
 }
 
-/// `LANGUAGE sql` body: run every statement; the last statement's
-/// result shapes the routine output.
-#[expect(clippy::too_many_lines, reason = "preserves PL/pgSQL transition order")]
 fn execute_sql_language(
     engine: &Engine,
-    def: &CreateFunction,
+    definition: &CreateFunction,
     plans: &[uqa_planner::UnifiedPlan],
     bound: &[Value],
 ) -> Result<RoutineOutcome, SQLError> {
-    let call_params = def.call_params();
-    if call_params.len() != bound.len() {
-        return Err(SQLError::Internal(format!(
-            "routine `{}` received {} values for {} concrete call parameters",
-            def.name,
-            bound.len(),
-            call_params.len()
-        )));
-    }
-    let params = bound
-        .iter()
-        .cloned()
-        .zip(call_params)
-        .map(|(value, parameter)| {
-            let ty = uqa_sql::ast::ColumnType::from_sql_name(&parameter.type_name)
-                .ok()
-                .or_else(|| crate::sql::resolve_catalog_column_type(engine, &parameter.type_name))
-                .ok_or_else(|| {
-                    SQLError::TypeMismatch(format!("unknown type `{}`", parameter.type_name))
-                })?;
-            Ok(SQLParam::typed_scalar(value, ty))
-        })
-        .collect::<Result<Vec<_>, SQLError>>()?;
-    let mut last = SQLResult::empty();
-    for plan in plans {
-        let _direct_routine_command = matches!(
-            plan,
-            uqa_planner::UnifiedPlan::Command(command)
-                if matches!(
-                    command.as_ref(),
-                    uqa_planner::CommandPlan::Call { .. }
-                        | uqa_planner::CommandPlan::DoBlock { .. }
-                )
-        )
-        .then(|| DirectRoutineCommandGuard::enter(engine));
-        let plan = super::super::plan_for_execution(engine, plan.clone(), &params)?;
-        last = UnifiedPlanExecutor::new_nested(engine, &params).execute(&plan)?;
-    }
-    let out_params = def.output_params();
-    let returns_anonymous_record = routine_returns_anonymous_record(def);
-    let returns_void = matches!(
-        &def.returns,
-        FunctionReturns::Scalar { type_name } if type_name == "void"
-    );
-    let expected = if out_params.is_empty() {
-        1
-    } else {
-        out_params.len()
-    };
-    // PostgreSQL enforces the final statement's column shape at
-    // CREATE time; the engine has no schema binding there, so the
-    // same 42P13 error surfaces on the first call instead.
-    let shape_checked =
-        !returns_void && !returns_anonymous_record && (!def.is_procedure || !out_params.is_empty());
-    if shape_checked && last.columns.len() != expected {
-        return Err(sql_body_shape_error(def));
-    }
-    if def.returns_set() {
-        let mut set_rows = Vec::with_capacity(last.rows.len());
-        for row_index in 0..last.rows.len() {
-            let mut values = result_row_values(&last, row_index).unwrap_or_default();
-            if !returns_anonymous_record && values.len() != expected {
-                return Err(sql_body_shape_error(def));
-            }
-            if returns_anonymous_record {
-                values = vec![anonymous_record_value(&last.columns, values)];
-            } else if out_params.is_empty() {
-                if let FunctionReturns::SetOf { type_name } = &def.returns {
-                    values[0] = super::resolution::coerce_routine_value_from(
-                        engine,
-                        &values[0],
-                        type_name,
-                        last.column_types.first().and_then(Option::as_ref),
-                    )?;
-                }
-            } else {
-                for ((value, parameter), source) in
-                    values.iter_mut().zip(&out_params).zip(&last.column_types)
-                {
-                    *value = super::resolution::coerce_routine_value_from(
-                        engine,
-                        value,
-                        &parameter.type_name,
-                        source.as_ref(),
-                    )?;
-                }
-            }
-            set_rows.push(values);
-        }
-        return Ok(RoutineOutcome {
-            value: Value::Null,
-            out_values: vec![Value::Null; out_params.len()],
-            set_rows,
-            anonymous_record_column_types: returns_anonymous_record
-                .then(|| last.column_types.clone()),
-        });
-    }
-    let first = result_row_values(&last, 0);
-    if !out_params.is_empty() {
-        let mut out_values = vec![Value::Null; out_params.len()];
-        if let Some(values) = first {
-            for (idx, value) in values.into_iter().take(out_values.len()).enumerate() {
-                out_values[idx] = super::resolution::coerce_routine_value_from(
-                    engine,
-                    &value,
-                    &out_params[idx].type_name,
-                    last.column_types.get(idx).and_then(Option::as_ref),
-                )?;
-            }
-        }
-        return Ok(RoutineOutcome {
-            value: Value::Null,
-            out_values,
-            set_rows: Vec::new(),
-            anonymous_record_column_types: None,
-        });
-    }
-    let value = match first {
-        Some(_) if returns_void => Value::Null,
-        Some(values) if returns_anonymous_record => anonymous_record_value(&last.columns, values),
-        Some(mut values) => {
-            if values.is_empty() {
-                Value::Null
-            } else {
-                let value = values.remove(0);
-                match &def.returns {
-                    FunctionReturns::Scalar { type_name } => {
-                        super::resolution::coerce_routine_value_from(
-                            engine,
-                            &value,
-                            type_name,
-                            last.column_types.first().and_then(Option::as_ref),
-                        )?
-                    }
-                    _ => value,
-                }
-            }
-        }
-        None => Value::Null,
-    };
-    Ok(RoutineOutcome {
-        value,
-        out_values: Vec::new(),
-        set_rows: Vec::new(),
-        anonymous_record_column_types: returns_anonymous_record.then(|| last.column_types.clone()),
-    })
-}
-
-fn anonymous_record_value(columns: &[String], values: Vec<Value>) -> Value {
-    Value::Record(columns.iter().cloned().zip(values).collect())
-}
-
-fn sql_body_shape_error(def: &CreateFunction) -> SQLError {
-    let declared = match &def.returns {
-        FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => {
-            type_name.clone()
-        }
-        FunctionReturns::Table => "record".into(),
-        FunctionReturns::None => "record".into(),
-    };
-    SQLError::Routine {
-        sqlstate: "42P13".into(),
-        message: format!("return type mismatch in function declared to return {declared}"),
-    }
+    uqa_execution::routines::sql_body::execute_sql_language(
+        engine.routine_execution_context(),
+        definition,
+        plans,
+        bound,
+    )
 }

@@ -1,0 +1,300 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Constraint catalog projection.
+
+use uqa_core::Value;
+use uqa_sql::{ResultRow, SQLError};
+
+use crate::catalog::{CatalogReadView, RelationNameResolution};
+
+use super::super::helpers::constraints::{
+    constraint_catalog_rows, ConstraintCatalogKind, ConstraintCatalogRow,
+};
+use super::super::helpers::oids::{schema_oid, stable_object_oid, stable_oid};
+use super::super::helpers::rows::{
+    bool_value, catalog_array, catalog_usize, int_value, row, str_value,
+};
+use super::table_relation_oid_from;
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves catalog column and OID order"
+)]
+pub fn build_pg_constraint(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+) -> Result<Vec<ResultRow>, SQLError> {
+    let indexes = super::catalog_index_relations(catalog, resolution)?;
+    let mut rows = constraint_catalog_rows(catalog, resolution)?
+        .into_iter()
+        .map(|constraint| -> Result<ResultRow, SQLError> {
+            let foreign_key = constraint.foreign_key.as_ref();
+            let constrained_key: Vec<i64> = constraint
+                .columns
+                .iter()
+                .map(|column| column.table_ordinal)
+                .collect();
+            let constrained_key = if constrained_key.is_empty() {
+                Value::Null
+            } else {
+                catalog_array(
+                    constrained_key.into_iter().map(Value::Int).collect(),
+                    "pg_constraint.conkey",
+                )?
+            };
+            let referenced_key = match foreign_key {
+                Some(foreign_key) => catalog_array(
+                    foreign_key
+                        .column_ordinals
+                        .iter()
+                        .copied()
+                        .map(Value::Int)
+                        .collect(),
+                    "pg_constraint.confkey",
+                )?,
+                None => Value::Null,
+            };
+            let constrained_relation_oid = table_relation_oid_from(
+                catalog,
+                resolution,
+                &format!(
+                    "{}.{}",
+                    uqa_sql::expr::quote_ident(&constraint.schema),
+                    uqa_sql::expr::quote_ident(&constraint.table)
+                ),
+            )?;
+            let referenced_relation_oid = match foreign_key {
+                Some(foreign_key) => table_relation_oid_from(
+                    catalog,
+                    resolution,
+                    &format!(
+                        "{}.{}",
+                        uqa_sql::expr::quote_ident(&foreign_key.schema),
+                        uqa_sql::expr::quote_ident(&foreign_key.table)
+                    ),
+                )?,
+                None => 0,
+            };
+            let index_oid = constraint_index_oid(&constraint, &indexes);
+            let (inheritance_count, is_local) =
+                constraint_inheritance_state(catalog, resolution, &constraint)?;
+            Ok(row([
+                (
+                    "oid",
+                    int_value(
+                        constraint
+                            .object_id
+                            .filter(|_| constraint.kind == ConstraintCatalogKind::Check)
+                            .map_or_else(
+                                || {
+                                    stable_oid(
+                                        "constraint",
+                                        &format!(
+                                            "{}.{}.{}",
+                                            constraint.schema, constraint.table, constraint.name
+                                        ),
+                                    )
+                                },
+                                |object_id| stable_object_oid("constraint", &object_id),
+                            ),
+                    ),
+                ),
+                ("conname", str_value(constraint.name)),
+                ("connamespace", int_value(schema_oid(&constraint.schema))),
+                ("contype", str_value(constraint.kind.pg_type())),
+                ("condeferrable", bool_value(constraint.state.deferrable())),
+                (
+                    "condeferred",
+                    bool_value(constraint.state.initially_deferred()),
+                ),
+                ("conenforced", bool_value(constraint.state.enforced())),
+                ("convalidated", bool_value(constraint.state.validated())),
+                ("conrelid", int_value(constrained_relation_oid)),
+                ("contypid", int_value(0)),
+                ("conindid", int_value(index_oid)),
+                ("conparentid", int_value(0)),
+                ("confrelid", int_value(referenced_relation_oid)),
+                (
+                    "confupdtype",
+                    str_value(foreign_key.map_or(" ", |foreign_key| {
+                        foreign_key_action_code(foreign_key.on_update)
+                    })),
+                ),
+                (
+                    "confdeltype",
+                    str_value(foreign_key.map_or(" ", |foreign_key| {
+                        foreign_key_action_code(foreign_key.on_delete)
+                    })),
+                ),
+                (
+                    "confmatchtype",
+                    str_value(foreign_key.map_or(" ", |foreign_key| {
+                        foreign_key_match_code(foreign_key.match_type)
+                    })),
+                ),
+                ("conislocal", bool_value(is_local)),
+                ("coninhcount", int_value(inheritance_count)),
+                ("connoinherit", bool_value(constraint.state.no_inherit())),
+                ("conperiod", bool_value(constraint.period)),
+                ("conkey", constrained_key),
+                ("confkey", referenced_key),
+                ("conpfeqop", Value::Null),
+                ("conppeqop", Value::Null),
+                ("conffeqop", Value::Null),
+                ("conexclop", Value::Null),
+                ("conbin", Value::Null),
+            ]))
+        })
+        .collect::<Result<Vec<_>, SQLError>>()?;
+    rows.extend(super::super::events::build_trigger_constraints(
+        catalog, resolution,
+    )?);
+    Ok(rows)
+}
+
+fn constraint_inheritance_state(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    constraint: &ConstraintCatalogRow,
+) -> Result<(i64, bool), SQLError> {
+    if constraint.kind == ConstraintCatalogKind::Check {
+        return check_inheritance_state(catalog, resolution, constraint);
+    }
+    if constraint.kind != ConstraintCatalogKind::NotNull {
+        return Ok((0, true));
+    }
+    let column = constraint
+        .columns
+        .first()
+        .ok_or_else(|| SQLError::Internal("NOT NULL constraint has no column".into()))?;
+    let table_name = format!(
+        "{}.{}",
+        uqa_sql::expr::quote_ident(&constraint.schema),
+        uqa_sql::expr::quote_ident(&constraint.table)
+    );
+    let Some(table) = catalog.table(resolution, &table_name)? else {
+        return Ok((0, true));
+    };
+    let is_local = table
+        .columns
+        .iter()
+        .find(|definition| definition.name == column.name)
+        .ok_or_else(|| SQLError::Internal("NOT NULL constraint column disappeared".into()))?
+        .not_null_is_local;
+    if constraint.state.no_inherit() {
+        return Ok((0, is_local));
+    }
+    let mut count = 0;
+    for parent in &table.hierarchy.parents {
+        let parent_table = catalog
+            .table(resolution, parent)?
+            .ok_or_else(|| SQLError::UnknownTable(parent.clone()))?;
+        if parent_table.columns.iter().any(|definition| {
+            definition.name == column.name && definition.not_null && !definition.not_null_no_inherit
+        }) {
+            count += 1;
+        }
+    }
+    Ok((
+        catalog_usize(count, "pg_constraint NOT NULL inheritance count")?,
+        is_local,
+    ))
+}
+
+fn check_inheritance_state(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    constraint: &ConstraintCatalogRow,
+) -> Result<(i64, bool), SQLError> {
+    let table_name = format!(
+        "{}.{}",
+        uqa_sql::expr::quote_ident(&constraint.schema),
+        uqa_sql::expr::quote_ident(&constraint.table)
+    );
+    let Some(table) = catalog.table(resolution, &table_name)? else {
+        return Ok((0, true));
+    };
+    let is_local = table
+        .columns
+        .iter()
+        .find(|column| {
+            column.check.is_some() && column.check_name.as_ref() == Some(&constraint.name)
+        })
+        .map(|column| column.check_is_local)
+        .or_else(|| {
+            table
+                .checks
+                .iter()
+                .find(|check| check.name.as_ref() == Some(&constraint.name))
+                .map(|check| check.is_local)
+        })
+        .ok_or_else(|| SQLError::Internal("CHECK constraint disappeared".into()))?;
+    let mut count = 0;
+    if !constraint.state.no_inherit() {
+        for parent in &table.hierarchy.parents {
+            let parent = catalog
+                .table(resolution, parent)?
+                .ok_or_else(|| SQLError::UnknownTable(parent.clone()))?;
+            if parent.columns.iter().any(|column| {
+                column.check.is_some()
+                    && !column.check_no_inherit
+                    && column.check_name.as_ref() == Some(&constraint.name)
+            }) || parent
+                .checks
+                .iter()
+                .any(|check| !check.no_inherit && check.name.as_ref() == Some(&constraint.name))
+            {
+                count += 1;
+            }
+        }
+    }
+    Ok((
+        catalog_usize(count, "pg_constraint CHECK inheritance count")?,
+        is_local,
+    ))
+}
+
+const fn foreign_key_action_code(action: uqa_sql::ast::ForeignKeyAction) -> &'static str {
+    match action {
+        uqa_sql::ast::ForeignKeyAction::NoAction => "a",
+        uqa_sql::ast::ForeignKeyAction::Restrict => "r",
+        uqa_sql::ast::ForeignKeyAction::Cascade => "c",
+        uqa_sql::ast::ForeignKeyAction::SetNull => "n",
+        uqa_sql::ast::ForeignKeyAction::SetDefault => "d",
+    }
+}
+
+const fn foreign_key_match_code(match_type: uqa_sql::ast::ForeignKeyMatch) -> &'static str {
+    match match_type {
+        uqa_sql::ast::ForeignKeyMatch::Simple => "s",
+        uqa_sql::ast::ForeignKeyMatch::Full => "f",
+    }
+}
+
+fn constraint_index_oid(
+    constraint: &super::super::helpers::constraints::ConstraintCatalogRow,
+    indexes: &[super::CatalogIndexRelation],
+) -> i64 {
+    use super::super::helpers::constraints::ConstraintCatalogKind;
+    let (schema, name) = if let Some(foreign) = &constraint.foreign_key {
+        let Some(name) = foreign.referenced_key.as_deref() else {
+            return 0;
+        };
+        (foreign.schema.as_str(), name)
+    } else if matches!(
+        constraint.kind,
+        ConstraintCatalogKind::PrimaryKey | ConstraintCatalogKind::Unique { .. }
+    ) {
+        (constraint.schema.as_str(), constraint.name.as_str())
+    } else {
+        return 0;
+    };
+    indexes
+        .iter()
+        .find(|index| index.relation.schema == schema && index.relation.name == name)
+        .map_or(0, super::CatalogIndexRelation::oid)
+}

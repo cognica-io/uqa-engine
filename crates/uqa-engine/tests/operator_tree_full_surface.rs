@@ -10,12 +10,12 @@ use std::sync::Arc;
 use uqa_core::{Edge, PostingList, Predicate, Value, Vertex};
 use uqa_engine::operator_tree_bridge::EngineDriver;
 use uqa_engine::Engine;
+use uqa_execution::operator_tree::{OperatorOutput, OperatorTreeDriver};
 use uqa_operators::{
     CountMonoid, DeepFusionAggregation, DeepFusionLayer, DeepFusionPoolMethod, DeepGraphDirection,
     EdgePatternIR, GatingSpec, GraphPatternIR, MaxMonoid, OperatorTree, ProgressiveFusionEntry,
     SumMonoid, TemporalFilterIR, TextScoringMode, VertexPatternIR,
 };
-use uqa_planner::executor::{OperatorOutput, OperatorTreeDriver};
 use uqa_planner::QueryOptimizer;
 use uqa_scoring::Scorer;
 

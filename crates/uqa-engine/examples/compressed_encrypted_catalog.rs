@@ -10,7 +10,7 @@ use std::error::Error;
 
 use uqa_core::Value;
 use uqa_engine::Engine;
-use uqa_storage::SQLiteCompressionOptions;
+use uqa_storage_sqlite::SQLiteCompressionOptions;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let dir = tempfile::tempdir()?;

@@ -138,7 +138,7 @@ fn sql_language_standard_body() {
 
 #[test]
 fn v016_sql_standard_body_dispatch_markers_migrate_before_catalog_binding() {
-    use uqa_storage::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::{Catalog, ManagedConnection};
 
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("legacy-function-dispatch.db");

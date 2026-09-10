@@ -179,7 +179,7 @@ fn optimize_scalar(
         },
         other => other,
     };
-    fold_literal_expression(optimized)
+    fold_literal_expression(optimized, config.constant_evaluator)
 }
 
 fn optimize_frame_bound(
@@ -254,7 +254,11 @@ mod tests {
             ty: "date".into(),
         };
 
-        optimize_scalar_slot(&mut expression, &OptimizerConfig::default()).unwrap();
+        optimize_scalar_slot(
+            &mut expression,
+            &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+        )
+        .unwrap();
 
         assert!(matches!(
             expression,
@@ -274,7 +278,11 @@ mod tests {
             rhs: Box::new(ScalarExpr::Literal(Value::Int(4))),
         };
 
-        optimize_scalar_slot(&mut expression, &OptimizerConfig::default()).unwrap();
+        optimize_scalar_slot(
+            &mut expression,
+            &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+        )
+        .unwrap();
 
         assert_eq!(expression, ScalarExpr::Literal(Value::Int(20)));
     }
@@ -285,7 +293,11 @@ mod tests {
             expr: Box::new(ScalarExpr::Literal(Value::Str("not-an-integer".into()))),
             ty: "integer".into(),
         };
-        let error = optimize_scalar_slot(&mut expression, &OptimizerConfig::default()).unwrap_err();
+        let error = optimize_scalar_slot(
+            &mut expression,
+            &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar),
+        )
+        .unwrap_err();
         assert_eq!(error.sqlstate(), Some("22P02"));
     }
 }

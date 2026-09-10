@@ -105,6 +105,24 @@ Keep migration failures visible and resolve them before admitting writes. Retain
 
 Use an explicit URL and token or `HttpEngine.fromEnv()` when deployment configuration already supplies credentials. The asynchronous `local()` and `cloud()` constructors require the installed `uqa` CLI and resolve a project once. Keep using the documented parameter wrappers for vectors and tensors, JavaScript `bigint` for exact signed 64-bit integers, and `Buffer` or `Uint8Array` for binary values. The [HTTP Engine reference](09-http-engine.md) describes errors, response limits, streaming, and cancellation.
 
+## SQLite provider ownership in development
+
+The development branch moves all concrete SQLite persistence into `uqa-storage-sqlite`. This is a Rust source migration after 0.2.3; it does not change the SQLite database format, schema version, SQL behavior, encryption options, or compressed-container layout. High-level `Engine` constructors keep their signatures.
+
+| Previous Rust API | Development Rust API |
+| --- | --- |
+| `uqa_storage::sqlite::{Catalog, ManagedConnection, ...}` | `uqa_storage_sqlite::{Catalog, ManagedConnection, ...}` |
+| `uqa_storage::{SQLiteStorageBackend, SQLiteStorageProvider, SQLiteTransaction, SQLiteCompressionOptions, SQLiteError, ...}` | The same concrete types under `uqa_storage_sqlite` |
+| `uqa_graph::SQLiteGraphStore` | `uqa_storage_sqlite::SQLiteGraphStore` |
+| `uqa_storage::IndexManager::new(connection)` | `uqa_storage::IndexManager::new()` |
+| SQLite persistence methods on `BlockMaxIndex` | Import `uqa_storage_sqlite::SQLiteBlockMaxPersistence` to call `save_to_sqlite` and `load_from_sqlite` |
+
+Add `uqa-storage-sqlite` as a direct dependency when importing its types. The common storage and graph crates do not re-export concrete SQLite implementations. `StorageBackendError::SQLite` is replaced by `StorageBackendError::Backend { backend: "SQLite", source }`; use `source.downcast_ref::<uqa_storage_sqlite::SQLiteError>()` for typed diagnostics. `TransactionError::Storage` now carries the provider-independent `StorageBackendError`. `Index::build` and `Index::drop_index` return `StorageBackendResult`, and SQLite value-key encoding belongs to the provider rather than implementing rusqlite traits on the shared `ValueIndexKey`.
+
 ## Internal Rust SQL ownership
 
 SQL statement and scalar models, static row schemas, and type resolution now live in `uqa_sql::plan`, `uqa_sql::ir`, `uqa_sql::schema`, and `uqa_sql::type_resolution`. Existing planner and execution exports refer to the same definitions. Low-level callers of `RowSchema::view` or `RowSchema::relayout_physical_row` must import `uqa_execution::RowSchemaExecution`; physical rows and materialization remain execution-owned. Applications using `Engine` require no SQL or query-result migration for this ownership change.
+
+Construct the plan-native `uqa_planner::OptimizerConfig` with `OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar)` when using the physical scalar runtime. The planner no longer supplies a default execution backend. Import `PlanExecutor`, `OperatorTreeDriver`, `OperatorOutput`, and `ExecutionStats` from `uqa_execution::operator_tree`, and parallel execution helpers from `uqa_execution::parallel`. Engine-level query APIs keep their existing signatures.
+
+The operator-tree `QueryOptimizer` accepts immutable `IndexScanCandidate` values through `with_index_candidates`. Its `index_manager` field and `with_index_manager` constructor are removed; callers discover applicable indexes and their scan costs from their catalog snapshot before invoking the optimizer. The planner no longer imports `uqa-storage` directly. Its existing retrieval IR still has transitive storage dependencies through `uqa-operators`; removing that coupling requires separating logical descriptors from bound execution objects.

@@ -21,7 +21,7 @@ mod config;
 
 pub use config::{HNSWIndexParams, IVFIndexParams, VectorIndexOpenMode, VectorIndexSpec};
 
-pub(crate) fn validate_vector_values(dimensions: u32, vector: &[f32]) -> StorageBackendResult<()> {
+pub fn validate_vector_values(dimensions: u32, vector: &[f32]) -> StorageBackendResult<()> {
     let dimensions = usize::try_from(dimensions).map_err(|_| {
         StorageBackendError::Other(format!(
             "vector dimension {dimensions} exceeds the platform usize range"
@@ -64,7 +64,7 @@ fn validate_threshold(threshold: f32) -> StorageBackendResult<()> {
     }
 }
 
-pub(crate) fn select_top_k_scored(scored: &mut Vec<(DocId, f32)>, k: usize) {
+pub fn select_top_k_scored(scored: &mut Vec<(DocId, f32)>, k: usize) {
     if scored.len() > k {
         scored.select_nth_unstable_by(k, |a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         scored.truncate(k);

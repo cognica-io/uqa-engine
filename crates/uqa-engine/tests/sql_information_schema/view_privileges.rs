@@ -613,7 +613,7 @@ fn view_acl_changes_follow_transactions_external_refresh_and_temporary_lifetime(
 
 #[test]
 fn legacy_view_column_metadata_is_migrated_before_acl_state_can_reference_it() {
-    use uqa_storage::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::{Catalog, ManagedConnection};
 
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("legacy-view-acl.db");
@@ -676,7 +676,7 @@ fn legacy_view_column_metadata_is_migrated_before_acl_state_can_reference_it() {
 
 #[test]
 fn broken_view_acl_grant_chains_are_rejected_during_open() {
-    use uqa_storage::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::{Catalog, ManagedConnection};
 
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("broken-view-acl.db");

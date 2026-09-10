@@ -64,6 +64,21 @@ pub trait RoutineResolution: FunctionTypeResolver {
         Ok(None)
     }
 
+    /// Resolve candidate metadata without refreshing session-visible function state during analysis.
+    fn lookup_visible_sql_functions_for_analysis(
+        &self,
+        name: &str,
+    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
+        self.lookup_visible_sql_functions(name)
+    }
+
+    fn lookup_bound_sql_functions_by_binding(
+        &self,
+        _binding: &FunctionBinding,
+    ) -> Option<Vec<Arc<SQLUserFunction>>> {
+        None
+    }
+
     fn resolve_static_sql_function(
         &self,
         _name: &str,
@@ -158,5 +173,31 @@ impl RankedFunctionMatch for StaticFunctionMatch {
 
     fn is_variadic_expansion(&self) -> bool {
         self.variadic_expansion
+    }
+}
+
+pub fn builtin_routine_support_oid(name: &str) -> Option<i64> {
+    Some(match name.strip_prefix("pg_catalog.").unwrap_or(name) {
+        "textlike_support" => 1023,
+        "texticregexeq_support" => 1024,
+        "texticlike_support" => 1025,
+        "network_subset_support" => 1173,
+        "textregexeq_support" => 1364,
+        "varchar_support" => 3097,
+        "numeric_support" => 3157,
+        _ => return None,
+    })
+}
+
+pub fn function_binding_matches(binding: &FunctionBinding, target: &FunctionBinding) -> bool {
+    if binding.builtin || target.builtin {
+        return false;
+    }
+    match (binding.object_id, target.object_id) {
+        (Some(binding), Some(target)) => binding == target,
+        (None, None) => {
+            binding.name == target.name && binding.argument_types == target.argument_types
+        }
+        _ => false,
     }
 }

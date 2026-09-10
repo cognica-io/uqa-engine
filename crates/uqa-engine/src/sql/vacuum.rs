@@ -463,7 +463,7 @@ pub(super) fn run_vacuum(engine: &Engine, statement: &VacuumStmt) -> Result<SQLR
         }
         engine.ensure_table_privilege(
             &canonical,
-            crate::engine_table_security::TableAclPrivilege::Maintain,
+            crate::table_security::TableAclPrivilege::Maintain,
         )?;
         resolved_targets.push(ResolvedVacuumTarget {
             table: canonical,

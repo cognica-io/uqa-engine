@@ -51,6 +51,7 @@ When generating SQL:
 ## Optional
 
 - [Internal architecture](docs/manual/internals/README.md): SQL analysis ownership, runtime adapters, crate dependency direction, and subsystem navigation.
+- [Storage internals](docs/manual/internals/03-storage.md): Provider-independent storage and graph contracts, SQLite provider ownership, transaction affinity, persistent formats, and migrations.
 - [Planning and execution](docs/manual/internals/02-planning-and-execution.md): Unified plans, operator joins, optimization, and execution.
 - [Analyzer internals](docs/manual/internals/04-analyzer-pipeline.md): Analyzer representation and index/search phases.
 - [Search internals](docs/manual/internals/05-search-and-ranking.md): Physical retrieval, scoring, and fusion.
@@ -59,3 +60,4 @@ When generating SQL:
 ## Release upgrades
 
 - [Upgrade guide](docs/manual/reference/10-upgrading.md): UQA Engine 0.2.3 packages, Rust graph API and custom catalog changes, automatic statistics, session caches, and persistent storage migration.
+- [Development Rust provider imports](docs/manual/reference/10-upgrading.md#sqlite-provider-ownership-in-development): Concrete SQLite APIs move to `uqa-storage-sqlite`; shared storage errors retain typed provider diagnostics.

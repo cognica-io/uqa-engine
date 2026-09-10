@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 
 use crate::{QueryBlockPlan, RelationalPlan, SourcePlan};
-use uqa_execution::ScalarExpr;
+use uqa_sql::ScalarExpr;
 
 pub(super) fn propagate_source_constants(block: &mut QueryBlockPlan) {
     let Some(source) = &block.from else { return };

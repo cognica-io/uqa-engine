@@ -16,12 +16,12 @@ use std::sync::Arc;
 use uqa_core::{Edge, Predicate, Value, Vertex};
 use uqa_engine::operator_tree_bridge::EngineDriver;
 use uqa_engine::Engine;
+use uqa_execution::operator_tree::OperatorTreeDriver;
 use uqa_fusion::{AttentionFusion, LearnedFusion};
 use uqa_operators::{
     AggState, AggregationMonoid, CountMonoid, GatingSpec, OperatorTree, ProbBoolMode, SumMonoid,
     TextScoringMode,
 };
-use uqa_planner::executor::OperatorTreeDriver;
 use uqa_sql::SQLError;
 
 fn engine_with_corpus() -> Engine {

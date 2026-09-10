@@ -1,0 +1,81 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Generated-column binding for fixed-signature `PostgreSQL` built-ins.
+
+use crate::ast::{ColumnDef, Expr, FunctionBinding, GeneratedFunctionDependency};
+use crate::{schema::SchemaExpressionCatalog, SQLError};
+
+use super::super::{
+    generated_call_arguments, generation_expression_column_type, non_immutable_function,
+    validate_bound_function, validate_unknown_literal_cast, GenerationType,
+};
+
+pub(in super::super) struct FixedBuiltinCall<'a> {
+    pub(in super::super) engine: &'a dyn SchemaExpressionCatalog,
+    pub(in super::super) columns: &'a [ColumnDef],
+    pub(in super::super) name: &'a str,
+    pub(in super::super) args: &'a [Expr],
+    pub(in super::super) argument_names: &'a [Option<String>],
+    pub(in super::super) argument_types: &'a [GenerationType],
+    pub(in super::super) explicit_variadic: bool,
+}
+
+pub(in super::super) fn bind_call(
+    call: FixedBuiltinCall<'_>,
+    binding: &mut Option<FunctionBinding>,
+    dependencies: &mut Vec<GeneratedFunctionDependency>,
+) -> Result<bool, SQLError> {
+    let call_arguments = generated_call_arguments(call.args)?;
+    let declared_argument_types = call_arguments
+        .iter()
+        .zip(call.argument_types)
+        .map(|(argument, inferred)| {
+            Ok(generation_expression_column_type(
+                call.columns,
+                argument.value,
+                inferred,
+            ))
+        })
+        .collect::<Result<Vec<_>, SQLError>>()?;
+    let Some(resolved) = crate::type_resolution::resolve_fixed_builtin_call(
+        call.name,
+        binding.as_ref(),
+        call.argument_names,
+        &declared_argument_types,
+        call.explicit_variadic,
+        Some(call.engine),
+    )?
+    else {
+        return Ok(false);
+    };
+    let selected = resolved.selected;
+    if !selected.binding.builtin {
+        let selected = validate_bound_function(
+            call.engine,
+            &selected.binding,
+            call.argument_names,
+            call.argument_types,
+        )?;
+        dependencies.push(selected.clone());
+        *binding = Some(selected);
+        return Ok(true);
+    }
+    if resolved.builtin_non_immutable {
+        return Err(non_immutable_function(call.name));
+    }
+    let positions = resolved.builtin_argument_positions.ok_or_else(|| {
+        SQLError::Internal(format!(
+            "resolved generated-column built-in `{}` lost its argument mapping",
+            selected.binding.name
+        ))
+    })?;
+    for (actual, position) in call.argument_types.iter().zip(positions) {
+        validate_unknown_literal_cast(actual, &selected.binding.argument_types[position])?;
+    }
+    *binding = Some(selected.binding);
+    Ok(true)
+}

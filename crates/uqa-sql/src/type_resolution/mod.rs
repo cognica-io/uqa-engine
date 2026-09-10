@@ -481,3 +481,9 @@ pub(super) fn scalar_type_inner(
 
 #[cfg(test)]
 mod tests;
+
+mod declaration;
+pub use declaration::resolve_declared_column_type;
+
+mod coercion;
+pub use coercion::coerce_common_context_value;

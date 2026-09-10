@@ -10,7 +10,7 @@
 
 use uqa_core::Value;
 use uqa_engine::Engine;
-use uqa_storage::ManagedConnection;
+use uqa_storage_sqlite::ManagedConnection;
 
 #[test]
 fn insert_from_select_copies_rows() {

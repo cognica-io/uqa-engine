@@ -194,7 +194,7 @@ fn analyze_executable_plan(
     params: &[SQLParam],
 ) -> Result<(), SQLError> {
     use uqa_planner::{CommandPlan, UnifiedPlan};
-    let scope = super::select::CteScope::new_for_current_routine(engine);
+    let scope = crate::capabilities::query_scope::new_for_current_routine(engine);
     match plan {
         UnifiedPlan::Query(query) => {
             super::select::analyze_query_plan_schema(engine, query, params, &scope, None)?;
@@ -254,7 +254,8 @@ fn optimize_plan_with_statistics(
     plan: uqa_planner::UnifiedPlan,
     statistics: &dyn uqa_planner::SourceStatistics,
 ) -> Result<uqa_planner::UnifiedPlan, SQLError> {
-    let mut optimizer_config = uqa_planner::optimizer::OptimizerConfig::default();
+    let mut optimizer_config =
+        uqa_planner::optimizer::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
     if volatility::unified_plan_contains_volatile_function(engine, &plan) {
         // Predicate prioritization and DPccp both move expressions across
         // physical evaluation boundaries.  A VOLATILE callback may observe

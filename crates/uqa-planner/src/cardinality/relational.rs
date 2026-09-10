@@ -11,7 +11,7 @@ use super::{
     GraphStoreSampler, RelationStats, Selectivity,
 };
 use uqa_core::Value;
-use uqa_execution::ScalarExpr;
+use uqa_sql::ScalarExpr;
 
 impl CardinalityEstimator {
     /// Estimate the selectivity of `predicate` against `stats`. Best
@@ -277,7 +277,7 @@ fn scalar_positive_usize(expression: &ScalarExpr) -> Option<usize> {
 }
 
 fn scalar_named_argument(expression: &ScalarExpr) -> bool {
-    uqa_execution::scalar_call_argument(expression)
+    uqa_sql::scalar_call_argument(expression)
         .ok()
         .is_some_and(|argument| argument.name.is_some())
 }

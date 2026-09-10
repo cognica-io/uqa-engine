@@ -50,6 +50,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Operator-tree planning accepts immutable index candidates and no longer retains storage index managers; low-level Rust callers migrate from `with_index_manager` to `with_index_candidates`.
+
+- Moved concrete SQLite catalogs, connections, indexes, transactions, compressed storage, and graph persistence into `uqa-storage-sqlite`. Rust imports of `uqa_storage::SQLite*`, `uqa_storage::sqlite::*`, and `uqa_graph::SQLiteGraphStore` now use `uqa_storage_sqlite`; shared storage errors preserve the typed provider error through `StorageBackendError::Backend`. Database formats and engine SQL behavior are unchanged.
+- Made `IndexManager::new()` independent of SQLite and moved block-max SQLite persistence to the provider's `SQLiteBlockMaxPersistence` extension trait. Provider conformance tests and SQLite persistence benchmarks also belong to the provider crate; the commit hook prevents common storage and graph crates from regaining provider dependencies in any dependency kind.
 - `ScalarExpr::TypedLiteral` retains optional resolved type and parameter-origin metadata; `Statement::SetVariable` and `CommandPlan::SetVariable` retain local and default flags. Older serialized plans remain readable.
 - Added structured `SQLError::Diagnostic` fields and persisted `TableConstraintSet::columns_declared` metadata for declared SQL schemas.
 - Unified optimizer APIs now return `OptimizerResult` with `OptimizerError::Expression` and `OptimizerError::JoinGraph`, preserving the distinction between SQL expression failures and join-graph failures.

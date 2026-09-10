@@ -35,7 +35,7 @@ pub struct PostingScore {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ClusterPosting {
+pub struct ClusterPosting {
     pub doc_id: DocId,
     pub term_freq: u64,
     pub doc_length: u64,
@@ -109,7 +109,7 @@ impl PostingCursor for MaterializedPostingCursor {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct EncodedScoreCluster {
+pub struct EncodedScoreCluster {
     pub cluster_id: u64,
     pub bytes: Vec<u8>,
 }
@@ -135,7 +135,7 @@ struct CursorBlock {
 }
 
 #[derive(Clone)]
-pub(crate) struct ClusteredPostingCursor {
+pub struct ClusteredPostingCursor {
     clusters: Arc<[EncodedScoreCluster]>,
     blocks: Arc<[CursorBlock]>,
     doc_freq: u64,
@@ -145,7 +145,7 @@ pub(crate) struct ClusteredPostingCursor {
 }
 
 impl ClusteredPostingCursor {
-    pub(crate) fn new(clusters: Vec<EncodedScoreCluster>) -> StorageBackendResult<Self> {
+    pub fn new(clusters: Vec<EncodedScoreCluster>) -> StorageBackendResult<Self> {
         let mut previous_cluster = None;
         let mut blocks = Vec::new();
         let mut doc_freq = 0_u64;
@@ -272,7 +272,7 @@ impl PostingCursor for ClusteredPostingCursor {
     }
 }
 
-pub(crate) fn cluster_id(doc_id: DocId) -> u64 {
+pub fn cluster_id(doc_id: DocId) -> u64 {
     doc_id / POSTING_CLUSTER_DOCS
 }
 
@@ -287,9 +287,7 @@ fn cluster_offset(doc_id: DocId) -> StorageBackendResult<u16> {
         .map_err(|_| corrupt("document offset exceeds clustered format"))
 }
 
-pub(crate) fn encode_cluster(
-    entries: &[ClusterPosting],
-) -> StorageBackendResult<(Vec<u8>, Vec<u8>)> {
+pub fn encode_cluster(entries: &[ClusterPosting]) -> StorageBackendResult<(Vec<u8>, Vec<u8>)> {
     if entries.is_empty() {
         return Err(corrupt("cannot encode an empty posting cluster"));
     }
@@ -297,7 +295,7 @@ pub(crate) fn encode_cluster(
     Ok((encode_scores(entries)?, encode_positions(entries)?))
 }
 
-pub(crate) fn decode_cluster(
+pub fn decode_cluster(
     cluster_id: u64,
     score_blob: &[u8],
     positions_blob: &[u8],
@@ -316,12 +314,12 @@ pub(crate) fn decode_cluster(
         .collect())
 }
 
-pub(crate) fn score_count(score_blob: &[u8]) -> StorageBackendResult<u64> {
+pub fn score_count(score_blob: &[u8]) -> StorageBackendResult<u64> {
     let (count, _) = parse_score_blob(score_blob)?;
     Ok(count as u64)
 }
 
-pub(crate) fn encode_terms(terms: &[String]) -> StorageBackendResult<Vec<u8>> {
+pub fn encode_terms(terms: &[String]) -> StorageBackendResult<Vec<u8>> {
     if terms.windows(2).any(|pair| pair[0] >= pair[1]) {
         return Err(corrupt("document terms are not strictly ordered"));
     }
@@ -347,7 +345,7 @@ pub(crate) fn encode_terms(terms: &[String]) -> StorageBackendResult<Vec<u8>> {
     Ok(output)
 }
 
-pub(crate) fn decode_terms(blob: &[u8]) -> StorageBackendResult<Vec<String>> {
+pub fn decode_terms(blob: &[u8]) -> StorageBackendResult<Vec<String>> {
     if blob.len() < 12 || blob.get(..4) != Some(TERMS_MAGIC.as_slice()) {
         return Err(corrupt("missing document term header"));
     }
@@ -389,7 +387,7 @@ pub(crate) fn decode_terms(blob: &[u8]) -> StorageBackendResult<Vec<String>> {
     Ok(terms)
 }
 
-pub(crate) fn decode_all_scores(
+pub fn decode_all_scores(
     cluster_id: u64,
     score_blob: &[u8],
 ) -> StorageBackendResult<Vec<PostingScore>> {

@@ -9,9 +9,7 @@
 
 mod catalog;
 mod overlay;
-pub(crate) mod storage;
-#[cfg(test)]
-mod tests;
+pub mod storage;
 mod trait_impl;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -61,7 +59,7 @@ impl PersistentGraphStore {
         Self::from_storage(Arc::new(catalog::CatalogGraphStorage { catalog, backend }))
     }
 
-    pub(crate) fn from_storage(storage: Arc<dyn GraphStorage>) -> Self {
+    pub fn from_storage(storage: Arc<dyn GraphStorage>) -> Self {
         Self {
             storage,
             resource: None,

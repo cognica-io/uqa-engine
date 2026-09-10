@@ -577,8 +577,10 @@ fn validate_view_merge_scope(
     inherited_ctes: Option<&CteScope>,
 ) -> Result<(), SQLError> {
     validate_view_merge_targets(target, plan)?;
-    let mut analysis_scope =
-        CteScope::new_for_statement(engine, plan.statement_privilege_subject.as_deref());
+    let mut analysis_scope = crate::capabilities::query_scope::new_for_statement(
+        engine,
+        plan.statement_privilege_subject.as_deref(),
+    );
     if let Some(parent) = inherited_ctes {
         analysis_scope.inherit_cte_bindings(parent);
     }
@@ -645,8 +647,10 @@ pub(in crate::sql) fn run_view_merge_inner(
         .as_deref()
         .map(|snapshot| engine.statement_read_snapshot_engine(snapshot));
     let read_engine = snapshot_engine.as_ref().unwrap_or(engine);
-    let mut ctes =
-        CteScope::new_for_statement(read_engine, plan.statement_privilege_subject.as_deref());
+    let mut ctes = crate::capabilities::query_scope::new_for_statement(
+        read_engine,
+        plan.statement_privilege_subject.as_deref(),
+    );
     if let Some(parent) = inherited_ctes {
         ctes.inherit_cte_bindings(parent);
     }

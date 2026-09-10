@@ -111,10 +111,10 @@ Approximate vector quality uses exact brute-force identities as the ground truth
 | Area | Path |
 | --- | --- |
 | Analysis | [`crates/uqa-analysis/src/lib.rs`](../../../crates/uqa-analysis/src/lib.rs) |
-| Analyzer catalog | [`crates/uqa-engine/src/engine_analyzers.rs`](../../../crates/uqa-engine/src/engine_analyzers.rs) |
+| Analyzer catalog | [`crates/uqa-engine/src/analyzers.rs`](../../../crates/uqa-engine/src/analyzers.rs) |
 | Scoring | [`crates/uqa-scoring/src/lib.rs`](../../../crates/uqa-scoring/src/lib.rs) |
 | WAND and Block-Max WAND | [`crates/uqa-scoring/src/wand`](../../../crates/uqa-scoring/src/wand) |
 | Fusion | [`crates/uqa-fusion/src/lib.rs`](../../../crates/uqa-fusion/src/lib.rs) |
 | Operator algebra | [`crates/uqa-operators/src/lib.rs`](../../../crates/uqa-operators/src/lib.rs) |
-| Engine search | [`crates/uqa-engine/src/engine_search`](../../../crates/uqa-engine/src/engine_search) |
+| Engine search | [`crates/uqa-engine/src/search`](../../../crates/uqa-engine/src/search) |
 | Retrieval lowering | [`crates/uqa-engine/src/operator_tree_bridge`](../../../crates/uqa-engine/src/operator_tree_bridge) |

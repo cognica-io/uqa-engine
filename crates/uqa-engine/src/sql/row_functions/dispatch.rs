@@ -11,17 +11,6 @@ use super::{
     ScoredEntry,
 };
 
-pub(in crate::sql) fn execute_function(
-    engine: &Engine,
-    table: &str,
-    signal_table: &str,
-    name: &str,
-    args: &[ScalarExpr],
-    params: &[SQLParam],
-) -> Result<Vec<ScoredEntry>, SQLError> {
-    execute_function_with_top_k(engine, table, signal_table, name, args, params, None)
-}
-
 pub(in crate::sql) fn execute_function_with_top_k(
     engine: &Engine,
     table: &str,
@@ -159,5 +148,36 @@ impl RetrievalExecution {
             Self::Public => engine.search(table, field, query, mode, top_k),
             Self::InExecution => engine.search_leaf(table, field, query, mode, top_k, None),
         }
+    }
+}
+
+impl uqa_execution::query::block::context::RelationRetrieval for Engine {
+    fn accelerated(
+        &self,
+        table: &str,
+        signal_table: &str,
+        predicate: Option<&ScalarExpr>,
+        params: &[SQLParam],
+    ) -> Result<Option<Vec<ScoredEntry>>, SQLError> {
+        crate::operator_tree_bridge::run_accelerated(self, table, signal_table, predicate, params)
+    }
+    fn optimized(
+        &self,
+        table: &str,
+        predicate: Option<&ScalarExpr>,
+        params: &[SQLParam],
+    ) -> Result<Option<Vec<ScoredEntry>>, SQLError> {
+        crate::operator_tree_bridge::run_optimised(self, table, predicate, params)
+    }
+    fn function(
+        &self,
+        table: &str,
+        signal_table: &str,
+        name: &str,
+        args: &[ScalarExpr],
+        params: &[SQLParam],
+        top_k: Option<usize>,
+    ) -> Result<Vec<ScoredEntry>, SQLError> {
+        execute_function_with_top_k(self, table, signal_table, name, args, params, top_k)
     }
 }

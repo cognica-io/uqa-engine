@@ -12,7 +12,7 @@ The master plan in [`docs/plans/0001-uqa-engine-implementation-plan.md`](docs/pl
 
 ## Local gates
 
-Install the repository hook with `bash scripts/install-git-hooks.sh` once per clone. It sets the local `core.hooksPath` to `.githooks` and refuses to replace an existing custom hook configuration. The pre-commit hook checks the exact staged Cargo manifests, lockfile, targets, and dependency policy in an offline snapshot, so unstaged edits cannot mask an invalid commit. Runtime, build, platform-specific, and transitive workspace dependencies are checked; development-only dependencies are excluded from the runtime graph. CI runs the same checker against the committed tree.
+Install the repository hook with `bash scripts/install-git-hooks.sh` once per clone. It sets the local `core.hooksPath` to `.githooks` and refuses to replace an existing custom hook configuration. The pre-commit hook checks the exact staged Cargo manifests, lockfile, targets, source paths, and dependency policy in an offline snapshot, so unstaged edits cannot mask an invalid commit. Runtime, build, platform-specific, and transitive workspace dependencies are checked. Provider-independent crates cannot declare forbidden database drivers, including through another workspace crate or a renamed Cargo dependency. Development-only fixture dependencies are excluded from the runtime graph. CI runs the same checker against the committed tree.
 
 Every change has to clear all of:
 
@@ -80,7 +80,7 @@ Integration test source files are modules, not independent Cargo targets. Add a 
 
 ```sh
 cargo test -p uqa-sql --test integration parser_fuzz::
-cargo test -p uqa-engine --test integration engine_queries::sql_joins::
+cargo test -p uqa-engine --test integration queries::sql_joins::
 ```
 
 Do not add a new Cargo test target merely to isolate a module during development. Use the module filter above; a separate target requires a real process-level fixture or lifecycle boundary that cannot share its harness without changing semantics.

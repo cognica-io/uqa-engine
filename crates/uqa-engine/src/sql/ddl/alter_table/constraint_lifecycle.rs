@@ -147,7 +147,7 @@ fn materialize_constraint_candidate(
         &canonical,
         &mut constraints.key_constraints,
     )?;
-    crate::engine_table_storage::materialize_constraint_metadata(&relation, columns, constraints)
+    crate::table_storage::materialize_constraint_metadata(&relation, columns, constraints)
         .map_err(|error| ddl_storage_error("ALTER TABLE constraint naming", error))?;
     Ok(())
 }
@@ -572,10 +572,7 @@ fn validate_check_rows(
         let Some(mut document) = engine.get_document(table, doc_id)? else {
             continue;
         };
-        crate::engine_generated::materialize_virtual_generated_columns(
-            &definitions,
-            &mut document,
-        )?;
+        crate::generated::materialize_virtual_generated_columns(&definitions, &mut document)?;
         let value = crate::sql::scalar::eval_lowered_expression_with_schema(
             engine,
             expression,

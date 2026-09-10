@@ -92,7 +92,7 @@ impl FunctionTypeResolver for ScopedEngineHook<'_> {
             self.engine,
             plan,
             params,
-            self.ctes,
+            &self.ctes,
             Some(outer_schema),
         )?;
         Ok(output.column_type(0).cloned())

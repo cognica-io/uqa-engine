@@ -165,8 +165,10 @@ fn merge_analysis_scope(
     stmt: &MergePlan,
     inherited_ctes: Option<&CteScope>,
 ) -> CteScope {
-    let mut scope =
-        CteScope::new_for_statement(engine, stmt.statement_privilege_subject.as_deref());
+    let mut scope = crate::capabilities::query_scope::new_for_statement(
+        engine,
+        stmt.statement_privilege_subject.as_deref(),
+    );
     if let Some(parent) = inherited_ctes {
         scope.inherit_cte_bindings(parent);
     }
@@ -190,42 +192,7 @@ fn validate_view_merge_dispatch_contract(
     super::view_automatic::validate_public_merge_contract(engine, stmt, &source)
 }
 
-pub(in crate::sql) fn merge_privilege_expressions(
-    stmt: &MergePlan,
-) -> Vec<&uqa_execution::ScalarExpr> {
-    let mut expressions = vec![&stmt.join_condition];
-    expressions.extend(stmt.target_predicate.iter());
-    expressions.extend(stmt.returning.iter().map(|projection| &projection.expr));
-    for clause in &stmt.when_clauses {
-        match clause {
-            MergeWhenPlan::UpdateMatched {
-                condition,
-                assignments,
-            }
-            | MergeWhenPlan::UpdateNotMatchedBySource {
-                condition,
-                assignments,
-            } => {
-                expressions.extend(condition.iter());
-                expressions.extend(assignments.iter().map(|assignment| &assignment.value));
-            }
-            MergeWhenPlan::InsertNotMatched {
-                condition, values, ..
-            } => {
-                expressions.extend(condition.iter());
-                expressions.extend(values);
-            }
-            MergeWhenPlan::DeleteMatched { condition }
-            | MergeWhenPlan::DeleteNotMatchedBySource { condition }
-            | MergeWhenPlan::NothingMatched { condition }
-            | MergeWhenPlan::NothingNotMatched { condition }
-            | MergeWhenPlan::NothingNotMatchedBySource { condition } => {
-                expressions.extend(condition.iter());
-            }
-        }
-    }
-    expressions
-}
+pub(in crate::sql) use uqa_sql::semantics::view_privileges::merge_privilege_expressions;
 
 #[expect(clippy::too_many_lines, reason = "preserves DML lock and event order")]
 pub(in crate::sql) fn validate_merge_action_scopes(

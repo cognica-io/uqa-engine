@@ -257,6 +257,14 @@ pub fn run_to_rows(
     Ok((schema, rows))
 }
 
+/// Preserve the SQL error reported by a physical operator.
+pub fn physical_exec_error(error: crate::ExecError) -> uqa_sql::SQLError {
+    match error {
+        crate::ExecError::SQL(error) => error,
+        crate::ExecError::Other(message) => uqa_sql::SQLError::Internal(message),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

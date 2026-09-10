@@ -16,6 +16,7 @@ name = "_uqa"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+uqa-storage-sqlite = { workspace = true }
 pyo3 = { workspace = true, features = ["abi3-py38", "multiple-pymethods"] }
 serde_json = { workspace = true }
 tokio.workspace = true
@@ -25,7 +26,6 @@ uqa-core = { workspace = true }
 uqa-engine = { workspace = true }
 uqa-scoring = { workspace = true }
 uqa-sql = { workspace = true }
-uqa-storage = { workspace = true }
 
 [lints]
 workspace = true

@@ -15,13 +15,32 @@ exclude.workspace = true
 [dependencies]
 uqa-core = { workspace = true }
 uqa-sql = { workspace = true }
+uqa-storage = { workspace = true }
+uqa-fdw = { workspace = true }
+uqa-graph = { workspace = true }
+uqa-operators = { workspace = true }
 parking_lot = { workspace = true }
+regex = { workspace = true }
+libc = { workspace = true }
+ciborium = { workspace = true }
 smallvec = { workspace = true }
 ahash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 tempfile = "3.13"
 thiserror = { workspace = true }
 
+# Browser execution uses the sequential implementations of the parallel interfaces.
+[target.'cfg(not(target_os = "emscripten"))'.dependencies]
+rayon = { workspace = true }
+rusqlite = { workspace = true }
+
 [lints]
 workspace = true
+
+[target.'cfg(target_os = "emscripten")'.dependencies]
+rusqlite = { version = "0.39", default-features = false, features = ["bundled", "blob", "cache"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Threading"] }

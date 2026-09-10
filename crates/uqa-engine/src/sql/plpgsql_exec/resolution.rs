@@ -7,11 +7,10 @@
 //! Routine overload resolution, argument binding, and coercion.
 
 use super::{
-    canonical_routine_type_name, cast_value, value_type_name, Arc, ArrayValue, CreateFunction,
-    Engine, FunctionBinding, SQLError, SQLUserFunction, Value,
+    value_type_name, Arc, CreateFunction, Engine, FunctionBinding, SQLError, SQLUserFunction, Value,
 };
-use crate::engine_user_functions::RoutineCallKind;
-use uqa_sql::ast::{ColumnType, FunctionParamMode, RoutineInvocationBinding, RoutineVariadicMode};
+use crate::user_functions::RoutineCallKind;
+use uqa_sql::ast::{ColumnType, RoutineInvocationBinding, RoutineVariadicMode};
 
 pub(super) fn output_column_names(def: &CreateFunction) -> Vec<String> {
     def.output_params()
@@ -197,87 +196,12 @@ fn materialize_arguments(
     invocation: &RoutineInvocationBinding,
     args: &[(Option<String>, Value)],
 ) -> Result<Vec<Value>, SQLError> {
-    if invocation.argument_positions.len() != args.len()
-        || invocation.argument_targets.len() != args.len()
-        || invocation.parameter_types.len() != def.params.len()
-    {
-        return Err(SQLError::Internal(format!(
-            "routine `{}` has an inconsistent invocation binding",
-            def.name
-        )));
-    }
-    let expanded_parameter = match invocation.variadic_mode {
-        RoutineVariadicMode::Expanded { parameter_index } => Some(parameter_index),
-        RoutineVariadicMode::None | RoutineVariadicMode::Explicit { .. } => None,
-    };
-    let mut slots = vec![None; def.params.len()];
-    let mut expanded_values = Vec::new();
-    for (argument_index, ((_, value), parameter_index)) in
-        args.iter().zip(&invocation.argument_positions).enumerate()
-    {
-        let target = &invocation.argument_targets[argument_index];
-        let source = invocation
-            .argument_sources
-            .get(argument_index)
-            .and_then(Option::as_deref)
-            .map(|name| crate::sql::resolve_catalog_column_type_name(engine, name))
-            .transpose()?;
-        let value = coerce_routine_value_from(engine, value, target, source.as_ref())?;
-        if Some(*parameter_index) == expanded_parameter {
-            expanded_values.push(value);
-        } else if slots[*parameter_index].replace(value).is_some() {
-            return Err(SQLError::Internal(format!(
-                "routine `{}` bound more than one argument to parameter {}",
-                def.name,
-                parameter_index + 1
-            )));
-        }
-    }
-    if let Some(parameter_index) = expanded_parameter {
-        let array = ArrayValue::try_new(expanded_values).ok_or_else(|| {
-            SQLError::Internal(format!(
-                "routine `{}` could not materialize its variadic array",
-                def.name
-            ))
-        })?;
-        slots[parameter_index] = Some(coerce_routine_value(
-            engine,
-            &Value::Array(array),
-            &invocation.parameter_types[parameter_index],
-        )?);
-    }
-    let mut bound = Vec::with_capacity(def.call_arity());
-    for (parameter_index, parameter) in def.params.iter().enumerate() {
-        let takes_argument = match parameter.mode {
-            FunctionParamMode::In | FunctionParamMode::InOut | FunctionParamMode::Variadic => true,
-            FunctionParamMode::Out => def.is_procedure,
-            FunctionParamMode::Table => false,
-        };
-        if !takes_argument {
-            continue;
-        }
-        let value = if let Some(value) = slots[parameter_index].take() {
-            value
-        } else {
-            let default = parameter.default.as_ref().ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "routine `{}` lost required parameter {} after overload resolution",
-                    def.name,
-                    parameter_index + 1
-                ))
-            })?;
-            let (value, source) =
-                crate::sql::scalar::eval_lowered_expression_with_type(engine, default, None, &[])?;
-            coerce_routine_value_from(
-                engine,
-                &value,
-                &invocation.parameter_types[parameter_index],
-                source.as_ref(),
-            )?
-        };
-        bound.push(value);
-    }
-    Ok(bound)
+    uqa_execution::routines::arguments::materialize_arguments(
+        engine.routine_execution_context().expressions,
+        def,
+        invocation,
+        args,
+    )
 }
 
 /// Apply a routine declaration's already-resolved SQL type. Pseudo-types use
@@ -288,67 +212,5 @@ pub(super) fn coerce_routine_value(
     value: &Value,
     type_name: &str,
 ) -> Result<Value, SQLError> {
-    coerce_routine_value_from(engine, value, type_name, None)
-}
-
-pub(super) fn coerce_routine_value_from(
-    engine: &Engine,
-    value: &Value,
-    type_name: &str,
-    source: Option<&ColumnType>,
-) -> Result<Value, SQLError> {
-    match canonical_routine_type_name(type_name).as_str() {
-        "record" => match value {
-            Value::Record(_) | Value::Null => Ok(value.clone()),
-            Value::Row(values) => Ok(Value::Record(
-                values
-                    .iter()
-                    .cloned()
-                    .enumerate()
-                    .map(|(index, value)| (format!("f{}", index + 1), value))
-                    .collect(),
-            )),
-            _ => Err(SQLError::Routine {
-                sqlstate: "42804".into(),
-                message: "cannot cast non-composite value to type record".into(),
-            }),
-        },
-        "trigger" => match value {
-            Value::Record(_) | Value::Row(_) | Value::Null => Ok(value.clone()),
-            _ => Err(SQLError::Routine {
-                sqlstate: "42804".into(),
-                message: "trigger function must return a row or NULL".into(),
-            }),
-        },
-        "anyarray" => match value {
-            Value::Array(_) | Value::List(_) | Value::Null => Ok(value.clone()),
-            _ => Err(SQLError::Routine {
-                sqlstate: "42804".into(),
-                message: "cannot cast non-array value to type anyarray".into(),
-            }),
-        },
-        "refcursor" => match value {
-            Value::Str(_) | Value::Null => Ok(value.clone()),
-            _ => Err(SQLError::Routine {
-                sqlstate: "42804".into(),
-                message: "cannot cast value to type refcursor".into(),
-            }),
-        },
-        "void" if matches!(value, Value::Null) => Ok(Value::Null),
-        "void" => Err(SQLError::Routine {
-            sqlstate: "42804".into(),
-            message: "cannot cast non-null value to type void".into(),
-        }),
-        _ => {
-            if let Some(target) = crate::sql::resolve_catalog_column_type(engine, type_name) {
-                return crate::sql::ddl::coerce_assignment_value(
-                    engine,
-                    value.clone(),
-                    &target,
-                    source,
-                );
-            }
-            cast_value(value, type_name)
-        }
-    }
+    uqa_sql::assignment::routines::coerce_routine_value(engine, value, type_name)
 }

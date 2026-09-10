@@ -4,341 +4,77 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! CTE materialization, EXPLAIN, VALUES, and SELECT-without-FROM execution.
+//! Bind child CTE execution to the active engine statement.
+use super::{
+    execute_lateral_subquery_output, execute_query_plan_output, push_output_filter_into_query_plan,
+    CtePlan, CteScope, Engine, QueryOutput, QueryOutputMode, QueryPlan, SQLError, SQLParam,
+    SQLResult, ScalarExpr,
+};
+use crate::session::StatementReadSnapshot;
+use uqa_execution::query::cte::context::{
+    CteBodyExecutor, CteExecutionContext, QueryOutputRewriter,
+};
+pub(in crate::sql) use uqa_planner::explain::*;
 
-use super::*;
-use uqa_planner::CtePlanBody;
-
-pub(in crate::sql) use uqa_sql::semantics::cte_reference_name;
-
+impl Engine {
+    pub(crate) fn cte_execution_context(&self) -> CteExecutionContext<'_, StatementReadSnapshot> {
+        CteExecutionContext {
+            queries: self,
+            rewrites: self,
+            routines: self,
+            functions: self,
+            runtime: self.query_runtime_view(),
+        }
+    }
+}
+impl CteBodyExecutor<StatementReadSnapshot> for Engine {
+    fn execute_query(
+        &self,
+        query: &QueryPlan,
+        params: &[SQLParam],
+        ctes: &mut CteScope,
+    ) -> Result<QueryOutput, SQLError> {
+        execute_query_plan_output(self, query, params, ctes, QueryOutputMode::SharedSpill)
+    }
+    fn execute_lateral_query(
+        &self,
+        query: &QueryPlan,
+        outer: &uqa_execution::OwnedPhysicalRow,
+        params: &[SQLParam],
+        ctes: &CteScope,
+    ) -> Result<QueryOutput, SQLError> {
+        execute_lateral_subquery_output(self, query, outer, params, ctes)
+    }
+    fn execute_command(
+        &self,
+        command: &uqa_planner::CommandPlan,
+        params: &[SQLParam],
+        ctes: &CteScope,
+    ) -> Result<SQLResult, SQLError> {
+        crate::sql::dml::execute_cte_command(self, command, params, ctes)
+    }
+}
+impl QueryOutputRewriter for Engine {
+    fn push_output_filter(
+        &self,
+        query: &QueryPlan,
+        qualifier: &str,
+        filter: &ScalarExpr,
+        columns: Option<&[String]>,
+    ) -> Result<Option<QueryPlan>, SQLError> {
+        push_output_filter_into_query_plan(self, query, qualifier, filter, columns)
+    }
+}
 pub(in crate::sql) fn materialize_plan_ctes(
     engine: &Engine,
     plans: &[CtePlan],
     params: &[SQLParam],
     ctes: &mut CteScope,
 ) -> Result<(), SQLError> {
-    materialize_plan_ctes_with_filters(engine, plans, params, ctes, &BTreeMap::new())
-}
-
-pub(in crate::sql) fn materialize_plan_ctes_with_filters<'a>(
-    engine: &Engine,
-    plans: impl IntoIterator<Item = &'a CtePlan>,
-    params: &[SQLParam],
-    ctes: &mut CteScope,
-    output_filters: &BTreeMap<String, (String, ScalarExpr)>,
-) -> Result<(), SQLError> {
-    let plans = order_cte_plans(plans.into_iter().collect())?;
-    for plan in plans {
-        if cte_references_own_name(plan) {
-            let rows = {
-                let mut cte_scope = ctes.enter_lock_identity_emission(false);
-                materialize_recursive_cte(
-                    engine,
-                    plan,
-                    params,
-                    &mut cte_scope,
-                    output_filters.get(&plan.name),
-                )?
-            };
-            ctes.insert_shared(plan.name.clone(), rows);
-            continue;
-        }
-
-        let outer_row = ctes.row_lock_outer_row().cloned();
-        let result = {
-            let mut cte_scope = ctes.enter_lock_identity_emission(false);
-            match &plan.body {
-                CtePlanBody::Query(query) => {
-                    if let Some(outer_row) = outer_row.as_ref() {
-                        execute_lateral_subquery_output(
-                            engine, query, outer_row, params, &cte_scope,
-                        )?
-                    } else {
-                        execute_query_plan_output(
-                            engine,
-                            query,
-                            params,
-                            &mut cte_scope,
-                            QueryOutputMode::SharedSpill,
-                        )?
-                    }
-                }
-                CtePlanBody::Command(command) => {
-                    execute_command_cte(engine, command, params, &cte_scope)?
-                }
-            }
-        };
-        let mut columns = result.columns.clone();
-        let source_columns = result.internal_columns.clone();
-        let mut operator = result.into_operator();
-        if !plan.columns.is_empty() {
-            let renamed_columns = columns
-                .iter()
-                .enumerate()
-                .map(|(index, source)| {
-                    plan.columns
-                        .get(index)
-                        .cloned()
-                        .unwrap_or_else(|| source.clone())
-                })
-                .collect::<Vec<_>>();
-            let mapping = source_columns
-                .iter()
-                .enumerate()
-                .map(|(index, source)| {
-                    let output = renamed_columns
-                        .get(index)
-                        .cloned()
-                        .unwrap_or_else(|| source.clone());
-                    (output, index)
-                })
-                .collect();
-            columns = renamed_columns;
-            operator = Box::new(uqa_execution::ColumnSelection::with_positions(
-                operator, mapping,
-            ));
-        }
-        let identity = operator
-            .row_schema()
-            .columns()
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(|(position, column)| (column, position))
-            .collect();
-        operator = Box::new(
-            uqa_execution::ColumnSelection::with_positions(operator, identity)
-                .discarding_lock_origins(),
-        );
-        let materialized =
-            collect_query_operator(engine, columns, operator, QueryOutputMode::SharedSpill)?;
-        let QueryRows::SharedSpill(materialized) = materialized.rows else {
-            return Err(SQLError::Internal(
-                "CTE spill collector returned in-memory rows".into(),
-            ));
-        };
-        ctes.insert_shared(plan.name.clone(), materialized);
-        if !plan.body.returns_rows() {
-            ctes.non_returning_ctes.insert(plan.name.clone());
-        }
-    }
-    Ok(())
-}
-
-fn execute_command_cte(
-    engine: &Engine,
-    command: &uqa_planner::CommandPlan,
-    params: &[SQLParam],
-    scope: &CteScope,
-) -> Result<super::QueryOutput, SQLError> {
-    let result = crate::sql::dml::execute_cte_command(engine, command, params, scope)?;
-    let schema =
-        uqa_execution::RowSchema::with_types(result.columns.clone(), result.column_types.clone());
-    let rows = (0..result.rows.len())
-        .map(|row| {
-            let values = (0..result.columns.len())
-                .map(|column| result.value_at(row, column).cloned().unwrap_or(Value::Null))
-                .collect();
-            uqa_execution::PhysicalRow::from_values(values)
-        })
-        .collect();
-    collect_query_operator(
-        engine,
-        result.columns,
-        Box::new(uqa_execution::TableScan::from_physical_rows(schema, rows)),
-        QueryOutputMode::SharedSpill,
-    )
-}
-
-/// Return the CTEs whose query results can be reached from this query root. `PostgreSQL` does not evaluate an unreferenced SELECT CTE. References are resolved through nested query scopes so a shadowing inner CTE does not make an outer CTE reachable, while a reachable inner CTE can still depend on an outer one.
-/// Render the inner statement as an EXPLAIN-style, single-column `plan`
-/// result with one row per line.
-pub(in crate::sql) struct ExplainAnalysis {
-    pub(in crate::sql) elapsed: std::time::Duration,
-    pub(in crate::sql) rows: u64,
-    pub(in crate::sql) affected_rows: u64,
-}
-
-pub(in crate::sql) fn run_explain(
-    body: &UnifiedPlan,
-    verbose: bool,
-    format: Option<&str>,
-    analysis: Option<&ExplainAnalysis>,
-) -> Result<SQLResult, SQLError> {
-    let mut plan_text = match body {
-        UnifiedPlan::Query(query) => format_query_plan(query),
-        UnifiedPlan::Command(command) => format!("{}\n  {command:#?}", command.name()),
-    };
-    if verbose {
-        plan_text.push_str("\n  verbose=true");
-        write!(plan_text, "\n  physical_plan={body:#?}")
-            .map_err(|error| SQLError::Internal(format!("format EXPLAIN plan: {error}")))?;
-    }
-    if let Some(analysis) = analysis {
-        let _ = write!(
-            plan_text,
-            "\n  actual_rows={}\n  affected_rows={}\n  execution_time_ms={:.3}",
-            analysis.rows,
-            analysis.affected_rows,
-            analysis.elapsed.as_secs_f64() * 1_000.0
-        );
-    }
-
-    let format = format.unwrap_or("text").to_ascii_lowercase();
-    if format == "json" {
-        let payload = serde_json::json!({
-            "Plan": plan_text.lines().collect::<Vec<_>>(),
-            "Analyze": analysis.is_some(),
-            "Actual Rows": analysis.map(|value| value.rows),
-            "Affected Rows": analysis.map(|value| value.affected_rows),
-            "Execution Time (ms)": analysis.map(|value| value.elapsed.as_secs_f64() * 1_000.0),
-        });
-        let mut row = ResultRow::new();
-        row.insert("plan".to_string(), Value::Str(payload.to_string()));
-        return Ok(SQLResult {
-            kind: uqa_sql::SQLResultKind::Rows,
-            command_tag: None,
-            columns: vec!["plan".to_string()],
-            column_types: vec![Some(uqa_sql::ColumnType::Text)],
-            rows: vec![row],
-            positional_rows: None,
-            affected_rows: 0,
-        });
-    }
-    if format != "text" {
-        return Err(SQLError::Unsupported(format!(
-            "EXPLAIN format `{format}` is not supported; expected TEXT or JSON"
-        )));
-    }
-    let mut rows: Vec<ResultRow> = Vec::new();
-    for line in plan_text.split('\n') {
-        let mut r = ResultRow::new();
-        r.insert("plan".to_string(), Value::Str(line.to_string()));
-        rows.push(r);
-    }
-    Ok(SQLResult {
-        kind: uqa_sql::SQLResultKind::Rows,
-        command_tag: None,
-        columns: vec!["plan".to_string()],
-        column_types: vec![Some(uqa_sql::ColumnType::Text)],
-        rows,
-        positional_rows: None,
-        affected_rows: 0,
-    })
-}
-
-pub(in crate::sql) fn format_query_plan(plan: &QueryPlan) -> String {
-    match &plan.root {
-        RelationalPlan::QueryBlock(block) => format_select_plan(block),
-        RelationalPlan::SetOp {
-            kind,
-            all,
-            left,
-            right,
-            order_by,
-            limit,
-            offset,
-            ..
-        } => format!(
-            "SetOp\n  kind={kind:?}\n  all={all}\n  left=({})\n  right=({})\n  order_by={}\n  limit={}\n  offset={}",
-            format_query_plan(left).replace('\n', "\n    "),
-            format_query_plan(right).replace('\n', "\n    "),
-            order_by.len(),
-            limit
-                .as_deref()
-                .map_or_else(|| "none".into(), explain_int_expr),
-            offset
-                .as_deref()
-                .map_or_else(|| "none".into(), explain_int_expr),
-        ),
-        RelationalPlan::Values { rows, .. } => format!("Values\n  rows={}", rows.len()),
-    }
-}
-
-pub(in crate::sql) fn format_select_plan(stmt: &QueryBlockPlan) -> String {
-    use std::fmt::Write as _;
-    let mut s = String::new();
-    let _ = writeln!(s, "Select");
-    if !stmt.projections.is_empty() {
-        let _ = writeln!(s, "  projections={}", stmt.projections.len());
-    }
-    if let Some(from) = &stmt.from {
-        let _ = writeln!(s, "  from={from:?}");
-    }
-    if stmt.r#where.is_some() {
-        let _ = writeln!(s, "  where=<expr>");
-    }
-    if !stmt.group_by.is_empty() {
-        let _ = writeln!(s, "  group_by={}", stmt.group_by.len());
-    }
-    if !stmt.grouping_sets.is_empty() {
-        let _ = writeln!(s, "  grouping_sets={}", stmt.grouping_sets.len());
-    }
-    if !stmt.order_by.is_empty() {
-        let _ = writeln!(s, "  order_by={}", stmt.order_by.len());
-    }
-    if let Some(expr) = stmt.limit.as_ref() {
-        let _ = writeln!(s, "  limit={}", explain_int_expr(expr));
-    }
-    if let Some(expr) = stmt.offset.as_ref() {
-        let _ = writeln!(s, "  offset={}", explain_int_expr(expr));
-    }
-    if stmt.distinct {
-        let _ = writeln!(s, "  distinct=true");
-    }
-    if !stmt.locking.is_empty() {
-        let _ = writeln!(s, "  locking={}", stmt.locking.len());
-    }
-    s.trim_end().to_string()
-}
-
-pub(in crate::sql) fn should_defer_distinct_limit(stmt: &QueryBlockPlan) -> bool {
-    stmt.distinct && (stmt.limit.is_some() || stmt.offset.is_some())
-}
-
-pub(in crate::sql) fn select_execution_stmt(
-    stmt: &QueryBlockPlan,
-    defer_distinct_limit: bool,
-) -> QueryBlockPlan {
-    if !defer_distinct_limit {
-        return stmt.clone();
-    }
-    let mut exec_stmt = stmt.clone();
-    exec_stmt.limit = None;
-    exec_stmt.offset = None;
-    exec_stmt
-}
-
-pub(in crate::sql) fn run_select_without_from_output(
-    engine: &Engine,
-    original: &QueryBlockPlan,
-    stmt: &QueryBlockPlan,
-    params: &[SQLParam],
-    ctes: &CteScope,
-    output_mode: QueryOutputMode,
-) -> Result<QueryOutput, SQLError> {
-    let columns = projection_columns(&stmt.projections);
-    let operator: Box<dyn uqa_execution::PhysicalOperator + '_> =
-        Box::new(uqa_execution::TableScan::from_physical_rows(
-            uqa_execution::RowSchema::default(),
-            vec![uqa_execution::PhysicalRow::from_values(Vec::new())],
-        ));
-    execute_query_block_operator_output(
-        engine,
-        operator,
-        stmt.r#where.clone(),
-        stmt,
-        original,
+    uqa_execution::query::cte::materialize_plan_ctes(
+        engine.cte_execution_context(),
+        plans,
         params,
         ctes,
-        columns,
-        output_mode,
     )
 }
-
-pub(in crate::sql) use uqa_sql::semantics::{
-    cte_references_own_name, ordered_plan_ctes, reachable_plan_cte_names,
-    single_reference_plan_cte_names,
-};
-
-use uqa_sql::semantics::order_cte_plans;

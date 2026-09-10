@@ -71,6 +71,9 @@ graph TD
     storage --> analysis
     storage_redb --> storage
     storage_sqlite --> storage
+    storage_sqlite --> graph
+    storage_sqlite --> analysis
+    storage_sqlite --> core
     scoring --> core
     scoring --> storage
     fusion --> scoring
@@ -79,6 +82,8 @@ graph TD
     operators --> fusion
     graph --> core
     graph --> analysis
+    graph --> storage
+    graph --> operators
     joins --> core
     joins --> graph
     joins --> sql
@@ -86,9 +91,9 @@ graph TD
     fdw --> core
     execution --> core
     execution --> sql
-    planner --> execution
+    execution --> graph
+    execution --> operators
     planner --> graph
-    planner --> joins
     planner --> operators
     planner --> sql
     planner --> storage
@@ -120,7 +125,7 @@ graph TD
 | `uqa-analysis` | Tokenizers, character filters, token filters, analyzers, stemming, and highlighting primitives |
 | `uqa-storage` | Document, inverted, vector, tensor, B-tree, block-max, spatial, catalog, and backend-neutral key/value abstractions |
 | `uqa-storage-redb` | Pure-Rust redb implementation of the ordered `KeyValueStore` contract and session provider |
-| `uqa-storage-sqlite` | Physical SQLite implementation of the backend-neutral `KeyValueStore` contract |
+| `uqa-storage-sqlite` | SQLite connections, catalog migrations, document and retrieval indexes, transactions, graph persistence, key/value storage, encryption, and compressed VFS |
 | `uqa-scoring` | BM25, Bayesian BM25, typed score domains, WAND/BMW, calibration, metrics, priors, and parameter learning |
 | `uqa-fusion` | Exact Bayesian evidence fusion, robust positive-evidence pooling, probabilistic Boolean operations, learned fusion, and attention fusion |
 | `uqa-operators` | Posting-list, Boolean, hybrid, staged, sparse, hierarchical, aggregation, fusion, and deep-fusion operators |
@@ -276,7 +281,7 @@ Calibration quality is evaluated on held-out labels with reliability, ECE, Brier
 
 ## Graph model
 
-`uqa-graph` provides memory and SQLite graph stores, named graph workspaces, graph pattern matching, RPQ parsing, Thompson NFA construction, DFA conversion, Cypher read and mutation execution, centrality, message passing, embeddings, path indexes, temporal traversal, and versioned deltas.
+`uqa-graph` provides memory and backend-neutral persistent graph stores, named graph workspaces, graph pattern matching, RPQ parsing, Thompson NFA construction, DFA conversion, Cypher read and mutation execution, centrality, message passing, embeddings, path indexes, temporal traversal, and versioned deltas. The standalone SQLite graph adapter belongs to `uqa-storage-sqlite`, which implements graph's persistent-record contract without introducing a provider dependency into graph algorithms.
 
 `GraphPostingList` requires graph payload keys to be contained in the underlying document support. Union, intersection, difference, graph-name conflicts, and overlapping subgraphs use explicit policies instead of inheriting generic payload precedence accidentally.
 

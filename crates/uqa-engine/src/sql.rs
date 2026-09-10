@@ -28,24 +28,24 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use uqa_core::{DecimalValue, DocId, TemporalValue, Value};
+use uqa_core::{DocId, Value};
 use uqa_sql::ast::{
-    AlterTableAction, AlterTableStmt, BinaryOp, ColumnType, CreateIndex, CreateTable, DropKind,
-    DropStmt, ForeignKey, ForeignKeyAction, ForeignKeyMatch, SetOpKind, Statement,
+    AlterTableAction, AlterTableStmt, ColumnType, CreateIndex, CreateTable, DropKind, DropStmt,
+    ForeignKey, Statement,
 };
 #[cfg(test)]
 use uqa_sql::compile;
-use uqa_sql::expr::{value_to_tensor, value_to_vector};
-use uqa_sql::{ResultRow, SQLError, SQLParam, SQLResult};
-use uqa_storage::document_store::{Document, DocumentMetadata, StoredDocument};
+use uqa_sql::{SQLError, SQLParam, SQLResult};
+use uqa_storage::document_store::Document;
 
-use crate::{Engine, HNSWIndexParams, IVFIndexParams, ScoredEntry, VectorIndexSpec};
+use crate::{Engine, HNSWIndexParams, IVFIndexParams, VectorIndexSpec};
 
 mod age_cypher;
 mod aggregates;
 mod catalog;
 pub(crate) use catalog::snapshot_table_relation_oid;
 pub(crate) use catalog::{rename_view_column_query, view_query_references_column};
+mod api;
 mod catalog_statement_routines;
 mod completion;
 mod copy;
@@ -56,14 +56,12 @@ mod ddl;
 pub(crate) mod dml;
 mod domains;
 mod driver;
-mod engine_api;
 mod from_rows;
 mod generated;
 mod hierarchy;
 mod mutability;
-mod plan_executor;
-mod result_text;
-pub use result_text::format_postgres_text;
+pub(crate) mod plan_executor;
+pub use uqa_sql::result::format_postgres_text;
 mod planning;
 mod plpgsql_exec;
 mod prepared;
@@ -74,9 +72,9 @@ mod read_only;
 mod regrole_dependencies;
 mod row_functions;
 mod rules;
-mod scalar;
+pub(crate) mod scalar;
 mod select;
-mod session_portal_worker;
+pub(crate) mod session_portal_worker;
 mod triggers;
 
 pub(crate) fn active_trigger_transition_relation_names() -> std::collections::BTreeSet<String> {
@@ -84,13 +82,12 @@ pub(crate) fn active_trigger_transition_relation_names() -> std::collections::BT
 }
 mod vacuum;
 mod volatility;
-mod where_eval;
 mod window;
 
 pub use catalog::{postgres_result_type, SQLTypeMetadata};
 pub(crate) use catalog_statement_routines::{
     bind_catalog_statement_routines, collect_expression_routine_references,
-    mark_catalog_statement_relations_bound, BoundRoutineReference,
+    mark_catalog_statement_relations_bound,
 };
 pub use cursor::{SQLCursor, SQLCursorSummary};
 pub(crate) use domains::{cast_domain_value, resolve_declared_column_type};
@@ -112,11 +109,6 @@ pub(crate) use select::{execute_query_plan, RowLockRetryCache};
 pub(crate) use triggers::fire_statement_triggers;
 pub(crate) use triggers::{fire_deferred_constraint_trigger_event, DeferredConstraintTriggerEvent};
 
-use aggregates::{
-    aggregate_value, contains_aggregate, has_aggregate, AggregateAccumulator,
-    PhysicalAggregateExecutor,
-};
-use catalog::build_info_schema_rows;
 pub(crate) use catalog::query_source_column_names;
 pub(crate) use catalog::{
     foreign_table_relation_oid, plpgsql_catalog, resolve_age_label_relation_name,
@@ -124,9 +116,8 @@ pub(crate) use catalog::{
     resolve_catalog_domain_type_by_oid, resolve_regclass_kind_by_oid, resolve_regclass_oid,
     resolve_regnamespace_oid, resolve_regobject_oid, resolve_regprocedure_oid, resolve_regrole_oid,
     resolve_regtype_oid, resolve_regtype_output, runtime_constraints, schema_object_oid,
-    sequence_relation_oid, view_relation_oid, RegtypeOutputCatalog,
+    sequence_relation_oid, view_relation_oid,
 };
-pub(in crate::sql) use catalog::{virtual_relation_accepts_row_lock, virtual_relation_schema};
 pub(crate) use ddl::{
     bind_stored_check_expression_routines, bind_stored_schema_expression_routines,
     convert_value_to_column_type, convert_value_to_column_type_with_engine, drop_column_cascade,
@@ -135,18 +126,16 @@ pub(crate) use ddl::{
     validate_postgres_relation_column_type, validate_vector_dimensions,
 };
 use ddl::{
-    coerce_to_column_type, column_type_name, core_value_to_json, json_table_arg,
-    json_table_value_to_text, json_to_core_value, run_alter_sequence, run_alter_table,
-    run_create_index, run_create_sequence, run_create_table, run_create_table_as,
-    run_create_table_if_not_exists, run_drop, value_to_text, CreateTableAsExecution,
+    column_type_name, json_table_arg, json_table_value_to_text, json_to_core_value,
+    run_alter_sequence, run_alter_table, run_create_index, run_create_sequence, run_create_table,
+    run_create_table_as, run_create_table_if_not_exists, run_drop, CreateTableAsExecution,
 };
 use dml::{index_vectors_for_type, run_delete, run_insert, run_merge, run_update};
-use from_rows::{build_join_spill_with_ctes, engine_func_intercept, ColumnPrune, QualifierFilters};
+use from_rows::{build_join_spill_with_ctes, engine_func_intercept};
 pub(crate) use generated::{prepare_generated_columns, refresh_stored_generated_columns};
 pub(in crate::sql) use hierarchy::{
-    partition_constraint_accepts_document, partition_insert_target,
-    prospective_partition_bound_accepts_document, validate_hash_partition_spec,
-    validate_new_partition_bound,
+    partition_insert_target, prospective_partition_bound_accepts_document,
+    validate_hash_partition_spec, validate_new_partition_bound,
 };
 use plan_executor::UnifiedPlanExecutor;
 pub(crate) use regrole_dependencies::{
@@ -154,14 +143,13 @@ pub(crate) use regrole_dependencies::{
     reject_stored_regrole_constants, StoredRegroleConstants,
 };
 use row_functions::{
-    execute_function, execute_function_with_top_k, execute_tree_entries, expect_column_name,
-    expect_optional_graph_value, graph_betweenness_entries, graph_hits_entries,
-    graph_pagerank_entries, run_age_alter_graph_with_evaluator,
-    run_age_create_elabel_with_evaluator, run_age_create_graph_with_evaluator,
-    run_age_create_vlabel_with_evaluator, run_age_drop_graph_with_evaluator,
-    run_age_drop_label_with_evaluator, run_age_graph_exists_with_evaluator,
-    run_graph_create_with_evaluator, run_graph_drop_with_evaluator,
-    validate_expr_text_match_fields, validate_joined_expr_text_match_fields,
+    execute_tree_entries, expect_column_name, expect_optional_graph_value,
+    graph_betweenness_entries, graph_hits_entries, graph_pagerank_entries,
+    run_age_alter_graph_with_evaluator, run_age_create_elabel_with_evaluator,
+    run_age_create_graph_with_evaluator, run_age_create_vlabel_with_evaluator,
+    run_age_drop_graph_with_evaluator, run_age_drop_label_with_evaluator,
+    run_age_graph_exists_with_evaluator, run_graph_create_with_evaluator,
+    run_graph_drop_with_evaluator,
 };
 pub(crate) use row_functions::{
     run_bayesian_match_with_prior_in_execution, run_bayesian_match_with_prior_public,
@@ -208,28 +196,11 @@ pub(crate) fn call_bound_engine_builtin(
     from_rows::engine_catalog_scalar_value(engine, &binding.name, &values)
 }
 pub(crate) use select::CteScope;
-use select::{
-    bind_projection_output_schema, build_projection_physical_row_with_ctes, projection_columns,
-    run_explain, ScopedEngineHook,
-};
+use select::{build_projection_physical_row_with_ctes, run_explain};
 pub(crate) use session_portal_worker::start_session_portal_worker;
-use where_eval::execute_mixed_where;
-pub(crate) use where_eval::expr_is_null_free as expr_is_null_free_public;
-use window::{has_window, prepare_window_plan, PhysicalWindowExecutor};
+pub(crate) use uqa_sql::semantics::expr_is_null_free as expr_is_null_free_public;
 
-type RowUpdateValues = BTreeMap<String, Value>;
 type RowUpdateVectors = BTreeMap<String, Vec<Vec<f32>>>;
-type RowIndependentUpdateValues = (RowUpdateValues, RowUpdateVectors);
-
-pub(crate) fn analyze_query_schema_with_catalog(
-    engine: &Engine,
-    query: &uqa_planner::QueryPlan,
-    params: &[SQLParam],
-    catalog: crate::engine_capabilities::CatalogReadView,
-    resolution: crate::engine_capabilities::RelationNameResolution,
-) -> Result<uqa_execution::RowSchema, SQLError> {
-    select::analyze_query_plan_schema_with_catalog(engine, query, params, catalog, resolution)
-}
 
 /// Analyze the declared RETURNING row type of a rewrite-rule action without
 /// executing the action.
@@ -246,7 +217,7 @@ pub(crate) fn bind_catalog_query_routines(
     query: &mut uqa_planner::QueryPlan,
     params: &[SQLParam],
 ) -> Result<uqa_execution::RowSchema, SQLError> {
-    let ctes = CteScope::new_for_catalog_binding(engine);
+    let ctes = crate::capabilities::query_scope::new_for_catalog_binding(engine);
     select::bind_query_plan_routines_for_storage(engine, query, params, &ctes, None)
 }
 
@@ -257,7 +228,7 @@ pub(crate) fn bind_catalog_query_routines_with_outer(
     params: &[SQLParam],
     outer: &uqa_execution::RowSchema,
 ) -> Result<uqa_execution::RowSchema, SQLError> {
-    let ctes = CteScope::new_for_catalog_binding(engine);
+    let ctes = crate::capabilities::query_scope::new_for_catalog_binding(engine);
     select::bind_query_plan_routines_for_storage(engine, query, params, &ctes, Some(outer))
 }
 
@@ -268,7 +239,7 @@ pub(crate) fn bind_catalog_expression_routines_with_outer(
     params: &[SQLParam],
     outer: &uqa_execution::RowSchema,
 ) -> Result<Option<uqa_sql::ast::ColumnType>, SQLError> {
-    let ctes = CteScope::new_for_catalog_binding(engine);
+    let ctes = crate::capabilities::query_scope::new_for_catalog_binding(engine);
     select::bind_expression_plan_routines_for_storage(engine, expression, params, &ctes, outer)
 }
 
@@ -280,71 +251,24 @@ pub(crate) fn validate_stored_view_check_option(
     dml::view_automatic::validate_view_definition_check_option(engine, name, view)
 }
 
-const SCORE_COLUMN: &str = "_score";
-pub(crate) use uqa_sql::semantics::DOC_ID_COLUMN;
-pub(crate) use uqa_sql::semantics::TABLE_OID_COLUMN;
 pub(crate) use uqa_sql::semantics::XMIN_COLUMN;
 
-pub(crate) fn projection_uses_tuple_xmin(
-    column: &str,
-    definitions: &[uqa_sql::ast::ColumnDef],
-) -> bool {
-    column == XMIN_COLUMN
-        && !definitions
-            .iter()
-            .any(|definition| definition.name == XMIN_COLUMN)
-}
-
-pub(crate) fn projections_use_tuple_xmin(
-    columns: &[String],
-    definitions: &[uqa_sql::ast::ColumnDef],
-) -> bool {
-    columns
-        .iter()
-        .any(|column| projection_uses_tuple_xmin(column, definitions))
-}
-
-pub(crate) fn project_document_column(
-    document: &Document,
-    metadata: DocumentMetadata,
-    column: &str,
-    definitions: &[uqa_sql::ast::ColumnDef],
-) -> Value {
-    if !projection_uses_tuple_xmin(column, definitions) {
-        return document.get(column).cloned().unwrap_or(Value::Null);
-    }
-    if definitions.is_empty() {
-        if let Some(value) = document.get(column) {
-            return value.clone();
-        }
-    }
-    metadata
-        .tuple_xmin()
-        .map_or(Value::Null, |xmin| Value::Int(i64::from(xmin)))
-}
-
-pub(crate) fn project_stored_document_column(
-    document: &StoredDocument,
-    column: &str,
-    definitions: &[uqa_sql::ast::ColumnDef],
-) -> Value {
-    project_document_column(document.fields(), document.metadata(), column, definitions)
-}
-
-pub(crate) use uqa_sql::semantics::META_DOC_ID_COLUMN;
-pub(crate) use uqa_sql::semantics::META_QUALIFIER;
-pub(crate) use uqa_sql::semantics::META_SCORE_COLUMN;
+pub(crate) use uqa_execution::query::document_projection::{
+    project_stored_document_column, projection_uses_tuple_xmin, projections_use_tuple_xmin,
+};
 
 pub(crate) use uqa_sql::semantics::builtin_function_dispatch_name;
 
-fn doc_id_value(doc_id: DocId) -> Result<Value, SQLError> {
-    i64::try_from(doc_id).map(Value::Int).map_err(|_| {
-        SQLError::TypeMismatch(format!("document id {doc_id} exceeds the SQL BIGINT range"))
-    })
-}
+use uqa_sql::semantics::doc_id_value;
 
 #[cfg(test)]
 #[path = "sql/tests.rs"]
 mod tests;
 
 pub(crate) use uqa_sql::semantics::merge_action_attribute;
+
+pub(crate) use triggers::current_transition_relations;
+
+pub(crate) use select::{attach_lock_rows, prepare_correlated_exists_predicate, ScopedEngineHook};
+
+pub(crate) use plpgsql_exec::execute_trigger_routine;

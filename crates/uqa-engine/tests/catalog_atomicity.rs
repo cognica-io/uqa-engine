@@ -13,9 +13,8 @@ use uqa_engine::Engine;
 use uqa_graph::GraphStore as _;
 use uqa_ml::{DeepLayerSpec, DeepModel, GatingSpec};
 use uqa_storage::document_store::Document;
-use uqa_storage::{
-    Catalog, CatalogFacade, ManagedConnection, PersistentStorageBackend, SQLiteStorageBackend,
-};
+use uqa_storage::{CatalogFacade, PersistentStorageBackend};
+use uqa_storage_sqlite::{Catalog, ManagedConnection, SQLiteStorageBackend};
 
 fn persistent_engine() -> (TempDir, ManagedConnection, Engine) {
     let dir = tempfile::tempdir().unwrap();

@@ -44,7 +44,7 @@ pub(in crate::sql) fn run_create_index(
     let relation = crate::RelationIdentity::new(&table_relation.schema, &name);
     if matches!(
         engine.resolve_bound_relation_kind(&relation.qualified_name())?,
-        crate::engine_capabilities::RelationResolution::Found(_, _)
+        crate::capabilities::RelationResolution::Found(_, _)
     ) {
         if c.if_not_exists {
             engine.push_sql_notice(
@@ -110,7 +110,7 @@ pub(in crate::sql) fn run_create_index(
             &c.table,
             &c.columns,
             &c.options,
-            &crate::engine_catalog_indexes::IndexDefinition {
+            &crate::catalog_indexes::IndexDefinition {
                 key_names,
                 key_types,
                 included_columns: c.included_columns.clone(),
@@ -225,7 +225,7 @@ fn allocate_default_index_name(
         let candidate = crate::RelationIdentity::new(&table.schema, name).qualified_name();
         Ok(matches!(
             engine.resolve_bound_relation_kind(&candidate)?,
-            crate::engine_capabilities::RelationResolution::MissingRelation
+            crate::capabilities::RelationResolution::MissingRelation
         ))
     };
     if available(&base)? {

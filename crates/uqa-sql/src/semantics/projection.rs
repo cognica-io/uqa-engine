@@ -201,3 +201,34 @@ pub fn returning_expression_schema(
         RowSchema::join(&target, source, std::iter::empty())
     })
 }
+
+pub fn query_plan_output_columns(plan: &crate::plan::QueryPlan) -> Option<Vec<String>> {
+    match &plan.root {
+        crate::plan::RelationalPlan::QueryBlock(block) => {
+            Some(projection_columns(&block.projections))
+        }
+        crate::plan::RelationalPlan::SetOp { left, .. } => query_plan_output_columns(left),
+        crate::plan::RelationalPlan::Values { rows, .. } => rows.first().map(|row| {
+            (1..=row.len())
+                .map(|index| format!("column{index}"))
+                .collect()
+        }),
+    }
+}
+
+pub fn should_defer_distinct_limit(stmt: &crate::plan::QueryBlockPlan) -> bool {
+    stmt.distinct && (stmt.limit.is_some() || stmt.offset.is_some())
+}
+
+pub fn select_execution_stmt(
+    stmt: &crate::plan::QueryBlockPlan,
+    defer_distinct_limit: bool,
+) -> crate::plan::QueryBlockPlan {
+    if !defer_distinct_limit {
+        return stmt.clone();
+    }
+    let mut exec_stmt = stmt.clone();
+    exec_stmt.limit = None;
+    exec_stmt.offset = None;
+    exec_stmt
+}

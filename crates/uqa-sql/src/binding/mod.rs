@@ -963,3 +963,12 @@ impl SchemaScope {
 
 #[cfg(test)]
 mod fixture;
+
+pub mod correlation;
+
+pub mod stored_routines;
+
+pub mod scoped_types;
+pub mod snapshot;
+
+pub mod view_dependencies;

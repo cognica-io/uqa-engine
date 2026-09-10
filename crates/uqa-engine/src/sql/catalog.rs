@@ -4,341 +4,206 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `information_schema` and `pg_catalog` virtual row dispatch.
+//! Adapt the engine's statement capabilities to catalog execution.
+use crate::Engine;
+use uqa_core::Value;
+pub(crate) use uqa_execution::catalog::projection::*;
+pub use uqa_sql::catalog::result_type::{postgres_result_type, SQLTypeMetadata};
+use uqa_sql::plan::QueryPlan;
+use uqa_sql::{ColumnType, SQLError};
 
-use uqa_sql::{ResultRow, SQLError};
-
-use crate::engine_capabilities::{CatalogReadView, RelationNameResolution, SessionExecutionView};
-use crate::{ConstraintIdentity, Engine, RelationIdentity};
-
-pub(crate) fn domain_object_oid(object_id: &[u8; 16]) -> u32 {
-    u32::try_from(helpers::oids::stable_object_oid("domain", object_id))
-        .expect("catalog OIDs fit in u32")
-}
-
-pub(in crate::sql) fn is_virtual_catalog_relation(
-    resolution: &RelationNameResolution,
-    name: &str,
-) -> bool {
-    resolve_virtual_relation(resolution, name).is_some()
-}
-
-pub(super) fn build_info_schema_rows(
+pub(crate) fn pg_get_indexdef_value(
     engine: &Engine,
-    catalog: &CatalogReadView,
-    resolution: &RelationNameResolution,
-    session: SessionExecutionView<'_>,
-    name: &str,
-) -> Result<Option<Vec<ResultRow>>, SQLError> {
-    let Some(relation) = resolve_virtual_relation(resolution, name) else {
-        return ag_catalog::build_age_label_relation_rows(catalog, resolution, name);
-    };
-    let mut catalog_resolution = resolution.clone();
-    catalog_resolution.set_lookup_mode(crate::engine_capabilities::RelationLookupMode::Bound);
-    let resolution = &catalog_resolution;
-    Ok(Some(match relation {
-        VirtualRelation::InformationSchemaCatalogName => build_info_catalog_name(),
-        VirtualRelation::InformationSchemata => build_info_schemata(catalog, resolution)?,
-        VirtualRelation::InformationTables => build_info_tables(engine, catalog, resolution)?,
-        VirtualRelation::InformationColumns => build_info_columns(engine, catalog, resolution)?,
-        VirtualRelation::InformationColumnPrivileges => {
-            build_info_column_privileges(engine, catalog, resolution, false)?
-        }
-        VirtualRelation::InformationRoleColumnGrants => {
-            build_info_column_privileges(engine, catalog, resolution, true)?
-        }
-        VirtualRelation::InformationViews => build_info_views(engine, catalog, resolution)?,
-        VirtualRelation::InformationRoutines => build_info_routines(catalog)?,
-        VirtualRelation::InformationSequences => build_info_sequences(catalog, session),
-        VirtualRelation::InformationTableConstraints => {
-            build_info_table_constraints(catalog, resolution)?
-        }
-        VirtualRelation::InformationKeyColumnUsage => {
-            build_info_key_column_usage(catalog, resolution)?
-        }
-        VirtualRelation::PgNamespace => build_pg_namespace(catalog, resolution)?,
-        VirtualRelation::PgClass => build_pg_class(engine, catalog, resolution)?,
-        VirtualRelation::PgInherits => build_pg_inherits(catalog, resolution)?,
-        VirtualRelation::PgPartitionedTable => {
-            build_pg_partitioned_table(engine, catalog, resolution)?
-        }
-        VirtualRelation::PgAttribute => build_pg_attribute(engine, catalog, resolution)?,
-        VirtualRelation::PgAttrdef => build_pg_attrdef(catalog, resolution)?,
-        VirtualRelation::PgConstraint => build_pg_constraint(catalog, resolution)?,
-        VirtualRelation::PgIndex => build_pg_index(catalog, resolution)?,
-        VirtualRelation::PgTrigger => build_pg_trigger(engine, catalog, resolution)?,
-        VirtualRelation::PgRewrite => build_pg_rewrite(catalog, resolution)?,
-        VirtualRelation::PgRules => build_pg_rules(catalog, resolution)?,
-        VirtualRelation::PgTables => build_pg_tables(catalog, resolution)?,
-        VirtualRelation::PgViews => build_pg_views(catalog, resolution)?,
-        VirtualRelation::PgIndexes => build_pg_indexes(catalog, resolution)?,
-        VirtualRelation::PgType => build_pg_type(catalog),
-        VirtualRelation::PgRange => build_pg_range(),
-        VirtualRelation::PgProc => build_pg_proc(catalog)?,
-        VirtualRelation::PgDatabase => build_pg_database(catalog)?,
-        VirtualRelation::PgAuthMembers => build_pg_auth_members(catalog),
-        VirtualRelation::PgRoles => build_pg_roles(catalog),
-        VirtualRelation::PgUser => build_pg_user(catalog),
-        VirtualRelation::PgSettings => build_pg_settings(session)?,
-        VirtualRelation::PgPreparedStatements => prepared_statements::rows(session)?,
-        VirtualRelation::PgDescription => Vec::new(),
-        VirtualRelation::PgMatviews => build_pg_matviews(catalog, resolution)?,
-        VirtualRelation::PgSequences => build_pg_sequences(catalog, session)?,
-        VirtualRelation::AgGraph => build_ag_graph(catalog)?,
-        VirtualRelation::AgLabel => build_ag_label(catalog)?,
-    }))
+    arguments: &[Value],
+) -> Result<Value, SQLError> {
+    uqa_execution::catalog::projection::pg_get_indexdef_value(
+        &engine.catalog_execution(),
+        arguments,
+    )
 }
-
-mod ag_catalog;
-mod builtin_routines;
-mod events;
-mod expression_text;
-mod index_definition;
-mod mutation;
-pub(in crate::sql) use index_definition::pg_get_indexdef_value;
-pub(in crate::sql) use mutation::virtual_relation_mutation_error;
-pub(in crate::sql) use regtypes::format_type_value;
-mod view_definition;
-pub(in crate::sql) use view_definition::pg_get_viewdef_value;
-pub(crate) use view_definition::{rename_view_column_query, view_query_references_column};
-mod helpers;
-mod result_type;
-pub use result_type::{postgres_result_type, SQLTypeMetadata};
-mod information_schema;
-mod partitioning;
-mod pg_catalog;
-mod pg_namespace;
-mod pg_proc;
-mod pg_settings;
-mod plpgsql;
-mod prepared_statements;
-mod regtypes;
+pub(crate) fn pg_get_triggerdef_value(
+    engine: &Engine,
+    arguments: &[Value],
+) -> Result<Value, SQLError> {
+    uqa_execution::catalog::projection::pg_get_triggerdef_value(
+        &engine.catalog_execution(),
+        arguments,
+    )
+}
+pub(crate) fn pg_get_ruledef_value(
+    engine: &Engine,
+    arguments: &[Value],
+) -> Result<Value, SQLError> {
+    uqa_execution::catalog::projection::pg_get_ruledef_value(&engine.catalog_execution(), arguments)
+}
+pub(crate) fn pg_get_expr_value(engine: &Engine, args: &[Value]) -> Result<Value, SQLError> {
+    uqa_execution::catalog::projection::pg_get_expr_value(&engine.catalog_execution(), args)
+}
+pub(crate) fn pg_get_partkeydef_value(engine: &Engine, args: &[Value]) -> Result<Value, SQLError> {
+    uqa_execution::catalog::projection::pg_get_partkeydef_value(&engine.catalog_execution(), args)
+}
+pub(crate) fn pg_get_viewdef_value(
+    engine: &Engine,
+    arguments: &[Value],
+) -> Result<Value, SQLError> {
+    uqa_execution::catalog::projection::pg_get_viewdef_value(&engine.catalog_execution(), arguments)
+}
+pub(crate) fn resolve_regclass_oid(engine: &Engine, name: &str) -> Result<Option<i64>, SQLError> {
+    uqa_execution::catalog::projection::resolve_regclass_oid(&engine.catalog_execution(), name)
+}
+pub(crate) fn resolve_regclass_kind_by_oid(
+    engine: &Engine,
+    oid: i64,
+) -> Result<Option<(String, String)>, SQLError> {
+    uqa_execution::catalog::projection::resolve_regclass_kind_by_oid(
+        &engine.catalog_execution(),
+        oid,
+    )
+}
+pub(crate) fn resolve_regprocedure_oid(engine: &Engine, name: &str) -> Result<Option<i64>, String> {
+    uqa_execution::catalog::projection::resolve_regprocedure_oid(&engine.catalog_execution(), name)
+}
+pub(crate) fn resolve_regnamespace_oid(
+    engine: &Engine,
+    input: &str,
+) -> Result<Option<i64>, SQLError> {
+    uqa_execution::catalog::projection::resolve_regnamespace_oid(&engine.catalog_execution(), input)
+}
+pub(crate) fn resolve_regtype_oid(engine: &Engine, name: &str) -> Result<Option<i64>, SQLError> {
+    uqa_execution::catalog::projection::resolve_regtype_oid(&engine.catalog_execution(), name)
+}
+pub(crate) fn resolve_regrole_oid(engine: &Engine, input: &str) -> Result<Option<i64>, SQLError> {
+    uqa_execution::catalog::projection::resolve_regrole_oid(&engine.catalog_execution(), input)
+}
+pub(crate) fn resolve_regobject_oid(
+    engine: &Engine,
+    ty: &ColumnType,
+    name: &str,
+) -> Result<Option<i64>, SQLError> {
+    uqa_execution::catalog::projection::resolve_regobject_oid(&engine.catalog_execution(), ty, name)
+}
+pub(crate) fn resolve_regtype_output(
+    engine: &Engine,
+    ty: &ColumnType,
+    oid: i64,
+) -> Result<Option<String>, String> {
+    uqa_execution::catalog::projection::resolve_regtype_output(&engine.catalog_execution(), ty, oid)
+}
+pub(crate) fn resolve_catalog_domain_type_by_oid(engine: &Engine, oid: u32) -> Option<ColumnType> {
+    uqa_execution::catalog::projection::resolve_catalog_domain_type_by_oid(
+        &engine.catalog_execution(),
+        oid,
+    )
+}
+pub(crate) fn resolve_catalog_column_type(engine: &Engine, type_name: &str) -> Option<ColumnType> {
+    uqa_execution::catalog::projection::resolve_catalog_column_type(
+        &engine.catalog_execution(),
+        type_name,
+    )
+}
+pub(crate) fn format_type_value(engine: &Engine, args: &[Value]) -> Result<Value, SQLError> {
+    uqa_execution::catalog::projection::format_type_value(&engine.catalog_execution(), args)
+}
+pub(crate) fn resolve_bound_regclass_oid(
+    engine: &Engine,
+    name: &str,
+) -> Result<Option<i64>, SQLError> {
+    uqa_execution::catalog::projection::resolve_bound_regclass_oid(
+        &engine.catalog_execution(),
+        name,
+    )
+}
+pub(crate) fn rename_view_column_query(
+    engine: &Engine,
+    query: &mut QueryPlan,
+    table: &str,
+    from: &str,
+    to: &str,
+) -> Result<(), SQLError> {
+    uqa_execution::catalog::projection::rename_view_column_query(
+        &engine.catalog_execution(),
+        query,
+        table,
+        from,
+        to,
+    )
+}
+pub(crate) fn view_query_references_column(
+    engine: &Engine,
+    query: &QueryPlan,
+    table: &str,
+    column: &str,
+) -> Result<bool, SQLError> {
+    uqa_execution::catalog::projection::view_query_references_column(
+        &engine.catalog_execution(),
+        query,
+        table,
+        column,
+    )
+}
 pub(crate) fn plpgsql_catalog(
     engine: &Engine,
 ) -> Result<uqa_sql::plpgsql::PlpgsqlCatalog, SQLError> {
-    let catalog = engine.catalog_read_view();
-    let resolution = engine.session_execution_view().relation_name_resolution();
-    let search_path = engine
-        .current_schema_names(true)
-        .map_err(|error| SQLError::Internal(error.to_string()))?;
-    plpgsql::plpgsql_catalog(&catalog, &resolution, search_path)
+    uqa_execution::catalog::projection::plpgsql_catalog(&engine.catalog_execution())
 }
-mod relation_catalog;
-mod schema;
-
-#[derive(Debug, Clone)]
-pub(crate) struct RuntimeConstraint {
-    pub(crate) identity: ConstraintIdentity,
-    pub(crate) deferrable: bool,
-}
-
 pub(crate) fn runtime_constraints(engine: &Engine) -> Result<Vec<RuntimeConstraint>, SQLError> {
-    let catalog = engine.catalog_read_view();
-    let resolution = engine.session_execution_view().relation_name_resolution();
-    let mut constraints = helpers::constraints::constraint_catalog_rows(&catalog, &resolution)?
-        .into_iter()
-        .map(|constraint| {
-            Ok(RuntimeConstraint {
-                identity: ConstraintIdentity {
-                    relation: RelationIdentity::new(constraint.schema, constraint.table),
-                    name: constraint.name,
-                    object_id: constraint.object_id,
-                },
-                deferrable: constraint.state.deferrable(),
-            })
-        })
-        .collect::<Result<Vec<_>, SQLError>>()?;
-    for (trigger, _) in events::catalog_triggers(&catalog, &resolution)? {
-        if !trigger.definition.constraint {
-            continue;
-        }
-        let relation =
-            RelationIdentity::from_legacy_name(&trigger.definition.table).map_err(|error| {
-                SQLError::Internal(format!(
-                    "decode constraint-trigger relation `{}`: {error}",
-                    trigger.definition.table
-                ))
-            })?;
-        constraints.push(RuntimeConstraint {
-            identity: ConstraintIdentity {
-                relation,
-                name: trigger
-                    .constraint_name
-                    .clone()
-                    .unwrap_or_else(|| trigger.definition.name.clone()),
-                object_id: trigger.object_id,
-            },
-            deferrable: trigger.definition.deferrability.is_deferrable(),
-        });
-    }
-    Ok(constraints)
+    uqa_execution::catalog::projection::runtime_constraints(&engine.catalog_execution())
 }
-
-pub(crate) fn schema_object_oid(name: &str) -> i64 {
-    helpers::oids::schema_oid(name)
-}
-
 pub(crate) fn resolve_age_label_relation_name(
     engine: &Engine,
     name: &str,
 ) -> Result<Option<String>, SQLError> {
-    let catalog = engine.catalog_read_view();
-    let resolution = engine.session_execution_view().relation_name_resolution();
-    ag_catalog::resolve_age_label_relation_name(&catalog, &resolution, name)
+    uqa_execution::catalog::projection::resolve_age_label_relation_name(
+        &engine.catalog_execution(),
+        name,
+    )
 }
-
 pub(crate) fn query_source_column_names(
     engine: &Engine,
     name: &str,
     relations_bound: bool,
 ) -> Result<Option<Vec<String>>, SQLError> {
-    let catalog = engine.catalog_read_view();
-    let mut resolution = engine.session_execution_view().relation_name_resolution();
-    if relations_bound {
-        resolution.set_lookup_mode(crate::engine_capabilities::RelationLookupMode::Bound);
-    }
-    if catalog.sequence_resolved(&resolution, name)?.is_some() {
-        return Ok(Some(vec![
-            "last_value".into(),
-            "log_cnt".into(),
-            "is_called".into(),
-        ]));
-    }
-    if let Some(view) = catalog.view_resolved(&resolution, name)? {
-        let schema =
-            engine.stored_view_schema_with_catalog(view, catalog.clone(), resolution.clone())?;
-        return Ok(Some(
-            schema
-                .columns()
-                .iter()
-                .enumerate()
-                .map(|(position, name)| schema.public_name(position).unwrap_or(name).to_string())
-                .collect(),
-        ));
-    }
-    if let Some(table) = catalog.table_resolved(&resolution, name)? {
-        return Ok(Some(
-            table
-                .columns
-                .iter()
-                .map(|column| column.name.clone())
-                .collect(),
-        ));
-    }
-    if let Some(table) = catalog.foreign_table_resolved(&resolution, name)? {
-        return Ok(Some(
-            table
-                .columns
-                .iter()
-                .map(|column| column.name.clone())
-                .collect(),
-        ));
-    }
-    Ok(virtual_relation_schema(&catalog, &resolution, name)?
-        .map(|columns| columns.into_iter().map(|(name, _)| name).collect()))
+    uqa_execution::catalog::projection::query_source_column_names(
+        &engine.catalog_execution(),
+        name,
+        relations_bound,
+    )
 }
-
-use ag_catalog::{build_ag_graph, build_ag_label};
-use events::{build_pg_rewrite, build_pg_rules, build_pg_trigger};
-pub(in crate::sql) use events::{
-    event_relation_oid, pg_get_ruledef_value, pg_get_triggerdef_value,
-};
-use information_schema::{
-    build_info_catalog_name, build_info_column_privileges, build_info_columns,
-    build_info_key_column_usage, build_info_routines, build_info_schemata, build_info_sequences,
-    build_info_table_constraints, build_info_tables, build_info_views,
-};
-use partitioning::build_pg_partitioned_table;
-pub(in crate::sql) use partitioning::{pg_get_expr_value, pg_get_partkeydef_value};
-pub(in crate::sql) fn table_relation_oid(engine: &Engine, table: &str) -> Result<i64, SQLError> {
-    let catalog = engine.catalog_read_view();
-    let mut resolution = engine.session_execution_view().relation_name_resolution();
-    resolution.set_lookup_mode(crate::engine_capabilities::RelationLookupMode::Bound);
-    snapshot_table_relation_oid(&catalog, &resolution, table)
-}
-pub(crate) fn sequence_relation_oid(object_id: [u8; 16]) -> i64 {
-    helpers::oids::stable_object_oid("relation", &object_id)
-}
-pub(crate) fn view_relation_oid(view: &crate::StoredView) -> i64 {
-    helpers::oids::stable_object_oid("relation", &view.object_id)
-}
-
-pub(crate) fn view_rowtype_oid(view: &crate::StoredView) -> i64 {
-    helpers::oids::stable_object_oid("rowtype", &view.object_id)
-}
-
-pub(crate) fn foreign_table_relation_oid(table: &crate::engine_fdw::StoredForeignTable) -> i64 {
-    helpers::oids::stable_object_oid("relation", &table.object_id)
-}
-
-pub(crate) fn foreign_table_rowtype_oid(table: &crate::engine_fdw::StoredForeignTable) -> i64 {
-    helpers::oids::stable_object_oid("rowtype", &table.object_id)
-}
-pub(crate) fn snapshot_table_relation_oid(
-    catalog: &CatalogReadView,
-    resolution: &RelationNameResolution,
-    table: &str,
-) -> Result<i64, SQLError> {
-    pg_catalog::table_relation_oid_from(catalog, resolution, table)
-}
-use pg_catalog::{
-    build_pg_attrdef, build_pg_attribute, build_pg_auth_members, build_pg_constraint,
-    build_pg_database, build_pg_index, build_pg_indexes, build_pg_matviews, build_pg_range,
-    build_pg_roles, build_pg_sequences, build_pg_tables, build_pg_type, build_pg_user,
-    build_pg_views,
-};
-use pg_namespace::build_pg_namespace;
-use pg_proc::build_pg_proc;
-use pg_settings::build_pg_settings;
-pub(crate) use regtypes::{
-    resolve_bound_regclass_oid, resolve_catalog_column_type, resolve_catalog_domain_type_by_oid,
-    resolve_regclass_kind_by_oid, resolve_regclass_oid, resolve_regnamespace_oid,
-    resolve_regobject_oid, resolve_regprocedure_oid, resolve_regrole_oid, resolve_regtype_oid,
-    resolve_regtype_output, RegtypeOutputCatalog,
-};
-
 pub(crate) fn resolve_catalog_column_type_name(
     engine: &Engine,
     type_name: &str,
 ) -> Result<uqa_sql::ast::ColumnType, SQLError> {
-    let parsed = uqa_sql::parse_regtype_name(type_name)?;
-    if let Some(parsed) = parsed.as_ref() {
-        if parsed.has_type_modifiers {
-            let name = parsed
-                .names
-                .iter()
-                .map(|name| format!("\"{}\"", name.replace('"', "\"\"")))
-                .collect::<Vec<_>>()
-                .join(".");
-            if resolve_catalog_column_type(engine, &name)
-                .is_some_and(|ty| matches!(ty, uqa_sql::ColumnType::Domain { .. }))
-            {
-                return Err(SQLError::Routine {
-                    sqlstate: "42601".into(),
-                    message: format!(
-                        "type modifier is not allowed for type \"{}\"",
-                        parsed.names.join(".")
-                    ),
-                });
-            }
-        }
-    }
-    resolve_catalog_column_type(engine, type_name).ok_or_else(|| SQLError::Routine {
-        sqlstate: "42704".into(),
-        message: format!(
-            "type \"{}\" does not exist",
-            parsed.as_ref().map_or_else(
-                || type_name.to_string(),
-                |name| format!(
-                    "{}{}",
-                    name.names.join("."),
-                    if name.array_dimensions > 0 { "[]" } else { "" }
-                )
-            )
-        ),
-    })
+    uqa_execution::catalog::projection::resolve_catalog_column_type_name(
+        &engine.catalog_execution(),
+        type_name,
+    )
 }
 
-use relation_catalog::{build_pg_class, build_pg_inherits};
-use schema::{resolve_virtual_relation, VirtualRelation};
-pub(in crate::sql) use schema::{virtual_relation_accepts_row_lock, virtual_relation_schema};
+impl Engine {
+    pub(crate) fn clear_regtype_output_cache(&self) {
+        self.runtime.regtype_output_cache.clear();
+    }
+}
+
+use uqa_execution::catalog::services::{
+    CatalogExpressionEvaluation, ViewCatalogCapabilities, ViewCatalogMetadata,
+};
+use uqa_sql::ast::{Expr, TriggerEvent};
+impl CatalogExpressionEvaluation for Engine {
+    fn evaluate(&self, expression: &Expr) -> Result<Value, SQLError> {
+        crate::sql::scalar::eval_lowered_expression(self, expression, None, &[])
+    }
+}
+impl ViewCatalogCapabilities for Engine {
+    fn view_updatability(&self, name: &str) -> Result<ViewCatalogMetadata, SQLError> {
+        let metadata = crate::sql::dml::view_automatic::view_updatability(self, name)?;
+        Ok(ViewCatalogMetadata {
+            catalog: metadata.catalog,
+            catalog_columns: metadata.catalog_columns,
+            check_option: metadata.check_option,
+        })
+    }
+    fn has_instead_of_trigger(&self, name: &str, event: TriggerEvent) -> Result<bool, SQLError> {
+        crate::sql::dml::view_automatic::has_instead_of_trigger(self, name, event)
+    }
+}

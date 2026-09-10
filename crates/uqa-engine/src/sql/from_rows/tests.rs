@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use uqa_sql::{semantics::source_filters::combine_filters, ResultRow};
 
 #[test]
 fn combine_filters_handles_empty_and_single_inputs_without_panicking() {
@@ -52,7 +53,7 @@ fn score_projection_uses_explicit_provenance_even_for_zero() {
     let score_column = uqa_sql::ast::InternalRelationId::allocate().column(0);
     let schema = RowSchema::with_qualified_types(
         "hit",
-        vec!["body".into(), super::super::SCORE_COLUMN.into()],
+        vec!["body".into(), uqa_sql::semantics::SCORE_COLUMN.into()],
         vec![None, None],
     );
     let schema = RowSchema::with_physical_internal_aliases(&schema, &[(score_column, 1, None)]);
@@ -68,7 +69,7 @@ fn score_projection_uses_explicit_provenance_even_for_zero() {
 
     let unscored_schema = RowSchema::with_qualified_types(
         "plain",
-        vec!["body".into(), super::super::SCORE_COLUMN.into()],
+        vec!["body".into(), uqa_sql::semantics::SCORE_COLUMN.into()],
         vec![None, None],
     );
     let unscored_row = OwnedPhysicalRow::new(
@@ -87,7 +88,7 @@ fn qualified_score_projection_uses_structured_provenance_identity() {
     let score_column = uqa_sql::ast::InternalRelationId::allocate().column(0);
     let schema = RowSchema::with_qualified_types(
         "hit",
-        vec!["body".into(), super::super::SCORE_COLUMN.into()],
+        vec!["body".into(), uqa_sql::semantics::SCORE_COLUMN.into()],
         vec![None, None],
     );
     let schema = RowSchema::with_physical_internal_aliases(&schema, &[(score_column, 1, None)]);

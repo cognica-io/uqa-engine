@@ -18,19 +18,13 @@ exclude.workspace = true
 uqa-core = { workspace = true }
 uqa-sql = { workspace = true }
 uqa-operators = { workspace = true }
-uqa-storage = { workspace = true }
-uqa-execution = { workspace = true }
 uqa-graph = { workspace = true }
-uqa-joins = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 
-# The browser (emscripten) target runs single-threaded; rayon is
-# native-only and parallel.rs keeps sequential twins for every site.
-[target.'cfg(not(target_os = "emscripten"))'.dependencies]
-rayon = { workspace = true }
-
 [dev-dependencies]
+uqa-execution = { workspace = true }
 proptest = { workspace = true }
 criterion = { workspace = true }
 

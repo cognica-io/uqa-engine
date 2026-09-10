@@ -1,301 +1,62 @@
 {
   "schema_version": 2,
-  "capability_module": "crates/uqa-engine/src/engine_capabilities.rs",
+  "capability_module": "crates/uqa-engine/src/capabilities.rs",
   "declared_types": [
     "CatalogEpochs",
-    "CatalogReadSnapshot",
-    "CatalogReadView",
-    "CatalogSequenceSnapshot",
-    "CatalogTableSnapshot",
     "MutationCoordinator",
-    "QueryRuntimeView",
-    "RelationResolution",
     "SessionExecutionView"
   ],
   "scopes": [
     {
-      "name": "catalog and session read leaves",
+      "name": "Engine state adapters",
       "files": [
-        "crates/uqa-engine/src/engine_capabilities/catalog.rs",
-        "crates/uqa-engine/src/sql/catalog/ag_catalog.rs",
-        "crates/uqa-engine/src/sql/catalog/helpers/constraints.rs",
-        "crates/uqa-engine/src/sql/catalog/helpers/dependencies.rs",
-        "crates/uqa-engine/src/sql/catalog/helpers/index_definitions.rs",
-        "crates/uqa-engine/src/sql/catalog/helpers/information_schema_types.rs",
-        "crates/uqa-engine/src/sql/catalog/helpers/oids.rs",
-        "crates/uqa-engine/src/sql/catalog/helpers/rows.rs",
-        "crates/uqa-engine/src/sql/catalog/helpers/type_metadata.rs",
-        "crates/uqa-engine/src/sql/catalog/pg_catalog.rs",
-        "crates/uqa-engine/src/sql/catalog/pg_catalog/indexes.rs",
-        "crates/uqa-engine/src/sql/catalog/pg_catalog/relations.rs",
-        "crates/uqa-engine/src/sql/catalog/pg_catalog/roles.rs",
-        "crates/uqa-engine/src/sql/catalog/pg_catalog/sequences.rs",
-        "crates/uqa-engine/src/sql/catalog/pg_catalog/types.rs",
-        "crates/uqa-engine/src/sql/catalog/pg_namespace.rs",
-        "crates/uqa-engine/src/sql/catalog/pg_settings.rs",
-        "crates/uqa-engine/src/sql/catalog/plpgsql.rs"
+        "crates/uqa-engine/src/capabilities.rs"
+      ],
+      "directories": [
+        "crates/uqa-engine/src/capabilities"
+      ],
+      "engine_allowlist": [
+        "crates/uqa-engine/src/capabilities.rs",
+        "crates/uqa-engine/src/capabilities/catalog_execution.rs",
+        "crates/uqa-engine/src/capabilities/constraints.rs",
+        "crates/uqa-engine/src/capabilities/insert_source.rs",
+        "crates/uqa-engine/src/capabilities/mutation_assignment.rs",
+        "crates/uqa-engine/src/capabilities/mutation_commands.rs",
+        "crates/uqa-engine/src/capabilities/mutation_publication.rs",
+        "crates/uqa-engine/src/capabilities/mutation_rows.rs",
+        "crates/uqa-engine/src/capabilities/partitions.rs",
+        "crates/uqa-engine/src/capabilities/query_execution.rs",
+        "crates/uqa-engine/src/capabilities/query_locking.rs",
+        "crates/uqa-engine/src/capabilities/query_operators.rs",
+        "crates/uqa-engine/src/capabilities/query_planning.rs",
+        "crates/uqa-engine/src/capabilities/query_scope.rs",
+        "crates/uqa-engine/src/capabilities/query_semantics.rs",
+        "crates/uqa-engine/src/capabilities/query_sources.rs",
+        "crates/uqa-engine/src/capabilities/referential.rs",
+        "crates/uqa-engine/src/capabilities/retrieval_catalog.rs",
+        "crates/uqa-engine/src/capabilities/returning.rs",
+        "crates/uqa-engine/src/capabilities/routine_execution.rs",
+        "crates/uqa-engine/src/capabilities/rule_targets.rs",
+        "crates/uqa-engine/src/capabilities/rules.rs",
+        "crates/uqa-engine/src/capabilities/schema_expressions.rs",
+        "crates/uqa-engine/src/capabilities/statement_effects.rs",
+        "crates/uqa-engine/src/capabilities/table_reads.rs",
+        "crates/uqa-engine/src/capabilities/table_reads/query_tests.rs",
+        "crates/uqa-engine/src/capabilities/table_reads/tests.rs",
+        "crates/uqa-engine/src/capabilities/tests.rs",
+        "crates/uqa-engine/src/capabilities/triggers.rs",
+        "crates/uqa-engine/src/capabilities/view_rewrite.rs"
+      ]
+    },
+    {
+      "name": "Independent SQL analysis, planning, and physical execution",
+      "files": [],
+      "directories": [
+        "crates/uqa-execution/src",
+        "crates/uqa-planner/src",
+        "crates/uqa-sql/src"
       ],
       "engine_allowlist": []
-    },
-    {
-      "name": "catalog scan adapters",
-      "files": [
-        "crates/uqa-engine/src/sql/catalog.rs",
-        "crates/uqa-engine/src/sql/catalog/schema.rs",
-        "crates/uqa-engine/src/sql/from_rows/local_table/table_source.rs"
-      ],
-      "engine_allowlist": [
-        "crates/uqa-engine/src/sql/catalog.rs",
-        "crates/uqa-engine/src/sql/from_rows/local_table/table_source.rs"
-      ]
-    },
-    {
-      "name": "catalog projection families",
-      "files": [
-        "crates/uqa-engine/src/sql/catalog/builtin_routines.rs",
-        "crates/uqa-engine/src/sql/catalog/events.rs",
-        "crates/uqa-engine/src/sql/catalog/expression_text.rs",
-        "crates/uqa-engine/src/sql/catalog/helpers.rs",
-        "crates/uqa-engine/src/sql/catalog/helpers/views.rs",
-        "crates/uqa-engine/src/sql/catalog/information_schema.rs",
-        "crates/uqa-engine/src/sql/catalog/partitioning.rs",
-        "crates/uqa-engine/src/sql/catalog/pg_catalog/attributes.rs",
-        "crates/uqa-engine/src/sql/catalog/pg_catalog/constraints.rs",
-        "crates/uqa-engine/src/sql/catalog/pg_proc.rs",
-        "crates/uqa-engine/src/sql/catalog/regtypes.rs",
-        "crates/uqa-engine/src/sql/catalog/regtypes/type_names.rs",
-        "crates/uqa-engine/src/sql/catalog/relation_catalog.rs"
-      ],
-      "engine_allowlist": [
-        "crates/uqa-engine/src/sql/catalog/events.rs",
-        "crates/uqa-engine/src/sql/catalog/helpers/views.rs",
-        "crates/uqa-engine/src/sql/catalog/information_schema.rs",
-        "crates/uqa-engine/src/sql/catalog/partitioning.rs",
-        "crates/uqa-engine/src/sql/catalog/pg_catalog/attributes.rs",
-        "crates/uqa-engine/src/sql/catalog/regtypes.rs",
-        "crates/uqa-engine/src/sql/catalog/regtypes/type_names.rs",
-        "crates/uqa-engine/src/sql/catalog/relation_catalog.rs"
-      ]
-    },
-    {
-      "name": "query evaluation scopes",
-      "files": [
-        "crates/uqa-engine/src/sql/select/evaluation.rs",
-        "crates/uqa-engine/src/sql/select/evaluation/callbacks.rs",
-        "crates/uqa-engine/src/sql/select/evaluation/cte.rs",
-        "crates/uqa-engine/src/sql/select/evaluation/row_locks.rs",
-        "crates/uqa-engine/src/sql/select/evaluation/subqueries.rs",
-        "crates/uqa-engine/src/sql/select/evaluation/type_resolution.rs"
-      ],
-      "engine_allowlist": [
-        "crates/uqa-engine/src/sql/select/evaluation/callbacks.rs",
-        "crates/uqa-engine/src/sql/select/evaluation/subqueries.rs",
-        "crates/uqa-engine/src/sql/select/evaluation/type_resolution.rs"
-      ]
-    },
-    {
-      "name": "query read path adapters",
-      "files": [
-        "crates/uqa-engine/src/sql/from_rows/local_table/hierarchy_retrieval.rs",
-        "crates/uqa-engine/src/sql/from_rows/local_table/row_source.rs",
-        "crates/uqa-engine/src/sql/from_rows/local_table/streaming_scan.rs",
-        "crates/uqa-engine/src/sql/from_rows/local_table/streaming_subquery.rs",
-        "crates/uqa-engine/src/sql/select/filter_pushdown.rs",
-        "crates/uqa-engine/src/sql/select/filter_pushdown/source_columns.rs",
-        "crates/uqa-engine/src/sql/select/foreign_access.rs",
-        "crates/uqa-engine/src/sql/select/query_block.rs",
-        "crates/uqa-engine/src/sql/select/table_access.rs"
-      ],
-      "engine_allowlist": [
-        "crates/uqa-engine/src/sql/from_rows/local_table/hierarchy_retrieval.rs",
-        "crates/uqa-engine/src/sql/from_rows/local_table/streaming_scan.rs",
-        "crates/uqa-engine/src/sql/from_rows/local_table/streaming_subquery.rs",
-        "crates/uqa-engine/src/sql/select/filter_pushdown.rs",
-        "crates/uqa-engine/src/sql/select/foreign_access.rs",
-        "crates/uqa-engine/src/sql/select/query_block.rs",
-        "crates/uqa-engine/src/sql/select/table_access.rs"
-      ]
-    },
-    {
-      "name": "query schema binding",
-      "files": [
-        "crates/uqa-engine/src/sql/select/schema_binding.rs",
-        "crates/uqa-engine/src/sql/select/schema_binding/context.rs",
-        "crates/uqa-sql/src/binding/analysis.rs",
-        "crates/uqa-sql/src/binding/analysis/functions.rs",
-        "crates/uqa-sql/src/binding/analysis/query_sources.rs",
-        "crates/uqa-sql/src/binding/analysis/references.rs",
-        "crates/uqa-sql/src/binding/catalog_sources.rs",
-        "crates/uqa-sql/src/binding/commands.rs",
-        "crates/uqa-sql/src/binding/context.rs",
-        "crates/uqa-sql/src/binding/cte_controls.rs",
-        "crates/uqa-sql/src/binding/ctes.rs",
-        "crates/uqa-sql/src/binding/fixture.rs",
-        "crates/uqa-sql/src/binding/merge_scopes.rs",
-        "crates/uqa-sql/src/binding/mod.rs",
-        "crates/uqa-sql/src/binding/preparation.rs",
-        "crates/uqa-sql/src/binding/preparation/commands.rs",
-        "crates/uqa-sql/src/binding/preparation/ctes.rs",
-        "crates/uqa-sql/src/binding/preparation/expression_contexts.rs",
-        "crates/uqa-sql/src/binding/preparation/expressions.rs",
-        "crates/uqa-sql/src/binding/preparation/parameters.rs",
-        "crates/uqa-sql/src/binding/preparation/queries.rs",
-        "crates/uqa-sql/src/binding/preparation/sources.rs",
-        "crates/uqa-sql/src/binding/projection.rs",
-        "crates/uqa-sql/src/binding/routine_binding.rs",
-        "crates/uqa-sql/src/binding/scope.rs",
-        "crates/uqa-sql/src/binding/sources.rs",
-        "crates/uqa-sql/src/binding/tests.rs",
-        "crates/uqa-sql/src/binding/type_resolution.rs",
-        "crates/uqa-sql/src/catalog/analysis.rs",
-        "crates/uqa-sql/src/catalog/resolution.rs",
-        "crates/uqa-sql/src/routines.rs"
-      ],
-      "engine_allowlist": []
-    },
-    {
-      "name": "query physical construction",
-      "files": [
-        "crates/uqa-engine/src/sql/select/physical_plan.rs",
-        "crates/uqa-engine/src/sql/select/physical_plan/aggregation.rs",
-        "crates/uqa-engine/src/sql/select/physical_plan/limit.rs",
-        "crates/uqa-engine/src/sql/select/physical_plan/operators.rs",
-        "crates/uqa-engine/src/sql/select/physical_plan/ordering.rs",
-        "crates/uqa-engine/src/sql/select/physical_plan/output.rs",
-        "crates/uqa-engine/src/sql/select/physical_plan/projection.rs",
-        "crates/uqa-engine/src/sql/select/physical_plan/row_at_a_time.rs",
-        "crates/uqa-engine/src/sql/select/physical_plan/row_locking.rs",
-        "crates/uqa-engine/src/sql/select/row_locking.rs",
-        "crates/uqa-sql/src/ir/traversal.rs"
-      ],
-      "engine_allowlist": [
-        "crates/uqa-engine/src/sql/select/physical_plan/aggregation.rs",
-        "crates/uqa-engine/src/sql/select/physical_plan/limit.rs",
-        "crates/uqa-engine/src/sql/select/physical_plan/operators.rs",
-        "crates/uqa-engine/src/sql/select/physical_plan/ordering.rs",
-        "crates/uqa-engine/src/sql/select/physical_plan/output.rs",
-        "crates/uqa-engine/src/sql/select/physical_plan/row_locking.rs",
-        "crates/uqa-engine/src/sql/select/row_locking.rs"
-      ]
-    },
-    {
-      "name": "mutation adapters",
-      "files": [
-        "crates/uqa-engine/src/engine_capabilities.rs",
-        "crates/uqa-engine/src/engine_session/schemas.rs",
-        "crates/uqa-engine/src/sql/plan_executor.rs"
-      ],
-      "engine_allowlist": [
-        "crates/uqa-engine/src/engine_capabilities.rs",
-        "crates/uqa-engine/src/engine_session/schemas.rs",
-        "crates/uqa-engine/src/sql/plan_executor.rs"
-      ]
-    },
-    {
-      "name": "mutation protocol and codecs",
-      "files": [
-        "crates/uqa-engine/src/sql/dml/insert/codec.rs",
-        "crates/uqa-engine/src/sql/dml/merge/codec.rs",
-        "crates/uqa-engine/src/sql/dml/protocol.rs",
-        "crates/uqa-engine/src/sql/dml/protocol/candidate.rs",
-        "crates/uqa-engine/src/sql/dml/protocol/command.rs",
-        "crates/uqa-engine/src/sql/dml/protocol/deferred.rs",
-        "crates/uqa-engine/src/sql/dml/protocol/events.rs",
-        "crates/uqa-engine/src/sql/dml/protocol/locking.rs",
-        "crates/uqa-engine/src/sql/dml/protocol/prepared.rs",
-        "crates/uqa-engine/src/sql/dml/protocol/publication.rs",
-        "crates/uqa-engine/src/sql/dml/protocol/row_images.rs",
-        "crates/uqa-engine/src/sql/dml/view_triggers/merge/codec.rs"
-      ],
-      "engine_allowlist": [
-        "crates/uqa-engine/src/sql/dml/protocol/command.rs",
-        "crates/uqa-engine/src/sql/dml/protocol/events.rs",
-        "crates/uqa-engine/src/sql/dml/protocol/locking.rs",
-        "crates/uqa-engine/src/sql/dml/protocol/publication.rs"
-      ]
-    },
-    {
-      "name": "mutation workflow adapters",
-      "files": [
-        "crates/uqa-engine/src/sql/dml.rs",
-        "crates/uqa-engine/src/sql/dml/conflict.rs",
-        "crates/uqa-engine/src/sql/dml/constraints.rs",
-        "crates/uqa-engine/src/sql/dml/constraints/period.rs",
-        "crates/uqa-engine/src/sql/dml/constraints/referential_actions.rs",
-        "crates/uqa-engine/src/sql/dml/constraints/staging.rs",
-        "crates/uqa-engine/src/sql/dml/delete.rs",
-        "crates/uqa-engine/src/sql/dml/insert.rs",
-        "crates/uqa-engine/src/sql/dml/insert/staging.rs",
-        "crates/uqa-engine/src/sql/dml/merge.rs",
-        "crates/uqa-engine/src/sql/dml/merge/returning.rs",
-        "crates/uqa-engine/src/sql/dml/merge/statement_events.rs",
-        "crates/uqa-engine/src/sql/dml/update.rs",
-        "crates/uqa-engine/src/sql/dml/update_from.rs",
-        "crates/uqa-engine/src/sql/dml/vectors.rs",
-        "crates/uqa-engine/src/sql/dml/view_automatic.rs",
-        "crates/uqa-engine/src/sql/dml/view_automatic/correlation.rs",
-        "crates/uqa-engine/src/sql/dml/view_automatic/returning.rs",
-        "crates/uqa-engine/src/sql/dml/view_automatic/rewrite_insert.rs",
-        "crates/uqa-engine/src/sql/dml/view_automatic/rewrite_merge.rs",
-        "crates/uqa-engine/src/sql/dml/view_automatic/rewrite_update_delete.rs",
-        "crates/uqa-engine/src/sql/dml/view_automatic/validation.rs",
-        "crates/uqa-engine/src/sql/dml/view_rules.rs",
-        "crates/uqa-engine/src/sql/dml/view_triggers.rs",
-        "crates/uqa-engine/src/sql/dml/view_triggers/insert.rs",
-        "crates/uqa-engine/src/sql/dml/view_triggers/merge.rs",
-        "crates/uqa-engine/src/sql/rules.rs",
-        "crates/uqa-engine/src/sql/rules/actions.rs",
-        "crates/uqa-engine/src/sql/rules/returning.rs"
-      ],
-      "engine_allowlist": [
-        "crates/uqa-engine/src/sql/dml.rs",
-        "crates/uqa-engine/src/sql/dml/conflict.rs",
-        "crates/uqa-engine/src/sql/dml/constraints.rs",
-        "crates/uqa-engine/src/sql/dml/constraints/period.rs",
-        "crates/uqa-engine/src/sql/dml/constraints/referential_actions.rs",
-        "crates/uqa-engine/src/sql/dml/constraints/staging.rs",
-        "crates/uqa-engine/src/sql/dml/delete.rs",
-        "crates/uqa-engine/src/sql/dml/insert.rs",
-        "crates/uqa-engine/src/sql/dml/insert/staging.rs",
-        "crates/uqa-engine/src/sql/dml/merge.rs",
-        "crates/uqa-engine/src/sql/dml/merge/returning.rs",
-        "crates/uqa-engine/src/sql/dml/merge/statement_events.rs",
-        "crates/uqa-engine/src/sql/dml/update.rs",
-        "crates/uqa-engine/src/sql/dml/update_from.rs",
-        "crates/uqa-engine/src/sql/dml/vectors.rs",
-        "crates/uqa-engine/src/sql/dml/view_automatic.rs",
-        "crates/uqa-engine/src/sql/dml/view_automatic/correlation.rs",
-        "crates/uqa-engine/src/sql/dml/view_automatic/returning.rs",
-        "crates/uqa-engine/src/sql/dml/view_automatic/rewrite_insert.rs",
-        "crates/uqa-engine/src/sql/dml/view_automatic/rewrite_merge.rs",
-        "crates/uqa-engine/src/sql/dml/view_automatic/rewrite_update_delete.rs",
-        "crates/uqa-engine/src/sql/dml/view_automatic/validation.rs",
-        "crates/uqa-engine/src/sql/dml/view_rules.rs",
-        "crates/uqa-engine/src/sql/dml/view_triggers.rs",
-        "crates/uqa-engine/src/sql/dml/view_triggers/insert.rs",
-        "crates/uqa-engine/src/sql/dml/view_triggers/merge.rs",
-        "crates/uqa-engine/src/sql/rules.rs",
-        "crates/uqa-engine/src/sql/rules/returning.rs"
-      ]
-    },
-    {
-      "name": "engine facade and workflow adapters",
-      "files": [
-        "crates/uqa-engine/src/engine_hook.rs",
-        "crates/uqa-engine/src/engine_statement_cache.rs",
-        "crates/uqa-engine/src/engine_truncate.rs",
-        "crates/uqa-engine/src/sql/cursor.rs",
-        "crates/uqa-engine/src/sql/driver.rs",
-        "crates/uqa-engine/src/sql/session_portal_worker.rs"
-      ],
-      "engine_allowlist": [
-        "crates/uqa-engine/src/engine_hook.rs",
-        "crates/uqa-engine/src/engine_statement_cache.rs",
-        "crates/uqa-engine/src/engine_truncate.rs",
-        "crates/uqa-engine/src/sql/cursor.rs",
-        "crates/uqa-engine/src/sql/driver.rs",
-        "crates/uqa-engine/src/sql/session_portal_worker.rs"
-      ]
     }
   ]
 }

@@ -13,7 +13,8 @@
 use uqa_core::Value;
 use uqa_engine::Engine;
 use uqa_sql::SQLResult;
-use uqa_storage::{sqlite::CURRENT_SCHEMA_VERSION, RelationIdentity};
+use uqa_storage::RelationIdentity;
+use uqa_storage_sqlite::CURRENT_SCHEMA_VERSION;
 
 fn persisted_index_count(path: &std::path::Path, table: &str, field: &str) -> i64 {
     let table = RelationIdentity::from_legacy_name(table)

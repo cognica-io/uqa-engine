@@ -74,6 +74,83 @@ def write_policy(
 
 
 class EngineCapabilityPolicyTest(unittest.TestCase):
+    def test_narrow_runtime_contract_does_not_inherit_a_concrete_owner_from_its_field_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            leaf = "crates/sql/src/leaf.rs"
+            adapter = "crates/engine/src/capabilities.rs"
+            (root / leaf).parent.mkdir(parents=True)
+            (root / leaf).write_text(
+                "trait SequenceValues { fn nextval(&self) -> i64; }\n"
+                "struct ScalarContext<'a> { engine: &'a dyn SequenceValues }\n"
+                "impl ScalarContext<'_> { fn evaluate(&self) -> i64 { self.engine.nextval() } }\n"
+            )
+            (root / adapter).parent.mkdir(parents=True)
+            (root / adapter).write_text("impl Engine {}\n")
+            policy = write_policy(root, leaf, adapter)
+            CHECKER.verify(root, policy)
+
+    def test_directory_scope_covers_new_nested_implementation_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            leaf = "crates/sql/src/leaf.rs"
+            adapter = "crates/engine/src/capabilities.rs"
+            (root / leaf).parent.mkdir(parents=True)
+            (root / leaf).write_text("fn bind() {}\n")
+            (root / adapter).parent.mkdir(parents=True)
+            (root / adapter).write_text("impl Engine {}\n")
+            policy = write_policy(root, leaf, adapter)
+            document = json.loads(policy.read_text())
+            document["scopes"][0]["files"] = []
+            document["scopes"][0]["directories"] = ["crates/sql/src"]
+            policy.write_text(json.dumps(document))
+            CHECKER.verify(root, policy)
+
+            added = root / "crates/sql/src/binding/nested.rs"
+            added.parent.mkdir()
+            added.write_text("fn bind(engine: &Engine) {}\n")
+            with self.assertRaisesRegex(CHECKER.PolicyError, "nested.rs: Engine reference"):
+                CHECKER.verify(root, policy)
+
+    def test_missing_directory_cannot_silently_remove_boundary_coverage(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            leaf = "crates/sql/src/leaf.rs"
+            adapter = "crates/engine/src/capabilities.rs"
+            (root / adapter).parent.mkdir(parents=True)
+            (root / adapter).write_text("impl Engine {}\n")
+            policy = write_policy(root, leaf, adapter)
+            document = json.loads(policy.read_text())
+            document["scopes"][0]["files"] = []
+            document["scopes"][0]["directories"] = ["crates/sql/src"]
+            policy.write_text(json.dumps(document))
+            with self.assertRaisesRegex(CHECKER.PolicyError, "directory is missing"):
+                CHECKER.verify(root, policy)
+
+    def test_directory_allowlist_still_requires_an_existing_engine_adapter(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            leaf = "crates/sql/src/leaf.rs"
+            adapter = "crates/engine/src/capabilities.rs"
+            (root / leaf).parent.mkdir(parents=True)
+            (root / leaf).write_text("fn bind() {}\n")
+            (root / adapter).parent.mkdir(parents=True)
+            (root / adapter).write_text("impl Engine {}\n")
+            policy = write_policy(root, leaf, adapter)
+            document = json.loads(policy.read_text())
+            document["scopes"][1]["directories"] = ["crates/engine/src/adapters"]
+            missing = root / "crates/engine/src/adapters/deleted.rs"
+            missing.parent.mkdir()
+            (missing.parent / "present.rs").write_text("impl Engine {}\n")
+            document["scopes"][1]["engine_allowlist"].extend([
+                "crates/engine/src/adapters/deleted.rs",
+                "crates/engine/src/adapters/present.rs",
+            ])
+            document["scopes"][1]["engine_allowlist"].sort()
+            policy.write_text(json.dumps(document))
+            with self.assertRaisesRegex(CHECKER.PolicyError, "declared Engine adapter is missing"):
+                CHECKER.verify(root, policy)
+
     def test_accepts_engine_free_leaf_and_declared_adapter(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)

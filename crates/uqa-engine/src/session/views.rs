@@ -1,0 +1,701 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Durable view registration, binding, dependencies, and restoration.
+
+mod columns;
+mod materialized;
+mod options;
+mod ownership;
+mod registration;
+mod restoration;
+
+use super::{
+    bind_query_plan_relations, bind_query_plan_sequence_references,
+    canonical_virtual_relation_reference, query_plan_references_relation,
+    query_plan_references_sequence, Engine, QueryPlan, RelationIdentity, SQLError,
+    StorageBackendError, StorageBackendResult, StoredView, StoredViewKind, ViewRow,
+};
+use uqa_sql::ast::FunctionBinding;
+
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum RestoredView {
+    Current(StoredView),
+    Legacy(QueryPlan),
+}
+
+pub(crate) fn catalog_view_row(
+    relation: &RelationIdentity,
+    view: &StoredView,
+) -> Result<ViewRow, serde_json::Error> {
+    Ok(ViewRow {
+        relation: relation.clone(),
+        role_owner: view.role_owner.clone(),
+        acl: view.acl.clone(),
+        column_acls: view.column_acls.clone(),
+        definition_json: serde_json::to_string(view)?,
+    })
+}
+
+fn upgrade_legacy_view_dispatches(plan: &mut QueryPlan) -> bool {
+    let mut changed = false;
+    plan.rewrite_scalar_expressions(&mut |expression| {
+        let uqa_execution::ScalarExpr::Func { name, binding, .. } = expression else {
+            return;
+        };
+        changed |= FunctionBinding::upgrade_legacy_serialized_dispatch(name, binding);
+    });
+    changed
+}
+
+pub(crate) struct ViewRegistration<'a> {
+    pub name: &'a str,
+    pub column_names: &'a [String],
+    pub plan: QueryPlan,
+    pub or_replace: bool,
+    pub persistence: uqa_sql::ast::RelationPersistence,
+    pub options: &'a [(String, String)],
+    pub params: &'a [uqa_sql::SQLParam],
+}
+
+pub(crate) struct MaterializedViewRegistration<'a> {
+    pub name: &'a str,
+    pub column_names: &'a [String],
+    pub plan: QueryPlan,
+    pub if_not_exists: bool,
+    pub with_no_data: bool,
+    pub options: &'a [(String, String)],
+    pub params: &'a [uqa_sql::SQLParam],
+}
+
+use uqa_sql::catalog::view::{create_view_output_columns, named_view_schema};
+
+fn validate_replacement_schema(
+    old: &uqa_execution::RowSchema,
+    new: &uqa_execution::RowSchema,
+) -> Result<(), SQLError> {
+    if new.len() < old.len() {
+        return Err(SQLError::Routine {
+            sqlstate: "42P16".into(),
+            message: "cannot drop columns from view".into(),
+        });
+    }
+    for position in 0..old.len() {
+        let old_name = old
+            .public_name(position)
+            .unwrap_or(&old.columns()[position]);
+        let new_name = new
+            .public_name(position)
+            .unwrap_or(&new.columns()[position]);
+        if old_name != new_name {
+            return Err(SQLError::Routine {
+                sqlstate: "42P16".into(),
+                message: format!(
+                    "cannot change name of view column \"{old_name}\" to \"{new_name}\""
+                ),
+            });
+        }
+        if old.column_type(position) != new.column_type(position) {
+            return Err(SQLError::Routine {
+                sqlstate: "42P16".into(),
+                message: format!("cannot change data type of view column \"{old_name}\""),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn bind_stored_view_relations(
+    plan: &mut QueryPlan,
+    relations: &std::collections::BTreeSet<RelationIdentity>,
+) -> StorageBackendResult<()> {
+    bind_query_plan_relations(plan, &std::collections::BTreeSet::new(), &mut |reference| {
+        if let Some(canonical) = canonical_virtual_relation_reference(reference) {
+            return Ok(canonical);
+        }
+        let (schema, local_name) =
+            RelationIdentity::parse_reference(reference).map_err(|error| {
+                StorageBackendError::Other(format!(
+                    "invalid stored view source `{reference}`: {error}"
+                ))
+            })?;
+        if let Some(schema) = schema {
+            let candidate = RelationIdentity::new(schema, local_name);
+            if relations.contains(&candidate) {
+                return Ok(candidate.qualified_name());
+            }
+        } else {
+            let candidates = relations
+                .iter()
+                .filter(|candidate| candidate.name == local_name)
+                .map(RelationIdentity::qualified_name)
+                .collect::<Vec<_>>();
+            match candidates.as_slice() {
+                [candidate] => return Ok(candidate.clone()),
+                [] => {}
+                _ => {
+                    return Err(StorageBackendError::Other(format!(
+                        "ambiguous stored view source `{reference}` matches {}",
+                        candidates.join(", ")
+                    )));
+                }
+            }
+        }
+        Err(StorageBackendError::Other(format!(
+            "stored view source relation `{reference}` does not exist"
+        )))
+    })
+}
+
+impl Engine {
+    pub(crate) fn rewrite_view_relation_references(
+        &self,
+        replacements: &std::collections::BTreeMap<RelationIdentity, RelationIdentity>,
+    ) -> StorageBackendResult<()> {
+        if replacements.is_empty() {
+            return Ok(());
+        }
+        let mut updates = Vec::new();
+        for (view_relation, stored) in self.durable.views.read().iter() {
+            let mut candidate = stored.clone();
+            let mut changed = false;
+            bind_query_plan_relations(
+                &mut candidate.query,
+                &std::collections::BTreeSet::new(),
+                &mut |reference| -> StorageBackendResult<String> {
+                    let identity = RelationIdentity::from_legacy_name(reference)
+                        .map_err(StorageBackendError::Other)?;
+                    if let Some(replacement) = replacements.get(&identity) {
+                        changed = true;
+                        Ok(replacement.qualified_name())
+                    } else {
+                        Ok(reference.to_string())
+                    }
+                },
+            )?;
+            if changed {
+                updates.push((view_relation.clone(), candidate));
+            }
+        }
+        if let Some(catalog) = self.storage.catalog.as_ref() {
+            for (relation, view) in &updates {
+                catalog.save_view(&catalog_view_row(relation, view)?)?;
+            }
+        }
+        let mut views = self.durable.views.write();
+        for (relation, view) in updates {
+            views.insert(relation, view);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn drop_views_depending_on_relations(
+        &self,
+        relations: &[String],
+    ) -> StorageBackendResult<()> {
+        self.drop_relation_routine_dependents(relations, true, "relation")
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+        let mut pending = relations.to_vec();
+        let mut views = std::collections::BTreeSet::new();
+        while let Some(relation) = pending.pop() {
+            for dependent in self.views_depending_on_relation(&relation)? {
+                if views.insert(dependent.clone()) {
+                    pending.push(dependent);
+                }
+            }
+        }
+        let views = views.into_iter().collect::<Vec<_>>();
+        self.drop_rules_depending_on_relations_inner(&views)?;
+        self.drop_views_inner(&views, false)
+            .map_err(|error| StorageBackendError::Other(error.to_string()))
+    }
+
+    #[cfg(test)]
+    pub(super) fn bind_stored_view_plan(
+        &self,
+        plan: &mut QueryPlan,
+        relations: &std::collections::BTreeSet<RelationIdentity>,
+    ) -> StorageBackendResult<()> {
+        bind_stored_view_relations(plan, relations)?;
+        let mut refreshed = false;
+        bind_query_plan_sequence_references(plan, &mut |reference| {
+            if !refreshed {
+                self.refresh_sequences_from_catalog()?;
+                refreshed = true;
+            }
+            self.resolve_stored_sequence_reference_from_loaded_registry(reference)
+        })
+    }
+
+    pub fn drop_view(&self, name: &str) -> Result<bool, SQLError> {
+        self.with_implicit_transaction(|engine| {
+            match engine.try_resolve_visible_relation_kind(name)? {
+                Some((canonical, "view")) => {
+                    engine.drop_views(&[canonical], false, "view")?;
+                    Ok(true)
+                }
+                Some((canonical, kind)) => Err(SQLError::Unsupported(format!(
+                    "DROP VIEW: relation `{canonical}` is a {kind}, not a view"
+                ))),
+                None => Ok(false),
+            }
+        })
+    }
+
+    pub(crate) fn drop_views(
+        &self,
+        names: &[String],
+        cascade: bool,
+        kind: &str,
+    ) -> Result<(), SQLError> {
+        self.with_implicit_transaction(|engine| {
+            engine.ensure_view_drop_authorities(names)?;
+            engine.drop_relation_routine_dependents(names, cascade, kind)?;
+            if !cascade {
+                return engine.drop_views_inner(names, false);
+            }
+            let remaining = engine.remaining_view_drop_targets(names)?;
+            let closure = engine.cascade_view_closure(remaining)?;
+            engine
+                .drop_rules_depending_on_relations_inner(&closure)
+                .map_err(|error| {
+                    SQLError::Internal(format!("drop rules depending on cascading views: {error}"))
+                })?;
+            engine.drop_views_inner(&closure, false)
+        })
+    }
+
+    pub(crate) fn remaining_view_drop_targets(
+        &self,
+        names: &[String],
+    ) -> Result<Vec<String>, SQLError> {
+        let remaining = names
+            .iter()
+            .filter_map(|name| match RelationIdentity::from_legacy_name(name) {
+                Ok(identity) => self
+                    .durable
+                    .views
+                    .read()
+                    .contains_key(&identity)
+                    .then(|| Ok(name.clone())),
+                Err(error) => Some(Err(SQLError::Internal(error))),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(remaining)
+    }
+
+    fn ensure_view_drop_authorities(&self, names: &[String]) -> Result<(), SQLError> {
+        let views = self.durable.views.read();
+        for name in names {
+            let relation = RelationIdentity::from_legacy_name(name).map_err(|error| {
+                SQLError::Internal(format!("resolve DROP VIEW target `{name}`: {error}"))
+            })?;
+            let view = views.get(&relation).ok_or_else(|| {
+                SQLError::Internal(format!("view `{name}` disappeared before owner check"))
+            })?;
+            self.ensure_view_drop_authority(name, view)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn drop_views_inner(
+        &self,
+        names: &[String],
+        check_authority: bool,
+    ) -> Result<(), SQLError> {
+        let drop_set = names
+            .iter()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        if check_authority {
+            self.ensure_view_drop_authorities(names)?;
+        }
+        let dependent_rules = self
+            .rules_depending_on_relations(names)
+            .map_err(|error| SQLError::Internal(format!("inspect rule dependencies: {error}")))?;
+        if !dependent_rules.is_empty() {
+            return Err(SQLError::Routine {
+                sqlstate: "2BP01".into(),
+                message: format!(
+                    "cannot drop view {} because other objects depend on it: {}",
+                    names.join(", "),
+                    dependent_rules
+                        .into_iter()
+                        .map(|(table, rule)| format!(
+                            "rule {rule} on table {}",
+                            table.qualified_name()
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            });
+        }
+        for name in names {
+            let dependents = self
+                .views_depending_on_relation(name)
+                .map_err(|err| SQLError::Internal(format!("inspect view dependencies: {err}")))?
+                .into_iter()
+                .filter(|dependent| !drop_set.contains(dependent))
+                .collect::<Vec<_>>();
+            if !dependents.is_empty() {
+                return Err(SQLError::Unsupported(format!(
+                    "DROP VIEW `{name}` rejected: dependent view(s) `{}` still reference it",
+                    dependents.join("`, `")
+                )));
+            }
+        }
+        for name in names {
+            self.drop_view_state_inner(name)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn drop_temporary_views_depending_on_relation_inner(
+        &self,
+        canonical_name: &str,
+    ) -> StorageBackendResult<()> {
+        let target = RelationIdentity::from_legacy_name(canonical_name)
+            .map_err(StorageBackendError::Other)?;
+        let empty_ctes = std::collections::BTreeSet::new();
+        let views = self.durable.views.read();
+        let mut targets = std::collections::BTreeSet::from([target]);
+        let mut layers = Vec::new();
+        loop {
+            let layer = views
+                .iter()
+                .filter(|(relation, _)| !targets.contains(*relation))
+                .filter(|(_, view)| {
+                    targets.iter().any(|target| {
+                        query_plan_references_relation(&view.query, target, &empty_ctes)
+                    })
+                })
+                .map(|(relation, view)| {
+                    if view.persistence != uqa_sql::ast::RelationPersistence::Temporary {
+                        return Err(StorageBackendError::Other(format!(
+                            "temporary relation `{canonical_name}` has non-temporary dependent view `{}`",
+                            relation.qualified_name()
+                        )));
+                    }
+                    Ok(relation.clone())
+                })
+                .collect::<StorageBackendResult<Vec<_>>>()?;
+            if layer.is_empty() {
+                break;
+            }
+            targets.extend(layer.iter().cloned());
+            layers.push(layer);
+        }
+        drop(views);
+
+        // PostgreSQL performs internal ON COMMIT deletion with CASCADE. Drop
+        // the outermost dependent views first so no temporary view survives
+        // with a binding to a relation that disappeared at commit.
+        for layer in layers.into_iter().rev() {
+            for relation in layer {
+                let name = relation.qualified_name();
+                self.drop_view_state_inner(&name)
+                    .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn drop_view_state_inner(&self, name: &str) -> Result<(), SQLError> {
+        let relation = RelationIdentity::from_legacy_name(name)
+            .map_err(|err| SQLError::Internal(format!("invalid canonical view name: {err}")))?;
+        self.drop_relation_events_inner(&relation)
+            .map_err(|error| SQLError::Internal(format!("drop view rules: {error}")))?;
+        let mut views = self.durable.views.write();
+        let temporary = views
+            .get(&relation)
+            .is_some_and(|view| view.persistence == uqa_sql::ast::RelationPersistence::Temporary);
+        let removed = if temporary {
+            views.contains_key(&relation)
+        } else if let Some(catalog) = self.storage.catalog.as_ref() {
+            catalog
+                .drop_view(&relation)
+                .map_err(|err| SQLError::Internal(format!("drop view `{name}`: {err}")))?
+        } else {
+            views.contains_key(&relation)
+        };
+        if removed {
+            views.remove(&relation);
+        }
+        drop(views);
+        if removed {
+            self.note_catalog_registry_changed();
+        }
+        if removed {
+            Ok(())
+        } else {
+            Err(SQLError::Internal(format!(
+                "view `{name}` disappeared after dependency preflight"
+            )))
+        }
+    }
+
+    pub(crate) fn stored_view_schema(
+        &self,
+        view: &StoredView,
+    ) -> Result<uqa_execution::RowSchema, SQLError> {
+        self.stored_view_schema_with_catalog(
+            view,
+            self.restored_catalog_read_view(),
+            self.session_execution_view().relation_name_resolution(),
+        )
+    }
+
+    pub(crate) fn stored_view_schema_with_catalog(
+        &self,
+        view: &StoredView,
+        catalog: crate::capabilities::CatalogReadView,
+        resolution: crate::capabilities::RelationNameResolution,
+    ) -> Result<uqa_execution::RowSchema, SQLError> {
+        view.row_schema(self, std::sync::Arc::new(catalog), resolution)
+    }
+
+    pub(crate) fn view_schema(
+        &self,
+        name: &str,
+    ) -> Result<Option<uqa_execution::RowSchema>, SQLError> {
+        self.view_definition(name)?
+            .map(|view| self.stored_view_schema(&view))
+            .transpose()
+    }
+
+    pub(crate) fn view_definition(&self, name: &str) -> Result<Option<StoredView>, SQLError> {
+        let Some(resolved) = self
+            .try_resolve_view_name(name)
+            .map_err(|err| SQLError::Internal(format!("refresh view catalog: {err}")))?
+        else {
+            return Ok(None);
+        };
+        let relation = Self::resolved_relation_identity(&resolved)
+            .map_err(|err| SQLError::Internal(format!("resolve view `{resolved}`: {err}")))?;
+        if let Some(snapshot) = self.query_view_snapshots.as_ref() {
+            return Ok(snapshot.get(&relation).cloned());
+        }
+        Ok(self.durable.views.read().get(&relation).cloned())
+    }
+
+    /// Resolve a view only against the live restored registry without starting another registry synchronization pass.
+    pub(crate) fn restored_catalog_view_definition(
+        &self,
+        name: &str,
+    ) -> Result<Option<StoredView>, SQLError> {
+        let views = self.durable.views.read();
+        Ok(self
+            .relation_lookup_candidates(name)
+            .map_err(|error| {
+                SQLError::Internal(format!("resolve restored view `{name}`: {error}"))
+            })?
+            .into_iter()
+            .find_map(|relation| views.get(&relation).cloned()))
+    }
+
+    pub fn view(&self, name: &str) -> Result<Option<uqa_planner::QueryPlan>, SQLError> {
+        Ok(self.view_definition(name)?.and_then(|definition| {
+            (definition.kind == StoredViewKind::View).then_some(definition.query)
+        }))
+    }
+
+    pub(crate) fn view_plan(&self, name: &str) -> Result<Option<uqa_planner::QueryPlan>, SQLError> {
+        self.view(name)
+    }
+
+    pub fn list_views(&self) -> Result<Vec<String>, SQLError> {
+        self.synchronize_catalog_registries()
+            .map_err(|err| SQLError::Internal(format!("refresh view catalog: {err}")))?;
+        let mut out: Vec<String> = self
+            .durable
+            .views
+            .read()
+            .iter()
+            .filter(|(_, view)| view.kind == StoredViewKind::View)
+            .map(|(relation, _)| relation.qualified_name())
+            .collect();
+        out.sort_unstable();
+        Ok(out)
+    }
+
+    /// Return stored views whose plan is bound to `canonical_name`.
+    ///
+    /// New definitions persist canonical source identities. Legacy plans are
+    /// canonicalized during restore only when an unqualified name has exactly
+    /// one catalog candidate, so normal dependency checks are exact. The
+    /// matcher remains conservative for malformed in-memory plans and fails
+    /// closed rather than permitting dangling DDL.
+    pub(crate) fn views_depending_on_relation(
+        &self,
+        canonical_name: &str,
+    ) -> StorageBackendResult<Vec<String>> {
+        self.synchronize_catalog_registries()?;
+        let target = RelationIdentity::from_legacy_name(canonical_name)
+            .map_err(StorageBackendError::Other)?;
+        let empty_ctes = std::collections::BTreeSet::new();
+        let mut dependents = self
+            .durable
+            .views
+            .read()
+            .iter()
+            .filter(|(relation, view)| {
+                *relation != &target
+                    && query_plan_references_relation(&view.query, &target, &empty_ctes)
+            })
+            .map(|(relation, _)| relation.qualified_name())
+            .collect::<Vec<_>>();
+        dependents.sort_unstable();
+        Ok(dependents)
+    }
+
+    /// Return stored views with a literal `nextval`, `currval`, or `setval`
+    /// dependency on the canonical sequence name.
+    pub(crate) fn views_depending_on_sequence(
+        &self,
+        canonical_name: &str,
+    ) -> StorageBackendResult<Vec<String>> {
+        self.synchronize_catalog_registries()?;
+        let target = RelationIdentity::from_legacy_name(canonical_name)
+            .map_err(StorageBackendError::Other)?;
+        let mut dependents = self
+            .durable
+            .views
+            .read()
+            .iter()
+            .filter(|(_, view)| query_plan_references_sequence(&view.query, &target))
+            .map(|(relation, _)| relation.qualified_name())
+            .collect::<Vec<_>>();
+        dependents.sort_unstable();
+        Ok(dependents)
+    }
+
+    pub(crate) fn rewrite_view_sequence_references(
+        &self,
+        from: &RelationIdentity,
+        to: &str,
+    ) -> StorageBackendResult<()> {
+        self.synchronize_catalog_registries()?;
+        let mut rewritten_views = Vec::new();
+        for (relation, stored) in self.durable.views.read().iter() {
+            let mut rewritten = stored.clone();
+            let mut changed = false;
+            bind_query_plan_sequence_references(
+                &mut rewritten.query,
+                &mut |reference| -> StorageBackendResult<String> {
+                    let (schema, name) =
+                        RelationIdentity::parse_reference(reference).map_err(|error| {
+                            StorageBackendError::Other(format!(
+                                "invalid stored view sequence reference `{reference}`: {error}"
+                            ))
+                        })?;
+                    let matches = schema.as_deref().map_or(name == from.name, |schema| {
+                        schema == from.schema && name == from.name
+                    });
+                    if matches {
+                        changed = true;
+                        Ok(to.to_string())
+                    } else {
+                        Ok(reference.to_string())
+                    }
+                },
+            )?;
+            if changed {
+                rewritten_views.push((relation.clone(), rewritten));
+            }
+        }
+        if let Some(catalog) = self.storage.catalog.as_ref() {
+            for (relation, view) in &rewritten_views {
+                if view.persistence != uqa_sql::ast::RelationPersistence::Temporary {
+                    catalog.save_view(&catalog_view_row(relation, view)?)?;
+                }
+            }
+        }
+        if !rewritten_views.is_empty() {
+            self.durable.views.write().extend(rewritten_views);
+            self.note_catalog_registry_changed();
+        }
+        Ok(())
+    }
+
+    pub(crate) fn cascade_view_closure(
+        &self,
+        initial: Vec<String>,
+    ) -> Result<Vec<String>, SQLError> {
+        let mut views = initial;
+        views.sort();
+        views.dedup();
+        let mut index = 0;
+        while index < views.len() {
+            let dependents = self
+                .views_depending_on_relation(&views[index])
+                .map_err(|error| {
+                    SQLError::Internal(format!("read cascading view dependencies: {error}"))
+                })?;
+            for dependent in dependents {
+                if !views.contains(&dependent) {
+                    views.push(dependent);
+                }
+            }
+            index += 1;
+        }
+        views.sort();
+        Ok(views)
+    }
+
+    /// Return stored views whose persisted query plan is bound to one exact non-builtin routine object. Return type is deliberately excluded from routine identity.
+    pub(crate) fn views_depending_on_function(
+        &self,
+        target: &FunctionBinding,
+    ) -> StorageBackendResult<Vec<String>> {
+        self.synchronize_catalog_registries()?;
+        let mut dependents = self
+            .durable
+            .views
+            .read()
+            .iter()
+            .filter(|(_, view)| {
+                super::view_binding::query_plan_references_function(&view.query, target)
+            })
+            .map(|(relation, _)| relation.qualified_name())
+            .collect::<Vec<_>>();
+        dependents.sort_unstable();
+        Ok(dependents)
+    }
+
+    pub(crate) fn rewrite_view_routine_identity(
+        &self,
+        target: &FunctionBinding,
+        new_name: &str,
+    ) -> StorageBackendResult<()> {
+        let mut next = self.durable.views.read().clone();
+        let mut changed = Vec::new();
+        for (relation, view) in &mut next {
+            if super::rewrite_query_plan_routine_identity(&mut view.query, target, new_name) {
+                changed.push(relation.clone());
+            }
+        }
+        if changed.is_empty() {
+            return Ok(());
+        }
+        if let Some(catalog) = self.storage.catalog.as_ref() {
+            for relation in &changed {
+                let view = next.get(relation).ok_or_else(|| {
+                    StorageBackendError::Other(format!(
+                        "rewritten view `{}` disappeared before persistence",
+                        relation.qualified_name()
+                    ))
+                })?;
+                if view.persistence != uqa_sql::ast::RelationPersistence::Temporary {
+                    catalog.save_view(&catalog_view_row(relation, view)?)?;
+                }
+            }
+        }
+        *self.durable.views.write() = next;
+        self.note_catalog_registry_changed();
+        Ok(())
+    }
+}

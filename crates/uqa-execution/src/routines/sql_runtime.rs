@@ -1,0 +1,183 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Dynamic SQL, `RAISE`, and statement-result bookkeeping.
+
+use super::{
+    cast_value_from, coercion_type_name, compile, condition_sqlstate, format_raise_message,
+    looks_like_sqlstate, result_row_count, result_row_values, strict_into_check, Expr, Flow,
+    Interpreter, IntoTarget, RaiseLevel, SQLError, SQLParam, SQLResult, Statement, Value,
+};
+
+impl Interpreter<'_> {
+    pub(super) fn exec_assert(
+        &mut self,
+        condition: &Expr,
+        message: Option<&Expr>,
+    ) -> Result<Flow, SQLError> {
+        if !self.services.statements.assertions_enabled() {
+            return Ok(Flow::Normal);
+        }
+        if self.eval_boolean(condition)? == Some(true) {
+            return Ok(Flow::Normal);
+        }
+        let message = match message {
+            Some(expression) => {
+                let (value, declared_type) = self.eval_expr_with_type(expression)?;
+                let source_type = declared_type.as_ref().map(coercion_type_name);
+                match cast_value_from(&value, "text", source_type.as_deref())? {
+                    Value::Null => "assertion failed".into(),
+                    Value::Str(text) => text,
+                    other => {
+                        return Err(SQLError::Internal(format!(
+                            "PL/pgSQL ASSERT message coercion returned {other:?}"
+                        )))
+                    }
+                }
+            }
+            None => "assertion failed".into(),
+        };
+        Err(SQLError::Routine {
+            sqlstate: "P0004".into(),
+            message,
+        })
+    }
+
+    pub(super) fn exec_raise(
+        &mut self,
+        level: RaiseLevel,
+        condition: Option<&str>,
+        message: Option<&str>,
+        params: &[Expr],
+    ) -> Result<Flow, SQLError> {
+        // Bare RAISE re-throws the error being handled.
+        if condition.is_none() && message.is_none() {
+            return match self.err_stack.last() {
+                Some((state, message)) => Err(SQLError::Routine {
+                    sqlstate: state.clone(),
+                    message: message.clone(),
+                }),
+                None => Err(SQLError::Routine {
+                    sqlstate: "0Z002".into(),
+                    message: "RAISE without parameters cannot be used outside an exception handler"
+                        .into(),
+                }),
+            };
+        }
+        let text = match message {
+            Some(format) => {
+                let mut values = Vec::with_capacity(params.len());
+                for param in params {
+                    values.push(self.eval_expr(param)?);
+                }
+                format_raise_message(format, &values)?
+            }
+            None => condition
+                .ok_or_else(|| {
+                    SQLError::Internal(
+                        "non-bare PL/pgSQL RAISE has neither condition nor message".into(),
+                    )
+                })?
+                .to_string(),
+        };
+        if level == RaiseLevel::Error {
+            let sqlstate = match condition {
+                Some(name) => {
+                    if let Some(state) = condition_sqlstate(name) {
+                        state.to_string()
+                    } else if looks_like_sqlstate(name) {
+                        name.to_ascii_uppercase()
+                    } else {
+                        return Err(SQLError::Internal(format!(
+                            "unrecognized PL/pgSQL RAISE condition `{name}`"
+                        )));
+                    }
+                }
+                None => "P0001".to_string(),
+            };
+            return Err(SQLError::Routine {
+                sqlstate,
+                message: text,
+            });
+        }
+        self.services.runtime.push_diagnostic(level.as_str(), &text);
+        Ok(Flow::Normal)
+    }
+
+    pub(super) fn exec_dynamic(
+        &mut self,
+        query: &Expr,
+        params: &[Expr],
+    ) -> Result<SQLResult, SQLError> {
+        let (text, bound_params) = self.eval_dynamic_sql(query, params)?;
+        if compile(&text)?
+            .iter()
+            .any(|statement| matches!(statement, Statement::Transaction(_)))
+        {
+            return Err(SQLError::Routine {
+                sqlstate: "0A000".into(),
+                message: "EXECUTE of transaction commands is not implemented".into(),
+            });
+        }
+        self.services.statements.execute_text(&text, &bound_params)
+    }
+
+    pub(super) fn eval_dynamic_sql(
+        &self,
+        query: &Expr,
+        params: &[Expr],
+    ) -> Result<(String, Vec<SQLParam>), SQLError> {
+        let text = match self.eval_expr(query)? {
+            Value::Str(text) => text,
+            Value::Null => {
+                return Err(SQLError::Routine {
+                    sqlstate: "22004".into(),
+                    message: "query string argument of EXECUTE is null".into(),
+                });
+            }
+            other => {
+                return Err(SQLError::TypeMismatch(format!(
+                    "EXECUTE expects a query string, got {other:?}"
+                )));
+            }
+        };
+        let mut bound_params = Vec::with_capacity(params.len());
+        for param in params {
+            bound_params.push(SQLParam::Scalar(self.eval_expr(param)?));
+        }
+        Ok((text, bound_params))
+    }
+
+    /// Post-process an embedded SQL statement's result: `ROW_COUNT`,
+    /// `FOUND`, and `INTO` assignment.
+    pub(super) fn consume_statement_result(
+        &mut self,
+        statement: &Statement,
+        result: &SQLResult,
+        into: Option<&IntoTarget>,
+        strict: bool,
+    ) -> Result<(), SQLError> {
+        let row_count = result_row_count(result)?;
+        self.last_row_count = row_count;
+        if let Some(target) = into {
+            if strict {
+                strict_into_check(row_count)?;
+            }
+            let values = result_row_values(result, 0);
+            self.assign_into(
+                target,
+                &result.columns,
+                &result.column_types,
+                values.as_deref(),
+            )?;
+        }
+        // CALL statements leave FOUND untouched.
+        if !matches!(statement, Statement::Call { .. }) {
+            self.set_found(row_count > 0);
+        }
+        Ok(())
+    }
+}

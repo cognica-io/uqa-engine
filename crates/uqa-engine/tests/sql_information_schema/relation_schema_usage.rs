@@ -369,7 +369,7 @@ fn pg18_stored_rule_actions_keep_their_authorized_relation_identity() {
 
 #[test]
 fn legacy_stored_rule_actions_restore_as_bound_relation_identities() {
-    use uqa_storage::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::{Catalog, ManagedConnection};
 
     fn remove_target_binding_marker(value: &mut serde_json::Value) -> usize {
         match value {

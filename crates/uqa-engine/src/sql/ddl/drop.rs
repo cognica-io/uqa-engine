@@ -7,7 +7,7 @@
 //! DROP preflight, object removal, and index side effects.
 
 use super::{CatalogIndexRow, ColumnType, DropKind, DropStmt, Engine, SQLError, SQLResult};
-use crate::engine_capabilities::RelationResolution;
+use crate::capabilities::RelationResolution;
 
 mod index_dependencies;
 
@@ -460,17 +460,7 @@ fn run_drop_index(engine: &Engine, stmt: DropStmt) -> Result<SQLResult, SQLError
 }
 
 pub(super) fn ddl_storage_error(action: &str, err: impl std::error::Error + 'static) -> SQLError {
-    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&err);
-    while let Some(error) = source {
-        if let Some(error) = error.downcast_ref::<SQLError>() {
-            return SQLError::Routine {
-                sqlstate: error.sqlstate().unwrap_or("XX000").into(),
-                message: error.to_string(),
-            };
-        }
-        source = error.source();
-    }
-    SQLError::Internal(format!("{action} failed in storage backend: {err}"))
+    uqa_sql::catalog::errors::storage_error(action, &err)
 }
 
 fn drop_index_side_effects(engine: &Engine, row: &CatalogIndexRow) -> Result<(), SQLError> {

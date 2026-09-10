@@ -162,7 +162,7 @@ pub(in crate::sql::ddl) fn validate_bound_foreign_key_definition_with_local_stat
         engine.ensure_column_privilege(
             &referenced,
             column,
-            crate::engine_table_security::TableAclPrivilege::References,
+            crate::table_security::TableAclPrivilege::References,
         )?;
     }
     foreign_key.referenced_key = referenced_keys

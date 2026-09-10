@@ -72,7 +72,10 @@ pub(super) fn run_merge_inner_with_ctes(
     let target_qual = stmt.target_qualifier.clone();
     let target_tables = engine.hierarchy_scan_tables(&target_table, stmt.include_descendants)?;
     let statement_events = super::statement_events::MergeStatementEvents::from_plan(stmt);
-    let mut ctes = CteScope::new_for_statement(engine, stmt.statement_privilege_subject.as_deref());
+    let mut ctes = crate::capabilities::query_scope::new_for_statement(
+        engine,
+        stmt.statement_privilege_subject.as_deref(),
+    );
     if let Some(parent) = inherited_ctes {
         ctes.inherit_cte_bindings(parent);
     }
@@ -468,7 +471,7 @@ pub(super) fn run_merge_inner_with_ctes(
                     doc_id,
                 )?;
                 let Some(route) = prepare_partition_update_route(
-                    engine,
+                    &engine.referential_execution_context(),
                     storage_table,
                     doc_id,
                     &old_document,
@@ -513,7 +516,7 @@ pub(super) fn run_merge_inner_with_ctes(
                     .or(primary_key_doc_id)
                     .unwrap_or(prepared.doc_id);
                 validate_view_checks(ViewCheckContext {
-                    engine,
+                    services: engine.mutation_assignment_context(),
                     table: &target_table,
                     storage_table: &new_storage_table,
                     target_qualifier: &target_qual,
@@ -731,7 +734,7 @@ pub(super) fn run_merge_inner_with_ctes(
                     lock_document_key_dependencies(engine, &storage_table, &document, None)?;
                 validate_document_constraints(engine, &storage_table, &document, params, None)?;
                 validate_view_checks(ViewCheckContext {
-                    engine,
+                    services: engine.mutation_assignment_context(),
                     table: &target_table,
                     storage_table: &storage_table,
                     target_qualifier: &target_qual,
@@ -743,7 +746,7 @@ pub(super) fn run_merge_inner_with_ctes(
                 })?;
                 engine.stage_command_document(&storage_table, doc_id, Some(document.clone()))?;
                 if let Some(event) = crate::sql::triggers::AfterRowTriggerEvent::prepare(
-                    engine,
+                    &engine.trigger_execution_context(),
                     crate::sql::triggers::AfterRowTriggerInput {
                         table: &storage_table,
                         event: uqa_sql::ast::TriggerEvent::Insert,
@@ -859,7 +862,8 @@ pub(super) fn run_merge_inner_with_ctes(
     } else {
         Vec::new()
     };
-    let referential_transition = events.referential_transition_tables(engine)?;
+    let referential_transition =
+        events.referential_transition_tables(&engine.trigger_execution_context())?;
     let mut transition_tables = delete_transition
         .iter()
         .chain(update_transition.iter())
@@ -882,7 +886,7 @@ pub(super) fn run_merge_inner_with_ctes(
             generation,
         )?;
         events.fire_referential_after_statement_triggers(
-            engine,
+            &engine.trigger_execution_context(),
             &referential_transition,
             &target_table,
             &root_events,

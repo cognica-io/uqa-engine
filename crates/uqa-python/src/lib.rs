@@ -25,7 +25,7 @@ use uqa_engine::{
 };
 use uqa_scoring::{BM25Params, CalibrationReport};
 use uqa_sql::SQLError;
-use uqa_storage::{DatabaseFileFormat, SQLiteCompressionOptions};
+use uqa_storage_sqlite::{DatabaseFileFormat, SQLiteCompressionOptions};
 
 mod callbacks;
 mod cli;

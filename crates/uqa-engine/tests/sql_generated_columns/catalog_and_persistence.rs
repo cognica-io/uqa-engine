@@ -181,7 +181,7 @@ fn generated_schema_and_values_survive_reopen() {
 
 #[test]
 fn v016_generated_dispatch_markers_migrate_and_are_rewritten_on_reopen() {
-    use uqa_storage::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::{Catalog, ManagedConnection};
 
     let directory = TempDir::new().unwrap();
     let database = directory.path().join("legacy-generated-dispatch.sqlite");

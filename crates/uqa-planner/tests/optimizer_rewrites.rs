@@ -62,7 +62,7 @@ fn select_with_where(filter: Expr) -> SelectStmt {
 }
 
 fn optimize_select(stmt: SelectStmt) -> UnifiedPlan {
-    let cfg = OptimizerConfig::default();
+    let cfg = OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
     optimize(UnifiedPlan::lower(Statement::Select(Box::new(stmt))), &cfg)
         .expect("optimizer succeeds")
 }
@@ -116,7 +116,7 @@ proptest! {
         let or_with_false = Expr::Or(vec![lit_false(), col("name")]);
         let filter = Expr::And(vec![Expr::And(and_parts), or_with_false]);
 
-        let cfg = OptimizerConfig::default();
+        let cfg = OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar);
         let stmt = select_with_where(filter);
         let once = optimize(UnifiedPlan::lower(Statement::Select(Box::new(stmt))), &cfg)
             .expect("first optimizer pass succeeds");

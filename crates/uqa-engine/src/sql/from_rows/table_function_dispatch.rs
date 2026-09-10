@@ -10,8 +10,8 @@ use super::{
     age_cypher, checked_integer_value, doc_id_value, eval_call_arguments, execute_tree_entries,
     expect_optional_graph_value, generate_series_values, graph_betweenness_entries,
     graph_hits_entries, graph_pagerank_entries, json_table_arg, json_table_value_to_text,
-    unnest_row_stream, PlanSubqueryArena, SQLError, SQLTableFunctionResult, SQLTableFunctionStream,
-    ScalarEvalContext, SourceEvalContext, TableFunctionCall, TableFunctionRows, Value,
+    unnest_row_stream, PlanSubqueryArena, SQLError, ScalarEvalContext, SourceEvalContext,
+    TableFunctionCall, TableFunctionRows, Value,
 };
 
 #[allow(clippy::similar_names)]
@@ -553,80 +553,6 @@ fn operator_join_rows(
     ))
 }
 
-pub(in crate::sql) fn registered_table_function_rows(
-    name: &str,
-    result: SQLTableFunctionResult,
-    _alias: Option<&str>,
-    column_aliases: &[String],
-) -> Result<TableFunctionRows, SQLError> {
-    if result.columns.is_empty() {
-        return Err(SQLError::TypeMismatch(format!(
-            "table function `{name}` returned no columns"
-        )));
-    }
-    let columns: Vec<String> = result
-        .columns
-        .iter()
-        .enumerate()
-        .map(|(idx, column)| {
-            column_aliases
-                .get(idx)
-                .cloned()
-                .unwrap_or_else(|| column.clone())
-        })
-        .collect();
-    let mut out = Vec::with_capacity(result.rows.len());
-    for values in result.rows {
-        if values.len() != result.columns.len() {
-            return Err(SQLError::TypeMismatch(format!(
-                "table function `{name}` row has {} values for {} columns",
-                values.len(),
-                result.columns.len()
-            )));
-        }
-        out.push(values);
-    }
-    Ok(TableFunctionRows::materialized(columns, out))
-}
-
-pub(in crate::sql) fn registered_table_function_row_stream(
-    name: &str,
-    result: SQLTableFunctionStream,
-    _alias: Option<&str>,
-    column_aliases: &[String],
-) -> Result<TableFunctionRows, SQLError> {
-    if result.columns.is_empty() {
-        return Err(SQLError::TypeMismatch(format!(
-            "table function `{name}` returned no columns"
-        )));
-    }
-    let expected_width = result.columns.len();
-    let columns = result
-        .columns
-        .iter()
-        .enumerate()
-        .map(|(index, column)| {
-            column_aliases
-                .get(index)
-                .cloned()
-                .unwrap_or_else(|| column.clone())
-        })
-        .collect::<Vec<_>>();
-    let function_name = name.to_string();
-    Ok(TableFunctionRows::new(
-        columns,
-        Box::new(result.rows.map(
-            move |values| -> uqa_execution::ExecResult<uqa_execution::PhysicalRow> {
-                let values = values.map_err(uqa_execution::ExecError::from)?;
-                if values.len() != expected_width {
-                    return Err(SQLError::TypeMismatch(format!(
-                "table function `{function_name}` row has {} values for {expected_width} columns",
-                values.len()
-            ))
-                    .into());
-                }
-                Ok(uqa_execution::PhysicalRow::from_values(values))
-            },
-        )),
-    ))
-}
+pub(in crate::sql) use uqa_execution::query::table_functions::{
+    registered_table_function_row_stream, registered_table_function_rows,
+};

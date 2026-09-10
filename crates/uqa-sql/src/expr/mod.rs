@@ -113,3 +113,6 @@ use evaluator::eval_between;
 
 #[cfg(test)]
 mod tests;
+
+mod json_carrier;
+pub use json_carrier::{core_value_to_json, value_to_text};

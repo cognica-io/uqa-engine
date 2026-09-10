@@ -192,6 +192,8 @@ Python and Node.js provide matching `local` and `cloud` project constructors; br
 
 `Engine::new()` keeps data in memory, while `Engine::open(path)` and `usql --db <path>` use the default persistent SQLite backend. Persistent engines restore schemas, documents, text postings, graphs, scoring parameters, models, views, and statistics when reopened.
 
+On the development branch, `uqa-storage` owns provider-independent contracts and shared data structures, while `uqa-storage-sqlite` owns SQLite connections, catalogs, indexes, transactions, graph persistence, and compressed storage. Rust callers using concrete storage types must use the [updated provider imports](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/reference/10-upgrading.md#sqlite-provider-ownership-in-development). This ownership change preserves the database format and engine SQL API.
+
 Applications that want a pure-Rust single-file store can compose the engine with `uqa-storage-redb`. The provider owns the database, and every `Engine::new_session()` receives independent transaction state over the same file.
 
 ```rust
@@ -275,7 +277,7 @@ The combined report includes exact, IVF, and HNSW SQL query latency and throughp
 Integration tests are consolidated into a small set of domain harnesses so a workspace test does not pay one linker and process-startup cost per source file. Individual modules remain directly selectable during development:
 
 ```sh
-cargo test -p uqa-engine --test integration engine_queries::sql_joins::
+cargo test -p uqa-engine --test integration queries::sql_joins::
 cargo test -p uqa-sql --test integration parser_fuzz::
 ```
 

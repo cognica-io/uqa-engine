@@ -21,7 +21,7 @@ mod search;
 mod state;
 mod training;
 
-pub(crate) use state::IVFMetadataSnapshot;
+pub use state::IVFMetadataSnapshot;
 pub use state::{IVFIndex, IVFState};
 
 #[cfg(test)]
