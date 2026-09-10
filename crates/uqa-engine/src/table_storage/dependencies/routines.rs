@@ -115,20 +115,6 @@ impl Engine {
         )
         .map_err(StorageBackendError::Other)
     }
-    pub(crate) fn bind_default_routine_identities(
-        &self,
-        table_name: &str,
-        column_name: &str,
-        default: &mut uqa_sql::ast::Expr,
-    ) -> StorageBackendResult<bool> {
-        uqa_sql::schema::dependencies::registration::bind_default_routine_identities(
-            &self.schema_dependency_binding_context(),
-            table_name,
-            column_name,
-            default,
-        )
-        .map_err(StorageBackendError::Other)
-    }
 
     pub(crate) fn rewrite_schema_routine_identity(
         &self,

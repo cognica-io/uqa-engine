@@ -155,3 +155,71 @@ impl uqa_execution::schema::columns::addition::ColumnAdditionState for Engine {
         self.try_persist_table_schema(table)
     }
 }
+
+impl Engine {
+    pub(crate) fn column_alter_context(
+        &self,
+    ) -> uqa_execution::schema::columns::alteration::ColumnAlterContext<'_, StatementReadSnapshot>
+    {
+        uqa_execution::schema::columns::alteration::ColumnAlterContext {
+            analysis: uqa_sql::schema::columns::alteration::ColumnAlterAnalysisContext {
+                columns: self,
+                keys: self,
+                state: self,
+                bindings: self.schema_dependency_binding_context(),
+                constraint_types: self.constraint_type_context(),
+            },
+            fields: self,
+            indexes: self,
+            transactions: self,
+            generated: self.generated_rewrite_context(),
+            rewrite: self.column_rewrite_context(),
+        }
+    }
+}
+impl uqa_sql::schema::columns::alteration::ColumnChangeCatalog for Engine {
+    fn has_column(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> Result<bool, uqa_sql::assignment::columns::ColumnCatalogError> {
+        self.try_table_has_column(table, column)
+            .map_err(|error| Box::new(error) as _)
+    }
+    fn column_type(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> Result<Option<ColumnType>, uqa_sql::assignment::columns::ColumnCatalogError> {
+        Engine::column_type(self, table, column).map_err(|error| Box::new(error) as _)
+    }
+    fn stored_columns(
+        &self,
+        table: &str,
+    ) -> Result<Vec<uqa_sql::ast::ColumnDef>, uqa_sql::assignment::columns::ColumnCatalogError>
+    {
+        let state = self
+            .table_entries()
+            .into_iter()
+            .find(|(name, _)| name == table)
+            .map(|(_, state)| state)
+            .ok_or_else(|| {
+                uqa_storage::StorageBackendError::Other(format!("table `{table}` does not exist"))
+            })?;
+        let columns = state.columns.read().clone();
+        Ok(columns)
+    }
+}
+impl uqa_execution::schema::columns::alteration::ColumnIndexChanges for Engine {
+    fn drop_vector_indexes(&self, table: &str, column: &str) -> StorageBackendResult<bool> {
+        self.try_drop_vector_indexes_for_column(table, column)
+    }
+    fn rebuild_vector_index(
+        &self,
+        table: &str,
+        column: &str,
+        dimensions: u32,
+    ) -> StorageBackendResult<bool> {
+        self.try_rebuild_vector_index_for_column(table, column, dimensions)
+    }
+}

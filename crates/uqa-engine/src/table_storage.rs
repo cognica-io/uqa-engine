@@ -26,12 +26,6 @@ fn table_not_found(table: &str) -> StorageBackendError {
     StorageBackendError::Other(format!("table `{table}` does not exist"))
 }
 
-fn column_not_found(table: &str, column: &str) -> StorageBackendError {
-    StorageBackendError::Other(format!(
-        "column `{column}` does not exist on table `{table}`"
-    ))
-}
-
 pub(crate) use uqa_sql::schema::dependencies::rewrites::upgrade_legacy_schema_function_dispatches;
 use uqa_sql::schema::dependencies::rewrites::{
     schema_expr_references_relation, stored_relation_reference_matches,

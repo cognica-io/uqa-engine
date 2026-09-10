@@ -7,8 +7,8 @@
 //! Column constraint mutation, key and foreign-key metadata, and identifier allocation.
 
 use super::{
-    column_not_found, table_not_found, DocId, Engine, RelationIdentity, SQLError,
-    StorageBackendError, StorageBackendResult, TableState,
+    table_not_found, DocId, Engine, RelationIdentity, SQLError, StorageBackendError,
+    StorageBackendResult, TableState,
 };
 
 const TABLE_NEXT_ID_METADATA_PREFIX: &str = "uqa.table_next_id.v1:";

@@ -89,3 +89,23 @@ pub fn validate_added_key_identity(
 
     Ok(())
 }
+
+/// Apply the NOT NULL requirement of a primary key to the stored column candidate.
+pub fn apply_primary_key_columns(
+    table: &str,
+    constraint: &TableKeyConstraint,
+    columns: &mut [ColumnDef],
+) -> Result<(), String> {
+    if constraint.kind == crate::ast::TableKeyConstraintKind::PrimaryKey {
+        for key_column in &constraint.columns {
+            let column = columns
+                .iter_mut()
+                .find(|column| column.name == *key_column)
+                .ok_or_else(|| {
+                    format!("column `{key_column}` does not exist on table `{table}`")
+                })?;
+            column.not_null = true;
+        }
+    }
+    Ok(())
+}

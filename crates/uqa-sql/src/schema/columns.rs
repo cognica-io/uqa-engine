@@ -72,3 +72,7 @@ pub fn reject_default_change_on_generated_column(
 }
 
 pub mod addition;
+
+pub mod publication;
+
+pub mod alteration;

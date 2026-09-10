@@ -7,9 +7,9 @@
 //! Bind remaining ALTER dispatch to constraint execution and SQL declaration analysis.
 use crate::Engine;
 pub(super) use uqa_sql::schema::constraint_changes::{
-    constraint_error, ensure_constraint_name_available, ensure_not_null_inheritable,
+    constraint_error, ensure_not_null_inheritable,
 };
-use uqa_sql::{ast::ForeignKey, SQLError};
+use uqa_sql::SQLError;
 
 pub(super) fn table_constraint_state(
     engine: &Engine,
@@ -132,21 +132,5 @@ pub(super) fn alter_constraint(
         enforceability,
         deferrability,
         no_inherit,
-    )
-}
-
-pub(super) fn validate_altered_constraint_column_types(
-    engine: &Engine,
-    table: &str,
-    candidate_columns: &[uqa_sql::ast::ColumnDef],
-    key_constraints: &[uqa_sql::ast::TableKeyConstraint],
-    foreign_keys: &[ForeignKey],
-) -> Result<(), SQLError> {
-    uqa_sql::schema::constraint_changes::validate_altered_constraint_column_types(
-        &engine.constraint_type_context(),
-        table,
-        candidate_columns,
-        key_constraints,
-        foreign_keys,
     )
 }

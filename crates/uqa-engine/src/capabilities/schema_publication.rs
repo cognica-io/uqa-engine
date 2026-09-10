@@ -56,6 +56,39 @@ impl TableSchemaCatalog for Engine {
     }
 }
 impl TableSchemaState for SchemaTableBinding<'_> {
+    fn write_columns(
+        &self,
+    ) -> Box<dyn uqa_execution::schema::publication::columns::ColumnSchemaWrite + '_> {
+        Box::new(SchemaColumnWrite {
+            columns: self.state.columns.write(),
+        })
+    }
+    fn persist_columns(&self, columns: &[ColumnDef]) -> StorageBackendResult<()> {
+        if self.engine.is_persistent() {
+            self.engine
+                .try_save_table_schema_with_columns(&self.name, &self.state, columns)?;
+        }
+        Ok(())
+    }
+    fn constraint_header(&self) -> TableConstraintSet {
+        TableConstraintSet {
+            columns_declared: Some(*self.state.columns_declared.read()),
+            persistence: self.state.persistence,
+            on_commit: self.state.on_commit,
+            hierarchy: self.state.hierarchy.read().clone(),
+            ..TableConstraintSet::default()
+        }
+    }
+    fn publish_constraints(&self, columns: Vec<ColumnDef>, constraints: TableConstraintSet) {
+        *self.state.columns.write() = columns;
+        *self.state.table_checks.write() = constraints.checks;
+        *self.state.foreign_keys.write() = constraints.foreign_keys;
+        *self.state.key_constraints.write() = constraints.key_constraints;
+    }
+
+    fn key_constraints(&self) -> Vec<uqa_sql::ast::TableKeyConstraint> {
+        self.state.key_constraints.read().clone()
+    }
     fn hierarchy(&self) -> uqa_sql::ast::TableHierarchy {
         self.state.hierarchy.read().clone()
     }
@@ -123,5 +156,17 @@ impl uqa_execution::schema::publication::SchemaWriteTransaction for Engine {
         write: uqa_execution::schema::publication::SchemaWrite<'_>,
     ) -> StorageBackendResult<()> {
         self.with_implicit_storage_transaction(|engine| write(&engine.schema_publication_context()))
+    }
+}
+
+struct SchemaColumnWrite<'a> {
+    columns: parking_lot::MappedRwLockWriteGuard<'a, Vec<ColumnDef>>,
+}
+impl uqa_execution::schema::publication::columns::ColumnSchemaWrite for SchemaColumnWrite<'_> {
+    fn columns(&self) -> &[ColumnDef] {
+        &self.columns
+    }
+    fn publish(&mut self, columns: Vec<ColumnDef>) {
+        *self.columns = columns;
     }
 }

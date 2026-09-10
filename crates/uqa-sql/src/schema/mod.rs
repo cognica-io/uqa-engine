@@ -201,3 +201,5 @@ pub mod constraint_metadata;
 pub mod keys;
 
 pub mod constraint_changes;
+
+pub mod constraint_views;

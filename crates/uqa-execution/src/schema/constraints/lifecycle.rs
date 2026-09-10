@@ -6,10 +6,10 @@
 
 //! Schedule constraint creation, validation, and enforcement changes.
 use super::{
-    checks, constraint_error, ensure_constraint_name_available, ensure_not_null_inheritable,
-    find_constraint, foreign_key_constraint_identity, materialize_constraint_candidate,
-    publish_constraint_state, table_constraint_state, validate_check_expression,
-    ConstraintAlterContext, ConstraintLocation, SQLError,
+    checks, constraint_error, ddl_storage_error, ensure_constraint_name_available,
+    ensure_not_null_inheritable, find_constraint, foreign_key_constraint_identity,
+    materialize_constraint_candidate, publish_constraint_state, table_constraint_state,
+    validate_check_expression, ConstraintAlterContext, ConstraintLocation, SQLError,
 };
 use uqa_sql::schema::foreign_keys::column_foreign_key;
 
@@ -362,5 +362,64 @@ pub fn alter_constraint(
     if let Some(identity) = &recreated_foreign_key {
         context.modes.forget(identity);
     }
+    Ok(())
+}
+
+pub fn add_key_constraint(
+    context: &ConstraintAlterContext<'_>,
+    table: &str,
+    qualifier: &str,
+    mut constraint: uqa_sql::ast::TableKeyConstraint,
+) -> Result<(), SQLError> {
+    let mut columns = context
+        .catalog
+        .try_describe_table(table)
+        .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?
+        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+    let declared_constraints = context
+        .catalog
+        .try_declared_table_constraints(table)
+        .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
+    ensure_constraint_name_available(
+        &columns,
+        &declared_constraints,
+        constraint.name.as_deref(),
+        table,
+    )?;
+    uqa_sql::schema::indexes::names::name_constraint_indexes(
+        context.names,
+        table,
+        std::slice::from_mut(&mut constraint),
+    )?;
+    let mut key_constraints = context
+        .catalog
+        .try_key_constraints(table)
+        .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
+    key_constraints.push(constraint.clone());
+    let foreign_keys = context
+        .catalog
+        .try_foreign_keys(table)
+        .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
+    uqa_sql::schema::generated::prepare_generated_columns(
+        context.publication.bindings.schema,
+        qualifier,
+        &mut columns,
+        &key_constraints,
+        &foreign_keys,
+    )?;
+    crate::schema::keys::validate_added_key_constraint(
+        &crate::schema::keys::KeyValidationContext {
+            catalog: context.catalog,
+            constraints: context.rows,
+        },
+        table,
+        &constraint,
+    )?;
+    context
+        .writes
+        .with_schema_write(Box::new(|publication| {
+            crate::schema::publication::keys::append_key_constraint(publication, table, &constraint)
+        }))
+        .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
     Ok(())
 }

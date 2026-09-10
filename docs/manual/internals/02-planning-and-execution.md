@@ -72,6 +72,8 @@ Stored schema expression rewrites and relation, sequence, and routine binding li
 
 ## Read-path ownership
 
+ALTER COLUMN default, generated-expression, and type analysis lives in [`uqa-sql/src/schema/columns/alteration.rs`](../../../crates/uqa-sql/src/schema/columns/alteration.rs), while [`schema/columns/alteration.rs`](../../../crates/uqa-execution/src/schema/columns/alteration.rs) schedules schema transactions, row conversion, index changes, and validation. Column publication retains its write guard until the persisted candidate replaces the in-memory columns. SQL also assembles effective constraints from stored column and table declarations and resolves persisted foreign-key targets without using the session search path. Added-key publication preserves the existing declaration and hierarchy state.
+
 Catalog projection is split by virtual-relation family under [`uqa-execution/src/catalog/projection/pg_catalog/`](../../../crates/uqa-execution/src/catalog/projection/pg_catalog), with shared row, OID, type, index, constraint, and dependency projection under [`projection/helpers/`](../../../crates/uqa-execution/src/catalog/projection/helpers).
 
 Schema binding, prepared parameter inference, and stored routine binding live under [`uqa-sql/src/binding/`](../../../crates/uqa-sql/src/binding). SQL-only fixtures bind complete queries using `AnalysisCatalog`, `RelationNameResolution`, and `RoutineResolution`. The execution [binding adapter](../../../crates/uqa-execution/src/query/binding/context.rs) translates CTE metadata into immutable `BindingContext` inputs. Execution retains CTE lifetime, subquery caches, callbacks, physical rows, and operators under [`uqa-execution/src/query/`](../../../crates/uqa-execution/src/query).

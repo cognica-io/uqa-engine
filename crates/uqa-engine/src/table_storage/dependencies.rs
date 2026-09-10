@@ -31,17 +31,11 @@ impl Engine {
             .map(|(_, state)| state)
             .ok_or_else(|| table_not_found(table_name))?;
         let columns = table.columns.read();
-        let dependents = columns
-            .iter()
-            .filter(|candidate| candidate.name != column)
-            .filter(|candidate| {
-                candidate.generated.as_ref().is_some_and(|generated| {
-                    schema_expr_references_column(&generated.expression, column)
-                })
-            })
-            .map(|candidate| candidate.name.clone())
-            .collect();
-        Ok(dependents)
+        Ok(
+            uqa_sql::schema::columns::alteration::generated_columns_referencing_column(
+                &columns, column,
+            ),
+        )
     }
 
     pub(super) fn resolve_table_ddl_target(
@@ -208,52 +202,6 @@ impl Engine {
         target: &RelationIdentity,
     ) -> bool {
         stored_relation_reference_matches(&foreign_key.ref_table, target)
-    }
-
-    pub(super) fn canonical_foreign_key_target(
-        &self,
-        reference: &str,
-    ) -> StorageBackendResult<String> {
-        self.try_resolve_table_name(reference)?
-            .ok_or_else(|| table_not_found(reference))
-    }
-
-    pub(super) fn canonical_stored_foreign_key_target(
-        &self,
-        reference: &str,
-    ) -> StorageBackendResult<String> {
-        let (schema, local_name) =
-            RelationIdentity::parse_reference(reference).map_err(|error| {
-                StorageBackendError::Other(format!(
-                    "invalid persisted foreign-key target `{reference}`: {error}"
-                ))
-            })?;
-        let tables = self.storage.tables.read();
-        if let Some(schema) = schema {
-            let target = RelationIdentity::new(schema, local_name);
-            if tables.contains_key(&target) {
-                return Ok(target.qualified_name());
-            }
-            return Err(StorageBackendError::Other(format!(
-                "dangling persisted foreign-key target `{reference}`"
-            )));
-        }
-
-        let candidates = tables
-            .keys()
-            .filter(|candidate| candidate.name == local_name)
-            .map(RelationIdentity::qualified_name)
-            .collect::<Vec<_>>();
-        match candidates.as_slice() {
-            [target] => Ok(target.clone()),
-            [] => Err(StorageBackendError::Other(format!(
-                "dangling persisted foreign-key target `{reference}`"
-            ))),
-            _ => Err(StorageBackendError::Other(format!(
-                "ambiguous persisted foreign-key target `{reference}` matches {}",
-                candidates.join(", ")
-            ))),
-        }
     }
 
     pub(super) fn table_schema_references_relation(

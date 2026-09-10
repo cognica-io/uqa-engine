@@ -152,3 +152,12 @@ impl uqa_sql::schema::dependencies::regclass::SchemaReferenceCatalog for Engine 
             .map_err(|error| error.to_string())
     }
 }
+
+impl uqa_sql::schema::constraint_views::StoredTableNames for Engine {
+    fn stored_table_exists(&self, relation: &uqa_core::RelationIdentity) -> bool {
+        self.storage.tables.read().contains_key(relation)
+    }
+    fn stored_table_names(&self) -> Vec<uqa_core::RelationIdentity> {
+        self.storage.tables.read().keys().cloned().collect()
+    }
+}
