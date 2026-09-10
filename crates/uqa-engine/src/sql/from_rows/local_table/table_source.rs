@@ -51,6 +51,7 @@ pub(super) fn build_table_source_operator<'a>(
             qualifier,
             alias,
             column_aliases,
+            bound_columns,
             ..
         } => {
             let qualifier = qualifier_for(qualifier, alias.as_deref());
@@ -378,6 +379,9 @@ pub(super) fn build_table_source_operator<'a>(
                                 .map_err(uqa_execution::ExecError::from)
                         })),
                     ));
+                let scan =
+                    crate::sql::from_rows::bound_source_operator(scan, bound_columns.as_deref())?;
+                let columns = scan.schema().to_vec();
                 let aliases = table_source_aliases(&columns, &[], column_aliases);
                 let operator = qualify_source_operator_with_columns(
                     scan,

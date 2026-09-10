@@ -40,11 +40,16 @@ fn collect_source_column_owners(
             qualifier,
             alias,
             column_aliases,
+            bound_columns,
             ..
         } => {
             let qualifier = alias.as_deref().unwrap_or(qualifier);
             let mut columns = if ctes.is_visible_cte(name) {
                 Vec::new()
+            } else if let Some(columns) = bound_columns {
+                let mut columns = columns.clone();
+                columns.extend([TABLE_OID_COLUMN.to_string(), XMIN_COLUMN.to_string()]);
+                columns
             } else {
                 relation_source_columns(catalog, resolution, name)?
             };

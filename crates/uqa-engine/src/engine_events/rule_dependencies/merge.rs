@@ -13,6 +13,7 @@ pub(crate) fn visit_stored_statement_merges(
     visit: MergeCallback<'_>,
 ) -> Result<(), SQLError> {
     StoredAstVisitor {
+        source: None,
         merge: Some(visit),
         expression: None,
         ty: None,

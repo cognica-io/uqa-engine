@@ -129,6 +129,7 @@ impl Engine {
                 "SQL routine body",
             )?;
             changed |= self.bind_stored_merge_target_columns(statement)?;
+            changed |= self.bind_stored_statement_source_columns(statement)?;
         }
         Ok(changed)
     }

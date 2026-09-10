@@ -277,6 +277,8 @@ impl Engine {
         expression: &mut uqa_sql::ast::Expr,
         stored: bool,
     ) -> Result<(), SQLError> {
+        self.bind_schema_regclass_constants(expression, stored)
+            .map_err(|error| SQLError::Internal(error.to_string()))?;
         let result = if stored {
             self.resolve_loaded_sequence_references_in_expr(expression)
         } else {

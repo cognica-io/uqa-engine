@@ -307,6 +307,7 @@ fn collect_from_qualifiers(from: &SourcePlan, out: &mut BTreeSet<String>) {
 /// document store with `next_doc_id`, so neither ids nor documents are copied
 /// into a cardinality-sized staging vector before the physical join sees its
 /// first batch.
+mod bound_columns;
 mod cte_spill;
 mod engine_functions;
 mod join_predicates;
@@ -318,6 +319,7 @@ mod table_function_core;
 mod table_function_dispatch;
 mod table_function_values;
 
+pub(in crate::sql) use bound_columns::*;
 pub(in crate::sql) use cte_spill::*;
 pub(in crate::sql) use engine_functions::*;
 pub(in crate::sql) use join_predicates::*;

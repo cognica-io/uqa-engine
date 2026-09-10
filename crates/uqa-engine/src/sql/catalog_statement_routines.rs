@@ -182,6 +182,7 @@ fn command_statement_routine_inputs(
 
 fn merge_statement_routine_inputs(plan: &MergePlan) -> CommandRoutineInputs {
     let target = SourcePlan::Table {
+        bound_columns: None,
         name: plan.target.clone(),
         qualifier: plan.target_qualifier.clone(),
         alias: plan.target_alias.clone(),
@@ -361,6 +362,7 @@ fn statement_target_outer_schema(
     let target = super::select::analyze_source_plan_schema(
         engine,
         &SourcePlan::Table {
+            bound_columns: None,
             name: table.to_string(),
             qualifier: target_qualifier.to_string(),
             alias: None,

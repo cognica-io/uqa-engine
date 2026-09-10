@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use uqa_sql::ast::{FunctionBinding, FunctionBody, RenameRoutineStmt};
+use uqa_sql::ast::{CreateFunction, FunctionBinding, FunctionBody, RenameRoutineStmt};
 use uqa_sql::SQLError;
 
 use crate::{
@@ -54,10 +54,8 @@ impl Engine {
         mut rewrite: impl FnMut(&mut uqa_sql::ast::Statement) -> Result<bool, SQLError>,
     ) -> Result<(), SQLError> {
         let registry = self.durable.sql_user_functions.read().clone();
-        let mut rewritten = BTreeMap::new();
-        let mut any_changed = false;
-        for (name, overloads) in registry {
-            let mut next = Vec::with_capacity(overloads.len());
+        let mut definitions = Vec::new();
+        for overloads in registry.values() {
             for function in overloads {
                 let mut definition = function.def.clone();
                 let mut changed = false;
@@ -67,23 +65,47 @@ impl Engine {
                     }
                 }
                 if changed {
-                    let compiled = self.compile_persisted_sql_function(&definition)?;
-                    next.push(Arc::new(SQLUserFunction {
-                        def: definition,
-                        compiled,
-                    }));
-                    any_changed = true;
-                } else {
-                    next.push(function);
+                    definitions.push(definition);
                 }
             }
-            rewritten.insert(name, next);
         }
-        if any_changed {
-            self.persist_sql_functions_snapshot(&rewritten)?;
-            *self.durable.sql_user_functions.write() = rewritten;
-            self.note_catalog_registry_changed();
+        self.publish_stored_routine_body_rewrites(definitions)
+    }
+
+    pub(crate) fn publish_stored_routine_body_rewrites(
+        &self,
+        definitions: Vec<CreateFunction>,
+    ) -> Result<(), SQLError> {
+        if definitions.is_empty() {
+            return Ok(());
         }
+        let mut rewritten = self.durable.sql_user_functions.read().clone();
+        for definition in definitions {
+            let signature = routine_signature_types(&definition);
+            let function = rewritten
+                .get_mut(&definition.name)
+                .and_then(|overloads| {
+                    overloads.iter_mut().find(|function| {
+                        function.def.object_id == definition.object_id
+                            && function.def.is_procedure == definition.is_procedure
+                            && routine_signature_types(&function.def) == signature
+                    })
+                })
+                .ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "stored routine {} disappeared before its body rewrite",
+                        definition.name
+                    ))
+                })?;
+            let compiled = self.compile_persisted_sql_function(&definition)?;
+            *function = Arc::new(SQLUserFunction {
+                def: definition,
+                compiled,
+            });
+        }
+        self.persist_sql_functions_snapshot(&rewritten)?;
+        *self.durable.sql_user_functions.write() = rewritten;
+        self.note_catalog_registry_changed();
         Ok(())
     }
 

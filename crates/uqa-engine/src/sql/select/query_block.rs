@@ -82,6 +82,7 @@ pub(in crate::sql) fn run_query_block_with_prepared_exists_output(
         alias,
         column_aliases,
         include_descendants,
+        ..
     } = from
     {
         if !ctes.is_visible_cte(name) {

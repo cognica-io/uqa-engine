@@ -115,8 +115,14 @@ impl Engine {
                         }) || schema_expr_has_legacy_routine_identity(&generated.expression)?;
                 }
             }
-            let expression_requires_migration =
-                self.bind_table_schema_routine_identities(&table_name, &mut columns, &mut checks)?;
+            let relation_requires_migration =
+                self.bind_table_schema_regclass_constants(&mut columns, &mut checks, true)?;
+            let expression_requires_migration = relation_requires_migration
+                | self.bind_table_schema_routine_identities(
+                    &table_name,
+                    &mut columns,
+                    &mut checks,
+                )?;
             if !generated_requires_migration && !expression_requires_migration {
                 continue;
             }
@@ -184,7 +190,7 @@ impl Engine {
         checks: &mut [uqa_sql::ast::TableCheck],
         check_columns: &[uqa_sql::ast::ColumnDef],
     ) -> StorageBackendResult<bool> {
-        let mut changed = false;
+        let mut changed = self.bind_table_schema_regclass_constants(columns, checks, false)?;
         for column in columns {
             if let Some(default) = &mut column.default {
                 changed |=
@@ -233,16 +239,18 @@ impl Engine {
         column_name: &str,
         default: &mut uqa_sql::ast::Expr,
     ) -> StorageBackendResult<bool> {
+        let changed = self.bind_schema_regclass_constants(default, false)?;
         if !schema_expr_may_require_routine_identity_binding(default)? {
-            return Ok(false);
+            return Ok(changed);
         }
-        crate::sql::bind_stored_schema_expression_routines(self, default, default.clone()).map_err(
-            |error| {
-                StorageBackendError::Other(format!(
+        let bound =
+            crate::sql::bind_stored_schema_expression_routines(self, default, default.clone())
+                .map_err(|error| {
+                    StorageBackendError::Other(format!(
                     "bind default routine identities for `{table_name}`.`{column_name}`: {error}"
                 ))
-            },
-        )
+                })?;
+        Ok(changed || bound)
     }
 
     pub(crate) fn rewrite_schema_routine_identity(

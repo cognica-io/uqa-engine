@@ -160,6 +160,7 @@ impl Engine {
             relations.extend(self.domain_drop_view_names(domains)?);
             self.expand_column_drop_dependencies(&mut columns, &mut relations)?;
             relations = self.relation_drop_closure(relations)?;
+            columns.extend(self.sequence_drop_column_names(&relations)?);
             for (name, overloads) in registry {
                 for function in overloads {
                     if self.routine_references_domain(&function.def, domains)?

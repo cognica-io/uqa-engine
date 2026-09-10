@@ -24,10 +24,11 @@ impl Engine {
         let mode = ColumnBindingMode::Rename { relation, from, to };
         let mut binder = RuleColumnBinder::new(self, mode);
         binder.bind_statement(statement, &[], &ColumnBindingContext::default())?;
+        let shape_changed = binder.alias_shape_changed();
         Ok(binder.finish().contains(&RuleColumnDependency {
             relation: relation.clone(),
             column: from.to_string(),
-        }))
+        }) || shape_changed)
     }
 }
 
@@ -44,6 +45,7 @@ impl RuleColumnBinder<'_> {
             &merge.target_qualifier,
             merge.target_alias.as_deref(),
             &[],
+            None,
             &ColumnBindingContext::default(),
         )?;
         let (local, scopes) =

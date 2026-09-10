@@ -8,6 +8,8 @@
 
 mod expressions;
 mod helpers;
+mod lifecycle;
+mod sources;
 mod statements;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -43,7 +45,7 @@ enum ColumnBindingMode<'a> {
         to: &'a str,
     },
     Drop {
-        dependency: &'a RuleColumnDependency,
+        dependencies: &'a BTreeSet<RuleColumnDependency>,
     },
 }
 
@@ -65,9 +67,9 @@ impl<'a> ColumnBindingMode<'a> {
         matches!(self, Self::Rename { .. })
     }
 
-    const fn dropped_dependency(self) -> Option<&'a RuleColumnDependency> {
+    const fn dropped_dependencies(self) -> Option<&'a BTreeSet<RuleColumnDependency>> {
         match self {
-            Self::Drop { dependency } => Some(dependency),
+            Self::Drop { dependencies } => Some(dependencies),
             Self::Bind | Self::Rename { .. } => None,
         }
     }
@@ -153,7 +155,7 @@ impl<'a> RuleColumnBinder<'a> {
         column_aliases: &mut Vec<String>,
         scope: &ColumnScope,
     ) {
-        let Some(dependency) = self.mode.dropped_dependency() else {
+        let Some(dependencies) = self.mode.dropped_dependencies() else {
             return;
         };
         let positions = scope
@@ -161,7 +163,7 @@ impl<'a> RuleColumnBinder<'a> {
             .iter()
             .enumerate()
             .filter_map(|(position, column)| {
-                column.dependencies.contains(dependency).then_some(position)
+                (!column.dependencies.is_disjoint(dependencies)).then_some(position)
             })
             .collect::<Vec<_>>();
         for position in positions.into_iter().rev() {
@@ -178,6 +180,7 @@ impl<'a> RuleColumnBinder<'a> {
         qualifier: &str,
         alias: Option<&str>,
         column_aliases: &[String],
+        bound_columns: Option<&[String]>,
         context: &ColumnBindingContext,
     ) -> Result<ColumnScope, SQLError> {
         if let Some(columns) = context.ctes.get(&name.to_ascii_lowercase()) {
@@ -192,8 +195,11 @@ impl<'a> RuleColumnBinder<'a> {
             apply_positional_aliases(&mut columns, column_aliases);
             return Ok(opaque_scope(&columns, Some(alias.unwrap_or(qualifier))));
         }
-        let columns = crate::sql::query_source_column_names(self.engine, name, true)?
-            .ok_or_else(|| SQLError::UnknownTable(name.to_string()))?;
+        let columns = match bound_columns {
+            Some(columns) => columns.to_vec(),
+            None => crate::sql::query_source_column_names(self.engine, name, true)?
+                .ok_or_else(|| SQLError::UnknownTable(name.to_string()))?,
+        };
         if column_aliases.len() > columns.len() {
             return Err(table_alias_count_error(
                 alias.unwrap_or(qualifier),
@@ -283,6 +289,7 @@ impl<'a> RuleColumnBinder<'a> {
             &insert.target_qualifier,
             Some(&insert.target_qualifier),
             &[],
+            None,
             &ColumnBindingContext::default(),
         )?;
         if insert.columns.is_empty() && !is_default_values_insert(&insert.rows) {
@@ -357,6 +364,7 @@ impl<'a> RuleColumnBinder<'a> {
             &update.target_qualifier,
             Some(&update.target_qualifier),
             &[],
+            None,
             &ColumnBindingContext::default(),
         )?;
         let (local, scopes) =
@@ -396,6 +404,7 @@ impl<'a> RuleColumnBinder<'a> {
             &delete.target_qualifier,
             Some(&delete.target_qualifier),
             &[],
+            None,
             &ColumnBindingContext::default(),
         )?;
         let (local, scopes) =
@@ -579,18 +588,7 @@ impl<'a> RuleColumnBinder<'a> {
         context: &ColumnBindingContext,
     ) -> Result<ColumnScope, SQLError> {
         match source {
-            FromClause::Table {
-                name,
-                qualifier,
-                alias,
-                column_aliases,
-                ..
-            } => {
-                let scope =
-                    self.table_scope(name, qualifier, alias.as_deref(), column_aliases, context)?;
-                self.remove_dropped_column_aliases(column_aliases, &scope);
-                Ok(scope)
-            }
+            source @ FromClause::Table { .. } => self.bind_table_source(source, context),
             source @ FromClause::Join { .. } => self.bind_join(source, outer, context),
             FromClause::Values {
                 rows,
@@ -893,71 +891,5 @@ impl<'a> RuleColumnBinder<'a> {
         }
         *projections = bound;
         Ok(())
-    }
-}
-
-impl Engine {
-    pub(crate) fn stored_statement_column_dependencies(
-        &self,
-        statement: &Statement,
-    ) -> Result<BTreeSet<RuleColumnDependency>, SQLError> {
-        self.bind_rule_action_column_dependencies(&mut statement.clone())
-    }
-
-    pub(in crate::engine_events) fn bind_rule_condition_column_dependencies(
-        &self,
-        condition: &mut Expr,
-    ) -> Result<BTreeSet<RuleColumnDependency>, SQLError> {
-        let mut binder = RuleColumnBinder::new(self, ColumnBindingMode::Bind);
-        binder.bind_expr(condition, &[], &ColumnBindingContext::default())?;
-        Ok(binder.finish())
-    }
-
-    pub(in crate::engine_events) fn bind_rule_action_column_dependencies(
-        &self,
-        action: &mut Statement,
-    ) -> Result<BTreeSet<RuleColumnDependency>, SQLError> {
-        let mut binder = RuleColumnBinder::new(self, ColumnBindingMode::Bind);
-        binder.bind_statement(action, &[], &ColumnBindingContext::default())?;
-        Ok(binder.finish())
-    }
-
-    pub(in crate::engine_events) fn rewrite_rule_column_references(
-        &self,
-        definition: &mut uqa_sql::ast::CreateRule,
-        relation: &RelationIdentity,
-        from: &str,
-        to: &str,
-    ) -> Result<(), SQLError> {
-        let mode = ColumnBindingMode::Rename { relation, from, to };
-        if let Some(condition) = &mut definition.condition {
-            let mut binder = RuleColumnBinder::new(self, mode);
-            binder.bind_expr(condition, &[], &ColumnBindingContext::default())?;
-        }
-        for action in &mut definition.actions {
-            let mut binder = RuleColumnBinder::new(self, mode);
-            binder.bind_statement(action, &[], &ColumnBindingContext::default())?;
-        }
-        Ok(())
-    }
-
-    pub(in crate::engine_events) fn remove_rule_source_column_aliases(
-        &self,
-        definition: &mut uqa_sql::ast::CreateRule,
-        dependency: &RuleColumnDependency,
-    ) -> Result<bool, SQLError> {
-        let mode = ColumnBindingMode::Drop { dependency };
-        let mut changed = false;
-        if let Some(condition) = &mut definition.condition {
-            let mut binder = RuleColumnBinder::new(self, mode);
-            binder.bind_expr(condition, &[], &ColumnBindingContext::default())?;
-            changed |= binder.alias_shape_changed();
-        }
-        for action in &mut definition.actions {
-            let mut binder = RuleColumnBinder::new(self, mode);
-            binder.bind_statement(action, &[], &ColumnBindingContext::default())?;
-            changed |= binder.alias_shape_changed();
-        }
-        Ok(changed)
     }
 }

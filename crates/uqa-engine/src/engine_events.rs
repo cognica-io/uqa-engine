@@ -23,11 +23,12 @@ pub(crate) use rule_binding::{
 pub(crate) use rule_condition_binding::RuleConditionBinding;
 pub(crate) use rule_dependencies::{
     bind_stored_expression_routines, bind_stored_statement_routines,
-    expression_references_routine_identity, rewrite_expression_routine_identity,
-    rewrite_statement_routine_identity, rewrite_stored_statement_relation,
-    statement_references_routine_identity, stored_expression_type_names,
-    stored_statement_relation_names, stored_statement_type_names, visit_stored_expression,
-    visit_stored_statement_expressions, visit_stored_statement_merges,
+    copy_stored_source_column_shapes, expression_references_routine_identity,
+    rewrite_expression_routine_identity, rewrite_statement_routine_identity,
+    rewrite_stored_statement_relation, statement_references_routine_identity,
+    stored_expression_type_names, stored_statement_relation_names, stored_statement_type_names,
+    visit_stored_expression, visit_stored_statement_expressions, visit_stored_statement_merges,
+    visit_stored_statement_sources,
 };
 
 const RULE_CATALOG_FORMAT_VERSION: u32 = 3;

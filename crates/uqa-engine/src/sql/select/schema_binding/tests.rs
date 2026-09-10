@@ -85,6 +85,7 @@ fn complete_query_binding_uses_catalog_fixture_without_engine() {
     let resolution = RelationNameResolution::fixture(vec!["app".into()], "pg_temp_fixture".into());
     let source = SourcePlan::Join {
         left: Box::new(SourcePlan::Table {
+            bound_columns: None,
             name: "documents".into(),
             qualifier: "documents".into(),
             alias: Some("d".into()),
@@ -92,6 +93,7 @@ fn complete_query_binding_uses_catalog_fixture_without_engine() {
             include_descendants: true,
         }),
         right: Box::new(SourcePlan::Table {
+            bound_columns: None,
             name: "rankings".into(),
             qualifier: "rankings".into(),
             alias: Some("r".into()),

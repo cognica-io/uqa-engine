@@ -13,6 +13,7 @@ pub(crate) fn visit_stored_expression(
     visit: ExpressionCallback<'_>,
 ) -> Result<(), SQLError> {
     StoredAstVisitor {
+            source: None,
             merge: None,
         expression: Some(visit),
         ty: None,
@@ -28,6 +29,7 @@ pub(crate) fn visit_stored_statement_expressions(
     visit: ExpressionCallback<'_>,
 ) -> Result<(), SQLError> {
     StoredAstVisitor {
+            source: None,
             merge: None,
         expression: Some(visit),
         ty: None,

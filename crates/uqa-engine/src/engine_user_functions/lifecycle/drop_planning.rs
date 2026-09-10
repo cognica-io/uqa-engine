@@ -378,10 +378,19 @@ impl Engine {
             .iter()
             .map(RoutineDropTarget::binding)
             .collect::<Vec<_>>();
+        let mut columns = self.domain_drop_column_names(&domains)?;
+        columns.extend(
+            dependents
+                .columns
+                .iter()
+                .map(|(table, column, _)| (table.clone(), column.clone())),
+        );
+        let rewritten = self.prepare_routine_column_alias_drop(columns, &bindings)?;
         self.drop_domain_routine_checks(&bindings)?;
         self.drop_routine_object_dependents(&dependents)?;
         self.commit_domain_drop(&domains)?;
         self.commit_routine_registry_drop(&targets)?;
+        self.publish_stored_routine_body_rewrites(rewritten)?;
         self.refresh_stored_merge_target_plans()?;
         for (level, message) in notices {
             self.push_sql_notice(level, &message);

@@ -14,6 +14,39 @@ use super::{
 };
 
 impl Engine {
+    pub(super) fn sequence_drop_column_names(
+        &self,
+        relations: &BTreeSet<String>,
+    ) -> Result<BTreeSet<(String, String)>, SQLError> {
+        let sequences = self
+            .durable
+            .sequences
+            .read()
+            .keys()
+            .map(crate::RelationIdentity::qualified_name)
+            .filter(|name| relations.contains(name))
+            .collect::<Vec<_>>();
+        let mut columns = BTreeSet::new();
+        for sequence in sequences {
+            for dependent in self
+                .sequence_schema_expression_dependents(&sequence)
+                .map_err(|error| {
+                    SQLError::Internal(format!("inspect sequence column dependencies: {error}"))
+                })?
+            {
+                if let crate::engine_sequences::SequenceSchemaDependent::GeneratedColumn {
+                    table,
+                    column,
+                    ..
+                } = dependent
+                {
+                    columns.insert((table, column));
+                }
+            }
+        }
+        Ok(columns)
+    }
+
     pub(super) fn stored_routine_references_columns(
         &self,
         definition: &CreateFunction,
@@ -39,7 +72,7 @@ impl Engine {
         Ok(false)
     }
 
-    fn relation_routine_drop_error(
+    pub(crate) fn relation_dependents_drop_error(
         &self,
         names: &[String],
         kind: &str,
@@ -181,9 +214,13 @@ impl Engine {
         loop {
             let previous = (relations.len(), resolution.targets.len(), domains.len());
             relations = self.relation_drop_closure(relations)?;
+            let mut columns = self.sequence_drop_column_names(&relations)?;
+            self.expand_column_drop_dependencies(&mut columns, &mut relations)?;
             for (name, overloads) in &registry {
                 for function in overloads {
-                    if self.stored_routine_references_relations(&function.def, &relations)? {
+                    if self.stored_routine_references_relations(&function.def, &relations)?
+                        || self.stored_routine_references_columns(&function.def, &columns)?
+                    {
                         let target = RoutineDropTarget {
                             object_id: function.def.object_id,
                             name: name.clone(),
@@ -200,9 +237,14 @@ impl Engine {
                 return Ok(());
             }
             if !cascade {
-                return Err(self.relation_routine_drop_error(names, kind)?);
+                return Err(self.relation_dependents_drop_error(names, kind)?);
             }
-            self.expand_routine_domain_drop(&registry, &mut resolution, &mut domains)?;
+            self.expand_routine_domain_column_drop(
+                &registry,
+                &mut resolution,
+                &mut domains,
+                columns,
+            )?;
             let dependents = self.routine_object_dependents(&resolution.targets, true)?;
             relations.extend(dependents.views.iter().cloned());
             if previous == (relations.len(), resolution.targets.len(), domains.len()) {

@@ -28,6 +28,7 @@ pub(super) fn preserve_table_column_name(
             qualifier,
             alias,
             column_aliases,
+            bound_columns,
             ..
         } => {
             let identity = RelationIdentity::from_legacy_name(name).map_err(|error| {
@@ -36,16 +37,26 @@ pub(super) fn preserve_table_column_name(
             if &identity != relation {
                 return Ok(false);
             }
-            let columns = crate::sql::query_source_column_names(engine, name, true)?
-                .ok_or_else(|| SQLError::UnknownTable(name.clone()))?;
-            let position = columns
+            let columns = match bound_columns {
+                Some(columns) => columns
+                    .iter()
+                    .map(|column| {
+                        if same_identifier(column, from) {
+                            to.to_string()
+                        } else {
+                            column.clone()
+                        }
+                    })
+                    .collect(),
+                None => crate::sql::query_source_column_names(engine, name, true)?
+                    .ok_or_else(|| SQLError::UnknownTable(name.clone()))?,
+            };
+            let Some(position) = columns
                 .iter()
                 .position(|column| same_identifier(column, to))
-                .ok_or_else(|| {
-                    SQLError::Internal(format!(
-                        "renamed rule dependency column \"{to}\" is missing from relation `{name}`"
-                    ))
-                })?;
+            else {
+                return Ok(false);
+            };
             if let Some(visible) = column_aliases.get(position) {
                 return Ok(same_identifier(visible, from));
             }

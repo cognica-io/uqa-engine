@@ -7,6 +7,7 @@
 //! Routine registration, catalog persistence, alteration, and removal.
 
 mod cascade;
+mod column_aliases;
 mod column_dependencies;
 mod compilation;
 mod dependencies;

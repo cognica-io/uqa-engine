@@ -6,6 +6,7 @@
 
 //! DDL target resolution, relation dependencies, and catalog index references.
 
+mod regclass;
 mod routines;
 mod sequences;
 

@@ -182,6 +182,7 @@ pub(in crate::compiler) fn compile_from_node(node: &Node) -> Result<FromClause> 
                 qualifier: r.relname.clone(),
                 alias,
                 column_aliases,
+                bound_columns: None,
                 include_descendants: r.inh,
             })
         }

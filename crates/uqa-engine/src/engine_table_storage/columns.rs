@@ -118,6 +118,7 @@ impl Engine {
 
     pub fn drop_column(&self, table: &str, column: &str) -> StorageBackendResult<bool> {
         self.with_implicit_storage_transaction(|engine| {
+            let mut rewritten = Vec::new();
             if let Some(canonical) =
                 engine.resolve_table_ddl_target(table, "ALTER TABLE DROP COLUMN")?
             {
@@ -125,10 +126,19 @@ impl Engine {
                     engine
                         .drop_column_routine_dependents(&canonical, column, false)
                         .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+                    rewritten = engine
+                        .prepare_routine_column_alias_drop(
+                            std::collections::BTreeSet::from([(canonical, column.to_string())]),
+                            &[],
+                        )
+                        .map_err(|error| StorageBackendError::Other(error.to_string()))?;
                 }
             }
             let dropped = engine.try_drop_column_inner(table, column)?;
             if dropped {
+                engine
+                    .publish_stored_routine_body_rewrites(rewritten)
+                    .map_err(|error| StorageBackendError::Other(error.to_string()))?;
                 engine
                     .refresh_stored_merge_target_plans()
                     .map_err(|error| StorageBackendError::Other(error.to_string()))?;

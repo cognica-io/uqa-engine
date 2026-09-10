@@ -450,6 +450,7 @@ impl SchemaScope {
                 qualifier,
                 alias,
                 column_aliases,
+                bound_columns,
                 ..
             } => {
                 let qualifier = alias.as_deref().unwrap_or(qualifier);
@@ -547,6 +548,10 @@ impl SchemaScope {
                         .map(|column| Some(column.ty.clone()))
                         .collect();
                     let schema = RowSchema::with_qualified_types(qualifier, columns, types);
+                    let schema = crate::sql::from_rows::bound_source_schema(
+                        &schema,
+                        bound_columns.as_deref(),
+                    )?;
                     let schema = alias_table_schema(&schema, qualifier, column_aliases)?;
                     return Ok(analysis::with_table_pseudo_columns(&schema, qualifier));
                 }
@@ -565,6 +570,10 @@ impl SchemaScope {
                         .collect();
                     let types = typed_columns.into_iter().map(|(_, ty)| Some(ty)).collect();
                     let schema = RowSchema::with_qualified_types(qualifier, columns, types);
+                    let schema = crate::sql::from_rows::bound_source_schema(
+                        &schema,
+                        bound_columns.as_deref(),
+                    )?;
                     return alias_table_schema(&schema, qualifier, column_aliases);
                 }
                 if let Some(schema) =

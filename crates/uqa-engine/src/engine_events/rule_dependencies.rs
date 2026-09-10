@@ -10,10 +10,12 @@ mod ctes;
 mod expressions;
 mod merge;
 mod routines;
+mod sources;
 mod types;
 use ctes::{collect_cte_relation_dependencies, collect_cte_source_routine_dependencies};
 pub(crate) use expressions::{visit_stored_expression, visit_stored_statement_expressions};
 pub(crate) use merge::visit_stored_statement_merges;
+pub(crate) use sources::{copy_stored_source_column_shapes, visit_stored_statement_sources};
 pub(crate) use types::{
     stored_expression_type_names, stored_statement_relation_names, stored_statement_type_names,
 };
@@ -38,8 +40,10 @@ pub(crate) use routines::{
 type MergeCallback<'a> = &'a mut dyn FnMut(&mut uqa_sql::ast::MergeStmt) -> Result<(), SQLError>;
 
 type ExpressionCallback<'a> = &'a mut dyn FnMut(&mut Expr) -> Result<(), SQLError>;
+type SourceCallback<'a> = &'a mut dyn FnMut(&mut FromClause) -> Result<(), SQLError>;
 
 struct StoredAstVisitor<'a, R, F> {
+    source: Option<SourceCallback<'a>>,
     merge: Option<MergeCallback<'a>>,
     expression: Option<ExpressionCallback<'a>>,
     ty: Option<&'a mut dyn FnMut(&mut String)>,
@@ -250,14 +254,23 @@ where
         source: &mut FromClause,
         visible_ctes: &BTreeSet<String>,
     ) -> Result<(), SQLError> {
+        if let FromClause::Table { name, .. } = source {
+            let is_cte =
+                RelationIdentity::parse_reference(name)
+                    .ok()
+                    .is_some_and(|(schema, relation)| {
+                        schema.is_none() && visible_ctes.contains(&relation)
+                    });
+            if is_cte {
+                return Ok(());
+            }
+        }
+        if let Some(visit) = self.source.as_mut() {
+            visit(source)?;
+        }
         match source {
             FromClause::Table { name, .. } => {
-                let is_cte = RelationIdentity::parse_reference(name).ok().is_some_and(
-                    |(schema, relation)| schema.is_none() && visible_ctes.contains(&relation),
-                );
-                if !is_cte {
-                    (self.relation)(name)?;
-                }
+                (self.relation)(name)?;
             }
             FromClause::Join {
                 left, right, on, ..
@@ -508,6 +521,7 @@ impl Engine {
                                   _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
          -> Result<(), SQLError> { Ok(()) };
         StoredAstVisitor {
+            source: None,
             merge: None,
             expression: None,
             ty: None,
@@ -541,6 +555,7 @@ impl Engine {
                                   _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
          -> Result<(), SQLError> { Ok(()) };
         StoredAstVisitor {
+            source: None,
             merge: None,
             expression: None,
             ty: None,
@@ -580,6 +595,7 @@ impl Engine {
                                   _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
          -> Result<(), SQLError> { Ok(()) };
         StoredAstVisitor {
+            source: None,
             merge: None,
             expression: None,
             ty: None,
@@ -625,6 +641,7 @@ pub(crate) fn rewrite_stored_statement_relation(
                               _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
      -> Result<(), SQLError> { Ok(()) };
     StoredAstVisitor {
+        source: None,
         merge: None,
         expression: None,
         ty: None,
@@ -680,6 +697,7 @@ pub(super) fn rewrite_stored_rule_relation(
                                   _: Option<&mut Option<uqa_sql::ast::FunctionBinding>>|
          -> Result<(), SQLError> { Ok(()) };
         StoredAstVisitor {
+            source: None,
             merge: None,
             expression: None,
             ty: None,

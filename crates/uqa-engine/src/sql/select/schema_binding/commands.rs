@@ -37,6 +37,7 @@ impl SchemaScope {
             .mutation_target()
             .ok_or_else(|| SQLError::Internal("non-DML command in a WITH definition".into()))?;
         let source = SourcePlan::Table {
+            bound_columns: None,
             name: table.to_string(),
             qualifier: command.target_qualifier().unwrap_or(table).to_string(),
             alias: None,

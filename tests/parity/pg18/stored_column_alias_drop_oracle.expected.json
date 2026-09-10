@@ -1,0 +1,3378 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE stored_alias_source(discarded integer, amount integer, spare integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO stored_alias_source VALUES(5,42,84)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION stored_alias_reader() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT s.kept FROM stored_alias_source AS s(unused,kept,tail); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT stored_alias_reader() AS amount",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "amount"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "42"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_alias_source DROP COLUMN discarded RESTRICT",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT stored_alias_reader() AS amount",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "amount"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "42"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE stored_alias_source ADD COLUMN discarded integer DEFAULT 1000",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT stored_alias_reader() AS amount",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "amount"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "42"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE stored_alias_source CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE alias_matrix(a integer, x integer, b integer, y integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE alias_other(z integer, unused integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE alias_right(x integer, z integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO alias_matrix VALUES(1,42,2,84)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO alias_other VALUES(7,9)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO alias_right VALUES(42,7)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_direct() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT s.kept FROM alias_matrix s(da,kept,db,tail); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_partial() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT s.kept+s.y FROM alias_matrix s(da,kept); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_nested() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT q.n FROM (SELECT s.kept AS n FROM alias_matrix s(da,kept,db,tail)) q; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_cte() RETURNS integer LANGUAGE SQL BEGIN ATOMIC WITH copied(v) AS (SELECT s.kept FROM alias_matrix s(da,kept,db,tail)) SELECT v FROM copied; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_lateral() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT q.n FROM alias_matrix s(da,kept,db,tail) CROSS JOIN LATERAL (SELECT s.kept+1 AS n) q; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_scalar() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT (SELECT s.kept FROM alias_matrix s(da,kept,db,tail)); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_join() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT j.kept+j.other_id FROM (alias_matrix s CROSS JOIN alias_other o) j(da,kept,db,tail,other_id,other_unused); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_full_join() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT j.kept+j.other_value FROM (alias_matrix s FULL JOIN alias_right r USING(x)) j(kept,da,db,tail,other_value); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_nested_join() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT j.kept+j.other_id+j.k FROM ((alias_matrix s CROSS JOIN alias_other o) i(da,kept,db,tail,other_id,other_unused) CROSS JOIN (VALUES(3)) v(k)) j(da,kept,db,tail,other_id,other_unused,k); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_parameter(p integer DEFAULT 5) RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT s.kept+alias_parameter.p FROM alias_matrix s(da,kept,db,tail); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_count() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT count(*)::integer FROM alias_matrix s(da,kept,db,tail); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_shadow() RETURNS integer LANGUAGE SQL BEGIN ATOMIC WITH alias_matrix(a,b,c,d) AS (VALUES(10,20,30,40)) SELECT s.v FROM alias_matrix s(u,v,w,z); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_late() RETURNS integer LANGUAGE SQL AS 'SELECT s.kept FROM alias_matrix s(da,kept,db,tail)'",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT alias_direct(), alias_partial(), alias_nested(), alias_cte(), alias_lateral(), alias_scalar(), alias_join(), alias_full_join(), alias_nested_join(), alias_parameter(), alias_count(), alias_shadow()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "alias_direct",
+            "alias_partial",
+            "alias_nested",
+            "alias_cte",
+            "alias_lateral",
+            "alias_scalar",
+            "alias_join",
+            "alias_full_join",
+            "alias_nested_join",
+            "alias_parameter",
+            "alias_count",
+            "alias_shadow"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "42",
+              "126",
+              "42",
+              "42",
+              "43",
+              "42",
+              "49",
+              "49",
+              "52",
+              "47",
+              "1",
+              "20"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SAVEPOINT retained_aliases",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE alias_matrix DROP COLUMN a, DROP COLUMN b",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT alias_direct(), alias_partial(), alias_nested(), alias_cte(), alias_lateral(), alias_scalar(), alias_join(), alias_full_join(), alias_nested_join(), alias_parameter(), alias_count(), alias_shadow()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "alias_direct",
+            "alias_partial",
+            "alias_nested",
+            "alias_cte",
+            "alias_lateral",
+            "alias_scalar",
+            "alias_join",
+            "alias_full_join",
+            "alias_nested_join",
+            "alias_parameter",
+            "alias_count",
+            "alias_shadow"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "42",
+              "126",
+              "42",
+              "42",
+              "43",
+              "42",
+              "49",
+              "49",
+              "52",
+              "47",
+              "1",
+              "20"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK TO retained_aliases",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "COMMIT",
+      "command_tags": [
+        "COMMIT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT alias_direct(), alias_partial(), alias_nested(), alias_cte(), alias_lateral(), alias_scalar(), alias_join(), alias_full_join(), alias_nested_join(), alias_parameter(), alias_count(), alias_shadow()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "alias_direct",
+            "alias_partial",
+            "alias_nested",
+            "alias_cte",
+            "alias_lateral",
+            "alias_scalar",
+            "alias_join",
+            "alias_full_join",
+            "alias_nested_join",
+            "alias_parameter",
+            "alias_count",
+            "alias_shadow"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "42",
+              "126",
+              "42",
+              "42",
+              "43",
+              "42",
+              "49",
+              "49",
+              "52",
+              "47",
+              "1",
+              "20"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE alias_matrix DROP COLUMN a, DROP COLUMN missing_alias_column",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"missing_alias_column\" of relation \"alias_matrix\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT alias_direct(), alias_partial(), alias_nested(), alias_cte(), alias_lateral(), alias_scalar(), alias_join(), alias_full_join(), alias_nested_join(), alias_parameter(), alias_count(), alias_shadow()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "alias_direct",
+            "alias_partial",
+            "alias_nested",
+            "alias_cte",
+            "alias_lateral",
+            "alias_scalar",
+            "alias_join",
+            "alias_full_join",
+            "alias_nested_join",
+            "alias_parameter",
+            "alias_count",
+            "alias_shadow"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "42",
+              "126",
+              "42",
+              "42",
+              "43",
+              "42",
+              "49",
+              "49",
+              "52",
+              "47",
+              "1",
+              "20"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE alias_matrix DROP COLUMN a RESTRICT",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT alias_direct(), alias_partial(), alias_nested(), alias_cte(), alias_lateral(), alias_scalar(), alias_join(), alias_full_join(), alias_nested_join(), alias_parameter(), alias_count(), alias_shadow()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "alias_direct",
+            "alias_partial",
+            "alias_nested",
+            "alias_cte",
+            "alias_lateral",
+            "alias_scalar",
+            "alias_join",
+            "alias_full_join",
+            "alias_nested_join",
+            "alias_parameter",
+            "alias_count",
+            "alias_shadow"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "42",
+              "126",
+              "42",
+              "42",
+              "43",
+              "42",
+              "49",
+              "49",
+              "52",
+              "47",
+              "1",
+              "20"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE alias_matrix DROP COLUMN b RESTRICT",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT alias_direct(), alias_partial(), alias_nested(), alias_cte(), alias_lateral(), alias_scalar(), alias_join(), alias_full_join(), alias_nested_join(), alias_parameter(), alias_count(), alias_shadow()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "alias_direct",
+            "alias_partial",
+            "alias_nested",
+            "alias_cte",
+            "alias_lateral",
+            "alias_scalar",
+            "alias_join",
+            "alias_full_join",
+            "alias_nested_join",
+            "alias_parameter",
+            "alias_count",
+            "alias_shadow"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "42",
+              "126",
+              "42",
+              "42",
+              "43",
+              "42",
+              "49",
+              "49",
+              "52",
+              "47",
+              "1",
+              "20"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT alias_late()",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P10",
+        "message": "table \"s\" has 2 columns available but 4 columns specified"
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER TABLE alias_matrix ADD COLUMN a integer DEFAULT 1000, ADD COLUMN b integer DEFAULT 2000",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT alias_direct(), alias_partial(), alias_nested(), alias_cte(), alias_lateral(), alias_scalar(), alias_join(), alias_full_join(), alias_nested_join(), alias_parameter(), alias_count(), alias_shadow()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "alias_direct",
+            "alias_partial",
+            "alias_nested",
+            "alias_cte",
+            "alias_lateral",
+            "alias_scalar",
+            "alias_join",
+            "alias_full_join",
+            "alias_nested_join",
+            "alias_parameter",
+            "alias_count",
+            "alias_shadow"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "42",
+              "126",
+              "42",
+              "42",
+              "43",
+              "42",
+              "49",
+              "49",
+              "52",
+              "47",
+              "1",
+              "20"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE alias_matrix RENAME COLUMN x TO amount",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT alias_direct(), alias_partial(), alias_nested(), alias_cte(), alias_lateral(), alias_scalar(), alias_join(), alias_full_join(), alias_nested_join(), alias_parameter(), alias_count(), alias_shadow()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "alias_direct",
+            "alias_partial",
+            "alias_nested",
+            "alias_cte",
+            "alias_lateral",
+            "alias_scalar",
+            "alias_join",
+            "alias_full_join",
+            "alias_nested_join",
+            "alias_parameter",
+            "alias_count",
+            "alias_shadow"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "42",
+              "126",
+              "42",
+              "42",
+              "43",
+              "42",
+              "49",
+              "49",
+              "52",
+              "47",
+              "1",
+              "20"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE alias_matrix DROP COLUMN amount RESTRICT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop column amount of table alias_matrix because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT alias_direct(), alias_partial(), alias_nested(), alias_cte(), alias_lateral(), alias_scalar(), alias_join(), alias_full_join(), alias_nested_join(), alias_parameter(), alias_count(), alias_shadow()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "alias_direct",
+            "alias_partial",
+            "alias_nested",
+            "alias_cte",
+            "alias_lateral",
+            "alias_scalar",
+            "alias_join",
+            "alias_full_join",
+            "alias_nested_join",
+            "alias_parameter",
+            "alias_count",
+            "alias_shadow"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "42",
+              "126",
+              "42",
+              "42",
+              "43",
+              "42",
+              "49",
+              "49",
+              "52",
+              "47",
+              "1",
+              "20"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE alias_matrix CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT alias_shadow()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "alias_shadow"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "20"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION alias_shadow(), alias_late()",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE alias_other,alias_right",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE alias_dml_source(a integer,id integer,n integer,b integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE alias_dml_target(id integer,n integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE alias_dml_inserted(id integer,n integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO alias_dml_source VALUES(1,7,42,2)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO alias_dml_target VALUES(7,0),(8,0)",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_insert() RETURNS integer LANGUAGE SQL BEGIN ATOMIC INSERT INTO alias_dml_inserted SELECT s.k,s.value FROM alias_dml_source s(da,k,value,db) RETURNING n; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_update() RETURNS integer LANGUAGE SQL BEGIN ATOMIC UPDATE alias_dml_target d SET n=s.value+1 FROM alias_dml_source s(da,k,value,db) WHERE d.id=s.k RETURNING d.n; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_delete() RETURNS integer LANGUAGE SQL BEGIN ATOMIC DELETE FROM alias_dml_target d USING alias_dml_source s(da,k,value,db) WHERE d.id=s.k+1 RETURNING d.id; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_merge() RETURNS integer LANGUAGE SQL BEGIN ATOMIC MERGE INTO alias_dml_target d USING alias_dml_source s(da,k,value,db) ON d.id=s.k WHEN MATCHED THEN UPDATE SET n=s.value WHEN NOT MATCHED THEN INSERT(id,n) VALUES(s.k,s.value) RETURNING d.n; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_cte_update() RETURNS integer LANGUAGE SQL BEGIN ATOMIC WITH changed AS (UPDATE alias_dml_target d SET n=s.value+2 FROM alias_dml_source s(da,k,value,db) WHERE d.id=s.k RETURNING d.n) SELECT n FROM changed; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_cte_merge() RETURNS integer LANGUAGE SQL BEGIN ATOMIC WITH changed AS (MERGE INTO alias_dml_target d USING alias_dml_source s(da,k,value,db) ON d.id=s.k WHEN MATCHED THEN UPDATE SET n=s.value+3 RETURNING d.n) SELECT n FROM changed; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE PROCEDURE alias_proc() LANGUAGE SQL BEGIN ATOMIC UPDATE alias_dml_target d SET n=s.value+4 FROM alias_dml_source s(da,k,value,db) WHERE d.id=s.k; END",
+      "command_tags": [
+        "CREATE PROCEDURE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT alias_insert(),alias_update(),alias_delete(),alias_merge(),alias_cte_update(),alias_cte_merge()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "alias_insert",
+            "alias_update",
+            "alias_delete",
+            "alias_merge",
+            "alias_cte_update",
+            "alias_cte_merge"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "42",
+              "43",
+              "8",
+              "42",
+              "44",
+              "45"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CALL alias_proc()",
+      "command_tags": [
+        "CALL"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id,n FROM alias_dml_target ORDER BY id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "7",
+              "46"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE alias_dml_source DROP COLUMN a, DROP COLUMN b",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO alias_dml_target VALUES(8,0)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT alias_insert(),alias_update(),alias_delete(),alias_merge(),alias_cte_update(),alias_cte_merge()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "alias_insert",
+            "alias_update",
+            "alias_delete",
+            "alias_merge",
+            "alias_cte_update",
+            "alias_cte_merge"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "42",
+              "43",
+              "8",
+              "42",
+              "44",
+              "45"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CALL alias_proc()",
+      "command_tags": [
+        "CALL"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id,n FROM alias_dml_target ORDER BY id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "7",
+              "46"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE alias_dml_source ADD COLUMN a integer DEFAULT 1000, ADD COLUMN b integer DEFAULT 2000",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO alias_dml_target VALUES(8,0)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT alias_insert(),alias_update(),alias_delete(),alias_merge(),alias_cte_update(),alias_cte_merge()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "alias_insert",
+            "alias_update",
+            "alias_delete",
+            "alias_merge",
+            "alias_cte_update",
+            "alias_cte_merge"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "42",
+              "43",
+              "8",
+              "42",
+              "44",
+              "45"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CALL alias_proc()",
+      "command_tags": [
+        "CALL"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id,n FROM alias_dml_target ORDER BY id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "7",
+              "46"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE alias_dml_source CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE alias_dml_target,alias_dml_inserted",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN alias_domain AS integer",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE alias_domain_source(a alias_domain,x integer,b alias_domain,y integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO alias_domain_source VALUES(1,42,2,84)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_domain_reader() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT s.kept+s.tail FROM alias_domain_source s(da,kept,db,tail); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_domain_doomed() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT s.da::integer FROM alias_domain_source s(da,kept,db,tail); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW alias_domain_view AS SELECT alias_domain_reader() AS amount",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN alias_domain CASCADE",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT alias_domain_reader(),to_regprocedure('alias_domain_doomed()') IS NULL AS doomed_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "alias_domain_reader",
+            "doomed_gone"
+          ],
+          "type_oids": [
+            23,
+            16
+          ],
+          "rows": [
+            [
+              "126",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT amount FROM alias_domain_view",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "amount"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "126"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE alias_domain_source CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SCHEMA alias_generators",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_generators.generate(v integer) RETURNS integer IMMUTABLE LANGUAGE SQL RETURN v+1",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE alias_generated_source(a integer GENERATED ALWAYS AS (alias_generators.generate(1)) STORED,x integer,b integer GENERATED ALWAYS AS (alias_generators.generate(2)) STORED,y integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO alias_generated_source(x,y) VALUES(42,84)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_generated_reader() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT s.kept+s.tail FROM alias_generated_source s(da,kept,db,tail); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_generated_doomed() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT s.da FROM alias_generated_source s(da,kept,db,tail); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW alias_generated_view AS SELECT alias_generated_reader() AS amount",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA alias_generators CASCADE",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT alias_generated_reader(),to_regprocedure('alias_generated_doomed()') IS NULL AS doomed_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "alias_generated_reader",
+            "doomed_gone"
+          ],
+          "type_oids": [
+            23,
+            16
+          ],
+          "rows": [
+            [
+              "126",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT amount FROM alias_generated_view",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "amount"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "126"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE alias_generated_source CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE ROLE alias_column_owner",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SCHEMA alias_private",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE alias_owned_source(a integer,x integer,b integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO alias_owned_source VALUES(1,42,2)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_private.reader() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT s.kept FROM alias_owned_source s(da,kept,db); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE alias_owned_source OWNER TO alias_column_owner",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE alias_column_owner",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE alias_owned_source DROP COLUMN a, DROP COLUMN b",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT alias_private.reader()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "reader"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "42"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE alias_owned_source CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SCHEMA alias_private",
+      "command_tags": [
+        "DROP SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP ROLE alias_column_owner",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE alias_column_sequence",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE alias_sequence_source(a regclass GENERATED ALWAYS AS ('alias_column_sequence'::regclass) STORED,x integer,b regclass GENERATED ALWAYS AS ('alias_column_sequence'::regclass) STORED,y integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO alias_sequence_source(x,y) VALUES(42,84)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_sequence_reader() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT s.kept+s.tail FROM alias_sequence_source s(da,kept,db,tail); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_sequence_doomed() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT s.da::oid::integer FROM alias_sequence_source s(da,kept,db,tail); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SEQUENCE alias_column_sequence CASCADE",
+      "command_tags": [
+        "DROP SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT alias_sequence_reader(),to_regprocedure('alias_sequence_doomed()') IS NULL AS doomed_gone",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "alias_sequence_reader",
+            "doomed_gone"
+          ],
+          "type_oids": [
+            23,
+            16
+          ],
+          "rows": [
+            [
+              "126",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE alias_sequence_source CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE alias_added(a integer,x integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE alias_added_other(z integer,unused integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO alias_added VALUES(1,42)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO alias_added_other VALUES(7,9)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_added_reader() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT j.kept+j.other_id FROM (alias_added s CROSS JOIN alias_added_other o) j(da,kept,other_id,other_unused); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_added_star() RETURNS TABLE(a integer,x integer) LANGUAGE SQL BEGIN ATOMIC SELECT * FROM alias_added; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_added_count() RETURNS bigint LANGUAGE SQL BEGIN ATOMIC SELECT count(*) FROM alias_added; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT alias_added_reader(),alias_added_count()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "alias_added_reader",
+            "alias_added_count"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "49",
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM alias_added_star()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "42"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE alias_added ADD COLUMN z integer DEFAULT 99",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE alias_added_other ADD COLUMN x integer DEFAULT 13",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT alias_added_reader(),alias_added_count()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "alias_added_reader",
+            "alias_added_count"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "49",
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM alias_added_star()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "x"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "42"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION alias_added_star()",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE alias_added DROP COLUMN a RESTRICT",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE alias_added_other DROP COLUMN unused RESTRICT",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE alias_added ADD COLUMN a integer DEFAULT 1000",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT alias_added_reader(),alias_added_count()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "alias_added_reader",
+            "alias_added_count"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "49",
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE OR REPLACE FUNCTION alias_added_reader() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT j.extra+j.added FROM (alias_added s CROSS JOIN alias_added_other o) j(kept,extra,old,other_id,added); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT alias_added_reader(),alias_added_count()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "alias_added_reader",
+            "alias_added_count"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "112",
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE alias_added,alias_added_other CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE alias_identity_sequence",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE alias_identity_source(a regclass GENERATED ALWAYS AS ('alias_identity_sequence'::regclass) STORED,x integer,b regclass GENERATED ALWAYS AS ('alias_identity_sequence'::regclass) VIRTUAL,d regclass DEFAULT 'alias_identity_sequence'::regclass CHECK('alias_identity_sequence'::regclass IS NOT NULL))",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO alias_identity_source(x) VALUES(42)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_identity_reader() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT s.kept FROM alias_identity_source s(da,kept,db,tail) ORDER BY s.kept LIMIT 1; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER SEQUENCE alias_identity_sequence RENAME TO alias_identity_renamed",
+      "command_tags": [
+        "ALTER SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE SEQUENCE alias_identity_sequence",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO alias_identity_source(x) VALUES(84)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT a::text,b::text,d::text FROM alias_identity_source ORDER BY x",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "d"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "alias_identity_renamed",
+              "alias_identity_renamed",
+              "alias_identity_renamed"
+            ],
+            [
+              "alias_identity_renamed",
+              "alias_identity_renamed",
+              "alias_identity_renamed"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP SEQUENCE alias_identity_sequence RESTRICT",
+      "command_tags": [
+        "DROP SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT alias_identity_reader()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "alias_identity_reader"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "42"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP SEQUENCE alias_identity_renamed RESTRICT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop sequence alias_identity_renamed because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SAVEPOINT identity_original",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP SEQUENCE alias_identity_renamed CASCADE",
+      "command_tags": [
+        "DROP SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT column_name FROM information_schema.columns WHERE table_name='alias_identity_source' ORDER BY ordinal_position",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "column_name"
+          ],
+          "type_oids": [
+            19
+          ],
+          "rows": [
+            [
+              "x"
+            ],
+            [
+              "d"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT alias_identity_reader()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "alias_identity_reader"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "42"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK TO identity_original",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "COMMIT",
+      "command_tags": [
+        "COMMIT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT a::text,b::text,d::text FROM alias_identity_source ORDER BY x",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "a",
+            "b",
+            "d"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "alias_identity_renamed",
+              "alias_identity_renamed",
+              "alias_identity_renamed"
+            ],
+            [
+              "alias_identity_renamed",
+              "alias_identity_renamed",
+              "alias_identity_renamed"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP SEQUENCE alias_identity_renamed CASCADE",
+      "command_tags": [
+        "DROP SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT column_name FROM information_schema.columns WHERE table_name='alias_identity_source' ORDER BY ordinal_position",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "column_name"
+          ],
+          "type_oids": [
+            19
+          ],
+          "rows": [
+            [
+              "x"
+            ],
+            [
+              "d"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT alias_identity_reader()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "alias_identity_reader"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "42"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE alias_identity_source CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE alias_star_source(a integer,x integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO alias_star_source VALUES(1,42)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_star_pair() RETURNS TABLE(k integer,v integer) LANGUAGE SQL BEGIN ATOMIC SELECT 7,9; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_star_function() RETURNS TABLE(k integer,v integer) LANGUAGE SQL BEGIN ATOMIC SELECT * FROM alias_star_pair(); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_star_mixed() RETURNS TABLE(k integer,v integer) LANGUAGE SQL BEGIN ATOMIC SELECT q.* FROM alias_star_source s(da,kept) CROSS JOIN alias_star_pair() q; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION alias_star_cte() RETURNS integer LANGUAGE SQL BEGIN ATOMIC WITH q(a,b) AS (SELECT * FROM alias_star_pair()) SELECT q.a+s.kept FROM alias_star_source s(da,kept) CROSS JOIN q; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM alias_star_function()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "v"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "7",
+              "9"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM alias_star_mixed()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "v"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "7",
+              "9"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT alias_star_cte()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "alias_star_cte"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "49"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE alias_star_source DROP COLUMN a RESTRICT",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE alias_star_source ADD COLUMN a integer DEFAULT 1000",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM alias_star_function()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "v"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "7",
+              "9"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM alias_star_mixed()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "v"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "7",
+              "9"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT alias_star_cte()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "alias_star_cte"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "49"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE alias_star_source DROP COLUMN x CASCADE",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE alias_star_source DROP COLUMN a RESTRICT",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM alias_star_mixed()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "v"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "7",
+              "9"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP FUNCTION alias_star_pair() CASCADE",
+      "command_tags": [
+        "DROP FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE alias_star_source CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    }
+  ]
+}

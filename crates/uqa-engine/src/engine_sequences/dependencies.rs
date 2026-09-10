@@ -73,22 +73,6 @@ impl SequenceSchemaDependent {
             ),
         }
     }
-
-    fn restrict_label(&self) -> String {
-        match self {
-            Self::Default { table, column, .. } | Self::GeneratedColumn { table, column, .. } => {
-                format!("{table}.{column}")
-            }
-            Self::CheckConstraint {
-                table,
-                constraint,
-                foreign,
-            } => format!(
-                "constraint {constraint} on {} {table}",
-                relation_kind(*foreign)
-            ),
-        }
-    }
 }
 
 fn relation_kind(foreign: bool) -> &'static str {
@@ -106,28 +90,8 @@ struct SequenceDropDependents {
 }
 
 impl SequenceDropDependents {
-    fn ensure_empty_for_restrict(&self, name: &str) -> Result<(), SQLError> {
-        if self.schema.is_empty() && self.views.is_empty() && self.rules.is_empty() {
-            return Ok(());
-        }
-        let mut dependents = self
-            .schema
-            .iter()
-            .map(SequenceSchemaDependent::restrict_label)
-            .collect::<Vec<_>>();
-        dependents.extend(self.views.iter().map(|view| format!("view {view}")));
-        dependents.extend(
-            self.rules
-                .iter()
-                .map(|(table, rule)| format!("rule {rule} on table {}", table.qualified_name())),
-        );
-        Err(SQLError::Routine {
-            sqlstate: "2BP01".into(),
-            message: format!(
-                "cannot drop sequence {name} because other objects depend on it: {}",
-                dependents.join(", ")
-            ),
-        })
+    fn is_empty(&self) -> bool {
+        self.schema.is_empty() && self.views.is_empty() && self.rules.is_empty()
     }
 }
 
@@ -242,14 +206,25 @@ impl Engine {
         self.drop_relation_routine_dependents(names, cascade, "sequence")?;
         for name in names {
             let dependents = self.sequence_drop_dependents(name)?;
-            if !cascade {
-                dependents.ensure_empty_for_restrict(name)?;
+            if !cascade && !dependents.is_empty() {
+                return Err(self.relation_dependents_drop_error(names, "sequence")?);
             }
             cascade_schema.extend(dependents.schema);
             direct_views.extend(dependents.views);
         }
         cascade_schema.sort();
         cascade_schema.dedup();
+        let columns = cascade_schema
+            .iter()
+            .filter_map(|dependent| {
+                if let SequenceSchemaDependent::GeneratedColumn { table, column, .. } = dependent {
+                    Some((table.clone(), column.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let rewritten = self.prepare_routine_column_alias_drop(columns, &[])?;
         let cascade_views = self.cascade_view_closure(direct_views)?;
         if cascade {
             self.drop_rules_for_sequence_cascade(names, &cascade_views)?;
@@ -273,6 +248,7 @@ impl Engine {
                 )));
             }
         }
+        self.publish_stored_routine_body_rewrites(rewritten)?;
         if cascade {
             let mut dependents = cascade_schema
                 .iter()

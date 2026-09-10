@@ -6,6 +6,8 @@
 
 //! Constraint and dependent-column removal for `ALTER TABLE`.
 
+use std::collections::BTreeSet;
+
 use super::{
     constraint_error, ddl_storage_error, find_constraint, publish_constraint_state,
     table_constraint_state, ConstraintLocation, Engine, SQLError,
@@ -350,6 +352,17 @@ pub(super) fn drop_column(
         return Ok(());
     }
     engine.drop_column_routine_dependents(table, column, cascade)?;
+    let rewritten = if engine
+        .try_table_has_column(table, column)
+        .map_err(|error| ddl_storage_error("DROP COLUMN routine aliases", error))?
+    {
+        engine.prepare_routine_column_alias_drop(
+            BTreeSet::from([(table.to_string(), column.to_string())]),
+            &[],
+        )?
+    } else {
+        Vec::new()
+    };
     engine.handle_drop_column_event_dependencies(table, column, cascade)?;
     if cascade {
         // A routine/domain cycle may already have removed the root column.
@@ -357,6 +370,7 @@ pub(super) fn drop_column(
     } else {
         drop_column_restrict(engine, table, column, false)?;
     }
+    engine.publish_stored_routine_body_rewrites(rewritten)?;
     engine.refresh_stored_merge_target_plans()
 }
 

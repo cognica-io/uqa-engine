@@ -20,6 +20,9 @@ pub enum FromClause {
         /// Positional names exposed by the range-table alias.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         column_aliases: Vec<String>,
+        /// Creation-bound physical columns of a stored table source, before positional aliases. Column deletion and renaming update this list; later additions do not change its shape.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bound_columns: Option<Vec<String>>,
         /// Ordinary references include inheritance children; `ONLY table`
         /// clears this flag.
         #[serde(default = "default_include_descendants")]

@@ -235,6 +235,8 @@ pub enum SourcePlan {
         alias: Option<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         column_aliases: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bound_columns: Option<Vec<String>>,
         #[serde(default = "default_include_descendants")]
         include_descendants: bool,
     },

@@ -61,6 +61,8 @@ The public Rust SQL AST adds `ColumnDef.not_null_is_local`. Applications using e
 
 ## Compatibility verification
 
+The development branch adds `bound_columns: Option<Vec<String>>` to `FromClause::Table` and `SourcePlan::Table`. Initialize it to `None` when constructing an ordinary query AST or plan. Engine-owned SQL-standard routine definitions capture their source columns and maintain them across column deletion and renaming, so later additions cannot shift stored positional aliases. Initial open migrates legacy source metadata and explicit string-to-regclass constants in stored schema expressions transactionally; subsequent catalog reloads validate the persisted definitions. See [stored column lifecycle](../sql/02-ddl.md#alter-table) for the SQL behavior.
+
 The release includes all 354 PostgreSQL 18.4 core and isolation tests through the official PostgreSQL drivers, with a pinned source inventory and recorded execution provenance. The PostgreSQL reference run passes this corpus in CI. The UQA run of the complete corpus remains unaudited; release compatibility claims continue to follow the checked differential fixtures and feature manifest. See [verification](../internals/09-verification.md) for commands and evidence boundaries.
 
 ## Python CLI update

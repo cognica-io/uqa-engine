@@ -357,6 +357,7 @@ fn source_scope(
 ) -> Result<QueryScope, SQLError> {
     match source {
         SourcePlan::Table {
+            bound_columns,
             name,
             qualifier,
             alias,
@@ -365,7 +366,10 @@ fn source_scope(
         } => {
             let mut qualifiers = BTreeSet::new();
             qualifiers.insert(alias.as_ref().unwrap_or(qualifier).clone());
-            let mut columns = relation_columns(engine, name, ctes)?;
+            let mut columns = match bound_columns {
+                Some(columns) => RelationColumns::known(columns.clone()),
+                None => relation_columns(engine, name, ctes)?,
+            };
             columns.apply_positional_aliases(column_aliases);
             Ok(QueryScope {
                 qualifiers,
@@ -780,6 +784,7 @@ mod tests {
             )
             .unwrap();
         let source = SourcePlan::Table {
+            bound_columns: None,
             name: "correlation_alias_source".into(),
             qualifier: "correlation_alias_source".into(),
             alias: Some("source".into()),

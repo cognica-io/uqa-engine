@@ -28,6 +28,7 @@ fn qualified_literal_equality(qualifier: &str, column: &str, value: &str) -> Sca
 fn joined_source(kind: JoinKind, on: ScalarExpr) -> SourcePlan {
     SourcePlan::Join {
         left: Box::new(SourcePlan::Table {
+            bound_columns: None,
             name: "left_table".into(),
             qualifier: "left_table".into(),
             alias: Some("l".into()),
@@ -35,6 +36,7 @@ fn joined_source(kind: JoinKind, on: ScalarExpr) -> SourcePlan {
             include_descendants: true,
         }),
         right: Box::new(SourcePlan::Table {
+            bound_columns: None,
             name: "right_table".into(),
             qualifier: "right_table".into(),
             alias: Some("r".into()),
@@ -119,6 +121,7 @@ fn table_range_aliases_are_the_filter_ownership_names() {
     let catalog = ctes.catalog_read_view().unwrap();
     let resolution = ctes.relation_name_resolution().unwrap();
     let source = SourcePlan::Table {
+        bound_columns: None,
         name: "filter_alias_source".into(),
         qualifier: "filter_alias_source".into(),
         alias: Some("source".into()),
@@ -269,6 +272,7 @@ fn outer_join_marks_only_null_extended_qualifiers_as_unsafe_for_pushdown() {
     let nested_alias = SourcePlan::Join {
         left: Box::new(nested_outer),
         right: Box::new(SourcePlan::Table {
+            bound_columns: None,
             name: "marker_table".into(),
             qualifier: "marker_table".into(),
             alias: Some("marker".into()),

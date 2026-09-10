@@ -349,6 +349,18 @@ SELECT renamed_amount_reader();
 
 CASCADE follows stored routine dependencies through generated columns, views, owned sequences, other routines, and domains, and removes dependent defaults, CHECK constraints, indexes, and inbound foreign keys through the corresponding object lifecycle. Unrelated columns, rows, and routines survive. The table owner's authority permits removal of a dependent routine in an inaccessible schema. Statement and savepoint failures roll back the column and dependent objects together, committed changes refresh sibling engines, and stored definitions survive SQLite reopen. The Rust `Engine::drop_column` API also protects stored readers with RESTRICT behavior.
 
+Stored SQL-standard routines retain the creation-time input columns of ordinary and foreign table sources. Deleting an unread column removes its positional alias from table and enclosing join alias lists; adding columns, including reuse of a deleted name, does not change the surviving bindings or expanded projections. Renames update the retained physical names while preserving SQL aliases. This applies to nested joins, CTEs, subqueries, query and mutation-command bodies, and procedures. Source shape metadata alone does not create a read dependency: a routine that only counts rows can survive removal of every column.
+
+```sql execute
+CREATE TABLE alias_kept_source (discarded integer, amount integer);
+INSERT INTO alias_kept_source VALUES (5, 42);
+CREATE FUNCTION alias_kept_reader() RETURNS integer
+    LANGUAGE SQL BEGIN ATOMIC SELECT s.kept FROM alias_kept_source AS s(unused, kept); END;
+ALTER TABLE alias_kept_source DROP COLUMN discarded;
+ALTER TABLE alias_kept_source ADD COLUMN discarded integer DEFAULT 1000;
+SELECT alias_kept_reader();
+```
+
 A MERGE destination used only for writing does not establish a column dependency. A retained stored MERGE routine skips writes to that deleted column, including evaluation of their value expressions, while continuing to mutate surviving columns. Those stored expressions keep their routine and sequence dependencies. Non-DEFAULT assignments also retain the original destination domain dependencies, including domains inside arrays, after column removal; omitted destinations and DEFAULT assignments do not add those coercion dependencies. Reusing the old column name does not redirect the retired write. The same behavior applies to implicit INSERT destination lists, MERGE command CTEs, procedures, transaction rollback, catalog refresh, and durable reopen.
 
 ```sql execute
@@ -544,7 +556,7 @@ Sequence definition changes are transactional. A parameter-changing `ALTER SEQUE
 
 `DROP SEQUENCE [ IF EXISTS ] name [, ...] [ CASCADE | RESTRICT ]` resolves relation names through the current `search_path`, validates every target before mutation, ignores duplicate targets, and uses `RESTRICT` by default. A missing target reports `42P01` unless `IF EXISTS` requests a notice and continuation, a target of another relation kind reports `42809` even with `IF EXISTS`, a dependency rejected by `RESTRICT` reports `2BP01`, and a read-only transaction reports `25006` before target lookup.
 
-`CASCADE` removes referencing column defaults, column- and table-level `CHECK` constraints, and the complete closure of dependent views while retaining the underlying tables; the same expression-granular behavior applies to foreign-table defaults and `CHECK` constraints. Dropping a serial sequence with `CASCADE` removes its column default and serial ownership metadata; if the serial default was replaced first, an ordinary drop succeeds and preserves the replacement expression. Sequence rename rewrites these stored schema expressions to the new exact relation identity, and recreating the old name cannot retarget them. Sequence drops are transactional: transaction and savepoint rollback restore the catalog object and its session-local `currval` and `lastval` identity, while a committed drop remains absent after reopen and does not transfer session values to a same-named replacement.
+`CASCADE` removes referencing column defaults, column- and table-level `CHECK` constraints, stored or virtual generated columns, routines that read those removed columns, and the complete closure of dependent views while retaining the underlying tables; the same expression-granular behavior applies to foreign-table defaults and `CHECK` constraints. Dropping a serial sequence with `CASCADE` removes its column default and serial ownership metadata; if the serial default was replaced first, an ordinary drop succeeds and preserves the replacement expression. Sequence rename rewrites these stored schema expressions to the new exact relation identity, and recreating the old name cannot retarget them. String literals explicitly cast to `regclass` in stored schema expressions bind the original relation identity. A sequence rename or recreation of the old name cannot redirect these constants, including generated values and defaults evaluated by later inserts. Surviving routine source aliases are updated when a sequence cascade removes generated columns. Sequence drops are transactional: transaction and savepoint rollback restore the catalog object and its session-local `currval` and `lastval` identity, while a committed drop remains absent after reopen and does not transfer session values to a same-named replacement.
 
 ## Foreign servers and tables
 
