@@ -207,3 +207,5 @@ pub mod constraint_views;
 pub mod table_alteration;
 
 pub mod removal;
+
+pub mod relation_alteration;

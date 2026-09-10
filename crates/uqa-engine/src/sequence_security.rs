@@ -11,8 +11,8 @@ use std::collections::BTreeMap;
 mod acl;
 
 use acl::{
-    grant_acl, requested_acl_privileges, revoke_acl, rewrite_acl_owner, role_has_privilege,
-    select_acl_grantor, AclPrivilege, PrivilegeCheck,
+    grant_acl, requested_acl_privileges, revoke_acl, role_has_privilege, select_acl_grantor,
+    AclPrivilege, PrivilegeCheck,
 };
 use uqa_sql::ast::{GrantSequenceStmt, GrantSequenceTarget, SequenceRevokeBehavior};
 
@@ -248,13 +248,6 @@ impl Engine {
             )));
         }
         Ok(())
-    }
-
-    pub(crate) fn rewrite_sequence_security_owner(
-        security: &mut SequenceSecurity,
-        new_owner: &str,
-    ) {
-        rewrite_acl_owner(security, new_owner);
     }
 
     pub(crate) fn ensure_sequence_nextval_privilege(

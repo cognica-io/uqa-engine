@@ -612,3 +612,7 @@ mod maintenance;
 mod index_removal;
 
 mod relation_removal;
+
+mod foreign_table_alteration;
+mod relation_alteration;
+mod view_alteration;

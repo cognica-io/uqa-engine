@@ -538,3 +538,6 @@ pub fn role_has_column_privilege(
         memberships,
     )
 }
+
+mod invariants;
+pub use invariants::validate_table_security_invariants;

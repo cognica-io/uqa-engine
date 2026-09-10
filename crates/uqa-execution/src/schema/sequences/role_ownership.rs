@@ -8,6 +8,10 @@
 use super::alteration::SequenceDefinitionCatalog;
 use crate::catalog::security::{roles::RoleCatalogGuards, SequenceSecurity};
 use crate::schema::publication::dependencies::CatalogPublicationChanges;
+use std::{
+    collections::BTreeMap,
+    ops::{Deref, DerefMut},
+};
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     catalog::roles::{self, RoleReferenceNames},
@@ -81,4 +85,35 @@ pub fn alter_sequence_role_owner(
     drop(roles);
     context.changes.catalog_registry_changed();
     Ok(())
+}
+
+pub type OwnedSequenceSecurityRead<'a> =
+    Box<dyn Deref<Target = BTreeMap<RelationIdentity, SequenceSecurity>> + 'a>;
+pub type OwnedSequenceSecurityWrite<'a> =
+    Box<dyn DerefMut<Target = BTreeMap<RelationIdentity, SequenceSecurity>> + 'a>;
+
+pub trait OwnedSequenceSecurityCatalog {
+    fn owned_sequences(&self, table_object_id: [u8; 16]) -> Vec<RelationIdentity>;
+    fn security_registry(&self) -> OwnedSequenceSecurityRead<'_>;
+}
+
+pub fn table_owned_sequence_owner_updates(
+    catalog: &dyn OwnedSequenceSecurityCatalog,
+    table_object_id: [u8; 16],
+    new_owner: &str,
+) -> Result<Vec<(RelationIdentity, SequenceSecurity)>, SQLError> {
+    let owned = catalog.owned_sequences(table_object_id);
+    let registry = catalog.security_registry();
+    let mut updates = Vec::with_capacity(owned.len());
+    for relation in owned {
+        let mut security = registry.get(&relation).cloned().ok_or_else(|| {
+            SQLError::Internal(format!(
+                "sequence `{}` has no security metadata",
+                relation.qualified_name()
+            ))
+        })?;
+        crate::catalog::security::sequence::rewrite_acl_owner(&mut security, new_owner);
+        updates.push((relation, security));
+    }
+    Ok(updates)
 }

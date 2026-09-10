@@ -47,6 +47,8 @@ DROP INDEX name and dependency analysis is implemented in [`uqa-sql/src/schema/i
 
 ALTER TABLE transaction restrictions and table-syntax binding for sequences, views, and foreign tables are implemented in [`schema/table_alteration/syntax.rs`](../../../crates/uqa-sql/src/schema/table_alteration/syntax.rs). Rename-source diagnostics use [`catalog/resolution.rs`](../../../crates/uqa-sql/src/catalog/resolution.rs). Both consume statement or catalog data without holding session or storage state.
 
+Native view and foreign-table ALTER target binding, rename destinations, and view options belong to [`uqa-sql/src/schema/relation_alteration.rs`](../../../crates/uqa-sql/src/schema/relation_alteration.rs); shared ACL invariants belong to [`catalog/security/table/invariants.rs`](../../../crates/uqa-sql/src/catalog/security/table/invariants.rs). [`uqa-execution/src/schema/view_alteration.rs`](../../../crates/uqa-execution/src/schema/view_alteration.rs) and [`foreign_table_alteration.rs`](../../../crates/uqa-execution/src/schema/foreign_table_alteration.rs) execute authority checks, dependency rewrites, persistence, and registry publication inside the caller's implicit transaction. Owned-sequence owner candidates are collected by [`schema/sequences/role_ownership.rs`](../../../crates/uqa-execution/src/schema/sequences/role_ownership.rs). Engine supplies current catalog inputs and actual registry guards, retaining the existing lock and publication order.
+
 ## Statement capability boundaries
 
 ```mermaid
